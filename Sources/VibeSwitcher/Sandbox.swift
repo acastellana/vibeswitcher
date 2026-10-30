@@ -38,7 +38,7 @@ enum Sandbox {
         }
         guard let statePath = arguments.first.map({ ($0 as NSString).standardizingPath }), statePath.hasPrefix("/"),
               let shotsPath = value("--shots").map({ ($0 as NSString).standardizingPath }), shotsPath.hasPrefix("/") else {
-            refuse("usage: VibeSwitcher --sandbox STATE --shots DIR [--minutes N] [--fake-claude PATH] (absolute paths); "
+            refuse("usage: VibeSwitcher --sandbox STATE --shots DIR [--minutes N] [--fake-claude PATH] [--empty] (absolute paths); "
                    + "run it with scripts/sandbox-app.sh")
         }
         if let problem = refusal(state: statePath, bundleID: Bundle.main.bundleIdentifier, root: VibePaths.root.path,
@@ -56,7 +56,7 @@ enum Sandbox {
         let minutes = value("--minutes").flatMap(Double.init).flatMap { $0 > 0 ? $0 : nil } ?? 10
         let driver = Driver(state: URL(fileURLWithPath: statePath, isDirectory: true),
                             shots: URL(fileURLWithPath: shotsPath, isDirectory: true),
-                            fakeClaude: value("--fake-claude"), minutes: minutes)
+                            fakeClaude: value("--fake-claude"), minutes: minutes, empty: arguments.contains("--empty"))
         app.delegate = driver
         withExtendedLifetime(driver) { app.run() }
         exit(0)
@@ -211,18 +211,23 @@ private final class Driver: NSObject, NSApplicationDelegate {
     let shots: URL
     let fakeClaude: String?
     let minutes: Double
+    /// Started with no session (`run --empty`): no session host either until something asks for one, as at a first launch.
+    let empty: Bool
     let store: SessionStore
     let host: HostClient
     let model = WindowModel()
     let preferences = Preferences()
     lazy var leads: LeadController = {
-        let controller = LeadController(host: host, store: store) { _ in "claude" }
+        // A lead `startlead` starts runs a fake Claude, never a real one (its arguments after the fake's own are ignored).
+        let controller = LeadController(host: host, store: store) { [weak self] folder in self?.leadCommand(folder) ?? "exec /bin/cat" }
         // A lead's questions to you would be alerts: none in the sandbox.
-        controller.confirm = { [weak self] title, _, buttons in
-            self?.refuse("a lead's question (\(title))")
+        controller.confirm = { [weak self] title, text, buttons in
+            self?.refuse("a lead's question (\(title) \(text))")
             return buttons.count - 1
         }
         controller.answersTrust = false
+        // The fake Claude needs nothing installed.
+        controller.preflight = { _ in nil }
         return controller
     }()
     lazy var briefing = BriefingModel(
@@ -282,16 +287,19 @@ private final class Driver: NSObject, NSApplicationDelegate {
     let watchdog = HangWatchdog(samples: false)
     var control: URL { state.appendingPathComponent("control", isDirectory: true) }
 
-    init(state: URL, shots: URL, fakeClaude: String?, minutes: Double) {
+    init(state: URL, shots: URL, fakeClaude: String?, minutes: Double, empty: Bool) {
         self.state = state
         self.shots = shots
         self.fakeClaude = fakeClaude
         self.minutes = minutes
+        self.empty = empty
         // Its own host: its own lock (not the user's host.lock: a host on it is the user's, which reads its vault key
         // from the Keychain), its socket in this home, ending with this process however it ends.
         let key = SandboxKey()
         self.key = key
         host = HostClient(socketPath: VibePaths.hostSocket.path, appKey: { key.current })
+        // The lead's vault calls prove the app with the same key, as the app's do with its Keychain one (`HostClient.appKey`).
+        HostConnection.appKey = key.own.key()
         host.hostArguments = HostClient.endsWithThisProcess + ["--lock", VibePaths.root.appendingPathComponent("sandbox-host.lock").path]
         weak var weakSelf: Driver?
         // Only the fake sessions: never the Mac's processes, never Terminal's tabs.
@@ -329,7 +337,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         watchdog.describeState = { [weak self] in self?.window?.debugState() ?? "window never opened" }
         watchdog.start()
         store.start()
-        startFake(label: "Fake Claude") { [weak self] problem in
+        let first: (@escaping (String?) -> Void) -> Void = empty ? { $0(nil) } : { self.startFake(label: "Fake Claude", $0) }
+        first { [weak self] problem in
             guard let self else { return }
             if let problem { Breadcrumbs.shared.note("sandbox: the first fake session didn't start: \(problem)") }
             self.openWindow()
@@ -418,23 +427,85 @@ private final class Driver: NSObject, NSApplicationDelegate {
             switch result {
             case .failure(let error): done(error.message)
             case .success(let session):
-                self.waitForPid(agentState, tries: 300) { pid in
-                    guard let pid else { return done("the fake agent never said its pid") }
-                    var hook = HookState(agent: agent ?? .claude, tty: session.tty, lastEvent: "Stop", lastEventAt: Date().timeIntervalSince1970 - 30)
-                    hook.agentPid = pid
-                    hook.sessionId = UUID().uuidString
-                    hook.cwd = folder
-                    hook.firstPrompt = "What does the sandbox do?"
-                    hook.lastMessage = "Drive it with scripts/sandbox-app.sh."
-                    hook.transcriptPath = fakeClaude == nil ? nil : transcript
-                    if fakeClaude != nil { try? hook.save(to: VibePaths.stateFile(tty: session.tty)) }
-                    self.lock.withLock {
-                        self.fakes[session.tty] = Fake(id: session.id, tty: session.tty, label: label, pid: pid, cwd: folder,
-                                                       transcript: fakeClaude == nil ? nil : transcript,
-                                                       control: fakeClaude == nil ? nil : controlFile, agent: agent)
-                    }
-                    self.store.refresh()
-                    done(nil)
+                self.adopt(session, label: label, folder: folder, transcript: fakeClaude == nil ? nil : transcript,
+                           control: fakeClaude == nil ? nil : controlFile, agentState: agentState, agent: agent, done)
+            }
+        }
+    }
+
+    /// A fake agent's session, once its agent said its pid: listed as the agent it is, with the hook state a Claude
+    /// session leaves (`transcript` nil: a plain shell's, with none).
+    private func adopt(_ session: HostSession, label: String, folder: String, transcript: String?, control: String?, agentState: String,
+                       agent: Agent?, _ done: @escaping (String?) -> Void) {
+        waitForPid(agentState, tries: 300) { pid in
+            guard let pid else { return done("the fake agent never said its pid") }
+            var hook = HookState(agent: agent ?? .claude, tty: session.tty, lastEvent: "Stop", lastEventAt: Date().timeIntervalSince1970 - 30)
+            hook.agentPid = pid
+            hook.sessionId = UUID().uuidString
+            hook.cwd = folder
+            hook.firstPrompt = "What does the sandbox do?"
+            hook.lastMessage = "Drive it with scripts/sandbox-app.sh."
+            hook.transcriptPath = transcript
+            if transcript != nil { try? hook.save(to: VibePaths.stateFile(tty: session.tty)) }
+            self.lock.withLock {
+                self.fakes[session.tty] = Fake(id: session.id, tty: session.tty, label: label, pid: pid, cwd: folder,
+                                               transcript: transcript, control: control, agent: agent)
+            }
+            self.store.refresh()
+            done(nil)
+        }
+    }
+
+    /// The project `startlead` starts a real lead in, and its fake Claude's files.
+    private var newLead: (folder: String, transcript: String, control: String, state: String) {
+        let folder = (home as NSString).appendingPathComponent("projects/new-lead")
+        let files = state.appendingPathComponent("lead-new-lead", isDirectory: true).path
+        let transcript = (home as NSString).appendingPathComponent(".claude/projects/-sandbox-new-lead/lead.jsonl")
+        return (folder, transcript, files + "/control.jsonl", files + "/state.json")
+    }
+
+    /// What a lead started in `folder` runs: the fake Claude on `startlead`'s files (a shell's `cat` without its script).
+    func leadCommand(_ folder: String) -> String {
+        let lead = newLead
+        guard let fakeClaude else { return "exec /bin/cat" }
+        return "exec /usr/bin/python3 -I -u '\(fakeClaude)' '\(lead.transcript)' '\(lead.control)' '\(lead.state)'"
+    }
+
+    /// A real lead start, as Project Lead's (`LeadController.startLead`: its vault grant, its launch, its session), in
+    /// a new repository, its agent a fake Claude. After `run --empty` it's the first thing to ask the session host.
+    func startRealLead(_ reply: @escaping (Bool, String) -> Void) {
+        let lead = newLead
+        let files = FileManager.default
+        for path in [lead.folder, (lead.transcript as NSString).deletingLastPathComponent, (lead.state as NSString).deletingLastPathComponent] {
+            try? VibePaths.ensurePrivate(URL(fileURLWithPath: path))
+        }
+        if !files.fileExists(atPath: lead.folder + "/.git") {
+            try? VibePaths.writePrivate(Data("# New lead\n".utf8), to: URL(fileURLWithPath: lead.folder + "/README.md"))
+            for args in [["init", "-q", "-b", "main"], ["config", "user.email", "sandbox@example.invalid"], ["config", "user.name", "Sandbox"],
+                         ["add", "README.md"], ["commit", "-q", "-m", "First commit"]] {
+                guard Git.run(args, in: lead.folder).ok else { return reply(false, "couldn't make its repository: git \(args.joined(separator: " "))") }
+            }
+        }
+        try? VibePaths.writePrivate(Data(Driver.firstTurn.utf8), to: URL(fileURLWithPath: lead.transcript))
+        try? VibePaths.writePrivate(Data(), to: URL(fileURLWithPath: lead.control))
+        try? files.removeItem(atPath: lead.state)
+        let hostWas = host.state
+        let refusedBefore = refused.count
+        leads.startLead(in: lead.folder)
+        let label = "Lead · new-lead"
+        waitFor({ [weak self] in
+            guard let self else { return true }
+            return self.host.sessions.contains { $0.label == label && $0.isLive } || self.refused.count > refusedBefore
+        }) { [weak self] _ in
+            guard let self else { return }
+            guard let session = self.host.sessions.first(where: { $0.label == label && $0.isLive }) else {
+                return reply(false, "the lead didn't start: \(self.refused.dropFirst(refusedBefore).joined(separator: "; "))")
+            }
+            self.adopt(session, label: label, folder: lead.folder, transcript: lead.transcript, control: lead.control, agentState: lead.state,
+                       agent: .claude) { problem in
+                if let problem { return reply(false, problem) }
+                self.chat("Lead") { ok, text in
+                    reply(ok, ok ? "lead started (the host was \(hostWas) before): \(text)" : text)
                 }
             }
         }
@@ -771,6 +842,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("churn [N]", "changes the fake lead's board N times (default 40), 0.15 s apart, each read and shown as a real change is"),
         ("publish [N]", "has the lead controller publish N times (default 50), each laid out and drawn, and times them"),
         ("hangs [reset]", "the sandbox's main-thread freezes (its hang reports, as the health digest tells them) and its longest wait between two beats (reset: from now on)"),
+        ("startlead", "starts a real project lead (LeadController.startLead, as Project Lead does: the host first if none runs, its vault grant) in a new repository, its agent a fake Claude, and shows its chat; first thing after `run --empty`, no session host runs before it"),
         ("lead [FILE]", "shows a fake project lead's chat, at its end (started the first time, on FILE's transcript if given): a board of tasks, a withdrawn question, tool runs and workers' messages"),
         ("team", "starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and tell it a permission to see it wait on its lead"),
         ("team named", "starts the fake lead's worker and a verifier titled as Claude Code 2.1.311 names them (worker-<slug>, verify-<slug>) and moves the lead's agent into its .vibeswitcher/worktrees (start the lead first): its team still folds under it"),
@@ -1166,6 +1238,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             startFake(label: label.isEmpty ? "Fake \(agent?.displayName ?? "Shell") \(fakeCount + 1)" : label, agent: agent) { problem in
                 reply(problem == nil, problem ?? "started")
             }
+        case "startlead": startRealLead(reply)
         case "lead":
             // Started once; then its chat, once its board is read, at the end (where its pinned questions are).
             let show = { [weak self] in
