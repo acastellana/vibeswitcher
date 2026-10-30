@@ -2163,3 +2163,6 @@
 - 2026-10-31 00:01 Planned app-memory-grows-28: App memory grows ~28 MB an hour (footprint 154 → 186 MB in a day, peak 328 MB)
 - 2026-10-31 00:01 Started a worker on app-memory-grows-28
 - 2026-10-31 00:01 Automatically (auto_advance): Started a worker on app-memory-grows-28 (App memory grows ~28 MB an hour (footprint 154 → 186 MB in a day, peak 328 MB)).
+- 2026-10-31 00:25 Planned 9-s-swiftui-layout: 9 s SwiftUI layout freeze on a calm Mac (environment comparisons in a window layout pass)
+- 2026-10-31 00:25 Started a worker on 9-s-swiftui-layout
+- 2026-10-31 00:25 Automatically (auto_advance): Started a worker on 9-s-swiftui-layout (9 s SwiftUI layout freeze on a calm Mac (environment comparisons in a window layout pass)).
