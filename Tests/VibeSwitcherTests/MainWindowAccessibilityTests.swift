@@ -107,11 +107,12 @@ struct MainWindowAccessibilityTests {
         chat.mode = .plan
         let window = Window(model: model, leads: leads, host: host, chat: chat, row: lead)
         defer { window.window.close() }
-        // An update as the host's sessions change: one of the team's workers turns to you, or back to work.
+        // An update as the host's sessions change: one of the team's workers turns to you, or back to work; and every row's
+        // state began a minute earlier, so how long it has lasted changes in each row as the rows' clock ticks it on.
         func update(_ step: Int) {
             let index = 1 + step % 4
             members[index].status = members[index].status == .working ? .needsInput : .working
-            SidebarDiffTests.feed(model, members, at: Self.now.addingTimeInterval(Double(step)))
+            SidebarDiffTests.feed(model, members, at: Self.now.addingTimeInterval(-60 * Double(step + 1)))
         }
         #expect(await until { window.settle(); return model.rows.count >= 30 }, "the sidebar didn't fill")
         window.settle()
@@ -150,31 +151,33 @@ struct MainWindowAccessibilityTests {
 
     /// The main thread's CPU for each of `updates` updates, settled and walked as a client walks the window (the walk
     /// finds nothing without one); and the most one took.
-    static func cost(_ window: Window, _ update: (Int) -> Void, updates: Int = 30) -> (each: TimeInterval, worst: TimeInterval) {
+    static func cost(_ window: Window, _ update: (Int) -> Void, updates: Int = 30) -> (each: TimeInterval, worst: TimeInterval, reading: TimeInterval) {
         let main = mach_thread_self()
-        var worst: TimeInterval = 0
+        var worst: TimeInterval = 0, reading: TimeInterval = 0
         let before = TeamChurnBench.cpu(of: main)
         for step in 0..<updates {
             let start = TeamChurnBench.cpu(of: main)
             update(step)
             window.settle()
-            _ = AXClient.walk(window.window)
+            let read = TeamChurnBench.cpu(of: main)
+            _ = AXClient.texts(window.window)
+            reading += TeamChurnBench.cpu(of: main) - read
             worst = max(worst, TeamChurnBench.cpu(of: main) - start)
         }
-        return ((TeamChurnBench.cpu(of: main) - before) / Double(updates), worst)
+        return ((TeamChurnBench.cpu(of: main) - before) / Double(updates), worst, reading / Double(updates))
     }
 
     /// The sidebar's, header's and composer's trees stay small: a row is one element, not each of its texts and marks;
     /// and an update walked by a client costs milliseconds, not seconds.
     @Test func anUpdateWithAClientAttachedStaysCheap() async throws {
-        var without: (each: TimeInterval, worst: TimeInterval) = (0, 0)
+        var without: (each: TimeInterval, worst: TimeInterval, reading: TimeInterval) = (0, 0, 0)
         try await withWindow(attach: false) { window, update, _ in without = Self.cost(window, update) }
         try await withWindow { window, update, rows in
             let elements = (sidebar: AXClient.walk(window.sidebar), header: AXClient.walk(window.header), composer: AXClient.walk(window.composer))
             let with = Self.cost(window, update)
-            print(String(format: "RESULT main-ax rows %d, elements sidebar %d header %d composer %d, main-thread ms per update %.1f (worst %.1f), "
-                         + "without a client %.1f (worst %.1f)", rows.count, elements.sidebar, elements.header, elements.composer,
-                         with.each * 1000, with.worst * 1000, without.each * 1000, without.worst * 1000))
+            print(String(format: "RESULT main-ax rows %d, elements sidebar %d header %d composer %d, main-thread ms per update %.1f (worst %.1f, "
+                         + "the client's reading %.1f), without a client %.1f (worst %.1f)", rows.count, elements.sidebar, elements.header,
+                         elements.composer, with.each * 1000, with.worst * 1000, with.reading * 1000, without.each * 1000, without.worst * 1000))
             // The sidebar: the grouping, the list, three for each row (the list's row, its cell, the row's one element),
             // five for each project's header row, and the filter.
             #expect(elements.sidebar <= rows.count * 3 + Self.projects.count * 5 + 15, "sidebar elements: \(elements.sidebar)")
