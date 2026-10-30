@@ -2082,3 +2082,14 @@
 - 2026-10-30 10:58 Automatically (auto_advance): Merged accessibility-graph (Accessibility-graph freezes: SwiftUI's accessibility updates take seconds while a lead's chat is shown (5 freezes, up to 15.7 s)) into main at 3ae4140f, review none: on its worker's done report on 804b028c and the full test run.
 - 2026-10-30 10:58 Automatically (auto_advance): Cleaned up accessibility-graph; ended pid 80237 (Worker: Accessibility-graph freezes: SwiftUI's accessibility updates take seconds while a lead's chat is shown (5 freezes, up to 15.7 s)) (freed 1.1 GB of build output and temporary folders). It stays done.
 - 2026-10-30 10:58 Update: Sidebar accessibility lighter (accessibility-graph) — **What changed:**
+- 2026-10-30 11:17 Audit of dictation-per-session: complete, clean, round 1: 2 Nit open, 2 Pre-existing open
+- 2026-10-30 11:17 Planned spaceholdtests-crashes: SpaceHoldTests crashes the whole test process (unowned self after dealloc in Box)
+- 2026-10-30 11:17 Planned flaky: Flaky: somethingTypedInTheTerminalMeanwhileIsLeftAlone times out under load (3 times now)
+- 2026-10-30 11:28 Merged dictation-per-session: Dictation per session: one chat processing doesn't stop another from dictating
+- 2026-10-30 11:28 Flaky in dictation-per-session's merge: aLeadWithAQuestionForYouSaysItNeedsYou(), aWorkerWaitingOnItsLeadDoesntSayItNeedsYou(), theWitnessReadsWhatItReadBefore(), boardsAreReadOffTheMainThreadAndHandedToIt(), aBoardThatDoesntReadNamesNoLead(), anUnchangedBoardIsNotReadAgain(), theStripSaysHowManyReportsWait(), countedPerLeadUntilItHasThem… failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-10-30 11:28 Planned fix-the-flaky-test-7: aFailingTestsHostIsEnded() flaked 3 times within 7 days
+- 2026-10-30 11:28 Planned fix-the-flaky-test-8: aToolThatGivesNoAnswerIsEnded() flaked 3 times within 7 days
+- 2026-10-30 11:28 Planned fix-the-flaky-test-9: theScreenRouteReadsATerminalTabOffTheMainThread() flaked 3 times within 7 days
+- 2026-10-30 11:28 Planned fix-the-flaky-test-10: noTestReadsTheMacsOwnFreeSpace() flaked 3 times within 7 days
+- 2026-10-30 11:28 Planned fix-the-flaky-test-11: aShellThatWaitsIsStopped() flaked 3 times within 7 days
+- 2026-10-30 11:28 Planned fix-the-flaky-test-12: aBannerBeforeTheValueIsLeftOut() flaked 3 times within 7 days
