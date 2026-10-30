@@ -304,6 +304,8 @@ cleanup() {
     # /bin/bash 3.2 calls an empty array unbound.
     set +u
     [[ -n $watchdog ]] && kill "$watchdog" 2>/dev/null
+    # No run starts another bundle while its processes are being listed and ended (`run_bundles`).
+    [[ -n $scratch ]] && : > "$scratch/stopping"
     stop "${burners[@]}"
     stop "${tests[@]}"
     wait 2>/dev/null
@@ -516,10 +518,13 @@ else
     # Run N: each test bundle in turn, the way `swift test` runs them, into the run's log ("=== Bundle" before each,
     # "=== Bundle exited S" after); its status is the first failing bundle's, and the bundles after it still run (their
     # tests are wanted too). Swift Testing exits 69 (EX_UNAVAILABLE) saying nothing when the filter matches none of a
-    # bundle's tests: no test of that bundle's, not a failure (a run in which no bundle ran a test fails below).
+    # bundle's tests: no test of that bundle's, not a failure (a run in which no bundle ran a test fails below). Once
+    # the run is being stopped (cleanup's mark, the watchdog's disk-low or memory-low) no further bundle starts: one
+    # started while `stop` lists the run's processes would outlive it.
     run_bundles() {
         local run=$1 status=0 bundle name executable args log=$logs/run-$1.log before code
         for bundle in "${bundles[@]}"; do
+            [[ -e $scratch/stopping || -e $scratch/disk-low || -e $scratch/memory-low ]] && return 130
             name=$(basename "$bundle" .xctest)
             executable=$bundle/Contents/MacOS/$name
             args=(--test-bundle-path "$executable")
@@ -608,6 +613,6 @@ if [[ -e $scratch/memory-low ]]; then
     echo "STOPPED: free memory fell to $(cat "$scratch/memory-low") % (under $memory_stop %); the load and the runs were ended"
 fi
 if [[ $failed -eq 0 && ${#command[@]} -eq 0 ]]; then
-    echo "all $runs runs passed and left nothing behind ($(printf '%s\n' "${counts[@]}" | sort -un | paste -sd, - | sed 's/,/, /g') tests each)"
+    echo "all $runs runs passed and left nothing behind ($(printf '%s\n' ${counts[@]+"${counts[@]}"} | sort -un | paste -sd, - | sed 's/,/, /g') tests each)"
 fi
 exit $failed
