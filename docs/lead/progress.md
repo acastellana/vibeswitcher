@@ -2144,3 +2144,7 @@
 - 2026-10-30 14:39 Started a worker on starting-a-lead-with
 - 2026-10-30 14:39 Automatically (auto_advance): Started a worker on starting-a-lead-with (Starting a lead with no session open fails: the session host isn't started first ("connect: connection refused")).
 - 2026-10-30 14:54 Automatically (auto_advance): Started the audit of starting-a-lead-with at a06a8077 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-10-30 15:07 Audit of starting-a-lead-with: complete, suspect, round 1: 1 Nit open
+- 2026-10-30 15:07 Dismissed starting-a-lead-with:F1: Lead accepts it. Sandbox.swift's `--empty`/`startlead` and the sandbox-app.sh option are what acceptance check 3 needs, since the sandbox had no host-less start and no lead start. The verifier reviewed them under the security checklist and found nothing harmful.
+- 2026-10-30 15:10 Audit of starting-a-lead-with: complete, clean, round 2: 1 Nit closed
+- 2026-10-30 15:15 Merged starting-a-lead-with: Starting a lead with no session open fails: the session host isn't started first ("connect: connection refused")

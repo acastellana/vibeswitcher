@@ -254,3 +254,7 @@ The user picked accuracy with code words over on-device privacy. Keeping the key
 
 The user said "Yes to both". project-lead only mirrored main, and every push had to fast-forward main by hand; one branch is simpler.
 
+## 2026-10-30 15:08:14 When a task's acceptance asks for sandbox shots of a state the sandbox can't yet reach, its boundaries include Sources/VibeSwitcher/Sandbox.swift and scripts/sandbox-app.sh for new driver commands only. Those files stay sensitive paths, so the task is audited anyway.
+
+Five tasks today (a-claude-dictation-that, 7-s-freeze-measuring, dictation-per-session, silence-the-mac-s, starting-a-lead-with) added sandbox commands outside their boundaries in order to take their acceptance shots. One audit came back "suspect" for it, which cost a second round. Naming the files up front saves those rounds.
+
