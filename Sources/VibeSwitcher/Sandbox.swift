@@ -776,6 +776,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("team named", "starts the fake lead's worker and a verifier titled as Claude Code 2.1.311 names them (worker-<slug>, verify-<slug>) and moves the lead's agent into its .vibeswitcher/worktrees (start the lead first): its team still folds under it"),
         ("ask [TEXT]", "puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its row reads needs you"),
         ("unfold", "shows the selected lead's team under its row in the sidebar"),
+        ("replaced [N]", "shows the selected window session as a lead another session replaced, with N characters (default 200000) typed into it: the header's one line it makes"),
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
         ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
@@ -1199,6 +1200,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
             guard let row = model.selectedRow else { return reply(false, "nothing selected") }
             if !model.expandedTeams.contains(row.id) { model.toggleTeam(row.id) }
             settle { reply(true, "\(row.title)'s team shown") }
+        case "replaced":
+            guard let row = model.selectedRow, let id = row.hostID, let tty = row.session?.tty else { return reply(false, "no window session selected") }
+            var replaced = ReplacedLead(root: row.cwd ?? home, project: "sandbox-lead", tty: tty, live: nil)
+            replaced.draft = String(repeating: "split the layer out, then the next one\n", count: (Int(rest) ?? 200_000) / 39 + 1)
+            model.replacedLeads[id] = replaced
+            settle { reply(true, "\(row.title) shown replaced, \(replaced.draft.count) characters typed into it") }
         case "ask": ask(rest, answer: false) { problem in reply(problem == nil, problem ?? "the lead asks you") }
         case "answer": ask("", answer: true) { problem in reply(problem == nil, problem ?? "its questions answered") }
         case "extras": extras { problem in reply(problem == nil, problem ?? "the lead's board has a proposal, a revised question, an all-done card and results") }
