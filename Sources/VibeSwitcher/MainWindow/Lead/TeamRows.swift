@@ -121,8 +121,13 @@ struct TeamRow: Identifiable, Equatable {
     private static let secondsFormatter = durationFormatter([.second])
     private static let longerFormatter = durationFormatter([.day, .hour, .minute])
 
+    /// In English whatever the Mac's language, like the rest of the row's words (its state, the line under it):
+    /// the formatter follows its calendar's locale, and left to the system's it read "Working, 12 minutos".
     private static func durationFormatter(_ units: NSCalendar.Unit) -> DateComponentsFormatter {
         let formatter = DateComponentsFormatter()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "en_US")
+        formatter.calendar = calendar
         formatter.unitsStyle = .full
         formatter.maximumUnitCount = 1
         formatter.allowedUnits = units
