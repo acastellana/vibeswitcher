@@ -2122,3 +2122,8 @@
 - 2026-10-30 11:55 Raised silence-the-mac-s to audit (the risk check, at c3115a64): it has code that deletes or rewrites files or data (Sources/VibeSwitcher/Dictation/OutputSilencer.swift: try? FileManager.default.removeItem(at: marker))
 - 2026-10-30 11:55 Automatically (auto_advance): Started the audit of silence-the-mac-s at c3115a64 (The risk check raised it to audit: it has code that deletes or rewrites files or data (Sources/VibeSwitcher/Dictation/OutputSilencer.swift: try? FileManager.default.removeItem(at: marker))).
 - 2026-10-30 11:55 Automatically (auto_advance): Started the audit of fix-the-flaky-test-7 at bfd1b841 (Its review is audit).
+- 2026-10-30 12:04 Audit of silence-the-mac-s: complete, clean, round 1: 1 Important open, 2 Nit open
+- 2026-10-30 12:04 Automatically (auto_advance): Sent silence-the-mac-s's worker the open Important findings silence-the-mac-s:F1 from its audit at c3115a64.
+- 2026-10-30 12:05 Audit of fix-the-flaky-test-7: complete, clean, round 1: 2 Nit open
+- 2026-10-30 12:12 Merged fix-the-flaky-test-7: Flake ledger: a crash's unfinished bystanders were recorded as flakes (made bogus tasks 7–12)
+- 2026-10-30 12:12 Flaky in fix-the-flaky-test-7's merge: bringingTerminalForwardLeavesTheMainThreadFree() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
