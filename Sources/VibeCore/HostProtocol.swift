@@ -300,7 +300,8 @@ public enum HostEvent: Codable, Equatable, Sendable {
     /// Replay is over; live output follows.
     case attached(id: UUID)
     case screenText(id: UUID, text: String)
-    case styledScreenText(id: UUID, text: String, runs: [ScreenRun])
+    /// `focusEvents`: its program asked for focus events (DECSET 1004); nil from a host older than that.
+    case styledScreenText(id: UUID, text: String, runs: [ScreenRun], focusEvents: Bool? = nil)
     case historyText(id: UUID, history: String, screen: String)
     case sessionChanged(HostSession)
     case sessionRemoved(id: UUID)

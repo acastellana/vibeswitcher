@@ -569,7 +569,9 @@ extension LeadRelaunchTests {
         let (host, controller) = relaunched(world)
         var asked: [(title: String, text: String)] = []
         var looked: [String] = []
-        controller.confirm = { title, text, _ in asked.append((title, text)); return 0 }
+        // Cancel: the install offered isn't run.
+        controller.confirm = { title, text, _ in asked.append((title, text)); return 1 }
+        controller.installer.run = { _ in Issue.record("an installer ran"); return (1, "") }
         controller.select = { _ in Issue.record("a lead was shown") }
         controller.preflight = { command in
             #expect(!Thread.isMainThread, "the preflight ran on the main thread")
@@ -587,5 +589,35 @@ extension LeadRelaunchTests {
         // Not offered a first commit: git wasn't asked about the folder.
         #expect(!Git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: root).ok)
         #expect(host.sessions.isEmpty)
+    }
+
+    /// Claude Code missing at the controller's start: Install runs Anthropic's installer in a session (a fake one
+    /// here), and when it exits 0 the look runs again and the lead starts, by itself.
+    @Test func theControllersStartInstallsClaudeCodeThenStartsTheLead() async throws {
+        let world = try world()
+        defer { world.stop() }
+        let (host, controller) = relaunched(world)
+        var asked: [[String]] = []
+        var installs: [SpawnRequest] = []
+        var ended: ((HostSession.Exit) -> Void)?
+        var shown: [UUID] = []
+        let installed = LockedFlag()
+        controller.confirm = { _, _, buttons in asked.append(buttons); return 0 }
+        controller.select = { shown.append($0) }
+        controller.installer.startSession = { request, started in installs.append(request); started(.success(UUID())) }
+        controller.installer.ended = { _, then in ended = then }
+        controller.preflight = { _ in installed.value ? nil : ToolInstallerTests.noClaude }
+        host.connectIfRunning()
+        #expect(await until { host.state == .connected })
+
+        controller.startLead(in: world.root)
+        #expect(await until { ended != nil })
+        #expect(asked == [["Install", "Cancel"]])
+        #expect(installs.map(\.label) == ["Install Claude Code"] && installs.map(\.command) == [ToolInstall.claudeCodeCommand])
+        #expect(host.sessions.isEmpty)
+        installed.value = true
+        ended?(HostSession.Exit(status: 0, at: Date()))
+        #expect(await until { host.sessions.contains { $0.label == "Lead · \(world.project)" } })
+        #expect(asked.count == 1 && shown.count == 2)
     }
 }

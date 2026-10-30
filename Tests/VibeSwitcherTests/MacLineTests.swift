@@ -26,7 +26,7 @@ struct MacLineTests {
         let line = MacLine.make(Self.sessions, load: 12.34, limits: MacLimits(loadThreshold: 24))
         #expect(line.text == "Mac: load 12.3, 3 team sessions across 2 projects")
         #expect(!line.isOver)
-        #expect(line.spoken == "Whole Mac, all projects: load average 12.3 over the last minute; 3 team sessions across 2 projects (vibeswitcher 2, project-c 1)")
+        #expect(line.spoken == "Whole Mac, all projects: load average 12.3, the greater of the last minute's and the last 5 minutes'; 3 team sessions across 2 projects (vibeswitcher 2, project-c 1)")
     }
 
     @Test func overALimitItSaysWhichAndThatTheLeadWaits() {

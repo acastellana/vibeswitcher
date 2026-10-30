@@ -565,7 +565,7 @@ extension LeadWitness {
         }
 
         /// What to tell each refused lead now that the Mac has room, one message per project: the waits `mac` has
-        /// room for under `limits` (the 1-minute load not over load_threshold, and with a wait's sessions the team
+        /// room for under `limits` (the load, `MacLoad.Averages.steady`, not over load_threshold, and with a wait's sessions the team
         /// sessions within mac_max_sessions). Those told are removed; the rest stay until there's room for them too.
         /// A project whose automatic steps were refused is nudged (`LeadAdvance.nudge`) instead: its lead's tool server
         /// tries them again, and only the lead's own refusals are told.
@@ -586,7 +586,7 @@ extension LeadWitness {
                 guard !waits.isEmpty else { return nil }
                 var whats: [String] = []
                 for wait in waits where !whats.contains(wait.what) { whats.append(wait.what) }
-                return (root, LeadWitness.roomText(whats, mac: mac, limits: limits))
+                return (root, LeadWitness.roomText(whats, mac: mac, limits: limits, root: root))
             }
         }
 
@@ -597,10 +597,11 @@ extension LeadWitness {
     }
 
     /// "The Mac has room again for what was refused: start_worker(one), audit(two). Now: load 3.0 (load_threshold 24,
-    /// twice the 12 cores), 4 team sessions across 2 projects (…) (mac_max_sessions 10). Retry what's still wanted."
-    public static func roomText(_ whats: [String], mac: MacLoad, limits: MacLimits) -> String {
+    /// twice the 12 cores), 4 team sessions across 2 projects (this one 1, 1 other 3) (mac_max_sessions 10). Retry what's
+    /// still wanted." Naming no project but the lead's `root`'s: the lead may copy it into its repo's records.
+    public static func roomText(_ whats: [String], mac: MacLoad, limits: MacLimits, root: String) -> String {
         "The Mac has room again for what was refused: \(whats.joined(separator: ", ")). Now: load \(mac.loadText) "
-            + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText) (mac_max_sessions \(limits.maxSessions)). "
+            + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessions)). "
             + "Retry what's still wanted; other projects' leads may take the room too."
     }
 }

@@ -9,16 +9,46 @@ struct InspectorView: View {
     /// Brief me on the lead's project, over its Team tab (none in the benches).
     var briefing: BriefingModel? = nil
     @AppStorage("inspectorTab") private var tab = "overview"
+    /// What the body would otherwise make on every draw, kept by its inputs: it's drawn again for every session the
+    /// host changes (hang-20261028-171900, 174653).
+    @State var cache = Cache()
+
+    final class Cache {
+        private var hostedKept: (sessions: [HostSession], listed: [MacLine.Session])?
+        private var briefingKept: (briefing: BriefingModel, root: String, project: BriefingModel)?
+        /// How many times the sessions were listed for the Mac-wide line, and a project's briefing looked up (for tests).
+        private(set) var hostedMade = 0
+        private(set) var briefingsLooked = 0
+
+        /// Every session the host lists, as the Mac-wide line counts them, made once for each list the host gives.
+        func hosted(_ sessions: [HostSession]) -> [MacLine.Session] {
+            if let kept = hostedKept, kept.sessions.isSameStorage(as: sessions) { return kept.listed }
+            hostedMade += 1
+            let listed = sessions.map(MacLine.Session.init)
+            hostedKept = (sessions, listed)
+            return listed
+        }
+
+        /// Brief me on the project at `root` (`BriefingModel.project`), looked up once while it's the same lead.
+        func briefing(_ briefing: BriefingModel, root: String) -> BriefingModel {
+            if let kept = briefingKept, kept.briefing === briefing, kept.root == root { return kept.project }
+            briefingsLooked += 1
+            let project = briefing.project(root)
+            briefingKept = (briefing, root, project)
+            return project
+        }
+    }
 
     var body: some View {
-        let lead = model.selectedRow.flatMap(leads.lead(for:))
+        let selected = model.selectedRow
+        let lead = selected.flatMap(leads.lead(for:))
         VStack(spacing: 0) {
             InspectorTabs(team: lead != nil)
             Divider()
-            if let row = model.selectedRow {
+            if let row = selected {
                 if tab == "team", let lead {
                     if let briefing {
-                        ProjectBriefingBar(model: briefing.project(lead.root))
+                        ProjectBriefingBar(model: cache.briefing(briefing, root: lead.root))
                         Divider()
                     }
                     // Only what the board's rows read: another session's change leaves the pane as it is.
@@ -27,7 +57,7 @@ struct InspectorView: View {
                                  rows: leads.teamRows.rows(lead.root, board: lead.board, seen: seen), open: { session in
                         if let id = UUID(uuidString: session) { model.select(hostID: id) }
                     }, answer: { question, text in leads.answer(question, root: lead.root, with: text) }, notices: leads.answerNotices,
-                                 summaries: leads.summaries, keepAwake: leads.keepAwake, hosted: host.sessions.map(MacLine.Session.init),
+                                 summaries: leads.summaries, keepAwake: leads.keepAwake, hosted: cache.hosted(host.sessions),
                                  recordsDir: leads.recordsDirs[lead.root] ?? LeadWorkflow.defaultRecordsDir)
                         .equatable()
                 } else if tab == "activity" {

@@ -92,6 +92,15 @@ public enum MergeRerun {
     /// What a flake is recorded under when the failed run named no test.
     public static let unnamed = "(the test command, naming no test)"
 
+    /// What a merge whose rerun passed records as flaky, from its failed run's `output`: the tests it named failing,
+    /// and `unnamed` for a crash or a stop (or a failure naming no test). Never the tests a crash left unfinished: they
+    /// were only running beside it. On 2026-10-30 one crash logged every test then running, 200 and more, and with two
+    /// misread earlier runs that was a third flake for six tests that had never failed (fix-the-flaky-test-7..12).
+    public static func flakes(in output: String) -> [String] {
+        let failures = TestFailures(output: output)
+        return failures.tests + (failures.tests.isEmpty || !failures.unfinished.isEmpty ? [unnamed] : [])
+    }
+
     // MARK: Evidence
 
     /// The most lines a flaky test's evidence keeps, and the most characters of each.

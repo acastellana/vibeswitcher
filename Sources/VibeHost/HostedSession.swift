@@ -46,6 +46,9 @@ public final class HostedSession {
     private let parserOptions: ParserOptions
     /// What the parser showed last: what a view falls back on when there's no parser to ask.
     private var lastView = ParserView.empty
+    /// Whether its program asked for focus events (see `FocusEvents`), read off its output as it's read. On `queue`.
+    private var focus = FocusEvents()
+    public var focusEvents: Bool { focus.on }
     /// When its parser failed lately (see `replaceParser`).
     private var parserFailures: [Date] = []
     static let maxParserFailures = 5
@@ -165,8 +168,10 @@ public final class HostedSession {
     /// What a new host build needs to carry this session on (see `HostHandover`): the PTY's descriptor survives the
     /// exec, the rest is copied.
     func saved() -> HostHandover.Session {
-        HostHandover.Session(info: info, masterFD: closed ? nil : masterFD, output: ring?.replay() ?? Data(), pendingInput: pendingInput,
-                             ended: ended.map { .init(screen: $0.screen, runs: $0.runs, history: $0.history) })
+        var saved = HostHandover.Session(info: info, masterFD: closed ? nil : masterFD, output: ring?.replay() ?? Data(), pendingInput: pendingInput,
+                                         ended: ended.map { .init(screen: $0.screen, runs: $0.runs, history: $0.history) })
+        saved.focusEvents = focus.on
+        return saved
     }
 
     /// The session as the host build before this one left it. The screen and scrollback are rebuilt from the replay
@@ -184,6 +189,7 @@ public final class HostedSession {
             session.ring = nil
         } else {
             session.ring?.append(saved.output)
+            if let on = saved.focusEvents { session.focus = FocusEvents(on: on) } else { session.focus.feed(saved.output) }
             session.startParser(replay: saved.output)
         }
         guard let fd else {
@@ -357,6 +363,7 @@ public final class HostedSession {
             if count > 0 {
                 let chunk = Data(buffer[0..<count])
                 ring?.append(chunk)
+                focus.feed(chunk)
                 parser?.feed(chunk)
                 onOutput?(chunk)
                 if pausing, !exiting, let parser, parser.unparsed > Self.maxUnparsed { return pauseReading() }

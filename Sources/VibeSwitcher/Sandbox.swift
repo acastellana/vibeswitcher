@@ -228,6 +228,18 @@ private final class Driver: NSObject, NSApplicationDelegate {
     lazy var briefing = BriefingModel(
         snapshot: { [weak self] in BriefingModel.Snapshot(boards: self?.leads.boards ?? [:], sessions: self?.store.sessions ?? []) },
         language: { .preferred() }, keyStore: BriefingKey(saved: AppProof.MemorySecret()), generate: { _ in nil })
+    /// Push to talk with no microphone and no OpenAI: a recorder that hands over a made-up recording, an HTTP client
+    /// that answers a made-up transcript, a key in memory (`dictation key|nokey|press|release|note`).
+    let dictationKey = AppProof.MemorySecret()
+    lazy var dictation: DictationController = {
+        let controller = DictationController(keyStore: dictationKey, recorder: SandboxRecorder(), microphone: SandboxMicrophone(),
+                                             transcription: OpenAITranscription(client: SandboxTranscriber()), findKey: { nil })
+        controller.openSettings = { [weak self] in self?.showSettings(.general) }
+        // A fake Claude's /voice (`tell '{"op": "voice", "mode": "hold"}'`): never the user's Claude settings.
+        controller.claudeSettings = { _ in ClaudeVoiceSettings() }
+        controller.checkKey()
+        return controller
+    }()
     var window: MainWindowController?
     /// The main window's actions (`sheet new-session-menu` lists the empty sidebar's menu from them).
     var windowActions: WindowActions?
@@ -606,6 +618,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let access = phone ?? PhoneAccess(store: store)
         access.hostClient = host
         access.inputAllowed = true
+        let phoneDictation = PhoneDictation(keyStore: dictationKey, transcription: OpenAITranscription(client: SandboxTranscriber()),
+                                            model: { [weak self] in self?.dictation.model ?? OpenAITranscription.defaultModel },
+                                            session: { [weak self] sid in self?.store.sessions.first { $0.identity == sid } })
+        access.transcribe = phoneDictation.transcribe
+        access.dictationReady = { [weak self] in self?.dictation.keyState == .saved }
         PhoneLeads.wire(access, controller: leads, model: model)
         phone = access
         let port = UInt16.random(in: 50_000...59_999)
@@ -698,7 +715,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             projectsFolder: { [weak self] in (self?.home ?? "") + "/projects" },
             projectCreated: { [weak self] folder, _ in self?.refuse("starting a lead in the new project \(folder)") })
         windowActions = actions
-        let controller = MainWindowController(store: store, host: host, model: model, actions: actions, leads: leads, briefing: briefing)
+        let controller = MainWindowController(store: store, host: host, model: model, actions: actions, leads: leads, briefing: briefing,
+                                              dictation: dictation)
         controller.pane.configure = { [weak self, weak controller] view in
             guard let self else { return }
             let dark = (view.window ?? controller?.window)?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -723,7 +741,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settings = SettingsWindowController(
                 preferences: preferences, setup: SetupModel(preferences: preferences, system: .fixed(hooks: [.claude: true, .codex: false], terminal: .notAsked, notifications: .off)),
                 phoneAccess: PhoneAccess(store: store), recentProjects: { [] }, showWelcome: { [weak self] in self?.refuse("the welcome window") },
-                host: host, briefing: briefing, policy: WorkingPolicyEditor())
+                host: host, briefing: briefing, dictation: dictation, policy: WorkingPolicyEditor())
         }
         guard let window = settings?.window else { return }
         Sandbox.hide(window)
@@ -747,6 +765,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),
         ("scroll top|middle|bottom", "scrolls the shown chat"),
+        ("scroll settings top|middle|bottom", "scrolls the shown Settings tab"),
         ("size WxH", "resizes the main window's content (e.g. 1728x1015)"),
         ("board [N]", "adds N finished tasks (default 250) to the fake lead's board (start the lead first)"),
         ("churn [N]", "changes the fake lead's board N times (default 40), 0.15 s apart, each read and shown as a real change is"),
@@ -757,9 +776,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("team named", "starts the fake lead's worker and a verifier titled as Claude Code 2.1.311 names them (worker-<slug>, verify-<slug>) and moves the lead's agent into its .vibeswitcher/worktrees (start the lead first): its team still folds under it"),
         ("ask [TEXT]", "puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its row reads needs you"),
         ("unfold", "shows the selected lead's team under its row in the sidebar"),
+        ("replaced [N]", "shows the selected window session as a lead another session replaced, with N characters (default 200000) typed into it: the header's one line it makes"),
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
         ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
+        ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
@@ -828,18 +849,30 @@ private final class Driver: NSObject, NSApplicationDelegate {
             return alert.window
         }),
         // A lead started on a Mac without Claude Code: the real look (`LaunchPreflight`), its login shell a stand-in
-        // whose PATH has no claude, and the alert the start shows.
+        // whose PATH has no claude, and the alert the start shows, offering Anthropic's installer (`ToolInstall`).
         ("missing-claude", { driver in
             let shell = driver.home + "/bin/fakesh"
             let script = "#!/bin/sh\nshift 2\nPATH=/usr/bin:/bin; export PATH\nexec /bin/sh \"$@\"\n"
             try? VibePaths.ensurePrivate(URL(fileURLWithPath: driver.home + "/bin"))
             try? VibePaths.writePrivate(Data(script.utf8), to: URL(fileURLWithPath: shell))
             chmod(shell, 0o700)
-            guard let missing = LaunchPreflight(shell: shell).check(command: "claude") else { return nil }
-            let alert = LeadController.makeAlert(missing.title, "The lead wasn't started. " + missing.text, ["OK"])
+            guard let missing = LaunchPreflight(shell: shell).check(command: "claude"), let install = ToolInstall.offer(for: missing)
+            else { return nil }
+            let offer = install.offer(missing)
+            let alert = LeadController.makeAlert(offer.title, offer.text, ToolInstall.buttons)
             alert.layout()
             return alert.window
         }),
+        // A lead started on a Mac without Apple's Command Line Tools (nor git with them): the install it offers.
+        ("missing-tools", { _ in
+            let missing = LaunchPreflight.Problem(missing: [.commandLineTools])
+            let offer = ToolInstall.commandLineTools.offer(missing)
+            let alert = LeadController.makeAlert(offer.title, offer.text, ToolInstall.buttons)
+            alert.layout()
+            return alert.window
+        }),
+        // What shows while Apple's installer runs.
+        ("installing-tools", { _ in ToolInstaller.waitingPanel(ToolInstaller.waitingText) {} }),
     ] }
 
     /// The `lead-team` sheet's board, as of now.
@@ -1065,6 +1098,18 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             let total = Date().timeIntervalSince(started)
             reply(true, String(format: "%d publishes: %.1f ms each, longest %.1f ms", count, total * 1000 / Double(count), longest * 1000))
+        case "scroll" where rest.hasPrefix("settings"):
+            // The Settings tab's form: the window's first scroll view.
+            func first(_ view: NSView) -> NSScrollView? { (view as? NSScrollView) ?? view.subviews.lazy.compactMap(first).first }
+            guard let root = settings?.window?.contentView, let scroll = first(root), let document = scroll.documentView else {
+                return reply(false, "no settings shown")
+            }
+            let to = rest.dropFirst("settings".count).trimmingCharacters(in: .whitespaces)
+            let height = document.frame.height - scroll.contentSize.height
+            let y = to == "top" ? 0 : to == "middle" ? height / 2 : height
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, y)))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            settle { reply(true, "scrolled settings to \(Int(y)) of \(Int(height))") }
         case "scroll":
             // The chat's scroll view: the one holding its messages.
             func holdsChat(_ view: NSView) -> Bool { view is ChatTextView || view.subviews.contains(where: holdsChat) }
@@ -1155,10 +1200,17 @@ private final class Driver: NSObject, NSApplicationDelegate {
             guard let row = model.selectedRow else { return reply(false, "nothing selected") }
             if !model.expandedTeams.contains(row.id) { model.toggleTeam(row.id) }
             settle { reply(true, "\(row.title)'s team shown") }
+        case "replaced":
+            guard let row = model.selectedRow, let id = row.hostID, let tty = row.session?.tty else { return reply(false, "no window session selected") }
+            var replaced = ReplacedLead(root: row.cwd ?? home, project: "sandbox-lead", tty: tty, live: nil)
+            replaced.draft = String(repeating: "split the layer out, then the next one\n", count: (Int(rest) ?? 200_000) / 39 + 1)
+            model.replacedLeads[id] = replaced
+            settle { reply(true, "\(row.title) shown replaced, \(replaced.draft.count) characters typed into it") }
         case "ask": ask(rest, answer: false) { problem in reply(problem == nil, problem ?? "the lead asks you") }
         case "answer": ask("", answer: true) { problem in reply(problem == nil, problem ?? "its questions answered") }
         case "extras": extras { problem in reply(problem == nil, problem ?? "the lead's board has a proposal, a revised question, an all-done card and results") }
         case "phone": servePhone(reply)
+        case "dictation": dictate(rest, reply)
         case "select":
             guard let row = WindowGroups.filter(model.sections, query: rest).first?.rows.first else { return reply(false, "no row matches \(rest)") }
             model.selectedID = row.id
@@ -1244,6 +1296,53 @@ private final class Driver: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.window?.chat.poll()
             self.settle { reply(met, met ? "chat of \(fake.label) shown" : "the chat of \(fake.label) didn't load: \(self.window?.chat.state ?? .none)") }
+        }
+    }
+
+    /// `dictation key|nokey|note|ack|press|release|letgo|cancel|turnon`.
+    private func dictate(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
+        switch what {
+        case "key", "nokey":
+            dictationKey.write(what == "key" ? "sk-sandbox-\(String(repeating: "0", count: 24))" : nil)
+            dictation.checkKey()
+            settle { reply(true, what == "key" ? "a made-up key is saved" : "no key: the mic says one is needed") }
+        case "note":
+            UserDefaults.standard.removeObject(forKey: DictationController.privacyNotedKey)
+            reply(true, "the next press shows the note about OpenAI")
+        case "ack":
+            dictation.acknowledgePrivacy()
+            settle { reply(true, "the note about OpenAI was read: a press records") }
+        case "press", "release", "letgo":
+            guard let row = model.selectedRow else { return reply(false, "no session selected: chat NAME first") }
+            let (agent, key) = (row.session?.agent, row.draftKey)
+            if what == "press" { dictation.press(key, agent: agent) { "Words that may come up: sandbox." } } else { dictation.release(key) }
+            let claude = dictation.isClaude(key)
+            waitFor({ [weak self] in
+                guard let dictation = self?.dictation else { return true }
+                // Claude's: held until it listens (or says why not); let go until the text is in the composer (letgo: until
+                // it waits for it).
+                if claude, what == "letgo" { return !dictation.isRecording(key) }
+                if claude { return what == "press" ? dictation.isListening(key) || !dictation.isBusy(key) : !dictation.isBusy(key) }
+                return !dictation.isTranscribing(key)
+            }) { [weak self] _ in
+                self?.settle { reply(true, "\(self?.dictation.phase(key) ?? .idle)\(self?.dictation.isListening(key) == true ? ", listening" : "")") }
+            }
+        case "cancel":
+            guard let row = model.selectedRow else { return reply(false, "no session selected: chat NAME first") }
+            let key = row.draftKey
+            dictation.cancel(key, .button)
+            waitFor({ [weak self] in self?.dictation.isBusy(key) == false }) { [weak self] _ in
+                self?.settle { reply(true, "cancelled: \(self?.dictation.phase(key) ?? .idle)") }
+            }
+        case "turnon":
+            guard let row = model.selectedRow else { return reply(false, "no session selected: chat NAME first") }
+            let key = row.draftKey
+            dictation.turnOnClaude(key)
+            waitFor({ [weak self] in self?.dictation.turningOn.contains(key) == false }) { [weak self] _ in
+                self?.settle { reply(true, self?.dictation.notices[key]?.text ?? "no notice") }
+            }
+        default:
+            reply(false, "dictation key|nokey|note|ack|press|release|letgo|cancel|turnon")
         }
     }
 
@@ -1433,5 +1532,27 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
         }
         take([("light", .aqua), ("dark", .darkAqua)][...])
+    }
+}
+
+/// The sandbox's microphone: no device opened, a made-up recording handed over.
+/// The sandbox's microphone permission: always allowed, never the Mac's (no dialog).
+final class SandboxMicrophone: MicrophoneAuthorizer {
+    var status: MicrophoneStatus { .allowed }
+    func request(_ done: @escaping (Bool) -> Void) { done(true) }
+}
+
+final class SandboxRecorder: DictationRecorder {
+    func permission(_ done: @escaping (Bool) -> Void) { done(true) }
+    func start() throws {}
+    func stop() -> DictationAudio? { DictationAudio(data: Data("sandbox-recording".utf8), mimeType: "audio/mp4", duration: 2) }
+    func cancel() {}
+}
+
+/// The sandbox's OpenAI: nothing leaves the Mac, a made-up transcript comes back.
+struct SandboxTranscriber: HTTPClient {
+    func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        (Data(#"{"text":"run the tests on ComposerView.swift"}"#.utf8),
+         HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!)
     }
 }

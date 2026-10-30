@@ -4,8 +4,12 @@
 <dict>
     <!-- The app reads Terminal's tabs and selects one (TerminalBridge), lists Chrome's localhost tabs (ChromeTabs)
          and asks for both at onboarding: Apple Events sent in-process. Under the hardened runtime they fail with -1743
-         and no prompt without this. The helpers send none and get no entitlements. -->
+         and no prompt without this. The helpers send none. -->
     <key>com.apple.security.automation.apple-events</key>
+    <true/>
+    <!-- Push to talk in the composer records from the microphone (EngineRecorder): under the hardened runtime macOS
+         gives the app no audio input, and asks nothing, without this. -->
+    <key>com.apple.security.device.audio-input</key>
     <true/>
 </dict>
 </plist>

@@ -32,15 +32,22 @@ private let fakeTheDisk: @convention(c) () -> Void = {
 /// this is only a guard, sized for a Mac running several suites at once (load 100+), never a measure of speed.
 let hangGuard: TimeInterval = 300
 
+/// The longest a test that talks to a scratch host process may run, its hang guards included: each wait is bounded,
+/// but a test whose host stops answering meets one after another (2026-10-28: a merge's full run hung for 45 min, the
+/// gate's limit, while a scratch host with a lead-courier session ran). Past it the test fails and its waits end (see
+/// `eventually`). Under load these tests take minutes at most (ToolServerStressTests: 313 s in an audit).
+let hostTestLimit: TimeLimitTrait = .timeLimit(.minutes(10))
+
 /// The tail of a scratch program that must still be running while the test looks at it: longer than any test
 /// waits, and ended by the test (or its host) when it's done.
 let keepRunning = "sleep 3600"
 
 /// Polls `condition` until it holds, or until `timeout` (a hang guard) passes. Host tests talk to real processes
-/// and sockets.
+/// and sockets. A test past its time limit (`.timeLimit`, see `hostTestLimit`) is cancelled: its waits then end at
+/// once, so a test whose host stopped answering ends there rather than waiting out one hang guard after another.
 func eventually(timeout: TimeInterval = hangGuard, _ condition: () -> Bool) -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
+    while Date() < deadline, !Task.isCancelled {
         if condition() { return true }
         Thread.sleep(forTimeInterval: 0.02)
     }

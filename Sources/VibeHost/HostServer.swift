@@ -489,7 +489,7 @@ public final class HostServer {
             session.view(historyLines: nil) { reply(.screenText(id: id, text: $0.screen)) }
         case .styledScreen(let id):
             guard let session = sessions[id] else { return reply(missing) }
-            session.view(historyLines: nil) { reply(.styledScreenText(id: id, text: $0.screen, runs: $0.runs)) }
+            session.view(historyLines: nil) { reply(.styledScreenText(id: id, text: $0.screen, runs: $0.runs, focusEvents: session.focusEvents)) }
         case .history(let id, let lines):
             guard let session = sessions[id] else { return reply(missing) }
             session.view(historyLines: max(1, min(lines, 5_000))) { view in

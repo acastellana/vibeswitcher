@@ -1,7 +1,7 @@
 import Foundation
 
-/// The whole Mac as every project's lead shares it: the 1-minute load average and the team sessions (workers and
-/// verifiers) of every project the session host knows. A lead that counted only its own team believed it had the Mac
+/// The whole Mac as every project's lead shares it: its load (`steady`) and the team sessions (workers and verifiers)
+/// of every project the session host knows. A lead that counted only its own team believed it had the Mac
 /// to itself: on 2026-10-19 three leads' teams together held it at load 100–190 for hours, a worker's build took 25
 /// minutes and merges failed on timing-sensitive tests.
 public struct MacLoad: Equatable, Sendable {
@@ -12,7 +12,7 @@ public struct MacLoad: Equatable, Sendable {
         public var sessions: Int
     }
 
-    /// The 1-minute load average; nil when it couldn't be read.
+    /// The load the leads judge by (`steady`); nil when it couldn't be read.
     public var load: Double?
     /// The projects holding live team sessions, most first.
     public var holders: [Holder]
@@ -20,10 +20,34 @@ public struct MacLoad: Equatable, Sendable {
     public var sessions: Int { holders.reduce(0) { $0 + $1.sessions } }
 
     /// The Mac's 1-minute load average; nil when the system doesn't say.
-    public static func oneMinute() -> Double? {
-        var loads = [Double](repeating: 0, count: 3)
-        return getloadavg(&loads, 3) >= 1 ? loads[0] : nil
+    public static func oneMinute() -> Double? { averages()?.one }
+
+    /// The 1- and 5-minute load averages, as `uptime` gives them.
+    public struct Averages: Equatable, Sendable {
+        public var one: Double
+        public var five: Double
+
+        public init(one: Double, five: Double) {
+            self.one = one
+            self.five = five
+        }
+
+        /// The load the leads judge room by: the greater of the two. The 1-minute alone dips within a minute or two
+        /// of a spike's work pausing: on 2026-10-28 the Mac hit load 150 on 12 cores at 17:30, and at 17:38, with the
+        /// 5-minute still at 64, auto_advance read a dip under load_threshold and started two workers. The 5-minute
+        /// falls only once the load has stayed down for minutes (from 64 to 24 with the Mac idle, about 5 minutes),
+        /// and the 1-minute still says a new rise at once.
+        public var steady: Double { max(one, five) }
     }
+
+    /// The Mac's load averages; nil when the system doesn't say.
+    public static func averages() -> Averages? {
+        var loads = [Double](repeating: 0, count: 3)
+        return getloadavg(&loads, 3) >= 2 ? Averages(one: loads[0], five: loads[1]) : nil
+    }
+
+    /// The Mac's load as the leads judge room by (`Averages.steady`); nil when the system doesn't say.
+    public static func steady() -> Double? { averages()?.steady }
 
     /// The cores the load is shared by.
     public static var processors: Int { ProcessInfo.processInfo.activeProcessorCount }
@@ -78,22 +102,41 @@ public struct MacLoad: Equatable, Sendable {
     /// 12.34 → "12.3"; unknown → "unknown".
     public var loadText: String { load.map { String(format: "%.1f", $0) } ?? "unknown" }
 
-    /// "3 team sessions across 2 projects (vibeswitcher 2, project-c 1)".
+    /// "3 team sessions across 2 projects (vibeswitcher 2, project-c 1)": every project by name, for the app's own
+    /// views only. What a lead is told goes into its repository's records (auto_advance logs refusals to progress.md),
+    /// so it names only its own project: see `sessionsText(for:)`.
     public var sessionsText: String {
-        let projects = holders.count == 1 ? "1 project" : "\(holders.count) projects"
         let who = holders.isEmpty ? "" : " (" + holders.map { "\($0.project) \($0.sessions)" }.joined(separator: ", ") + ")"
-        return "\(sessions) team session\(sessions == 1 ? "" : "s") across \(projects)\(who)"
+        return sessionsCount + who
+    }
+
+    /// "8 team sessions across 3 projects (this one 3, 2 others 5)": as told to the lead of the repository `root`,
+    /// naming no other project. On 2026-10-28 a start refusal naming the Mac's other projects went into this repo's
+    /// progress.md through auto_advance, an hour after the user had their names scrubbed from it.
+    public func sessionsText(for root: String) -> String {
+        guard !holders.isEmpty else { return sessionsCount }
+        let own = ((root as NSString).standardizingPath as NSString).lastPathComponent
+        let mine = holders.filter { $0.project == own }.reduce(0) { $0 + $1.sessions }
+        let others = holders.filter { $0.project != own }
+        var who = ["this one \(mine)"]
+        if !others.isEmpty {
+            who.append("\(others.count) other\(others.count == 1 ? "" : "s") \(others.reduce(0) { $0 + $1.sessions })")
+        }
+        return sessionsCount + " (" + who.joined(separator: ", ") + ")"
+    }
+
+    /// "3 team sessions across 2 projects".
+    private var sessionsCount: String {
+        let projects = holders.count == 1 ? "1 project" : "\(holders.count) projects"
+        return "\(sessions) team session\(sessions == 1 ? "" : "s") across \(projects)"
     }
 
     /// The Team view's line: "Mac: load 12.3, 3 team sessions across 2 projects".
-    public var line: String {
-        let projects = holders.count == 1 ? "1 project" : "\(holders.count) projects"
-        return "Mac: load \(loadText), \(sessions) team session\(sessions == 1 ? "" : "s") across \(projects)"
-    }
+    public var line: String { "Mac: load \(loadText), \(sessionsCount)" }
 
     /// The line as VoiceOver reads it: what the numbers are, who holds the sessions, and against the lead's limits.
     public func spoken(threshold: Double, max: Int) -> String {
-        let load = self.load.map { _ in "load average \(loadText) over the last minute" } ?? "load average unknown"
+        let load = self.load.map { _ in "load average \(loadText), the greater of the last minute's and the last 5 minutes'" } ?? "load average unknown"
         var parts = ["Whole Mac, all projects: \(load)", sessionsText]
         if isBusy(threshold: threshold) { parts.append("over the load limit of \(Self.number(threshold)): new workers and audits wait") }
         if isFull(max: max) { parts.append("at the limit of \(max) team sessions: new workers and audits wait") }
@@ -114,8 +157,8 @@ public struct MacLimits: Codable, Equatable, Sendable {
     /// How many workers and verifiers may run at once across every project the session host knows; start_worker and
     /// audit refuse at it.
     public var maxSessions: Int
-    /// The 1-minute load average above which start_worker and audit refuse, and merge waits before its tests; nil:
-    /// twice the cores (`loadLimit`).
+    /// The load (the greater of the 1- and 5-minute averages, `MacLoad.Averages.steady`) above which start_worker and
+    /// audit refuse, and merge waits before its tests; nil: twice the cores (`loadLimit`).
     public var loadThreshold: Double?
 
     public init(maxSessions: Int = MacLimits.defaultMaxSessions, loadThreshold: Double? = nil) {

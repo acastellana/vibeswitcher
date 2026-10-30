@@ -1052,7 +1052,7 @@ final class HostClient: ObservableObject {
     func styledScreen(_ id: UUID, completion: @escaping (LeadDelivery.Screen?) -> Void) {
         request(.styledScreen(id: id)) { [weak self] event in
             switch event {
-            case .styledScreenText(_, let text, let runs): completion(LeadDelivery.Screen(text: text, runs: runs))
+            case .styledScreenText(_, let text, let runs, let focusEvents): completion(LeadDelivery.Screen(text: text, runs: runs, focusEvents: focusEvents))
             case .error: self?.screen(id) { completion($0.map { LeadDelivery.Screen(text: $0) }) } ?? completion(nil)
             default: completion(nil)
             }

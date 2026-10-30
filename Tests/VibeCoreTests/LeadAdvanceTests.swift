@@ -183,6 +183,30 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
     }
 
+    /// 2026-10-28 20:37: auto_advance's start of a task was refused (the load rose between its count of the Mac's room
+    /// and start_worker's), and the refusal it logged to progress.md named the Mac's other projects, an hour after the
+    /// user had them scrubbed from the repo. Logged, it names only this project and counts the others.
+    @Test func aStartRefusalLoggedToTheProgressLogNamesNoOtherProject() throws {
+        let (root, runtime, lead) = try team()
+        #expect(!lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]]).isError)
+        // Room for its worker beside the other projects' six: only the load refuses it.
+        lead.macLimits = { MacLimits(maxSessions: 10, loadThreshold: 24) }
+        runtime.calls.lock()
+        // Other projects' teams, which the host counts in its census but doesn't list this lead.
+        runtime.unlisted = LeadToolsetTests.neighbours
+        // The pass's own reading and its count of the room: idle; start_worker's, a moment later: loaded.
+        runtime.loadReadings = [0.5, 0.5, 150]
+        runtime.calls.unlock()
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        #expect(advancing.until { progress(root).contains("Automatically (auto_advance): Didn't start add-b: Not started") })
+        let log = progress(root)
+        #expect(log.contains("6 team sessions across 2 projects (this one 0, 2 others 6)"), "\(log)")
+        for other in ["project-c", "films"] { #expect(!log.contains(other), "\(log)") }
+        // The load drops: it starts.
+        #expect(advancing.until { task("add-b", root)?.status == .running })
+    }
+
     // MARK: review none
 
     @Test func aReviewNoneTaskStartsMergesWithItsTestRunAndIsCleanedUpWithNoLeadCall() throws {
@@ -902,6 +926,38 @@ struct LeadAdvanceTests: LeadTeamFixture {
         let told = roomWaits.look(mac: MacLoad.count([], load: 0.5), limits: MacLimits(maxSessions: 1))
         #expect(told.isEmpty)
         #expect(advancing.until { task("waits", root)?.status == .running })
+    }
+
+    /// 2026-10-28: load 150 at 17:30 on 12 cores, and at 17:38 auto_advance started two workers on a dip of the
+    /// 1-minute load with the 5-minute still at 64. The loop's room check judges by the greater of the two, so through
+    /// a series of readings (spike, dip, calm) it starts nothing until the 5-minute is under load_threshold too, even
+    /// nudged in the dip.
+    @Test func aDipOfTheOneMinuteLoadAfterASpikeStartsNothing() throws {
+        let (root, runtime, lead) = try team()
+        lead.macLimits = { MacLimits(maxSessions: 6, loadThreshold: 24) }
+        let set = { (one: Double, five: Double) in
+            runtime.calls.lock()
+            runtime.averages = MacLoad.Averages(one: one, five: five)
+            runtime.calls.unlock()
+        }
+        set(150.4, 102.16)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Dip", "goal": "g", "acceptance": ["a"]])
+        advancing.settle()
+        #expect(task("dip", root)?.status == .planned)
+        #expect(roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "start_worker(dip)" }, "\(roomWaits.waits())")
+        // The dip: the 1-minute under load_threshold, the 5-minute not. Nudged as the app's watch would, it still waits.
+        set(20, 64)
+        LeadAdvance.nudge(root: root)
+        advancing.settle()
+        advancing.settle()
+        #expect(task("dip", root)?.status == .planned)
+        #expect(runtime.spawned.isEmpty)
+        // Calm: both under it.
+        set(8, 22)
+        LeadAdvance.nudge(root: root)
+        #expect(advancing.until { task("dip", root)?.status == .running })
     }
 
     @Test func aBatteryHoldStopsStartsAndMergesUntilACPowerReturns() throws {

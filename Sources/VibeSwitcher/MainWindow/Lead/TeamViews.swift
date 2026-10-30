@@ -245,35 +245,70 @@ struct TeamTaskList: View {
     /// The rows as last drawn, for `reveal`: a row equal to the one before keeps its first closure (`TeamRowView` is
     /// equatable), which must still find the rows of now.
     @State private var shown = Shown()
+    /// The rows split into those under way and the finished ones, with the fold's title, made once a list of rows.
+    @State var parts = Parts()
+    /// Which rows accessibility sees (`TeamExposure`, the Team tab's); nil: all of them.
+    @Environment(\.teamExposure) private var exposure
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     final class Shown {
         var rows: [TeamRow] = []
     }
 
+    /// `rows` split, kept while they're the same rows (`TeamRowsCache` hands out the same ones until the board or its
+    /// members' sessions change): the list is drawn again as the Team tab's clock ticks, and filtering 200-odd rows
+    /// twice and counting the finished ones four times (`TeamRows.finishedTitle`) on every tick showed in a 10 s
+    /// freeze (hang-20261028-174102).
+    final class Parts {
+        struct Split {
+            let open: [TeamRow]
+            let finished: [TeamRow]
+            /// The fold's: "Merged (44, 3 folded) · Abandoned (1)".
+            let title: String
+        }
+
+        private var kept: (rows: [TeamRow], split: Split)?
+        /// How many times the rows were split (for tests).
+        private(set) var made = 0
+
+        func split(_ rows: [TeamRow]) -> Split {
+            if let kept, kept.rows.isSameStorage(as: rows) { return kept.split }
+            made += 1
+            let finished = rows.filter { $0.group == .finished }
+            let split = Split(open: rows.filter { $0.group != .finished }, finished: finished,
+                              title: finished.isEmpty ? "" : TeamRows.finishedTitle(finished))
+            kept = (rows, split)
+            return split
+        }
+    }
+
     var body: some View {
         let _ = shown.rows = rows
-        let finished = rows.filter { $0.group == .finished }
-        ScrollViewReader { proxy in
-            VStack(alignment: .leading, spacing: 1) {
-                ForEach(rows.filter { $0.group != .finished }) { row in line(row, proxy) }
-                if !finished.isEmpty {
-                    Fold(title: TeamRows.finishedTitle(finished), isOpen: $showFinished, hint: "the finished tasks").padding(.top, 3)
-                    if showFinished {
-                        ForEach(finished) { row in line(row, proxy) }
+        let split = parts.split(rows)
+        TeamExposure.Reader(exposure: exposure) { unexposed in
+            ScrollViewReader { proxy in
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(split.open) { row in line(row, proxy, unexposed: unexposed) }
+                    if !split.finished.isEmpty {
+                        Fold(title: split.title, isOpen: $showFinished, hint: "the finished tasks").padding(.top, 3)
+                        if showFinished {
+                            ForEach(split.finished) { row in line(row, proxy, unexposed: unexposed) }
+                        }
                     }
                 }
             }
         }
     }
 
-    private func line(_ row: TeamRow, _ proxy: ScrollViewProxy) -> some View {
+    private func line(_ row: TeamRow, _ proxy: ScrollViewProxy, unexposed: Set<String>) -> some View {
         TeamRowView(row: row, now: now, summary: summary(row), isOpen: openRows.contains(row.id), canOpen: canOpen, open: open,
                     openTask: { [shown] in reveal($0, in: shown.rows, proxy) }) {
             if openRows.contains(row.id) { openRows.remove(row.id) } else { openRows.insert(row.id) }
         }
         .equatable()
         .id(row.id)
+        .accessibilityHidden(unexposed.contains(row.id))
+        .modifier(TeamExposure.Top(id: row.id, exposure: exposure))
     }
 
     /// Opens task `id`'s row (unfolding the finished ones when it's there) and scrolls to it.
@@ -282,6 +317,94 @@ struct TeamTaskList: View {
         if target.group == .finished { showFinished = true }
         openRows.insert(id)
         DispatchQueue.main.async { withAnimation(reduceMotion ? nil : .default) { proxy.scrollTo(id, anchor: .top) } }
+    }
+}
+
+/// The Team list's rows accessibility sees: those on screen and a screen either side (`ChatExposure`'s band), the rest
+/// hidden, as the chat's are. SwiftUI keeps its accessibility tree up to date while a client watches the app, and with
+/// a lead selected each update walked every Team row's node beside the chat's (`AccessibilityNode.updateChildren`,
+/// `impliedVisibility`: hang-20261028-173905, 174102, 175306). The rows keep their ids and labels; the band moves
+/// as the Team tab scrolls, only when what's on screen nears its edge. The Team tab (`LeadTeamView`) owns one and
+/// hands it to its list through the environment; a list without one (pictures, tests) shows every row to it.
+final class TeamExposure: ObservableObject {
+    static let space = "team-rows"
+    /// The rows out of the band, by task id.
+    @Published private(set) var unexposed: Set<String> = []
+    /// The stretch of the Team tab seen (from the top of its content); nil until its scroll view says where it is.
+    private(set) var band: ClosedRange<Double>?
+    /// Where each row starts, from the top of the Team tab's content.
+    private var tops: [String: Double] = [:]
+
+    /// The scroll view is at `top`, `height` tall: the band moves when what's on screen nears its edge.
+    func scrolled(top: Double, height: Double) {
+        guard let band = ChatExposure.band(band, top: top, height: height) else { return }
+        self.band = band
+        expose()
+    }
+
+    /// A row starts at `top` now (nil: it's gone): the rows out of the band are worked out again once the layout that
+    /// moved it is done, however many rows it moved.
+    func place(_ id: String, top: Double?) {
+        guard tops[id] != top else { return }
+        tops[id] = top
+        guard !pending else { return }
+        pending = true
+        DispatchQueue.main.async { [weak self] in
+            self?.pending = false
+            self?.expose()
+        }
+    }
+    private var pending = false
+
+    private func expose() {
+        let hidden = ChatExposure.hidden(tops: tops, exposed: band)
+        if hidden != unexposed { unexposed = hidden }
+    }
+
+    /// Hands its content the rows out of the band, drawn again when they change (none without an exposure).
+    struct Reader<Content: View>: View {
+        let exposure: TeamExposure?
+        @ViewBuilder let content: (Set<String>) -> Content
+
+        var body: some View {
+            if let exposure { Observed(exposure: exposure, content: content) } else { content([]) }
+        }
+    }
+
+    private struct Observed<Content: View>: View {
+        @ObservedObject var exposure: TeamExposure
+        let content: (Set<String>) -> Content
+
+        var body: some View { content(exposure.unexposed) }
+    }
+
+    /// Tells the exposure where a row starts as that changes (never as the Team tab's clock ticks: a geometry reader and
+    /// a preference a row were made again on every tick), and when it goes.
+    struct Top: ViewModifier {
+        let id: String
+        let exposure: TeamExposure?
+
+        func body(content: Content) -> some View {
+            if let exposure {
+                content
+                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TeamExposure.space)).minY } action: { exposure.place(id, top: Double($0)) }
+                    .onDisappear { exposure.place(id, top: nil) }
+            } else {
+                content
+            }
+        }
+    }
+}
+
+private struct TeamExposureKey: EnvironmentKey {
+    static let defaultValue: TeamExposure? = nil
+}
+
+extension EnvironmentValues {
+    /// The Team tab's rows accessibility sees (`TeamExposure`); nil: all of them.
+    var teamExposure: TeamExposure? {
+        get { self[TeamExposureKey.self] }
+        set { self[TeamExposureKey.self] = newValue }
     }
 }
 
@@ -467,18 +590,52 @@ struct LeadTeamPane: View, Equatable {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Counts 5-second ticks while it's on screen (a `.task`, so a re-render of the window doesn't restart it).
     @State private var tick = 0
-    /// The Mac's load and the Mac-wide limits, read again with each tick.
-    @State private var load: Double?
-    @State private var limits = MacLimits()
-    /// The Mac-wide line, made with each tick and when the host's sessions change, never in `body`: counting every
-    /// project's team sessions is a walk of all their folders, and the body is drawn again many times a second while
-    /// the window updates (hang-20261027-201145, 201501).
+    /// The Mac-wide line, made off the main thread with each tick and when the host's sessions change (`MacReads`),
+    /// never in `body`: counting every project's team sessions is a walk of all their folders, and the body is drawn
+    /// again many times a second while the window updates (hang-20261027-201145, 201501). Reading the limits' file
+    /// and counting took seconds of the main thread on a loaded Mac (hang-20261028-175702).
     @State private var mac: MacLine?
+    @State var macReads = MacReads()
 
     static func == (a: LeadTeamPane, b: LeadTeamPane) -> Bool {
-        a.root == b.root && a.board == b.board && a.decisions == b.decisions && a.seen == b.seen && a.rows == b.rows
+        a.root == b.root && a.board.isSame(as: b.board) && a.decisions == b.decisions && a.seen == b.seen && a.rows == b.rows
             && a.notices == b.notices && a.summaries === b.summaries && a.keepAwake === b.keepAwake && a.hosted == b.hosted
             && a.recordsDir == b.recordsDir
+    }
+
+    /// The Mac-wide line's inputs read and the line made on a queue of its own: the load (`MacLoad.steady`), the limits' file
+    /// (`MacLimits.load`), every project's team sessions counted. Made again when the sessions listed change or the
+    /// clock ticks, never for the same sessions in between.
+    final class MacReads {
+        private let run: (@escaping () -> Void) -> Void
+        private var hosted: [MacLine.Session]?
+        /// The load and limits as last read, for a change of sessions between ticks (only on `run`'s queue).
+        private var read: (load: Double?, limits: MacLimits)?
+        /// Each request's number: a line that comes back after a newer request is dropped.
+        private var asked = 0
+        /// How many times a line was asked for (for tests).
+        private(set) var made = 0
+
+        init(run: ((@escaping () -> Void) -> Void)? = nil) {
+            let queue = DispatchQueue(label: "VibeSwitcher.mac-line", qos: .utility)
+            self.run = run ?? { queue.async(execute: $0) }
+        }
+
+        /// Makes the line for `hosted` and hands it to `then` on the main thread: `reread` reads the load and the limits
+        /// again (a tick); without it, nothing is made for the sessions it was last made for.
+        func make(_ hosted: [MacLine.Session], reread: Bool, then: @escaping (MacLine) -> Void) {
+            guard reread || hosted != self.hosted else { return }
+            self.hosted = hosted
+            made += 1
+            asked += 1
+            let number = asked
+            run { [self] in
+                if reread || read == nil { read = (MacLoad.steady(), MacLimits.load()) }
+                let read = read!
+                let line = MacLine.make(listed: hosted, load: read.load, limits: read.limits)
+                DispatchQueue.main.async { if number == self.asked { then(line) } }
+            }
+        }
     }
 
     private var teamRows: [TeamRow] { rows ?? TeamRows.rows(board, seen: seen) }
@@ -486,10 +643,10 @@ struct LeadTeamPane: View, Equatable {
     var body: some View {
         LeadTeamView(root: root, board: board, seen: seen, open: open, answer: answer, notices: notices, decisions: decisions,
                      summary: { summaries.line($0) }, decisionSummary: { summaries.line($0) }, keepingAwake: keepAwake.held.contains(root),
-                     mac: mac, rows: teamRows, recordsDir: recordsDir)
+                     mac: mac, rows: teamRows, recordsDir: recordsDir, linesVersion: summaries.version)
             .onAppear(perform: request)
             .onChange(of: tick) { request() }
-            .onChange(of: hosted) { mac = MacLine.make(listed: hosted, load: load, limits: limits) }
+            .onChange(of: hosted) { macReads.make(hosted, reread: false) { mac = $0 } }
             .onChange(of: summaries.enabled) { request() }
             .task {
                 while !Task.isCancelled {
@@ -500,9 +657,7 @@ struct LeadTeamPane: View, Equatable {
     }
 
     private func request() {
-        load = MacLoad.oneMinute()
-        limits = MacLimits.load()
-        mac = MacLine.make(listed: hosted, load: load, limits: limits)
+        macReads.make(hosted, reread: true) { mac = $0 }
         let recent = DecisionFeed.split(decisions, now: Date().timeIntervalSince1970, reduceMotion: reduceMotion).recent.map(\.decision)
         summaries.request(rows: teamRows, decisions: recent)
     }

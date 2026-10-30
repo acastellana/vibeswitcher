@@ -6,7 +6,7 @@ import Testing
 
 /// Each session's output is parsed in a process of its own (see `SessionParser`): a parser that stalls or traps (a test
 /// hook, on a scratch host only) holds up or ends only itself; the watchdog logs it and starts another.
-@Suite(.serialized) struct ParserIsolationTests {
+@Suite(.serialized, hostTestLimit) struct ParserIsolationTests {
     /// Prints the time every 50 ms, so a client can tell how late each line reached it.
     static let clock = "perl -MTime::HiRes=time -e '$|=1; while (1) { printf qq(t=%.4f\\n), time; select(undef, undef, undef, 0.05) }'"
     /// Prints a line, then the hook's sequence on its own, then counts.

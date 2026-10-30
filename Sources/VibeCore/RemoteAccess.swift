@@ -98,7 +98,13 @@ public enum HTTPParser {
         case complete(HTTPRequest)
     }
 
-    public static func parse(_ data: Data, maxHeaderBytes: Int = 16 * 1024, maxBodyBytes: Int = 64 * 1024) -> Result {
+    /// The most a request's body may hold, unless `bodyLimit` allows a given request more.
+    public static let defaultMaxBodyBytes = 64 * 1024
+
+    /// `bodyLimit`, given the request's method, path and lowercased headers, says how big its body may be (one
+    /// endpoint takes recordings); without it, `maxBodyBytes`.
+    public static func parse(_ data: Data, maxHeaderBytes: Int = 16 * 1024, maxBodyBytes: Int = defaultMaxBodyBytes,
+                             bodyLimit: ((_ method: String, _ path: String, _ headers: [String: String]) -> Int)? = nil) -> Result {
         guard let end = data.range(of: Data("\r\n\r\n".utf8)) else {
             return data.count > maxHeaderBytes ? .tooLarge : .incomplete
         }
@@ -123,7 +129,7 @@ public enum HTTPParser {
         if headers["transfer-encoding"] != nil { return .invalid }
         let length = headers["content-length"].map { Int($0) } ?? 0
         guard let length, length >= 0 else { return .invalid }
-        guard length <= maxBodyBytes else { return .tooLarge }
+        guard length <= bodyLimit?(String(requestLine[0]), components.path, headers) ?? maxBodyBytes else { return .tooLarge }
         let bodyStart = end.upperBound
         guard data.count - (bodyStart - data.startIndex) >= length else { return .incomplete }
         let body = data[bodyStart..<(bodyStart + length)]

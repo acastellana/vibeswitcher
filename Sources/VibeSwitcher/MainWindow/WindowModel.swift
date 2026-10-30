@@ -5,11 +5,16 @@ import VibeCore
 /// The main window's list and selection.
 final class WindowModel: ObservableObject {
     @Published private(set) var sections: [WindowSection] = [] {
-        didSet { arrangedKept = nil }
+        didSet {
+            arrangedKept = nil
+            allRowsKept = nil
+            selectedKept = nil
+        }
     }
     @Published var selectedID: String? {
         didSet {
             guard selectedID != oldValue else { return }
+            selectedKept = nil
             UserDefaults.standard.set(selectedID, forKey: Self.selectionKey)
             // An ended session chosen from Home, the palette or a filter shows in the sidebar: its fold opens.
             if !endedOpen, let selectedID, foldsAway(selectedID) { endedOpen = true }
@@ -68,8 +73,19 @@ final class WindowModel: ObservableObject {
         homeEndedOpen = UserDefaults.standard.bool(forKey: Self.homeEndedOpenKey)
     }
 
-    /// Every row, whatever the grouping and filter.
-    var allRows: [WindowRow] { sections.flatMap(\.rows) }
+    /// Every row, whatever the grouping and filter. Made once for each change of the sections: the header, the
+    /// inspector and the sidebar ask on every draw, and copying every row each time showed in the window's freezes
+    /// (hang-20261028-175306).
+    var allRows: [WindowRow] {
+        if let allRowsKept { return allRowsKept }
+        allRowsMade += 1
+        let rows = sections.flatMap(\.rows)
+        allRowsKept = rows
+        return rows
+    }
+    private var allRowsKept: [WindowRow]?
+    /// How many times `allRows` was made (for tests).
+    private(set) var allRowsMade = 0
     /// The sections as the sidebar shows them (grouped, ended rows folded away, then filtered) and, apart, its
     /// "Ended (n)" fold's rows, filtered; a team member stays under its lead.
     func folded(_ arranged: LeadTeams.Arranged) -> (sections: [WindowSection], ended: [WindowRow]) {
@@ -134,8 +150,15 @@ final class WindowModel: ObservableObject {
         let folded = folded(arranged)
         return folded.sections.flatMap(\.rows) + (endedOpen ? folded.ended : [])
     }
-    /// Stays selected while filtered out of view.
-    var selectedRow: WindowRow? { allRows.first { $0.id == selectedID } }
+    /// Stays selected while filtered out of view. Found once for each change of the sections or the selection.
+    var selectedRow: WindowRow? {
+        if let selectedKept { return selectedKept }
+        let row = allRows.first { $0.id == selectedID }
+        selectedKept = .some(row)
+        return row
+    }
+    /// The selected row as last found (`.some(nil)`: none).
+    private var selectedKept: WindowRow??
 
     func focusFilter() { filterFocusRequests += 1 }
 

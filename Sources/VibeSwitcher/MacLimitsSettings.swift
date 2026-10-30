@@ -6,7 +6,7 @@ import VibeCore
 final class MacLimitsEditor: ObservableObject {
     /// Team sessions (workers and verifiers) of all projects at once, at least 1.
     @Published var maxSessions: Int { didSet { changed() } }
-    /// The 1-minute load above which leads start nothing; nil (empty) or 0: twice the cores.
+    /// The load (the greater of the 1- and 5-minute averages) above which leads start nothing; nil (empty) or 0: twice the cores.
     @Published var loadThreshold: Double? { didSet { changed() } }
     @Published private(set) var problem: String?
     private let file: URL
@@ -64,10 +64,10 @@ struct MacLimitsSection: View {
                     Stepper("Team sessions", value: $editor.maxSessions, in: 1...99).labelsHidden()
                 }
             }
-            LabeledContent("Start nothing above a 1-minute load of") {
+            LabeledContent("Start nothing above a load of") {
                 TextField("Load limit", value: $editor.loadThreshold, format: .number,
                           prompt: Text(MacLoad.number(Double(2 * MacLoad.processors))))
-                    .labelsHidden().accessibilityLabel("Start nothing above a 1-minute load of; empty is twice the cores")
+                    .labelsHidden().accessibilityLabel("Start nothing above a load of; empty is twice the cores")
                     .multilineTextAlignment(.trailing).frame(width: 60)
             }
             if let problem = editor.problem {
@@ -76,7 +76,7 @@ struct MacLimitsSection: View {
         } header: {
             Text("Project lead: Mac-wide limits")
         } footer: {
-            SettingsFooter("Every project's leads share this Mac. They start no workers or audits while the workers and verifiers of all projects together are at the first limit, or the Mac's 1-minute load is above the second (empty: twice the \(MacLoad.processors) cores); merges wait for the load. A lead refused for either is told once there's room again. Kept in ~/.vibeswitcher/mac-limits.json; workflow.md's load_threshold and mac_max_sessions are ignored.")
+            SettingsFooter("Every project's leads share this Mac. They start no workers or audits while the workers and verifiers of all projects together are at the first limit, or the Mac's load is above the second (the greater of its 1- and 5-minute averages, so a dip after a spike isn't room; empty: twice the \(MacLoad.processors) cores); merges wait for the load. A lead refused for either is told once there's room again. Kept in ~/.vibeswitcher/mac-limits.json; workflow.md's load_threshold and mac_max_sessions are ignored.")
         }
         .onAppear { editor.reload() }
     }

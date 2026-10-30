@@ -109,6 +109,26 @@ final class LeadReads: @unchecked Sendable {
     }
 }
 
+/// `LeadWitness.HeavySlots` and what it has told, looked at off the main thread (`LeadController.lookAtHeavySlots`),
+/// one look at a time.
+final class HeavySlotsWatch: @unchecked Sendable {
+    private var watch: LeadWitness.HeavySlots
+    private let lock = NSLock()
+    /// How many looks, and how many of them on the main thread (for tests).
+    private(set) var looks = 0
+    private(set) var lookedOnMain = 0
+
+    init(_ watch: LeadWitness.HeavySlots) { self.watch = watch }
+
+    func look(now: Date = Date()) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        looks += 1
+        if Thread.isMainThread { lookedOnMain += 1 }
+        return watch.look(now: now)
+    }
+}
+
 /// What the witness reads of a lead's team at each look, on `LeadReads`' queue: a team's transcripts are a few hundred
 /// KB each to parse (thirty of them froze the window when read on the main thread). The sessions as they were when the
 /// look began, what each member it watches is doing (`LeadObserver.watching`), the oldest message waiting for each
@@ -165,6 +185,50 @@ struct TeamReading {
             team.agentGone = Set(unseen.filter { !$0.session.agentRuns(in: table) }.map(\.id))
         }
         return team
+    }
+}
+
+/// What the witness works out of a lead's board and what it saw of the team (`LeadController.witness`), on `LeadReads`'
+/// queue: the sessions without tools, the verifiers auto_advance audits again, the messages to tell, the working time
+/// and the stalls. On the main thread at each refresh they held it for 7.1 s on a busy Mac (hang-20261028-195651);
+/// the main thread only applies what's worked out here.
+struct WitnessWork {
+    /// The live workers and verifiers that never got their tools (`LeadWitness.withoutTools`).
+    var withoutTools: [String] = []
+    /// The verifiers that ended without a verdict for auto_advance (`LeadWitness.endedForAdvance`), when it runs.
+    var endedForAdvance: [String] = []
+    /// The messages not told yet as of the look (`LeadWitness.unbuiltMessages`), their texts built where they're posted.
+    var messages: [(keys: [String], text: @Sendable () -> String)] = []
+    /// The running tasks' workers at work (`LeadBudget.working`), and whether the board's counts change for it.
+    var working: Set<String> = []
+    var notesWork = false
+    /// The stall to keep on each task (`LeadWitness.stalls`), and whether the board's change for it.
+    var stalls: [String: LeadStall] = [:]
+    var notesStalls = false
+
+    /// `firstSeen`: when the app first saw a verifier end for auto_advance (nil: not before now). `told`: whether an
+    /// event key was told already. `step` names each computation as it starts (tests watch or slow them).
+    init(board: LeadBoard, seen: [String: LeadWitness.Seen], now: Date, advancing: Bool, budgetMinutes: Int,
+         firstSeen: (String) -> Date?, told: (String) -> Bool, step: ((String) -> Void)? = nil) {
+        step?("withoutTools")
+        withoutTools = LeadWitness.withoutTools(board: board, seen: seen, now: now)
+        var advanced: Set<String> = []
+        if advancing {
+            step?("endedForAdvance")
+            endedForAdvance = LeadWitness.endedForAdvance(board: board, seen: seen, now: now)
+            let first = Dictionary(endedForAdvance.map { ($0, firstSeen($0) ?? now) }, uniquingKeysWith: { first, _ in first })
+            step?("leftToAdvance")
+            advanced = LeadWitness.leftToAdvance(board: board, seen: seen, now: now, firstSeen: first)
+        }
+        step?("unbuiltMessages")
+        messages = LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, told: told)
+        step?("working")
+        working = LeadBudget.working(board: board, seen: seen)
+        notesWork = board.notesWork(working, defaultMinutes: budgetMinutes, now: now.timeIntervalSince1970)
+        step?("stalls")
+        stalls = LeadWitness.stalls(board: board, seen: seen, now: now)
+        var noted = board
+        notesStalls = noted.noteStalls(stalls)
     }
 }
 
@@ -238,6 +302,9 @@ final class LeadController: ObservableObject {
     /// When the witness first saw each verifier that auto_advance audits again end without a verdict (by root and
     /// session; see `LeadWitness.leftToAdvance`).
     private var advanceSeen: [String: Date] = [:]
+    /// Names each computation of the witness's as it starts, on the thread that runs it (see `WitnessWork`), and
+    /// "applied" on the main thread once a look is applied (`witnessed`); tests watch or slow them.
+    var witnessStep: ((String) -> Void)?
     /// Each project's free disk space, watched (see `LeadWitness.Disk`), by root.
     private var disks: [String: LeadWitness.Disk] = [:]
     /// The bytes free on the volume holding a path, as the disk watch reads them (see `DiskSpace.free`; a test run's
@@ -254,14 +321,16 @@ final class LeadController: ObservableObject {
     private var policyTimer: Heartbeat.Subscription?
     /// The Mac-wide test and build slots, looked at once a minute: one held long is told to every running lead (see
     /// `LeadWitness.HeavySlots`); none until the app starts it (`watchHeavySlots`).
-    private var heavySlots: LeadWitness.HeavySlots?
+    private(set) var heavySlots: HeavySlotsWatch?
+    /// Where the slots are looked at (`lookAtHeavySlots`).
+    private let heavySlotsQueue = DispatchQueue(label: "VibeSwitcher.heavy-slots", qos: .utility)
     private var heavySlotsTimer: Heartbeat.Subscription?
     /// The leads refused for the Mac's room or load, looked at once a minute: each is woken once there's room, whichever
     /// project's sessions ended (see `LeadWitness.RoomWaits`); none until the app starts it (`watchRoom`).
     private var roomWaits: LeadWitness.RoomWaits?
     private var roomTimer: Heartbeat.Subscription?
-    /// The Mac's 1-minute load as the room watch reads it (see `MacLoad.oneMinute`); faked in tests.
-    var macLoad: () -> Double? = MacLoad.oneMinute
+    /// The Mac's load as the room watch reads it, as the leads' tools judge it (see `MacLoad.steady`); faked in tests.
+    var macLoad: () -> Double? = MacLoad.steady
     /// Ended team sessions the host has been asked to drop.
     private var forgetting: Set<UUID> = []
     /// Ends the sessions of finished tasks from the vault's roster, in every project (see `RoleSweep`); nil in tests
@@ -342,6 +411,9 @@ final class LeadController: ObservableObject {
     /// What this Mac lacks to start a lead with a command line (see `LaunchPreflight`), looked at off the main thread
     /// before anything else of a start. Faked in tests.
     var preflight: (_ command: String) -> LaunchPreflight.Problem? = { LaunchPreflight.standard.check(command: $0, helpers: LeadController.helpers) }
+    /// Installs what a start found missing, on the user's click (`ToolInstaller`); its alerts are `confirm`'s, and the
+    /// install session it starts is shown with `select`.
+    let installer: ToolInstaller
 
     init(host: HostClient, store: SessionStore, vault: LeadVault = .standard, inbox: URL = VibePaths.root,
          home: String = VibePaths.home, keepAwake: KeepAwake = KeepAwake(), sweepsRoles: Bool = false, claudeCommand: @escaping (String) -> String) {
@@ -356,6 +428,7 @@ final class LeadController: ObservableObject {
         baseMoves = BaseMoves(vault: vault, reads: reads)
         allDone = AllDoneWatch(reads: reads)
         self.claudeCommand = claudeCommand
+        installer = ToolInstaller(host: host)
         summaries.lookup = { [weak host, weak store] id in
             (host?.sessions.first { $0.id.uuidString == id }, store?.sessions.first { $0.hostID?.uuidString == id }?.transcriptPath)
         }
@@ -370,6 +443,8 @@ final class LeadController: ObservableObject {
         roleSweep?.tools = { [weak self] tools in
             DispatchQueue.main.async { self?.toolTimes = tools }
         }
+        installer.confirm = { [weak self] title, text, buttons in self?.confirm(title, text, buttons) ?? buttons.count - 1 }
+        installer.select = { [weak self] id in self?.select(id) }
         allDone.enabled = { [weak summaries] in summaries?.enabled ?? false }
         allDone.changed = { [weak self] _ in self?.refresh() }
         timer = Heartbeat.shared.every(3) { [weak self] in self?.refresh() }
@@ -442,12 +517,26 @@ final class LeadController: ObservableObject {
     /// The lead a row is, if it is one: its root (the folder its window session started in, wherever its agent has
     /// `cd`'d since) and board.
     func lead(for row: WindowRow) -> (root: String, board: LeadBoard)? {
-        guard let id = row.hostID, let session = host.sessions.first(where: { $0.id == id }), LeadTeams.role(label: session.label) == .lead
-        else { return nil }
-        let root = (session.cwd as NSString).standardizingPath
-        guard let board = boards[root] else { return nil }
+        guard let id = row.hostID, let root = leadRoots(of: host.sessions)[id], let board = boards[root] else { return nil }
         return (root, board)
     }
+
+    /// The window sessions that are leads (by their labels) and their roots, by host id, made once for each list the host
+    /// gives: the inspector and the sidebar ask on every draw, and looking through every session's label and folder
+    /// each time showed in the window's freezes (hang-20261028-174653).
+    func leadRoots(of sessions: [HostSession]) -> [UUID: String] {
+        if let kept = leadRootsKept, kept.sessions.isSameStorage(as: sessions) { return kept.roots }
+        leadRootsMade += 1
+        var roots: [UUID: String] = [:]
+        for session in sessions where LeadTeams.role(label: session.label) == .lead {
+            roots[session.id] = (session.cwd as NSString).standardizingPath
+        }
+        leadRootsKept = (sessions, roots)
+        return roots
+    }
+    private var leadRootsKept: (sessions: [HostSession], roots: [UUID: String])?
+    /// How many times the leads' roots were made (for tests).
+    private(set) var leadRootsMade = 0
 
     /// The user opened this lead: its all-done cards are seen, and the sidebar's check goes at once.
     func seeAllDone(for row: WindowRow) {
@@ -466,8 +555,13 @@ final class LeadController: ObservableObject {
         // git can be slow (a network volume, a git shim): find the repository off the main thread.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // First: on a Mac without the Command Line Tools, git below would only say the folder isn't a repository.
+            // What's missing is offered to install (on your click), then this start runs again.
             if let missing = preflight(command) {
-                return DispatchQueue.main.async { self?.alert(missing.title, "The lead wasn't started. " + missing.text) }
+                return DispatchQueue.main.async {
+                    self?.installer.resolve(missing, preflight: { preflight(command) }) { [weak self] in
+                        self?.startLead(in: folder, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead)
+                    }
+                }
             }
             let top = Git.run(["rev-parse", "--show-toplevel"], in: folder)
             let root = (top.output as NSString).standardizingPath
@@ -996,8 +1090,10 @@ final class LeadController: ObservableObject {
                 self?.wake(root: root)
             }
         case .ready:
-            // A prompt typed a moment ago (its hooks haven't said it's working yet) is one in flight too.
-            guard !flushing.contains(lead.tty), Date().timeIntervalSince(typedAt[lead.tty] ?? .distantPast) > 10 else { return }
+            // A prompt typed a moment ago (its hooks haven't said it's working yet) is one in flight too. Not into a
+            // dictation going on there (its words would go out with the prompt): the next try.
+            guard !flushing.contains(lead.tty), Date().timeIntervalSince(typedAt[lead.tty] ?? .distantPast) > 10,
+                  !ClaudeVoiceRun.busy.contains(id) else { return }
             flushing.insert(lead.tty)
             host.styledScreen(id) { [weak self] screen in
                 guard let self else { return }
@@ -1046,7 +1142,9 @@ final class LeadController: ObservableObject {
 
     /// What waits for an agent between turns, typed once its box is empty (see `flush`).
     private func type(waiting agent: LeadAgent, id: UUID, lead root: String?) {
-        guard !flushing.contains(agent.tty), Date().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10 else { return }
+        // Not into a dictation going on there (its words would go out with the message): the next flush.
+        guard !flushing.contains(agent.tty), Date().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10,
+              !ClaudeVoiceRun.busy.contains(id) else { return }
         flushing.insert(agent.tty)
         host.styledScreen(id) { [weak self] screen in
             guard let self else { return }
@@ -1201,14 +1299,23 @@ final class LeadController: ObservableObject {
     /// Looks at the Mac-wide test and build slots once a minute from now on: a slot held long is told to every
     /// running lead once (see `LeadWitness.HeavySlots`).
     func watchHeavySlots(_ watch: LeadWitness.HeavySlots = LeadWitness.HeavySlots()) {
-        heavySlots = watch
+        heavySlots = HeavySlotsWatch(watch)
         heavySlotsTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtHeavySlots() }
     }
 
-    /// A slot held long: to each running lead, as the witness.
-    func lookAtHeavySlots() {
-        guard let text = heavySlots?.look() else { return }
-        for root in leadRoots { deliver(text, from: .system("witness"), root: root) }
+    /// A slot held long: to each running lead, as the witness. The Mac-wide lock files are read on a queue of their own
+    /// (`heavySlotsQueue`), never the main thread: on a loaded Mac reading them held it for 10 s
+    /// (hang-20261028-175702). `then` runs on the main thread once the look is told (tests).
+    func lookAtHeavySlots(then: @escaping () -> Void = {}) {
+        guard let watch = heavySlots else { return then() }
+        heavySlotsQueue.async { [weak self] in
+            let text = watch.look()
+            DispatchQueue.main.async {
+                defer { then() }
+                guard let self, let text else { return }
+                for root in self.leadRoots { self.deliver(text, from: .system("witness"), root: root) }
+            }
+        }
     }
 
     /// Looks once a minute from now on for leads refused for the Mac's room or load that have room now.
@@ -1340,8 +1447,25 @@ final class LeadController: ObservableObject {
                                         boundAt: toolTimes[id]?.bound, toolsAt: toolTimes[id]?.tools, lockWait: team.lockWaits[id])
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
+        // What to tell and do is worked out off the main thread (see `WitnessWork`), with what's told and seen so far;
+        // the boards' queue runs one thing at a time, so each look is applied before the next refresh's.
+        let (toldNow, advanceSeenNow, step) = (told, advanceSeen, witnessStep)
+        let (advancing, budget) = (team.advancing, team.workflow.taskBudgetMinutes)
+        reads.async({ _ in
+            WitnessWork(board: board, seen: seen, now: now, advancing: advancing, budgetMinutes: budget,
+                        firstSeen: { advanceSeenNow["\(root)|\($0)"] }, told: { toldNow.contains("\(root)|\($0)") }, step: step)
+        }) { [weak self] work in
+            self?.witnessed(work, root: root, board: board, team: team, now: now)
+        }
+    }
+
+    /// What the witness worked out of a look (`WitnessWork`), applied on the main thread: sessions without tools end,
+    /// the auto_advance loop is nudged, the lead is told what it wasn't yet, the board keeps the working time and the
+    /// stalls, held messages go, and the lead is woken.
+    private func witnessed(_ work: WitnessWork, root: String, board: LeadBoard, team: TeamReading, now: Date) {
+        dispatchPrecondition(condition: .onQueue(.main))
         // A worker or verifier whose tools never connected only holds a Mac slot: it ends (`events` tells the lead).
-        for id in LeadWitness.withoutTools(board: board, seen: seen, now: now) {
+        for id in work.withoutTools {
             guard let uuid = UUID(uuidString: id), endingNoTools[id].map({ now.timeIntervalSince($0) >= 60 }) ?? true else { continue }
             endingNoTools[id] = now
             Breadcrumbs.shared.note("witness: ending session \(id.prefix(8)) in \((root as NSString).lastPathComponent): its tools never connected")
@@ -1351,21 +1475,16 @@ final class LeadController: ObservableObject {
         // A verifier that ended without a verdict, which auto_advance audits again: its loop looks now (an agent that
         // quit leaving its shell open writes nothing in the project's folder), and the lead hears of it in its report;
         // past `LeadWitness.advanceGrace` with no retry, from here as ever.
-        var advanced: Set<String> = []
-        if team.advancing {
-            var firstSeen: [String: Date] = [:]
-            for verifier in LeadWitness.endedForAdvance(board: board, seen: seen, now: now) {
-                let key = "\(root)|\(verifier)"
-                if advanceSeen[key] == nil {
-                    advanceSeen[key] = now
-                    LeadAdvance.nudge(root: root)
-                }
-                firstSeen[verifier] = advanceSeen[key]
+        for verifier in work.endedForAdvance {
+            let key = "\(root)|\(verifier)"
+            if advanceSeen[key] == nil {
+                advanceSeen[key] = now
+                LeadAdvance.nudge(root: root)
             }
-            advanced = LeadWitness.leftToAdvance(board: board, seen: seen, now: now, firstSeen: firstSeen)
         }
-        // Only the keys here: each text is built where it's posted, off the main thread.
-        for message in LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, told: { told.contains("\(root)|\($0)") }) {
+        // Only the keys here: each text is built where it's posted, off the main thread. One a look before this told
+        // already (two looks under way at once) isn't told again.
+        for message in work.messages where !message.keys.allSatisfy({ told.contains("\(root)|\($0)") }) {
             message.keys.forEach { told.insert("\(root)|\($0)") }
             deliver(built: message.text, from: .system("witness"), root: root)
         }
@@ -1382,11 +1501,11 @@ final class LeadController: ObservableObject {
         }
         disks[root] = disk
         // Working time, and the stop at a task's time budget (see `LeadBudget`): counted on the board as it is when
-        // written, so each budget is told once, to its worker and to the lead. Here only its running tasks are looked
-        // at, and nothing is copied or written: the count is written off the main thread, under the board's lock.
-        let working = LeadBudget.working(board: board, seen: seen)
+        // written, so each budget is told once, to its worker and to the lead. The count is written off the main
+        // thread, under the board's lock.
+        let working = work.working
         let budget = workflow.taskBudgetMinutes, at = now.timeIntervalSince1970
-        if board.notesWork(working, defaultMinutes: budget, now: at) {
+        if work.notesWork {
             let sessions = team.sessions
             reads.async({ _ in
                 (try? BoardStore(root: root).update { $0.noteWork(working, defaultMinutes: budget, now: at).reached }) ?? []
@@ -1398,14 +1517,14 @@ final class LeadController: ObservableObject {
             }
         }
         // On the board too, for status and the Team view, until the worker moves again.
-        let stalls = LeadWitness.stalls(board: board, seen: seen, now: now)
-        var noted = board
-        if noted.noteStalls(stalls) { reads.async { _ in try? BoardStore(root: root).update { $0.noteStalls(stalls) } } }
+        let stalls = work.stalls
+        if work.notesStalls { reads.async { _ in try? BoardStore(root: root).update { $0.noteStalls(stalls) } } }
         // A lead runs again: what was held for it goes now.
         if let waiting = held.removeValue(forKey: root) {
             for message in waiting { deliver(message.text, from: message.sender, root: root, order: message.order) }
         }
         wake(root: root)
+        witnessStep?("applied")
     }
 
     /// A task's worker reached its time budget: it's told to stop and report over_budget (in its inbox, typed in if

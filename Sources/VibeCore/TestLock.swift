@@ -262,11 +262,16 @@ public struct TestLock: Sendable {
             var text = parts.map { parts in
                 "pid \(parts.pid), \(parts.what)" + (parts.directory.map { " in \($0) (\(project ?? "?"))" } ?? "")
             } ?? note ?? "a run that didn't say who it is"
-            if since != nil {
-                let seconds = Int(held(now: now))
-                text += ", for " + (seconds < 60 ? "\(seconds) s" : "\(seconds / 60) min") + (isLong(now: now) ? ", long" : "") + idleText(now: now)
-            }
-            return text
+            return text + heldText(now: now)
+        }
+
+        /// "another project's run, for 38 min, long": as `text` without its folder, command or project.
+        public func anonymous(now: Date = Date()) -> String { "another project's run" + heldText(now: now) }
+
+        private func heldText(now: Date) -> String {
+            guard since != nil else { return "" }
+            let seconds = Int(held(now: now))
+            return ", for " + (seconds < 60 ? "\(seconds) s" : "\(seconds / 60) min") + (isLong(now: now) ? ", long" : "") + idleText(now: now)
         }
 
         /// Status's and the witness's words for a long or idle one: "TGE (pytest -q) for 38 min, idle 35 min".
@@ -278,6 +283,17 @@ public struct TestLock: Sendable {
     /// "slot 1 held by pid 1, a in /r (r), for 3 min; slot 2 held by …".
     public static func text(_ holders: [Holder], now: Date = Date()) -> String {
         holders.isEmpty ? "nothing says who" : holders.map { "slot \($0.slot) held by \($0.text(now: now))" }.joined(separator: "; ")
+    }
+
+    /// As `text`, for what may go into the records of the repository `root` (a merge's output, which auto_advance
+    /// logs to progress.md): its own runs as `text` has them, every other project's (or one that doesn't say whose it
+    /// is) as "another project's run", with no name or folder. On 2026-10-28 the Mac-wide census text put the user's
+    /// other projects' names into this repo's progress.md, an hour after they had them scrubbed.
+    public static func text(_ holders: [Holder], for root: String, now: Date = Date()) -> String {
+        let own = ((root as NSString).standardizingPath as NSString).lastPathComponent
+        return holders.isEmpty ? "nothing says who" : holders.map {
+            "slot \($0.slot) held by " + ($0.project == own ? $0.text(now: now) : $0.anonymous(now: now))
+        }.joined(separator: "; ")
     }
 
     /// A waiter in line for a slot, as its ticket says.

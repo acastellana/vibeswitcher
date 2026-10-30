@@ -92,9 +92,12 @@ suite (or `-f` filtered tests) 3 times at once beside busy loops, the way a Mac 
 and fails a run that fails or leaves anything in its TMPDIR. A test must wait on the event it checks (a file, a reply,
 a semaphore, an injected clock), never on a fixed sleep.
 
-It's the only way to load the Mac for a test. It starts at most 2 × ncpu busy loops, and none while the 1-minute load
-is already over 2 × ncpu, free memory is under 25 %, or the disk has under 15 GB free; it says what to wait for. Every
-busy loop stops when the script, its parent or the session's claude process is gone, or after `--max-time` (30
+It's the only way to load the Mac for a test. `--load N` is the load it tops up to, not loops it adds: every few
+seconds it runs as many busy loops (at most N, at most 2 × ncpu) as the other sessions' load leaves short of N, and
+says how many it ran on average. One load run burns at a time on this Mac, and each holds one of `vs-heavy`'s
+Mac-wide slots for the whole run: a second waits, saying for whose. It waits too while the 1-minute load is over
+2 × ncpu (up to `--wait`, an hour), and refuses when free memory is under 25 % or the disk has under 15 GB free,
+saying what to wait for. Every busy loop stops when the script, its parent or the session's claude process is gone, or after `--max-time` (30
 minutes). Logs go to `.build/test-under-load/run-N.log`. `scripts/test-under-load-selfcheck.sh` shows the cleanup
 works.
 

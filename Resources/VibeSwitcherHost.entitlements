@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The session host's: a session's Claude Code records from the microphone in its own process (/voice). macOS
+         asks about the session's responsible process: VibeSwitcher, which starts the host without disclaiming it
+         (sessions, and hosts that took over by handover, keep it). A host that is its own responsible process (one
+         started outside the app) is asked about instead, and under the hardened runtime macOS hands it and its
+         sessions silence, asking nothing, without this. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

@@ -145,9 +145,7 @@ extension LeadBoard {
     /// here (`TeamChurnTests` counts them). An array changed in place keeps its storage only while nothing else holds
     /// it, and the board compared with is held (the cache's, SwiftUI's last view): a change made since copies first.
     func isSame(as other: LeadBoard) -> Bool {
-        func same<T>(_ a: [T], _ b: [T]) -> Bool {
-            a.count == b.count && (a.isEmpty || a.withUnsafeBufferPointer { a in b.withUnsafeBufferPointer { $0.baseAddress == a.baseAddress } })
-        }
+        func same<T>(_ a: [T], _ b: [T]) -> Bool { a.isSameStorage(as: b) }
         func same<T>(_ a: [T]?, _ b: [T]?) -> Bool {
             switch (a, b) {
             case (nil, nil): return true
@@ -159,6 +157,14 @@ extension LeadBoard {
             && same(tasks, other.tasks) && same(questions, other.questions) && same(updates, other.updates) && same(reports, other.reports)
             && reportsSeenAt == other.reportsSeenAt && same(removed, other.removed) && same(allDone, other.allDone) && same(flakes, other.flakes)
             && archivedScores == other.archivedScores && same(archivedBatch, other.archivedBatch)
+    }
+}
+
+extension Array {
+    /// The same array, not only an equal one: the same storage (see `LeadBoard.isSame`). A cache that keeps the array
+    /// it compares with keeps its storage from being reused by another.
+    func isSameStorage(as other: [Element]) -> Bool {
+        count == other.count && (isEmpty || withUnsafeBufferPointer { a in other.withUnsafeBufferPointer { $0.baseAddress == a.baseAddress } })
     }
 }
 

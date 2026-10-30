@@ -65,6 +65,8 @@ final class ChatSync {
     var hostScreen: (UUID, @escaping ([String]?) -> Void) -> Void
     /// Whether the program in that session asked for bracketed paste.
     var bracketedPaste: (UUID) -> Bool = { _ in false }
+    /// Whether that session's terminal pane has the keyboard (is first responder).
+    var paneFocused: (UUID) -> Bool = { _ in false }
     /// Whether the chat is in sight (the window shown and not covered, the chat over the terminal: the rule
     /// `MainWindowController.followChat` reads by). The watch reads nothing otherwise, and goes on when it's back.
     var inSight: () -> Bool = { true }
@@ -542,6 +544,18 @@ final class ChatSync {
             Breadcrumbs.shared.note("composer: refused, no agent in the terminal")
             return false
         }
+        // Claude is taking down a dictation there: typed in now, the message (and its Enter) would go out with it. Sending
+        // wins: the dictation is stopped first (Claude's recording cancelled, its box as it was), then the message goes.
+        if ClaudeVoiceRun.busy.contains(target.id) {
+            let id = target.id
+            if overrideDictation(id, { [weak self] clean in self?.afterDictation(text, key: target.key, id: id, clean: clean) }) {
+                Breadcrumbs.shared.note("composer: a dictation cancelled to send a message")
+                return true
+            }
+            chat.sendNotice = Self.dictating
+            Breadcrumbs.shared.note("composer: refused, a dictation is going into that session")
+            return false
+        }
         readScreen()
         // A menu on the pane's last read not taken yet, or the card's while it's going: the message waits for it.
         if let menu = onScreenNow ?? (paneSettling ? chat.menu : nil) {
@@ -621,7 +635,24 @@ final class ChatSync {
         ProcessTable.info(pid: pid)?.tty == tty
     }
 
+    /// The message sent over a dictation, once it's stopped: the usual way in, still into that session; not sent (back
+    /// in the composer's outbox strip, to send again) when the dictation left text in Claude's box (its Enter would send
+    /// that too), another session is shown by then, or it's refused now.
+    private func afterDictation(_ text: String, key: String, id: UUID, clean: Bool) {
+        if !clean { chat.sendNotice = Self.dictationLeft }
+        guard clean, target()?.id == id, type(text) else {
+            Breadcrumbs.shared.note("composer: a message sent over a dictation didn't go in after it")
+            return chat.confirmed(key: key, message: text, ok: false)
+        }
+    }
+
+    /// Cancels the dictation going into a session for a message sent over it, calling back once it's stopped (true: its
+    /// box as it was); false when none of the window's goes there (`DictationController.override`).
+    var overrideDictation: (UUID, @escaping (Bool) -> Void) -> Bool = { _, _ in false }
+    static let dictationLeft = "Not sent: the dictation left text in Claude's prompt box in the terminal. Clear it there, then send again from the outbox."
+
     static let noAgent = "Not sent: no agent is running in this terminal, so your message would run as a shell command."
+    static let dictating = "Not sent yet: Claude is taking down your dictation in that session. Send once it's in the box."
 
     /// The question's "Type something." row, when the open tab is a question that takes free text (not the review,
     /// not a permission prompt).
@@ -633,7 +664,8 @@ final class ChatSync {
     /// The messages held while a question was open, typed in now that it's answered (oldest first).
     private func releaseHeld(_ target: Target) {
         let held = chat.outbox.outbox.entries.filter { $0.key == target.key && $0.state == .held }.sorted { $0.sentAt < $1.sentAt }
-        guard !held.isEmpty else { return }
+        // Not into a dictation going on there: they go at a later read.
+        guard !held.isEmpty, !ClaudeVoiceRun.busy.contains(target.id) else { return }
         // The agent exited while they waited: they stay held (in the outbox strip), never typed into the shell.
         guard agentRunning(target) else {
             chat.sendNotice = Self.noAgent
@@ -646,6 +678,40 @@ final class ChatSync {
         }
         chat.sendNotice = nil
     }
+
+    /// The selected window session as dictation drives Claude's /voice in it (`ClaudeVoiceRun`), when it's `key`'s
+    /// composer's and runs Claude Code; nil otherwise. Its keys go in raw and at once (key repeats can't wait out a
+    /// unit's gap), its screen is the host's with how it's drawn (Claude's live transcript is dim, not typed), and a
+    /// command is typed as the composer's messages are, only while that session is still the one shown.
+    func claudeVoice(key: String, folder: String? = nil) -> ClaudeVoiceSession? {
+        guard let target = target(), target.key == key, target.agent == .claude, host.isUsable else { return nil }
+        let id = target.id
+        return ClaudeVoiceSession(id: id, folder: folder, keys: { [weak self] bytes in
+            guard let self, self.host.isUsable else { return false }
+            self.host.send(id, bytes: Data(bytes), reply: false)
+            return true
+        }, screen: { [weak self] done in
+            guard let self else { return done(nil) }
+            self.host.styledScreen(id, completion: done)
+        }, command: { [weak self] text in
+            guard let self, self.target()?.id == id else { return false }
+            return self.type(text)
+        }, focusIn: { [weak self] in
+            guard let self, self.host.isUsable else { return false }
+            self.host.send(id, bytes: Data(Self.focusIn), reply: false)
+            return true
+        }, focusBack: { [weak self] in
+            guard let self, self.host.isUsable, !self.paneFocused(id) else { return }
+            self.host.send(id, bytes: Data(Self.focusOut), reply: false)
+        }, working: { [weak self] in
+            guard let target = self?.target(), target.id == id else { return true }
+            return target.working
+        })
+    }
+
+    /// The focus reports a terminal sends a program that asked for them (DECSET 1004).
+    static let focusIn: [UInt8] = [0x1b, 0x5b, 0x49]
+    static let focusOut: [UInt8] = [0x1b, 0x5b, 0x4f]
 
     /// Keys for the session, as one unit: in order with the messages typed in (see `HostClient.send(_:writes:check:confirmed:)`).
     func write(_ writes: [HostInput.Write], to id: UUID) {

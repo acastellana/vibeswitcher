@@ -36,7 +36,7 @@ extension LeadToolsetTests {
         #expect(told.first?.root == (root as NSString).standardizingPath)
         let text = try #require(told.first?.text)
         #expect(text.hasPrefix("The Mac has room again for what was refused: start_worker(one). "), "\(text)")
-        #expect(text.contains("2 team sessions across 1 project (films 2) (mac_max_sessions 6)"), "\(text)")
+        #expect(text.contains("2 team sessions across 1 project (this one 0, 1 other 2) (mac_max_sessions 6)"), "\(text)")
         // Once only.
         #expect(roomWaits.look(mac: Self.mac(Self.projectCEnded, load: 3), limits: limits).isEmpty)
         #expect(roomWaits.look(mac: Self.mac([], load: 1), limits: limits).isEmpty)
@@ -59,7 +59,7 @@ extension LeadToolsetTests {
         // Room for sessions, but the load is still over: nothing; at the threshold, not over it: one message for all three.
         #expect(roomWaits.look(mac: Self.mac([], load: 40), limits: limits).isEmpty)
         let told = roomWaits.look(mac: Self.mac([], load: 24), limits: limits)
-        #expect(told.map(\.text) == [LeadWitness.roomText(["start_worker(one)", "start_worker(two)"], mac: Self.mac([], load: 24), limits: limits)])
+        #expect(told.map(\.text) == [LeadWitness.roomText(["start_worker(one)", "start_worker(two)"], mac: Self.mac([], load: 24), limits: limits, root: root)])
         #expect(told.first?.text.contains("load 24.0 (load_threshold 24 in Settings)") == true)
         #expect(roomWaits.look(mac: Self.mac([], load: 1), limits: limits).isEmpty)
     }

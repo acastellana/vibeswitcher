@@ -51,7 +51,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         moveTab: { [weak self] tab in self?.sync.moveTab(to: tab) },
         showTerminal: { [weak self] in self?.model.showsChat = false },
         dismissMenu: { [weak self] in self?.sync.cancel() })
-        .environment(\.holdLeadQuestion) { [weak leads] question in leads?.hold(question) })
+        .environment(\.holdLeadQuestion) { [weak leads] question in leads?.hold(question) }
+        .environment(\.dictation, dictation))
     }
 
     private func mountViews() {
@@ -99,11 +100,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     let leads: LeadController
     /// The toolbar's Brief me (none in the benches).
     private let briefing: BriefingModel?
+    /// The composer's push to talk (none in the benches).
+    private let dictation: DictationController?
 
     init(store: SessionStore, host: HostClient, model: WindowModel, actions: WindowActions, leads: LeadController,
-         briefing: BriefingModel? = nil) {
+         briefing: BriefingModel? = nil, dictation: DictationController? = nil) {
         self.leads = leads
         self.briefing = briefing
+        self.dictation = dictation
         self.store = store
         self.host = host
         self.model = model
@@ -119,6 +123,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         window.minSize = NSSize(width: 760, height: 420)
         super.init(window: window)
         window.delegate = self
+        // A Claude Code session's dictation goes through its own /voice.
+        dictation?.claudeSession = { [weak self] key in self?.sync.claudeVoice(key: key, folder: self?.model.selectedRow?.cwd) }
+        // A message sent over it cancels it, and goes once it's stopped.
+        sync.overrideDictation = { [weak dictation] id, then in dictation?.override(session: id, then: then) ?? false }
 
         // The side panes are sized by the split (their items' thicknesses) and the window, never by their content. Left
         // to it, a hosting controller holds the window to its content's smallest size, and SwiftUI takes that at no
@@ -416,6 +424,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         }
         sync.screen = { [weak self] id in self?.pane.screenText(id) ?? ScreenRead() }
         sync.bracketedPaste = { [weak self] id in self?.pane.bracketedPaste(id) ?? false }
+        sync.paneFocused = { [weak self] id in self?.pane.hasKeyboard(id) ?? false }
         sync.inSight = { [weak self] in self?.chatInSight ?? false }
         return sync
     }

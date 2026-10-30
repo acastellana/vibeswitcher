@@ -915,6 +915,9 @@ public enum Worktrees {
             return (.error("Couldn't make the scratch home \(home) to run the tests in: \(error.localizedDescription)"), [])
         }
         var header = "HOME, CFFIXED_USER_HOME and TMPDIR: \(home) (a scratch folder, removed afterwards)\n"
+        // What's said of the lock's holders in the output and errors (which go into the repo's records), naming no
+        // other project; the live progress names them all.
+        let recorded = { (holders: [TestLock.Holder]) in place.map { TestLock.text(holders, for: $0) } ?? TestLock.text(holders) }
         var held: TestLock.Held?
         defer { held?.release() }
         let progress = ToolProgress.current
@@ -929,10 +932,10 @@ public enum Worktrees {
             case .held(let taken, let waited, let after):
                 held = taken
                 if !after.isEmpty {
-                    header += "Waited \(duration(waited)) for a slot of the Mac-wide test and build lock, \(slots) held: \(TestLock.text(after)).\n"
+                    header += "Waited \(duration(waited)) for a slot of the Mac-wide test and build lock, \(slots) held: \(recorded(after)).\n"
                 }
-            case .busy(let holders):
-                return (.error("Every slot of the Mac-wide test and build lock (\(lock.directory), \(lock.slots)) stayed held for over \(duration(timeout)) (test_timeout_min): \(TestLock.text(holders)). Nothing was tested; try again once one is done."), [])
+            case .busy(let busy):
+                return (.error("Every slot of the Mac-wide test and build lock (\(lock.directory), \(lock.slots)) stayed held for over \(duration(timeout)) (test_timeout_min): \(recorded(busy)). Nothing was tested; try again once one is done."), [])
             case .cancelled:
                 return (.cancelled, [])
             case .failed(let text):

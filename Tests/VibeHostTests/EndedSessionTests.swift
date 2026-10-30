@@ -5,7 +5,7 @@ import Testing
 @testable import VibeHost
 
 /// E-16: an ended session lets go of its PTY, replay buffer and terminal, and still shows its last screen and exit.
-struct EndedSessionTests {
+@Suite(hostTestLimit) struct EndedSessionTests {
     @Test func anEndedSessionKeepsItsLastScreenOnly() throws {
         let probe = SessionProbe()
         let request = SpawnRequest(cwd: "/tmp", command: "printf '\\033[31mred\\033[0m line-%s\\n' 1 2 3; exit 4", env: [:], cols: 80, rows: 24,

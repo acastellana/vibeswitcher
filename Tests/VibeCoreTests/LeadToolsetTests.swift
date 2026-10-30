@@ -24,10 +24,13 @@ final class FakeRuntime: LeadRuntime {
     var pids: [String: Int32] = [:]
     /// Set: the session host can't be read (the error it gives).
     var hostDown: String?
-    /// The Mac's 1-minute load (an idle Mac unless set; the real one varies with what else runs), and readings handed
-    /// out first, one per read.
+    /// The Mac's load, its 1- and 5-minute averages alike (an idle Mac unless set; the real one varies with what else
+    /// runs), and readings handed out first, one per read: `averageReadings` (1- and 5-minute apart) before `loadReadings`.
     var load: Double? = 0.5
     var loadReadings: [Double?] = []
+    var averageReadings: [MacLoad.Averages?] = []
+    /// Set: the 1- and 5-minute averages apart, in place of `load`.
+    var averages: MacLoad.Averages?
     var loadReads = 0
     /// Sessions of other projects' teams the host also lists.
     var others: [LeadSessionInfo] = []
@@ -118,11 +121,13 @@ final class FakeRuntime: LeadRuntime {
         if let hostDown { throw BoardError(text: hostDown) }
         return HostCensus.count((listing + unlisted).map { ($0.label, $0.cwd, $0.live) })
     }
-    func loadAverage() -> Double? {
+    func loadAverages() -> MacLoad.Averages? {
         calls.lock()
         defer { calls.unlock() }
         loadReads += 1
-        return loadReadings.isEmpty ? load : loadReadings.removeFirst()
+        if !averageReadings.isEmpty { return averageReadings.removeFirst() }
+        if let averages { return averages }
+        return (loadReadings.isEmpty ? load : loadReadings.removeFirst()).map { MacLoad.Averages(one: $0, five: $0) }
     }
     func transcript(of session: String) throws -> String? {
         calls.lock()
@@ -165,7 +170,7 @@ final class FakeSeat: LeadRuntime {
     func transcript(of session: String) throws -> String? { try shared.transcript(of: session) }
     func currentAgent() -> LeadAgent? { agent }
     func isRunning(_ agent: LeadAgent) -> Bool { shared.isRunning(agent) }
-    func loadAverage() -> Double? { shared.loadAverage() }
+    func loadAverages() -> MacLoad.Averages? { shared.loadAverages() }
     func agentEnding(_ session: LeadSessionInfo) -> String? { shared.agentEnding(session) }
 }
 

@@ -45,21 +45,26 @@ extension LeadToolsetTests {
         // 0.02 min: the wait is bounded at 1.2 s.
         #expect(!call(lead, "configure", ["heavy_slots": "2", "test_command": "test -f b.txt", "test_timeout_min": "0.02"]).isError)
         let holders = try fillSlots(2, notes: [".venv/bin/python -m pytest -q in /Users/a/dev/TGE-ANALYSIS/.vibeswitcher/worktrees/redesign",
-                                               "vs-heavy swift build in /Users/a/dev/vibeswitcher/.vibeswitcher/worktrees/w"])
+                                               "vs-heavy swift build in \(root)/.vibeswitcher/worktrees/w"])
+        let own = (root as NSString).lastPathComponent
         defer { end(holders) }
         let told = Told()
         let before = Git.run(["rev-parse", "main"], in: root).output
         let refused = ToolProgress.with(ToolProgress(every: 0.2, told.add)) { call(lead, "merge", ["task": "add-b"]) }
         #expect(refused.isError)
         #expect(refused.text.contains("Every slot of the Mac-wide test and build lock") && refused.text.contains("Nothing was tested"), "\(refused.text)")
-        #expect(refused.text.contains("pytest -q in /Users/a/dev/TGE-ANALYSIS/.vibeswitcher/worktrees/redesign (TGE-ANALYSIS)"), "\(refused.text)")
-        #expect(refused.text.contains("vs-heavy swift build in /Users/a/dev/vibeswitcher/.vibeswitcher/worktrees/w (vibeswitcher)"), "\(refused.text)")
+        // The refusal can go into the repo's records (auto_advance logs it to progress.md): it names this project's run,
+        // and another project's only as that.
+        #expect(refused.text.contains("slot 1 held by another project's run, for "), "\(refused.text)")
+        #expect(!refused.text.contains("TGE-ANALYSIS") && !refused.text.contains("pytest"), "\(refused.text)")
+        #expect(refused.text.contains("vs-heavy swift build in \(root)/.vibeswitcher/worktrees/w (\(own))"), "\(refused.text)")
         #expect(Git.run(["rev-parse", "main"], in: root).output == before)
         #expect(BoardStore(root: root).load().task("add-b")?.status == .review)
         // Progress at once and then every `every` (30 s for a client), each naming both holders: never silent.
         let waits = told.texts.filter { $0.hasPrefix("Waiting ") && $0.contains("for a slot of the Mac-wide test and build lock (all 2 slots held), 1st in line: ") }
         #expect(waits.count >= 3, "\(told.texts)")
-        #expect(waits.allSatisfy { $0.contains("(TGE-ANALYSIS)") && $0.contains("(vibeswitcher)") }, "\(waits)")
+        // The live progress, written nowhere, names both.
+        #expect(waits.allSatisfy { $0.contains("(TGE-ANALYSIS)") && $0.contains("(\(own))") }, "\(waits)")
         let times = told.times
         let gaps = zip(times.dropFirst(), times).map { $0.timeIntervalSince($1) }
         #expect(gaps.allSatisfy { $0 < 1 }, "\(gaps)")
@@ -97,7 +102,7 @@ extension LeadToolsetTests {
         let told = Told()
         let merged = ToolProgress.with(ToolProgress(every: 0.01, told.add)) { call(lead, "merge", ["task": "add-b"]) }
         #expect(!merged.isError, "\(merged.text)")
-        #expect(told.texts.first?.contains("for the Mac's 1-minute load (150) to drop below load_threshold (24) before testing add-b") == true, "\(told.texts)")
+        #expect(told.texts.first?.contains("for the Mac's load (150, the greater of its 1- and 5-minute averages) to drop below load_threshold (24) before testing add-b") == true, "\(told.texts)")
     }
 
     @Test func anAuditRunWaitingOnFullSlotsSaysWhoHoldsThem() throws {

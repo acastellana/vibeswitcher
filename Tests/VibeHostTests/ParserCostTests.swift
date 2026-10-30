@@ -8,7 +8,7 @@ import Testing
 /// `VIBESWITCHER_MEASURE_HOST=<a vibeswitcher-host binary> swift test --filter ParserCostTests`. A scratch host of that
 /// build runs 10 sessions (4 idle shells, 4 steady printers, a full-screen program redrawing, one that prints 20,000
 /// lines once); it prints the memory of the host and of each parser, and their CPU while idle and while printing.
-struct ParserCostTests {
+@Suite(hostTestLimit) struct ParserCostTests {
     static let binary = ProcessInfo.processInfo.environment["VIBESWITCHER_MEASURE_HOST"]
 
     static let printer = "read go; i=0; while :; do i=$((i+1)); echo \"line $i: the quick brown fox jumps over the lazy dog, again and again\"; sleep 0.02; done"

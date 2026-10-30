@@ -7,7 +7,7 @@ import Testing
 /// agent ended under it, and a parser no session holds. Nothing else: a tool server whose agent runs, or another
 /// program left to launchd, stays. On a scratch host (its own binary, so the tool server beside it is the test's) that
 /// looks twice a second, told to end tool servers (only the user's own host does unasked).
-struct OrphanSweepTests {
+@Suite(hostTestLimit) struct OrphanSweepTests {
     /// Starts `executable` reading `input` (a FIFO) with launchd as its parent (its starter exits at once), as a tool
     /// server is once its agent ends: its pid. The caller opens `input` for writing (which lets it start) and keeps it
     /// open, so it waits on its input as a tool server does.

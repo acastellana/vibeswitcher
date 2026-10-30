@@ -8,7 +8,7 @@ import Testing
 /// ended mid-session ("connection closed (cleanly)"). Out of descriptors, Foundation's `Pipe()` fails unseen (both its
 /// handles hold fd 0, the server's stdin) and Process.run fails with that EBADF, as it does when it can't make its own.
 /// The real `vibeswitcher-mcp`, in a lead's session on a scratch host, under many tool calls at once.
-@Suite(.serialized) struct ToolServerStressTests {
+@Suite(.serialized, hostTestLimit) struct ToolServerStressTests {
     /// A lead's tool server on a scratch host, a repository whose board has a running task (`live`, its worker a
     /// session in its worktree) and finished ones with worktrees (`done-<n>`), as cleanup finds them.
     final class Rig {
@@ -30,6 +30,8 @@ import Testing
             // The session's tools find the host where they always do: under its home.
             try FileManager.default.createDirectory(atPath: host.home + "/.vibeswitcher", withIntermediateDirectories: true)
             try FileManager.default.createSymbolicLink(atPath: host.home + "/.vibeswitcher/host.sock", withDestinationPath: host.socket)
+            // Over the load limit always: audit refuses before it starts a verifier (see `refusesAudits`).
+            try MacLimits(loadThreshold: Self.anyLoad).save(to: URL(fileURLWithPath: host.home + "/.vibeswitcher/mac-limits.json"))
             let root = host.dir + "/repo"
             self.root = root
             try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
@@ -131,8 +133,16 @@ import Testing
 
         var alive: Bool { kill(pid, 0) == 0 }
 
+        /// The rig's load_threshold, under any 1-minute load a running Mac has: audit refuses at it after its git and host
+        /// calls, before it starts a verifier. Under the threshold (2026-10-28, two merges' full runs hung 45 min) each
+        /// burst's audit started a verifier session on the scratch host, waited on Claude's trust question (15 s) and
+        /// its tools (`roleWait`, 45 s) and ended it: a minute a burst on a calm Mac, past the hang guard on a busy one,
+        /// and each of the test's later waits then waited out its own.
+        static let anyLoad = 0.001
+
         /// A round of the lead's calls, interleaved: start_worker (refused: its worker runs), cleanup of finished
-        /// tasks (git runs for each), status, an audit refused (the task hasn't reported), and a call for no task.
+        /// tasks (git runs for each), status, an audit refused (the Mac over the rig's load limit, `anyLoad`), and a call
+        /// for no task.
         func round(_ copies: Int = 1) -> [(tool: String, arguments: [String: Any])] {
             var calls: [(tool: String, arguments: [String: Any])] = []
             for copy in 0..<copies {
@@ -152,8 +162,12 @@ import Testing
     @Test func manyCallsAtOnceLeaveTheServerAnsweringWithItsDescriptorsAsBefore() throws {
         let rig = try Rig()
         // A first round opens what stays open (the folder watch, the dispatch queues' kqueue): counted from after it.
-        let first = try rig.burst(rig.round(2))
-        #expect(first.allSatisfy { $0 != nil }, "unanswered in the first round; stderr: \(rig.server.errors)")
+        let round = rig.round(2)
+        let first = try rig.burst(round)
+        try #require(first.allSatisfy { $0 != nil }, "unanswered in the first round; stderr: \(rig.server.errors)")
+        // Each audit was refused before it started a verifier (none waited on one's tools).
+        let audits = zip(round, first).filter { $0.0.tool == "audit" }.map { $0.1?.text ?? "" }
+        #expect(audits.count == 2 && audits.allSatisfy(Self.refusesAudits), "audit: \(audits)")
         var base: Int?
         #expect(eventually { base = rig.descriptors; return base != nil })
         let before = try #require(base)
@@ -169,7 +183,8 @@ import Testing
             }
         }
         var answers: [(text: String, isError: Bool)?] = []
-        for _ in 0..<5 { answers += try rig.burst(rig.round(4)) }
+        // A burst with a call unanswered waited out its hang guard: the next would too, so the test ends its bursts there.
+        for _ in 0..<5 where answers.allSatisfy({ $0 != nil }) { answers += try rig.burst(rig.round(4)) }
         stop.set()
         _ = callers.wait(timeout: .now() + hangGuard)
 
@@ -194,7 +209,7 @@ import Testing
         let rig = try Rig(limit: Self.lowLimit)
         var exhausted = false
         var answers: [(text: String, isError: Bool)?] = []
-        for _ in 0..<6 where !exhausted && rig.alive {
+        for _ in 0..<6 where !exhausted && rig.alive && answers.allSatisfy({ $0 != nil }) {
             answers += try rig.burst(rig.round(16))
             exhausted = rig.log.contains("EMFILE")
         }
@@ -219,6 +234,11 @@ import Testing
     /// The log says the input loop ended (`MCPServer.serve`'s exits).
     static func servingEnded(_ log: String) -> Bool {
         log.contains("; ending") || log.contains("serve: input ended") || log.contains("serve: stopped")
+    }
+
+    /// An audit refused for the Mac's load (`macRefusal`), no verifier started.
+    static func refusesAudits(_ text: String) -> Bool {
+        text.hasPrefix("No verifier started") && text.contains("load_threshold")
     }
 
     static func saysBadDescriptor(_ text: String) -> Bool {

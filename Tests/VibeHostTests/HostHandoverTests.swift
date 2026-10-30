@@ -142,7 +142,7 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
     return (0..<terminal.rows).compactMap { terminal.getLine(row: $0)?.translateToString(trimRight: true) }.joined(separator: "\n")
 }
 
-@Suite(.serialized) struct HostHandoverTests {
+@Suite(.serialized, hostTestLimit) struct HostHandoverTests {
     static let counter = "i=0; while :; do i=$((i+1)); echo n=$i; sleep 0.1; done"
     /// A job in a process group of its own (job control), then a line read and a telling exit status.
     static let job = "set -m; \(keepRunning) & echo bg=$!; read line; echo got:$line; exit 7"
@@ -203,8 +203,12 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         #expect(sessions.first { $0.id == scene.done.id }?.exit?.status == 3)
         #expect(sessions.map(\.childPID) == scene.all.map(\.childPID))
         #expect(sessions.map(\.tty) == scene.all.map(\.tty))
-        // The screens are rebuilt from what each session printed.
-        for (id, before) in screens { #expect(client.screen(id) == before) }
+        // The screens are rebuilt from what each session printed: by each session's new parser, which a busy Mac starts
+        // late (until then the host answers a blank screen; at load 136 a single read came too soon).
+        for (id, before) in screens {
+            var after: String?
+            #expect(eventually { after = client.screen(id); return after == before }, "\(String(describing: after)) != \(before)")
+        }
         #expect(screens[scene.done.id]?.contains("finished-early") == true && screens[scene.painted.id]?.contains("BOX") == true)
 
         client.attach(scene.counter.id)
@@ -284,6 +288,28 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         #expect(all.contains { $0.contains("exit ") && $0.contains("pid \(signalled.childPID)") && $0.contains("signal 15 (SIGTERM)") })
         #expect(all.contains { $0.contains("kill ") && $0.contains("pid \(killed.childPID)") && $0.contains("peer pid \(getpid())") })
         #expect(all.contains { $0.contains("exit ") && $0.contains("pid \(killed.childPID)") && $0.contains("after a kill from peer pid \(getpid())") })
+    }
+
+    /// A program that asked for focus events still has them after a handover, though the replay no longer holds its
+    /// ask: Claude Code asks once, and redraws past it long before.
+    @Test func focusEventsAskedForBeforeAHandoverAreKept() throws {
+        let scene = try scene()
+        defer { end(scene) }
+        let asked = try scene.client.spawn("printf '\\033[?1004h\\033[2J\\033[Hdrawn after\\n'; exec sleep 600")
+        let focus = { (client: TestClient) -> Bool? in
+            let seq = client.send(.styledScreen(id: asked.id))
+            guard eventually({ client.reply(to: seq) != nil }),
+                  case .styledScreenText(_, let text, _, let focusEvents)? = client.reply(to: seq), text.contains("drawn after") else { return nil }
+            return focusEvents
+        }
+        #expect(eventually { focus(scene.client) == true })
+        let seq = scene.client.send(.handover(executable: scene.host.newBinary))
+        #expect(eventually { scene.client.reply(to: seq) != nil })
+        #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
+        #expect(eventually { scene.host.log.contains("took over") })
+        let (client, _, build, _, _, _, _) = try TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
+        #expect(build == scene.host.newBuild)
+        #expect(focus(client) == true)
     }
 
     @Test func aBuildThatCantStartLeavesTheHostAsItWas() throws {

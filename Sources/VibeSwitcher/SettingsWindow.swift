@@ -15,14 +15,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let selection = SettingsSelection()
     private let setup: SetupModel
     private let briefing: BriefingModel?
+    private let dictation: DictationController?
     /// The window is open (from `open(tab:)` to its closing): what's started for an opening runs once per opening.
     private var watching = false
 
     init(preferences: Preferences, setup: SetupModel, phoneAccess: PhoneAccess,
          recentProjects: @escaping () -> [String], showWelcome: @escaping () -> Void, host: HostClient? = nil,
-         briefing: BriefingModel? = nil, policy: WorkingPolicyEditor? = nil) {
+         briefing: BriefingModel? = nil, dictation: DictationController? = nil, policy: WorkingPolicyEditor? = nil) {
         self.setup = setup
         self.briefing = briefing
+        self.dictation = dictation
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.size),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Settings"
@@ -32,7 +34,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.contentView = NSHostingView(rootView: SettingsView(preferences: preferences, setup: setup, phoneAccess: phoneAccess,
                                                                   selection: selection, recentProjects: recentProjects,
                                                                   showWelcome: showWelcome, host: host, briefing: briefing,
-                                                                  policy: policy))
+                                                                  dictation: dictation, policy: policy))
         window.center()
     }
 
@@ -56,6 +58,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         watching = true
         setup.watch()
         briefing?.checkKey()
+        dictation?.lookForKeys()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -72,11 +75,13 @@ struct SettingsView: View {
     let showWelcome: () -> Void
     var host: HostClient? = nil
     var briefing: BriefingModel? = nil
+    var dictation: DictationController? = nil
     var policy: WorkingPolicyEditor? = nil
 
     var body: some View {
         TabView(selection: $selection.tab) {
-            GeneralSettings(preferences: preferences, setup: setup, showWelcome: showWelcome, host: host, briefing: briefing, policy: policy)
+            GeneralSettings(preferences: preferences, setup: setup, showWelcome: showWelcome, host: host, briefing: briefing,
+                            dictation: dictation, policy: policy)
                 .tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
             AgentsSettings(setup: setup)
                 .tabItem { Label("Agents", systemImage: "waveform.path.ecg") }.tag(SettingsTab.agents)
@@ -122,6 +127,7 @@ struct GeneralSettings: View {
     let showWelcome: () -> Void
     var host: HostClient? = nil
     var briefing: BriefingModel? = nil
+    var dictation: DictationController? = nil
     var policy: WorkingPolicyEditor? = nil
 
     var body: some View {
@@ -184,6 +190,7 @@ struct GeneralSettings: View {
             MacLimitsSection()
             if let policy { WorkingPolicySection(editor: policy) }
             if let briefing { BriefingSettings(preferences: preferences, briefing: briefing) }
+            if let dictation { DictationSettings(dictation: dictation) }
             Section {
                 LabeledContent("Permission") {
                     HStack {

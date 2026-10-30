@@ -30,6 +30,10 @@ struct ComposerView: View {
     let actions: ComposerActions
     /// The answer card above, when it's a window session's: ⌘1–⌘9, ↩ and ↑ / ↓ are its while the box is empty.
     var cardKeys: AnswerCardKeys?
+    /// The session's project and folder: dictation's vocabulary (its name, its branches).
+    var project: String? = nil
+    var folder: String? = nil
+    @Environment(\.dictation) private var dictation
     @State private var height: CGFloat = 22
     @State private var suggestions = Suggestions()
     @State private var notice: String?
@@ -65,6 +69,9 @@ struct ComposerView: View {
             HStack(alignment: .bottom, spacing: 8) {
                 Button(action: attach) { Image(systemName: "paperclip").font(.system(size: 14)).accessibilityLabel("Attach files") }
                     .buttonStyle(.borderless).padding(.bottom, 9).help("Attach files or images")
+                if let dictation {
+                    DictationButton(dictation: dictation, rowID: rowID, agent: steerOnly ? nil : agent, vocabulary: vocabulary)
+                }
                 ZStack(alignment: .topLeading) {
                     if text.wrappedValue.isEmpty {
                         Text(working ? (steerOnly ? "Steer \(agent.displayName) while it works — ↩ sends it to its next step"
@@ -76,7 +83,8 @@ struct ComposerView: View {
                     ComposerTextView(text: text, height: $height, suggestions: $suggestions, history: { [chat] in chat.log.prompts },
                                      focusRequests: chat.focusComposerRequests, complete: complete,
                                      submit: { submit(queue: false) }, queue: { submit(queue: true) }, attachImage: attachImage,
-                                     cardKey: cardKey)
+                                     cardKey: cardKey, rowID: rowID, dictation: dictation, agent: steerOnly ? nil : agent,
+                                     vocabulary: vocabulary)
                         .frame(height: min(max(height, 22), 220))
                 }
                 .padding(.horizontal, 10).padding(.vertical, 8)
@@ -101,15 +109,27 @@ struct ComposerView: View {
                 .help(working ? "Steer: send it to the agent's next step (↩)" : "Send (↩)")
                 .help(working ? "Steer (↩): it gets this at its next step, without stopping. ⌥↩ queues it for after the turn." : "Send (↩)")
             }
+            if let dictation { DictationStatusRow(dictation: dictation, rowID: rowID) }
+            // A line of its own, wrapped: in the chips' row a long one ran over them and past the window's edge.
+            if let notice = steerOnly ? notice : notice ?? chat.sendNotice {
+                Text(notice).font(.system(size: 11)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 30)
+            }
             if !steerOnly {
-                ComposerChips(chat: chat, agent: agent, cycleMode: actions.cycleMode, notice: notice ?? chat.sendNotice) { command in
+                ComposerChips(chat: chat, agent: agent, cycleMode: actions.cycleMode) { command in
                     _ = actions.send(command)
                 }
-            } else if let notice {
-                Text(notice).font(.system(size: 11)).foregroundStyle(.red).padding(.leading, 30)
             }
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
+    }
+
+    /// Dictation's prompt maker, taken at a press: the files come from the conversation shown now, the branches from
+    /// git when it runs (off the main thread).
+    private func vocabulary() -> @Sendable () -> String {
+        let files = DictationVocabulary.files(in: chat.log.entries)
+        let (project, folder) = (project, folder)
+        return { DictationVocabulary.prompt(project: project, branches: DictationVocabulary.branches(in: folder), files: files) }
     }
 
     /// ↩ and the Send button: steers while the agent works, sends otherwise. ⌥↩ (`queue`): typed in for after the turn.
@@ -278,7 +298,6 @@ private struct ComposerChips: View {
     @ObservedObject var chat: ChatModel
     let agent: Agent
     let cycleMode: () -> Void
-    let notice: String?
     let command: (String) -> Void
 
     var body: some View {
@@ -320,9 +339,7 @@ private struct ComposerChips: View {
                 }
             }
             Spacer(minLength: 0)
-            if let notice {
-                Text(notice).font(.system(size: 11)).foregroundStyle(.red).lineLimit(1)
-            } else if !chat.pending.isEmpty {
+            if !chat.pending.isEmpty {
                 Text("\(chat.pending.count) queued").font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }
@@ -361,6 +378,15 @@ private struct ContextMeter: View {
             }
         }
         .help("Tokens in the context of the latest request\(window.map { " (of \(TokenCount.short($0)))" } ?? "")")
+        // One element in words: its bar is drawn shapes, its text says the same.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
+    }
+
+    /// "45% context", or "12.3k context" without the model's window.
+    var spoken: String {
+        guard let window, window > 0 else { return "\(TokenCount.short(tokens)) context" }
+        return "\(Int(min(1, Double(tokens) / Double(window)) * 100))% context"
     }
 }
 
@@ -474,6 +500,12 @@ struct ComposerTextView: NSViewRepresentable {
     let attachImage: (URL) -> Void
     /// A key for the answer card (true: it took it, so it isn't typed or sent).
     var cardKey: (AnswerKeys.Key) -> Bool = { _ in false }
+    /// The box's row, and push to talk: ⌥Space (or Space, past a moment) held records, and transcripts land at the cursor.
+    var rowID = ""
+    var dictation: DictationController? = nil
+    /// The session's agent: a Claude Code session's dictation goes through Claude's /voice.
+    var agent: Agent? = nil
+    var vocabulary: () -> @Sendable () -> String = { { "" } }
 
     func makeNSView(context: Context) -> NSScrollView {
         // TextKit 1 from the start: `measure` asks for the layout manager, which switches a TextKit 2 view over, and
@@ -481,6 +513,13 @@ struct ComposerTextView: NSViewRepresentable {
         let textView = ComposerNSTextView(usingTextLayoutManager: false)
         textView.attachImage = attachImage
         textView.cardKey = cardKey
+        textView.holdToTalk = dictation == nil ? nil : context.coordinator.holdToTalk
+        textView.spaceHoldReady = dictation == nil ? nil : context.coordinator.spaceHoldReady
+        textView.cancelTalk = { [weak coordinator = context.coordinator] in
+            guard let coordinator else { return }
+            coordinator.parent.dictation?.cancel(coordinator.talkingIn ?? coordinator.parent.rowID)
+            coordinator.talkingIn = nil
+        }
         textView.delegate = context.coordinator
         textView.font = .systemFont(ofSize: 13)
         textView.isRichText = false
@@ -503,6 +542,8 @@ struct ComposerTextView: NSViewRepresentable {
         scroll.borderType = .noBorder
         // A new box (another session) takes the focus once it's on screen.
         context.coordinator.lastFocusRequest = focusRequests - 1
+        context.coordinator.inbox.watch(dictation, rowID: { [weak coordinator = context.coordinator] in coordinator?.parent.rowID ?? "" },
+                                        textView: textView)
         return scroll
     }
 
@@ -511,6 +552,10 @@ struct ComposerTextView: NSViewRepresentable {
         guard let textView = scroll.documentView as? NSTextView else { return }
         (textView as? ComposerNSTextView)?.attachImage = attachImage
         (textView as? ComposerNSTextView)?.cardKey = cardKey
+        (textView as? ComposerNSTextView)?.holdToTalk = dictation == nil ? nil : context.coordinator.holdToTalk
+        (textView as? ComposerNSTextView)?.spaceHoldReady = dictation == nil ? nil : context.coordinator.spaceHoldReady
+        context.coordinator.inbox.watch(dictation, rowID: { [weak coordinator = context.coordinator] in coordinator?.parent.rowID ?? "" },
+                                        textView: textView)
         if textView.string != text {
             textView.string = text
             context.coordinator.undo.removeAllActions()
@@ -541,9 +586,34 @@ struct ComposerTextView: NSViewRepresentable {
         /// session's draft, a history step): undoing into text that's gone raises a range exception.
         let undo = UndoManager()
 
+        /// Transcripts for this box, put in at the cursor.
+        let inbox = DictationInbox()
+
         init(_ parent: ComposerTextView) { self.parent = parent }
 
         func undoManager(for view: NSTextView) -> UndoManager? { undo }
+
+        /// Holding Space in the box may start a run now (Settings › Dictation).
+        private(set) lazy var spaceHoldReady: () -> Bool = { [weak self] in
+            guard let parent = self?.parent else { return false }
+            return parent.dictation?.canHoldSpace(parent.rowID) == true
+        }
+
+        /// The composer whose dictation the held key started: let go, it's that one's even if the box shows another
+        /// session's by then.
+        var talkingIn: String?
+
+        /// ⌥Space (or Space, held) went down (true) or up (false) in the box.
+        private(set) lazy var holdToTalk: (Bool) -> Void = { [weak self] down in
+            guard let self, let dictation = self.parent.dictation else { return }
+            if down {
+                self.talkingIn = self.parent.rowID
+                dictation.press(self.parent.rowID, agent: self.parent.agent, vocabulary: self.parent.vocabulary())
+            } else {
+                dictation.release(self.talkingIn ?? self.parent.rowID)
+                self.talkingIn = nil
+            }
+        }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
@@ -589,6 +659,11 @@ struct ComposerTextView: NSViewRepresentable {
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
             // An input method is composing (Japanese, Chinese…): its keys aren't ours.
             if textView.hasMarkedText() { return false }
+            // Esc while dictating: the recording is dropped.
+            if selector == #selector(NSResponder.cancelOperation(_:)), let dictation = parent.dictation, dictation.isBusy(parent.rowID) {
+                dictation.cancel(parent.rowID)
+                return true
+            }
             let count = min(parent.suggestions.items.count, 8)
             if count > 0 {
                 switch selector {
@@ -673,6 +748,193 @@ final class ComposerNSTextView: NSTextView {
     var pasteboard: NSPasteboard = .general
     /// Where a pasted or dropped image is saved (a test's scratch folder).
     var attachments: URL = Attachments.folder
+    /// Push to talk: ⌥Space held down (true) and let go (false). Nil: ⌥Space types as usual.
+    var holdToTalk: ((Bool) -> Void)?
+    /// Esc while ⌥Space is held.
+    var cancelTalk: (() -> Void)?
+    /// Hold Space alone to talk (Settings › Dictation): true when a run may start now. Nil: the box has no dictation.
+    var spaceHoldReady: (() -> Bool)?
+    /// Calls back after a delay; returns what cancels it (tests give their own clock).
+    var schedule: (TimeInterval, @escaping () -> Void) -> () -> Void = DictationController.after
+    /// ⌥Space (or Space, past the hold) is held now.
+    private(set) var talking = false
+    /// While held: the window going out of key (another app, another window), whose key-up goes elsewhere.
+    private var leaving: NSObjectProtocol?
+
+    /// Where holding Space alone is: down and timed (with the box as it was before it typed), dictating, or spent
+    /// (the run was cancelled with Space still down: its repeats do nothing until it comes up).
+    enum SpaceHold: Equatable {
+        case idle
+        case pressed(text: String, selection: NSRange)
+        case running
+        case spent
+    }
+    private(set) var spaceHold = SpaceHold.idle
+    private var cancelSpaceTimer: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if holdSpace(event) { return }
+        // Esc mid-hold (⌥ still down, so it isn't cancelOperation): the recording is dropped.
+        if talking, event.keyCode == UInt16(kVK_Escape) { return dropTalk() }
+        if let holdToTalk, !hasMarkedText(), Self.isTalkKey(event) {
+            // Its repeats while held do nothing.
+            if !event.isARepeat, !talking {
+                talking = true
+                watchLeaving()
+                holdToTalk(true)
+            }
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    /// Holding Space alone: true when the key was dealt with here. The first Space types as ever and is timed from its
+    /// key-down (key repeat may be off or slow, so repeats aren't counted); its repeats type too. Held past
+    /// `DictationLimits.spaceHold`, what it typed comes out and the run starts (`spaceHeld`). Another key before then
+    /// leaves the spaces and goes on as typing; one mid-run cancels the run, as Esc does, and isn't typed.
+    private func holdSpace(_ event: NSEvent) -> Bool {
+        let space = event.keyCode == UInt16(kVK_Space)
+        switch spaceHold {
+        case .running:
+            if space { return true }
+            spaceHold = .spent
+            dropTalk()
+            return true
+        case .spent:
+            return space && event.isARepeat
+        case .pressed:
+            if space, event.isARepeat { return false }
+            giveUpSpace()
+            return false
+        case .idle:
+            guard space, !event.isARepeat, event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+                  !hasMarkedText(), spaceHoldReady?() == true else { return false }
+            // The spaces get a typing step of their own, which `spaceHeld` undoes.
+            breakUndoCoalescing()
+            spaceHold = .pressed(text: string, selection: selectedRange())
+            watchLeaving()
+            cancelSpaceTimer = schedule(DictationLimits.spaceHold) { [weak self] in self?.spaceHeld() }
+            super.keyDown(with: event)
+            return true
+        }
+    }
+
+    /// Space held long enough: the box goes back to what it was before the press, and the run starts. Not when the
+    /// box lost the keyboard, something is composing, dictation is busy, or the box isn't its old text plus spaces:
+    /// the spaces stay typed then.
+    private func spaceHeld() {
+        cancelSpaceTimer = nil
+        guard case .pressed(let text, let selection) = spaceHold else { return }
+        guard window?.firstResponder === self, !hasMarkedText(), spaceHoldReady?() == true,
+              takeOutSpaces(before: text, selection: selection) else { return giveUpSpace() }
+        spaceHold = .running
+        talking = true
+        holdToTalk?(true)
+    }
+
+    /// Undoes the press's typing (one step when its spaces coalesced, one per space when they didn't), so ⌘Z after the
+    /// run never brings the spaces back as a step of their own (and the dictation's insert clears the redo). A
+    /// correction the space set off ("teh " made "the ") is a step too, undone with them. Only when the steps are
+    /// closed and undoing them gets back to `text` exactly; false otherwise, everything redone as it was.
+    private func takeOutSpaces(before text: String, selection: NSRange) -> Bool {
+        let typed = (string as NSString).length - ((text as NSString).length - selection.length)
+        guard string != text, let undo = undoManager, undo.canUndo, undo.groupingLevel == 0 else { return false }
+        breakUndoCoalescing()
+        var steps = 0
+        while string != text, steps < max(typed, 1) + 2, undo.canUndo {
+            undo.undo()
+            steps += 1
+        }
+        guard string == text else {
+            for _ in 0..<steps where undo.canRedo { undo.redo() }
+            return false
+        }
+        setSelectedRange(selection)
+        return true
+    }
+
+    /// The hold is given up before the threshold: what Space typed stays.
+    private func giveUpSpace() {
+        cancelSpaceTimer?()
+        cancelSpaceTimer = nil
+        spaceHold = .idle
+        if !talking { stopWatchingLeaving() }
+    }
+
+    override func keyUp(with event: NSEvent) {
+        if event.keyCode == UInt16(kVK_Space) {
+            switch spaceHold {
+            case .pressed: giveUpSpace()
+            case .spent: spaceHold = .idle
+            case .running, .idle: break
+            }
+        }
+        if talking, event.keyCode == UInt16(kVK_Space) { return endTalk() }
+        super.keyUp(with: event)
+    }
+
+    /// A modifier going down while Space is held short of the threshold (⇧ for the next word's capital): typing.
+    override func flagsChanged(with event: NSEvent) {
+        if case .pressed = spaceHold, !event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty { giveUpSpace() }
+        super.flagsChanged(with: event)
+    }
+
+    /// Focus moving away mid-hold: its key-up would go elsewhere, so it ends here.
+    override func resignFirstResponder() -> Bool {
+        endHolds()
+        return super.resignFirstResponder()
+    }
+
+    /// The window or the focus went away: a timed Space is given up, a run goes to be transcribed.
+    private func endHolds() {
+        if case .pressed = spaceHold { giveUpSpace() }
+        endTalk()
+    }
+
+    /// ⌥Space (or Space) let go, or as good as: the recording goes to be transcribed.
+    func endTalk() {
+        if spaceHold == .running || spaceHold == .spent { spaceHold = .idle }
+        guard talking else { return }
+        talking = false
+        stopWatchingLeaving()
+        holdToTalk?(false)
+    }
+
+    /// Esc, or another key mid-run: the recording is dropped.
+    private func dropTalk() {
+        talking = false
+        stopWatchingLeaving()
+        cancelTalk?()
+    }
+
+    /// Out of its window mid-hold: that window is watched by its address, which a later window may take, so it's let
+    /// go; the window the view moves into is watched instead.
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow !== window, leaving != nil { stopWatchingLeaving() }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil, talking || spaceHold != .idle { watchLeaving() }
+    }
+
+    private func watchLeaving() {
+        guard leaving == nil else { return }
+        leaving = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window,
+                                                         queue: .main) { [weak self] _ in self?.endHolds() }
+    }
+
+    private func stopWatchingLeaving() {
+        if let leaving { NotificationCenter.default.removeObserver(leaving) }
+        leaving = nil
+    }
+
+    /// ⌥Space, nothing else held.
+    static func isTalkKey(_ event: NSEvent) -> Bool {
+        event.type == .keyDown && event.keyCode == UInt16(kVK_Space)
+            && event.modifierFlags.intersection([.command, .control, .option, .shift]) == .option
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if window?.firstResponder === self, !hasMarkedText(), let digit = Self.digit(event), cardKey(digit) { return true }

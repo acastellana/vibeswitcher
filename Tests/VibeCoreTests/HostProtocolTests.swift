@@ -93,6 +93,7 @@ struct HostMessageTests {
             .styledScreenText(id: id, text: "❯ hi", runs: [ScreenRun(row: 0, column: 2, length: 2, faint: true),
                                                          ScreenRun(row: 0, column: 0, length: 1, inverse: true, color: .rgb(153, 153, 153)),
                                                          ScreenRun(row: 1, column: 0, length: 3, color: .palette(244))]),
+            .styledScreenText(id: id, text: "❯", runs: [], focusEvents: true),
             .historyText(id: id, history: "a\nb", screen: "c"),
             .sessionChanged(session), .sessionRemoved(id: id), .resync(id: id), .bell(id: id), .error("nope"), .ok,
             .challenge(Data(repeating: 3, count: 32), keyless: true), .vault(.startedOver(1_234)),
@@ -104,6 +105,9 @@ struct HostMessageTests {
             let data = try HostCoding.encode(HostEventEnvelope(replyTo: 3, event: event))
             #expect(try HostCoding.decode(HostEventEnvelope.self, from: data) == HostEventEnvelope(replyTo: 3, event: event))
         }
+        // A host from before focus events answers without them: not known.
+        let older = Data(#"{"replyTo":3,"event":{"styledScreenText":{"id":"\#(id.uuidString)","text":"❯","runs":[]}}}"#.utf8)
+        #expect(try HostCoding.decode(HostEventEnvelope.self, from: older).event == .styledScreenText(id: id, text: "❯", runs: [], focusEvents: nil))
     }
 
     /// The Exit an app before `signal` knew: status and time only.

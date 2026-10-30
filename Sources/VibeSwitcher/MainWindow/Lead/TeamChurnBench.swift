@@ -20,6 +20,9 @@ import VibeCore
 /// accessibility turned on in every hosting view of the window, the window's tree walked after each upsert (each
 /// element's role and children, as a client reads them), and the lead's transcript 75 turns (300 entries, the project-b
 /// lead's 290-odd); the elements reached are printed with the phases.
+/// `--rows N`: N of the board's tasks under way (20 by default, the rest merged), a Team list of N rows and the fold.
+/// `--main-blocks MS`: the main queue held as a loaded Mac holds it (load 60–150, 10-28): another thread posts it a block
+/// that spins MS ms every 100 ms. The blocks' own CPU is left out of every number printed.
 /// Each phase prints the main thread's longest block (its own CPU time while a post from another thread waited, and the
 /// wall clock's), and `RESULT team-churn …` lines. Nothing is checked: it's for comparing builds.
 ///
@@ -30,7 +33,7 @@ import VibeCore
 /// modal ends: `RESULT team-churn modal-…` lines. `--modal-without boards,churn` leaves that traffic out.
 enum TeamChurnBench {
     /// The made-up board: as big as the real ones (vibeswitcher's 3.3 MB, 200-odd tasks), most of it merged.
-    static func board(seed: Int) -> LeadBoard {
+    static func board(seed: Int, underWay: Int = 20) -> LeadBoard {
         var board = UIBench.board(tasks: 220, seed: seed)
         let words = ["the", "worker", "ran", "the", "suite", "twice", "on", "a", "scratch", "home", "and", "every", "check",
                      "passed;", "the", "verifier", "read", "the", "diff", "line", "by", "line", "before", "the", "merge."]
@@ -43,8 +46,8 @@ enum TeamChurnBench {
             board.tasks[index].checkpoints = (board.tasks[index].checkpoints ?? []) + (0..<10).map {
                 LeadCheckpoint(text: prose(45, index + $0), at: board.tasks[index].createdAt + 300 + Double($0) * 30)
             }
-            // The newest 20 at work or waiting, the rest merged.
-            let status = index < 200 ? LeadTask.Status.done : active[index % active.count]
+            // The newest `underWay` at work or waiting, the rest merged.
+            let status = index < board.tasks.count - underWay ? LeadTask.Status.done : active[index % active.count]
             board.tasks[index].status = status
             if status == .done {
                 board.tasks[index].evidence = LeadEvidence(completion: .complete, integrity: .clean, summary: prose(80, index), commit: "abc\(index)")
@@ -58,14 +61,20 @@ enum TeamChurnBench {
     }
 
     static func run(arguments: [String]) -> Never {
-        let seconds = arguments.prefix { !$0.hasPrefix("--modal") }.lazy.compactMap(Double.init).first ?? 20
+        func value(after flag: String) -> Double? {
+            arguments.firstIndex(of: flag).flatMap { arguments.indices.contains($0 + 1) ? Double(arguments[$0 + 1]) : nil }
+        }
+        // The first number that isn't an option's.
+        let seconds = arguments.prefix { !$0.hasPrefix("--modal") }.enumerated()
+            .lazy.filter { $0.offset == 0 || !["--rows", "--main-blocks"].contains(arguments[$0.offset - 1]) }.compactMap { Double($0.element) }.first ?? 20
         let app = NSApplication.shared
         app.setActivationPolicy(arguments.contains("--onscreen") ? .accessory : .prohibited)
         VibePaths.ensurePrivateDirectories()
         let modal = arguments.firstIndex(of: "--modal").flatMap { arguments.indices.contains($0 + 1) ? Double(arguments[$0 + 1]) : nil }
         let without = arguments.firstIndex(of: "--modal-without").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
         let bench = Bench(seconds: seconds, onscreen: arguments.contains("--onscreen"), ax: arguments.contains("--ax"), modal: modal,
-                          modalWithout: Set((without ?? "").split(separator: ",").map(String.init)))
+                          modalWithout: Set((without ?? "").split(separator: ",").map(String.init)),
+                          underWay: value(after: "--rows").map(Int.init) ?? 20, mainBlock: value(after: "--main-blocks").map { $0 / 1000 } ?? 0)
         bench.start()
         app.run()
         exit(0)
@@ -134,6 +143,12 @@ enum TeamChurnBench {
         let modal: Double?
         /// `--modal-without boards,churn`: traffic left out of it, to narrow a growth down.
         let modalWithout: Set<String>
+        /// `--rows`: the board's tasks under way.
+        let underWay: Int
+        /// `--main-blocks`: how long each block posted to the main queue spins (s; 0: none), and the main thread's CPU in them.
+        let mainBlock: TimeInterval
+        private let blockLock = NSLock()
+        private var blockSpent: TimeInterval = 0
         let started = Date()
         let store: SessionStore
         let host = HostClient(appKey: HostClient.ownKey())
@@ -154,12 +169,14 @@ enum TeamChurnBench {
         static let workers = 6, others = 4, period = 2.0
         var leadID: UUID?
 
-        init(seconds: Double, onscreen: Bool, ax: Bool, modal: Double?, modalWithout: Set<String>) {
+        init(seconds: Double, onscreen: Bool, ax: Bool, modal: Double?, modalWithout: Set<String>, underWay: Int, mainBlock: TimeInterval) {
             self.seconds = seconds
             self.onscreen = onscreen
             self.ax = ax
             self.modal = modal
             self.modalWithout = modalWithout
+            self.underWay = underWay
+            self.mainBlock = mainBlock
             weak var weakSelf: Bench?
             store = SessionStore(scanner: SessionScanner(
                 processes: { weakSelf?.processes() ?? [:] },
@@ -184,10 +201,36 @@ enum TeamChurnBench {
 
         private var awake: NSObjectProtocol?
 
+        /// The main thread's CPU so far, the injected blocks' left out.
+        func mainCPU() -> TimeInterval {
+            blockLock.lock()
+            defer { blockLock.unlock() }
+            return TeamChurnBench.cpu(of: main) - blockSpent
+        }
+
+        /// `--main-blocks`: a block that spins `mainBlock` s posted to the main queue every 100 ms from now on.
+        private func holdMainQueue() {
+            guard mainBlock > 0 else { return }
+            let (mainBlock, main) = (mainBlock, main)
+            Thread.detachNewThread { [weak self] in
+                while self != nil {
+                    DispatchQueue.main.async {
+                        let start = TeamChurnBench.cpu(of: main), until = Date().addingTimeInterval(mainBlock)
+                        while Date() < until {}
+                        guard let self else { return }
+                        self.blockLock.lock()
+                        self.blockSpent += TeamChurnBench.cpu(of: main) - start
+                        self.blockLock.unlock()
+                    }
+                    Thread.sleep(forTimeInterval: 0.1)
+                }
+            }
+        }
+
         func start() {
             awake = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "--team-churn measures")
             let boards = BoardStore(root: root)
-            try? boards.update { $0 = TeamChurnBench.board(seed: 0) }
+            try? boards.update { $0 = TeamChurnBench.board(seed: 0, underWay: underWay) }
             try? boards.replaceRecord("decisions.md", with: UIBench.decisions(count: 30, newest: started.addingTimeInterval(-3600)))
             try? FileManager.default.createDirectory(atPath: other, withIntermediateDirectories: true)
             let folder = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects/\(RecentProjects.claudeSlug(for: root))")
@@ -203,9 +246,9 @@ enum TeamChurnBench {
                 // The client reads the window again once the change is drawn, as a client told of it does.
                 guard let self, self.ax, let window = self.window?.window else { return }
                 DispatchQueue.main.async {
-                    let before = TeamChurnBench.cpu(of: self.main)
+                    let before = self.mainCPU()
                     self.walked = AXClient.walk(window)
-                    self.walking += TeamChurnBench.cpu(of: self.main) - before
+                    self.walking += self.mainCPU() - before
                 }
             }.store(in: &cancellables)
             store.$sessions.combineLatest(host.$sessions, host.$state, store.$tableRead).receiveLatest(on: RunLoop.main)
@@ -294,8 +337,8 @@ enum TeamChurnBench {
             model.showsChat = true
             let file = (BoardStore(root: root).folder as NSString).appendingPathComponent("board.json")
             let size = ((try? FileManager.default.attributesOfItem(atPath: file))?[.size] as? Int) ?? 0
-            print(String(format: "team churn: a lead's chat and its Team tab, a board of %.1f MB (%d tasks), %d workers and %d other sessions "
-                         + "retitling every %.0f s; window %@; %.0f s a phase", Double(size) / 1_048_576, 220, Self.workers, Self.others,
+            print(String(format: "team churn: a lead's chat and its Team tab, a board of %.1f MB (%d tasks, %d under way), %d workers and %d other sessions "
+                         + "retitling every %.0f s; window %@; %.0f s a phase", Double(size) / 1_048_576, 220, underWay, Self.workers, Self.others,
                          Self.period, onscreen ? "on screen" : "off screen", seconds))
             fflush(stdout)
             wait(until: { [self] in
@@ -314,6 +357,8 @@ enum TeamChurnBench {
                     // from a block of the main queue: inside one the main queue would wait for it, as it never did there.
                     if let modal = self.modal { return RunLoop.main.perform(inModes: [.default]) { self.modalPhase(modal) } }
                     self.watchdog = BoardBench.Watchdog()
+                    if self.mainBlock > 0 { print(String(format: "the main queue held: a block of %.0f ms every 100 ms", self.mainBlock * 1000)) }
+                    self.holdMainQueue()
                     self.quiet()
                 }
             }, else: "the lead's Team tab never showed")
@@ -322,11 +367,11 @@ enum TeamChurnBench {
         /// One phase: `seconds` of it, the main thread's CPU over it, its longest block and the upserts seen.
         private func measure(_ name: String, then done: @escaping (_ cpu: TimeInterval, _ upserts: Int, _ block: (cpu: TimeInterval, wall: TimeInterval)) -> Void) {
             _ = watchdog?.take()
-            let cpu = TeamChurnBench.cpu(of: main)
+            let cpu = mainCPU()
             let upserts = upserts
             let walking = walking
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [self] in
-                let used = TeamChurnBench.cpu(of: main) - cpu
+                let used = mainCPU() - cpu
                 let block: (cpu: TimeInterval, wall: TimeInterval) = watchdog?.take() ?? (cpu: 0, wall: 0)
                 print(String(format: "  %@: main thread %.0f ms of CPU in %.0f s, %d upserts, longest block %.0f ms (wall %.0f ms)%@",
                              name as NSString, used * 1000, seconds, self.upserts - upserts, block.cpu * 1000, block.wall * 1000,
@@ -369,9 +414,9 @@ enum TeamChurnBench {
             if tick - now < 0.5 { tick += 10 }
             DispatchQueue.main.asyncAfter(deadline: .now() + (tick - now - 0.3)) { [self] in
                 _ = watchdog?.take()
-                let before = TeamChurnBench.cpu(of: main)
+                let before = mainCPU()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
-                    let used = TeamChurnBench.cpu(of: main) - before
+                    let used = mainCPU() - before
                     keep(watchdog?.take() ?? (cpu: 0, wall: 0))
                     slowTicks(count - 1, costs: costs + [max(0, used - floor)])
                 }
@@ -568,5 +613,26 @@ enum AXClient {
         }
         let children = entryPoint(element, "AXChildren")?.takeUnretainedValue() as? [AnyObject] ?? []
         return own + children.flatMap(texts)
+    }
+
+    /// A list's rows (AXRow) under the element, as a client reads each: the elements in it and what they say.
+    static func rows(_ element: AnyObject) -> [(elements: Int, texts: [String])] {
+        guard let entryPoint else { return [] }
+        if entryPoint(element, "AXRole")?.takeUnretainedValue() as? String == "AXRow" { return [(walk(element), texts(element))] }
+        let children = entryPoint(element, "AXChildren")?.takeUnretainedValue() as? [AnyObject] ?? []
+        return children.flatMap(rows)
+    }
+
+    /// The tree as a client reads it, an element a line: its role and what it says, indented under its parent.
+    static func dump(_ element: AnyObject, depth: Int = 0) -> String {
+        guard let entryPoint else { return "" }
+        let role = entryPoint(element, "AXRole")?.takeUnretainedValue() as? String ?? "?"
+        let said = ["AXValue", "AXTitle", "AXDescription"].compactMap { attribute -> String? in
+            let value = entryPoint(element, attribute as NSString)?.takeUnretainedValue()
+            return (value as? String) ?? (value as? NSAttributedString)?.string
+        }.filter { !$0.isEmpty }
+        let children = entryPoint(element, "AXChildren")?.takeUnretainedValue() as? [AnyObject] ?? []
+        let line = String(repeating: "  ", count: depth) + role + (said.isEmpty ? "" : " " + said.joined(separator: " | "))
+        return ([line] + children.map { dump($0, depth: depth + 1) }).joined(separator: "\n")
     }
 }

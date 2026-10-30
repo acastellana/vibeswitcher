@@ -201,7 +201,7 @@ final class HostRuntime: LeadRuntime {
         }
     }
 
-    func loadAverage() -> Double? { MacLoad.oneMinute() }
+    func loadAverages() -> MacLoad.Averages? { MacLoad.averages() }
 
     func census() throws -> [HostCensus]? { try HostCall.census(socket: socket) }
 

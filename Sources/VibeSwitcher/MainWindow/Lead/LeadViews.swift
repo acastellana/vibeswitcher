@@ -753,6 +753,35 @@ struct LeadTeamView: View {
     /// Where the lead's records are kept (`BoardStore.recordsDir`, read with the board, never as it draws; nil: in
     /// .vibeswitcher).
     var recordsDir: String? = LeadWorkflow.defaultRecordsDir
+    /// Changes whenever a line `summary` or `decisionSummary` gives may have (`TeamSummaryModel.version`): the lines are
+    /// looked up again only then, or when the rows or decisions do (`Lines`). nil: on every draw (pictures).
+    var linesVersion: Int?
+    @State var lines = Lines()
+    /// The rows accessibility sees (`TeamExposure`).
+    @StateObject private var exposure = TeamExposure()
+
+    /// The glance's lines by task and by decision, kept by their inputs: the body is drawn again for every session the
+    /// host changes, and looking up 200-odd rows' summaries each time showed in its freezes (hang-20261028-173406,
+    /// 175314).
+    final class Lines {
+        private var kept: (rows: [TeamRow], decisions: [LeadDecision], version: Int, rowLines: [String: String], decisionLines: [String: String])?
+        /// How many times the lines were looked up (for tests).
+        private(set) var made = 0
+
+        func lines(rows: [TeamRow], decisions: [LeadDecision], version: Int?, summary: (TeamRow) -> String?,
+                   decisionSummary: (LeadDecision) -> String?) -> (rows: [String: String], decisions: [String: String]) {
+            if let version, let kept, kept.version == version, kept.rows.isSameStorage(as: rows), kept.decisions.isSameStorage(as: decisions) {
+                return (kept.rowLines, kept.decisionLines)
+            }
+            made += 1
+            var rowLines: [String: String] = [:]
+            for row in rows { if let line = summary(row) { rowLines[row.id] = line } }
+            var decisionLines: [String: String] = [:]
+            for decision in decisions { if let line = decisionSummary(decision) { decisionLines[decision.id] = line } }
+            kept = version.map { (rows, decisions, $0, rowLines, decisionLines) }
+            return (rowLines, decisionLines)
+        }
+    }
 
     var body: some View {
         // Made once a draw, never as the clock ticks: a day's 200-odd tasks mapped and sorted.
@@ -766,7 +795,14 @@ struct LeadTeamView: View {
                             showEarlierQuestions: showEarlierQuestions).equatable()
             }
             .padding(14)
+            .coordinateSpace(name: TeamExposure.space)
+            .background(ScrollProbe { [exposure] top, height, _ in
+                if ChatExposure.band(exposure.band, top: top, height: height) != nil {
+                    DispatchQueue.main.async { exposure.scrolled(top: top, height: height) }
+                }
+            })
         }
+        .environment(\.teamExposure, exposure)
         // The Mac's state, not a task: a line at the foot, in view however far the tasks scroll.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if mac != nil || keepingAwake { TeamStatusFoot(mac: mac, keepingAwake: keepingAwake) }
@@ -779,12 +815,9 @@ struct LeadTeamView: View {
     }
 
     private func glancing(_ rows: [TeamRow]) -> TeamGlance {
-        var lines: [String: String] = [:]
-        for row in rows { if let line = summary(row) { lines[row.id] = line } }
-        var decisionLines: [String: String] = [:]
-        for decision in decisions { if let line = decisionSummary(decision) { decisionLines[decision.id] = line } }
-        return TeamGlance(board: board, rows: rows, openable: Set(seen.keys), notices: notices, decisions: decisions, lines: lines,
-                          decisionLines: decisionLines, openRows: openRows, showFinished: showFinished, openDecisions: openDecisions,
+        let lines = self.lines.lines(rows: rows, decisions: decisions, version: linesVersion, summary: summary, decisionSummary: decisionSummary)
+        return TeamGlance(board: board, rows: rows, openable: Set(seen.keys), notices: notices, decisions: decisions, lines: lines.rows,
+                          decisionLines: lines.decisions, openRows: openRows, showFinished: showFinished, openDecisions: openDecisions,
                           showEarlier: showEarlier, clock: clock, open: open, answer: answer)
     }
 }
@@ -812,7 +845,8 @@ struct TeamGlance: View, Equatable {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static func == (a: TeamGlance, b: TeamGlance) -> Bool {
-        a.board == b.board && a.rows == b.rows && a.openable == b.openable && a.notices == b.notices && a.decisions == b.decisions
+        // The same board, not a walk through an equal one's 200-odd tasks (see `LeadBoard.isSame`).
+        a.board.isSame(as: b.board) && a.rows == b.rows && a.openable == b.openable && a.notices == b.notices && a.decisions == b.decisions
             && a.lines == b.lines && a.decisionLines == b.decisionLines && a.openRows == b.openRows && a.showFinished == b.showFinished
             && a.openDecisions == b.openDecisions && a.showEarlier == b.showEarlier && a.clock == b.clock
     }
@@ -862,6 +896,11 @@ struct TeamRecords: View, Equatable {
     let minute: Int
     let showEarlierResults: Bool
     let showEarlierQuestions: Bool
+
+    static func == (a: TeamRecords, b: TeamRecords) -> Bool {
+        a.root == b.root && a.board.isSame(as: b.board) && a.recordsDir == b.recordsDir && a.clock == b.clock && a.minute == b.minute
+            && a.showEarlierResults == b.showEarlierResults && a.showEarlierQuestions == b.showEarlierQuestions
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {

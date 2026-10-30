@@ -10,7 +10,7 @@ import Testing
 /// as a loaded Mac makes a fresh build's first exec wait on amfid. A scratch host (its own home, socket, lock and key;
 /// never the user's) in a process of its own: a handover replaces the process's image.
 @MainActor
-struct HostClientSlowProbeTests {
+@Suite(hostTestLimit) struct HostClientSlowProbeTests {
     /// The host and its two builds: copies of the built host with their own modification times, which is what tells
     /// builds apart.
     final class ScratchHost {

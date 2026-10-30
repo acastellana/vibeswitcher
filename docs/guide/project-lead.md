@@ -154,7 +154,8 @@ These are set once for the Mac, not per project, in Settings › General › Pro
 `~/.vibeswitcher/mac-limits.json`:
 
 - **Team sessions** (`mac_max_sessions`): the most workers and verifiers of all projects together, 10 by default.
-- **Load** (`load_threshold`): the 1-minute load average above which leads start nothing; empty means twice the cores.
+- **Load** (`load_threshold`): the load above which leads start nothing, the greater of the 1- and 5-minute averages
+  (so a dip of the 1-minute after a spike isn't room); empty means twice the cores.
 
 The session host counts the live workers and verifiers of every project (the **census**), so every lead sees the same
 total. `start_worker` and `audit` refuse at either limit, and the lead gets one message once there's room again. A

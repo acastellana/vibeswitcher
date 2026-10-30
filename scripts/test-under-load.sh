@@ -5,11 +5,19 @@
 # wait that only holds on an idle Mac fails here, not on project-lead. With `-- COMMAND` it runs COMMAND beside the
 # busy loops instead (a `swift test --filter` reproducing a failure seen under load) and exits with its status.
 #
-# The Mac is shared with other sessions and the user, so it starts at most 2 × ncpu busy loops, and not at all while
-# the 1-minute load (`uptime`) is already over 2 × ncpu, memory is under the floor or the disk is nearly full: it says
-# what to wait for instead. Each busy loop is its own watchdog: it stops when this script, its parent or the session's
-# claude process is gone, or after --max-time, so a turn that ends without this shell ending leaves no load behind.
-# The busy loops' pids are recorded (--pid-file) and killed by pid on any exit, Ctrl-C too; never by name.
+# The Mac is shared with other sessions and the user. --load N is the load to reach, not loops to add: every few
+# seconds it starts or stops busy loops so that its own make up what the others' load (the 1-minute load less its
+# loops' share of it) leaves short of N, never more than N (at most 2 × ncpu), and says how many it ran on average.
+# On a Mac already busy it adds little; on a calm one it still reaches N. On 2026-10-28 two runs of 24 loops each, two
+# full suites and macOS's scans of the new test binaries took the load to 150 on 12 cores and froze the user's app for
+# minutes, so: one load run burns at a time on this Mac (a flock on load-run.lock in vs-heavy's folder: a second run
+# waits, saying whose it waits for), and each holds one of vs-heavy's Mac-wide slots for heavy work for the whole run
+# (it runs itself under Resources/bin/vs-heavy, waiting in its line, its holder note naming the loops). Before it
+# burns it waits while the 1-minute load is over --max-load, saying so; memory under the floor or a nearly full disk
+# it refuses at once, saying what to wait for. --wait bounds the waits for the other load run and for the load.
+# Each busy loop is its own watchdog: it stops when this script, its parent or the session's claude process is gone,
+# or after --max-time, so a turn that ends without this shell ending leaves no load behind. The live busy loops' pids
+# are kept in --pid-file and killed by pid on any exit, Ctrl-C too; never by name.
 #
 # Each run gets its own empty TMPDIR (tests put their scratch files under it, see `scratchRoot` in the tests'
 # TestSupport.swift) and must leave it empty; what's left is named by prefix. Each run gets its own empty home too
@@ -20,13 +28,18 @@
 # Logs: .build/test-under-load/run-N.log. Everything else (the TMPDIRs, the burner) is gone when it exits, Ctrl-C too.
 # scripts/test-under-load-selfcheck.sh shows the cleanup and the refusals work.
 #
-# scripts/test-under-load.sh [--load N] [--memory-floor PCT] [--max-load L] [--max-time S] [--pid-file FILE]
-#                            [--check-only] [-r RUNS] [-f FILTER] [-- COMMAND...]
-#   --load N: busy loops (ncpu; at most 2 × ncpu).  --memory-floor PCT: least free memory to start (25 %); the runs are
-#   stopped if it falls under half of it.  --max-load L: the 1-minute load over which it won't start (2 × ncpu; only
-#   lower).  --max-time S: everything stops after S seconds (1800; at most 3600).  --pid-file FILE: where the busy
-#   loops' pids go (kept after it exits).  --check-only: the checks alone, nothing started.
+# scripts/test-under-load.sh [--load N] [--memory-floor PCT] [--max-load L] [--max-time S] [--wait S]
+#                            [--pid-file FILE] [--check-only] [-r RUNS] [-f FILTER] [-- COMMAND...]
+#   --load N: the load to top up to (ncpu; at most 2 × ncpu), so at most N busy loops.  --memory-floor PCT: least free
+#   memory to start (25 %); the runs are stopped if it falls under half of it.  --max-load L: the 1-minute load over
+#   which it waits before burning (2 × ncpu; only lower).  --max-time S: everything stops after S seconds (1800; at
+#   most 3600).  --wait S: how long it waits for the other load run and the load, together, before it gives up (3600;
+#   at most 3600; 0: refuse at once).  --pid-file FILE: the live busy loops' pids (kept after it exits).
+#   --check-only: the checks alone, refusing rather than waiting, nothing started and no slot taken.
 #   -r RUNS: suites at once (3).  -f FILTER: only the tests matching FILTER (as `swift test --filter`), for a quick look.
+# For its own tests only: TEST_UNDER_LOAD_FAKE_BURNER=1 makes each busy loop sleep instead of burn, and only then (or
+# with --check-only) are the fake readings (TEST_UNDER_LOAD_FAKE_LOAD: a number, or a file holding one, read at each
+# look) and TEST_UNDER_LOAD_TICK (seconds between looks, 5) taken.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
@@ -36,10 +49,11 @@ unset VIBESWITCHER_HOME
 
 cores=$(sysctl -n hw.ncpu)
 cap=$((2 * cores))
-usage="usage: scripts/test-under-load.sh [--load N] [--memory-floor PCT] [--max-load L] [--max-time S] [--pid-file FILE]"
-usage+=" [--check-only] [-r RUNS] [-f FILTER] [-- COMMAND...]"
+usage="usage: scripts/test-under-load.sh [--load N] [--memory-floor PCT] [--max-load L] [--max-time S] [--wait S]"
+usage+=" [--pid-file FILE] [--check-only] [-r RUNS] [-f FILTER] [-- COMMAND...]"
 
-runs=3 filter="" load=$cores memory_floor=25 max_load=$cap max_time=1800 pid_file="" check_only=0 command=()
+arguments=("$@")
+runs=3 filter="" load=$cores memory_floor=25 max_load=$cap max_time=1800 wait=3600 pid_file="" check_only=0 command=()
 value() {
     [[ -n ${2-} ]] || { echo "$1 needs a value; $usage"; exit 64; }
 }
@@ -49,6 +63,7 @@ while [[ $# -gt 0 ]]; do
         --memory-floor) value "$@"; memory_floor=$2; shift 2 ;;
         --max-load) value "$@"; max_load=$2; shift 2 ;;
         --max-time) value "$@"; max_time=$2; shift 2 ;;
+        --wait) value "$@"; wait=$2; shift 2 ;;
         --pid-file) value "$@"; pid_file=$2; shift 2 ;;
         --check-only) check_only=1; shift ;;
         -r) value "$@"; runs=$2; shift 2 ;;
@@ -58,16 +73,21 @@ while [[ $# -gt 0 ]]; do
         *) echo "$1? $usage"; exit 64 ;;
     esac
 done
-for option in "load:$load" "memory-floor:$memory_floor" "max-time:$max_time" "r:$runs"; do
+for option in "load:$load" "memory-floor:$memory_floor" "max-time:$max_time" "wait:$wait" "r:$runs"; do
     [[ ${option#*:} =~ ^[0-9]+$ ]] || { echo "--${option%%:*} takes a whole number, not ${option#*:}"; exit 64; }
 done
 [[ $max_load =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "--max-load takes a number, not $max_load"; exit 64; }
 
-# The fake readings below are for the checks' tests, and only with --check-only, which starts nothing: they can make
-# it refuse, never make it start load it shouldn't.
-if [[ $check_only -eq 0 ]]; then
+# The fake readings below are for the checks' tests, and only with --check-only, which starts nothing, or with the
+# fake burner, whose loops only sleep: they can make it refuse, never make it start load it shouldn't.
+fake_burner=0
+[[ ${TEST_UNDER_LOAD_FAKE_BURNER-} == 1 ]] && fake_burner=1
+if [[ $check_only -eq 0 && $fake_burner -eq 0 ]]; then
     unset TEST_UNDER_LOAD_FAKE_LOAD TEST_UNDER_LOAD_FAKE_MEMORY TEST_UNDER_LOAD_FAKE_DISK_GB TEST_UNDER_LOAD_OWNER_NAME
+    unset TEST_UNDER_LOAD_TICK
 fi
+tick=${TEST_UNDER_LOAD_TICK:-5}
+[[ $tick =~ ^[0-9]+(\.[0-9]+)?$ ]] && awk -v t="$tick" 'BEGIN { exit !(t > 0) }' || { echo "TEST_UNDER_LOAD_TICK takes seconds, not $tick"; exit 64; }
 
 # More load than this is no longer "a loaded Mac", it's one nobody else can use.
 if [[ $load -gt $cap ]]; then
@@ -81,6 +101,14 @@ if awk -v l="$max_load" -v c="$cap" 'BEGIN { exit !(l > c) }'; then
 fi
 [[ $memory_floor -le 100 ]] || { echo "--memory-floor is a percentage (0–100), not $memory_floor"; exit 64; }
 [[ $max_time -le 3600 ]] || { echo "--max-time $max_time refused: at most 3600 s"; exit 1; }
+[[ $wait -le 3600 ]] || { echo "--wait $wait refused: at most 3600 s"; exit 1; }
+
+# Run under vs-heavy (below), this script runs again as its command: `inner`, with the slot held.
+inner=0
+[[ -n ${TEST_UNDER_LOAD_INNER-} && -n ${VIBESWITCHER_TEST_LOCK-} ]] && inner=1
+# Its own, not its runs': a harness a test starts takes the lock and a slot of its own.
+starter=${TEST_UNDER_LOAD_INNER-} waited_until=${TEST_UNDER_LOAD_WAIT_UNTIL-} lock_note=${TEST_UNDER_LOAD_LOCK_NOTE-}
+unset TEST_UNDER_LOAD_INNER TEST_UNDER_LOAD_WAIT_UNTIL TEST_UNDER_LOAD_LOCK_NOTE
 
 # Who this run belongs to: its parent, and the session's claude process when it runs in one. The load stops when
 # either is gone, so a session whose turn has no live owner can't start any.
@@ -98,7 +126,23 @@ if [[ $PPID -le 1 ]]; then
     echo "not starting: this script's parent is gone (the shell that started it has ended), so nothing owns the load"
     exit 1
 fi
+# Under vs-heavy its parent is vs-heavy's supervisor; the owner is the one that started it, an ancestor still.
 owners=("$PPID")
+if [[ $inner -eq 1 ]]; then
+    ancestor=$PPID
+    while [[ $ancestor -gt 1 && $ancestor != "$starter" ]]; do
+        ancestor=$(ps -o ppid= -p "$ancestor" 2>/dev/null | tr -d ' ')
+        [[ -n $ancestor ]] || ancestor=0
+    done
+    if [[ $ancestor != "$starter" || $ancestor -le 1 ]]; then
+        echo "not starting: the shell that started it (pid $starter) is gone, so nothing owns the load"
+        exit 1
+    fi
+    owners=("$starter")
+    # The load-run lock is vs-heavy's and its supervisor's to hold, so nothing this run starts keeps it; under a slot
+    # held already (VIBESWITCHER_TEST_LOCK), vs-heavy ran this in its own process, and fd 8 is this one's alone to hold.
+    [[ $PPID != "$starter" ]] && exec 8>&-
+fi
 if claude=$(claude_ancestor); then
     owners+=("$claude")
 elif [[ -n ${CLAUDECODE-} ]]; then
@@ -107,12 +151,55 @@ elif [[ -n ${CLAUDECODE-} ]]; then
     exit 1
 fi
 
-loadavg=${TEST_UNDER_LOAD_FAKE_LOAD:-$(uptime | sed -E 's/.*load averages?: *([0-9.]+).*/\1/')}
-if awk -v l="$loadavg" -v m="$max_load" 'BEGIN { exit !(l > m) }'; then
-    echo "not starting: the Mac is already loaded, its 1-minute load is $loadavg (over $max_load, 2 × $cores cores)." \
+# The 1-minute load: the fake's (a number, or the file holding one) in its tests.
+one_minute() {
+    local fake=${TEST_UNDER_LOAD_FAKE_LOAD-}
+    if [[ $fake == /* ]]; then
+        cat "$fake" 2>/dev/null || echo 0
+    elif [[ -n $fake ]]; then
+        echo "$fake"
+    else
+        sysctl -n vm.loadavg | awk '{ print $2 }'
+    fi
+}
+over() { awk -v l="$1" -v m="$max_load" 'BEGIN { exit !(l > m) }'; }
+# While it waits (for the other load run, for the load), it holds the load-run lock or a heavy slot: once an owner is
+# gone (the turn ended without this shell ending), it stops waiting rather than hold them for nobody.
+owned() {
+    local pid
+    for pid in "${owners[@]}"; do
+        kill -0 "$pid" 2>/dev/null && continue
+        echo "stopped waiting: its owner (pid $pid) is gone, so nothing would own the load; nothing was started"
+        exit 1
+    done
+}
+refuse_loaded() {
+    echo "not starting: the Mac is already loaded, its 1-minute load is $1 (over $max_load, 2 × $cores cores)." \
         "Wait until the first of \`uptime\`'s load averages is under $max_load (the other sessions' builds and tests" \
         "finishing; it falls within a minute or two once they're done), then run this again."
     exit 1
+}
+# Until when it may wait, for the other load run and the load together (set once, before vs-heavy).
+wait_until=${waited_until:-$(($(date +%s) + wait))}
+[[ $inner -eq 1 ]] || wait_until=$(($(date +%s) + wait))
+
+loadavg=$(one_minute)
+if [[ $check_only -eq 1 || $wait -eq 0 ]]; then
+    over "$loadavg" && refuse_loaded "$loadavg"
+elif [[ $inner -eq 1 ]]; then
+    said=0
+    while over "$loadavg"; do
+        owned
+        [[ $(date +%s) -lt $wait_until ]] || refuse_loaded "$loadavg"
+        if [[ $((SECONDS - said)) -ge 60 || $said -eq 0 ]]; then
+            echo "waiting: the Mac's 1-minute load is $loadavg, over $max_load (2 × $cores cores); it burns once it's under" \
+                "(for at most --wait $wait s from the start)"
+            said=$SECONDS
+            [[ $said -gt 0 ]] || said=1
+        fi
+        sleep "$tick"
+        loadavg=$(one_minute)
+    done
 fi
 
 free_memory() {
@@ -137,6 +224,47 @@ if [[ $check_only -eq 1 ]]; then
     echo "ok to start: load $loadavg (under $max_load), $memory % of memory free (floor $memory_floor %)," \
         "$free_gb GB of disk free; up to $load load processes, owned by ${owners[*]}"
     exit 0
+fi
+
+# One load run at a time on this Mac, each in a heavy-work slot: here the load-run lock (fd 8, waiting for the other
+# run up to --wait), then this script again under vs-heavy, which waits in its line for a slot. The lock stays with
+# vs-heavy and its supervisor (an exec keeps the fd) until the run is over, a kill -9 too.
+if [[ $inner -eq 0 ]]; then
+    lock_dir=${VIBESWITCHER_TEST_LOCK_DIR:-/private/tmp/vibeswitcher-$(id -u)}
+    while [[ $lock_dir == */ && $lock_dir != / ]]; do lock_dir=${lock_dir%/}; done
+    mkdir -p -m 700 "$lock_dir" || { echo "can't make $lock_dir for the load-run lock"; exit 1; }
+    [[ -O $lock_dir && ! -L $lock_dir ]] || { echo "$lock_dir isn't a folder of yours: the load-run lock can't be kept there"; exit 1; }
+    lock=$lock_dir/load-run.lock
+    exec 8>> "$lock" || { echo "can't open $lock"; exit 1; }
+    said=""
+    until /usr/bin/perl -MFcntl=:flock -e 'open(my $fh, ">&=", 8) or exit 2; exit(flock($fh, LOCK_EX | LOCK_NB) ? 0 : 1)'; do
+        holder=$(head -n 1 "$lock.holder" 2>/dev/null)
+        # A note naming a process that has ended says nothing.
+        [[ $holder =~ ^pid\ ([0-9]+), ]] && ! kill -0 "${BASH_REMATCH[1]}" 2>/dev/null && holder=""
+        holder=${holder:-a run that did not say who it is}
+        if [[ $holder != "$said" ]]; then
+            echo "waiting for the other load run to end (one burns at a time on this Mac, $lock): $holder"
+            said=$holder
+        fi
+        owned
+        if [[ $(date +%s) -ge $wait_until ]]; then
+            echo "not starting: another load run still burns after --wait $wait s ($holder); run this again once it's done"
+            exit 1
+        fi
+        sleep 0.5
+    done
+    [[ -n $said ]] && echo "the other load run is over: this one goes on"
+    where=$PWD
+    [[ $where =~ ^(.*)/\.vibeswitcher/worktrees/([^/]+) ]] && where="$PWD (${BASH_REMATCH[1]##*/})"
+    echo "pid $$, test-under-load in $where, since $(date +%H:%M:%S)" > "$lock.holder"
+    what="test-under-load: up to $load busy loops (target load $load)"
+    [[ ${#command[@]} -gt 0 ]] && what+=" beside ${command[*]}" || what+=" beside $runs suite runs${filter:+ of $filter}"
+    TEST_UNDER_LOAD_INNER=$PPID TEST_UNDER_LOAD_WAIT_UNTIL=$wait_until TEST_UNDER_LOAD_LOCK_NOTE="pid $$, $lock.holder"
+    export TEST_UNDER_LOAD_INNER TEST_UNDER_LOAD_WAIT_UNTIL TEST_UNDER_LOAD_LOCK_NOTE
+    # The repository's own vs-heavy: its slots are the ones every vs-heavy and TestLock take. Its timeout is past
+    # --max-time's and the waits', which end the run first.
+    exec Resources/bin/vs-heavy --as "$(printf '%s' "$what" | cut -c 1-120)" --timeout "$((max_time + wait + 900))s" \
+        /bin/bash "$PWD/scripts/test-under-load.sh" ${arguments[@]+"${arguments[@]}"}
 fi
 
 logs=.build/test-under-load
@@ -179,6 +307,11 @@ cleanup() {
     wait 2>/dev/null
     # Not from the terminal: rm would ask about each read-only file a test's git repository left.
     [[ -n $scratch ]] && rm -r "$scratch" < /dev/null
+    # The load-run lock's note, while it's still this run's (the lock goes with vs-heavy, just after).
+    if [[ -n $lock_note ]]; then
+        local note=${lock_note#*, }
+        [[ $(head -n 1 "$note" 2>/dev/null) == "${lock_note%%, *}, "* ]] && rm -f "$note"
+    fi
 }
 # Why the watchdog stopped this script, if it did.
 stopped() {
@@ -210,7 +343,7 @@ if [[ ${#command[@]} -eq 0 ]]; then
     fi
 
     echo "building…"
-    swift build --build-tests > /dev/null 2>&1 || { echo "the build failed: run swift build --build-tests"; exit 1; }
+    swift build --build-tests > /dev/null 2>&1 8>&- || { echo "the build failed: run swift build --build-tests"; exit 1; }
     bin=$(swift build --show-bin-path)
     bundle="$bin/VibeSwitcherPackageTests.xctest/Contents/MacOS/VibeSwitcherPackageTests"
     helper="$(dirname "$(xcrun --find swift)")/../libexec/swift/pm/swiftpm-testing-helper"
@@ -267,19 +400,59 @@ memory_stop=$((memory_floor / 2))
     rm -r "$scratch" "$tool_scratch" < /dev/null 2>/dev/null
 ) &
 watchdog=$!
+# Out of the job table: bash would print its whole text once it's killed. Its end is waited for by pid (`stop`).
+disown "$watchdog"
 
-# A busy loop that checks, between rounds, that this script and its owners are still there and its time isn't up.
+# A busy loop that checks, between rounds, that this script, the top-up and its owners are still there and its time
+# isn't up. The fake burner's sleeps instead.
+work='for ((i = 0; i < 200000; i++)); do :; done'
+[[ $fake_burner -eq 1 ]] && work='sleep 0.1'
 burn='end=$((SECONDS + $1)); shift
 while [[ $SECONDS -lt $end ]]; do
     for pid in "$@"; do kill -0 "$pid" 2>/dev/null || exit 0; done
-    for ((i = 0; i < 200000; i++)); do :; done
+    '"$work"'
 done'
-for ((n = 0; n < load; n++)); do
-    bash -c "$burn" burner "$max_time" "$script" "${owners[@]}" &
-    burners+=($!)
-    echo $! >> "$pid_file"
-done
-echo "burning $load of $cores cores (pids in $pid_file); load $(sysctl -n vm.loadavg)"
+# The top-up: every $tick seconds, as many busy loops as the others' load leaves short of --load. The others' load is
+# the 1-minute load less its loops' share of it, which the kernel averages as it does the load (every 5 s, decaying
+# over a minute), so the share is kept the same way; a loop started or stopped shows in the load only bit by bit, and
+# without its share's lag the top-up would chase its own loops. The live loops' pids go in $pid_file (rewritten at each
+# change), the loops summed over its looks in $scratch/loops ("SUM LOOKS"), each change said.
+loops_file=$scratch/loops
+(
+    trap - INT TERM
+    # Its own pid (/bin/bash 3.2 has no BASHPID): the parent of a shell it starts.
+    me=$(exec /bin/sh -c 'echo $PPID') live=() share=0 sum=0 looks=0
+    decay=$(awk -v t="$tick" 'BEGIN { printf "%.6f", exp(-t / 60) }')
+    while kill -0 "$script" 2>/dev/null; do
+        now=$(one_minute)
+        want=$(awk -v n="$load" -v l="$now" -v s="$share" 'BEGIN { o = l - s; if (o < 0) o = 0; w = int(n - o + 0.5);
+            if (w < 0) w = 0; if (w > n) w = n; print w }')
+        before=${#live[@]}
+        while [[ ${#live[@]} -lt $want ]]; do
+            bash -c "$burn" burner "$max_time" "$script" "$me" "${owners[@]}" 8>&- &
+            live+=($!)
+        done
+        while [[ ${#live[@]} -gt $want ]]; do
+            last=${live[${#live[@]} - 1]}
+            kill "$last" 2>/dev/null
+            wait "$last" 2>/dev/null
+            unset "live[${#live[@]}-1]"
+        done
+        if [[ ${#live[@]} -ne $before || $looks -eq 0 ]]; then
+            printf '%s\n' ${live[@]+"${live[@]}"} > "$pid_file.new" && mv "$pid_file.new" "$pid_file"
+            echo "busy loops: ${#live[@]} (1-minute load $now, target $load, on $cores cores)"
+        fi
+        sum=$((sum + ${#live[@]})) looks=$((looks + 1))
+        echo "$sum $looks" > "$loops_file"
+        share=$(awk -v s="$share" -v k="${#live[@]}" -v d="$decay" 'BEGIN { printf "%.4f", s * d + k * (1 - d) }')
+        sleep "$tick"
+    done
+) &
+burners+=($!)
+disown "$!"
+echo "topping the load up to $load on $cores cores (pids in $pid_file); load $(sysctl -n vm.loadavg)"
+# Its first look before the runs start: the loops it starts then are running when they do.
+for _ in $(seq 1 100); do [[ -s $loops_file ]] && break; sleep 0.1; done
 
 # Run N's TMPDIR: run 1's long, the others' short.
 tmpdir() {
@@ -300,7 +473,7 @@ started=$(date +%s)
 failed=0
 if [[ ${#command[@]} -gt 0 ]]; then
     # In the background so that a signal reaches the trap at once, not when the command is done.
-    "${command[@]}" &
+    "${command[@]}" 8>&- &
     tests+=($!)
     echo $! >> "$scratch/pids"
     wait "${tests[0]}"
@@ -311,7 +484,7 @@ else
         mkdir -p "$(tmpdir "$run")" "$(home "$run")"
         args=(--test-bundle-path "$bundle")
         [[ -n $filter ]] && args+=(--filter "$filter")
-        HOME="$(home "$run")" CFFIXED_USER_HOME="$(home "$run")" with_tmpdir "$(tmpdir "$run")/" "$helper" "${args[@]}" "$bundle" --testing-library swift-testing > "$logs/run-$run.log" 2>&1 &
+        HOME="$(home "$run")" CFFIXED_USER_HOME="$(home "$run")" with_tmpdir "$(tmpdir "$run")/" "$helper" "${args[@]}" "$bundle" --testing-library swift-testing > "$logs/run-$run.log" 2>&1 8>&- &
         tests+=($!)
         echo $! >> "$scratch/pids"
     done
@@ -337,6 +510,12 @@ else
     done
 fi
 tests=()
+# The load ends with the runs: no look of the top-up's comes after what follows.
+stop "${burners[@]}"
+burners=()
+read -r sum looks < "$loops_file" 2>/dev/null
+echo "busy loops: $(awk -v s="${sum:-0}" -v n="${looks:-0}" 'BEGIN { printf "%.1f", n ? s / n : 0 }') on average" \
+    "(target load $load, over ${looks:-0} looks every $tick s)"
 echo "took $(($(date +%s) - started)) s; load $(sysctl -n vm.loadavg); lowest free disk $(cat "$scratch/disk-min" 2>/dev/null) MB;" \
     "$(sysctl -n vm.swapusage | sed -E 's/  +/ /g')"
 if [[ -e $scratch/disk-low ]]; then

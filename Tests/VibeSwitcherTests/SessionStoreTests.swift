@@ -11,8 +11,10 @@ struct SessionStoreTests {
     private let stateDir = scratchRoot.appendingPathComponent("store-tests-\(UUID().uuidString)")
 
     /// A working agent and one whose turn is over with a background shell still running (its age is in the detail).
-    /// `readable`: whether the process table can be read at the time.
-    private func store(started: Date, readable: @escaping () -> Bool = { true }) throws -> SessionStore {
+    /// `readable`: whether the process table can be read at the time. `inTerminal`: a third agent, in Terminal.app (a
+    /// stand-in that has no tabs). `ledgers`: writes the activity ledgers.
+    private func store(started: Date, readable: @escaping () -> Bool = { true }, inTerminal: Bool = false,
+                       ledgers: LedgerWriter = LedgerWriter { _ in }) throws -> SessionStore {
         try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
         let now = Date().timeIntervalSince1970
         var working = HookState(agent: .claude, tty: "ttys970", lastEvent: "PreToolUse", lastEventAt: now - 30)
@@ -25,17 +27,22 @@ struct SessionStoreTests {
         finished.agentPid = 971
         try finished.save(to: stateDir.appendingPathComponent("ttys971.json"))
         let launched = started.addingTimeInterval(-3600)
-        let procs = [
+        var procs = [
             ProcInfo(pid: 960, ppid: 1, tty: nil, comm: "vibeswitcher-hos", startTime: launched, agent: nil),
             ProcInfo(pid: 970, ppid: 960, tty: "ttys970", comm: "claude", startTime: launched, agent: .claude),
             ProcInfo(pid: 971, ppid: 960, tty: "ttys971", comm: "claude", startTime: launched, agent: .claude),
             ProcInfo(pid: 972, ppid: 971, tty: "ttys971", comm: "zsh", startTime: started.addingTimeInterval(-5), agent: nil),
         ]
+        if inTerminal {
+            procs += [ProcInfo(pid: 950, ppid: 1, tty: nil, comm: "Terminal", startTime: launched, agent: nil),
+                      ProcInfo(pid: 973, ppid: 950, tty: "ttys973", comm: "claude", startTime: launched, agent: .claude)]
+        }
         let table = Dictionary(uniqueKeysWithValues: procs.map { ($0.pid, $0) })
         let dir = stateDir
         return SessionStore(scanner: SessionScanner(
             processes: { readable() ? table : nil }, stateDir: { dir }, cwd: { _ in "/tmp/store-tests" },
-            arguments: { $0.pid == 972 ? ["/bin/zsh", "-c", "source /h/.claude/shell-snapshots/a.sh && eval 'npm run dev' < /dev/null"] : [] }))
+            arguments: { $0.pid == 972 ? ["/bin/zsh", "-c", "source /h/.claude/shell-snapshots/a.sh && eval 'npm run dev' < /dev/null"] : [] }),
+            bridge: .init(tabs: { .tabs([:]) }, screens: { _ in [:] }), ledgers: ledgers)
     }
 
     /// The store's time: it moves only when the test says, however long the scans take.
@@ -99,6 +106,111 @@ struct SessionStoreTests {
         #expect(reads.names(main: false).filter { $0 == "presence" }.count >= 2)
         #expect(reads.names(main: false).filter { $0 == "desktops" }.count >= 2)
         #expect(reads.names(main: true) == [])
+    }
+
+    /// Terminal being the app in front is asked on the scan's queue (`TerminalBridge.front`, the frontmost app's bundle
+    /// id: a synchronous XPC), and the ledger is written on its writer's queue: both were done on the main thread as
+    /// each scan landed (hang-20261028-171900: 836 of 2366 samples). A lookup or a write that takes 5 s holds neither
+    /// a refresh nor a scan's landing.
+    @Test func slowAppLookupsAndLedgerWritesDontHoldTheMainThread() async throws {
+        AppStatus.enabled = false
+        defer { try? FileManager.default.removeItem(at: stateDir) }
+        let clock = Clock()
+        let written = Written()
+        let writes = Gate()
+        let store = try store(started: clock.now, inTerminal: true, ledgers: LedgerWriter { ledger in
+            written.add(ledger)
+            writes.wait()
+            written.finish()
+        })
+        store.clock = { clock.now }
+        let reads = Reads()
+        let lookups = Gate()
+        store.terminalFront = { reads.add("front"); lookups.wait(); return (false, nil) }
+        // A failed run lets the scan and the writer go too.
+        defer { lookups.open(); writes.open() }
+
+        // The scan waits on its lookup; the main thread doesn't. (Its clock is 10 s past the store's start: the
+        // first save is a minute after that.)
+        clock.advance(10)
+        store.refresh()
+        #expect(await until { reads.names(main: false) == ["front"] })
+        #expect(store.scansApplied == 0)
+        lookups.open()
+        #expect(await until { store.scansApplied == 1 })
+        #expect(reads.names(main: true) == [])
+
+        // Scans every 20 s: at 70 s the ledger is saved, and that scan lands while its write still waits.
+        for _ in 0..<3 {
+            clock.advance(20)
+            try await refreshAndSettle(store)
+        }
+        // Its write begins on the writer's queue, after the scan landed.
+        #expect(await until { written.ledgers.count == 1 })
+        #expect(written.finished == 0)
+        // Saved again at 130 s and 190 s while it waits: the later takes the earlier's place, written after it.
+        for _ in 0..<6 {
+            clock.advance(20)
+            try await refreshAndSettle(store)
+        }
+        #expect(written.ledgers.count == 1)
+        writes.open()
+        #expect(await until { written.finished == 2 })
+        // At quit: written before it returns.
+        store.saveLedger()
+        let ledgers = written.ledgers
+        #expect(ledgers.count == 3)
+        #expect(ledgers.count == 3 && ledgers[1] == store.today && ledgers[2] == store.today)
+        #expect(ledgers.first.map { $0.agentsWorking < store.today.agentsWorking } == true)
+        #expect(written.onMain == 0)
+        #expect(reads.names(main: true) == [])
+    }
+
+    /// Ledgers written, and whether on the main thread.
+    final class Written: @unchecked Sendable {
+        private let lock = NSLock()
+        private var all: [ActivityLedger] = []
+        private var main = 0
+        private var done = 0
+
+        func add(_ ledger: ActivityLedger) {
+            lock.lock()
+            all.append(ledger)
+            if Thread.isMainThread { main += 1 }
+            lock.unlock()
+        }
+
+        func finish() { lock.lock(); done += 1; lock.unlock() }
+        var ledgers: [ActivityLedger] { lock.lock(); defer { lock.unlock() }; return all }
+        var onMain: Int { lock.lock(); defer { lock.unlock() }; return main }
+        var finished: Int { lock.lock(); defer { lock.unlock() }; return done }
+    }
+
+    /// Holds whoever waits on it off the main thread until the test opens it (a slow writer or lookup: 5 s and more);
+    /// open, it holds no one. It never opens by itself while the test still looks (a 60 s limit did, on a loaded Mac:
+    /// the scan landed before the test checked it hadn't), only past the hang guard. Waited on on the main thread (a
+    /// run without the fix) it fails the test and holds nothing, so that run ends.
+    final class Gate: @unchecked Sendable {
+        private let lock = NSLock()
+        private let group = DispatchGroup()
+        private var opened = false
+        init() { group.enter() }
+
+        func wait() {
+            guard !Thread.isMainThread else {
+                Issue.record("Waited on a slow lookup or write on the main thread")
+                return
+            }
+            if group.wait(timeout: .now() + hangGuard) == .timedOut { Issue.record("The gate was never opened") }
+        }
+
+        func open() {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !opened else { return }
+            opened = true
+            group.leave()
+        }
     }
 
     /// What was read, and on which thread.
