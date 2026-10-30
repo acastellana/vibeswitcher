@@ -770,8 +770,9 @@ struct LeadAdvanceTests: LeadTeamFixture {
         let kept = lead.call("update_task", ["task": "add-b", "status": "kept", "reason": "main's suite fails 2 pre-existing tests"])
         #expect(!kept.isError && kept.text.contains("state kept"), "\(kept.text)")
         FileManager.default.createFile(atPath: release, contents: nil)
-        // The loop's one word on it, whatever it did.
-        #expect(advancing.until { reports(runtime).contains { $0.contains("add-b") } })
+        // The loop's one word on its merge, whatever it did: merged, failed, or refused (the start's report names add-b too).
+        func aboutMerge(_ report: String) -> Bool { ["Merged add-b", "Merge of add-b", "merge add-b"].contains { report.contains($0) } }
+        #expect(advancing.until { reports(runtime).contains(where: aboutMerge) })
         advancing.settle()
         let after = try #require(task("add-b", root))
         #expect(after.status == .kept && after.keptBecause == "main's suite fails 2 pre-existing tests" && after.merged == nil, "\(after.status) \(after.keptBecause ?? "")")
@@ -779,7 +780,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(head("main", root) == main)
         #expect(!Git.run(["show", "main:b.txt"], in: root).ok)
         #expect(toWorker("add-b", root, runtime).isEmpty, "\(toWorker("add-b", root, runtime))")
-        let told = reports(runtime).filter { $0.contains("add-b") }
+        let told = reports(runtime).filter(aboutMerge)
         #expect(told.count == 1 && told[0].contains("Didn't merge add-b") && told[0].contains("kept"), "\(told)")
         #expect(!told.contains { $0.contains("Merged add-b") || $0.contains("Merge of add-b failed") }, "\(told)")
         // And merge itself says the same when the lead calls it.

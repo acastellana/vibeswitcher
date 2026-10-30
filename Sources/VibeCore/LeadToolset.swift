@@ -2200,6 +2200,7 @@ public final class LeadToolset: MCPToolset {
             let unshown = MergeRerun.unshown(plan, rerun: again)
             guard unshown.isEmpty else {
                 let names = unshown.prefix(8).joined(separator: ", ")
+                if let changed = changedMeanwhile(slug, since: task, tests: "failed") { throw changed }
                 try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Tests fail rebased onto \(base): \(Self.clip(plan.tests.joined(separator: ", "), 200))"))
                 throw Problem(text: testFailure(failed, slug: slug, base: base, commit: commit, onto: current)
                               + "\nIts rerun of the failing tests exited 0 but didn't show \(names) passing (a filter that matched nothing), so it doesn't count.")
@@ -2229,6 +2230,7 @@ public final class LeadToolset: MCPToolset {
                           + (saved.map { "The output so far: \($0). " } ?? "(The output couldn't be saved.) ")
                           + "If they only need longer, raise test_timeout_min (\(Self.gb(workflow.testTimeoutMinutes)) in workflow.md) with configure; else have the worker find what hangs.")
         case .conflict:
+            if let changed = changedMeanwhile(slug, since: task, tests: "didn't run: the branch conflicts with \(base)") { throw changed }
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Conflicts with \(base): the branch needs bringing up to date."))
             throw Problem(text: "\(slug) conflicts with \(base). " + Self.bringUpToDate(base))
         case .failed(let output):
@@ -2236,6 +2238,7 @@ public final class LeadToolset: MCPToolset {
             let tests = TestFailures(output: output).tests.joined(separator: ", ")
             let last = tests.isEmpty ? output.split(whereSeparator: \.isNewline).last.map(String.init) ?? "" : tests
             let what = output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker) ? "regression_command fails" : "Tests fail"
+            if let changed = changedMeanwhile(slug, since: task, tests: "failed") { throw changed }
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "\(what) rebased onto \(base)" + (last.isEmpty ? "." : ": \(last.prefix(200))")))
             throw Problem(text: testFailure(output, slug: slug, base: base, commit: commit, onto: current))
         case .error(let text):
@@ -2245,6 +2248,8 @@ public final class LeadToolset: MCPToolset {
         if ShellCancel.current?.isCancelled == true {
             throw Problem(text: "The merge of \(slug) was cancelled after its checks passed; nothing was merged, and \(slug) stays as it was.")
         }
+        // Held, re-planned, folded or abandoned by the lead while the tests ran: that word stands, and it doesn't land.
+        if let changed = changedMeanwhile(slug, since: task, tests: "passed") { throw changed }
         switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tested, from: current) }) {
         case .merged:
             try vault.setHead(tested, root: root, branch: base)
@@ -3339,6 +3344,24 @@ public final class LeadToolset: MCPToolset {
         guard !changed.isEmpty else { return }
         let now = changed.map { $0.value.isEmpty ? "\($0.key) is now empty" : "\($0.key) is now `\($0.value)`" }.joined(separator: "; ")
         throw Problem(text: "\(not): workflow.md's \(now), not what you last set with configure. Its commands run as you, its policy and limits hold the team, and any session of the team can write the file: a worker may have changed it. If you or the user did, set it again with configure (as it should read) and try again; if not, set it back with configure and tell the user.")
+    }
+
+    /// A merge's test run takes minutes, in which update_task answers as ever: the lead may hold the task (kept,
+    /// blocked), re-plan, fold or abandon it meanwhile, and that word stands over the run's result, which was started
+    /// on a task in another state. This is the refusal when `slug`'s state isn't `started`'s any more (or the task is
+    /// gone from the board): the task stays as the lead set it, nothing is written to it, and nothing lands. 2026-10-30,
+    /// build-app-sh-install: set kept while auto_advance's merge ran its tests; the run failed, merge set it failed,
+    /// and the loop sent its worker the output and put it back to work, kept reason and all.
+    private func changedMeanwhile(_ slug: String, since started: LeadTask, tests: String) -> Problem? {
+        guard let now = store.load().task(slug) else {
+            return Problem(text: "Not merged: \(slug) was removed from the board while its tests ran (they \(tests)). Nothing was changed.")
+        }
+        guard now.status != started.status else { return nil }
+        let why = now.status == .kept ? now.keptBecause : now.isAbandoned ? now.abandonedBecause : now.status == .folded ? now.foldedInto.map { "into \($0)" } : nil
+        let state = Self.shownState(now) + (why.map { " (\($0))" } ?? "")
+        try? store.appendProgress("Didn't merge \(slug): set \(state) while its tests ran (they \(tests)); it stays \(Self.shownState(now))")
+        return Problem(text: "Not merged: \(slug) was set \(state) while its tests ran (they \(tests)), and that stands: it stays \(Self.shownState(now)), its worker wasn't told, and nothing was changed."
+                       + (now.status == .kept ? " If it's wanted after all, update_task(\(slug), status: planned) first, and say why with record_decision." : ""))
     }
 
     private func setStatus(_ slug: String, _ status: LeadTask.Status, setback: LeadSetback? = nil) throws {
