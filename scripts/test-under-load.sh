@@ -23,8 +23,10 @@
 # TestSupport.swift) and must leave it empty; what's left is named by prefix. Each run gets its own empty home too
 # (HOME and CFFIXED_USER_HOME), so nothing a test writes under ~ (~/.vibeswitcher, ~/.claude) reaches yours. Run 1's is long (about 130 characters, as
 # a Claude session's scratchpad is): the suite passes whatever TMPDIR is, sockets and names included. The runs start
-# the test bundle the way `swift test` does (swiftpm-testing-helper), directly: three `swift test` would take turns on
-# SwiftPM's lock on .build.
+# the test bundles the way `swift test` does (swiftpm-testing-helper), directly: three `swift test` would take turns on
+# SwiftPM's lock on .build. The bundles are whatever the build produced: Swift Build's (the default since Swift 6.4) one
+# per test target, run in turn, or the deprecated native build system's one for the package; a bundle missing, one not
+# the package's, or a run in which no test ran (a filter matching nothing) fails the run rather than pass it.
 # Logs: .build/test-under-load/run-N.log. Everything else (the TMPDIRs, the burner) is gone when it exits, Ctrl-C too.
 # scripts/test-under-load-selfcheck.sh shows the cleanup and the refusals work.
 #
@@ -344,11 +346,41 @@ if [[ ${#command[@]} -eq 0 ]]; then
 
     echo "building…"
     swift build --build-tests > /dev/null 2>&1 8>&- || { echo "the build failed: run swift build --build-tests"; exit 1; }
-    bin=$(swift build --show-bin-path)
-    bundle="$bin/VibeSwitcherPackageTests.xctest/Contents/MacOS/VibeSwitcherPackageTests"
+    bin=$(swift build --show-bin-path 2>/dev/null 8>&-)
+    [[ -d $bin ]] || { echo "no build folder at ${bin:-?} (swift build --show-bin-path)"; exit 1; }
     helper="$(dirname "$(xcrun --find swift)")/../libexec/swift/pm/swiftpm-testing-helper"
-    [[ -x $helper && -x $bundle ]] || { echo "no test runner at $helper, or no test bundle at $bundle"; exit 1; }
+    [[ -x $helper ]] || { echo "no test runner at $helper"; exit 1; }
+    # The test bundles the build produced, as `swift test` would run them: the deprecated native build system's one
+    # <Package>PackageTests.xctest holding every test target, or Swift Build's (the default since Swift 6.4) one
+    # <Target>.xctest per test target. Which is in $bin says which; the package's test targets (swift package describe)
+    # say what must be there, and a bundle missing or unexpected stops the run rather than drop or add tests.
+    describe=$(swift package describe --type json 2>/dev/null 8>&-) || { echo "swift package describe failed: the test targets are unknown"; exit 1; }
+    package=$(jq -r '.name' <<< "$describe")
+    targets=$(jq -r '.targets[] | select(.type == "test") | .name' <<< "$describe" | sort)
+    [[ -n $package && -n $targets ]] || { echo "swift package describe names no package or no test target; nothing to run"; exit 1; }
+    bundles=()
+    if [[ -d $bin/${package}PackageTests.xctest ]]; then
+        bundles=("$bin/${package}PackageTests.xctest")
+        layout="one bundle, ${package}PackageTests.xctest (the native build system)"
+    else
+        for target in $targets; do bundles+=("$bin/$target.xctest"); done
+        layout="one bundle per test target ($(tr '\n' ' ' <<< "$targets" | sed 's/ $//'); Swift Build)"
+    fi
+    for bundle in "${bundles[@]}"; do
+        executable=$bundle/Contents/MacOS/$(basename "$bundle" .xctest)
+        made=$(ls -d "$bin"/*.xctest 2>/dev/null | tr '\n' ' ')
+        [[ -x $executable ]] || { echo "no test bundle at $executable: the build made ${made:-none}"; exit 1; }
+    done
+    other=$(ls -d "$bin"/*.xctest 2>/dev/null | grep -vxF -f <(printf '%s\n' "${bundles[@]}"))
+    [[ -z $other ]] || { echo "unexpected test bundles beside the package's in $bin: $(tr '\n' ' ' <<< "$other")"; echo "(the package's: $layout); remove them or run swift build --build-tests again"; exit 1; }
+    echo "test bundles: $layout"
+    # Where a bundle finds XCTest and Testing (its own folder's dylibs too), as `swift test` tells dyld.
+    platform=$(xcrun --sdk macosx --show-sdk-platform-path 2>/dev/null)
+    [[ -d $platform/Developer/Library/Frameworks ]] || { echo "no macOS platform at ${platform:-?} (xcrun --show-sdk-platform-path): XCTest.framework can't be found"; exit 1; }
+    frameworks="$platform/Developer/Library/Frameworks:$platform/Developer/Library/PrivateFrameworks"
+    libraries="$bin:$platform/Developer/usr/lib"
     failures="$bin/vibeswitcher-mcp"
+    [[ -x $failures ]] || { echo "no $failures to name a failed run's tests with"; exit 1; }
     mkdir -p "$logs"
     rm -f "$logs"/run-*.log
 fi
@@ -480,24 +512,72 @@ if [[ ${#command[@]} -gt 0 ]]; then
     failed=$?
     echo "${command[*]} exited $failed"
 else
+    # Run N: each test bundle in turn, the way `swift test` runs them, into the run's log ("=== Bundle" before each,
+    # "=== Bundle exited S" after); its status is the first failing bundle's, and the bundles after it still run (their
+    # tests are wanted too). Swift Testing exits 69 (EX_UNAVAILABLE) saying nothing when the filter matches none of a
+    # bundle's tests: no test of that bundle's, not a failure (a run in which no bundle ran a test fails below).
+    run_bundles() {
+        local run=$1 status=0 bundle name executable args log=$logs/run-$1.log before code
+        for bundle in "${bundles[@]}"; do
+            name=$(basename "$bundle" .xctest)
+            executable=$bundle/Contents/MacOS/$name
+            args=(--test-bundle-path "$executable")
+            [[ -n $filter ]] && args+=(--filter "$filter")
+            echo "=== $name" >> "$log"
+            before=$(wc -c < "$log")
+            DYLD_FRAMEWORK_PATH=$frameworks DYLD_LIBRARY_PATH=$libraries \
+                "$helper" "${args[@]}" "$executable" --testing-library swift-testing >> "$log" 2>&1
+            code=$?
+            if [[ $code -eq 69 && $(wc -c < "$log") -eq $before ]]; then
+                echo "=== no test of $name matches" >> "$log"
+                code=0
+            fi
+            echo "=== $name exited $code" >> "$log"
+            [[ $status -eq 0 ]] && status=$code
+        done
+        return $status
+    }
     for run in $(seq 1 "$runs"); do
         mkdir -p "$(tmpdir "$run")" "$(home "$run")"
-        args=(--test-bundle-path "$bundle")
-        [[ -n $filter ]] && args+=(--filter "$filter")
-        HOME="$(home "$run")" CFFIXED_USER_HOME="$(home "$run")" with_tmpdir "$(tmpdir "$run")/" "$helper" "${args[@]}" "$bundle" --testing-library swift-testing > "$logs/run-$run.log" 2>&1 8>&- &
+        : > "$logs/run-$run.log"
+        HOME="$(home "$run")" CFFIXED_USER_HOME="$(home "$run")" with_tmpdir "$(tmpdir "$run")/" run_bundles "$run" 8>&- &
         tests+=($!)
         echo $! >> "$scratch/pids"
     done
 
+    counts=()
     for run in $(seq 1 "$runs"); do
         status=0
         wait "${tests[$((run - 1))]}" || status=$?
-        tail=$(grep -E "Test run with" "$logs/run-$run.log" | tail -1 | sed -E 's/\x1B\[[0-9;]*m//g')
+        # Each bundle's closing line ("✔ Test run with 12 tests in 3 suites passed after 3.1 seconds."; a test's own
+        # output never starts with the mark); the run's tests are their sum, and a bundle none of whose tests matched
+        # has no closing line.
+        results=$(sed -E 's/\x1B\[[0-9;]*m//g' "$logs/run-$run.log" | grep -E "^[^ ]+ Test run with [0-9]+ tests? ")
+        lines=$(grep -c . <<< "$results")
+        unmatched=$(grep -c "^=== no test of .* matches$" "$logs/run-$run.log")
+        count=$(grep -oE "Test run with [0-9]+" <<< "$results" | awk '{ s += $4 } END { print s + 0 }')
+        counts+=("$count")
+        if [[ ${#bundles[@]} -eq 1 ]]; then
+            tail=$(tail -1 <<< "$results")
+        else
+            tail="$count tests over ${#bundles[@]} bundles"
+        fi
         echo "run $run$([[ $run -eq 1 ]] && echo " (long TMPDIR)"): exit $status  ${tail:-(no result line)}  ($logs/run-$run.log)"
         if [[ $status -ne 0 ]]; then
             failed=1
             summary=$("$failures" --test-failures "$logs/run-$run.log")
             echo "${summary:-the run failed without naming a test; see the log}" | sed 's/^/    /'
+        fi
+        if [[ $((lines + unmatched)) -ne ${#bundles[@]} ]]; then
+            failed=1
+            echo "    $lines of ${#bundles[@]} bundles gave a result line$([[ $unmatched -gt 0 ]] && echo " ($unmatched matched no test)"): one crashed or was stopped; see the log"
+        fi
+        if [[ $count -eq 0 ]]; then
+            failed=1
+            echo "    no test ran${filter:+: nothing matches -f '$filter'} (a filter is a regular expression over Target.Suite/test, as swift test --filter's)"
+        fi
+        if [[ ${#bundles[@]} -gt 1 && ( $status -ne 0 || $((lines + unmatched)) -ne ${#bundles[@]} || $count -eq 0 ) ]]; then
+            sed -E 's/\x1B\[[0-9;]*m//g' "$logs/run-$run.log" | grep -E "^=== |^[^ ]+ Test run with [0-9]+ tests? " | sed 's/^/    /'
         fi
         # What the run left in its TMPDIR, by prefix (the name without its UUID or random tail).
         left=$(ls -A "$(tmpdir "$run")")
@@ -526,5 +606,7 @@ if [[ -e $scratch/memory-low ]]; then
     failed=1
     echo "STOPPED: free memory fell to $(cat "$scratch/memory-low") % (under $memory_stop %); the load and the runs were ended"
 fi
-[[ $failed -eq 0 && ${#command[@]} -eq 0 ]] && echo "all $runs runs passed and left nothing behind"
+if [[ $failed -eq 0 && ${#command[@]} -eq 0 ]]; then
+    echo "all $runs runs passed and left nothing behind ($(printf '%s\n' "${counts[@]}" | sort -un | paste -sd, - | sed 's/,/, /g') tests each)"
+fi
 exit $failed
