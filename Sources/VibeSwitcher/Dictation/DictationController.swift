@@ -105,7 +105,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     private let now: () -> Date
     /// A Claude run in this launch heard something (its level cursor coloured, or text taken): the microphone works, so
     /// a later run that hears nothing isn't said to be the microphone's doing.
-    private var claudeHeard = false
+    private(set) var claudeHeard = false
     /// Called once the Claude run under way has ended (a message sent over it goes then): true when Claude's box is as
     /// it was, false when the run said something's left there.
     private var afterClaude: [(Bool) -> Void] = []

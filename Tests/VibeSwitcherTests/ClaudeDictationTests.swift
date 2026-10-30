@@ -523,7 +523,10 @@ struct ClaudeDictationTests {
         let clock = Clock()
         let controller = dictation(h, now: clock.now)
         controller.press(h.key, agent: .claude) { "" }
-        try await h.waitFor { controller.listening }
+        try await h.waitFor { controller.listening && controller.claudeHeard }
+        // Quiet from here on: only what was heard while held says it isn't the flat case.
+        h.tell(["op": "voice", "loud": false])
+        try await h.waitFor { h.agent["loud"] as? Bool == false }
         controller.release()
         try await h.waitFor { h.agent["recording"] as? String == "processing" }
         clock.ahead += ClaudeVoiceRun.quietAfterRelease + 0.1
