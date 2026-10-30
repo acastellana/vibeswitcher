@@ -354,6 +354,7 @@ if [[ ${#command[@]} -eq 0 ]]; then
     # <Package>PackageTests.xctest holding every test target, or Swift Build's (the default since Swift 6.4) one
     # <Target>.xctest per test target. Which is in $bin says which; the package's test targets (swift package describe)
     # say what must be there, and a bundle missing or unexpected stops the run rather than drop or add tests.
+    command -v jq > /dev/null || { echo "no jq on PATH (macOS 15 and later have /usr/bin/jq): the package's test targets can't be read"; exit 1; }
     describe=$(swift package describe --type json 2>/dev/null 8>&-) || { echo "swift package describe failed: the test targets are unknown"; exit 1; }
     package=$(jq -r '.name' <<< "$describe")
     targets=$(jq -r '.targets[] | select(.type == "test") | .name' <<< "$describe" | sort)
