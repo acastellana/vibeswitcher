@@ -55,7 +55,7 @@ wait_gone() {
     done
     return 1
 }
-# $1 of $2's pids is one of $3's.
+# $1 is one of the pids in $2.
 among() { local p; for p in $2; do [[ $p == "$1" ]] && return 0; done; return 1; }
 
 old=$(running)
