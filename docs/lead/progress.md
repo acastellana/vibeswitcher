@@ -2,3 +2,7 @@
 - 2026-10-30 20:57 Planned build-app-sh-install: build-app.sh --install restarts the app, or says plainly that it didn't (review audit)
 - 2026-10-30 20:57 Started a worker on build-app-sh-install
 - 2026-10-30 20:57 Automatically (auto_advance): Started a worker on build-app-sh-install (build-app.sh --install restarts the app, or says plainly that it didn't).
+- 2026-10-30 21:16 Automatically (auto_advance): Started the audit of build-app-sh-install at 72cc3757 (Its review is audit).
+- 2026-10-30 21:17 Planned test-under-load-sh: test-under-load.sh's own runner finds the per-target test bundles of Swift's new build system
+- 2026-10-30 21:17 Started a worker on test-under-load-sh
+- 2026-10-30 21:17 Automatically (auto_advance): Started a worker on test-under-load-sh (test-under-load.sh's own runner finds the per-target test bundles of Swift's new build system).
