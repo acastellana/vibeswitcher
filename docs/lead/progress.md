@@ -2160,3 +2160,6 @@
 - 2026-10-30 19:40 Merged readme-one-time-switch: README: one-time switch for clones made before main became the only branch; scripts still name project-lead
 - 2026-10-30 19:40 Automatically (auto_advance): Merged readme-one-time-switch (README: one-time switch for clones made before main became the only branch; scripts still name project-lead) into main at e2095efc, on its passing audit and the full test run.
 - 2026-10-30 19:40 Automatically (auto_advance): Cleaned up readme-one-time-switch; ended pid 47970 (Worker: README: one-time switch for clones made before main became the only branch; scripts still name project-lead) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-10-31 00:01 Planned app-memory-grows-28: App memory grows ~28 MB an hour (footprint 154 → 186 MB in a day, peak 328 MB)
+- 2026-10-31 00:01 Started a worker on app-memory-grows-28
+- 2026-10-31 00:01 Automatically (auto_advance): Started a worker on app-memory-grows-28 (App memory grows ~28 MB an hour (footprint 154 → 186 MB in a day, peak 328 MB)).
