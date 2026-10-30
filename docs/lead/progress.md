@@ -2114,3 +2114,5 @@
 - 2026-10-30 11:31 Abandoned fix-the-flaky-test-8: A withKnownIssue test, counted by the old gate's misread and by the 11:28 crash bystanders (see fix-the-flaky-test-7). Never really failed.
 - 2026-10-30 11:40 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-10-30 11:49 Merged spaceholdtests-crashes: SpaceHoldTests crashes the whole test process (unowned self after dealloc in Box) (no audit: review none)
+- 2026-10-30 11:49 Automatically (auto_advance): Merged spaceholdtests-crashes (SpaceHoldTests crashes the whole test process (unowned self after dealloc in Box)) into main at 6f8ded17, review none: on its worker's done report on b13b5e8a and the full test run.
+- 2026-10-30 11:55 Merged flaky: Flaky: somethingTypedInTheTerminalMeanwhileIsLeftAlone times out under load (3 times now) (no audit: review none)
