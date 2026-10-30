@@ -370,10 +370,13 @@ struct ClaudeDictationTests {
         return controller
     }
 
-    /// The real time, moved on by the test.
+    /// The real time, moved on by the test; `held`, it stands still there (but for `ahead`): a run's waits (its 3 s for
+    /// Claude to start) run out only when the test moves it on, however slow a loaded Mac is to show what it waits on.
     final class Clock: @unchecked Sendable {
         var ahead: TimeInterval = 0
-        func now() -> Date { Date().addingTimeInterval(ahead) }
+        var held: Date?
+        init(held: Bool = false) { self.held = held ? Date() : nil }
+        func now() -> Date { (held ?? Date()).addingTimeInterval(ahead) }
     }
 
     /// How the last run ended, as app.log says.
@@ -606,10 +609,12 @@ struct ClaudeDictationTests {
     @Test func offItsSaidAndTurningItOnTypesVoiceHoldAfterTheClick() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
-        let controller = dictation(h)
+        let clock = Clock(held: true)
+        let controller = dictation(h, now: clock.now)
         controller.press(h.key, agent: .claude) { "" }
-        // Its spaces typed in, as a terminal with /voice off takes them.
+        // Its spaces typed in, as a terminal with /voice off takes them; then its 3 s for Claude to start are up.
         try await h.waitFor { self.input(h).count >= 3 }
+        clock.ahead += ClaudeVoiceRun.startWithin
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.notice?.text == ClaudeVoiceRun.didntStart && controller.notice?.turnOn == true)
         // The spaces are gone, and nothing was sent or typed but them.
@@ -661,7 +666,8 @@ struct ClaudeDictationTests {
         // It never starts listening: the spaces go in, and then a word someone types.
         h.tell(["op": "voice", "mode": "hold", "warmup": 100000])
         try await h.waitFor { h.agent["warmup"] as? Int == 100000 }
-        let controller = dictation(h)
+        // Held: its 3 s for Claude to start never run out, so the spaces stay until the word goes in after them.
+        let controller = dictation(h, now: Clock(held: true).now)
         controller.press(h.key, agent: .claude) { "" }
         try await h.waitFor { self.input(h).count >= ClaudeVoiceScreen.warmupTyped }
         h.keys("x")
@@ -1038,9 +1044,11 @@ struct ClaudeDictationTests {
         defer { h.stop() }
         h.tell(["op": "voice", "mode": "off", "statusLine": true])
         try await h.waitFor { h.agent["statusLine"] as? Bool == true }
-        let controller = dictation(h)
+        let clock = Clock(held: true)
+        let controller = dictation(h, now: clock.now)
         controller.press(h.key, agent: .claude) { "" }
         try await h.waitFor { self.input(h).count > ClaudeVoiceScreen.warmupTyped }
+        clock.ahead += ClaudeVoiceRun.startWithin
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.notice?.text == ClaudeVoiceRun.didntStart && controller.notice?.turnOn == true, "\(String(describing: controller.notice))")
         try await h.waitFor { self.input(h) == "" }
@@ -1054,9 +1062,17 @@ struct ClaudeDictationTests {
         defer { h.stop() }
         h.tell(["op": "voice", "mode": "hold", "statusLine": true, "warmup": 100000])
         try await h.waitFor { h.agent["warmup"] as? Int == 100000 }
-        let controller = dictation(h)
+        let clock = Clock(held: true)
+        let controller = dictation(h, now: clock.now)
         controller.press(h.key, agent: .claude) { "" }
-        try await h.waitFor { self.input(h).count == ClaudeVoiceScreen.warmupTyped }
+        // Its warmup, as the run saw it (the two spaces kept, the repeats after them swallowed); then its 3 s are up.
+        try await h.waitFor {
+            let lines = Breadcrumbs.shared.lines
+            guard self.input(h).count == ClaudeVoiceScreen.warmupTyped,
+                  let began = lines.lastIndex(where: { $0.contains("dictation: Claude's began") }) else { return false }
+            return lines[began...].last { $0.contains("dictation: Claude's saw") }?.hasSuffix("saw warming up") == true
+        }
+        clock.ahead += ClaudeVoiceRun.startWithin
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.notice?.text == ClaudeVoiceRun.unclear(.warming) && controller.notice?.turnOn == false,
                 "\(String(describing: controller.notice))")
