@@ -2063,3 +2063,5 @@
 - 2026-10-30 09:36 Planned silence-the-mac-s: Silence the Mac's sound while dictation listens, then put it back
 - 2026-10-30 09:50 Audit of a-claude-dictation-that: incomplete, clean, round 1: 1 Important open, 3 Nit open
 - 2026-10-30 09:50 Automatically (auto_advance): Sent a-claude-dictation-that's worker the open Important findings a-claude-dictation-that:F1 from its audit at a4d3e232.
+- 2026-10-30 09:59 The worker on a-claude-dictation-that answered findings: a-claude-dictation-that:F1 fixed at bf6bfd2a: bf6bfd2. stopping() no longer ends clean on a read that shows nothing. 1. Dim words heard (different from the box's placeholder) count as recording or processing and get Esc; 2.1.312 shows them only in those states. 2. A cancelled run that saw Claude recording, with no Esc sent and no transcript landed, may still be processing out of sight. It gets one Esc only when the window's hooks say Claude isn't in a turn (new ClaudeVoiceSession.working, from C…
+- 2026-10-30 10:00 Automatically (auto_advance): Started the audit of a-claude-dictation-that at bf6bfd2a (An audit was started on it: its verdict decides).
