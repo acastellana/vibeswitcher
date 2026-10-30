@@ -258,7 +258,13 @@ struct HomeIsolationTests {
         let files = Agent.allCases.map { HookInstaller.configURL(for: $0, home: home.path) }
 
         func probe(_ mode: String) throws -> String {
-            let environment = ["HOME": home.path, "PATH": "/usr/bin:/bin", "VIBESWITCHER_INSTALLER_PROBE": mode]
+            var environment = ["HOME": home.path, "PATH": "/usr/bin:/bin", "VIBESWITCHER_INSTALLER_PROBE": mode]
+            // Where the bundle finds XCTest and Testing, as `swift test` told this process: Swift Build's per-target
+            // bundles (Swift 6.4's default layout) have no rpath to the platform's frameworks, so without these the
+            // child stops in dlopen before any test. Neither names a home.
+            for key in ["DYLD_FRAMEWORK_PATH", "DYLD_LIBRARY_PATH"] {
+                environment[key] = ProcessInfo.processInfo.environment[key]
+            }
             let (status, output) = try Self.run(helper, ["--test-bundle-path", bundle, bundle, "--testing-library", "swift-testing",
                                                          "--filter", "HomeIsolationTests/installerProbe"], environment: environment)
             #expect(status == 0, "\(output)")
