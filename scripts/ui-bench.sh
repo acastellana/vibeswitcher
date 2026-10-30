@@ -13,13 +13,14 @@
 #
 # scripts/ui-bench.sh [-b BINARY] [-B BASE] [-r ROUNDS] [-t PCT] [MINUTES] [--onscreen] [--ticking] [--transcript PATH]
 #   -b BINARY: the build judged (.build/debug/VibeSwitcher).  -B BASE: the base: a VibeSwitcher binary, or a git ref
-#   (project-lead) exported and built in this run's scratch folder under /tmp, outside the worktree, and removed on exit
+#   (main) exported and built in this run's scratch folder under /tmp, outside the worktree, and removed on exit
 #   (Ctrl-C too). Not under .build/: the export holds the ref's AGENTS.md and CLAUDE.md, and the lead's audit counts
 #   instructions files a worktree holds uncommitted (its verifier then starts with project settings off).
 #   -r ROUNDS: runs of each with -B (2).  -t PCT: how far over the base's instructions/s the branch may be (20).
 #   MINUTES: the idle phase (default 5). --onscreen: the window shows (without taking focus) instead of off screen.
 #   Logs: .build/ui-bench/{base,branch}-N.log, and the base's build-base.log (UI_BENCH_LOGS: another folder).
 set -euo pipefail
+[[ ${1-} == -h || ${1-} == --help ]] && { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
 source scripts/lib/bench-defaults.sh
@@ -102,7 +103,7 @@ failed=0
 if [[ -z $base ]]; then
     run branch-1 "$binary" "$@"
     failed=$status
-    echo "instructions/s not judged: give -B project-lead (or a base binary) to judge it against the base in the same run."
+    echo "instructions/s not judged: give -B main (or a base binary) to judge it against the base in the same run."
 else
     base_failed=0
     for round in $(seq 1 "$rounds"); do

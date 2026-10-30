@@ -34,7 +34,7 @@ when part of it still holds).
 |---|------|--------|--------|
 | 1 | The lead never writes code: no edits, no commits | brief LeadWorkflow.swift:776 | enforced by `LeadLaunch.deny(.lead)` (Edit, Write, git writes) |
 | 2 | The lead never pushes; main moves only when the user fast-forwards it | decisions 2026-10-17 13:28, 2026-10-20 16:19 | enforced by `LeadLaunch.deny` (git push, for every role) |
-| 3 | The base branch is the lead's (project-lead), workers start from it and merge into it | decision 2026-10-17 13:28 | enforced by `base_branch` and the vault's recorded head (`LeadBaseMovesTests`) |
+| 3 | The base branch is the lead's (main; project-lead until 2026-10-29), workers start from it and merge into it | decision 2026-10-17 13:28 | enforced by `base_branch` and the vault's recorded head (`LeadBaseMovesTests`) |
 | 4 | The lead's records live in docs/lead, committed by the tool server only | decision 2026-10-17 17:45 | enforced by `LeadRecords` and the workers' deny rules on records_dir (`LeadRecordsTests`) |
 | 5 | Never merge a task a decision or the user holds back | decision 2026-10-18 15:05; brief :809 | enforced by the `kept` state, which merge and cleanup refuse (`LeadToolsetTests`); setting it is guidance (#G4) |
 | 6 | A worker's report is a claim: an audit task merges only on its verifier's verdict | brief :805 | enforced by merge reading the vault's verdict (`LeadGuardRailsTests`) |

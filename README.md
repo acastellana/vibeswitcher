@@ -58,6 +58,20 @@ is signed ad hoc, and macOS forgets its permissions at every rebuild.
 keychain, and macOS shows a dialog. Click **Always Allow**. The app uses that key to prove itself to the session host.
 If you click Deny, the host doesn't recognise the app: the window says so in red and shows no sessions.
 
+**Updating.** In your clone, get the latest and install it:
+
+```sh
+git pull
+./scripts/build-app.sh --install
+```
+
+A clone made before 2026-10-29 is on `project-lead`, the old default branch. That branch is gone (main is now the
+only branch), so `git pull` there fails or brings nothing. Move the clone to main once, then update as above:
+
+```sh
+git fetch origin --prune && git switch main && git pull
+```
+
 Every binary in the app is signed with the Hardened Runtime; the app's only entitlement is Apple Events (to control
 Terminal).
 More in [Getting started](docs/guide/getting-started.md).

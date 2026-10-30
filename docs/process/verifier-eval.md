@@ -36,7 +36,7 @@ Important finding, and nothing in their code was fixed since.
 
 Most audited commits aren't on any branch any more: a merge squashes or rebases a branch, and cleanup deletes
 `agent/<slug>`. Those cases are stored as `scripts/verifier-eval/NAME.patch.gz` (the branch at the audited commit
-against its merge-base with project-lead, gzipped so the repository's text lints don't read old code), and the
+against its merge-base with the base branch, main, gzipped so the repository's text lints don't read old code), and the
 script refuses one whose tree on its base isn't the audited commit's. Each case's contract is the board task's own,
 as text, in `scripts/verifier-eval/NAME.contract.md` (a-fix-s-regression's is its commit's message, as when it was
 first scored).
@@ -73,7 +73,7 @@ From the board: a fixed Important finding (`board(task)` shows it with its file:
 the task's `setback` evidence names the commit of the audit that failed). Then:
 
 1. `scripts/verifier-eval.sh --patch NAME COMMIT` when the commit is on no branch that stays (check with
-   `git branch -a --contains COMMIT`); a commit on project-lead whose first parent is the right base needs nothing.
+   `git branch -a --contains COMMIT`); a commit on main whose first parent is the right base needs nothing.
 2. Check each place at that commit (`git show COMMIT:FILE | sed -n 'LINEp'`), and where the fix went: list both with `|`.
 3. The board task's contract as `scripts/verifier-eval/NAME.contract.md` (title, goal, acceptance checks,
    boundaries, context).

@@ -179,6 +179,6 @@ struct UIBenchScriptTests {
         let branch = try fakeBuild("branch", rate: 90e6, order: order)
         let run = try bench(["-b", branch.path, "1"])
         #expect(run.status == 0, "\(run.output)")
-        #expect(run.output.contains("instructions/s not judged: give -B project-lead"), "\(run.output)")
+        #expect(run.output.contains("instructions/s not judged: give -B main"), "\(run.output)")
     }
 }

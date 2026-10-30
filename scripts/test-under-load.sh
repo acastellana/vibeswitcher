@@ -2,7 +2,7 @@
 # The one way to put load on this Mac for a test. With no command it runs the whole test suite 3 times at once beside
 # a CPU burner (one busy loop per core), the way a Mac with several sessions building and testing is loaded, and checks
 # that each run passes and leaves nothing behind. Run it when you add or change a host, timing or concurrency test: a
-# wait that only holds on an idle Mac fails here, not on project-lead. With `-- COMMAND` it runs COMMAND beside the
+# wait that only holds on an idle Mac fails here, not on main. With `-- COMMAND` it runs COMMAND beside the
 # busy loops instead (a `swift test --filter` reproducing a failure seen under load) and exits with its status.
 #
 # The Mac is shared with other sessions and the user. --load N is the load to reach, not loops to add: every few
