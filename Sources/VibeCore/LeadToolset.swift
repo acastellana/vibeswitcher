@@ -3356,7 +3356,8 @@ public final class LeadToolset: MCPToolset {
         guard let now = store.load().task(slug) else {
             return Problem(text: "Not merged: \(slug) was removed from the board while its tests ran (they \(tests)). Nothing was changed.")
         }
-        guard now.status != started.status else { return nil }
+        // Review is a worker's word (its done report on a running task), not the lead's: the merge goes on.
+        guard now.status != started.status, now.status != .review else { return nil }
         let why = now.status == .kept ? now.keptBecause : now.isAbandoned ? now.abandonedBecause : now.status == .folded ? now.foldedInto.map { "into \($0)" } : nil
         let state = Self.shownState(now) + (why.map { " (\($0))" } ?? "")
         try? store.appendProgress("Didn't merge \(slug): set \(state) while its tests ran (they \(tests)); it stays \(Self.shownState(now))")
