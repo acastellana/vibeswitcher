@@ -217,6 +217,9 @@ struct DictationSettings: View {
             Toggle("Hold Space to dictate", isOn: $dictation.holdSpace)
                 .help(Self.holdSpaceHelp)
             Text(Self.holdSpaceHelp).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Silence the Mac while dictating", isOn: $dictation.silenceMac)
+                .help(Self.silenceHelp)
+            Text(Self.silenceHelp).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let notice = dictation.keyNotice { Text(notice).font(.caption).foregroundStyle(.red) }
         } header: {
             Text("Dictation")
@@ -226,6 +229,8 @@ struct DictationSettings: View {
     }
 
     static let holdSpaceHelp = "In the composer's box, hold Space alone for a moment to dictate, as \(DictationController.shortcut) does; let go to finish. A tap types a space, and the spaces a hold typed come out. Holding Space to type many spaces doesn't work while this is on."
+
+    static let silenceHelp = "While you hold the mic, the Mac's sound is muted so it isn't recorded; it comes back as it was when you let go."
 
     static func line(_ state: DictationController.KeyState) -> String {
         switch state {

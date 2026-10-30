@@ -87,9 +87,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     /// Dictation's OpenAI key: the login Keychain item only (one in your shell or Codex's file is offered for import in
     /// Settings, never used until you confirm); read when a dictation goes out, the Mac's or the phone's.
     private let dictationKey = AppProof.KeychainSecret(account: AppProof.openAIAccount, label: "VibeSwitcher OpenAI API key")
+    /// The Mac's sound, silenced while a dictation records: put back at launch when the last run left it silenced, and
+    /// at quit.
+    private let outputSilencer = OutputSilencer(outputs: CoreAudioOutputs())
     /// Push to talk in the composer.
     private lazy var dictation: DictationController = {
-        let controller = DictationController(keyStore: dictationKey, recorder: EngineRecorder(), microphone: SystemMicrophone())
+        let controller = DictationController(keyStore: dictationKey, recorder: EngineRecorder(), microphone: SystemMicrophone(),
+                                             silencer: outputSilencer)
         controller.openSettings = { [weak self] in self?.showSettings(tab: .general) }
         return controller
     }()
@@ -139,6 +143,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         HookBinary.sync()
         VibePaths.ensurePrivateDirectories()
         PrivateRepair.atLaunch()
+        // The sound a dictation silenced when this app last ended without quitting (its marker), put back.
+        outputSilencer.recover()
         // Script blocks' files a crash left behind (see `RunnableCommand.Script`).
         RunnableCommand.Script.removeAll()
         hostClient.connectIfRunning()
@@ -811,6 +817,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         SidebarWorkspace.restoreHiddenWindows(timeout: 1)
         store.saveLedger()
         phoneAccess.shutdown()
+        // Never leave the Mac silent behind a dictation that was recording.
+        outputSilencer.restore()
         // Script blocks written for Run and not run yet.
         RunnableCommand.Script.removeAll()
     }

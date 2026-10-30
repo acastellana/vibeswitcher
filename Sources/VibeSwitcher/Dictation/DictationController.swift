@@ -68,9 +68,10 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     static let modelKey = "dictationModel"
     static let shortcut = "⌥Space"
     static let holdSpaceKey = "dictationHoldSpace"
+    static let silenceKey = "dictationSilenceMac"
 
     /// The composers' runs under way, by row.
-    @Published private(set) var runs: [String: Run] = [:]
+    @Published private(set) var runs: [String: Run] = [:] { didSet { syncSilence() } }
     @Published private(set) var keyState: KeyState = .unknown
     /// The line under each composer's box, by row.
     @Published private(set) var notices: [String: Notice] = [:]
@@ -80,6 +81,13 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     @Published var model: String { didSet { defaults.set(model, forKey: Self.modelKey) } }
     /// Settings: holding Space alone in the box dictates too, as ⌥Space does (on at first).
     @Published var holdSpace: Bool { didSet { defaults.set(holdSpace, forKey: Self.holdSpaceKey) } }
+    /// Settings: the Mac's sound is silenced while a composer records, and put back after (on at first).
+    @Published var silenceMac: Bool {
+        didSet {
+            defaults.set(silenceMac, forKey: Self.silenceKey)
+            syncSilence()
+        }
+    }
     /// Settings: a key found in your shell or Codex's file, offered for import (nil: none, or not looked).
     @Published private(set) var found: FoundOpenAIKey?
     @Published private(set) var keyNotice: String?
@@ -100,6 +108,10 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     private let keyStore: SecretStore
     private let recorder: DictationRecorder
     private let microphone: MicrophoneAuthorizer
+    /// Silences the Mac's sound output while a composer records (nil: never; the sandbox, and tests not about it).
+    private let silencer: OutputSilencer?
+    /// Inside `steadySilence`: the silence is left as it is until the outermost one ends.
+    private var steadying = 0
     /// macOS was asked about the microphone (once, at the first press).
     private var askedMicrophone = false
     private let transcription: OpenAITranscription
@@ -130,7 +142,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     /// Called each time a run ends (tests wait on it).
     var onIdle: (() -> Void)?
 
-    init(keyStore: SecretStore, recorder: DictationRecorder, microphone: MicrophoneAuthorizer,
+    init(keyStore: SecretStore, recorder: DictationRecorder, microphone: MicrophoneAuthorizer, silencer: OutputSilencer? = nil,
          transcription: OpenAITranscription = OpenAITranscription(),
          defaults: UserDefaults = .standard, findKey: @escaping @Sendable () -> FoundOpenAIKey? = { DictationKey.findLive() },
          background: @escaping (@escaping @Sendable () -> Void) -> Void = { DispatchQueue.global(qos: .userInitiated).async(execute: $0) },
@@ -139,6 +151,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         self.keyStore = keyStore
         self.recorder = recorder
         self.microphone = microphone
+        self.silencer = silencer
         self.transcription = transcription
         self.defaults = defaults
         self.findKey = findKey
@@ -148,6 +161,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         let saved = defaults.string(forKey: Self.modelKey) ?? ""
         model = OpenAITranscription.models.contains(saved) ? saved : OpenAITranscription.defaultModel
         holdSpace = defaults.object(forKey: Self.holdSpaceKey) as? Bool ?? true
+        silenceMac = defaults.object(forKey: Self.silenceKey) as? Bool ?? true
     }
 
     static func after(_ delay: TimeInterval, _ work: @escaping () -> Void) -> () -> Void {
@@ -191,6 +205,10 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     /// prompt (run off the main thread; Claude takes the project's and branch's names itself). A recording in another
     /// composer ends first, as its release would.
     func press(_ rowID: String, agent: Agent? = nil, vocabulary: @escaping @Sendable () -> String) {
+        steadySilence { pressNow(rowID, agent: agent, vocabulary: vocabulary) }
+    }
+
+    private func pressNow(_ rowID: String, agent: Agent?, vocabulary: @escaping @Sendable () -> String) {
         guard runs[rowID] == nil, !turningOn.contains(rowID) else { return }
         notices[rowID] = nil
         // The microphone first, for either: macOS asks about VibeSwitcher for a session's Claude too.
@@ -222,27 +240,31 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         endOtherRecording(rowID)
         held = rowID
         recorder.permission { [weak self] allowed in
-            guard let self else { return }
-            guard allowed else {
-                if self.held == rowID { self.held = nil }
-                return self.microphoneDenied(rowID)
-            }
-            // Let go before macOS answered (its first-time question), or another composer pressed since: nothing to
-            // record.
-            guard self.held == rowID, self.runs[rowID] == nil else { return }
-            self.endOtherRecording(rowID)
-            do {
-                try self.recorder.start()
-            } catch {
-                self.held = nil
-                self.notices[rowID] = Notice(rowID: rowID, text: "The microphone couldn't be started.")
-                return
-            }
-            let work = Work()
-            work.vocabulary = vocabulary
-            work.cancelLimit = self.schedule(DictationLimits.maxDuration) { [weak self] in self?.stop(rowID, limitReached: true) }
-            self.begin(rowID, Run(phase: .recording(rowID: rowID), claude: false), work)
+            self?.steadySilence { self?.recordingAllowed(allowed, rowID, vocabulary: vocabulary) }
         }
+    }
+
+    /// macOS answered about the microphone for `rowID`'s press: it records, unless let go or pressed elsewhere since.
+    private func recordingAllowed(_ allowed: Bool, _ rowID: String, vocabulary: @escaping @Sendable () -> String) {
+        guard allowed else {
+            if held == rowID { held = nil }
+            return microphoneDenied(rowID)
+        }
+        // Let go before macOS answered (its first-time question), or another composer pressed since: nothing to
+        // record.
+        guard held == rowID, runs[rowID] == nil else { return }
+        endOtherRecording(rowID)
+        do {
+            try recorder.start()
+        } catch {
+            held = nil
+            notices[rowID] = Notice(rowID: rowID, text: "The microphone couldn't be started.")
+            return
+        }
+        let work = Work()
+        work.vocabulary = vocabulary
+        work.cancelLimit = schedule(DictationLimits.maxDuration) { [weak self] in self?.stop(rowID, limitReached: true) }
+        begin(rowID, Run(phase: .recording(rowID: rowID), claude: false), work)
     }
 
     /// The button or ⌥Space came up in `rowID`'s composer: its recording goes to OpenAI, or Claude finishes its
@@ -290,6 +312,23 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         guard let other = recordingRow, other != rowID else { return }
         Breadcrumbs.shared.note("dictation: a press in another composer ended the recording under way")
         release(other)
+    }
+
+    /// Runs `body` with the Mac's sound left as it is until it ends: a recording that ends there for another to begin
+    /// (a press in another composer) doesn't bring the sound back between the two.
+    private func steadySilence(_ body: () -> Void) {
+        steadying += 1
+        defer {
+            steadying -= 1
+            syncSilence()
+        }
+        body()
+    }
+
+    /// The Mac's sound silenced while a composer records (and the setting's on), put back once none does.
+    private func syncSilence() {
+        guard let silencer, steadying == 0 else { return }
+        silencer.set(holders: silenceMac ? Set(runs.keys.filter { isRecording($0) }) : [])
     }
 
     private func begin(_ rowID: String, _ run: Run, _ work: Work) {
