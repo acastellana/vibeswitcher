@@ -40,8 +40,10 @@ struct AppHealthTests: LeadTeamFixture {
         """
     }
 
-    /// A `sample` report whose main thread's busiest path runs through `frames` (outermost first) under a timer.
-    static func sample(_ frames: [String] = ["SessionStore.rescan()", "specialized ChatModel.reload(from:)", "TranscriptReader.parse(_:)"]) -> String {
+    /// A `sample` report whose main thread's busiest path runs through `frames` (outermost first) under a timer, its
+    /// 2300 samples at the top of that path spread over `pcs` instructions of `leaf` (230, 10 each: running code).
+    static func sample(_ frames: [String] = ["SessionStore.rescan()", "specialized ChatModel.reload(from:)", "TranscriptReader.parse(_:)"],
+                       pcs: Int = 230, leaf: String = "_platform_memmove") -> String {
         var lines = """
         Analysis of sampling VibeSwitcher (pid 4242) every 1 millisecond
         Process:         VibeSwitcher [4242]
@@ -68,6 +70,10 @@ struct AppHealthTests: LeadTeamFixture {
             depth += "  "
         }
         lines.append("\(depth)2300 memmove  (in libsystem_platform.dylib) + 1  [0x9]")
+        for pc in 0..<pcs {
+            let count = 2300 / pcs + (pc < 2300 % pcs ? 1 : 0)
+            lines.append("\(depth)  \(count) \(leaf)  (in libsystem_platform.dylib) + \(pc * 4)  [0x\(String(0x1_9b00_0000 + pc * 4, radix: 16))]")
+        }
         lines += [
             "    +       !       100 LeadController.refresh()  (in VibeSwitcher) + 1  [0xa]",
             "    +       100 __CFRunLoopServiceMachPort  (in CoreFoundation) + 1  [0xb]",
@@ -160,6 +166,110 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(AppHealth.sampleInside(start: since.addingTimeInterval(2), end: since.addingTimeInterval(3.5)) == 0.5)
         #expect(AppHealth.sampleInside(start: since.addingTimeInterval(2), end: nil) == 1)
         #expect(AppHealth.sampleStart("no header") == nil)
+    }
+
+    /// Running code is sampled at hundreds of instructions; a starved thread (a loaded Mac, or paging back in) sits on
+    /// a few for hundreds of samples each, as hang-20261031-001452's 2298 samples on 18 PCs did.
+    @Test func aClusteredSampleIsLikelyStarvationAndASpreadOneRealWork() throws {
+        // 2300 samples on 18 PCs at the top of the path, plus the path's 5 (frames' own samples, two siblings).
+        let clustered = try #require(AppHealth.spread(sample: Self.sample(pcs: 18)))
+        #expect(clustered.samples == 2600 && clustered.pcs == 23, "\(clustered)")
+        #expect(clustered.top == "_platform_memmove" && abs(clustered.topShare - 128.0 / 2600) < 0.0001)
+        #expect(clustered.waiting == 0)
+        #expect(AppHealth.verdict(clustered, sampleInside: 1) == .starved)
+        // Sampled after it answered, a thread still clustered (not in a wait) was still starved.
+        #expect(AppHealth.verdict(clustered, sampleInside: 0) == .starved)
+        #expect(AppHealth.describe(clustered, verdict: .starved)
+                == "main thread's sample: 2600 samples on 23 top-of-stack PCs (0.9%), the busiest 5% of them (_platform_memmove): likely starvation or paging, not the app's work")
+
+        let spread = try #require(AppHealth.spread(sample: Self.sample()))
+        #expect(spread.samples == 2600 && spread.pcs == 235, "\(spread)")
+        #expect(AppHealth.verdict(spread, sampleInside: 1) == .work)
+        #expect(AppHealth.verdict(spread, sampleInside: nil) == .work)
+        // Work sampled after the stall isn't the stall's.
+        #expect(AppHealth.verdict(spread, sampleInside: 0.2) == nil)
+        #expect(AppHealth.describe(spread, verdict: .work).hasSuffix(": real work"))
+
+        // Either side of the threshold: 35 samples a PC is starvation, fewer isn't.
+        let edge = AppHealth.Spread(samples: 2100, pcs: 60, top: "x", topShare: 0.1, waiting: 0)
+        #expect(AppHealth.verdict(edge, sampleInside: 1) == .starved)
+        #expect(AppHealth.verdict(AppHealth.Spread(samples: 2100, pcs: 61, top: "x", topShare: 0.1, waiting: 0), sampleInside: 1) == .work)
+
+        // Few PCs, but blocked in the kernel: a wait (a lock, a synchronous message), the app's to fix.
+        let blocked = try #require(AppHealth.spread(sample: Self.sample(pcs: 3, leaf: "mach_msg2_trap")))
+        #expect(blocked.waiting > 0.88 && blocked.top == "mach_msg2_trap", "\(blocked)")
+        #expect(AppHealth.verdict(blocked, sampleInside: 1) == .waiting)
+        // After it answered, that's the idle run loop: nothing said.
+        #expect(AppHealth.verdict(blocked, sampleInside: 0) == nil)
+        // Too few samples to tell (100 here).
+        let few = try #require(AppHealth.spread(sample: Self.frameless("AG::Subgraph::update(unsigned int)")))
+        #expect(few.samples == 100 && few.pcs == 1)
+        #expect(AppHealth.verdict(few, sampleInside: 1) == nil)
+        #expect(AppHealth.spread(sample: "no call graph") == nil)
+    }
+
+    /// The .log's header keeps the load at the stall and the verdict; a hang reads its load back and its verdict from its
+    /// sample.
+    @Test func aHangReportKeepsItsLoadAndVerdict() throws {
+        let spread = try #require(AppHealth.spread(sample: Self.sample(pcs: 18)))
+        let header = AppHealth.hangHeader(since: start, duration: 9.1, sampleInside: 1, load: 23.456, cpus: 10, spread: spread, verdict: .starved)
+        #expect(header == "vibeswitcher-hang: since=1761393730.000 duration=9.1 sample-inside=1.00 load=23.46 cpus=10 samples=2600 pcs=23 top-share=0.05 verdict=starved")
+        var log = Self.log().components(separatedBy: "\n")
+        log[0] = header
+        let hang = AppHealth.hang(name: "hang-20261025-140210", log: log.joined(separator: "\n"), sample: Self.sample(pcs: 18))
+        #expect(hang.load == 23.46 && hang.cpus == 10)
+        #expect(hang.spread == spread)
+        #expect(hang.verdict == .starved)
+        // A report from before: no load, and its verdict still from its sample.
+        let old = AppHealth.hang(name: "hang-20261025-140210", log: Self.log(), sample: Self.sample())
+        #expect(old.load == nil && old.cpus == nil && old.verdict == .work)
+    }
+
+    /// A starved freeze is told as one, with no task asked for it; real work reads as before.
+    @Test func aStarvedFreezeIsToldAsStarvationAndAsksNoTask() throws {
+        let folders = try folders()
+        var watch = AppHealth.Watch()
+        func header(_ inside: Double) -> String {
+            AppHealth.hangHeader(since: start, duration: 9.1, sampleInside: inside, load: 23.4, cpus: 10)
+        }
+        func log(_ inside: Double) -> String { header(inside) + "\n" + Self.log().components(separatedBy: "\n").dropFirst().joined(separator: "\n") }
+        try writeHang("hang-20261025-140210", in: folders, log: log(1), sample: Self.sample(pcs: 18))
+        watch.saw(hangs: folders.hangNames(), crashes: [], now: start)
+        watch.look(now: start.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
+        let starved = try #require(watch.pending.first)
+        #expect(starved.contains("- hang-20261025-140210: likely starvation: the Mac was loaded or paging; no app work to fix (main thread's sample: 2600 samples "
+                                 + "on 23 top-of-stack PCs (0.9%), the busiest 5% of them (_platform_memmove); 1-minute load 23.4 on 10 cores); stuck 9.1 s; "
+                                 + "lead session selected, chat shown, window key;"), "\(starved)")
+        #expect(starved.hasSuffix("That freeze looks like starvation (the Mac loaded or paging), not the app's work: no task for it; the reports have the full stacks."),
+                "\(starved)")
+        #expect(!starved.contains("into a task"))
+        noSecrets(starved)
+
+        // The same frames doing real work two hours on: told as before, not counted as a repeat of the starved one.
+        watch.pending = []
+        let later = start.addingTimeInterval(2 * 3600)
+        try writeHang("hang-20261025-160210", in: folders, log: log(1))
+        watch.saw(hangs: folders.hangNames(), crashes: [], now: later)
+        watch.look(now: later.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
+        let work = try #require(watch.pending.first)
+        #expect(work.contains("- hang-20261025-160210: stuck 9.1 s; lead session selected, chat shown, window key; footprint 812 MB (peak 900 MB); "
+                              + "top app frames: TranscriptReader.parse(_:) < ChatModel.reload(from:) < SessionStore.rescan() < closure #1 in Heartbeat.every(_:_:) "
+                              + "(100% of its sample inside the stall) — main thread's sample: 2600 samples on 235 top-of-stack PCs"), "\(work)")
+        #expect(work.contains(": real work; 1-minute load 23.4 on 10 cores"))
+        #expect(!work.contains("likely starvation"))
+        #expect(work.hasSuffix("Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks."), "\(work)")
+
+        // Both in one digest: each told, the task line says the starved one needs none.
+        watch.pending = []
+        let third = start.addingTimeInterval(30 * 3600)
+        try writeHang("hang-20261026-180000", in: folders, log: log(1), sample: Self.sample(["Other.freeze()"], pcs: 10))
+        try writeHang("hang-20261026-180100", in: folders, log: log(1), sample: Self.sample(["Third.freeze()"]))
+        watch.saw(hangs: folders.hangNames(), crashes: [], now: third)
+        watch.look(now: third.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
+        let both = try #require(watch.pending.first)
+        #expect(both.contains("- hang-20261026-180000: likely starvation:") && both.contains("- hang-20261026-180100: stuck"), "\(both)")
+        #expect(both.hasSuffix("Turn what's a real bug into a task (one already on the board needs nothing; one marked likely starvation needs none); "
+                               + "read the reports for the full stacks."), "\(both)")
     }
 
     @Test func aReportFromBeforeTheHeaderStillReads() {

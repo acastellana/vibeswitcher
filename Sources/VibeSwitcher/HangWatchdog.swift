@@ -5,7 +5,8 @@ import VibeCore
 /// `~/.vibeswitcher/debug/hang-<time>.txt` (a `sample` of the app: every thread's stack) and `hang-<time>.log` (the
 /// app's state, the main thread's stacks caught while it was stuck, and its latest breadcrumbs), and notes how long
 /// the stall lasted. The .log starts with a machine-readable line (`AppHealth.hangHeader`): when it got stuck, once it
-/// answered again how long it was, and how much of the sample was taken while still stuck.
+/// answered again how long it was, how much of the sample was taken while still stuck, the 1-minute load when it got
+/// stuck, and what the sample's main thread says it was (`AppHealth.Verdict`: starvation, real work or a wait).
 /// The stacks are caught from the moment a beat is `early` late, every `catchEvery`, and kept only if it turns into a
 /// stall: 2026-10-26, `sample` took 3 to 6 s to begin, and both reports that day sampled only the idle main thread
 /// after its stall had ended.
@@ -60,6 +61,11 @@ final class HangWatchdog: @unchecked Sendable {
         var text: String
         var end: Date?
         var sampleStart: Date?
+        /// How the sample's main-thread samples spread over its PCs.
+        var spread: AppHealth.Spread?
+        /// The 1-minute load average when it got stuck (one `getloadavg`), and the cores.
+        var load: Double?
+        var cpus = ProcessInfo.processInfo.activeProcessorCount
         var sampleDone = false
         var sampleWritten = false
         /// The caught stacks' call graph, as last written.
@@ -150,8 +156,13 @@ final class HangWatchdog: @unchecked Sendable {
         let name = "hang-\(formatter.string(from: since))"
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         Breadcrumbs.shared.note("main thread stuck since \(since); \(caught.count) stacks caught so far, \(samples ? "sampling into \(name).txt" : "no sample")")
+        var averages = [0.0]
+        let load = getloadavg(&averages, 1) == 1 ? averages[0] : nil
+        var report = Report(name: name, since: since, text: "")
+        report.load = load
+        report.text = "Main thread stuck since \(since)" + (load.map { "; " + AppHealth.describeLoad($0, cpus: report.cpus) } ?? "") + "\n\nState:\n\(state)\n"
         lock.lock()
-        report = Report(name: name, since: since, text: "Main thread stuck since \(since)\n\nState:\n\(state)\n")
+        self.report = report
         lock.unlock()
         writeReport()
         Breadcrumbs.shared.flush()
@@ -165,10 +176,12 @@ final class HangWatchdog: @unchecked Sendable {
         // Not waited for: the stacks go on being caught while it runs. Its end is written by the next tick.
         sample.terminationHandler = { [weak self] _ in
             guard let self else { return }
-            let start = (try? String(contentsOf: file, encoding: .utf8)).flatMap(AppHealth.sampleStart)
+            let text = try? String(contentsOf: file, encoding: .utf8)
+            let start = text.flatMap(AppHealth.sampleStart), spread = text.flatMap { AppHealth.spread(sample: $0) }
             self.lock.lock()
             if self.report?.name == name {
                 self.report?.sampleStart = start
+                self.report?.spread = spread
                 self.report?.sampleDone = true
             }
             self.lock.unlock()
@@ -196,15 +209,18 @@ final class HangWatchdog: @unchecked Sendable {
                 inside = share
                 overlap = String(format: "Sample (.txt): began %.1f s into the stall, %.0f s long; %.0f%% of it inside the stall", start.timeIntervalSince(report.since),
                                  AppHealth.sampleSeconds, share * 100)
-                    + (share == 0 ? " (all of it after: the stacks below are the stall's)" : "") + "\n"
+                    + (share == 0 ? " (all of it after: the stacks below are the stall's)" : "")
             } else {
-                overlap = "Sample (.txt): no start time read from it\n"
+                overlap = "Sample (.txt): no start time read from it"
             }
+            if let spread = report.spread { overlap += "; " + AppHealth.describe(spread, verdict: AppHealth.verdict(spread, sampleInside: inside)) }
+            overlap += "\n"
         }
         let stacks = report.stacks.isEmpty ? "No stacks caught while stuck.\n" : report.stacks + "\n"
         let text = Redaction.secrets(in: report.text + "\n" + overlap + stacks + "\nLatest events:\n"
             + Breadcrumbs.shared.lines.joined(separator: "\n") + "\n")
-        let header = AppHealth.hangHeader(since: report.since, duration: duration, sampleInside: inside)
+        let header = AppHealth.hangHeader(since: report.since, duration: duration, sampleInside: inside, load: report.load, cpus: report.cpus,
+                                          spread: report.spread, verdict: AppHealth.verdict(report.spread, sampleInside: inside))
         try? (header + "\n" + text).write(to: folder.appendingPathComponent(report.name + ".log"), atomically: true, encoding: .utf8)
         onWrite?(report.name)
     }

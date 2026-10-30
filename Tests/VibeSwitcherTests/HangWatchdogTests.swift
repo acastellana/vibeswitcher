@@ -41,6 +41,9 @@ struct HangWatchdogTests {
         while recovered() == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
         let log = try #require(recovered(), "no report with the stall's length; writes: \(writes.all.count)")
         let lines = log.components(separatedBy: "\n")
+        // The 1-minute load when it got stuck, in the header and in words.
+        #expect(lines[0].contains(" load=") && lines[0].contains(" cpus=\(ProcessInfo.processInfo.activeProcessorCount)"), "\(lines[0])")
+        #expect(lines.contains { $0.hasPrefix("Main thread stuck since ") && $0.contains("; 1-minute load ") }, "\(log)")
         let caught = try #require(lines.first { $0.hasPrefix(AppHealth.caughtTitle) }, "\(log)")
         // Caught from about 0.5 s into it (well before the 2 s it takes to be a stall), on to its end.
         let range = try #require(caught.firstMatch(of: #/from ([\d.]+) s to ([\d.]+) s/#))

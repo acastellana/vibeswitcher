@@ -29,11 +29,17 @@ public enum AppHealth {
     /// The line `HangWatchdog` starts a hang's .log with: when the main thread got stuck, and once it answered again,
     /// how long that took ("vibeswitcher-hang: since=1761400000.123 duration=12.3").
     /// `sampleInside`: how much of the sample (.txt) was taken while it was still stuck, 0 to 1 ("sample-inside=0.00":
-    /// none of it, the sample began after it answered).
-    public static func hangHeader(since: Date, duration: TimeInterval?, sampleInside: Double? = nil) -> String {
+    /// none of it, the sample began after it answered). `load`: the 1-minute load average when it got stuck, on `cpus`
+    /// cores. `spread`: the sample's main thread (see `Spread`), with its `verdict`.
+    public static func hangHeader(since: Date, duration: TimeInterval?, sampleInside: Double? = nil, load: Double? = nil, cpus: Int? = nil,
+                                  spread: Spread? = nil, verdict: Verdict? = nil) -> String {
         "vibeswitcher-hang: since=\(String(format: "%.3f", since.timeIntervalSince1970))"
             + (duration.map { " duration=\(String(format: "%.1f", $0))" } ?? "")
             + (sampleInside.map { " sample-inside=\(String(format: "%.2f", $0))" } ?? "")
+            + (load.map { " load=\(String(format: "%.2f", $0))" } ?? "")
+            + (cpus.map { " cpus=\($0)" } ?? "")
+            + (spread.map { " samples=\($0.samples) pcs=\($0.pcs) top-share=\(String(format: "%.2f", $0.topShare))" } ?? "")
+            + (verdict.map { " verdict=\($0.rawValue)" } ?? "")
     }
 
     /// How long `sample` samples a hang for (its `HangWatchdog` call).
@@ -137,6 +143,14 @@ public enum AppHealth {
         public var caught = false
         /// How much of the sample was taken while it was still stuck, 0 to 1 (nil: not known).
         public var sampleInside: Double?
+        /// The 1-minute load average when it got stuck, and the Mac's cores (nil: a report from before they were kept).
+        public var load: Double?
+        public var cpus: Int?
+        /// How its sample's main-thread samples spread (nil without a sample).
+        public var spread: Spread?
+
+        /// Whether its sample says it was starvation, real work or a wait.
+        public var verdict: Verdict? { AppHealth.verdict(spread, sampleInside: sampleInside) }
 
         public init(name: String) { self.name = name }
 
@@ -162,6 +176,8 @@ public enum AppHealth {
                 hang.since = fields["since"].flatMap(Double.init).map { Date(timeIntervalSince1970: $0) }
                 hang.duration = fields["duration"].flatMap(Double.init)
                 hang.sampleInside = fields["sample-inside"].flatMap(Double.init)
+                hang.load = fields["load"].flatMap(Double.init)
+                hang.cpus = fields["cpus"].flatMap { Int($0) }
             }
             for line in lines {
                 if line.hasPrefix("window never opened") { hang.shown = "window never opened" }
@@ -178,6 +194,7 @@ public enum AppHealth {
             hang.sampled = true
             hang.footprint = sampleMegabytes(sample, "Physical footprint:")
             hang.peak = sampleMegabytes(sample, "Physical footprint (peak):")
+            hang.spread = spread(sample: sample)
             hang.frames = appFrames(sample: sample, image: "VibeSwitcher")
             if hang.frames.isEmpty { hang.systemFrames = systemFrames(sample: sample) }
         }
@@ -259,30 +276,7 @@ public enum AppHealth {
     /// The main thread's busiest path (at each frame, the callee with the most samples), outermost first: each frame's
     /// function name and image.
     static func busiestPath(sample: String) -> [(name: String, image: String)] {
-        let lines = sample.components(separatedBy: "\n")
-        guard let graph = lines.firstIndex(where: { $0.hasPrefix("Call graph:") }) else { return [] }
-        // The main thread's block: its line, then every line indented deeper.
-        var threadDepth: Int?
-        var nodes: [(depth: Int, count: Int, text: String, parent: Int?)] = []
-        var children: [[Int]] = []
-        var stack: [Int] = []
-        for line in lines[(graph + 1)...] {
-            guard let (depth, count, text) = graphLine(line) else {
-                if threadDepth != nil { break }
-                continue
-            }
-            if let top = threadDepth {
-                if depth <= top { break }
-                while let last = stack.last, nodes[last].depth >= depth { stack.removeLast() }
-                nodes.append((depth, count, text, stack.last))
-                children.append([])
-                if let parent = stack.last { children[parent].append(nodes.count - 1) }
-                stack.append(nodes.count - 1)
-            } else if text.hasPrefix("Thread_") {
-                // The first thread is the main one (sample lists it first, as "com.apple.main-thread").
-                threadDepth = depth
-            }
-        }
+        guard let (_, nodes, children) = mainThreadGraph(sample: sample) else { return [] }
         let roots = nodes.indices.filter { nodes[$0].parent == nil }
         guard var current = roots.max(by: { nodes[$0].count < nodes[$1].count }) else { return [] }
         var path = [current]
@@ -299,6 +293,137 @@ public enum AppHealth {
             guard !name.isEmpty else { return nil }
             return (String(name.prefix(120)), String(text[open.upperBound..<close].prefix(60)))
         }
+    }
+
+    /// The main thread's block of a `sample` report's call graph: its sample count (its thread line's), and each frame
+    /// line under it (outermost first) with its parent and children, as indices.
+    static func mainThreadGraph(sample: String) -> (samples: Int, nodes: [(depth: Int, count: Int, text: String, parent: Int?)], children: [[Int]])? {
+        let lines = sample.components(separatedBy: "\n")
+        guard let graph = lines.firstIndex(where: { $0.hasPrefix("Call graph:") }) else { return nil }
+        // The main thread's block: its line, then every line indented deeper.
+        var thread: (depth: Int, count: Int)?
+        var nodes: [(depth: Int, count: Int, text: String, parent: Int?)] = []
+        var children: [[Int]] = []
+        var stack: [Int] = []
+        for line in lines[(graph + 1)...] {
+            guard let (depth, count, text) = graphLine(line) else {
+                if thread != nil { break }
+                continue
+            }
+            if let top = thread?.depth {
+                if depth <= top { break }
+                while let last = stack.last, nodes[last].depth >= depth { stack.removeLast() }
+                nodes.append((depth, count, text, stack.last))
+                children.append([])
+                if let parent = stack.last { children[parent].append(nodes.count - 1) }
+                stack.append(nodes.count - 1)
+            } else if text.hasPrefix("Thread_") {
+                // The first thread is the main one (sample lists it first, as "com.apple.main-thread").
+                thread = (depth, count)
+            }
+        }
+        guard let thread else { return nil }
+        return (thread.count, nodes, children)
+    }
+
+    // MARK: Starvation or work
+
+    /// How the main thread's samples spread over the instructions they caught it at (its top-of-stack PCs). Running
+    /// code, sampled every millisecond for 3 s, is caught at hundreds of them; a thread that barely runs (a loaded Mac,
+    /// or its pages coming back in after hours idle) sits on the same few for hundreds of samples each. 2026-10-30 and
+    /// 31, three fix tasks (7-s-freeze-measuring, accessibility-graph, 9-s-swiftui-layout) found their freeze was that:
+    /// hang-20261031-001452, 2298 samples on 18 PCs.
+    public struct Spread: Equatable, Sendable {
+        /// The main thread's samples, and the distinct addresses at the top of their stacks.
+        public var samples: Int
+        public var pcs: Int
+        /// The busiest of those PCs: its function, and its share of the samples, 0 to 1.
+        public var top: String
+        public var topShare: Double
+        /// The share of samples in a kernel wait (`waits`): the thread blocked, not running.
+        public var waiting: Double
+
+        public init(samples: Int, pcs: Int, top: String, topShare: Double, waiting: Double) {
+            self.samples = samples
+            self.pcs = pcs
+            self.top = top
+            self.topShare = topShare
+            self.waiting = waiting
+        }
+    }
+
+    /// What a freeze's main-thread sample says it was.
+    public enum Verdict: String, Sendable {
+        /// Few PCs, many samples each: the thread barely ran (the Mac loaded or paging), nothing of the app's to fix.
+        case starved
+        /// Spread over many PCs: the app's own work, as a freeze was always told.
+        case work
+        /// Most samples in a kernel wait while it was stuck: a blocking call (a lock, a synchronous message).
+        case waiting
+    }
+
+    /// At least this many samples on average a PC is starvation. Chosen from the 101 reports in ~/.vibeswitcher/debug
+    /// on 2026-10-31 whose sample wasn't mostly in a wait: 54 clustered ones had 2 to 58 PCs over 1799-2493 samples (at
+    /// least 39 samples a PC; hang-20261031-001452's 18 over 2298), the spread ones 71 to 441 (at most 33 a PC; the
+    /// accessibility work of 2026-10-30 09:57-10:08, 148-282 PCs). No report fell between 33 and 39.
+    public static let starvedSamplesPerPC = 35
+    /// Fewer samples than this say nothing either way (`sample` itself starved: hang-20261028-070849 got 10 in 3 s).
+    public static let verdictSamples = 200
+    /// At least this share in a kernel wait is a wait, not starvation: the 10-30 11:40 and 11:51 freezes had 91% and
+    /// 95% of theirs in mach_msg2_trap (every stack caught while stuck there too); no clustered sample had over 39%.
+    public static let waitingShare = 0.5
+    /// The kernel calls a blocked thread sits in.
+    static let waits: Set<String> = ["mach_msg2_trap", "mach_msg_trap", "mach_msg_overwrite_trap", "semaphore_wait_trap", "semaphore_timedwait_trap",
+                                     "__psynch_cvwait", "__psynch_mutexwait", "__psynch_rw_rdlock", "__psynch_rw_wrlock", "__ulock_wait",
+                                     "__ulock_wait2", "__semwait_signal", "kevent", "kevent_id", "kevent_qos", "__select", "__workq_kernreturn",
+                                     "__wait4", "poll"]
+
+    /// The main thread's spread in a `sample` report: each frame's samples not in a callee were taken at its address.
+    public static func spread(sample: String) -> Spread? {
+        guard let (samples, nodes, children) = mainThreadGraph(sample: sample), samples > 0 else { return nil }
+        var atPC: [String: (count: Int, name: String)] = [:]
+        for (index, node) in nodes.enumerated() {
+            let own = node.count - children[index].reduce(0) { $0 + nodes[$1].count }
+            guard own > 0 else { continue }
+            let text = node.text
+            // "name  (in Image) + 12  [0x19b2ad380]  File.swift:3"
+            let pc = text.range(of: "[0x").flatMap { open in text[open.lowerBound...].firstIndex(of: "]").map { String(text[open.lowerBound...$0]) } } ?? text
+            let name = text.range(of: "  (in ").map { String(text[..<$0.lowerBound]).trimmingCharacters(in: .whitespaces) } ?? text
+            atPC[pc, default: (0, name)].count += own
+        }
+        guard let top = atPC.values.max(by: { $0.count < $1.count }) else { return nil }
+        let waiting = atPC.values.filter { waits.contains($0.name) }.reduce(0) { $0 + $1.count }
+        return Spread(samples: samples, pcs: atPC.count, top: String(top.name.prefix(120)), topShare: Double(top.count) / Double(samples),
+                      waiting: Double(waiting) / Double(samples))
+    }
+
+    /// What a freeze was, from its sample's spread and how much of the sample was inside it (nil: not known). A sample
+    /// taken after the thread answered says what it did then: real work or a wait then isn't the stall's, but a thread
+    /// still clustered then, not waiting, was still starved (hang-20261031-001506: sampled after, 2273 samples on 13 PCs).
+    public static func verdict(_ spread: Spread?, sampleInside: Double?) -> Verdict? {
+        guard let spread, spread.samples >= verdictSamples else { return nil }
+        let ofTheStall = (sampleInside ?? 1) >= 0.5
+        if spread.waiting >= waitingShare { return ofTheStall ? .waiting : nil }
+        if spread.samples >= starvedSamplesPerPC * spread.pcs { return .starved }
+        return ofTheStall ? .work : nil
+    }
+
+    /// The spread and its verdict in words, for a hang's .log and the lead's digest.
+    public static func describe(_ spread: Spread, verdict: Verdict?) -> String {
+        var text = "main thread's sample: \(spread.samples) samples on \(spread.pcs) top-of-stack PCs"
+            + String(format: " (%.1f%%), the busiest %.0f%% of them (%@)", Double(spread.pcs) / Double(spread.samples) * 100, spread.topShare * 100, spread.top)
+        switch verdict {
+        case .starved?: text += ": likely starvation or paging, not the app's work"
+        case .work?: text += ": real work"
+        case .waiting?: text += String(format: ": waiting, %.0f%% of it in a kernel wait (a blocking call)", spread.waiting * 100)
+        case nil: break
+        }
+        return text
+    }
+
+    /// The 1-minute load average and the core count, as a hang's .log records them at the stall.
+    public static func describeLoad(_ load: Double, cpus: Int?) -> String {
+        String(format: "1-minute load %.1f", load) + (cpus.map { " on \($0) cores" } ?? "")
     }
 
     /// A call graph line ("    + ! : | 2345 frame  (in Image) + 12  [0x…]"): its depth (the width of its tree
@@ -624,22 +749,26 @@ public enum AppHealth {
                 errors = [:]
             }
             var freezes: [String] = []
+            var starved = 0
             var repeated: [String] = []
-            // One without a signature is a group of its own.
-            let groups = Dictionary(grouping: read.filter { hang in !unsampled.contains { $0.name == hang.name } }, by: { $0.signature ?? $0.name })
+            // One without a signature is a group of its own. A starved one isn't the same freeze as the app's own work
+            // in the same frames (nor counted as its repeat).
+            func mark(_ hang: Hang) -> String { hang.verdict == .starved ? " [likely starvation]" : "" }
+            let groups = Dictionary(grouping: read.filter { hang in !unsampled.contains { $0.name == hang.name } }, by: { ($0.signature ?? $0.name) + mark($0) })
             for (_, group) in groups.sorted(by: { $0.value[0].name < $1.value[0].name }) {
                 guard let signature = group[0].signature else {
                     freezes.append(Self.line(group))
                     continue
                 }
-                let key = "hang " + signature
+                let key = "hang " + signature + mark(group[0])
                 if let last = told[key], at - last.at < AppHealth.repeatWithin {
                     told[key]?.repeats += group.count
-                    repeated.append("\(group.count == 1 ? "a freeze" : "\(group.count) freezes") like \(last.first) (\(signature))")
+                    repeated.append("\(group.count == 1 ? "a freeze" : "\(group.count) freezes") like \(last.first) (\(signature + mark(group[0])))")
                     continue
                 }
                 told[key] = Told(at: at, repeats: 0, first: group[0].name)
                 freezes.append(Self.line(group))
+                if group[0].verdict == .starved { starved += 1 }
             }
             var crashLines: [String] = []
             for crash in crashes.sorted().compactMap(folders.crash) {
@@ -673,7 +802,13 @@ public enum AppHealth {
             if !repeated.isEmpty {
                 parts.append("Seen again, told within 24 h, so only counted (the daily trend has the counts): " + repeated.joined(separator: "; "))
             }
-            parts.append("Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.")
+            if starved > 0, starved == freezes.count, crashLines.isEmpty, errors.isEmpty {
+                parts.append("\(starved == 1 ? "That freeze looks" : "Those freezes look") like starvation (the Mac loaded or paging), not the app's work: no task for "
+                             + "\(starved == 1 ? "it" : "them"); the reports have the full stacks.")
+            } else {
+                parts.append("Turn what's a real bug into a task (one already on the board needs nothing"
+                             + (starved > 0 ? "; one marked likely starvation needs none" : "") + "); read the reports for the full stacks.")
+            }
             return Redaction.secrets(in: parts.joined(separator: "\n"))
         }
 
@@ -684,6 +819,12 @@ public enum AppHealth {
         public static func line(_ group: [Hang]) -> String {
             let hang = group[0]
             var words = ["- \(hang.name)" + (group.count > 1 ? " and \(group.count - 1) more like it (\(group.dropFirst().map(\.name).joined(separator: ", ")))" : "") + ":"]
+            let verdict = hang.verdict
+            let load = hang.load.map { AppHealth.describeLoad($0, cpus: hang.cpus) }
+            if verdict == .starved, let spread = hang.spread {
+                words.append("likely starvation: the Mac was loaded or paging; no app work to fix (" + AppHealth.describe(spread, verdict: nil)
+                             + (load.map { "; \($0)" } ?? "") + ");")
+            }
             words.append(hang.duration.map { String(format: "stuck %.1f s", $0) + ";" } ?? "stuck, no recovery recorded;")
             if hang.shown == "window never opened" {
                 words.append("window never opened;")
@@ -700,6 +841,11 @@ public enum AppHealth {
             else if !hang.systemFrames.isEmpty { words.append("no app frames on the main thread's busiest path\(source); its top frames: " + hang.systemFrames.joined(separator: " < ")) }
             else { words.append("no sample of its stacks") }
             if let inside = hang.sampleInside { words.append(String(format: "(%.0f%% of its sample inside the stall)", inside * 100)) }
+            // Real work or a wait reads as before, with what its sample says after it.
+            if verdict != .starved {
+                let after = [verdict.flatMap { verdict in hang.spread.map { AppHealth.describe($0, verdict: verdict) } }, load].compactMap { $0 }
+                if !after.isEmpty { words.append("— " + after.joined(separator: "; ")) }
+            }
             return words.joined(separator: " ")
         }
 
