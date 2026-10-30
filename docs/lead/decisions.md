@@ -258,3 +258,7 @@ The user said "Yes to both". project-lead only mirrored main, and every push had
 
 Five tasks today (a-claude-dictation-that, 7-s-freeze-measuring, dictation-per-session, silence-the-mac-s, starting-a-lead-with) added sandbox commands outside their boundaries in order to take their acceptance shots. One audit came back "suspect" for it, which cost a second round. Naming the files up front saves those rounds.
 
+## 2026-10-31 00:48:03 Before planning a task for an app-health freeze, read the main thread's top-of-stack spread in its .txt. If it's clustered (a few PCs with hundreds of samples each), it's starvation or paging: no task. Plan a task only when the spread shows real work, and once hang-reports-say-when lands, its verdict decides.
+
+Three freeze investigations (7-s-freeze-measuring, accessibility-graph, 9-s-swiftui-layout) each spent a worker to find the main thread barely running, either on a loaded Mac or paging back in after a long idle. The PC spread showed it from the start.
+

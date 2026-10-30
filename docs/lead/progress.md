@@ -2166,3 +2166,6 @@
 - 2026-10-31 00:25 Planned 9-s-swiftui-layout: 9 s SwiftUI layout freeze on a calm Mac (environment comparisons in a window layout pass)
 - 2026-10-31 00:25 Started a worker on 9-s-swiftui-layout
 - 2026-10-31 00:25 Automatically (auto_advance): Started a worker on 9-s-swiftui-layout (9 s SwiftUI layout freeze on a calm Mac (environment comparisons in a window layout pass)).
+- 2026-10-31 00:47 Planned hang-reports-say-when: Hang reports say when a freeze was starvation or paging, not the app's work
+- 2026-10-31 00:48 Started a worker on hang-reports-say-when
+- 2026-10-31 00:48 Automatically (auto_advance): Started a worker on hang-reports-say-when (Hang reports say when a freeze was starvation or paging, not the app's work).
