@@ -2068,3 +2068,11 @@
 - 2026-10-30 10:11 Audit of a-claude-dictation-that: complete, clean, round 2: 1 Important closed, 3 Nit (1 open), 1 Pre-existing open
 - 2026-10-30 10:17 Merged a-claude-dictation-that: A Claude dictation that hears nothing never blocks the composer: cancel any time, sending overrides, shorter wait, honest notice
 - 2026-10-30 10:17 Flaky in a-claude-dictation-that's merge: aSlowAnswerIsntCutByTheReceiveTimeout() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-10-30 10:17 Automatically (auto_advance): Merged a-claude-dictation-that (A Claude dictation that hears nothing never blocks the composer: cancel any time, sending overrides, shorter wait, honest notice) into main at 3fe03feb, on its passing audit and the full test run. (Its first test run failed on aSlowAnswerIsntCutByTheReceiveTimeout() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/a-claude-dictation-that/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibeswi….)
+- 2026-10-30 10:17 Automatically (auto_advance): Cleaned up a-claude-dictation-that; ended pid 27303 (Worker: A Claude dictation that hears nothing never blocks the composer: cancel any time, sending overrides, shorter wait, honest notice) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-10-30 10:17 Started a worker on dictation-per-session
+- 2026-10-30 10:17 Automatically (auto_advance): Started a worker on dictation-per-session (Dictation per session: one chat processing doesn't stop another from dictating), its after tasks done (a-claude-dictation-that).
+- 2026-10-30 10:17 Update: Dictation never blocks the composer (a-claude-dictation-that) — **What changed:**
+- 2026-10-30 10:20 Planned accessibility-graph: Accessibility-graph freezes: SwiftUI's accessibility updates take seconds while a lead's chat is shown (5 freezes, up to 15.7 s)
+- 2026-10-30 10:20 Started a worker on accessibility-graph
+- 2026-10-30 10:20 Automatically (auto_advance): Started a worker on accessibility-graph (Accessibility-graph freezes: SwiftUI's accessibility updates take seconds while a lead's chat is shown (5 freezes, up to 15.7 s)).
