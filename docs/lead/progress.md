@@ -2093,3 +2093,22 @@
 - 2026-10-30 11:28 Planned fix-the-flaky-test-10: noTestReadsTheMacsOwnFreeSpace() flaked 3 times within 7 days
 - 2026-10-30 11:28 Planned fix-the-flaky-test-11: aShellThatWaitsIsStopped() flaked 3 times within 7 days
 - 2026-10-30 11:28 Planned fix-the-flaky-test-12: aBannerBeforeTheValueIsLeftOut() flaked 3 times within 7 days
+- 2026-10-30 11:28 Automatically (auto_advance): Merged dictation-per-session (Dictation per session: one chat processing doesn't stop another from dictating) into main at 67dcec35, on its passing audit and the full test run. (Its first test run failed on aLeadWithAQuestionForYouSaysItNeedsYou(), aWorkerWaitingOnItsLeadDoesntSayItNeedsYou(), theWitnessReadsWhatItReadBefore(), boardsAreReadOffTheMainThreadAndHandedToIt(), aBoardThatDoesntReadNamesNoLead(), anUnchangedBoardIsNotReadAgain(), theStripSaysHowManyReportsWait(), countedPerLeadUntilItHasThem… and the rerun of the whole test command passed, so it merged on the ….)
+- 2026-10-30 11:28 Automatically (auto_advance): Cleaned up dictation-per-session; ended pid 59547 (Worker: Dictation per session: one chat processing doesn't stop another from dictating) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-30 11:28 Started a worker on silence-the-mac-s
+- 2026-10-30 11:28 Automatically (auto_advance): Started a worker on silence-the-mac-s (Silence the Mac's sound while dictation listens, then put it back), its after tasks done (dictation-per-session).
+- 2026-10-30 11:28 Started a worker on spaceholdtests-crashes
+- 2026-10-30 11:28 Automatically (auto_advance): Started a worker on spaceholdtests-crashes (SpaceHoldTests crashes the whole test process (unowned self after dealloc in Box)).
+- 2026-10-30 11:28 Started a worker on flaky
+- 2026-10-30 11:28 Automatically (auto_advance): Started a worker on flaky (Flaky: somethingTypedInTheTerminalMeanwhileIsLeftAlone times out under load (3 times now)).
+- 2026-10-30 11:28 Started a worker on fix-the-flaky-test-7
+- 2026-10-30 11:28 Automatically (auto_advance): Started a worker on fix-the-flaky-test-7 (Fix the flaky test aFailingTestsHostIsEnded()).
+- 2026-10-30 11:28 Started a worker on fix-the-flaky-test-8
+- 2026-10-30 11:28 Automatically (auto_advance): Started a worker on fix-the-flaky-test-8 (Fix the flaky test aToolThatGivesNoAnswerIsEnded()).
+- 2026-10-30 11:29 Update: Dictation per chat (dictation-per-session) — **What changed:**
+- 2026-10-30 11:31 Review of fix-the-flaky-test-7: audit
+- 2026-10-30 11:31 Abandoned fix-the-flaky-test-9: Its 3rd count came from the crash at dictation-per-session's 11:28 merge, where unfinished bystanders were recorded as flakes (see fix-the-flaky-test-7). The ledger plans it again if it really fails 3 times.
+- 2026-10-30 11:31 Abandoned fix-the-flaky-test-10: A withKnownIssue test, counted by the old gate's misread and by the 11:28 crash bystanders (see fix-the-flaky-test-7). Never really failed.
+- 2026-10-30 11:31 Abandoned fix-the-flaky-test-11: Its 3rd count came from the crash at dictation-per-session's 11:28 merge, where unfinished bystanders were recorded as flakes (see fix-the-flaky-test-7). The ledger plans it again if it really fails 3 times.
+- 2026-10-30 11:31 Abandoned fix-the-flaky-test-12: Its 3rd count came from the crash at dictation-per-session's 11:28 merge, where unfinished bystanders were recorded as flakes (see fix-the-flaky-test-7). The ledger plans it again if it really fails 3 times.
+- 2026-10-30 11:31 Abandoned fix-the-flaky-test-8: A withKnownIssue test, counted by the old gate's misread and by the 11:28 crash bystanders (see fix-the-flaky-test-7). Never really failed.
