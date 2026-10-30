@@ -6,3 +6,17 @@
 - 2026-10-30 21:17 Planned test-under-load-sh: test-under-load.sh's own runner finds the per-target test bundles of Swift's new build system
 - 2026-10-30 21:17 Started a worker on test-under-load-sh
 - 2026-10-30 21:17 Automatically (auto_advance): Started a worker on test-under-load-sh (test-under-load.sh's own runner finds the per-target test bundles of Swift's new build system).
+- 2026-10-30 21:26 Audit of build-app-sh-install: complete, clean, round 1: 2 Nit open, 3 Pre-existing open
+- 2026-10-30 21:26 Kept build-app-sh-install unmerged: Audit clean, but main's full suite fails 2 pre-existing tests (F4 TeamRowsTests.voiceOverReadsTheRow, F5 HomeIsolationTests installer), so the merge gate would fail and send this worker output outside its boundaries. Merge once the fix task for F4/F5 lands.
+- 2026-10-30 21:26 Planned main-s-full-suite: Main's full suite is green again: TeamRowsTests.voiceOverReadsTheRow and HomeIsolationTests' installer test
+- 2026-10-30 21:27 Dismissed build-app-sh-install:F5: Carried by task main-s-full-suite together with F4.
+- 2026-10-30 21:27 Dismissed build-app-sh-install:F3: Carried by task test-under-load-sh, already running.
+- 2026-10-30 21:41 Automatically (auto_advance): Merge of build-app-sh-install failed: Tests fail rebased onto main: voiceOverReadsTheRow(), theInstallerOnAScratchHomeWritesThereAndNotInTheUsersFiles() Sent its worker the output; it's back at work.
+- 2026-10-30 21:41 Started a worker on main-s-full-suite
+- 2026-10-30 21:41 Automatically (auto_advance): Started a worker on main-s-full-suite (Main's full suite is green again: TeamRowsTests.voiceOverReadsTheRow and HomeIsolationTests' installer test).
+- 2026-10-30 21:42 Incident: auto_advance merged a task the lead had set to kept: it ran the merge gate on build-app-sh-install and sent its worker the failure, and the task's status went f… (in build-app-sh-install); planned turn-this-incident-into-2 to turn it into a check
+- 2026-10-30 21:42 Started a worker on turn-this-incident-into-2
+- 2026-10-30 21:42 Automatically (auto_advance): Started a worker on turn-this-incident-into-2 (Turn this incident into a check: auto_advance merged a task the lead had set to kept: it ran …).
+- 2026-10-30 21:42 Review of turn-this-incident-into-2: audit
+- 2026-10-30 21:43 Kept build-app-sh-install unmerged: Audit clean at 72cc375 and no change since. Held until main-s-full-suite makes main's full suite green, then merged by the lead (auto_advance off).
+- 2026-10-30 21:44 Audit of test-under-load-sh: complete, clean

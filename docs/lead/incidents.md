@@ -33,3 +33,10 @@ Evidence: 2026-10-28 07:59: installed build 1793170724 (PR #1 merged as f5bdf1a)
 
 Check: task turn-this-incident-into-5 turns it into a check that runs before merge.
 
+## 2026-10-30 21:42:14 auto_advance merged a task the lead had set to kept: it ran the merge gate on build-app-sh-install and sent its worker the failure, and the task's status went from kept back to running.
+
+Evidence: 2026-10-30. build-app-sh-install's audit passed at 21:26. The lead then set update_task(status: kept, reason: main's suite fails 2 pre-existing tests) and got "Updated build-app-sh-install: state kept." At ~21:41 (setback.at 1793392902), auto_advance reported "Merge of build-app-sh-install failed: Tests fail rebased onto main … Sent its worker the output; it's back at work." board(build-app-sh-install) afterwards shows status running, with keptBecause still set. The merge should have been refused for a kept task (step 6: merge refuses it until the lead sets it back). Possible cause: the merge was queued at the clean verdict, before the hold, and didn't re-check status at run time.
+
+Task: build-app-sh-install
+Check: task turn-this-incident-into-2 turns it into a check that runs before merge.
+
