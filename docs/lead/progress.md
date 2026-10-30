@@ -2078,3 +2078,4 @@
 - 2026-10-30 10:20 Automatically (auto_advance): Started a worker on accessibility-graph (Accessibility-graph freezes: SwiftUI's accessibility updates take seconds while a lead's chat is shown (5 freezes, up to 15.7 s)).
 - 2026-10-30 10:42 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-10-30 10:44 Automatically (auto_advance): Started the audit of dictation-per-session at 040834da (Its review is audit).
+- 2026-10-30 10:58 Merged accessibility-graph: Accessibility-graph freezes: SwiftUI's accessibility updates take seconds while a lead's chat is shown (5 freezes, up to 15.7 s) (no audit: review none)
