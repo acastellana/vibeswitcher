@@ -472,6 +472,47 @@ struct ClaudeDictationTests {
         #expect(h.agent["mode"] as? String == "working" && h.agent["enters"] as? Int == 0)
     }
 
+    /// Cancelled while Claude processes out of sight: a custom status line hides its footer, its level cursor goes with
+    /// the recording, and nothing heard shows dim. Not in a turn: one Esc (harmless into an idle prompt) cancels it, the
+    /// box as it was. In a turn, where an Esc into an idle prompt would interrupt it: no Esc; the run waits for what
+    /// Claude may still write and, nothing seen, says it wasn't seen stopped, and a message sent over it doesn't go.
+    @Test func cancelledWhileClaudeProcessesOutOfSight() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "statusLine": true, "interim": "", "processing": 30.0])
+        try await h.waitFor { h.agent["statusLine"] as? Bool == true && h.agent["processing"] as? Double == 30 }
+        let controller = dictation(h)
+        for working in [false, true] {
+            if working {
+                h.tell(["op": "work"])
+                try await h.waitFor { h.agent["mode"] as? String == "working" }
+            }
+            let (cancels, prompts) = (h.agent["voiceCancels"] as? Int ?? -1, h.agentPrompts)
+            controller.press(h.key, agent: .claude) { "" }
+            try await h.waitFor { controller.listening }
+            controller.release()
+            try await h.waitFor { h.agent["recording"] as? String == "processing" }
+            if working {
+                #expect(h.sync.type("also check the tests"))
+            } else {
+                controller.cancel(.escape)
+            }
+            try await h.waitFor { controller.phase == .idle }
+            if working {
+                #expect(controller.notice?.text == ClaudeVoiceRun.notStopped, "\(String(describing: controller.notice))")
+                #expect(h.chat.sendNotice == ChatSync.dictationLeft)
+                #expect(h.agent["voiceCancels"] as? Int == cancels && h.agent["mode"] as? String == "working")
+                try await h.quiet()
+                #expect(h.agentPrompts == prompts, "the message went in over the dictation")
+            } else {
+                try await h.waitFor { h.agent["voiceCancels"] as? Int == cancels + 1 }
+                #expect(controller.notice == nil, "\(String(describing: controller.notice))")
+                #expect(h.agent["recording"] as? String == "" && input(h) == "" && h.agent["voiceInserts"] as? Int == 0)
+            }
+            #expect(h.agent["enters"] as? Int == 0)
+        }
+    }
+
     /// The user's case (2026-10-30): a recording whose level cursor stayed flat, no processing seen and no text after the
     /// release, ends 3 s after it (the runs' clock), not 20. Claude went idle at once with nothing (too fast to see it
     /// process): nothing more to do. Claude still recording after the Spaces stopped: its own cancel first, so it isn't

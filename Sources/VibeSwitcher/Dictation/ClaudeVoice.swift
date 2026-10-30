@@ -19,6 +19,9 @@ struct ClaudeVoiceSession {
     var focusIn: () -> Bool = { false }
     /// Tells its program the terminal's real focus again: `CSI O` unless its pane has it.
     var focusBack: () -> Void = {}
+    /// Claude may be in a turn (the hooks say so, or it can't be told): an Esc that reaches its prompt with its
+    /// dictation idle would interrupt it.
+    var working: () -> Bool = { true }
 }
 
 /// What Claude Code's screen says about its dictation (code.claude.com/docs/en/voice-dictation).
@@ -471,6 +474,8 @@ final class ClaudeVoiceRun {
     private var stopBy = Date.distantFuture
     private var stopEscapes = 0
     private var stopKills = 0
+    /// Stopping: the dictation's transcript showed in the box (Claude is idle).
+    private var stopLanded = false
     /// When the stop began and the last Esc went: only reads asked after them say what to do.
     private var stopAt = Date.distantFuture
     private var lastEscapeAt = Date.distantPast
@@ -884,17 +889,23 @@ final class ClaudeVoiceRun {
         readSoon(after: 0)
     }
 
-    /// While a read shows Claude recording or processing (its footer or level cursor), Esc, its own cancel in either
-    /// (2.1.312: the box put back as it was before the recording, what it heard dropped); never when it shows neither,
-    /// where Esc would interrupt Claude's turn. Once it shows neither: the warmup's spaces go, and a transcript that went
-    /// in before the Esc is taken out if it's the dictation's; then it ends. Only a read asked since the stop began says
+    /// While a read shows Claude recording or processing (its footer, its level cursor, or the words it heard, dim: it
+    /// shows them only then), Esc, its own cancel in either (2.1.312: the box put back as it was before the recording,
+    /// what it heard dropped). Once it shows none of them: the warmup's spaces go, and a transcript that went in before
+    /// the Esc is taken out if it's the dictation's; then it ends. A cancelled recording that shows none of them with no
+    /// Esc sent yet may still be processing out of sight (a custom status line hides its footer, and its level cursor
+    /// goes with the recording): it gets one Esc when Claude isn't in a turn (into an idle prompt that's harmless);
+    /// in a turn, where an Esc could interrupt it, the box is watched instead, and what lands is taken out, until
+    /// `stopBy`, when it ends saying it wasn't seen stopped (a message sent over it doesn't go). Only a read asked since the stop began says
     /// anything (one asked before may show it processing after it went idle), and only one asked `stopRetryAfter` after
     /// the last Esc sends another (one asked before Claude redrew still shows it going).
     private func stopping(_ screen: LeadDelivery.Screen?, asked: Date) {
         if let screen, asked >= stopAt {
             let footer = ClaudeVoiceScreen.footer(screen.text)
             let prompt = ClaudeVoiceScreen.prompt(screen)
-            if prompt.meter || [.listening, .processing, .tap].contains(footer) {
+            let words = prompt.dim != dimBefore && prompt.dim.contains(where: { $0.isLetter || $0.isNumber })
+            let unseen = cancelled && listening && stopEscapes == 0 && !stopLanded
+            if prompt.meter || [.listening, .processing, .tap].contains(footer) || words {
                 let first = stopEscapes == 0
                 if stopEscapes < Self.stopKeys, asked.timeIntervalSince(lastEscapeAt) >= Self.stopRetryAfter {
                     if session.keys([Self.escape]) {
@@ -903,11 +914,20 @@ final class ClaudeVoiceRun {
                         if first { trail("Esc sent") }
                     }
                 }
+            } else if unseen, LeadDelivery.box(in: screen) == .empty, !session.working() {
+                if session.keys([Self.escape]) {
+                    stopEscapes += 1
+                    lastEscapeAt = now()
+                    trail("Esc sent, nothing shown")
+                }
             } else {
                 switch LeadDelivery.box(in: screen) {
                 case .empty where (prompt.spaces ?? 0) > 0 && stopKills < Self.clearKeys:
                     // The warmup's spaces (the box shows nothing else): out with ⌃U.
                     killStopping()
+                case .empty where unseen:
+                    // In a turn, nothing shown: what it may still write is waited for.
+                    trail("watching, nothing shown")
                 case .empty, .dialog:
                     return endStopped()
                 case .draft(let draft):
@@ -915,6 +935,8 @@ final class ClaudeVoiceRun {
                     // what was heard. Anything else is left alone.
                     guard !typed, ClaudeVoiceScreen.grew(ClaudeVoiceScreen.line(draft), from: live) else { return endStopped() }
                     guard stopKills < Self.clearKeys else { return end(.notice(Self.keptText, offer: false), why: "the dictated text stayed in the box") }
+                    // It wrote what it heard: idle now, and once that's out the box is as it was.
+                    stopLanded = true
                     killStopping()
                 }
             }

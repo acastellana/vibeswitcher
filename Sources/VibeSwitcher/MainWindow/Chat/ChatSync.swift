@@ -703,6 +703,9 @@ final class ChatSync {
         }, focusBack: { [weak self] in
             guard let self, self.host.isUsable, !self.paneFocused(id) else { return }
             self.host.send(id, bytes: Data(Self.focusOut), reply: false)
+        }, working: { [weak self] in
+            guard let target = self?.target(), target.id == id else { return true }
+            return target.working
         })
     }
 
