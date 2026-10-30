@@ -2058,3 +2058,6 @@
 - 2026-10-30 08:57 Planned a-claude-dictation-that: A Claude dictation that hears nothing never blocks the composer: cancel any time, sending overrides, shorter wait, honest notice
 - 2026-10-30 08:57 Started a worker on a-claude-dictation-that
 - 2026-10-30 08:57 Automatically (auto_advance): Started a worker on a-claude-dictation-that (A Claude dictation that hears nothing never blocks the composer: cancel any time, sending overrides, shorter wait, honest notice).
+- 2026-10-30 09:35 Automatically (auto_advance): Started the audit of a-claude-dictation-that at a4d3e232 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-10-30 09:35 Planned dictation-per-session: Dictation per session: one chat processing doesn't stop another from dictating (review audit)
+- 2026-10-30 09:36 Planned silence-the-mac-s: Silence the Mac's sound while dictation listens, then put it back
