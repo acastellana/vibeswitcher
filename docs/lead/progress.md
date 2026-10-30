@@ -2148,3 +2148,6 @@
 - 2026-10-30 15:07 Dismissed starting-a-lead-with:F1: Lead accepts it. Sandbox.swift's `--empty`/`startlead` and the sandbox-app.sh option are what acceptance check 3 needs, since the sandbox had no host-less start and no lead start. The verifier reviewed them under the security checklist and found nothing harmful.
 - 2026-10-30 15:10 Audit of starting-a-lead-with: complete, clean, round 2: 1 Nit closed
 - 2026-10-30 15:15 Merged starting-a-lead-with: Starting a lead with no session open fails: the session host isn't started first ("connect: connection refused")
+- 2026-10-30 15:15 Automatically (auto_advance): Merged starting-a-lead-with (Starting a lead with no session open fails: the session host isn't started first ("connect: connection refused")) into main at 2870cf5b, on its passing audit and the full test run.
+- 2026-10-30 15:15 Automatically (auto_advance): Cleaned up starting-a-lead-with; ended pid 81324 (Worker: Starting a lead with no session open fails: the session host isn't started first ("connect: connection refused")) (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-10-30 15:16 Update: A lead starts with no session open (starting-a-lead-with) — **What changed:**
