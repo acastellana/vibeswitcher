@@ -2055,3 +2055,6 @@
 - 2026-10-30 08:45 Automatically (auto_advance): Merged 7-s-freeze-measuring (7 s freeze measuring chat text (NSAttributedString boundingRect under SwiftUI layout)) into main at b55933ce, on its passing audit and the full test run.
 - 2026-10-30 08:45 Automatically (auto_advance): Cleaned up 7-s-freeze-measuring; ended pid 82356 (Worker: 7 s freeze measuring chat text (NSAttributedString boundingRect under SwiftUI layout)) (freed 1.4 GB of build output and temporary folders). It stays done.
 - 2026-10-30 08:45 Update: Session header lines capped (7-s-freeze-measuring) — **What changed:** the session header's one-line texts are cut at 400 characters before layout: the title, the details line, and a replaced lead's draft line. That's more than the header can show, so i…
+- 2026-10-30 08:57 Planned a-claude-dictation-that: A Claude dictation that hears nothing never blocks the composer: cancel any time, sending overrides, shorter wait, honest notice
+- 2026-10-30 08:57 Started a worker on a-claude-dictation-that
+- 2026-10-30 08:57 Automatically (auto_advance): Started a worker on a-claude-dictation-that (A Claude dictation that hears nothing never blocks the composer: cancel any time, sending overrides, shorter wait, honest notice).
