@@ -2116,3 +2116,9 @@
 - 2026-10-30 11:49 Merged spaceholdtests-crashes: SpaceHoldTests crashes the whole test process (unowned self after dealloc in Box) (no audit: review none)
 - 2026-10-30 11:49 Automatically (auto_advance): Merged spaceholdtests-crashes (SpaceHoldTests crashes the whole test process (unowned self after dealloc in Box)) into main at 6f8ded17, review none: on its worker's done report on b13b5e8a and the full test run.
 - 2026-10-30 11:55 Merged flaky: Flaky: somethingTypedInTheTerminalMeanwhileIsLeftAlone times out under load (3 times now) (no audit: review none)
+- 2026-10-30 11:55 Automatically (auto_advance): Merged flaky (Flaky: somethingTypedInTheTerminalMeanwhileIsLeftAlone times out under load (3 times now)) into main at 2d2d4589, review none: on its worker's done report on 7582622f and the full test run.
+- 2026-10-30 11:55 Automatically (auto_advance): Cleaned up spaceholdtests-crashes (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-30 11:55 Automatically (auto_advance): Cleaned up flaky; ended pid 63357 (Worker: Flaky: somethingTypedInTheTerminalMeanwhileIsLeftAlone times out under load (3 times now)) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-30 11:55 Raised silence-the-mac-s to audit (the risk check, at c3115a64): it has code that deletes or rewrites files or data (Sources/VibeSwitcher/Dictation/OutputSilencer.swift: try? FileManager.default.removeItem(at: marker))
+- 2026-10-30 11:55 Automatically (auto_advance): Started the audit of silence-the-mac-s at c3115a64 (The risk check raised it to audit: it has code that deletes or rewrites files or data (Sources/VibeSwitcher/Dictation/OutputSilencer.swift: try? FileManager.default.removeItem(at: marker))).
+- 2026-10-30 11:55 Automatically (auto_advance): Started the audit of fix-the-flaky-test-7 at bfd1b841 (Its review is audit).
