@@ -1314,29 +1314,32 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settle { reply(true, "the note about OpenAI was read: a press records") }
         case "press", "release", "letgo":
             guard let row = model.selectedRow else { return reply(false, "no session selected: chat NAME first") }
-            let agent = row.session?.agent
-            if what == "press" { dictation.press(row.draftKey, agent: agent) { "Words that may come up: sandbox." } } else { dictation.release() }
-            let claude = dictation.claudeRow == row.draftKey
+            let (agent, key) = (row.session?.agent, row.draftKey)
+            if what == "press" { dictation.press(key, agent: agent) { "Words that may come up: sandbox." } } else { dictation.release(key) }
+            let claude = dictation.isClaude(key)
             waitFor({ [weak self] in
                 guard let dictation = self?.dictation else { return true }
                 // Claude's: held until it listens (or says why not); let go until the text is in the composer (letgo: until
                 // it waits for it).
-                if claude, what == "letgo" { return !dictation.isRecording(row.draftKey) }
-                if claude { return what == "press" ? dictation.listening || dictation.phase == .idle : dictation.phase == .idle }
-                return !dictation.isTranscribing(row.draftKey)
+                if claude, what == "letgo" { return !dictation.isRecording(key) }
+                if claude { return what == "press" ? dictation.isListening(key) || !dictation.isBusy(key) : !dictation.isBusy(key) }
+                return !dictation.isTranscribing(key)
             }) { [weak self] _ in
-                self?.settle { reply(true, "\(self?.dictation.phase ?? .idle)\(self?.dictation.listening == true ? ", listening" : "")") }
+                self?.settle { reply(true, "\(self?.dictation.phase(key) ?? .idle)\(self?.dictation.isListening(key) == true ? ", listening" : "")") }
             }
         case "cancel":
-            dictation.cancel(.button)
-            waitFor({ [weak self] in self?.dictation.phase == .idle }) { [weak self] _ in
-                self?.settle { reply(true, "cancelled: \(self?.dictation.phase ?? .idle)") }
+            guard let row = model.selectedRow else { return reply(false, "no session selected: chat NAME first") }
+            let key = row.draftKey
+            dictation.cancel(key, .button)
+            waitFor({ [weak self] in self?.dictation.isBusy(key) == false }) { [weak self] _ in
+                self?.settle { reply(true, "cancelled: \(self?.dictation.phase(key) ?? .idle)") }
             }
         case "turnon":
             guard let row = model.selectedRow else { return reply(false, "no session selected: chat NAME first") }
-            dictation.turnOnClaude(row.draftKey)
-            waitFor({ [weak self] in self?.dictation.turningOn == nil }) { [weak self] _ in
-                self?.settle { reply(true, self?.dictation.notice?.text ?? "no notice") }
+            let key = row.draftKey
+            dictation.turnOnClaude(key)
+            waitFor({ [weak self] in self?.dictation.turningOn.contains(key) == false }) { [weak self] _ in
+                self?.settle { reply(true, self?.dictation.notices[key]?.text ?? "no notice") }
             }
         default:
             reply(false, "dictation key|nokey|note|ack|press|release|letgo|cancel|turnon")

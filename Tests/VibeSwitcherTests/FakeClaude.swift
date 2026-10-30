@@ -25,6 +25,7 @@ enum FakeClaude {
 # does it draw its caret and level cursor), "processing" (seconds a recording takes to process once it ends: a
 # Space then is typed, and it drops what it heard if the box changed meanwhile, as 2.1.312's input_diverged), "stuck" (a
 # recording goes on after the Spaces stop, until Esc), "loud" (its level cursor coloured though no words show)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
+# "processed" (the recording being processed is done now, whatever "processing" said) |
 # "exit" (it quits, as /exit)).
 # Its /voice keeps Claude Code 2.1.312's timings: a repeat chain breaks 120 ms after the last Space (the key let go),
 # 5 repeats start recording, and a second push of the key within 300 ms of a transcript going in sends it. A held
@@ -918,6 +919,9 @@ def control():
         elif op == "voiceStop":
             if state["recording"] == "listening":
                 end_recording()
+        elif op == "processed":
+            if state["recording"] == "processing":
+                VOICE["until"] = time.monotonic()
         elif op == "voice":
             for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine", "focused", "processing", "stuck", "loud"):
                 if name in command:

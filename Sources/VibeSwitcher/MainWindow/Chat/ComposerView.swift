@@ -515,7 +515,11 @@ struct ComposerTextView: NSViewRepresentable {
         textView.cardKey = cardKey
         textView.holdToTalk = dictation == nil ? nil : context.coordinator.holdToTalk
         textView.spaceHoldReady = dictation == nil ? nil : context.coordinator.spaceHoldReady
-        textView.cancelTalk = { [weak coordinator = context.coordinator] in coordinator?.parent.dictation?.cancel() }
+        textView.cancelTalk = { [weak coordinator = context.coordinator] in
+            guard let coordinator else { return }
+            coordinator.parent.dictation?.cancel(coordinator.talkingIn ?? coordinator.parent.rowID)
+            coordinator.talkingIn = nil
+        }
         textView.delegate = context.coordinator
         textView.font = .systemFont(ofSize: 13)
         textView.isRichText = false
@@ -590,12 +594,25 @@ struct ComposerTextView: NSViewRepresentable {
         func undoManager(for view: NSTextView) -> UndoManager? { undo }
 
         /// Holding Space in the box may start a run now (Settings › Dictation).
-        private(set) lazy var spaceHoldReady: () -> Bool = { [weak self] in self?.parent.dictation?.canHoldSpace == true }
+        private(set) lazy var spaceHoldReady: () -> Bool = { [weak self] in
+            guard let parent = self?.parent else { return false }
+            return parent.dictation?.canHoldSpace(parent.rowID) == true
+        }
+
+        /// The composer whose dictation the held key started: let go, it's that one's even if the box shows another
+        /// session's by then.
+        var talkingIn: String?
 
         /// ⌥Space (or Space, held) went down (true) or up (false) in the box.
         private(set) lazy var holdToTalk: (Bool) -> Void = { [weak self] down in
             guard let self, let dictation = self.parent.dictation else { return }
-            if down { dictation.press(self.parent.rowID, agent: self.parent.agent, vocabulary: self.parent.vocabulary()) } else { dictation.release() }
+            if down {
+                self.talkingIn = self.parent.rowID
+                dictation.press(self.parent.rowID, agent: self.parent.agent, vocabulary: self.parent.vocabulary())
+            } else {
+                dictation.release(self.talkingIn ?? self.parent.rowID)
+                self.talkingIn = nil
+            }
         }
 
         func textDidChange(_ notification: Notification) {
@@ -644,7 +661,7 @@ struct ComposerTextView: NSViewRepresentable {
             if textView.hasMarkedText() { return false }
             // Esc while dictating: the recording is dropped.
             if selector == #selector(NSResponder.cancelOperation(_:)), let dictation = parent.dictation, dictation.isBusy(parent.rowID) {
-                dictation.cancel()
+                dictation.cancel(parent.rowID)
                 return true
             }
             let count = min(parent.suggestions.items.count, 8)

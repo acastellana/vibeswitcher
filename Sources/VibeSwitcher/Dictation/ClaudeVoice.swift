@@ -500,6 +500,9 @@ final class ClaudeVoiceRun {
     /// The host session it dictates into.
     var sessionID: UUID? { session.id }
 
+    /// Which session's run a line in app.log is (runs in several sessions go at once): its id's first part.
+    private var inSession: String { session.id.map { "session \($0.uuidString.prefix(8)), " } ?? "" }
+
     /// Reads the box first: only an empty one gets keys.
     func start() {
         if let id = session.id { Self.busy.insert(id) }
@@ -554,7 +557,7 @@ final class ClaudeVoiceRun {
             if screen.focusEvents == true, session.focusIn() { focusSent = true }
             stage = .holding
             started = now()
-            Breadcrumbs.shared.note("dictation: Claude's began (focus events \(screen.focusEvents == true ? "yes" : "no"))")
+            Breadcrumbs.shared.note("dictation: Claude's began (\(inSession)focus events \(screen.focusEvents == true ? "yes" : "no"))")
             guard space() else { return }
             _ = schedule(Self.firstRepeatWithin) { [weak self] in self?.beginRepeats() }
             readSoon(after: Self.holdReadEvery)
@@ -725,7 +728,7 @@ final class ClaudeVoiceRun {
         guard stage == .holding, !listening, now().timeIntervalSince(started) >= Self.startWithin else { return }
         let last = seen.last ?? .nothing
         let off = last == .typed && spacesShown > ClaudeVoiceScreen.warmupTyped
-        Breadcrumbs.shared.note("dictation: Claude's didn't start (\(off ? "off" : "unclear")): seen \(seen.suffix(6).map(\.rawValue).joined(separator: " → ")) after \(spaces) Spaces")
+        Breadcrumbs.shared.note("dictation: Claude's didn't start (\(inSession)\(off ? "off" : "unclear")): seen \(seen.suffix(6).map(\.rawValue).joined(separator: " → ")) after \(spaces) Spaces")
         tidy { [weak self] in self?.end(off ? .notice(Self.didntStart, offer: true) : .notice(Self.unclear(last), offer: false)) }
     }
 
@@ -971,7 +974,7 @@ final class ClaudeVoiceRun {
         }
         let ended = cancelled && outcome != .cancelled ? how + ", cancelled by \(cancelReason.rawValue)" : how
         let took = started == .distantPast ? "before any Space" : String(format: "after %.1f s", now().timeIntervalSince(started))
-        Breadcrumbs.shared.note("dictation: Claude's ended, \(ended), \(took), \(spaces) Spaces, level cursor \(meterSummary); saw \(trailed.isEmpty ? "nothing" : trailed.joined(separator: " → "))")
+        Breadcrumbs.shared.note("dictation: Claude's ended, \(inSession)\(ended), \(took), \(spaces) Spaces, level cursor \(meterSummary); saw \(trailed.isEmpty ? "nothing" : trailed.joined(separator: " → "))")
         stopSpaces?()
         stopSpaces = nil
         if focusSent {

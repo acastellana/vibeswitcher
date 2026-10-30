@@ -278,10 +278,10 @@ struct SpaceHoldTests {
         }
         let dictation = controller()
         #expect(dictation.holdSpace)
-        #expect(dictation.canHoldSpace)
+        #expect(dictation.canHoldSpace("row"))
         #expect(dictation.shortcuts == "Space or ⌥Space")
         dictation.holdSpace = false
-        #expect(!dictation.canHoldSpace)
+        #expect(!dictation.canHoldSpace("row"))
         #expect(dictation.shortcuts == "⌥Space")
         #expect(!controller().holdSpace)
         #expect(DictationSettings.holdSpaceHelp.contains("many spaces"))

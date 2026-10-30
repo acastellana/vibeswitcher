@@ -19,6 +19,10 @@ enum DictationLimits {
 /// session in the window dictates through Claude's own /voice (`ClaudeVoiceRun`: your claude.ai sign-in, no key);
 /// any other (Codex, a Terminal tab) records here and has OpenAI transcribe it with your key, and the first such press
 /// on this Mac shows a one-time note that the audio goes to OpenAI instead of recording. Main thread.
+///
+/// Each composer (keyed by its row, one per session) has its own run, notice and cancel: while one waits for its text
+/// another dictates. Only recording is one at a time (one microphone): a press in another composer ends the recording
+/// under way first, as letting go would, so its words still land in its own box.
 final class DictationController: ObservableObject, @unchecked Sendable {
     enum Phase: Equatable {
         case idle
@@ -50,14 +54,26 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         var text: String
     }
 
+    /// A composer's dictation under way, as its views show it.
+    struct Run: Equatable {
+        /// Recording or transcribing (never idle: a composer with none has no run).
+        var phase: Phase
+        /// Through Claude's /voice (else OpenAI's).
+        var claude: Bool
+        /// Claude says it's listening.
+        var listening = false
+    }
+
     static let privacyNotedKey = "dictationPrivacyNoted"
     static let modelKey = "dictationModel"
     static let shortcut = "⌥Space"
     static let holdSpaceKey = "dictationHoldSpace"
 
-    @Published private(set) var phase: Phase = .idle
+    /// The composers' runs under way, by row.
+    @Published private(set) var runs: [String: Run] = [:]
     @Published private(set) var keyState: KeyState = .unknown
-    @Published private(set) var notice: Notice?
+    /// The line under each composer's box, by row.
+    @Published private(set) var notices: [String: Notice] = [:]
     /// The composer showing the one-time note about OpenAI.
     @Published private(set) var privacyNoteFor: String?
     @Published private(set) var deliveries: [String: Delivery] = [:]
@@ -78,11 +94,8 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     var claudeSession: (String) -> ClaudeVoiceSession? = { _ in nil }
     /// Claude's settings for a session's folder as dictation reads them (never writes them); off the main thread.
     var claudeSettings: @Sendable (String?) -> ClaudeVoiceSettings = { ClaudeVoiceSettings.read(folder: $0) }
-    /// The composer whose dictation goes through Claude's /voice now, and whether Claude says it's listening.
-    @Published private(set) var claudeRow: String?
-    @Published private(set) var listening = false
-    /// The composer whose session is turning Claude's dictation on (`/voice hold` typed, its answer read).
-    @Published private(set) var turningOn: String?
+    /// The composers whose sessions are turning Claude's dictation on (`/voice hold` typed, its answer read).
+    @Published private(set) var turningOn: Set<String> = []
 
     private let keyStore: SecretStore
     private let recorder: DictationRecorder
@@ -96,20 +109,25 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     private let background: (@escaping @Sendable () -> Void) -> Void
     /// Calls back after a delay (the 2-minute limit); returns what cancels it. Tests give their own clock.
     private let schedule: (TimeInterval, @escaping () -> Void) -> () -> Void
-    private var holding = false
-    private var vocabulary: (@Sendable () -> String)?
-    private var cancelLimit: (() -> Void)?
+    /// The composer whose mic (button or key) is held down now: one at a time.
+    private(set) var held: String?
+    /// What each run keeps that its views don't show.
+    private final class Work {
+        var claudeRun: ClaudeVoiceRun?
+        var cancelLimit: (() -> Void)?
+        var vocabulary: (@Sendable () -> String)?
+        /// Called once its Claude run has ended (a message sent over it goes then): true when Claude's box is as it
+        /// was, false when the run said something's left there.
+        var afterClaude: [(Bool) -> Void] = []
+    }
+    private var work: [String: Work] = [:]
     private var serial = 0
-    private var claudeRun: ClaudeVoiceRun?
     /// The clock Claude's runs keep (tests give their own).
     private let now: () -> Date
     /// A Claude run in this launch heard something (its level cursor coloured, or text taken): the microphone works, so
     /// a later run that hears nothing isn't said to be the microphone's doing.
     private(set) var claudeHeard = false
-    /// Called once the Claude run under way has ended (a message sent over it goes then): true when Claude's box is as
-    /// it was, false when the run said something's left there.
-    private var afterClaude: [(Bool) -> Void] = []
-    /// Called each time the phase goes back to idle (tests wait on it).
+    /// Called each time a run ends (tests wait on it).
     var onIdle: (() -> Void)?
 
     init(keyStore: SecretStore, recorder: DictationRecorder, microphone: MicrophoneAuthorizer,
@@ -140,17 +158,25 @@ final class DictationController: ObservableObject, @unchecked Sendable {
 
     var privacyNoted: Bool { defaults.bool(forKey: Self.privacyNotedKey) }
 
-    func isRecording(_ rowID: String) -> Bool { phase == .recording(rowID: rowID) }
-    func isTranscribing(_ rowID: String) -> Bool { phase == .transcribing(rowID: rowID) }
+    func phase(_ rowID: String) -> Phase { runs[rowID]?.phase ?? .idle }
+    func isRecording(_ rowID: String) -> Bool { phase(rowID) == .recording(rowID: rowID) }
+    func isTranscribing(_ rowID: String) -> Bool { phase(rowID) == .transcribing(rowID: rowID) }
     /// Recording or transcribing for that composer (Esc there cancels it).
-    func isBusy(_ rowID: String) -> Bool { isRecording(rowID) || isTranscribing(rowID) }
+    func isBusy(_ rowID: String) -> Bool { runs[rowID] != nil }
+    /// That composer's run goes through Claude's /voice.
+    func isClaude(_ rowID: String) -> Bool { runs[rowID]?.claude == true }
+    /// Claude says it's listening to that composer's run.
+    func isListening(_ rowID: String) -> Bool { runs[rowID]?.listening == true }
+
+    /// The composer whose recording is under way (one at a time: one microphone).
+    private var recordingRow: String? { runs.first { $0.value.phase == .recording(rowID: $0.key) }?.key }
 
     /// The keys that dictate in the box, as said in tooltips and notices.
     var shortcuts: String { holdSpace ? "Space or \(Self.shortcut)" : Self.shortcut }
 
-    /// Whether holding Space in a box may start a run now: it's on, and nothing else is under way (otherwise the
-    /// spaces stay typed).
-    var canHoldSpace: Bool { holdSpace && phase == .idle && turningOn == nil }
+    /// Whether holding Space in `rowID`'s box may start a run now: it's on, and nothing else is under way there
+    /// (otherwise the spaces stay typed).
+    func canHoldSpace(_ rowID: String) -> Bool { holdSpace && runs[rowID] == nil && !turningOn.contains(rowID) }
 
     /// Whether `rowID`'s dictation goes through Claude's /voice: a Claude Code session the window can type into.
     func usesClaude(_ rowID: String, agent: Agent?) -> Bool { route(rowID, agent: agent) != nil }
@@ -162,10 +188,11 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     // MARK: Push to talk
 
     /// The button or ⌥Space went down in `rowID`'s composer, whose session runs `agent`. `vocabulary` makes OpenAI's
-    /// prompt (run off the main thread; Claude takes the project's and branch's names itself).
+    /// prompt (run off the main thread; Claude takes the project's and branch's names itself). A recording in another
+    /// composer ends first, as its release would.
     func press(_ rowID: String, agent: Agent? = nil, vocabulary: @escaping @Sendable () -> String) {
-        guard phase == .idle, turningOn == nil else { return }
-        notice = nil
+        guard runs[rowID] == nil, !turningOn.contains(rowID) else { return }
+        notices[rowID] = nil
         // The microphone first, for either: macOS asks about VibeSwitcher for a session's Claude too.
         switch microphone.status {
         case .allowed:
@@ -176,14 +203,14 @@ final class DictationController: ObservableObject, @unchecked Sendable {
             // Asked once, at this first press; still held when it's allowed, it goes on.
             guard !askedMicrophone else { return microphoneDenied(rowID) }
             askedMicrophone = true
-            holding = true
+            held = rowID
             return microphone.request { [weak self] granted in
                 guard let self else { return }
                 guard granted else {
-                    self.holding = false
+                    if self.held == rowID { self.held = nil }
                     return self.microphoneDenied(rowID)
                 }
-                if self.holding { self.press(rowID, agent: agent, vocabulary: vocabulary) }
+                if self.held == rowID { self.press(rowID, agent: agent, vocabulary: vocabulary) }
             }
         }
         if let session = route(rowID, agent: agent) { return pressClaude(rowID, session) }
@@ -192,49 +219,56 @@ final class DictationController: ObservableObject, @unchecked Sendable {
             privacyNoteFor = rowID
             return
         }
-        holding = true
+        endOtherRecording(rowID)
+        held = rowID
         recorder.permission { [weak self] allowed in
             guard let self else { return }
             guard allowed else {
-                self.holding = false
+                if self.held == rowID { self.held = nil }
                 return self.microphoneDenied(rowID)
             }
-            // Let go before macOS answered (its first-time question): nothing to record.
-            guard self.holding, self.phase == .idle else { return }
+            // Let go before macOS answered (its first-time question), or another composer pressed since: nothing to
+            // record.
+            guard self.held == rowID, self.runs[rowID] == nil else { return }
+            self.endOtherRecording(rowID)
             do {
                 try self.recorder.start()
             } catch {
-                self.holding = false
-                self.notice = Notice(rowID: rowID, text: "The microphone couldn't be started.")
+                self.held = nil
+                self.notices[rowID] = Notice(rowID: rowID, text: "The microphone couldn't be started.")
                 return
             }
-            self.vocabulary = vocabulary
-            self.phase = .recording(rowID: rowID)
-            self.cancelLimit = self.schedule(DictationLimits.maxDuration) { [weak self] in self?.stop(limitReached: true) }
+            let work = Work()
+            work.vocabulary = vocabulary
+            work.cancelLimit = self.schedule(DictationLimits.maxDuration) { [weak self] in self?.stop(rowID, limitReached: true) }
+            self.begin(rowID, Run(phase: .recording(rowID: rowID), claude: false), work)
         }
     }
 
-    /// The button or ⌥Space came up: the recording goes to OpenAI, or Claude finishes its transcript.
-    func release() {
-        holding = false
-        if let claudeRun {
-            if case .recording(let rowID) = phase { phase = .transcribing(rowID: rowID) }
-            return claudeRun.release()
-        }
-        stop(limitReached: false)
+    /// The button or ⌥Space came up in `rowID`'s composer: its recording goes to OpenAI, or Claude finishes its
+    /// transcript. Nothing when that composer isn't recording (another press ended it already).
+    func release(_ rowID: String) {
+        if held == rowID { held = nil }
+        guard isRecording(rowID) else { return }
+        guard isClaude(rowID) else { return stop(rowID, limitReached: false) }
+        runs[rowID]?.phase = .transcribing(rowID: rowID)
+        // No run yet (Claude's settings are being read): it's let go as it starts.
+        work[rowID]?.claudeRun?.release()
     }
 
-    /// Esc or the ✕ in the composer: the recording is dropped (Claude's: stopped with its own cancel, held, waiting or
-    /// processing), nothing lands in the box.
-    func cancel(_ reason: ClaudeVoiceRun.CancelReason = .escape) {
-        holding = false
-        if let claudeRun { return claudeRun.cancel(reason) }
-        guard case .recording = phase else { return }
-        cancelLimit?()
-        cancelLimit = nil
-        vocabulary = nil
+    /// Esc or the ✕ in `rowID`'s composer: its recording is dropped (Claude's: stopped with its own cancel, held,
+    /// waiting or processing), nothing lands in the box. Other composers' runs go on.
+    func cancel(_ rowID: String, _ reason: ClaudeVoiceRun.CancelReason = .escape) {
+        if held == rowID { held = nil }
+        guard let run = runs[rowID] else { return }
+        if run.claude {
+            if let claudeRun = work[rowID]?.claudeRun { return claudeRun.cancel(reason) }
+            // Its settings still being read: nothing went into the session.
+            return finishClaude(rowID, .cancelled)
+        }
+        guard case .recording = run.phase else { return }
         recorder.cancel()
-        idle()
+        idle(rowID)
     }
 
     /// The one-time note was read: from now on a press records.
@@ -243,26 +277,39 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         privacyNoteFor = nil
     }
 
-    func dismissNotice() { notice = nil }
+    func dismissNotice(_ rowID: String) { notices[rowID] = nil }
 
     /// The composer put `serial`'s text in (or the box went away with it shown): it's not offered again.
     func delivered(_ rowID: String, serial: Int) {
         if deliveries[rowID]?.serial == serial { deliveries[rowID] = nil }
     }
 
-    private func stop(limitReached: Bool) {
-        guard case .recording(let rowID) = phase else { return }
-        cancelLimit?()
-        cancelLimit = nil
+    /// One microphone: a recording in a composer other than `rowID`'s ends as letting go would, its words still
+    /// going to its own box.
+    private func endOtherRecording(_ rowID: String) {
+        guard let other = recordingRow, other != rowID else { return }
+        Breadcrumbs.shared.note("dictation: a press in another composer ended the recording under way")
+        release(other)
+    }
+
+    private func begin(_ rowID: String, _ run: Run, _ work: Work) {
+        self.work[rowID] = work
+        runs[rowID] = run
+    }
+
+    private func stop(_ rowID: String, limitReached: Bool) {
+        guard isRecording(rowID), !isClaude(rowID), let work = work[rowID] else { return }
+        work.cancelLimit?()
+        work.cancelLimit = nil
         let audio = recorder.stop()
-        let vocabulary = vocabulary ?? { "" }
-        self.vocabulary = nil
+        let vocabulary = work.vocabulary ?? { "" }
+        work.vocabulary = nil
         guard let audio, audio.duration >= DictationLimits.minDuration else {
-            notice = Notice(rowID: rowID, text: "Nothing was recorded: hold the mic button (or \(shortcuts)) while you speak.")
-            return idle()
+            notices[rowID] = Notice(rowID: rowID, text: "Nothing was recorded: hold the mic button (or \(shortcuts)) while you speak.")
+            return idle(rowID)
         }
-        if limitReached { notice = Notice(rowID: rowID, text: "Stopped at 2 minutes, the most one dictation takes.") }
-        phase = .transcribing(rowID: rowID)
+        if limitReached { notices[rowID] = Notice(rowID: rowID, text: "Stopped at 2 minutes, the most one dictation takes.") }
+        runs[rowID]?.phase = .transcribing(rowID: rowID)
         let (keyStore, transcription, model) = (keyStore, transcription, model)
         background { [weak self] in
             let key = keyStore.read()
@@ -288,9 +335,9 @@ final class DictationController: ObservableObject, @unchecked Sendable {
             keyState = .missing
             needKey(rowID)
         case .failure(let failure):
-            notice = Notice(rowID: rowID, text: failure.notice, settings: failure == .status(401))
+            notices[rowID] = Notice(rowID: rowID, text: failure.notice, settings: failure == .status(401))
         }
-        idle()
+        idle(rowID)
     }
 
     private func deliver(_ text: String, to rowID: String) {
@@ -299,8 +346,11 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         deliveries[rowID] = Delivery(serial: serial, text: before.map { $0 + " " + text } ?? text)
     }
 
-    private func idle() {
-        phase = .idle
+    /// `rowID`'s run is over.
+    private func idle(_ rowID: String) {
+        work[rowID]?.cancelLimit?()
+        work[rowID] = nil
+        runs[rowID] = nil
         onIdle?()
     }
 
@@ -308,10 +358,9 @@ final class DictationController: ObservableObject, @unchecked Sendable {
 
     /// Claude's settings first (tap mode and autoSubmit send by themselves: not used), then the run.
     private func pressClaude(_ rowID: String, _ session: ClaudeVoiceSession) {
-        holding = true
-        claudeRow = rowID
-        listening = false
-        phase = .recording(rowID: rowID)
+        endOtherRecording(rowID)
+        held = rowID
+        begin(rowID, Run(phase: .recording(rowID: rowID), claude: true), Work())
         let (read, folder) = (claudeSettings, session.folder)
         background { [weak self] in
             let settings = read(folder)
@@ -320,47 +369,43 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     }
 
     private func startClaude(_ rowID: String, _ session: ClaudeVoiceSession, _ settings: ClaudeVoiceSettings) {
-        guard claudeRun == nil, claudeRow == rowID, phase != .idle else { return }
+        guard isClaude(rowID), let work = work[rowID], work.claudeRun == nil else { return }
         if let refusal = settings.refusal {
             Breadcrumbs.shared.note("dictation: Claude's not started, its settings: \(refusal.text)")
             return finishClaude(rowID, .notice(refusal.text, offer: refusal.offer))
         }
         let run = ClaudeVoiceRun(session: session, schedule: schedule, now: now, heardBefore: claudeHeard,
-                                 onListening: { [weak self] in self?.listening = true },
+                                 onListening: { [weak self] in self?.runs[rowID]?.listening = true },
                                  onHeard: { [weak self] in self?.claudeHeard = true },
                                  finish: { [weak self] outcome in self?.finishClaude(rowID, outcome) })
-        claudeRun = run
-        cancelLimit = schedule(DictationLimits.maxDuration) { [weak self] in
-            guard let self, self.claudeRun === run else { return }
-            self.notice = Notice(rowID: rowID, text: "Stopped at 2 minutes, the most one dictation takes.", info: true)
-            self.release()
+        work.claudeRun = run
+        work.cancelLimit = schedule(DictationLimits.maxDuration) { [weak self] in
+            guard let self, self.work[rowID]?.claudeRun === run, self.isRecording(rowID) else { return }
+            self.notices[rowID] = Notice(rowID: rowID, text: "Stopped at 2 minutes, the most one dictation takes.", info: true)
+            self.release(rowID)
         }
         run.start()
-        // Let go while the settings were read.
-        if !holding { release() }
+        // Let go (or ended by a press elsewhere) while the settings were read.
+        if held != rowID { runs[rowID]?.phase = .transcribing(rowID: rowID) }
+        if !isRecording(rowID) { run.release() }
     }
 
     private func finishClaude(_ rowID: String, _ outcome: ClaudeVoiceRun.Outcome) {
-        claudeRun = nil
-        cancelLimit?()
-        cancelLimit = nil
+        guard let work = work[rowID] else { return }
         switch outcome {
         case .text(let text):
             claudeHeard = true
             deliver(text, to: rowID)
         case .notice(let text, let offer):
-            notice = Notice(rowID: rowID, text: text, turnOn: offer, privacy: text == Self.microphoneNotice || text == ClaudeVoiceRun.heardNothing)
+            notices[rowID] = Notice(rowID: rowID, text: text, turnOn: offer, privacy: text == Self.microphoneNotice || text == ClaudeVoiceRun.heardNothing)
         case .cancelled:
             break
         }
-        claudeRow = nil
-        listening = false
-        idle()
-        let after = afterClaude
-        afterClaude = []
+        if held == rowID { held = nil }
+        idle(rowID)
         let clean: Bool
         if case .notice = outcome { clean = false } else { clean = true }
-        after.forEach { $0(clean) }
+        work.afterClaude.forEach { $0(clean) }
     }
 
     /// A message sent from the composer into `session` while a Claude dictation goes into it: the dictation is
@@ -368,8 +413,10 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     /// when its box is as it was, false when the run left something there (the message mustn't go onto it). False when no
     /// dictation of this controller's goes into that session.
     func override(session: UUID, then: @escaping (Bool) -> Void) -> Bool {
-        guard let claudeRun, claudeRun.sessionID == session else { return false }
-        afterClaude.append(then)
+        guard let entry = work.first(where: { $0.value.claudeRun?.sessionID == session }), let claudeRun = entry.value.claudeRun
+        else { return false }
+        if held == entry.key { held = nil }
+        entry.value.afterClaude.append(then)
         claudeRun.cancel(.send)
         return true
     }
@@ -377,15 +424,15 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     /// After your click on the notice's offer: `/voice hold` typed into the session (only with its prompt box empty),
     /// and what Claude answers said under the box. Claude's settings and keys are its own: never edited from here.
     func turnOnClaude(_ rowID: String) {
-        guard phase == .idle, turningOn == nil else { return }
+        guard runs[rowID] == nil, !turningOn.contains(rowID) else { return }
         guard let session = claudeSession(rowID) else {
-            notice = Notice(rowID: rowID, text: "This session can't be typed into from here: run /voice hold in its terminal.")
+            notices[rowID] = Notice(rowID: rowID, text: "This session can't be typed into from here: run /voice hold in its terminal.")
             return
         }
-        turningOn = rowID
-        notice = Notice(rowID: rowID, text: "Turning on Claude's dictation…", info: true)
+        turningOn.insert(rowID)
+        notices[rowID] = Notice(rowID: rowID, text: "Turning on Claude's dictation…", info: true)
         session.screen { [weak self] screen in
-            guard let self, self.turningOn == rowID else { return }
+            guard let self, self.turningOn.contains(rowID) else { return }
             guard let screen, LeadDelivery.box(in: screen) == .empty else {
                 return self.turnedOn(rowID, Notice(rowID: rowID, text: "Claude's prompt box in the terminal isn't empty: clear it there, then turn dictation on."))
             }
@@ -409,7 +456,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
                              conversation: [String], until deadline: Date) {
         _ = schedule(ClaudeVoiceRun.readEvery * 2) { [weak self] in
             session.screen { [weak self] screen in
-                guard let self, self.turningOn == rowID else { return }
+                guard let self, self.turningOn.contains(rowID) else { return }
                 if let screen, let signal = ClaudeVoiceScreen.answer(to: Self.turnOnCommand, in: screen.text, before: conversation)
                     ?? ClaudeVoiceScreen.new(ClaudeVoiceScreen.signals(screen.text), since: before).first {
                     let notice = signal.notice.map { Notice(rowID: rowID, text: $0) }
@@ -426,17 +473,17 @@ final class DictationController: ObservableObject, @unchecked Sendable {
 
     private func turnedOn(_ rowID: String, _ notice: Notice) {
         Breadcrumbs.shared.note("dictation: turning on Claude's ended: \(notice.text)")
-        turningOn = nil
-        self.notice = notice
+        turningOn.remove(rowID)
+        notices[rowID] = notice
     }
 
     private func microphoneDenied(_ rowID: String) {
         Breadcrumbs.shared.note("dictation: not started, macOS says VibeSwitcher may not use the microphone")
-        notice = Notice(rowID: rowID, text: Self.microphoneNotice, privacy: true)
+        notices[rowID] = Notice(rowID: rowID, text: Self.microphoneNotice, privacy: true)
     }
 
     private func needKey(_ rowID: String) {
-        notice = Notice(rowID: rowID, text: OpenAITranscription.Failure.noKey.notice, settings: true)
+        notices[rowID] = Notice(rowID: rowID, text: OpenAITranscription.Failure.noKey.notice, settings: true)
     }
 
     // MARK: The key
@@ -489,7 +536,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
                 guard let self else { return }
                 self.keyState = saved ? .saved : .missing
                 self.keyNotice = ok ? nil : "The Keychain didn't take it; nothing was saved."
-                if saved, self.notice?.settings == true { self.notice = nil }
+                if saved { self.notices = self.notices.filter { !$0.value.settings } }
             }
         }
     }

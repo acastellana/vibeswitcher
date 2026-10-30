@@ -78,10 +78,11 @@ struct ClaudeDictationTests {
         // Codex, or a Claude session the window can't type into (a Terminal tab): OpenAI's, which needs the key.
         #expect(!controller.usesClaude("codex-row", agent: .codex))
         controller.press("codex-row", agent: .codex) { "" }
-        #expect(controller.notice?.settings == true && controller.notice?.rowID == "codex-row")
+        #expect(controller.notices["codex-row"]?.settings == true)
         #expect(!controller.usesClaude("terminal-row", agent: .claude))
         controller.press("terminal-row", agent: .claude) { "" }
-        #expect(controller.notice?.settings == true && controller.notice?.rowID == "terminal-row")
+        // Each composer keeps its own notice.
+        #expect(controller.notices["terminal-row"]?.settings == true && controller.notices["codex-row"]?.settings == true)
         // Even a Claude row whose session can be typed into, when its agent isn't Claude Code.
         #expect(!controller.usesClaude("claude-row", agent: .codex))
         // None of those reached the Claude session.
@@ -173,7 +174,7 @@ struct ClaudeDictationTests {
         for (row, agent) in [("claude", Agent.claude), ("codex", Agent.codex)] {
             controller.press(row, agent: agent) { "" }
             #expect(controller.phase == .idle)
-            #expect(controller.notice == DictationController.Notice(rowID: row, text: DictationController.microphoneNotice, privacy: true))
+            #expect(controller.notices[row] == DictationController.Notice(rowID: row, text: DictationController.microphoneNotice, privacy: true))
         }
         #expect(await until { controller.phase == .idle })
         #expect(scripted.keys.isEmpty && recorder.starts == 0)
@@ -617,7 +618,7 @@ struct ClaudeDictationTests {
         #expect(h.agent["voice"] as? String == "off")
 
         controller.turnOnClaude(h.key)
-        try await h.waitFor { controller.turningOn == nil }
+        try await h.waitFor { controller.turningOn.isEmpty }
         #expect(h.agent["voice"] as? String == "hold")
         #expect(controller.notice?.info == true && controller.notice?.text.contains("is on") == true, "\(String(describing: controller.notice))")
         // In app.log: the turning on, and what came of it.
@@ -649,7 +650,7 @@ struct ClaudeDictationTests {
         h.tell(["op": "voice", "mode": "off", "account": "none"])
         try await h.waitFor { h.agent["voiceAccount"] as? String == "none" }
         controller.turnOnClaude(h.key)
-        try await h.waitFor { controller.turningOn == nil }
+        try await h.waitFor { controller.turningOn.isEmpty }
         #expect(controller.notice?.text == ClaudeVoiceScreen.Signal.unknownCommand.notice, "\(String(describing: controller.notice))")
         #expect(h.agent["voice"] as? String == "off")
     }
@@ -739,6 +740,141 @@ struct ClaudeDictationTests {
         try await h.quiet()
         #expect(h.agentPrompts == prompts + ["also check the tests"])
         #expect(h.agent["voiceInserts"] as? Int == 0 && h.agent["enters"] as? Int == 1 && input(h) == "")
+    }
+
+    // MARK: - Two sessions
+
+    /// Two Claude Code sessions, each FakeClaude with /voice on in hold mode on its own scratch host: A's recordings
+    /// write `first` (and process until told, with `processing`), B's `second`.
+    func twoSessions(processing: Bool = true) async throws -> (Harness, Harness) {
+        let a = try await Harness.start(temp)
+        let b = try await Harness.start(temp)
+        a.tell(["op": "voice", "mode": "hold", "transcript": Self.first, "processing": processing ? 600.0 : 0.0])
+        b.tell(["op": "voice", "mode": "hold", "transcript": Self.second])
+        try await a.waitFor { a.agent["voice"] as? String == "hold" && a.agent["transcript"] as? String == Self.first }
+        try await b.waitFor { b.agent["voice"] as? String == "hold" && b.agent["transcript"] as? String == Self.second }
+        return (a, b)
+    }
+
+    static let first = "open the composer view on main"
+    static let second = "and run the tests in the other one"
+
+    /// One controller for both, as the window's: composer "A" dictates into `a`'s session, "B" into `b`'s, and a
+    /// message sent in either over a dictation cancels it as the window wires it.
+    func dictation(_ a: Harness, _ b: Harness) -> DictationController {
+        let controller = controller(session: { [weak a, weak b] row in
+            row == "A" ? a?.sync.claudeVoice(key: a?.key ?? "") : row == "B" ? b?.sync.claudeVoice(key: b?.key ?? "") : nil
+        }).0
+        for h in [a, b] { h.sync.overrideDictation = { [weak controller] id, then in controller?.override(session: id, then: then) ?? false } }
+        return controller
+    }
+
+    /// A's run after the release, waiting while Claude processes it.
+    func processing(_ controller: DictationController, _ a: Harness) async throws {
+        controller.press("A", agent: .claude) { "" }
+        try await a.waitFor { controller.isListening("A") }
+        controller.release("A")
+        try await a.waitFor { a.agent["recording"] as? String == "processing" }
+        #expect(controller.isTranscribing("A"))
+    }
+
+    /// While A's dictation waits for Claude to process it, B's records and lands; then A's lands, each in its own box.
+    @Test func oneSessionProcessingWhileAnotherRecordsEachLandsInItsOwnBox() async throws {
+        let (a, b) = try await twoSessions()
+        defer { a.stop(); b.stop() }
+        let controller = dictation(a, b)
+        try await processing(controller, a)
+
+        controller.press("B", agent: .claude) { "" }
+        try await b.waitFor { controller.isListening("B") }
+        #expect(controller.isTranscribing("A"))
+        controller.release("B")
+        try await b.waitFor { !controller.isBusy("B") }
+        #expect(controller.deliveries["B"]?.text == Self.second, "\(controller.notices)")
+        #expect(controller.isTranscribing("A") && controller.deliveries["A"] == nil)
+        #expect(a.agent["recording"] as? String == "processing" && a.agent["voiceCancels"] as? Int == 0)
+
+        a.tell(["op": "processed"])
+        try await a.waitFor { !controller.isBusy("A") }
+        #expect(controller.deliveries["A"]?.text == Self.first, "\(controller.notices)")
+        #expect(controller.deliveries["B"]?.text == Self.second)
+        #expect(controller.notices.isEmpty, "\(controller.notices)")
+        #expect(self.input(a) == "" && self.input(b) == "")
+        #expect(a.agent["enters"] as? Int == 0 && b.agent["enters"] as? Int == 0)
+    }
+
+    /// A press in B while A records ends A's recording first, as letting go would: A's words land in A, and A's late
+    /// key-up doesn't let go of B's.
+    @Test func aPressInAnotherSessionEndsTheRecordingAndItsTextStillLandsInItsBox() async throws {
+        let (a, b) = try await twoSessions(processing: false)
+        defer { a.stop(); b.stop() }
+        let controller = dictation(a, b)
+        controller.press("A", agent: .claude) { "" }
+        try await a.waitFor { controller.isListening("A") }
+
+        controller.press("B", agent: .claude) { "" }
+        #expect(controller.isTranscribing("A") && controller.isRecording("B"))
+        try await b.waitFor { controller.isListening("B") }
+        try await a.waitFor { !controller.isBusy("A") }
+        #expect(controller.deliveries["A"]?.text == Self.first, "\(controller.notices)")
+        #expect(controller.notices["A"] == nil)
+        controller.release("A")
+        #expect(controller.isRecording("B") && controller.isListening("B"))
+
+        controller.release("B")
+        try await b.waitFor { !controller.isBusy("B") }
+        #expect(controller.deliveries["B"]?.text == Self.second, "\(controller.notices)")
+        #expect(controller.deliveries["A"]?.text == Self.first)
+        #expect(controller.notices.isEmpty, "\(controller.notices)")
+        #expect(a.agent["voiceStarts"] as? Int == 1 && b.agent["voiceStarts"] as? Int == 1)
+        #expect(a.agent["enters"] as? Int == 0 && b.agent["enters"] as? Int == 0)
+    }
+
+    /// Esc and the ✕ in B cancel B's dictation only: A's, waiting on Claude, goes on and lands.
+    @Test func escAndTheCrossInOneSessionLeaveAnothersDictationAlone() async throws {
+        let (a, b) = try await twoSessions()
+        defer { a.stop(); b.stop() }
+        let controller = dictation(a, b)
+        try await processing(controller, a)
+
+        var cancels = 0
+        for reason in [ClaudeVoiceRun.CancelReason.escape, .button] {
+            controller.press("B", agent: .claude) { "" }
+            try await b.waitFor { controller.isListening("B") }
+            controller.cancel("B", reason)
+            try await b.waitFor { !controller.isBusy("B") }
+            cancels += 1
+            try await b.waitFor { b.agent["voiceCancels"] as? Int == cancels }
+            #expect(controller.deliveries["B"] == nil && controller.notices["B"] == nil, "\(reason)")
+            #expect(controller.isTranscribing("A"), "\(reason)")
+            #expect(a.agent["recording"] as? String == "processing" && a.agent["voiceCancels"] as? Int == 0, "\(reason)")
+            #expect(ClaudeVoiceRun.busy.contains(a.session.id) && !ClaudeVoiceRun.busy.contains(b.session.id))
+        }
+
+        a.tell(["op": "processed"])
+        try await a.waitFor { !controller.isBusy("A") }
+        #expect(controller.deliveries["A"]?.text == Self.first, "\(controller.notices)")
+        #expect(controller.notices.isEmpty, "\(controller.notices)")
+    }
+
+    /// A message sent in B while A's dictation waits on Claude goes into B at once, and A's dictation goes on.
+    @Test func aMessageSentInOneSessionWhileAnothersDictationProcessesIsntRefused() async throws {
+        let (a, b) = try await twoSessions()
+        defer { a.stop(); b.stop() }
+        let controller = dictation(a, b)
+        try await processing(controller, a)
+        let (promptsA, promptsB) = (a.agentPrompts, b.agentPrompts)
+
+        #expect(b.sync.type("also check the tests"))
+        try await b.waitFor { b.agentPrompts.count > promptsB.count }
+        #expect(b.agentPrompts == promptsB + ["also check the tests"], "\(b.agentPrompts)")
+        #expect(b.chat.sendNotice != ChatSync.dictating)
+        #expect(controller.isTranscribing("A") && a.agent["voiceCancels"] as? Int == 0)
+
+        a.tell(["op": "processed"])
+        try await a.waitFor { !controller.isBusy("A") }
+        #expect(controller.deliveries["A"]?.text == Self.first, "\(controller.notices)")
+        #expect(a.agentPrompts == promptsA && a.agent["enters"] as? Int == 0)
     }
 
     /// Claude stops listening by itself (silence, its limit, or repeats that stalled past its 120 ms) while the mic is
@@ -1170,7 +1306,7 @@ struct ClaudeDictationTests {
         }
         let (controller, _) = controller(session: { _ in scripted.session })
         controller.turnOnClaude("row")
-        #expect(await until { controller.turningOn == nil })
+        #expect(await until { controller.turningOn.isEmpty })
         #expect(scripted.commands == [DictationController.turnOnCommand])
         #expect(controller.notice?.info == true && controller.notice?.text.contains("is on") == true, "\(String(describing: controller.notice))")
 

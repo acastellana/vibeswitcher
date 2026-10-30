@@ -76,6 +76,47 @@ struct DictationTests {
         }
     }
 
+    /// Holds every request until the test lets them through (an upload under way), then answers the nth with
+    /// `texts[n]`; keeps the requests.
+    final class GatedHTTP: HTTPClient, @unchecked Sendable {
+        private let lock = NSLock()
+        private var seen: [URLRequest] = []
+        private var waiting: [CheckedContinuation<Void, Never>] = []
+        private var open = false
+        let texts: [String]
+
+        init(texts: [String]) { self.texts = texts }
+
+        var requests: [URLRequest] { lock.withLock { seen } }
+
+        /// The uploads held so far, and any after, go on.
+        func letThrough() {
+            let held = lock.withLock {
+                open = true
+                defer { waiting = [] }
+                return waiting
+            }
+            held.forEach { $0.resume() }
+        }
+
+        func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+            let index = lock.withLock {
+                seen.append(request)
+                return seen.count - 1
+            }
+            await withCheckedContinuation { (go: CheckedContinuation<Void, Never>) in
+                let now = lock.withLock {
+                    if open { return true }
+                    waiting.append(go)
+                    return false
+                }
+                if now { go.resume() }
+            }
+            let body = try JSONSerialization.data(withJSONObject: ["text": texts[index]])
+            return (body, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!)
+        }
+    }
+
     /// The 2-minute limit's timer, fired when the test says.
     final class FakeClock {
         var pending: [(delay: TimeInterval, work: () -> Void)] = []
@@ -86,13 +127,13 @@ struct DictationTests {
         }
     }
 
-    func transcription(_ http: FakeHTTP) -> OpenAITranscription {
+    func transcription(_ http: HTTPClient) -> OpenAITranscription {
         var transcription = OpenAITranscription(client: http)
         transcription.boundary = { "BOUNDARY" }
         return transcription
     }
 
-    func controller(_ http: FakeHTTP, recorder: FakeRecorder, key: String? = key, clock: FakeClock = FakeClock(),
+    func controller(_ http: HTTPClient, recorder: FakeRecorder, key: String? = key, clock: FakeClock = FakeClock(),
                     noted: Bool = true, found: FoundOpenAIKey? = nil,
                     microphone: FakeMicrophone = FakeMicrophone()) -> (DictationController, AppProof.MemorySecret) {
         let store = AppProof.MemorySecret(key)
@@ -360,6 +401,39 @@ struct DictationTests {
         #expect(http.requests.count == 1)
     }
 
+    /// One microphone, several composers: B records while A's transcription is still uploading, and a press in C while
+    /// B records ends B's recording first, uploaded as its release would (B's late key-up then lets go of nothing).
+    /// Each text lands in its own box.
+    @Test func anotherComposerRecordsWhileOnesTranscriptionUploads() async {
+        let http = GatedHTTP(texts: ["the first", "the second", "the third"])
+        let recorder = FakeRecorder()
+        let (controller, _) = controller(http, recorder: recorder)
+        controller.press("A") { "" }
+        controller.release("A")
+        #expect(await until { http.requests.count == 1 }, "A's upload never began")
+        #expect(controller.isTranscribing("A"))
+
+        controller.press("B") { "" }
+        #expect(controller.isRecording("B") && recorder.recording && recorder.starts == 2)
+        #expect(controller.isTranscribing("A"))
+
+        controller.press("C") { "" }
+        #expect(recorder.stops == 2 && recorder.starts == 3)
+        #expect(controller.isTranscribing("B") && controller.isRecording("C"))
+        controller.release("B")
+        #expect(controller.isRecording("C") && recorder.recording)
+        controller.release("C")
+        #expect(await until { http.requests.count == 3 }, "B's and C's uploads never began")
+        #expect(controller.isTranscribing("A") && controller.deliveries.isEmpty)
+
+        http.letThrough()
+        #expect(await until { controller.runs.isEmpty }, "\(controller.runs)")
+        #expect(controller.deliveries["A"]?.text == "the first")
+        #expect(controller.deliveries["B"]?.text == "the second")
+        #expect(controller.deliveries["C"]?.text == "the third")
+        #expect(controller.notices.isEmpty, "\(controller.notices)")
+    }
+
     @Test func aTapTooShortSendsNothing() {
         let http = FakeHTTP()
         let recorder = FakeRecorder()
@@ -451,5 +525,29 @@ struct DictationTests {
         #expect(held == [true, false, true, false])
         textView.keyUp(with: try event(.keyUp, window: window))
         #expect(held == [true, false, true, false], "the late key-up sends nothing more")
+    }
+}
+
+/// The controller as a test of one composer reads it: that composer's run, notice and release, whichever row it is.
+/// Tests of several composers ask by row (`phase(_:)`, `notices[row]`, `release(_:)`).
+extension DictationController {
+    /// The run under way (one composer's: a test with several asks by row).
+    var phase: Phase { runs.count == 1 ? runs.first!.value.phase : .idle }
+    /// The one notice shown (nil with several: a test with several asks by row).
+    var notice: Notice? { notices.count == 1 ? notices.first!.value : nil }
+    var listening: Bool { runs.count == 1 && runs.first!.value.listening }
+    /// The composer whose dictation goes through Claude's /voice now.
+    var claudeRow: String? { runs.first { $0.value.claude }?.key }
+
+    /// The composer that's recording (or whose press waits on macOS) let go.
+    func release() {
+        guard let row = runs.first(where: { isRecording($0.key) })?.key ?? held else { return }
+        release(row)
+    }
+
+    /// Esc in the one composer dictating.
+    func cancel(_ reason: ClaudeVoiceRun.CancelReason = .escape) {
+        guard let row = runs.count == 1 ? runs.first!.key : held else { return }
+        cancel(row, reason)
     }
 }
