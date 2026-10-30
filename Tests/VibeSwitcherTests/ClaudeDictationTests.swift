@@ -363,11 +363,30 @@ struct ClaudeDictationTests {
     // MARK: - Against FakeClaude's /voice
 
     /// The harness's session, as the window gives it to dictation, a message sent over a dictation cancelling it as the
-    /// window wires it; `now`: the runs' clock.
-    func dictation(_ h: Harness, now: @escaping () -> Date = Date.init) -> DictationController {
-        let controller = controller(session: { [weak h] key in h?.sync.claudeVoice(key: key) }, now: now).0
+    /// window wires it; `now`: the runs' clock; `shown`: told the spaces in Claude's box of each read once a run has
+    /// handled it.
+    func dictation(_ h: Harness, now: @escaping () -> Date = Date.init, shown: Shown? = nil) -> DictationController {
+        let controller = controller(session: { [weak h] key in
+            guard var session = h?.sync.claudeVoice(key: key) else { return nil }
+            if let shown {
+                let read = session.screen
+                session.screen = { done in
+                    read { screen in
+                        done(screen)
+                        shown.spaces = screen.flatMap { ClaudeVoiceScreen.prompt($0).spaces } ?? 0
+                    }
+                }
+            }
+            return session
+        }, now: now).0
         h.sync.overrideDictation = { [weak controller] id, then in controller?.override(session: id, then: then) ?? false }
         return controller
+    }
+
+    /// The spaces in Claude's box as a run's last read showed them, after the run took that read in: what it decides by
+    /// (the state file can be ahead of the read in flight).
+    final class Shown: @unchecked Sendable {
+        var spaces = 0
     }
 
     /// The real time, moved on by the test; `held`, it stands still there (but for `ahead`): a run's waits (its 3 s for
@@ -609,13 +628,16 @@ struct ClaudeDictationTests {
     @Test func offItsSaidAndTurningItOnTypesVoiceHoldAfterTheClick() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
-        let clock = Clock(held: true)
-        let controller = dictation(h, now: clock.now)
+        let (clock, shown) = (Clock(held: true), Shown())
+        let controller = dictation(h, now: clock.now, shown: shown)
         controller.press(h.key, agent: .claude) { "" }
-        // Its spaces typed in, as a terminal with /voice off takes them; then its 3 s for Claude to start are up.
-        try await h.waitFor { self.input(h).count >= 3 }
+        // Its spaces typed in, as a terminal with /voice off takes them, and seen so by the run; then its 3 s for Claude
+        // to start are up.
+        try await h.waitFor { shown.spaces >= 3 }
         clock.ahead += ClaudeVoiceRun.startWithin
         try await h.waitFor { controller.phase == .idle }
+        // The real time again, for the runs after (their late Spaces' guard goes by it).
+        clock.held = nil
         #expect(controller.notice?.text == ClaudeVoiceRun.didntStart && controller.notice?.turnOn == true)
         // The spaces are gone, and nothing was sent or typed but them.
         try await h.waitFor { self.input(h) == "" }
@@ -1044,10 +1066,11 @@ struct ClaudeDictationTests {
         defer { h.stop() }
         h.tell(["op": "voice", "mode": "off", "statusLine": true])
         try await h.waitFor { h.agent["statusLine"] as? Bool == true }
-        let clock = Clock(held: true)
-        let controller = dictation(h, now: clock.now)
+        let (clock, shown) = (Clock(held: true), Shown())
+        let controller = dictation(h, now: clock.now, shown: shown)
         controller.press(h.key, agent: .claude) { "" }
-        try await h.waitFor { self.input(h).count > ClaudeVoiceScreen.warmupTyped }
+        // More spaces than a warmup keeps, as the run saw them; then its 3 s for Claude to start are up.
+        try await h.waitFor { shown.spaces > ClaudeVoiceScreen.warmupTyped }
         clock.ahead += ClaudeVoiceRun.startWithin
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.notice?.text == ClaudeVoiceRun.didntStart && controller.notice?.turnOn == true, "\(String(describing: controller.notice))")
