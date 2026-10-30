@@ -2052,3 +2052,6 @@
 - 2026-10-30 08:29 Automatically (auto_advance): Started the audit of 7-s-freeze-measuring at a07e976f (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
 - 2026-10-30 08:39 Audit of 7-s-freeze-measuring: complete, clean, round 1: 2 Nit open
 - 2026-10-30 08:45 Merged 7-s-freeze-measuring: 7 s freeze measuring chat text (NSAttributedString boundingRect under SwiftUI layout)
+- 2026-10-30 08:45 Automatically (auto_advance): Merged 7-s-freeze-measuring (7 s freeze measuring chat text (NSAttributedString boundingRect under SwiftUI layout)) into main at b55933ce, on its passing audit and the full test run.
+- 2026-10-30 08:45 Automatically (auto_advance): Cleaned up 7-s-freeze-measuring; ended pid 82356 (Worker: 7 s freeze measuring chat text (NSAttributedString boundingRect under SwiftUI layout)) (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-10-30 08:45 Update: Session header lines capped (7-s-freeze-measuring) — **What changed:** the session header's one-line texts are cut at 400 characters before layout: the title, the details line, and a replaced lead's draft line. That's more than the header can show, so i…
