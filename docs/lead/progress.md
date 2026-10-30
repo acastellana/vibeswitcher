@@ -2158,3 +2158,5 @@
 - 2026-10-30 19:24 Automatically (auto_advance): Started the audit of readme-one-time-switch at 0a541194 (The risk check raised it to audit: it changes test or build infrastructure the suite relies on (scripts/test-under-load.sh)).
 - 2026-10-30 19:34 Audit of readme-one-time-switch: complete, clean, round 1: 3 Nit open
 - 2026-10-30 19:40 Merged readme-one-time-switch: README: one-time switch for clones made before main became the only branch; scripts still name project-lead
+- 2026-10-30 19:40 Automatically (auto_advance): Merged readme-one-time-switch (README: one-time switch for clones made before main became the only branch; scripts still name project-lead) into main at e2095efc, on its passing audit and the full test run.
+- 2026-10-30 19:40 Automatically (auto_advance): Cleaned up readme-one-time-switch; ended pid 47970 (Worker: README: one-time switch for clones made before main became the only branch; scripts still name project-lead) (freed 1.2 GB of build output and temporary folders). It stays done.
