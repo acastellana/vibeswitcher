@@ -2169,3 +2169,7 @@
 - 2026-10-31 00:47 Planned hang-reports-say-when: Hang reports say when a freeze was starvation or paging, not the app's work
 - 2026-10-31 00:48 Started a worker on hang-reports-say-when
 - 2026-10-31 00:48 Automatically (auto_advance): Started a worker on hang-reports-say-when (Hang reports say when a freeze was starvation or paging, not the app's work).
+- 2026-10-31 00:49 Planned team-pane-s-lines: Team pane's lines over all decisions on every render (string indexing in LeadTeamView.Lines / TeamSummaryModel.line)
+- 2026-10-31 00:49 Started a worker on team-pane-s-lines
+- 2026-10-31 00:49 Automatically (auto_advance): Started a worker on team-pane-s-lines (Team pane's lines over all decisions on every render (string indexing in LeadTeamView.Lines / TeamSummaryModel.line)).
+- 2026-10-31 00:55 Merged 9-s-swiftui-layout: 9 s SwiftUI layout freeze on a calm Mac (environment comparisons in a window layout pass) (no audit: review none)
