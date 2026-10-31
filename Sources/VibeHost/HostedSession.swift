@@ -338,7 +338,7 @@ public final class HostedSession {
         // Ended (and reaped) already: its pid may belong to someone else now.
         guard info.isLive else { return }
         let exit = DispatchSource.makeProcessSource(identifier: info.childPID, eventMask: .exit, queue: queue)
-        exit.setEventHandler { [weak self] in self?.reap() }
+        exit.setEventHandler { [weak self] in self?.exitEvent() }
         exit.resume()
         exitSource = exit
 
@@ -400,6 +400,11 @@ public final class HostedSession {
         guard status != previous else { return }
         info.programStatus = status
         onChange?(info)
+    }
+
+    /// The exit source's event: the program ended.
+    func exitEvent() {
+        reap()
     }
 
     private func reap() {
