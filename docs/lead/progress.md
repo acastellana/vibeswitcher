@@ -2384,3 +2384,6 @@
 - 2026-10-31 21:31 Automatically (auto_advance): Started the audit of swiftui-accessibility at f82d198f (Its review is audit. (audited: it changes test or build infrastructure the suite relies on (scripts/test.sh), as the risk check found.)).
 - 2026-10-31 21:42 Audit of swiftui-accessibility: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
 - 2026-10-31 21:50 Merged swiftui-accessibility: SwiftUI accessibility work dominates the window's freezes: measure which views, then flatten their accessibility trees
+- 2026-10-31 21:50 Automatically (auto_advance): Merged swiftui-accessibility (SwiftUI accessibility work dominates the window's freezes: measure which views, then flatten their accessibility trees) into main at d8756ec7, on its passing audit and the full test run.
+- 2026-10-31 21:50 Automatically (auto_advance): Cleaned up swiftui-accessibility; ended pid 13682 (Worker: SwiftUI accessibility work dominates the window's freezes: measure which views, then flatten their accessibility trees) (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-10-31 21:50 Automatically (auto_advance): Started the audit of local-end-to-end at 39cece00 (It touches sensitive_paths (AGENTS.md, Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
