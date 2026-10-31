@@ -2377,3 +2377,5 @@
 - 2026-10-31 21:01 Automatically (auto_advance): Merged wallet-request-fallback (Wallet request fallback: sign in the browser's wallet (Rabby/MetaMask), plus a "not picked up" hint) into main at 90289cf3, on its passing audit and the full test run.
 - 2026-10-31 21:01 Automatically (auto_advance): Cleaned up wallet-request-fallback; ended pid 3258 (Worker: Wallet request fallback: sign in the browser's wallet (Rabby/MetaMask), plus a "not picked up" hint) (freed 1.5 GB of build output and temporary folders). It stays done.
 - 2026-10-31 21:01 Update: Wallet requests: sign in your browser wallet as a fallback, and a "not picked up" hint — **What changed** (main at 90289cf3, with the rename c3a9b59e and the Passage.app fix bb042414)
+- 2026-10-31 21:13 Started a worker on local-end-to-end
+- 2026-10-31 21:13 Automatically (auto_advance): Started a worker on local-end-to-end (Local end-to-end: VibeSwitcher → loop Passage → Wallet Manager → back, on this Mac), its after tasks done (wallet-request-fallback).
