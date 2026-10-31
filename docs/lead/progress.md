@@ -2364,3 +2364,4 @@
 - 2026-10-31 20:10 Automatically (auto_advance): Cleaned up wallet-requests-find; ended pid 3764 (Worker: Wallet requests find Passage.app by themselves (no `passage` symlink needed)) (freed 1.2 GB of build output and temporary folders). It stays done.
 - 2026-10-31 20:16 Automatically (auto_advance): Started the audit of the-power-check-writes at f68b028f (Its review is audit. (audited: it has code that adds locks or threads (Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift: private let lock = NSLock()), as the risk check found.)).
 - 2026-10-31 20:18 Automatically (auto_advance): Started the audit of wallet-request-fallback at 72a1a8a8 (Its review is audit).
+- 2026-10-31 20:23 Planned swiftui-accessibility: SwiftUI accessibility work dominates the window's freezes: measure which views, then flatten their accessibility trees
