@@ -2379,3 +2379,5 @@
 - 2026-10-31 21:01 Update: Wallet requests: sign in your browser wallet as a fallback, and a "not picked up" hint — **What changed** (main at 90289cf3, with the rename c3a9b59e and the Passage.app fix bb042414)
 - 2026-10-31 21:13 Started a worker on local-end-to-end
 - 2026-10-31 21:13 Automatically (auto_advance): Started a worker on local-end-to-end (Local end-to-end: VibeSwitcher → loop Passage → Wallet Manager → back, on this Mac), its after tasks done (wallet-request-fallback).
+- 2026-10-31 21:23 Raised swiftui-accessibility to audit (the risk check, at f82d198f): it changes test or build infrastructure the suite relies on (scripts/test.sh)
+- 2026-10-31 21:23 Automatically (auto_advance): swiftui-accessibility is audited, not merged: it changes test or build infrastructure the suite relies on (scripts/test.sh) (the risk check raised it from review none). Its audit starts once the Mac has room.
