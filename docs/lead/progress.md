@@ -2382,3 +2382,5 @@
 - 2026-10-31 21:23 Raised swiftui-accessibility to audit (the risk check, at f82d198f): it changes test or build infrastructure the suite relies on (scripts/test.sh)
 - 2026-10-31 21:23 Automatically (auto_advance): swiftui-accessibility is audited, not merged: it changes test or build infrastructure the suite relies on (scripts/test.sh) (the risk check raised it from review none). Its audit starts once the Mac has room.
 - 2026-10-31 21:31 Automatically (auto_advance): Started the audit of swiftui-accessibility at f82d198f (Its review is audit. (audited: it changes test or build infrastructure the suite relies on (scripts/test.sh), as the risk check found.)).
+- 2026-10-31 21:42 Audit of swiftui-accessibility: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-10-31 21:50 Merged swiftui-accessibility: SwiftUI accessibility work dominates the window's freezes: measure which views, then flatten their accessibility trees
