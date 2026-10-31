@@ -2264,3 +2264,5 @@
 - 2026-10-31 12:53 Started a worker on hosthandovertests
 - 2026-10-31 12:53 Automatically (auto_advance): Started a worker on hosthandovertests (HostHandoverTests.aHandoverKeepsEverySession waits for the whole "bg=<pid>" line), its after tasks done (main-s-full-suite-2).
 - 2026-10-31 12:54 Update: Sessions started at once no longer lose a terminal (openpty serialized in the host) — **What changed:** On macOS 27, `openpty` fails for some threads when several call it at the same time (a probe outside the app: 40 of 200 calls failed, 0 with a mutex). The host now holds one lock aro…
+- 2026-10-31 13:10 Merged hosthandovertests: HostHandoverTests.aHandoverKeepsEverySession waits for the whole "bg=<pid>" line (no audit: review none)
+- 2026-10-31 13:10 Flaky in hosthandovertests's merge: (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
