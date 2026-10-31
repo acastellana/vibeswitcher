@@ -2338,3 +2338,6 @@
 - 2026-10-31 18:27 Automatically (auto_advance): Started the audit of rename-the-vault-request at 4c3f66aa (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift, scripts/build-app.sh), so it's treated as audit whatever its review says).
 - 2026-10-31 18:39 Planned the-main-thread-blocks: The main thread blocks writing to the session host's socket (HostConnection.flush from SessionStore.refresh) (review audit)
 - 2026-10-31 18:54 Audit of rename-the-vault-request: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-10-31 19:07 Started a worker on the-main-thread-blocks
+- 2026-10-31 19:07 Automatically (auto_advance): Started a worker on the-main-thread-blocks (The main thread blocks writing to the session host's socket (HostConnection.flush from SessionStore.refresh)).
+- 2026-10-31 19:15 Merged rename-the-vault-request: Rename the vault-request feature to "wallet requests" (VibeSwitcher's "vault" means only the lead's vault)
