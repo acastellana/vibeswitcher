@@ -2301,3 +2301,6 @@
 - 2026-10-31 16:48 Automatically (auto_advance): Didn't start agents-know-they-can: agents-know-they-can's worker is still running. Send it what to do with message, or stop_worker first.
 - 2026-10-31 16:49 Started a worker on agents-know-they-can
 - 2026-10-31 16:49 Automatically (auto_advance): Started a worker on agents-know-they-can (Agents know they can ask for a transaction (vs-vault), and hear when a request expires unsent), its after tasks done (vault-requests-in-the).
+- 2026-10-31 16:51 Incident: `build-app.sh --install` replaced the bundle of a VibeSwitcher that was still running. Its process check (`pgrep -x VibeSwitcher`) finds nothing from a sandboxe…; planned turn-this-incident-into-7 to turn it into a check
+- 2026-10-31 16:51 Started a worker on turn-this-incident-into-7
+- 2026-10-31 16:51 Automatically (auto_advance): Started a worker on turn-this-incident-into-7 (Turn this incident into a check: `build-app.sh --install` replaced the bundle of a VibeSwitch…).

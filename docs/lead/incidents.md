@@ -47,3 +47,9 @@ Evidence: 2026-10-31, two projects. (1) Reported by another project's lead: at a
 Task: agents-know-they-can
 Check: task turn-this-incident-into-6 turns it into a check that runs before merge.
 
+## 2026-10-31 16:51:30 `build-app.sh --install` replaced the bundle of a VibeSwitcher that was still running. Its process check (`pgrep -x VibeSwitcher`) finds nothing from a sandboxed shell, so the script printed "VibeSwitcher isn't running", copied over the live app, and `open` only brought the old process forward.
+
+Evidence: 2026-10-31 ~16:46, the user ran `! scripts/build-app.sh --install` from a Claude Code session. The output: "VibeSwitcher isn't running." … "Installed /Applications/VibeSwitcher.app, but no new VibeSwitcher process is up 10s after the launch (running: )." Meanwhile `ps` shows pid 3218 /Applications/VibeSwitcher.app/Contents/MacOS/VibeSwitcher, started 14:37:49, still running at 16:51. From the same shell, `pgrep -x VibeSwitcher` exits 1, while `ps -Ao pid=,comm=` lists it. This is the second install that left the old process running (the first was 2026-10-30, fixed in scripts/lib/install-app.sh), and it's worse this time: the bundle was removed and replaced under the live process. The fix: running() finds the app with ps (by its executable path inside DEST_APP, not just the name), and fails closed. If the process list can't be read, or a process of that path is up and won't quit, nothing is copied. The test drives install-app.sh with a stand-in process that pgrep can't see but ps can.
+
+Check: task turn-this-incident-into-7 turns it into a check that runs before merge.
+
