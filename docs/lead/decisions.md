@@ -179,3 +179,7 @@ User, 2026-10-31: our load and test runs were slowing other projects' leads, and
 
 User's call, 2026-10-31. Two unrelated things were both called "vault" in VibeSwitcher, the lead's team and key store and the payment requests, which invites mix-ups for the user and for agents. It's renamed now, while the format is new and nothing real uses it yet.
 
+## 2026-10-31 18:19:28 Wallet requests are tested end to end on this Mac first: VibeSwitcher's sandbox, a loop `passage` stand-in and a locally run Wallet Manager on a synthetic vault (task local-end-to-end). The real two-Mac trial over Passage, with the older MacBook already paired as the vault Mac, and moving the Wallet Manager there through a private GitHub repository come at the end, once everything is tested, at the user's go.
+
+User, 2026-10-31: the vault Mac isn't at hand, so test everything locally; the GitHub transfer is later, at the end. Passage can't pair a Mac with itself, and the rules forbid touching real pairings, so the loop stands in for the transport.
+
