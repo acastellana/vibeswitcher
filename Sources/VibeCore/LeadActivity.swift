@@ -17,13 +17,16 @@ public enum LeadActivity: Equatable, Sendable {
     case idle(background: String?)
     /// Its turn ended on an API error rather than on its reply: it's between turns, but not done.
     case apiError(String)
+    /// Its turn ended on the account's usage limit (see `UsageLimit`): between turns, and it does nothing until the
+    /// limit resets; a message only hits the limit again.
+    case usageLimit(UsageLimit)
     /// Neither its hooks nor its transcript say anything yet.
     case unknown
 
     /// It takes a typed prompt now (anything else gets messages at its next step, through its hooks).
     public var betweenTurns: Bool {
         switch self {
-        case .idle, .apiError: return true
+        case .idle, .apiError, .usageLimit: return true
         case .working, .needsInput, .unknown: return false
         }
     }
@@ -36,6 +39,7 @@ public enum LeadActivity: Equatable, Sendable {
         case .idle(nil): return "finished its turn"
         case .idle(let background?): return "waiting on its background task (\(background))"
         case .apiError(let error): return "its turn ended on an API error (\(error)); message it to go on"
+        case .usageLimit(let limit): return limit.text + "; it does nothing until then"
         case .unknown: return "running (nothing from its hooks or transcript yet)"
         }
     }
@@ -54,6 +58,7 @@ public enum LeadActivity: Equatable, Sendable {
             case .toolCall, .thinking:
                 return .working(fromHook == .working ? hook?.toolDetail : nil)
             case .turnOver(let error):
+                if let limit = transcript.usageLimit { return .usageLimit(limit) }
                 return error.map(LeadActivity.apiError) ?? .idle(background: background)
             }
         }
@@ -64,6 +69,7 @@ public enum LeadActivity: Equatable, Sendable {
             return .needsInput(hook?.request ?? hook?.notice)
         case .done?, .idle?:
             // Claude's "waiting for your input" notice a minute after a turn that ended on an error is still that error.
+            if let limit = transcript?.usageLimit { return .usageLimit(limit) }
             if case .turnOver(let error?)? = transcript?.state { return .apiError(error) }
             return .idle(background: background)
         default:

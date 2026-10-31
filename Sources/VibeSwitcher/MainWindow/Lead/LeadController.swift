@@ -157,15 +157,15 @@ struct TeamReading {
         session == nil && scanSaysQuit && agentGone.contains(id)
     }
 
-    /// A worker's transcript is read whatever it shows: a stall is one that reads as working too (see `LeadStall`). A
-    /// verifier's while it doesn't show working: a turn that ended on an API error reads as finished or waiting, and
-    /// its transcript says which it was.
+    /// Each live member's transcript is read whatever it shows: a worker's stall is one that reads as working too (see
+    /// `LeadStall`), and a turn that ended on the account's usage limit reads as working (Claude Code fires no Stop hook
+    /// on it; a verifier's audit sat there for hours, 2026-10-31): its transcript says so (see `UsageLimit`).
     static func read(root: String, board: LeadBoard, hosted: [String: HostSession], sessions: [String: Session],
                      observer: LeadObserver) -> TeamReading {
         var team = TeamReading(hosted: hosted, sessions: sessions)
         let workers = Set(board.tasks.compactMap(\.worker))
         for id in board.tasks.flatMap({ [$0.worker, $0.verifier] }).compactMap({ $0 }) where team.watched[id] == nil {
-            guard let info = hosted[id], info.isLive, let session = sessions[id], session.status != .working || workers.contains(id) else { continue }
+            guard let info = hosted[id], info.isLive, let session = sessions[id] else { continue }
             team.watched[id] = observer.watching(info, agentPid: session.pid)
             if workers.contains(id) {
                 team.held[id] = SteerInbox.pending(tty: session.tty).filter { $0.agentPid == session.pid }.min { $0.at < $1.at }
@@ -1428,8 +1428,8 @@ final class LeadController: ObservableObject {
         for id in board.tasks.flatMap({ [$0.worker, $0.verifier] }).compactMap({ $0 }) {
             guard let info = hosted[id] else { continue }
             let session = team.sessions[id]
-            // A turn that ended on an API error reads as finished or waiting; its transcript says which it was. A
-            // worker's transcript is read whatever it shows: a stall is one that reads as working too (see `LeadStall`).
+            // A turn that ended on an API error reads as finished or waiting; its transcript says which it was. One that
+            // ended on the usage limit reads as working too: the witness takes it from the activity (`Seen.usageLimit`).
             var apiError: (text: String, at: Double?)?
             var watched: (activity: LeadActivity, tail: TranscriptTail?, progress: TranscriptProgress?)?
             var shells: [BackgroundJob] = []

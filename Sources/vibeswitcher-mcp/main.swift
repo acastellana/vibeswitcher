@@ -267,7 +267,7 @@ final class HostRuntime: LeadRuntime {
                                         turnStarted: { [observer] in
                                             switch observer.activity(session, agentPid: agent.pid) {
                                             case .working, .needsInput: return true
-                                            case .idle, .apiError, .unknown: return false
+                                            case .idle, .apiError, .usageLimit, .unknown: return false
                                             }
                                         },
                                         pause: { usleep(250_000) })

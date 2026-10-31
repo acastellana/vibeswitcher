@@ -213,7 +213,7 @@ extension LeadDelivery {
         case .needsInput(let asked):
             try post()
             return .awaitingAnswer(asked)
-        case .idle, .apiError:
+        case .idle, .apiError, .usageLimit:
             break
         }
         // A report for an idle lead isn't typed as it is: the app's wake-up (`LeadWake`) types one short prompt for

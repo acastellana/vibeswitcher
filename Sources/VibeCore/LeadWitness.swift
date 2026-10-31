@@ -52,6 +52,13 @@ public enum LeadWitness {
         /// How it ended, in words; its exit code when that wasn't said.
         var ending: String { cause ?? "exit \(exit ?? 0)" }
 
+        /// Its turn ended on the account's usage limit, by its transcript (see `LeadActivity.usageLimit`): stopped until
+        /// the limit resets, whatever its hooks (and so `status`) say. Claude Code fires no Stop hook on it.
+        public var usageLimit: UsageLimit? {
+            if case .usageLimit(let limit)? = activity { return limit }
+            return nil
+        }
+
         /// Between turns, the work of its own it waits on, in words: the background task its transcript names, or
         /// else its shells, as the lead's status says them ("1 shell: bash calm-check.sh", "2 shells"). Its turn goes
         /// on when that's done.
@@ -232,6 +239,9 @@ public enum LeadWitness {
                     add("\(worker)|ended", "The worker on \(task.slug) ended (\(info.ending)) without reporting. Its commits are on agent/\(task.slug); read_session to see why, then start_worker(\(task.slug)) starts it again where it was (the task needn't be set to blocked first), or re-plan.")
                 } else if info.live, info.agentQuit, [.running, .failed].contains(task.status) {
                     add("\(worker)|ended", "The worker on \(task.slug) ended without reporting: its agent quit and left the session's shell open. Its commits are on agent/\(task.slug); read_session to see why, then stop_worker (it closes the shell) and start_worker again, or re-plan.")
+                } else if info.live, !info.agentQuit, let limit = info.usageLimit, [.running, .failed].contains(task.status) {
+                    add(usageLimitKey(worker, limit), "The worker on \(task.slug) stopped at the account's usage limit: \(limitText(limit)). "
+                        + "It does nothing until then; its work so far is on agent/\(task.slug). Tell the user; after the reset, message(\(task.slug), …) tells it to go on where it was.")
                 } else if info.live, !info.agentQuit, let error = info.apiError, [.running, .failed].contains(task.status) {
                     add("\(worker)|api-error-\(Int(info.apiErrorAt ?? 0))", "The worker on \(task.slug) stopped mid-task: its turn ended on an API error (\(error)). Tell it to go on with message(\(task.slug), …); it picks up where it was.")
                 } else if info.live, !info.agentQuit, let event = waiting(info, session: worker, now: now,
@@ -248,7 +258,10 @@ public enum LeadWitness {
             // With several finders, each that hasn't submitted yet.
             for verifier in task.status == .review && task.evidence == nil ? task.awaitedVerifiers : [] {
                 guard !noTools.contains(verifier), !advanced.contains(verifier), let info = seen[verifier], !gaveVerdict(info, on: task) else { continue }
-                if info.live, !info.agentQuit, let error = info.apiError {
+                if info.live, !info.agentQuit, let limit = info.usageLimit {
+                    add(usageLimitKey(verifier, limit), "The verifier on \(task.slug) stopped mid-audit at the account's usage limit: \(limitText(limit)). "
+                        + "It gives no verdict until then. Tell the user; audit(\(task.slug)) again after the reset.")
+                } else if info.live, !info.agentQuit, let error = info.apiError {
                     add("\(verifier)|api-error-\(Int(info.apiErrorAt ?? 0))", "The verifier on \(task.slug) stopped mid-audit: its turn ended on an API error (\(error)). Tell the user, or audit again.")
                 } else if !info.live || info.agentQuit {
                     add("\(verifier)|ended", "The verifier on \(task.slug) ended without a verdict (\(verifierEnding(info))). read_session(\(task.slug), who: verifier) to see why, then audit again.")
@@ -260,6 +273,16 @@ public enum LeadWitness {
             }
         }
         return events
+    }
+
+    /// A usage-limit stop is told once: by its session and when the line was written.
+    private static func usageLimitKey(_ session: String, _ limit: UsageLimit) -> String {
+        "\(session)|usage-limit-\(Int(limit.at ?? limit.resetsAt ?? 0))"
+    }
+
+    /// "Claude said “You've hit your weekly limit · …”, and it resets Nov 3, 01:00".
+    private static func limitText(_ limit: UsageLimit) -> String {
+        "Claude said “\(limit.said)”" + (limit.resetText.map { ", and it resets \($0)" } ?? ", and the reset time isn't known")
     }
 
     /// What to tell the lead: the `events` not `told` yet, as they are, except that sessions that ended without

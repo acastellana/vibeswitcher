@@ -25,10 +25,10 @@ public enum LeadBudget {
     /// in line for the Mac-wide test and build lock; nor does a session that ended, or quit, or stopped on an API
     /// error. Nor an audit: its task is in review, not running.
     public static func counts(_ seen: LeadWitness.Seen, task: LeadTask) -> Bool {
-        guard task.status == .running, seen.live, !seen.agentQuit, seen.apiError == nil, seen.lockWait == nil,
+        guard task.status == .running, seen.live, !seen.agentQuit, seen.apiError == nil, seen.usageLimit == nil, seen.lockWait == nil,
               seen.status != .needsInput else { return false }
         switch seen.activity {
-        case .needsInput?, .apiError?: return false
+        case .needsInput?, .apiError?, .usageLimit?: return false
         case .working?: return true
         case .idle?: return seen.waitingOn != nil
         case .unknown?, nil:

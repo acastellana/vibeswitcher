@@ -3944,7 +3944,16 @@ public final class LeadToolset: MCPToolset {
         // A task whose worker or verifier ended without a word, or whose session went with a replaced host, isn't
         // running: it's said apart, with what to do.
         let ended = sessions.map { sessions in board.tasks.compactMap { task in Self.endedMember(task, sessions).map { (task, $0) } } } ?? []
-        let endedIDs = Set(ended.map(\.0.id))
+        // A task whose worker or verifier stopped at the account's usage limit isn't running or in review: it waits on
+        // the limit's reset, said apart (its hooks keep saying working; see `UsageLimit`).
+        let limited = sessions.map { sessions in
+            board.tasks.compactMap { task in Self.limitedMember(task, sessions).map { (task, $0) } }.filter { limited in !ended.contains { $0.0.id == limited.0.id } }
+        } ?? []
+        let endedIDs = Set(ended.map(\.0.id)).union(limited.map(\.0.id))
+        if !limited.isEmpty {
+            lines.append("\nWaiting on the account's usage limit (\(limited.count)), doing nothing until it resets:")
+            lines += limited.prefix(Self.statusTasks).map { task, said in Self.clip("- \(task.slug): \(Self.clip(task.title, 60)) — \(said)", 300) }
+        }
         // Short: status stays bounded (the board says it in full).
         if board.tasks.contains(where: { !LeadTeams.isFinished($0) }) { lines.append("\n" + Self.shortReviewLegend) }
         var budget = Self.statusTasks
@@ -4162,6 +4171,25 @@ public final class LeadToolset: MCPToolset {
             }
             guard let info = sessions[verifier] else { return "verifier ended: its session is gone, with no verdict. audit again." }
             return info.live ? nil : "verifier ended without a verdict. audit again."
+        default:
+            return nil
+        }
+    }
+
+    /// The task's worker (running) or awaited verifier (in review) that stopped at the account's usage limit, as its
+    /// session's state says (`LeadActivity.usageLimit`), in words with what to do; nil for none.
+    static func limitedMember(_ task: LeadTask, _ sessions: [String: LeadSessionInfo]) -> String? {
+        func limited(_ id: String) -> String? {
+            guard let info = sessions[id], info.live, info.waiting == nil, let state = info.status, state.hasPrefix(UsageLimit.statePrefix) else { return nil }
+            return state
+        }
+        switch task.status {
+        case .running:
+            guard let worker = task.worker, task.stopped != worker, let state = limited(worker) else { return nil }
+            return "worker \(state). After the reset, message(\(task.slug), …) tells it to go on."
+        case .review where task.evidence == nil:
+            guard let state = task.awaitedVerifiers.lazy.compactMap(limited).first else { return nil }
+            return "verifier \(state). Audit again after the reset."
         default:
             return nil
         }

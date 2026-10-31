@@ -74,8 +74,8 @@ struct LeadFilesTests {
     }
 
     /// What the witness reads of a team off the main thread (`TeamReading`) is what it read on it before: a worker's
-    /// transcript whatever it shows, a verifier's while it doesn't show working, none for an ended session or one the
-    /// scan didn't take for an agent's.
+    /// transcript whatever it shows, a verifier's too (one at the usage limit shows working: `UsageLimitReadTests`),
+    /// none for an ended session or one the scan didn't take for an agent's.
     @Test func theWitnessReadsWhatItReadBefore() throws {
         let home = try newRoot()
         defer { try? FileManager.default.removeItem(atPath: home) }
@@ -126,8 +126,8 @@ struct LeadFilesTests {
             board.tasks.append(task)
         }
         let team = TeamReading.read(root: home, board: board, hosted: hosted, sessions: sessions, observer: observer)
-        #expect(Set(team.watched.keys) == [worker, verifier])
-        for id in [worker, verifier] {
+        #expect(Set(team.watched.keys) == [worker, working, verifier])
+        for id in [worker, working, verifier] {
             let reading = observer.watching(try #require(hosted[id]), agentPid: try #require(sessions[id]).pid)
             #expect(team.watched[id]?.activity == reading.activity)
             #expect(team.watched[id]?.tail == reading.tail)
