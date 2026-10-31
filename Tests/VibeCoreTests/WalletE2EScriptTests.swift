@@ -127,6 +127,50 @@ struct WalletE2EScriptTests {
         #expect(!FileManager.default.fileExists(atPath: setup.nodeLog.path))
     }
 
+    /// Case 1's verdict on recorded outcomes (`--judge-case-1 SEEN RECORD`, which runs nothing else): a check that failed
+    /// in a record that isn't rejected is a warning, named on a line of its own, and the case passes; a rejection or a
+    /// missing answer fails it.
+    func judge(_ seen: String, _ record: String) throws -> (status: Int32, output: String) {
+        let script = Self.repo.appendingPathComponent("scripts/e2e/wallet-e2e.sh").path
+        let home = scratch.url("judge-home").path   // read (the default checkout's path), never made
+        return try HomeIsolationTests.run("/bin/bash", [script, "--judge-case-1", seen, record], environment: ["PATH": "/usr/bin:/bin", "HOME": home])
+    }
+
+    @Test func case1CountsFailedChecksOutsideARejectionAsWarnings() throws {
+        // The Wallet Manager with an address book: received and pending, recipient-known and calldata warn.
+        var ran = try judge("waiting → sent → received", "pending true 1 wallet:ok,chain:ok,balance:ok,recipient-known:failed,calldata:failed")
+        #expect(ran.status == 0, "\(ran.output)")
+        var lines = ran.output.split(separator: "\n").map(String.init)
+        #expect(lines.first?.hasPrefix("case 1 valid testnet transfer from a known wallet: pass (") == true, "\(ran.output)")
+        #expect(lines.first?.contains("warnings: 2") == true, "\(ran.output)")
+        #expect(Array(lines.dropFirst()) == ["  warning: recipient-known (failed, in a result that isn't rejected)",
+                                             "  warning: calldata (failed, in a result that isn't rejected)"], "\(ran.output)")
+
+        // Every check ok: a pass with no warning lines; a proposed card passes too.
+        for seen in ["waiting → sent → received", "waiting → sent → proposed"] {
+            ran = try judge(seen, "pending true 2 wallet:ok,chain:ok,recipient-known:ok")
+            lines = ran.output.split(separator: "\n").map(String.init)
+            #expect(ran.status == 0 && lines.count == 1 && lines[0].contains(": pass (") && lines[0].contains("warnings: 0"), "\(ran.output)")
+        }
+    }
+
+    @Test(arguments: [
+        // Rejected: by the checks, or declined on the vault Mac.
+        ("waiting → sent", "rejected true 2 wallet:failed,chain:ok", "the Wallet Manager's record is rejected"),
+        ("waiting → sent → received", "declined true 2 wallet:ok", "the Wallet Manager's record is declined"),
+        // No answer: no record, the card never Received, no result, or the checks never finished.
+        ("waiting → sent", "", "no answer: the Wallet Manager has no record of the request"),
+        ("waiting → sent", "pending true 1 wallet:ok,chain:ok", "no answer on the card"),
+        ("waiting → sent → received", "pending true 0 wallet:ok", "the Wallet Manager sent no result"),
+        ("waiting → sent → received", "pending false 1 ", "the Wallet Manager didn't finish its checks"),
+    ])
+    func case1FailsOnARejectionOrAMissingAnswer(_ seen: String, _ record: String, _ why: String) throws {
+        let ran = try judge(seen, record)
+        #expect(ran.status == 1, "\(ran.output)")
+        #expect(ran.output.hasPrefix("case 1 valid testnet transfer from a known wallet: fail (\(why); "), "\(ran.output)")
+        #expect(!ran.output.contains("warning:"), "\(ran.output)")
+    }
+
     /// `--help` prints the script's header comment, line 2 up to its first line that isn't a comment, and nothing else.
     @Test(arguments: ["scripts/e2e/wallet-e2e.sh", "scripts/sandbox-app.sh"])
     func helpPrintsTheHeaderCommentsOnly(_ path: String) throws {

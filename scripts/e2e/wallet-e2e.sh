@@ -6,14 +6,23 @@
 # is stood in for. Run on demand (never part of scripts/test.sh): it needs the Wallet Manager's checkout.
 #
 # scripts/e2e/wallet-e2e.sh [--wallet-manager DIR] [--binary PATH] [--keep]
+# scripts/e2e/wallet-e2e.sh --judge-case-1 SEEN RECORD
 #   --wallet-manager DIR  the Wallet Manager's checkout (~/dev/wallet-manager). Nothing is written there but its
 #                         git-ignored node_modules: when node_modules/.package-lock.json is missing or older than its
 #                         package-lock.json, the run first says so and runs `npm ci --ignore-scripts` in it.
 #   --binary PATH         this build of VibeSwitcher (vibeswitcher-host beside it) instead of building (sandbox-app.sh).
 #   --keep                keeps the run's scratch folder (logs, vault, inboxes) and says where; else it's removed.
+#   --judge-case-1 SEEN RECORD  runs nothing: judges case 1 on a recorded outcome (SEEN, the card's states as the run
+#                         writes them, "waiting → sent → received"; RECORD, the Wallet Manager's record as `record`
+#                         prints it, "pending true 1 wallet:ok,recipient-known:failed", or "" for none), prints its
+#                         lines and exits 0 on a pass, 1 on a failure.
 #
 # Cases, each with the card's final state and a light shot in .build/sandbox-shots/e2e/:
-#   1 a valid testnet transfer from a known wallet: waiting → sent → received, the Wallet Manager's checks all pass
+#   1 a valid testnet transfer from a known wallet: waiting → sent → received (or proposed), not rejected. A check
+#     that failed in a result that isn't rejected is a warning (docs/protocol/wallet-request.md): named, not a failure.
+#     Its recipient isn't in the vault, so a Wallet Manager with an address book warns `recipient-known`.
+#  1b the same with case 1's recipient in the vault's address book (contacts/, as the Wallet Manager's
+#     docs/vault-format.md has it): no warnings. Skipped, saying so, when that document doesn't describe contacts/.
 #   2 an unknown wallet: rejected, the failed check named on the card
 #   3 the wrong chain (the testnet wallet asked for mainnet): rejected, the chain check failed
 #   5 the same id sent again after an unsure send (Retry): the Wallet Manager takes it once
@@ -29,11 +38,13 @@ repo=$(pwd -P)
 wm=$HOME/dev/wallet-manager
 binary=""
 keep=""
+judge=""
 while [[ $# -gt 0 ]]; do
     case $1 in
         --wallet-manager) wm=$2; shift 2 ;;
         --binary) binary=$2; shift 2 ;;
         --keep) keep=1; shift ;;
+        --judge-case-1) [[ $# -ge 3 ]] || { echo "--judge-case-1 SEEN RECORD"; exit 64; }; judge_seen=$2; judge_record=$3; judge=1; shift 3 ;;
         -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
         *) echo "unknown option $1 (--help)"; exit 64 ;;
     esac
@@ -48,6 +59,46 @@ AMOUNT=1000000000000000000
 
 say() { printf '%s\n' "$*"; }
 die() { say "wallet-e2e: $*"; exit 1; }
+
+failures=0
+cases=0
+report() {   # report NUMBER TITLE pass|fail DETAIL [SHOT]
+    say "case $1 $2: $3 ($4)"
+    [[ -n ${5:-} ]] && say "  shot: $shots/$5-main-light.png"   # the main window's, as `shot` names it
+    cases=$((cases + 1))
+    [[ $3 == pass ]] || failures=$((failures + 1))
+}
+# Judges and reports case 1, or 1b with STRICT set (a warning fails it then):
+# report_case_1 NUMBER TITLE SEEN RECORD SHOT [CARD] [STRICT]
+# SEEN is the card's states ("waiting → sent → received"), RECORD the Wallet Manager's record as `record` prints it.
+# It fails on a rejection (or a decline, or a failure) or a missing answer (no record, no Received or Proposed on the
+# card, no result, the checks not run). A check that failed while the record isn't rejected is a warning, as the
+# protocol has it (docs/protocol/wallet-request.md): named on a line of its own, and case 1 still passes.
+report_case_1() {
+    local number=$1 title=$2 seen=$3 rec=$4 shot=$5 card=${6:-} strict=${7:-}
+    local state="" checked="" results="" checks="" check warned="" why=""
+    read -r state checked results checks <<<"$rec"
+    for check in ${checks//,/ }; do [[ $check == *:failed ]] && warned+="${warned:+ }${check%:failed}"; done
+    if [[ -z $rec ]]; then why="no answer: the Wallet Manager has no record of the request"
+    elif [[ $state == rejected || $state == declined || $state == failed ]]; then why="the Wallet Manager's record is $state"
+    elif [[ $seen != "waiting → sent → received" && $seen != "waiting → sent → proposed" ]]; then why="no answer on the card"
+    elif [[ $checked != true || -z $checks ]]; then why="the Wallet Manager didn't finish its checks"
+    elif [[ ! $results =~ ^[1-9][0-9]*$ ]]; then why="the Wallet Manager sent no result"
+    elif [[ -n $strict && -n $warned ]]; then why="warnings where none were expected: $warned"
+    fi
+    if [[ -z $why ]]; then
+        local count=0 name
+        for name in $warned; do count=$((count + 1)); done
+        report "$number" "$title" pass "$seen; the Wallet Manager's checks: $checks; warnings: $count" "$shot"
+        for name in $warned; do say "  warning: $name (failed, in a result that isn't rejected)"; done
+    else
+        report "$number" "$title" fail "$why; $seen; record: ${rec:-none}${card:+; card: $(tr '\n' ';' <<<"$card")}" "$shot"
+    fi
+}
+if [[ -n $judge ]]; then
+    report_case_1 1 "valid testnet transfer from a known wallet" "$judge_seen" "$judge_record" ""
+    exit $((failures == 0 ? 0 : 1))
+fi
 
 command -v node >/dev/null || die "node isn't on the PATH"
 wm=$(cd "$wm" 2>/dev/null && pwd -P) || die "no Wallet Manager checkout at $wm (--wallet-manager DIR)"
@@ -176,12 +227,13 @@ session() { sb new "$1" >/dev/null && sb chat "$1" >/dev/null || die "couldn't s
 
 # The newest card's field ($1: state, id, not-picked-up…), from `wallet-card`.
 card() { sb wallet-card | sed -n "s/^$1 //p" | head -1; }
-# Waits for the newest card's state to be $1 (up to 60 s); prints the card.
+# Waits for the newest card's state to be $1, or one of them ("Received|Proposed"), up to 60 s; prints the card.
 await_card() {
-    local text
+    local text state
     for _ in $(seq 1 300); do
         text=$(sb wallet-card)
-        [[ $(sed -n 's/^state //p' <<<"$text") == "$1" ]] && { printf '%s\n' "$text"; return 0; }
+        state=$(sed -n 's/^state //p' <<<"$text")
+        [[ -n $state && "|$1|" == *"|$state|"* ]] && { printf '%s\n' "$text"; return 0; }
         sleep 0.2
     done
     printf '%s\n' "$text"
@@ -199,33 +251,48 @@ record() {
 results_in_dev_inbox() { ls "$loop/dev/inbox/0a1b2c3d" 2>/dev/null | grep -c -- "-wallet-result-$1.json$"; }
 requests_in_vault_inbox() { ls "$loop/vault/inbox/$DEV_PEER" 2>/dev/null | grep -c -- "-wallet-request-$1.json$"; }
 
-failures=0
-report() {   # report NUMBER TITLE pass|fail DETAIL SHOT
-    local shot=$shots/$5-main-light.png   # the main window's, as `shot` names it
-    say "case $1 $2: $3 ($4)"
-    say "  shot: $shot"
-    [[ $3 == pass ]] || failures=$((failures + 1))
-}
 shot() { sb scroll bottom >/dev/null; sb shot "$1" >/dev/null || say "  (couldn't take shot $1)"; }
 
 # 1. A valid testnet transfer: waiting → sent → received. Its answer is held back until the card has shown Sent.
-touch "$loop/vault/hold"
-session "Case 1 agent"
-ask; seen="waiting"
-send send
-[[ $(card state) == Sent ]] && seen+=" → sent"
-id=$(card id)
-wm_poll
-rm -f "$loop/vault/hold"
-wm_poll
-final=$(await_card Received) && seen+=" → received"
-rec=$(record "$id")
-shot e2e-1-valid
-checks=${rec#* * * }
-if [[ $seen == "waiting → sent → received" && $rec == "pending true 1 "* && $checks != *failed* && -n $checks ]]; then
-    report 1 "valid testnet transfer from a known wallet" pass "$seen; the Wallet Manager's checks: $checks" e2e-1-valid
+# Its recipient isn't in the vault: a Wallet Manager with an address book warns recipient-known, without rejecting.
+case_1() {   # case_1 NUMBER TITLE SHOT [STRICT]
+    local seen id final rec
+    touch "$loop/vault/hold"
+    session "Case $1 agent"
+    ask; seen="waiting"
+    send send
+    [[ $(card state) == Sent ]] && seen+=" → sent"
+    id=$(card id)
+    wm_poll
+    rm -f "$loop/vault/hold"
+    wm_poll
+    final=$(await_card "Received|Proposed") && seen+=" → $(sed -n 's/^state //p' <<<"$final" | tr '[:upper:]' '[:lower:]')"
+    rec=$(record "$id")
+    shot "$3"
+    report_case_1 "$1" "$2" "$seen" "$rec" "$3" "$final" "${4:-}"
+}
+case_1 1 "valid testnet transfer from a known wallet" e2e-1-valid
+
+# 1b. Case 1's recipient in the vault's address book, as the Wallet Manager's docs/vault-format.md describes it: a
+# contacts/<id>.json, in a vault whose version has contacts (the version the document's contacts/ section names; the
+# vault stays 1.0 until here). The checker must take the vault; then no warnings.
+contacts_doc=$wm/docs/vault-format.md
+if [[ -f $contacts_doc ]] && grep -q '^## `contacts/' "$contacts_doc"; then
+    contacts_version=$(awk '/^## `contacts\//{on=1; next} on && /^## /{exit} on' "$contacts_doc" | grep -oE 'format [0-9]+\.[0-9]+' | head -1 | cut -d' ' -f2)
+    [[ -n $contacts_version ]] || contacts_version=$(sed -n '1s/^# Vault format, version \([0-9]*\.[0-9]*\).*/\1/p' "$contacts_doc")
+    if [[ -z $contacts_version ]]; then
+        report 1b "recipient in the address book" fail "$contacts_doc describes contacts/ but names no format version for them"
+    else
+        write "$vault/vault.json" "{ \"format\": \"wallet-manager-vault\", \"version\": \"$contacts_version\" }"
+        write "$vault/contacts/e2e-recipient.json" "{ \"address\": \"$RECIPIENT\", \"label\": \"Made-up end-to-end recipient\", \"networks\": [\"testnet\"], \"workspaces\": [\"e2e\"] }"
+        if (cd "$wm" && node src/cli/check-vault.ts "$vault") >"$run/check-vault-contacts.log" 2>&1; then
+            case_1 1b "recipient in the address book (vault $contacts_version, contacts/e2e-recipient.json)" e2e-1b-recipient-known strict
+        else
+            report 1b "recipient in the address book" fail "the Wallet Manager's checker refused the vault with the contact: $(tr '\n' ';' <"$run/check-vault-contacts.log")"
+        fi
+    fi
 else
-    report 1 "valid testnet transfer from a known wallet" fail "$seen; record: ${rec:-none}; card: $(tr '\n' ';' <<<"$final")" e2e-1-valid
+    say "case 1b recipient in the address book: skipped (the Wallet Manager has no address book yet: its docs/vault-format.md doesn't describe contacts/)"
 fi
 
 # 2. An unknown wallet: rejected, naming the wallet check.
@@ -307,5 +374,5 @@ else
     report 4 "Wallet Manager stopped: stays Sent with the not-picked-up hint" fail "the Wallet Manager (pid $wm_pid) didn't stop on SIGTERM" e2e-4-not-picked-up
 fi
 
-if ((failures == 0)); then say "wallet-e2e: all 5 cases passed"; else say "wallet-e2e: $failures of 5 cases failed (logs: --keep keeps $run)"; fi
+if ((failures == 0)); then say "wallet-e2e: all $cases cases passed"; else say "wallet-e2e: $failures of $cases cases failed (logs: --keep keeps $run)"; fi
 exit $((failures == 0 ? 0 : 1))
