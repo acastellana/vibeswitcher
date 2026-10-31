@@ -11,7 +11,7 @@
 # scripts/sandbox-app.sh [options] shot NAME    draws its windows, light and dark: .build/sandbox-shots/NAME-*.png
 # scripts/sandbox-app.sh [options] quit         quits it and removes its state folder (the shots stay)
 # scripts/sandbox-app.sh [options] COMMAND…     any other command of the sandbox's: status, chat, type TEXT, send,
-#                                               tell JSON, new, select TEXT, home, settings [TAB], sheet NAME, wallet STATE,
+#                                               tell JSON, new, select TEXT, home, settings [TAB], sheet NAME, wallet STATE, wallet-page,
 #                                               close settings|sheet (help lists them)
 # e.g. run; chat; type "hello"; shot chat; settings agents; shot settings; sheet new-project; shot new-project; quit
 #

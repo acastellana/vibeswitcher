@@ -9,7 +9,26 @@ extension WalletCardModel {
         let (amount, asset) = Self.amount(request)
         self.init(id: request.id, workspace: request.workspace, from: request.from, wallet: wallet, to: request.to,
                   chainID: Int(clamping: request.chainId), asset: asset, amount: amount, reason: request.reason,
-                  calldataBytes: request.data.map { ($0.utf8.count - 2) / 2 }, requestedBy: requestedBy, state: state, checks: checks)
+                  calldataBytes: request.data.map { ($0.utf8.count - 2) / 2 }, requestedBy: requestedBy, state: state, checks: checks,
+                  browserSignable: WalletBrowser.canSign(request))
+    }
+
+    /// The card state a browser wallet mark stands for.
+    static func state(_ mark: WalletBrowser.Mark, chainId: Int64) -> State {
+        switch mark.state {
+        case .opened: return .inBrowser
+        case .sent:
+            let hash = mark.txHash ?? ""
+            return .sentFromBrowser(txHash: hash, explorerURL: WalletBrowser.explorerURL(chainId: chainId, txHash: hash))
+        case .rejected: return .rejectedInWallet
+        case .noAnswer: return .browserNoAnswer
+        }
+    }
+
+    /// The request in a few words for a message: "1.25 GEN to 0x… on GenLayer".
+    static func summary(_ request: WalletRequest) -> String {
+        let (amount, asset) = amount(request)
+        return "\(amount) \(asset) to \(request.to) on \(chainName(Int(clamping: request.chainId)))"
     }
 
     /// The native coin's symbol on the chains the card names, else nil.

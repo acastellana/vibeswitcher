@@ -4,6 +4,7 @@ import CryptoKit
 import ObjectiveC
 import SwiftUI
 import VibeCore
+import WebKit
 
 /// `VibeSwitcher --sandbox STATE --shots DIR [--minutes N] [--fake-claude PATH]` (run by scripts/sandbox-app.sh): a
 /// copy of the app's window that a worker builds from its worktree, drives and photographs, with nothing of the user's
@@ -129,6 +130,16 @@ enum Sandbox {
         window.hasShadow = false
         window.isRestorable = false
         if window.sheetParent == nil { window.collectionBehavior.formUnion([.transient, .ignoresCycle]) }
+    }
+
+    /// The hidden window `wallet-page` draws its web view in. Not released by `close()`: Swift holds it, and a window
+    /// AppKit also released on close was released twice (the sandbox crashed in the autorelease pool's pop).
+    static func pageWindow(_ view: NSView) -> NSWindow {
+        let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        hide(window)
+        return window
     }
 
     /// Whether `frame` reaches any of the screens.
@@ -264,6 +275,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
                              inbox: walletPassage.appendingPathComponent("inbox", isDirectory: true),
                              config: { WalletDesk.Config(passage: passage, peer: Driver.walletPeers[0].peerID) })
         desk.findPassage = { nil }
+        // Sign in browser wallet: never the user's browser. The page's address is kept for `wallet-page`, which renders
+        // it in a web view of the sandbox's own (no wallet extension there).
+        desk.openBrowser = { [weak self] url in self?.walletPageURL = url }
         // The answer goes to the fake session's agent the way it would to a real one: its steer inbox, typed in between turns.
         desk.deliver = { [weak self] session, text in
             guard let id = UUID(uuidString: session) else { return }
@@ -274,6 +288,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
     }()
     /// The fake Wallet Manager's next result number, per request.
     var walletSequence: [String: Int64] = [:]
+    /// The local page Sign in browser wallet opened last (`wallet-click browser`), for `wallet-page`.
+    var walletPageURL: URL?
+    /// `wallet-page`'s web view and the made-up request's server, while it draws.
+    var walletPageView: (window: NSWindow, view: WKWebView, loaded: WalletPageLoad)?
+    var walletPageServer: WalletSignServer?
     var window: MainWindowController?
     /// The main window's actions (`sheet new-session-menu` lists the empty sidebar's menu from them).
     var windowActions: WindowActions?
@@ -891,8 +910,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
         ("soak [MINUTES [every SECONDS] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. LIST leaves out sessions, stream, dictation, team, ax, reports. With no MINUTES: the log so far"),
-        ("wallet-ask", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager"),
-        ("wallet-click send|retry|discard", "presses that button on the newest wallet request card in the selected chat (send goes to the sandbox's fake passage, never the real one)"),
+        ("wallet-ask [address]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet"),
+        ("wallet-click send|retry|discard|browser", "presses that button on the newest wallet request card in the selected chat (send goes to the sandbox's fake passage, never the real one; browser serves the local page but never opens a browser: wallet-page shows it)"),
+        ("wallet-page [NAME]", "draws the local Sign in browser wallet page as served (the one wallet-click browser opened, else one for a made-up request), in a web view of the sandbox's own with no wallet extension, light and dark: NAME-light.png, NAME-dark.png (default wallet-page)"),
         ("wallet-answer received|proposed|signed|submitted|rejected|failed", "the fake Wallet Manager's Mac answers the newest card's request: the card shows it, and the asking fake session gets it as a message"),
         ("wallet [STATE]", "shows a made-up wallet request card as the sheet, in STATE: " + Driver.walletCards.map(\.state).joined(separator: ", ") + " (all: every state, one under another); settings wallet shows its Settings tab"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
@@ -937,7 +957,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let request = WalletCardModel(
             id: "example-request", workspace: "example", from: "0x0000000000000000000000000000000000000001", wallet: .hardware,
             to: "0x0000000000000000000000000000000000000002", chainID: 42424242, asset: "GEN", amount: "12.5",
-            reason: "Pay the example invoice for the test deployment.", requestedBy: "example-agent", state: .waiting)
+            reason: "Pay the example invoice for the test deployment.", requestedBy: "example-agent", state: .waiting, browserSignable: true)
         func with(_ state: WalletCardModel.State, checks: [WalletCardModel.Check] = []) -> WalletCardModel {
             var card = request
             card.state = state
@@ -960,6 +980,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
                                        .init(name: "Chain", ok: true)])),
             ("failed", with(.failed(message: "the hardware wallet was disconnected"))),
             ("expired", with(.expired)),
+            ("sent-not-picked-up", { var card = with(.sent); card.notPickedUp = true; return card }()),
+            ("in-browser", with(.inBrowser)),
+            ("sent-from-browser", with(.sentFromBrowser(txHash: hash, explorerURL: URL(string: "https://scan.chain.genlayer.com/tx/" + hash)))),
+            ("rejected-in-wallet", with(.rejectedInWallet)),
+            ("browser-no-answer", with(.browserNoAnswer)),
         ]
     }()
 
@@ -986,11 +1011,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     /// `wallet-ask`: the selected fake session's agent files a made-up request, as `vs-wallet request` does
     /// (`WalletAsk.run`, its session's id in its environment).
-    private func walletAsk(_ reply: @escaping (Bool, String) -> Void) {
+    private func walletAsk(address: Bool = false, _ reply: @escaping (Bool, String) -> Void) {
         guard let row = model.selectedRow, let id = row.hostID, let fake = fakeList.first(where: { $0.id == id }) else {
             return reply(false, "no fake session selected: chat NAME first")
         }
-        let arguments = ["request", "--workspace", "example", "--from", "example-hardware", "--chain", "42424242",
+        let arguments = ["request", "--workspace", "example", "--from", address ? "0x0000000000000000000000000000000000000001" : "example-hardware", "--chain", "42424242",
                          "--to", "0x0000000000000000000000000000000000000002", "--amount", "12500000000000000000",
                          "--reason", "Pay the example invoice for the test deployment.", "--label", fake.label]
         let ran = WalletAsk.run(arguments, environment: ["VIBESWITCHER_SESSION": id.uuidString], cwd: fake.cwd, peerChosen: true,
@@ -1004,7 +1029,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     /// `wallet-click send|retry|discard`: that button on the newest card in the selected session's chat.
     private func walletClick(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
-        guard let action = WalletCardModel.Action(rawValue: what) else { return reply(false, "wallet-click send, retry or discard") }
+        guard let action = WalletCardModel.Action(rawValue: what) else { return reply(false, "wallet-click send, retry, discard or browser") }
         guard let card = walletCard else { return reply(false, "no wallet request in this chat: wallet-ask first") }
         guard card.actions.contains(action) else {
             return reply(false, "the card (\(WalletCardModel.title(card.state))) has no \(action.title): " + card.actions.map(\.title).joined(separator: ", "))
@@ -1051,6 +1076,63 @@ private final class Driver: NSObject, NSApplicationDelegate {
         walletDesk.poll { [weak self] in
             self?.settle { reply(true, "the Wallet Manager said \(status.rawValue): the card is now \(self?.walletCard.map { WalletCardModel.title($0.state) } ?? "gone")") }
         }
+    }
+
+    /// `wallet-page NAME`: the local page as served, from the page Sign in browser wallet opened, else from a server of its
+    /// own for a made-up request (stopped once drawn), loaded in a web view with no wallet extension, drawn light and dark.
+    private func walletPage(_ name: String, _ reply: @escaping (Bool, String) -> Void) {
+        var url = walletPageURL
+        if url == nil {
+            let request = WalletRequest.make(requestedBy: .init(project: "sandbox-project", session: UUID().uuidString.lowercased(), label: "example-agent"),
+                                             workspace: "example", from: "0x0000000000000000000000000000000000000001", chainId: 42_424_242,
+                                             action: .transfer, to: "0x0000000000000000000000000000000000000002", asset: "native",
+                                             amount: "12500000000000000000", reason: "Pay the example invoice for the test deployment.")
+            guard let page = WalletSignPage.html(for: request) else { return reply(false, "no page for the made-up request") }
+            let server = WalletSignServer(page: page)
+            do { url = try server.start { _ in } } catch { return reply(false, "the page's server didn't start: \(error)") }
+            walletPageServer = server
+        }
+        guard let url else { return reply(false, "no page") }
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 720, height: 760), configuration: configuration)
+        let loaded = WalletPageLoad()
+        view.navigationDelegate = loaded
+        let window = Sandbox.pageWindow(view)
+        window.orderFront(nil)
+        walletPageView = (window, view, loaded)
+        let base = Sandbox.fileName(name)
+        var written: [String] = []
+        func finish(_ ok: Bool, _ text: String) {
+            walletPageServer?.stop()
+            walletPageServer = nil
+            walletPageView?.window.close()
+            walletPageView = nil
+            reply(ok, text)
+        }
+        func take(_ modes: ArraySlice<(String, NSAppearance.Name)>) {
+            guard let (mode, appearance) = modes.first else { return finish(true, written.joined(separator: "\n")) }
+            view.appearance = NSAppearance(named: appearance)
+            // The page's colors follow prefers-color-scheme: give it a moment to restyle, then snapshot.
+            view.evaluateJavaScript("document.getElementById('status').textContent") { status, _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    view.takeSnapshot(with: nil) { image, error in
+                        let file = self.shots.appendingPathComponent("\(base)-\(mode).png")
+                        guard let image, let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+                              let png = bitmap.representation(using: .png, properties: [:]), (try? png.write(to: file)) != nil else {
+                            return finish(false, "couldn't draw \(file.lastPathComponent): \(error.map { "\($0)" } ?? "no image")")
+                        }
+                        written.append(file.path + (status.map { "  (status: \($0))" } ?? ""))
+                        take(modes.dropFirst())
+                    }
+                }
+            }
+        }
+        loaded.done = { failure in
+            if let failure { return finish(false, "the page didn't load: \(failure)") }
+            take([("light", .aqua), ("dark", .darkAqua)][...])
+        }
+        view.load(URLRequest(url: url))
     }
 
     /// `wallet STATE`'s sheets: a card per state, and all of them.
@@ -1471,7 +1553,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             showSettings(tab)
             settle { reply(true, "settings shown on \(tab.rawValue)") }
         case "sheet": showSheet(rest, reply)
-        case "wallet-ask": walletAsk(reply)
+        case "wallet-ask": walletAsk(address: rest == "address", reply)
+        case "wallet-page": walletPage(rest.isEmpty ? "wallet-page" : rest, reply)
         case "wallet-click": walletClick(rest, reply)
         case "wallet-answer": walletAnswer(rest, reply)
         case "wallet":
@@ -2042,4 +2125,13 @@ struct SandboxTranscriber: HTTPClient {
         (Data(#"{"text":"run the tests on ComposerView.swift"}"#.utf8),
          HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!)
     }
+}
+
+/// `wallet-page`'s web view's navigation: `done` once the page loaded (nil) or failed (why).
+final class WalletPageLoad: NSObject, WKNavigationDelegate {
+    var done: (String?) -> Void = { _ in }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { done(nil) }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { done("\(error)") }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { done("\(error)") }
 }

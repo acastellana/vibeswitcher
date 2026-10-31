@@ -12,10 +12,10 @@ struct WalletCard: View {
 
     static func tint(_ state: WalletCardModel.State) -> Color {
         switch state {
-        case .waiting, .unreachable, .unsure: return SessionStatus.needsInput.color
-        case .sent, .received, .proposed, .signedNotSubmitted: return SessionStatus.working.color
-        case .signed: return SessionStatus.done.color
-        case .rejected, .failed, .notSent: return Color(nsColor: .systemRed)
+        case .waiting, .unreachable, .unsure, .browserNoAnswer: return SessionStatus.needsInput.color
+        case .sent, .received, .proposed, .signedNotSubmitted, .inBrowser: return SessionStatus.working.color
+        case .signed, .sentFromBrowser: return SessionStatus.done.color
+        case .rejected, .failed, .notSent, .rejectedInWallet: return Color(nsColor: .systemRed)
         case .expired: return .secondary
         }
     }
@@ -34,6 +34,10 @@ struct WalletCard: View {
         case .rejected: return "xmark.octagon.fill"
         case .failed: return "exclamationmark.triangle.fill"
         case .expired: return "clock.badge.xmark"
+        case .inBrowser: return "safari"
+        case .sentFromBrowser: return "checkmark.circle.fill"
+        case .rejectedInWallet: return "xmark.octagon.fill"
+        case .browserNoAnswer: return "questionmark.circle.fill"
         }
     }
 
@@ -121,7 +125,7 @@ struct WalletCard: View {
     /// What the Wallet Manager sent back that's worth keeping: the transaction hash and its explorer link.
     @ViewBuilder private var outcome: some View {
         switch card.state {
-        case .signed(let hash, let url):
+        case .signed(let hash, let url), .sentFromBrowser(let hash, let url):
             hashRow("Transaction", hash)
             if let url {
                 Link(destination: url) {
@@ -172,15 +176,31 @@ struct WalletCard: View {
     }
 
     private var buttons: some View {
-        HStack(spacing: 8) {
-            ForEach(card.actions, id: \.self) { action in
-                if action == card.actions.first {
-                    Button(action.title) { act(action) }.buttonStyle(.borderedProminent)
-                } else {
-                    Button(action.title) { act(action) }.buttonStyle(.bordered)
+        let main = card.actions.filter { $0 != .browser }
+        return VStack(alignment: .leading, spacing: 8) {
+            if !main.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(main, id: \.self) { action in
+                        if action == main.first {
+                            Button(action.title) { act(action) }.buttonStyle(.borderedProminent)
+                        } else {
+                            Button(action.title) { act(action) }.buttonStyle(.bordered)
+                        }
+                    }
+                    Spacer(minLength: 0)
                 }
             }
-            Spacer(minLength: 0)
+            // The fallback, secondary and under the rest: it skips the Wallet Manager, so it says so.
+            if card.actions.contains(.browser) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Button { act(.browser) } label: { Label(WalletCardModel.Action.browser.title, systemImage: "safari") }
+                        .buttonStyle(.bordered)
+                        .accessibilityHint(WalletCardModel.browserNote)
+                    Text(WalletCardModel.browserNote)
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .controlSize(.regular)
     }

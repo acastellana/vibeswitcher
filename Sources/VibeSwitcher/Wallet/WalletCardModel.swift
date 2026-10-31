@@ -30,6 +30,10 @@ struct WalletCardModel: Equatable, Identifiable {
     var state: State
     /// The Wallet Manager's checks, when it sent any (with a rejection, but also along with other answers).
     var checks: [Check] = []
+    /// `from` is an 0x address, so the browser's wallet could sign it (`WalletBrowser.canSign`).
+    var browserSignable = false
+    /// Sent, with no word from the Wallet Manager for 5 minutes: the card asks whether it's running.
+    var notPickedUp = false
 
     /// The kinds of wallet a request can come from: it decides what signing it means.
     enum Wallet: String, CaseIterable {
@@ -76,20 +80,37 @@ struct WalletCardModel: Equatable, Identifiable {
         case failed(message: String)
         /// No answer in time, or you didn't send it in time: it can't be sent any more.
         case expired
+        /// Opened in the browser's wallet (`WalletBrowser`): waiting for it to be confirmed or rejected there.
+        case inBrowser
+        /// Signed and sent by the browser's wallet.
+        case sentFromBrowser(txHash: String, explorerURL: URL?)
+        /// Rejected in the browser's wallet.
+        case rejectedInWallet
+        /// Opened in the browser's wallet, and no answer came back before the page stopped.
+        case browserNoAnswer
     }
 
     /// What you can do on the card.
     enum Action: String, CaseIterable {
         case send, discard, retry
+        /// Sign it with the browser's wallet extension instead (`WalletBrowser`): skips the Wallet Manager.
+        case browser
 
         var title: String {
             switch self {
             case .send: return "Send to Wallet Manager"
             case .discard: return "Discard"
             case .retry: return "Retry"
+            case .browser: return "Sign in browser wallet"
             }
         }
     }
+
+    /// The line under Sign in browser wallet.
+    static let browserNote = "Skips the Wallet Manager's checks: read the wallet's own popup"
+    /// Added to a Sent card's line after `notPickedUpAfter` with no word from the Wallet Manager.
+    static let notPickedUpNote = "Delivered to the Wallet Manager's Mac, but it hasn't picked it up yet. Is the Wallet Manager running?"
+    static let notPickedUpAfter: TimeInterval = 5 * 60
 
     /// The buttons the card shows in `state`, the main one first. Send only while waiting: once a request has left,
     /// nothing on this card sends it again but Retry, after Passage said it couldn't reach the Wallet Manager.
@@ -98,11 +119,28 @@ struct WalletCardModel: Equatable, Identifiable {
         case .waiting: return [.send, .discard]
         case .unreachable, .unsure: return [.retry, .discard]
         case .notSent: return [.discard]
-        case .sent, .received, .proposed, .signedNotSubmitted, .signed, .rejected, .failed, .expired: return []
+        case .inBrowser, .rejectedInWallet, .browserNoAnswer: return [.discard]
+        case .sent, .received, .proposed, .signedNotSubmitted, .signed, .rejected, .failed, .expired, .sentFromBrowser: return []
         }
     }
 
-    var actions: [Action] { Self.actions(for: state) }
+    /// Whether Sign in browser wallet shows: only while the request has never reached the Wallet Manager (waiting,
+    /// unreachable, not sent), from an 0x address that isn't known to be a Safe. Once it's used the card is `inBrowser`
+    /// or after, where neither it nor Send shows again.
+    var offersBrowser: Bool {
+        guard browserSignable, wallet != .safe else { return false }
+        switch state {
+        case .waiting, .unreachable, .notSent: return true
+        default: return false
+        }
+    }
+
+    /// The buttons: the state's, with Sign in browser wallet before Discard where `offersBrowser`.
+    var actions: [Action] {
+        var list = Self.actions(for: state)
+        if offersBrowser { list.insert(.browser, at: list.firstIndex(of: .discard) ?? list.endIndex) }
+        return list
+    }
 
     /// A check that failed in an answer that isn't a rejection (an "unknown calldata" check on a proposal): the Wallet Manager
     /// went on, and the person there decides; shown as a warning, not as a failure.
@@ -145,6 +183,10 @@ struct WalletCardModel: Equatable, Identifiable {
         case .rejected: return "Rejected"
         case .failed: return "Failed"
         case .expired: return "Expired"
+        case .inBrowser: return "Waiting for the browser wallet"
+        case .sentFromBrowser: return "Sent from browser wallet"
+        case .rejectedInWallet: return "Rejected in the wallet"
+        case .browserNoAnswer: return "No answer from the browser wallet"
         }
     }
 
@@ -175,10 +217,20 @@ struct WalletCardModel: Equatable, Identifiable {
         case .rejected(let reason): return "The Wallet Manager refused it: \(reason)"
         case .failed(let message): return "The Wallet Manager couldn't finish it: \(message)"
         case .expired: return "No longer valid: it can't be sent. Ask the agent again if it's still needed."
+        case .inBrowser:
+            return "Opened in your browser: confirm or reject it in the wallet's own popup, and read the transaction there. "
+                + "It no longer goes to the Wallet Manager."
+        case .sentFromBrowser: return "Signed and sent from your browser wallet, without the Wallet Manager's checks."
+        case .rejectedInWallet: return "You rejected it in the browser wallet. Nothing was sent."
+        case .browserNoAnswer:
+            return "Opened in the browser wallet, but no answer came back. Check the wallet's activity to see whether it was sent."
         }
     }
 
-    var detail: String { Self.detail(state, wallet: wallet) }
+    var detail: String {
+        let line = Self.detail(state, wallet: wallet)
+        return state == .sent && notPickedUp ? line + " " + Self.notPickedUpNote : line
+    }
 
     /// The card as text, for Copy.
     var text: String {
@@ -190,7 +242,7 @@ struct WalletCardModel: Equatable, Identifiable {
         lines += [
                      detail]
         switch state {
-        case .signed(let hash, let url):
+        case .signed(let hash, let url), .sentFromBrowser(let hash, let url):
             lines.append("Transaction: \(hash)")
             if let url { lines.append(url.absoluteString) }
         case .proposed(let hash?): lines.append("Safe transaction: \(hash)")

@@ -125,10 +125,11 @@ public enum WalletAsk {
         return try handle.read(upToCount: WalletRequestFormat.maxFileBytes + 1) ?? Data()
     }
 
-    /// Removes a filed request (sent, discarded, or refused), and its expiry note's marker.
+    /// Removes a filed request (sent, discarded, or refused), its expiry note's marker and its browser wallet mark.
     public static func remove(_ id: String, in folder: URL = WalletAsk.folder) {
         try? FileManager.default.removeItem(at: folder.appendingPathComponent("\(id).json"))
         try? FileManager.default.removeItem(at: expiryMarker(id, in: folder))
+        try? FileManager.default.removeItem(at: WalletBrowser.markFile(id, in: folder))
     }
 
     /// Beside a filed request that expired unsent, once its agent was told (`.<id>.expired`: `filed` reads no
