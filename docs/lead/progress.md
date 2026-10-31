@@ -2414,3 +2414,4 @@
 - 2026-10-31 23:30 Started a worker on verifiers-don-t-run
 - 2026-10-31 23:30 Automatically (auto_advance): Started a worker on verifiers-don-t-run (Verifiers don't run a full suite of their own: the merge's run is the one full suite).
 - 2026-10-31 23:30 Update: Retrospective: wallet requests batch (2026-10-31) — **Went well**
+- 2026-10-31 23:42 Planned wallet-e2e-a-failed: wallet-e2e: a failed check in a non-rejected result is a warning, not a failure (recipient-known, calldata)
