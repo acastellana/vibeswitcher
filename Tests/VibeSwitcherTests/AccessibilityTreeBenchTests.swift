@@ -180,13 +180,14 @@ struct AccessibilityTreeBenchTests {
 
     @Test func anUpdateOfASidebarATeamAndAChatWithAClientAttached() async throws {
         let runs: [(String, (Bool) async throws -> (each: Double, worst: Double, elements: Int))] = [
-            ("sidebar", { try sidebar(attach: $0) }), ("team", { try team(attach: $0) }), ("chat", { try await chat(attach: $0) }),
+            ("sidebar rows \(Self.rows)", { try sidebar(attach: $0) }), ("team rows \(Self.rows)", { try team(attach: $0) }),
+            ("chat entries 300", { try await chat(attach: $0) }),
         ]
         for (name, run) in runs {
             let without = try await run(false)
             let with = try await run(true)
-            print(String(format: "RESULT ax-tree %@ rows %d elements %d, main-thread ms per update %.1f (worst %.1f), without a client %.1f "
-                         + "(worst %.1f), the client's share %.1f", name, Self.rows, with.elements, with.each, with.worst, without.each,
+            print(String(format: "RESULT ax-tree %@, elements %d, main-thread ms per update %.1f (worst %.1f), without a client %.1f "
+                         + "(worst %.1f), the client's share %.1f", name, with.elements, with.each, with.worst, without.each,
                          without.worst, with.each - without.each))
             #expect(with.elements > 0, "\(name): the client read nothing")
             // A tick of 100 rows read by a client: well under a frame budget's worth of seconds, never the freezes' seconds.
