@@ -847,7 +847,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 phoneAccess: PhoneAccess(store: store), recentProjects: { [] }, showWelcome: { [weak self] in self?.refuse("the welcome window") },
                 host: host, briefing: briefing, dictation: dictation, policy: WorkingPolicyEditor(),
                 // Its own fake passage's peers, whatever the path setting says: never the real passage.
-                walletPeers: WalletPeerList(load: { [passage = walletPassage.appendingPathComponent("passage").path] _ in WalletPeerChoice.list(passage: passage) }))
+                walletPeers: WalletPeerList(load: { [passage = PassageCommand(executable: walletPassage.appendingPathComponent("passage").path)] _ in
+                    WalletPeerList.Read(passage: passage, peers: WalletPeerChoice.list(passage: passage))
+                }))
         }
         guard let window = settings?.window else { return }
         Sandbox.hide(window)

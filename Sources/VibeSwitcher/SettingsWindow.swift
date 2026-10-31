@@ -22,7 +22,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     init(preferences: Preferences, setup: SetupModel, phoneAccess: PhoneAccess,
          recentProjects: @escaping () -> [String], showWelcome: @escaping () -> Void, host: HostClient? = nil,
          briefing: BriefingModel? = nil, dictation: DictationController? = nil, policy: WorkingPolicyEditor? = nil,
-         walletPeers: WalletPeerList = WalletPeerList(load: { _ in [] })) {
+         walletPeers: WalletPeerList = WalletPeerList(load: { _ in WalletPeerList.Read(passage: nil, peers: []) })) {
         self.setup = setup
         self.briefing = briefing
         self.dictation = dictation
@@ -78,7 +78,7 @@ struct SettingsView: View {
     var briefing: BriefingModel? = nil
     var dictation: DictationController? = nil
     var policy: WorkingPolicyEditor? = nil
-    var walletPeers = WalletPeerList(load: { _ in [] })
+    var walletPeers = WalletPeerList(load: { _ in WalletPeerList.Read(passage: nil, peers: []) })
 
     var body: some View {
         TabView(selection: $selection.tab) {

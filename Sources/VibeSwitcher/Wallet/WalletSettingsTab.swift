@@ -11,17 +11,34 @@ struct WalletPeerChoice: Equatable, Hashable, Identifiable {
 /// Settings › Wallet: which Passage peer is the Wallet Manager's Mac, and which `passage` carries requests there. Until a peer is
 /// chosen, wallet requests are refused.
 /// Settings › Wallet's peers, read from `passage peers --no-discovery --json` off the main thread: again each time the
-/// tab shows and when the passage path changes; the latest read wins (one for a path typed since is dropped).
+/// tab shows and when the passage path changes; the latest read wins (one for a path typed since is dropped). With
+/// them, which Passage was used.
 final class WalletPeerList: ObservableObject {
+    /// One read: the Passage found for the path setting (nil: none, or the path isn't absolute) and the peers it
+    /// listed (nil when it couldn't list them).
+    struct Read: Equatable {
+        var passage: PassageCommand?
+        var peers: [WalletPeerChoice]?
+    }
+
     @Published private(set) var peers: [WalletPeerChoice] = []
-    /// The peers for the passage path setting (empty: `passage` on the PATH), or nil when passage couldn't list them.
-    let load: (_ passagePath: String) -> [WalletPeerChoice]?
+    /// The Passage the latest read used; nil until a read is shown, or when none was found.
+    @Published private(set) var passage: PassageCommand?
+    /// Whether a read has been shown (until then, nothing is said about which Passage is used).
+    @Published private(set) var read = false
+    /// Passage and its peers for the passage path setting (empty: found by itself).
+    let load: (_ passagePath: String) -> Read
     private var generation = 0
 
-    init(load: @escaping (_ passagePath: String) -> [WalletPeerChoice]? = { path in
-        (path.isEmpty ? WalletPeerChoice.findPassage() : path).flatMap { WalletPeerChoice.list(passage: $0) }
-    }) {
+    init(load: @escaping (_ passagePath: String) -> Read = { WalletPeerList.read($0) }) {
         self.load = load
+    }
+
+    /// Passage for the path setting (`PassageCommand.resolve`), and the peers it lists. Blocks: off the main thread.
+    static func read(_ passagePath: String, onPath: () -> String? = WalletPeerChoice.findPassage,
+                     apps: [URL] = PassageCommand.appLocations) -> Read {
+        let passage = PassageCommand.resolve(setting: passagePath, onPath: onPath, apps: apps)
+        return Read(passage: passage, peers: passage.flatMap { WalletPeerChoice.list(passage: $0) })
     }
 
     /// Reads them again; `then` runs on the main thread once this read's peers are shown (not for one a later read
@@ -31,10 +48,13 @@ final class WalletPeerList: ObservableObject {
         let mine = generation
         let load = self.load
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let peers = load(passagePath) ?? []
+            let found = load(passagePath)
+            let peers = found.peers ?? []
             DispatchQueue.main.async {
                 guard let self, self.generation == mine else { return }
                 if self.peers != peers { self.peers = peers }
+                if self.passage != found.passage { self.passage = found.passage }
+                if !self.read { self.read = true }
                 then()
             }
         }
@@ -61,6 +81,16 @@ struct WalletSettingsTab: View {
         guard !saved.isEmpty else { return refusedNote }
         let name = peers.first { $0.peerID == saved }?.name ?? saved
         return "Requests go to \(name) once you press Send to Wallet Manager on their card. Nothing is sent before that."
+    }
+
+    /// The line under the passage path: which Passage requests go through, or why there's none. Nil before the first read.
+    static func using(_ passage: PassageCommand?, read: Bool, path: String) -> String? {
+        guard read else { return nil }
+        if let passage { return "Using \(passage.shown)" }
+        if path.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "Passage not found: no passage on your PATH, no Passage.app in /Applications or ~/Applications."
+        }
+        return "This path isn't absolute."
     }
 
     var body: some View {
@@ -94,10 +124,17 @@ struct WalletSettingsTab: View {
                         .labelsHidden().accessibilityLabel("Path to the passage command")
                         .font(.system(.body, design: .monospaced))
                 }
+                if let using = Self.using(peerList.passage, read: peerList.read, path: preferences.walletPassagePath) {
+                    Text(using)
+                        .font(.callout)
+                        .foregroundStyle(peerList.passage == nil ? SessionStatus.needsInput.color : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             } header: {
                 Text("Passage")
             } footer: {
-                SettingsFooter("The passage command requests go through. Empty: passage on your PATH.")
+                SettingsFooter("The passage command requests go through: a passage link, Passage.app or its binary. "
+                    + "Empty: passage on your PATH, else Passage.app in /Applications or ~/Applications.")
             }
         }
         .formStyle(.grouped)
@@ -115,9 +152,10 @@ extension WalletPeerChoice {
 
     /// The paired peers, as `passage peers --no-discovery --json` lists them (no browsing, no Local Network use): one JSON
     /// object per line with `peerID` and `name`. Blocks: call it off the main thread. Nil when passage failed.
-    static func list(passage: String, timeout: TimeInterval = 15) -> [WalletPeerChoice]? {
-        guard passage.hasPrefix("/") else { return nil }
-        let run = Shell.run(executable: passage, args: ["peers", "--no-discovery", "--json"], in: "/", timeout: timeout, ownSession: true)
+    static func list(passage: PassageCommand, timeout: TimeInterval = 15) -> [WalletPeerChoice]? {
+        guard passage.executable.hasPrefix("/") else { return nil }
+        let run = Shell.run(executable: passage.executable, args: passage.arguments(["peers", "--no-discovery", "--json"]), in: "/",
+                            timeout: timeout, ownSession: true)
         guard run.ok, !run.signaled else { return nil }
         return parse(run.output)
     }

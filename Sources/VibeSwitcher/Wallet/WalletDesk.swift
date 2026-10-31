@@ -21,7 +21,7 @@ final class WalletDesk: ObservableObject {
 
     /// Where Passage is and which peer is the Wallet Manager's Mac: Settings › Wallet (read on the main thread).
     struct Config: Equatable {
-        /// The `passage` command: an absolute path, or empty for `passage` on the PATH.
+        /// The `passage` command: an absolute path (`passage`, Passage.app or its binary), or empty to find it.
         var passage: String
         /// The Wallet Manager peer's ID; empty: none chosen.
         var peer: String
@@ -32,8 +32,9 @@ final class WalletDesk: ObservableObject {
     let inbox: URL
     /// Settings › Wallet, read on the main thread.
     var config: () -> Config
-    /// `passage` found on the login shell's PATH (off the main thread): an absolute path, or nil.
-    var findPassage: () -> String? = WalletPeerChoice.findPassage
+    /// Passage found when no path is set (off the main thread): `passage` on the login shell's PATH, else Passage.app
+    /// in /Applications or ~/Applications; nil when there's none.
+    var findPassage: () -> PassageCommand? = { PassageCommand.resolve(setting: "", onPath: WalletPeerChoice.findPassage) }
     /// Hands a message to the asking session's agent (its id, lower case), on the main thread.
     var deliver: (_ session: String, _ text: String) -> Void = { _, _ in }
     let now: @Sendable () -> Date
@@ -47,9 +48,9 @@ final class WalletDesk: ObservableObject {
     /// What Passage said when it stopped unsure, per request.
     private var unsureWhy: [String: String] = [:]
     private var courier: WalletCourier?
-    private var courierFor: (passage: String, peer: String)?
-    /// `passage` on the PATH, once found.
-    private var foundPassage: String?
+    private var courierFor: (passage: PassageCommand, peer: String)?
+    /// Passage found with no path set, once found.
+    private var foundPassage: PassageCommand?
 
     init(folder: URL = WalletAsk.folder, store: WalletRequestStore = WalletRequestStore(), inbox: URL = PassageLink.defaultInbox,
          config: @escaping () -> Config, now: @escaping @Sendable () -> Date = { Date() },
@@ -186,12 +187,14 @@ final class WalletDesk: ObservableObject {
     private func courier(_ config: Config) throws -> WalletCourier {
         guard !config.peer.isEmpty else { throw WalletAsk.Refusal("no Wallet Manager peer is chosen in Settings › Wallet") }
         if config.passage.isEmpty, foundPassage == nil { foundPassage = findPassage() }
-        let passage = config.passage.isEmpty ? foundPassage : config.passage
-        guard let passage, passage.hasPrefix("/") else {
-            throw WalletAsk.Refusal(config.passage.isEmpty ? "passage isn't on the PATH: set its path in Settings › Wallet" : "the passage path in Settings › Wallet isn't absolute")
+        let passage = config.passage.isEmpty ? foundPassage : PassageCommand.forPath(config.passage)
+        guard let passage else {
+            throw WalletAsk.Refusal(config.passage.isEmpty
+                ? "Passage isn't found (no passage on the PATH, no Passage.app in /Applications or ~/Applications): set its path in Settings › Wallet"
+                : "the passage path in Settings › Wallet isn't absolute")
         }
         if let courier, courierFor?.passage == passage, courierFor?.peer == config.peer { return courier }
-        guard let link = PassageLink(executable: passage, walletPeer: config.peer, inboxFolder: inbox) else {
+        guard let link = PassageLink(command: passage, walletPeer: config.peer, inboxFolder: inbox) else {
             throw WalletAsk.Refusal("the Wallet Manager peer \(config.peer) isn't a Passage peer ID")
         }
         courier?.close()

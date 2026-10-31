@@ -571,6 +571,7 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(AppHealth.errorKind("14:02:09.000 composer: couldn't save the outbox: SECRET-MESSAGE-TEXT") == "composer: couldn't")
         #expect(AppHealth.errorKind("14:02:09.000 lead: its role wasn't bound to its session: Error Domain=x") == "lead: error")
         #expect(AppHealth.errorKind("14:02:09.000 spawn failed: no such folder '/Users/someone/secret-project'") == "spawn failed: failed")
+        #expect(AppHealth.errorKind("14:02:09.000 wallet: couldn't start passage listen: SECRET-MESSAGE-TEXT") == "wallet: couldn't")
         #expect(AppHealth.errorKind("14:02:09.000 SECRET-MESSAGE-TEXT: cannot do it") == "app: cannot")
         #expect(AppHealth.errorKind("14:02:09.000 chat: apiError shown") == nil)
         #expect(AppHealth.errorKind("14:02:09.000 main thread stuck since now; sampling into hang-1.txt") == nil)

@@ -5,8 +5,10 @@ import Foundation
 /// (`passage inbox <peer> --json`) and runs `passage listen` while there's something to hear. Inbox files are
 /// untrusted data: read only as bytes for the strict parser, never opened or run.
 public struct PassageLink: Sendable {
+    /// How passage is run: the program (an absolute path) and what comes before each command (`cli` for the app's binary).
+    public let command: PassageCommand
     /// The `passage` executable, an absolute path.
-    public let executable: String
+    public var executable: String { command.executable }
     /// The Wallet Manager's Mac's peer ID: 8 lower-case hex digits (a name could match another peer).
     public let walletPeer: String
     /// Passage's inbox folder, holding one folder per peer ID.
@@ -19,10 +21,15 @@ public struct PassageLink: Sendable {
 
     /// Nil unless `executable` is an absolute path and `walletPeer` a peer ID.
     public init?(executable: String, walletPeer: String, inboxFolder: URL = PassageLink.defaultInbox) {
+        self.init(command: PassageCommand(executable: executable), walletPeer: walletPeer, inboxFolder: inboxFolder)
+    }
+
+    /// Nil unless `command`'s executable is an absolute path and `walletPeer` a peer ID.
+    public init?(command: PassageCommand, walletPeer: String, inboxFolder: URL = PassageLink.defaultInbox) {
         let peer = Array(walletPeer.utf8)
-        guard executable.hasPrefix("/"), peer.count == 8,
+        guard command.executable.hasPrefix("/"), peer.count == 8,
               peer.allSatisfy({ ($0 >= 0x30 && $0 <= 0x39) || ($0 >= 0x61 && $0 <= 0x66) }) else { return nil }
-        self.executable = executable
+        self.command = command
         self.walletPeer = walletPeer
         self.inboxFolder = inboxFolder.standardizedFileURL
     }
@@ -61,7 +68,7 @@ public struct PassageLink: Sendable {
     /// terminal to ask on. Blocks: call it off the main thread.
     public func send(file: URL, id: String, timeout: TimeInterval = 120) -> SendOutcome {
         let name = WalletRequest.fileName(id)
-        let result = Shell.run(executable: executable, args: ["send", walletPeer, file.path, "--name", name], in: "/",
+        let result = Shell.run(executable: executable, args: command.arguments(["send", walletPeer, file.path, "--name", name]), in: "/",
                                timeout: timeout, ownSession: true)
         let said = Self.brief(result.error)
         if result.timedOut || result.cancelled { return .unexpected("passage send was stopped: \(result.timedOut ? "out of time" : "cancelled")") }
@@ -108,7 +115,7 @@ public struct PassageLink: Sendable {
     /// What the Wallet Manager peer has sent, oldest first: `passage inbox <Wallet Manager peer> --json`. Any line that isn't an object
     /// with string `peerID`, `name` and `path` fails the whole listing.
     public func inbox(timeout: TimeInterval = 60) -> Result<[InboxEntry], InboxFailure> {
-        let result = Shell.run(executable: executable, args: ["inbox", walletPeer, "--json"], in: "/", timeout: timeout, ownSession: true)
+        let result = Shell.run(executable: executable, args: command.arguments(["inbox", walletPeer, "--json"]), in: "/", timeout: timeout, ownSession: true)
         guard result.ok else {
             let why = result.timedOut ? "out of time" : result.cancelled ? "cancelled" : "exit \(result.status)"
             let said = Self.brief(result.error)
@@ -159,7 +166,7 @@ public struct PassageLink: Sendable {
 
     /// Starts `passage listen`: `heard` is called (on a thread of its own) for each line it prints, an item received.
     public func listen(heard: @escaping @Sendable () -> Void) throws -> PassageListener {
-        try PassageListener(executable: executable, heard: heard)
+        try PassageListener(command: command, heard: heard)
     }
 }
 
@@ -169,9 +176,9 @@ public final class PassageListener: @unchecked Sendable {
     public let pid: Int32
     private let process: Shell.Spawned
 
-    init(executable: String, heard: @escaping @Sendable () -> Void) throws {
+    init(command: PassageCommand, heard: @escaping @Sendable () -> Void) throws {
         let out = try ShellPipe(), err = try ShellPipe()
-        process = try Shell.Spawned([executable, "listen"], in: "/", environment: ProcessInfo.processInfo.environment,
+        process = try Shell.Spawned([command.executable] + command.arguments(["listen"]), in: "/", environment: ProcessInfo.processInfo.environment,
                                     output: out, errors: err, session: true)
         pid = process.processIdentifier
         Thread.detachNewThread {

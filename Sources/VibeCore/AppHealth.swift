@@ -588,7 +588,7 @@ public enum AppHealth {
     /// The parts of the app that start their app.log lines with their name ("lead: …"); a line starting with anything
     /// else is the app's ("app: …"), so no word of what a line says becomes its kind.
     static let logParts: Set<String> = ["app", "app health", "bench", "chat", "composer", "handover refused", "host", "keep awake", "lead",
-                                        "move", "privacy", "role sweep", "sandbox", "shutdown refused", "spawn failed", "vault", "watchdog",
+                                        "move", "privacy", "role sweep", "sandbox", "shutdown refused", "spawn failed", "vault", "wallet", "watchdog",
                                         "window", "witness"]
 
     /// An app.log line's kind, when it's an error ("lead: couldn't"): what part of the app wrote it (one of `logParts`,

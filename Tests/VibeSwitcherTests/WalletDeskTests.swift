@@ -11,16 +11,25 @@ import VibeCore
 struct WalletFakePassage {
     static let peer = "0a1b2c3d"
     let folder: URL
-    var executable: String { folder.appendingPathComponent("passage").path }
+    /// `passage` in `folder`, or with `app`, the binary of a fake `Passage.app` there.
+    let executable: String
     var inbox: URL { folder.appendingPathComponent("inbox", isDirectory: true) }
+    /// The fake app bundle (with `app`).
+    var app: URL { folder.appendingPathComponent("Passage.app", isDirectory: true) }
 
-    init(_ scratch: Scratch, name: String = "passage") throws {
+    /// With `app`, it's Passage.app's binary: it acts only when its first argument is `cli` (logged with the rest), and
+    /// otherwise says it would open its window and exits 70, as the real one would open it.
+    init(_ scratch: Scratch, name: String = "passage", app: Bool = false) throws {
         folder = scratch.url(name)
+        executable = app ? folder.appendingPathComponent("Passage.app/Contents/MacOS/Passage").path : folder.appendingPathComponent("passage").path
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("inbox"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: (executable as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        let cli = app ? #"if [ "$1" = cli ]; then shift; else echo "Passage: would open its window" >&2; exit 70; fi"# : ""
         let script = """
             #!/bin/bash
             here="\(folder.path)"
             printf '%s\\n' "$*" >> "$here/calls"
+            \(cli)
             case "$1" in
             send)
                 code=$(cat "$here/send-exit" 2>/dev/null || echo 0)
@@ -486,7 +495,8 @@ struct WalletDeskTests {
         let release = DispatchSemaphore(value: 0)
         let list = WalletPeerList(load: { path in
             if path == "slow" { release.wait() }
-            return WalletPeerChoice.list(passage: fake.executable)
+            let passage = PassageCommand(executable: fake.executable)
+            return WalletPeerList.Read(passage: passage, peers: WalletPeerChoice.list(passage: passage))
         })
         try (#"{"peerID":"0a1b2c3d","name":"Example Wallet Manager Mac"}"# + "\n").write(to: fake.file("peers.jsonl"), atomically: true, encoding: .utf8)
         var shown = 0
@@ -508,6 +518,110 @@ struct WalletDeskTests {
     }
 
     // MARK: Settings › Wallet's peers
+    // MARK: Finding Passage
+
+    /// A desk on a fake Passage.app (never the real one): `passage` is the path setting.
+    func appSetup(passage: (WalletFakePassage) -> String) throws -> (fake: WalletFakePassage, desk: WalletDesk, asked: URL) {
+        let fake = try WalletFakePassage(temp, app: true)
+        let asked = temp.url("asked")
+        let setting = passage(fake)
+        let desk = WalletDesk(folder: asked, store: WalletRequestStore(folder: temp.url("requests")), inbox: fake.inbox,
+                             config: { WalletDesk.Config(passage: setting, peer: WalletFakePassage.peer) },
+                             now: { WalletDeskTests.created.addingTimeInterval(30) }, log: { _ in })
+        // No passage on the PATH; Passage.app where /Applications would be (one missing before it, as ~/Applications may be).
+        desk.findPassage = { PassageCommand.resolve(setting: "", onPath: { nil }, apps: [self.temp.url("missing/Passage.app"), fake.app]) }
+        return (fake, desk, asked)
+    }
+
+    @Test func withNoPathSetPassageAppIsFoundAndRunAsItsCLI() async throws {
+        let (fake, desk, asked) = try appSetup { _ in "" }
+        defer { desk.close() }
+        let request = Self.request()
+        try WalletAsk.file(request, in: asked)
+        await refreshed(desk)
+        await acted(desk, .send, request.id)
+        #expect(desk.cards.first?.state == .sent)
+        let sends = fake.calls.filter { $0.hasPrefix("cli send ") }
+        #expect(sends.count == 1)
+        #expect(sends.first?.hasPrefix("cli send \(WalletFakePassage.peer) /") == true)
+        #expect(sends.first?.hasSuffix(" --name \(WalletRequest.fileName(request.id))") == true)
+        // Every run had `cli` first: none would have opened Passage's window.
+        #expect(!fake.calls.isEmpty && fake.calls.allSatisfy { $0.hasPrefix("cli ") })
+        try fake.receive(Self.result(request, .received, sequence: 1), second: 1)
+        await polled(desk)
+        #expect(desk.cards.first?.state == .received)
+        #expect(fake.calls.contains("cli inbox \(WalletFakePassage.peer) --json"))
+    }
+
+    @Test(arguments: [false, true])
+    func aPathToPassageAppOrItsBinaryIsRunAsItsCLI(binary: Bool) async throws {
+        let (fake, desk, asked) = try appSetup { binary ? $0.executable : $0.app.path }
+        defer { desk.close() }
+        desk.findPassage = { Issue.record("a path is set: nothing is looked for"); return nil }
+        let request = Self.request()
+        try WalletAsk.file(request, in: asked)
+        await refreshed(desk)
+        await acted(desk, .send, request.id)
+        #expect(desk.cards.first?.state == .sent)
+        #expect(fake.sends.isEmpty && fake.calls.filter { $0.hasPrefix("cli send ") }.count == 1)
+        #expect(fake.calls.allSatisfy { $0.hasPrefix("cli ") })
+    }
+
+    @Test func aPathToAPassageLinkIsRunAsIs() async throws {
+        let s = try setup()
+        defer { s.desk.close() }
+        let request = Self.request()
+        try WalletAsk.file(request, in: s.asked)
+        await refreshed(s.desk)
+        await acted(s.desk, .send, request.id)
+        #expect(s.desk.cards.first?.state == .sent)
+        #expect(s.fake.sends.count == 1 && !s.fake.calls.contains { $0.hasPrefix("cli") })
+    }
+
+    @Test func withNoPassageFoundTheCardSaysWhereToSetIt() async throws {
+        let (fake, desk, asked) = try appSetup { _ in "" }
+        defer { desk.close() }
+        desk.findPassage = { nil }
+        let request = Self.request()
+        try WalletAsk.file(request, in: asked)
+        await refreshed(desk)
+        await acted(desk, .send, request.id)
+        // Retry once it's set.
+        guard case .unreachable(let message?)? = desk.cards.first?.state else {
+            Issue.record("not held back: \(String(describing: desk.cards.first?.state))")
+            return
+        }
+        #expect(message.contains("Passage isn't found") && message.contains("Settings › Wallet"))
+        #expect(desk.cards.first?.actions == [.retry, .discard])
+        #expect(fake.calls.isEmpty)
+    }
+
+    @Test func settingsSaysWhichPassageItFoundAndListsPeersThroughIt() async throws {
+        let fake = try WalletFakePassage(temp, app: true)
+        try (#"{"peerID":"0a1b2c3d","name":"Example Wallet Manager Mac"}"# + "\n").write(to: fake.file("peers.jsonl"), atomically: true, encoding: .utf8)
+        let apps = [temp.url("missing/Passage.app"), fake.app]
+        let list = WalletPeerList(load: { WalletPeerList.read($0, onPath: { nil }, apps: apps) })
+        #expect(WalletSettingsTab.using(list.passage, read: list.read, path: "") == nil)
+        var shown = 0
+        list.reload(passagePath: "") { shown += 1 }
+        #expect(await until { shown == 1 })
+        #expect(list.peers.map(\.peerID) == ["0a1b2c3d"])
+        #expect(list.passage == PassageCommand(executable: fake.executable, leading: ["cli"]))
+        #expect(WalletSettingsTab.using(list.passage, read: list.read, path: "") == "Using \(fake.app.path)")
+        #expect(fake.calls == ["cli peers --no-discovery --json"])
+        // The app's path set in Settings: the same.
+        list.reload(passagePath: fake.app.path) { shown += 1 }
+        #expect(await until { shown == 2 })
+        #expect(WalletSettingsTab.using(list.passage, read: list.read, path: fake.app.path) == "Using \(fake.app.path)")
+        #expect(list.peers.map(\.peerID) == ["0a1b2c3d"])
+        // Nothing found: said so, and no peers.
+        let none = WalletPeerList(load: { WalletPeerList.read($0, onPath: { nil }, apps: [self.temp.url("missing/Passage.app")]) })
+        none.reload(passagePath: "") { shown += 1 }
+        #expect(await until { shown == 3 })
+        #expect(none.peers.isEmpty && none.passage == nil)
+        #expect(WalletSettingsTab.using(none.passage, read: none.read, path: "")?.hasPrefix("Passage not found") == true)
+    }
+
     // MARK: Settings › Wallet's peers
 
     @Test func settingsListsThePeersPassageNames() throws {
@@ -516,11 +630,11 @@ struct WalletDeskTests {
                      #"{"peerID":"not-a-peer","name":"Odd"}"#,
                      #"{"peerID":"0d0d0d0d","name":"","reachable":null}"#]
         try (lines.joined(separator: "\n") + "\n").write(to: fake.file("peers.jsonl"), atomically: true, encoding: .utf8)
-        let peers = try #require(WalletPeerChoice.list(passage: fake.executable))
+        let peers = try #require(WalletPeerChoice.list(passage: PassageCommand(executable: fake.executable)))
         #expect(peers == [WalletPeerChoice(peerID: "0a1b2c3d", name: "Example Wallet Manager Mac (0a1b2c3d)"),
                           WalletPeerChoice(peerID: "0d0d0d0d", name: "(unnamed)")])
         #expect(fake.calls == ["peers --no-discovery --json"])
-        #expect(WalletPeerChoice.list(passage: "relative/passage") == nil)
+        #expect(WalletPeerChoice.list(passage: PassageCommand(executable: "relative/passage")) == nil)
     }
 }
 

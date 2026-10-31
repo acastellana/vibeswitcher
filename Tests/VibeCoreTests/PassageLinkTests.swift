@@ -17,16 +17,26 @@ struct PassageLinkTests {
     /// `send-go`. `inbox.jsonl` is what `inbox` prints.
     struct FakePassage {
         let folder: URL
-        var executable: String { folder.appendingPathComponent("passage").path }
+        /// `passage` in `folder`, or with `app`, the binary of a fake `Passage.app` there.
+        let executable: String
+        /// How the link runs it: Passage.app's binary with `cli` first.
+        let command: PassageCommand
         var inbox: URL { folder.appendingPathComponent("inbox", isDirectory: true) }
 
-        init(_ scratch: Scratch) throws {
+        /// With `app`, it's Passage.app's binary: it acts only when its first argument is `cli` (logged with the
+        /// rest), and otherwise says it would open its window and exits 70.
+        init(_ scratch: Scratch, app: Bool = false) throws {
             folder = scratch.url("passage")
+            executable = app ? folder.appendingPathComponent("Passage.app/Contents/MacOS/Passage").path : folder.appendingPathComponent("passage").path
+            command = try #require(PassageCommand.forPath(app ? folder.appendingPathComponent("Passage.app").path : executable))
             try FileManager.default.createDirectory(at: folder.appendingPathComponent("inbox"), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(atPath: (executable as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            let cli = app ? #"if [ "$1" = cli ]; then shift; else echo "Passage: would open its window" >&2; exit 70; fi"# : ""
             let script = """
                 #!/bin/bash
                 here="\(folder.path)"
                 printf '%s\\n' "$*" >> "$here/calls"
+                \(cli)
                 case "$1" in
                 send)
                     if [ -e "$here/send-signal" ]; then kill -s "$(cat "$here/send-signal")" $$; fi
@@ -87,7 +97,7 @@ struct PassageLinkTests {
             try receive(result.encoded(), name: WalletResult.fileName(result.id), from: peer, second: second)
         }
 
-        var link: PassageLink { PassageLink(executable: executable, walletPeer: PassageLinkTests.peer, inboxFolder: inbox)! }
+        var link: PassageLink { PassageLink(command: command, walletPeer: PassageLinkTests.peer, inboxFolder: inbox)! }
     }
 
     /// What a courier logged.
@@ -381,6 +391,28 @@ struct PassageLinkTests {
         #expect(kill(pid, 0) == -1 && errno == ESRCH)
         #expect(log.lines.contains("passage listen (pid \(pid)) stopped: no request outstanding"))
         #expect(fake.calls.filter { $0 == "listen" }.count == 1)
+    }
+
+    /// Passage.app's binary runs as its CLI only with `cli` first: send, inbox and listen all put it there.
+    @Test func passageAppsBinaryIsRunWithCliFirst() throws {
+        let fake = try FakePassage(scratch, app: true)
+        #expect(fake.command == PassageCommand(executable: fake.executable, leading: ["cli"]))
+        let log = Log()
+        let courier = courier(fake, log: log)
+        defer { courier.close() }
+        let request = Self.request()
+        #expect(courier.send(request) == .passage(.sent))
+        let pid = try #require(courier.listenerPID)
+        #expect(eventually { fake.text("listen.pid") != nil })
+        #expect(fake.text("listen.pid")?.trimmingCharacters(in: .whitespacesAndNewlines) == "\(pid)")
+        try fake.receive(Self.result(request, .submitted, sequence: 1))
+        #expect(courier.poll().count == 1)
+        #expect(courier.listenerPID == nil)
+        let file = courier.store.folder.appendingPathComponent("outbox/wallet-request-\(request.id).json").path
+        #expect(fake.calls.contains("cli send \(Self.peer) \(file) --name wallet-request-\(request.id).json"))
+        #expect(fake.calls.contains("cli listen"))
+        #expect(fake.calls.contains("cli inbox \(Self.peer) --json"))
+        #expect(fake.calls.allSatisfy { $0.hasPrefix("cli ") })
     }
 
     // MARK: Records
