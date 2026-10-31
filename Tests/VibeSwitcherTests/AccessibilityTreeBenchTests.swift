@@ -203,10 +203,11 @@ struct AccessibilityTreeBenchTests {
 @MainActor
 @Suite(.serialized, .tags(.perf), .enabled(if: perfRun, perfOnly))
 struct HostingViewDepthTests {
-    let temp = Scratch()
+    /// Its scratch folders live as long as this test does (the window's store, inbox and vault are in them).
+    let panes = SidePaneSizeTests()
 
     @Test func theMainWindowsHostingViewsAndTheirDepths() throws {
-        let controller = try SidePaneSizeTests().window()
+        let controller = try panes.window()
         let window = try #require(controller.window)
         let frame = try #require(window.contentView?.superview)
         var found: [(depth: Int, name: String, frame: NSRect)] = []
