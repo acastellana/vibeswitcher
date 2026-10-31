@@ -40,3 +40,10 @@ Evidence: 2026-10-30. build-app-sh-install's audit passed at 21:26. The lead the
 Task: build-app-sh-install
 Check: task turn-this-incident-into-2 turns it into a check that runs before merge.
 
+## 2026-10-31 16:48:31 A worker's or verifier's session that hits the account's usage limit isn't reported as stopped: status keeps it running or in review, and no witness report is sent, so the lead and the user wait on a session that will do nothing until the reset.
+
+Evidence: 2026-10-31, two projects. (1) Reported by another project's lead: at about 16:41 a re-audit started, ran one command, and its session printed "You've hit your weekly limit · resets Nov 3 at 1am (Europe/Madrid)" and sat there. status kept showing the task in review as if the audit were running, no witness report said stalled or stopped, and the user had to ask "u sure we're not stuck?". It was found only with read_session(verifier). (2) In this project, agents-know-they-can's worker hit the same limit at about 16:35. status showed "its turn ended on an API error (You've hit your weekly limit …)" only when called, and no report came. The fix: the witness treats a usage-limit line in a worker's or verifier's output as a stop, reports it to the lead with the reset time (parsed when present), and status shows the task as waiting on the limit, not running or in review.
+
+Task: agents-know-they-can
+Check: task turn-this-incident-into-6 turns it into a check that runs before merge.
+

@@ -2295,3 +2295,9 @@
 - 2026-10-31 16:27 Folded vault-request-card-and into vault-requests-in-the: that task carries its work
 - 2026-10-31 16:27 Folded test-under-load-sh into vault-requests-in-the: that task carries its work
 - 2026-10-31 16:28 Update: Vault requests: agents ask, you click Send to vault, the answer comes back — **What changed** (one commit on main, 64e3b83)
+- 2026-10-31 16:48 Incident: A worker's or verifier's session that hits the account's usage limit isn't reported as stopped: status keeps it running or in review, and no witness report is s… (in agents-know-they-can); planned turn-this-incident-into-6 to turn it into a check
+- 2026-10-31 16:48 Started a worker on turn-this-incident-into-6
+- 2026-10-31 16:48 Automatically (auto_advance): Started a worker on turn-this-incident-into-6 (Turn this incident into a check: A worker's or verifier's session that hits the account's usa…).
+- 2026-10-31 16:48 Automatically (auto_advance): Didn't start agents-know-they-can: agents-know-they-can's worker is still running. Send it what to do with message, or stop_worker first.
+- 2026-10-31 16:49 Started a worker on agents-know-they-can
+- 2026-10-31 16:49 Automatically (auto_advance): Started a worker on agents-know-they-can (Agents know they can ask for a transaction (vs-vault), and hear when a request expires unsent), its after tasks done (vault-requests-in-the).
