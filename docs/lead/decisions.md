@@ -175,3 +175,7 @@ User's direction, 2026-10-31: keep the vault domain as safe as possible but Vibe
 
 User, 2026-10-31: our load and test runs were slowing other projects' leads, and they asked to wait until the whole thing is finished and test once at the end.
 
+## 2026-10-31 17:16:40 The payment-request feature is renamed to "wallet requests". The new names are WalletRequest… code, the `vs-wallet` CLI, Settings › Wallet, the "Send to Wallet Manager" button, and a wire format of vibeswitcher.wallet-request/-result in docs/protocol/wallet-request.md, still version 1. In VibeSwitcher, "vault" means only the lead's vault (LeadVault/VaultStorage). Stored state is carried over once. The Wallet Manager's lead was told and updates its side when the rename merges (task rename-the-vault-request, after agents-know-they-can).
+
+User's call, 2026-10-31. Two unrelated things were both called "vault" in VibeSwitcher, the lead's team and key store and the payment requests, which invites mix-ups for the user and for agents. It's renamed now, while the format is new and nothing real uses it yet.
+
