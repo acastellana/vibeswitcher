@@ -103,6 +103,16 @@ struct InstallRelaunchTests {
         /// The script's ps can't read the process list.
         func failingPs() throws { try shim("ps", "#!/bin/bash\necho 'ps: the process list is out of reach here' >&2\nexit 1\n") }
 
+        /// The script's signals to any process are refused (EPERM), as a sandbox that allows signals only within itself
+        /// does; the quit request (SIGUSR1 here, an Apple Event for the app) still goes through. `kill` is a bash builtin,
+        /// so this is a function the script's bash loads from BASH_ENV.
+        func refusedSignals() throws {
+            try "kill() { [[ $1 == -USR1 ]] && { builtin kill \"$@\"; return; }; echo \"kill: operation not permitted\" >&2; return 1; }\n"
+                .write(to: shims.appendingPathComponent("refused-signals.bash"), atomically: true, encoding: .utf8)
+            bashEnv = shims.appendingPathComponent("refused-signals.bash").path
+        }
+        var bashEnv: String?
+
         private func shim(_ command: String, _ body: String) throws {
             let file = shims.appendingPathComponent(command)
             try body.write(to: file, atomically: true, encoding: .utf8)
@@ -132,6 +142,7 @@ struct InstallRelaunchTests {
             environment["VS_INSTALL_LAUNCH"] = "\"\(launcher.path)\" \"$1\""
             environment["VS_INSTALL_WAIT"] = "\(wait)"
             environment["VS_STANDIN_READY"] = ready.path
+            environment["BASH_ENV"] = bashEnv
             environment["PATH"] = shims.path + ":" + (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
             process.environment = environment
             process.standardInput = FileHandle.nullDevice
@@ -269,5 +280,35 @@ struct InstallRelaunchTests {
         #expect(!run.output.contains("isn't running"), Comment(rawValue: run.output))
         #expect(stand.installedVersion == "old")
         #expect(stand.old.isRunning)
+    }
+
+    /// The sandboxed shell may refuse the script's signals to the app as well (kill -0 fails with EPERM on a live pid):
+    /// that must read as "still up", never as "quit", so an app that won't quit keeps its bundle.
+    @Test func anAppTheScriptCantSignalIsStillUpUntilPsSaysItsGone() throws {
+        let stand = try StandIn(temp, mode: "ignores-all")
+        defer { stand.cleanUp() }
+        try stand.blindPgrep()
+        try stand.refusedSignals()
+        let run = try stand.install(wait: 2)
+        #expect(run.status == 1, Comment(rawValue: run.output))
+        #expect(!run.output.contains("\n\(stand.name) quit"), Comment(rawValue: run.output))
+        #expect(run.output.contains("Nothing was installed: \(stand.installed.path) is the one that was there."), Comment(rawValue: run.output))
+        #expect(stand.installedVersion == "old")
+        #expect(try stand.running() == [stand.oldPid])
+    }
+
+    /// The same refused signals and an app that quits when asked: ps sees it go, and the install carries on.
+    @Test func anAppTheScriptCantSignalIsReplacedOnceItQuits() throws {
+        let stand = try StandIn(temp, mode: "quits-when-asked")
+        defer { stand.cleanUp() }
+        try stand.blindPgrep()
+        try stand.refusedSignals()
+        let run = try stand.install(wait: 10)
+        #expect(run.status == 0, Comment(rawValue: run.output))
+        #expect(run.output.contains("\n\(stand.name) quit.\n"), Comment(rawValue: run.output))
+        let launched = try #require(StandIn.launchedPid(in: run.output), Comment(rawValue: run.output))
+        #expect(!stand.old.isRunning)
+        #expect(stand.installedVersion == "new")
+        #expect(try stand.running() == [launched])
     }
 }

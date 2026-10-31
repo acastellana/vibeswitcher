@@ -65,12 +65,18 @@ started_at() {
     lstart=$(ps -p "$1" -o lstart= 2>/dev/null | tr -s ' ' | sed 's/^ *//; s/ *$//') || return 0
     [[ -n $lstart ]] && date -j -f '%a %b %d %T %Y' "$lstart" +%s 2>/dev/null || true
 }
-# Waits up to $wait_s seconds for every pid in $* to be gone; 1 when one is still up.
+# Waits up to $wait_s seconds for every pid in $* to be gone from the app's processes; 1 when one is still up. Read from
+# ps, as running() is, not from `kill -0`: a sandbox that refuses signals to the app makes kill -0 fail on a live pid,
+# which would read as gone. A process list that can't be read counts as still up.
 wait_gone() {
-    local pid up
+    local pid up now
     for _ in $(seq 1 $((wait_s * 5))); do
         up=0
-        for pid in $*; do kill -0 "$pid" 2>/dev/null && up=1; done
+        if now=$(running); then
+            for pid in $*; do among "$pid" "$now" && up=1; done
+        else
+            up=1
+        fi
         (( up )) || return 0
         sleep 0.2
     done
