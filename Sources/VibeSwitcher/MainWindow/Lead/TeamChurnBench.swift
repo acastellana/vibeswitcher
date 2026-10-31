@@ -625,6 +625,22 @@ enum AXClient {
         return children.flatMap(rows)
     }
 
+    /// Presses the first element under `element` whose label, description or title is `label`, as a client's press does;
+    /// whether one was found.
+    static func press(_ element: AnyObject, labelled label: String) -> Bool {
+        guard let entryPoint else { return false }
+        let said = ["AXDescription", "AXLabel", "AXTitle"].compactMap { attribute -> String? in
+            let value = entryPoint(element, attribute as NSString)?.takeUnretainedValue()
+            return (value as? String) ?? (value as? NSAttributedString)?.string
+        }
+        if said.contains(label), let object = element as? NSObject, object.responds(to: #selector(NSAccessibilityButton.accessibilityPerformPress)) {
+            _ = object.perform(#selector(NSAccessibilityButton.accessibilityPerformPress))
+            return true
+        }
+        let children = entryPoint(element, "AXChildren")?.takeUnretainedValue() as? [AnyObject] ?? []
+        return children.contains { press($0, labelled: label) }
+    }
+
     /// The tree as a client reads it, an element a line: its role and what it says, indented under its parent.
     static func dump(_ element: AnyObject, depth: Int = 0) -> String {
         guard let entryPoint else { return "" }
