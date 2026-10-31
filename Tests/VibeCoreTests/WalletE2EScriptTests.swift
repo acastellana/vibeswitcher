@@ -122,8 +122,8 @@ struct WalletE2EScriptTests {
         #expect(failure.hasPrefix("wallet-e2e: `npm ci --ignore-scripts` failed in ") && failure.contains("(exit 1); its output: "), "\(failure)")
         #expect(!ran.output.contains("    at ") && !ran.output.contains("ERESOLVE"), "\(ran.output)")
         // Its output is kept where the line says; nothing else ran (no node).
-        let log = String(failure[failure.range(of: "its output: ")!.upperBound...])
-        #expect(((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").contains("ERESOLVE"))
+        let log = failure.range(of: "its output: ").map { String(failure[$0.upperBound...]) } ?? ""
+        #expect(((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").contains("ERESOLVE"), "\(failure)")
         #expect(!FileManager.default.fileExists(atPath: setup.nodeLog.path))
     }
 
