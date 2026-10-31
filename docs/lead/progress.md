@@ -2343,3 +2343,8 @@
 - 2026-10-31 19:15 Merged rename-the-vault-request: Rename the vault-request feature to "wallet requests" (VibeSwitcher's "vault" means only the lead's vault)
 - 2026-10-31 19:15 Automatically (auto_advance): Merged rename-the-vault-request (Rename the vault-request feature to "wallet requests" (VibeSwitcher's "vault" means only the lead's vault)) into main at c3a9b59e, on its passing audit and the full test run.
 - 2026-10-31 19:15 Automatically (auto_advance): Cleaned up rename-the-vault-request; ended pid 23676 (Worker: Rename the vault-request feature to "wallet requests" (VibeSwitcher's "vault" means only the lead's vault)) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-31 19:27 Started a worker on wallet-request-fallback
+- 2026-10-31 19:27 Automatically (auto_advance): Started a worker on wallet-request-fallback (Wallet request fallback: sign in the browser's wallet (Rabby/MetaMask), plus a "not picked up" hint), its after tasks done (rename-the-vault-request).
+- 2026-10-31 19:27 Started a worker on wallet-requests-find
+- 2026-10-31 19:27 Automatically (auto_advance): Started a worker on wallet-requests-find (Wallet requests find Passage.app by themselves (no `passage` symlink needed)), its after tasks done (rename-the-vault-request).
+- 2026-10-31 19:27 Automatically (auto_advance): Started the audit of the-main-thread-blocks at a4b3ef50 (Its review is audit).
