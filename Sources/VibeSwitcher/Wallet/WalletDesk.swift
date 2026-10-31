@@ -13,7 +13,9 @@ import VibeCore
 /// The fallback, while a request has never reached the Wallet Manager: Sign in browser wallet (`act(.browser)`) serves
 /// the request on a local page (`WalletSignServer`) and opens it in the browser, whose wallet extension shows and signs
 /// it; what it did comes back to the card and the asking session. A mark beside the filed request (`WalletBrowser.Mark`)
-/// records that it went that way, so it can't also be sent to the Wallet Manager, nor the reverse.
+/// records that it went that way, so it can't also be sent to the Wallet Manager, nor the reverse. It needs no Wallet
+/// Manager set up: with no peer chosen or no Passage found, cards still show, Send gives way to a line saying what's
+/// missing and Open Settings (`openSettings`, Settings › Wallet), and Send comes back once Settings has what it needs.
 ///
 /// Its state lives on a queue of its own (`work`), where Passage runs (a send blocks for seconds); `cards` is
 /// published on the main thread.
@@ -43,6 +45,8 @@ final class WalletDesk: ObservableObject {
     var findPassage: () -> PassageCommand? = { PassageCommand.resolve(setting: "", onPath: WalletPeerChoice.findPassage) }
     /// Hands a message to the asking session's agent (its id, lower case), on the main thread.
     var deliver: (_ session: String, _ text: String) -> Void = { _, _ in }
+    /// Opens Settings › Wallet (a card's Open Settings), on the main thread.
+    var openSettings: () -> Void = {}
     /// Opens the local page in the browser, on the main thread (a test catches it instead: never the user's browser).
     var openBrowser: (URL) -> Void = { NSWorkspace.shared.open($0) }
     let now: @Sendable () -> Date
@@ -65,6 +69,9 @@ final class WalletDesk: ObservableObject {
     private var pages: [String: (server: WalletSignServer, until: Date)] = [:]
     /// When the Wallet Manager's Mac took each request that has no answer yet (or when this run first saw it so).
     private var sentSince: [String: Date] = [:]
+    /// What Settings › Wallet lacks for the Wallet Manager, as the cards say it (`WalletCardModel.setupNeeded`), from the
+    /// last time a courier was asked for; nil when it has a peer and a Passage.
+    private var setupNeeded: String?
 
     init(folder: URL = WalletAsk.folder, store: WalletRequestStore = WalletRequestStore(), inbox: URL = PassageLink.defaultInbox,
          config: @escaping () -> Config, now: @escaping @Sendable () -> Date = { Date() },
@@ -111,6 +118,10 @@ final class WalletDesk: ObservableObject {
     /// stopped unsure), Discard. `then` runs on the main thread once it's done and the cards are redrawn.
     func act(_ action: WalletCardModel.Action, on id: String, then: @escaping () -> Void = {}) {
         guard let card = cards.first(where: { $0.id == id }), card.actions.contains(action), let shown = drawn[id] else { return then() }
+        if action == .settings {
+            openSettings()
+            return then()
+        }
         let config = self.config()
         work.async { [self] in
             // The request as recorded once sent, else as filed; only if it's still the one the card showed.
@@ -129,6 +140,7 @@ final class WalletDesk: ObservableObject {
                 send(request, config: config)
             case .browser: browse(request)
             case .discard: discard(request)
+            case .settings: break
             }
             publish(then: then)
         }
@@ -220,19 +232,24 @@ final class WalletDesk: ObservableObject {
     }
 
     /// The courier for Settings › Wallet as it is now: made, or made again when the settings changed. Throws why there
-    /// is none (no peer chosen, no passage).
+    /// is none (no peer chosen, no passage), and notes what's missing for the cards (`setupNeeded`).
     @discardableResult
     private func courier(_ config: Config) throws -> WalletCourier {
-        guard !config.peer.isEmpty else { throw WalletAsk.Refusal("no Wallet Manager peer is chosen in Settings › Wallet") }
+        guard !config.peer.isEmpty else {
+            setupNeeded = WalletCardModel.noPeerNote
+            throw WalletAsk.Refusal("no Wallet Manager peer is chosen in Settings › Wallet")
+        }
         // Only spaces is no path, as Settings reads it.
         let unset = config.passage.trimmingCharacters(in: .whitespaces).isEmpty
         if unset, foundPassage == nil { foundPassage = findPassage() }
         let passage = unset ? foundPassage : PassageCommand.forPath(config.passage)
         guard let passage else {
+            setupNeeded = unset ? WalletCardModel.noPassageNote : WalletCardModel.passageNotAbsoluteNote
             throw WalletAsk.Refusal(unset
                 ? "Passage isn't found (no passage on the PATH, no Passage.app in /Applications or ~/Applications): set its path in Settings › Wallet"
                 : "the passage path in Settings › Wallet isn't absolute")
         }
+        setupNeeded = nil
         if let courier, courierFor?.passage == passage, courierFor?.peer == config.peer { return courier }
         guard let link = PassageLink(command: passage, walletPeer: config.peer, inboxFolder: inbox) else {
             throw WalletAsk.Refusal("the Wallet Manager peer \(config.peer) isn't a Passage peer ID")
@@ -409,6 +426,7 @@ final class WalletDesk: ObservableObject {
             } else {
                 cards.append(WalletCardModel(request: request, requestedBy: name, state: request.isExpired(now: time) ? .expired : .waiting))
             }
+            cards[cards.count - 1].setupNeeded = setupNeeded
             sessions[request.id] = by.session.lowercased()
         }
         DispatchQueue.main.async { [weak self] in

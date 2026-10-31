@@ -94,14 +94,14 @@ struct WalletCardModelTests {
         #expect(card.text.contains("Workspace: example"))
     }
 
-    @Test func settingsKeepThePeerAndPathAndSayWhenRequestsAreRefused() throws {
+    @Test func settingsKeepThePeerAndPathAndSayWhatRequestsDoWithoutOne() throws {
         let temp = Scratch()
         let defaults = temp.defaults("wallet-settings")
         let presets = temp.url("wallet-settings-presets")
         let preferences = Preferences(defaults: defaults, presetsFile: presets)
         let peers = [WalletPeerChoice(peerID: "peer-1", name: "Example Wallet Manager Mac")]
         #expect(preferences.walletPeerID == "")
-        #expect(WalletSettingsTab.status(peers, saved: preferences.walletPeerID) == WalletSettingsTab.refusedNote)
+        #expect(WalletSettingsTab.status(peers, saved: preferences.walletPeerID) == WalletSettingsTab.noPeerNote)
         preferences.walletPeerID = "peer-1"
         preferences.walletPassagePath = "/opt/example/passage"
         let again = Preferences(defaults: defaults, presetsFile: presets)

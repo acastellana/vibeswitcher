@@ -15,10 +15,11 @@ struct WalletAskTests {
                         "--to", "0x0000000000000000000000000000000000000001", "--amount", "1000000000000000000",
                         "--reason", "Pay the example invoice.", "--label", "Example agent"]
 
-    func run(_ arguments: [String], environment: [String: String] = WalletAskTests.environment, peerChosen: Bool = true)
-        -> (status: Int32, output: String, error: String, folder: URL) {
+    func run(_ arguments: [String], environment: [String: String] = WalletAskTests.environment,
+             walletManager: WalletAsk.WalletManager = .ready) -> (status: Int32, output: String, error: String, folder: URL) {
         let folder = scratch.url("asked")
-        let ran = WalletAsk.run(arguments, environment: environment, cwd: "/work/example-project", peerChosen: peerChosen, folder: folder, now: Self.now)
+        let ran = WalletAsk.run(arguments, environment: environment, cwd: "/work/example-project", walletManager: walletManager,
+                                folder: folder, now: Self.now)
         return (ran.status, ran.output, ran.error, folder)
     }
 
@@ -83,15 +84,67 @@ struct WalletAskTests {
         #expect(filed(ran.folder).isEmpty)
     }
 
-    @Test func refusedOutsideAVibeSwitcherSessionAndUntilAWalletManagerPeerIsChosen() {
+    @Test func refusedOutsideAVibeSwitcherSession() {
         let outside = run(Self.valid, environment: [:])
         #expect(outside.status == 1 && outside.error.contains("isn't a session VibeSwitcher started"))
-        let noPeer = run(Self.valid, peerChosen: false)
-        #expect(noPeer.status == 1 && noPeer.error.contains("no Wallet Manager peer is chosen"))
-        #expect(filed(noPeer.folder).isEmpty)
+        #expect(filed(outside.folder).isEmpty)
         let usage = run(["send"])
         #expect(usage.status == 2 && usage.error.contains("usage: vs-wallet request"))
         #expect(run(["help"]).status == 0)
+    }
+
+    /// No Wallet Manager peer chosen, or no Passage found: filed all the same, and the output says the card is up and the
+    /// browser wallet is the way to sign (from an 0x address); a wallet id waits for the Wallet Manager.
+    @Test(arguments: [WalletAsk.WalletManager.noPeer, .noPassage])
+    func filedWithoutAWalletManagerTheBrowserWalletIsTheWay(walletManager: WalletAsk.WalletManager) throws {
+        let address = Self.with("--from", "0x00000000000000000000000000000000000000aa")
+        let ran = run(address, walletManager: walletManager)
+        #expect(ran.status == 0, "\(ran.error)")
+        #expect(filed(ran.folder).count == 1)
+        #expect(ran.output.contains("its card is up in this session's chat"), "\(ran.output)")
+        #expect(ran.output.contains("The Wallet Manager isn't set up yet (\(walletManager.why!))"), "\(ran.output)")
+        #expect(ran.output.contains("so the browser wallet is the way to sign"), "\(ran.output)")
+        #expect(ran.output.contains("Sign in browser wallet"))
+        #expect(walletManager == .noPeer ? walletManager.why!.contains("no Wallet Manager peer is chosen")
+                : walletManager.why!.contains("Passage isn't found"))
+        // A wallet id: filed, and it says a browser wallet can't sign for it.
+        let id = run(Self.valid, walletManager: walletManager)
+        #expect(id.status == 0, "\(id.error)")
+        #expect(filed(id.folder).contains { id.output.contains("Filed wallet request \($0.dropLast(5))") }, "\(id.output)")
+        #expect(id.output.contains("The Wallet Manager isn't set up yet"))
+        #expect(id.output.contains("a browser wallet can't sign for a wallet id (--from example-hardware)"), "\(id.output)")
+        #expect(!id.output.contains("is the way to sign"))
+        // Set up: as before.
+        let ready = run(address)
+        #expect(ready.output.contains("until the user presses Send to Wallet Manager") && !ready.output.contains("isn't set up"))
+    }
+
+    /// Settings › Wallet as the CLI reads it: no peer; a peer and a Passage (on the PATH, an absolute path set, Passage.app);
+    /// a peer and none.
+    @Test func theWalletManagerIsReadyWithAPeerAndAPassage() throws {
+        let bin = scratch.url("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let passage = bin.appendingPathComponent("passage")
+        try "#!/bin/sh\n".write(to: passage, atomically: true, encoding: .utf8)
+        chmod(passage.path, 0o755)
+        let none = [scratch.url("missing/Passage.app")]
+        typealias Manager = WalletAsk.WalletManager
+        #expect(Manager.from(peer: "", passagePath: "", path: bin.path, apps: none) == .noPeer)
+        #expect(Manager.from(peer: "0a1b2c3d", passagePath: "", path: "/nowhere:" + bin.path, apps: none) == .ready)
+        #expect(Manager.from(peer: "0a1b2c3d", passagePath: "", path: "/nowhere", apps: none) == .noPassage)
+        #expect(Manager.from(peer: "0a1b2c3d", passagePath: "", path: nil, apps: none) == .noPassage)
+        #expect(Manager.from(peer: "0a1b2c3d", passagePath: "/opt/example/passage", path: nil, apps: none) == .ready)
+        #expect(Manager.from(peer: "0a1b2c3d", passagePath: "passage", path: bin.path, apps: none) == .noPassage)
+        // A folder named passage on the PATH isn't it.
+        let dirs = scratch.url("dirs")
+        try FileManager.default.createDirectory(at: dirs.appendingPathComponent("passage"), withIntermediateDirectories: true)
+        #expect(Manager.from(peer: "0a1b2c3d", passagePath: "", path: dirs.path, apps: none) == .noPassage)
+    }
+
+    /// vs-wallet's help and the session note say the browser wallet works without a Wallet Manager.
+    @Test func helpAndTheSessionNoteSayTheBrowserWalletWorksWithoutAWalletManager() {
+        #expect(run(["help"]).output.contains("It works with no Wallet Manager set up; a wallet id (not 0x) needs the Wallet Manager."))
+        #expect(SessionNote.text.contains("Sign in browser wallet, which works without a Wallet Manager"))
     }
 
     @Test func aFiledFileThatDoesntParseOrIsntItsNamesIsRefused() throws {

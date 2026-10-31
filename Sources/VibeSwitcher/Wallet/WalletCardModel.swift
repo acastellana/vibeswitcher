@@ -34,6 +34,14 @@ struct WalletCardModel: Equatable, Identifiable {
     var browserSignable = false
     /// Sent, with no word from the Wallet Manager for 5 minutes: the card asks whether it's running.
     var notPickedUp = false
+    /// The Wallet Manager isn't set up in Settings › Wallet (no peer chosen, no Passage found): the line that says so,
+    /// shown with Open Settings where Send or Retry would be. Nil when it is.
+    var setupNeeded: String? = nil
+
+    /// `setupNeeded`'s line for each way the Wallet Manager isn't set up.
+    static let noPeerNote = "No Wallet Manager chosen: choose its Mac in Settings › Wallet"
+    static let noPassageNote = "Passage isn't found: set its path in Settings › Wallet"
+    static let passageNotAbsoluteNote = "The passage path in Settings › Wallet isn't absolute: set it there"
 
     /// The kinds of wallet a request can come from: it decides what signing it means.
     enum Wallet: String, CaseIterable {
@@ -95,6 +103,8 @@ struct WalletCardModel: Equatable, Identifiable {
         case send, discard, retry
         /// Sign it with the browser's wallet extension instead (`WalletBrowser`): skips the Wallet Manager.
         case browser
+        /// Opens Settings › Wallet, where Send or Retry would be while the Wallet Manager isn't set up (`setupNeeded`).
+        case settings
 
         var title: String {
             switch self {
@@ -102,6 +112,7 @@ struct WalletCardModel: Equatable, Identifiable {
             case .discard: return "Discard"
             case .retry: return "Retry"
             case .browser: return "Sign in browser wallet"
+            case .settings: return "Open Settings"
             }
         }
     }
@@ -135,9 +146,14 @@ struct WalletCardModel: Equatable, Identifiable {
         }
     }
 
-    /// The buttons: the state's, with Sign in browser wallet before Discard where `offersBrowser`.
+    /// The buttons: the state's, with Sign in browser wallet before Discard where `offersBrowser`. While the Wallet
+    /// Manager isn't set up (`setupNeeded`), Send and Retry give way to Open Settings: the request can't go there yet.
     var actions: [Action] {
         var list = Self.actions(for: state)
+        if setupNeeded != nil, list.contains(where: { $0 == .send || $0 == .retry }) {
+            list.removeAll { $0 == .send || $0 == .retry }
+            list.append(.settings)
+        }
         if offersBrowser { list.insert(.browser, at: list.firstIndex(of: .discard) ?? list.endIndex) }
         return list
     }
@@ -228,6 +244,11 @@ struct WalletCardModel: Equatable, Identifiable {
     }
 
     var detail: String {
+        // Waiting with no Wallet Manager set up: the browser wallet is the way, or, for a wallet id, there is none yet.
+        if state == .waiting, setupNeeded != nil {
+            return offersBrowser ? "Nothing has left this Mac. Sign it in your browser wallet, or discard it."
+                : "Nothing has left this Mac. It needs the Wallet Manager: a browser wallet can't use a wallet id."
+        }
         let line = Self.detail(state, wallet: wallet)
         return state == .sent && notPickedUp ? line + " " + Self.notPickedUpNote : line
     }
@@ -241,6 +262,7 @@ struct WalletCardModel: Equatable, Identifiable {
         if let calldataBytes { lines.append("Contract call: \(calldataBytes) bytes of calldata") }
         lines += [
                      detail]
+        if let setupNeeded, actions.contains(.settings) { lines.append(setupNeeded) }
         switch state {
         case .signed(let hash, let url), .sentFromBrowser(let hash, let url):
             lines.append("Transaction: \(hash)")

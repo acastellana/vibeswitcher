@@ -14,7 +14,8 @@ public enum SessionNote {
         transfer, a contract call), ask for it with `vs-wallet request …` (on your PATH; `vs-wallet help` lists the fields). \
         It files the request as a card in this session's chat: nothing is sent until the user clicks Send to Wallet Manager there. \
         The Wallet Manager then checks it on its own Mac and the user signs it there with a hardware wallet; its answers come back to you as \
-        messages. vs-wallet never holds or takes keys: never put a key, seed or recovery phrase in a request.
+        messages. From an 0x address the card also offers Sign in browser wallet, which works without a Wallet Manager: when \
+        none is set up, vs-wallet says so and the browser wallet is the way to sign. vs-wallet never holds or takes keys: never put a key, seed or recovery phrase in a request.
         """
 
     /// The hook's reply to `payload`: the note at a Claude Code session's start (a new one, a resumed one, one cleared

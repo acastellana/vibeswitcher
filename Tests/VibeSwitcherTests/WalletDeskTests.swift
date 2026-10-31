@@ -269,15 +269,27 @@ struct WalletDeskTests {
         #expect(s.desk.cards.isEmpty)
     }
 
-    @Test func withoutAWalletManagerPeerSendGoesNowhereAndSaysWhy() async throws {
+    /// No peer chosen: the card still shows, without Send; a wallet id (not 0x) can't go to the browser wallet either,
+    /// so it says it needs the Wallet Manager and offers Discard and Open Settings. Nothing runs Passage.
+    @Test func withoutAWalletManagerPeerAWalletIdCardNeedsItAndOffersSettings() async throws {
         let s = try setup(peer: "")
         defer { s.desk.close() }
+        var opened = 0
+        s.desk.openSettings = { opened += 1 }
         let request = Self.request()
         try WalletAsk.file(request, in: s.asked)
         await refreshed(s.desk)
+        let card = try #require(s.desk.cards.first)
+        #expect(card.state == .waiting)
+        #expect(card.actions == [.discard, .settings])
+        #expect(card.setupNeeded == "No Wallet Manager chosen: choose its Mac in Settings › Wallet")
+        #expect(card.detail.contains("It needs the Wallet Manager: a browser wallet can't use a wallet id."))
         await acted(s.desk, .send, request.id)
+        await acted(s.desk, .browser, request.id)
         #expect(s.fake.calls.isEmpty)
-        #expect(s.desk.cards.first?.state == .unreachable(message: "no Wallet Manager peer is chosen in Settings › Wallet"))
+        #expect(s.desk.cards.first?.state == .waiting)
+        await acted(s.desk, .settings, request.id)
+        #expect(opened == 1)
     }
 
     @Test func anUnsentRequestExpiresAndCantBeSent() async throws {
@@ -586,15 +598,17 @@ struct WalletDeskTests {
         let request = Self.request()
         try WalletAsk.file(request, in: asked)
         await refreshed(desk)
+        // Held back: no Send, the line says where to set it.
+        #expect(desk.cards.first?.state == .waiting)
+        #expect(desk.cards.first?.setupNeeded == "Passage isn't found: set its path in Settings › Wallet")
+        #expect(desk.cards.first?.actions == [.discard, .settings])
         await acted(desk, .send, request.id)
-        // Retry once it's set.
-        guard case .unreachable(let message?)? = desk.cards.first?.state else {
-            Issue.record("not held back: \(String(describing: desk.cards.first?.state))")
-            return
-        }
-        #expect(message.contains("Passage isn't found") && message.contains("Settings › Wallet"))
-        #expect(desk.cards.first?.actions == [.retry, .discard])
         #expect(fake.calls.isEmpty)
+        // Found later: Send is back.
+        desk.findPassage = { PassageCommand(executable: fake.executable, leading: ["cli"]) }
+        await refreshed(desk)
+        #expect(desk.cards.first?.setupNeeded == nil)
+        #expect(desk.cards.first?.actions == [.send, .discard])
     }
 
     @Test func settingsSaysWhichPassageItFoundAndListsPeersThroughIt() async throws {

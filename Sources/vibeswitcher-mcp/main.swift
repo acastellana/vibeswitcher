@@ -35,11 +35,16 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--test-failure
 
 // `vibeswitcher-mcp --wallet-request request …`, as Resources/bin/vs-wallet runs it in a session VibeSwitcher started:
 // files a transaction request for the user to send to the Wallet Manager from its card (see `WalletAsk`). No tool server runs;
-// nothing is sent from here. Refused until Settings › Wallet names the Wallet Manager peer (the app's own defaults say).
+// nothing is sent from here. Filed with or without the Wallet Manager set up in Settings › Wallet (the app's own defaults
+// say): without it, the output says the browser wallet is the way to sign it.
 if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--wallet-request" {
-    let peer = UserDefaults(suiteName: "dev.vibeswitcher.VibeSwitcher")?.string(forKey: "walletPeerID") ?? ""
-    let ran = WalletAsk.run(Array(CommandLine.arguments.dropFirst(2)), environment: ProcessInfo.processInfo.environment,
-                           cwd: FileManager.default.currentDirectoryPath, peerChosen: !peer.isEmpty)
+    let defaults = UserDefaults(suiteName: "dev.vibeswitcher.VibeSwitcher")
+    let environment = ProcessInfo.processInfo.environment
+    let walletManager = WalletAsk.WalletManager.from(peer: defaults?.string(forKey: "walletPeerID") ?? "",
+                                                    passagePath: defaults?.string(forKey: "walletPassagePath") ?? "",
+                                                    path: environment["PATH"])
+    let ran = WalletAsk.run(Array(CommandLine.arguments.dropFirst(2)), environment: environment,
+                           cwd: FileManager.default.currentDirectoryPath, walletManager: walletManager)
     if !ran.output.isEmpty { print(ran.output) }
     if !ran.error.isEmpty { FileHandle.standardError.write(Data((ran.error + "\n").utf8)) }
     exit(ran.status)

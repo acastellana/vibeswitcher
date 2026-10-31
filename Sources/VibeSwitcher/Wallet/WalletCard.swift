@@ -176,12 +176,16 @@ struct WalletCard: View {
     }
 
     private var buttons: some View {
-        let main = card.actions.filter { $0 != .browser }
+        let main = card.actions.filter { $0 != .browser && $0 != .settings }
+        // The state's buttons lead, the first prominent; while the Wallet Manager isn't set up (no Send or Retry), the
+        // browser wallet leads and Discard is plain.
+        let leads = !card.actions.contains(.settings)
         return VStack(alignment: .leading, spacing: 8) {
+            if !leads { browser }
             if !main.isEmpty {
                 HStack(spacing: 8) {
                     ForEach(main, id: \.self) { action in
-                        if action == main.first {
+                        if action == main.first && leads {
                             Button(action.title) { act(action) }.buttonStyle(.borderedProminent)
                         } else {
                             Button(action.title) { act(action) }.buttonStyle(.bordered)
@@ -190,19 +194,37 @@ struct WalletCard: View {
                     Spacer(minLength: 0)
                 }
             }
-            // The fallback, secondary and under the rest: it skips the Wallet Manager, so it says so.
-            if card.actions.contains(.browser) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Button { act(.browser) } label: { Label(WalletCardModel.Action.browser.title, systemImage: "safari") }
-                        .buttonStyle(.bordered)
-                        .accessibilityHint(WalletCardModel.browserNote)
-                    Text(WalletCardModel.browserNote)
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+            if leads { browser }
+            if card.actions.contains(.settings) { setup }
         }
         .controlSize(.regular)
+    }
+
+    /// The fallback, secondary: it skips the Wallet Manager, so it says so.
+    @ViewBuilder private var browser: some View {
+        if card.actions.contains(.browser) {
+            VStack(alignment: .leading, spacing: 3) {
+                Button { act(.browser) } label: { Label(WalletCardModel.Action.browser.title, systemImage: "safari") }
+                    .buttonStyle(.bordered)
+                    .accessibilityHint(WalletCardModel.browserNote)
+                Text(WalletCardModel.browserNote)
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Where Send to Wallet Manager would be while the Wallet Manager isn't set up: what's missing, and Settings › Wallet.
+    private var setup: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Label(card.setupNeeded ?? "", systemImage: "gearshape")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button(WalletCardModel.Action.settings.title) { act(.settings) }
+                .buttonStyle(.bordered)
+                .accessibilityHint("Opens Settings › Wallet")
+        }
     }
 }
 

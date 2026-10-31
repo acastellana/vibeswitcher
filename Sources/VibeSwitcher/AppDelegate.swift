@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             guard let id = UUID(uuidString: session) else { return }
             self?.leadController.tell(text, from: .system("from the Wallet Manager"), session: id)
         }
+        desk.openSettings = { [weak self] in self?.showSettings(tab: .wallet) }
         return desk
     }()
     /// Settings › Wallet's peers: `passage peers --no-discovery --json`, read off the main thread each time the tab shows
@@ -168,6 +169,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         // Requests filed or sent while the feature was called vault requests, carried over once.
         do { try WalletRequestStore.carryOver() } catch { Breadcrumbs.shared.note("wallet: couldn't carry over vault-requests: \(error)") }
         walletDesk.start()
+        // A peer or Passage path chosen in Settings › Wallet: the cards redraw now (Send comes back on waiting ones),
+        // not at the next look. After the change lands (@Published sends before it does).
+        preferences.$walletPeerID.combineLatest(preferences.$walletPassagePath)
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.walletDesk.refresh(polling: false) }
+            .store(in: &cancellables)
         appHealth = AppHealthWatcher { [weak self] text in self?.leadController.tellAppHealth(text) ?? false }
         appHealth?.start()
         if UserDefaults.standard.bool(forKey: "windowWasOpen") {

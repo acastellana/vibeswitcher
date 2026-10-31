@@ -57,6 +57,38 @@ struct WalletBrowserCardTests {
         #expect(WalletCardModel.title(.rejectedInWallet) == "Rejected in the wallet")
     }
 
+    /// No Wallet Manager set up (`setupNeeded`): Send and Retry give way to Open Settings; the browser wallet stays where
+    /// today's rules offer it; a wallet id says it needs the Wallet Manager. Once set up, the card is as before.
+    @Test func withNoWalletManagerSendGivesWayToSettings() {
+        var card = Self.card(.waiting)
+        card.setupNeeded = WalletCardModel.noPeerNote
+        #expect(card.actions == [.browser, .discard, .settings])
+        #expect(card.detail == "Nothing has left this Mac. Sign it in your browser wallet, or discard it.")
+        #expect(card.text.contains("No Wallet Manager chosen: choose its Mac in Settings › Wallet"))
+        #expect(WalletCardModel.Action.settings.title == "Open Settings")
+        var id = Self.card(.waiting, signable: false)
+        id.setupNeeded = WalletCardModel.noPeerNote
+        #expect(id.actions == [.discard, .settings])
+        #expect(id.detail.contains("It needs the Wallet Manager: a browser wallet can't use a wallet id."))
+        var unreachable = Self.card(.unreachable(message: nil))
+        unreachable.setupNeeded = WalletCardModel.noPeerNote
+        #expect(unreachable.actions == [.browser, .discard, .settings])
+        // Never Send, nor Open Settings, once a request went one way or the other.
+        for state in Self.states {
+            var gone = Self.card(state)
+            gone.setupNeeded = WalletCardModel.noPeerNote
+            #expect(!gone.actions.contains(.send) && !gone.actions.contains(.retry), "\(state)")
+            switch state {
+            case .waiting, .unreachable, .unsure: #expect(gone.actions.contains(.settings), "\(state)")
+            default: #expect(!gone.actions.contains(.settings), "\(state)")
+            }
+        }
+        // Set up: as before.
+        card.setupNeeded = nil
+        #expect(card.actions == [.send, .browser, .discard])
+        #expect(card.detail == WalletCardModel.detail(.waiting, wallet: nil))
+    }
+
     @Test func aSentCardNotPickedUpAsksWhetherTheWalletManagerRuns() {
         var card = Self.card(.sent)
         #expect(!card.detail.contains("Is the Wallet Manager running?"))
@@ -85,12 +117,18 @@ struct WalletBrowserDeskTests {
         var desk: WalletDesk { base.desk }
     }
 
-    func setup(clock: WalletDeskTests.Clock = WalletDeskTests.Clock()) throws -> Setup {
+    /// The Wallet Manager peer Settings › Wallet names, changed as a test goes (empty: none chosen).
+    final class Peer: @unchecked Sendable {
+        var id: String
+        init(_ id: String = WalletFakePassage.peer) { self.id = id }
+    }
+
+    func setup(clock: WalletDeskTests.Clock = WalletDeskTests.Clock(), peer: Peer = Peer()) throws -> Setup {
         let fake = try WalletFakePassage(temp)
         let asked = temp.url("asked")
         let store = WalletRequestStore(folder: temp.url("requests"))
         let desk = WalletDesk(folder: asked, store: store, inbox: fake.inbox,
-                              config: { WalletDesk.Config(passage: fake.executable, peer: WalletFakePassage.peer) }, now: { clock.now }, log: { _ in })
+                              config: { WalletDesk.Config(passage: fake.executable, peer: peer.id) }, now: { clock.now }, log: { _ in })
         desk.findPassage = { nil }
         let told = WalletDeskTests.Told()
         desk.deliver = { session, text in told.messages.append((session, text)) }
@@ -289,6 +327,60 @@ struct WalletBrowserDeskTests {
         await refreshed(s.desk)
         #expect(s.desk.cards.first?.state == .browserNoAnswer)
         #expect(s.base.told.messages.count == 1)
+        await acted(s.desk, .send, request.id)
+        #expect(s.base.fake.sends.isEmpty)
+    }
+
+    /// No Wallet Manager peer chosen: the card shows, offers the browser wallet and Open Settings, never Send; once a
+    /// peer is chosen, a card still waiting offers Send again.
+    @Test func withNoPeerTheCardOffersTheBrowserAndSendComesBackOnceOneIsChosen() async throws {
+        let peer = Peer("")
+        let s = try setup(peer: peer)
+        defer { s.desk.close() }
+        var opened = 0
+        s.desk.openSettings = { opened += 1 }
+        let request = Self.request()
+        try WalletAsk.file(request, in: s.base.asked)
+        await refreshed(s.desk)
+        let card = try #require(s.desk.cards.first)
+        #expect(card.state == .waiting)
+        #expect(card.actions == [.browser, .discard, .settings])
+        #expect(card.setupNeeded == "No Wallet Manager chosen: choose its Mac in Settings › Wallet")
+        await acted(s.desk, .send, request.id)
+        #expect(s.base.fake.calls.isEmpty)
+        await acted(s.desk, .settings, request.id)
+        #expect(opened == 1)
+        peer.id = WalletFakePassage.peer
+        await refreshed(s.desk)
+        #expect(s.desk.cards.first?.setupNeeded == nil)
+        #expect(s.desk.cards.first?.actions == [.send, .browser, .discard])
+        await acted(s.desk, .send, request.id)
+        #expect(s.base.fake.sends.count == 1)
+        #expect(s.desk.cards.first?.state == .sent)
+    }
+
+    /// One request, one path: signed in the browser with no peer chosen, it never offers Send, nor sends, once one is.
+    @Test func onceInTheBrowserAPeerChosenLaterDoesntBringSendBack() async throws {
+        let peer = Peer("")
+        let s = try setup(peer: peer)
+        defer { s.desk.close() }
+        let request = Self.request()
+        try WalletAsk.file(request, in: s.base.asked)
+        await refreshed(s.desk)
+        await acted(s.desk, .browser, request.id)
+        #expect(await until { s.opened.urls.count == 1 })
+        #expect(s.desk.cards.first?.state == .inBrowser && s.desk.cards.first?.actions == [.discard])
+        peer.id = WalletFakePassage.peer
+        await refreshed(s.desk)
+        #expect(s.desk.cards.first?.state == .inBrowser && s.desk.cards.first?.actions == [.discard])
+        await acted(s.desk, .send, request.id)
+        // Rejected in the wallet: still no Send.
+        let url = try #require(s.opened.urls.first)
+        let posted = await Self.fetch(Self.result(url), method: "POST", body: #"{"rejected":true}"#, origin: Self.origin(url))
+        #expect(posted?.status == 204)
+        #expect(await until { s.desk.cards.first?.state == .rejectedInWallet })
+        await refreshed(s.desk)
+        #expect(s.desk.cards.first?.actions == [.discard])
         await acted(s.desk, .send, request.id)
         #expect(s.base.fake.sends.isEmpty)
     }

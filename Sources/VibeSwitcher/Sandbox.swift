@@ -294,9 +294,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let desk = WalletDesk(folder: state.appendingPathComponent("wallet/asked", isDirectory: true),
                              store: WalletRequestStore(folder: state.appendingPathComponent("wallet/requests", isDirectory: true)),
                              inbox: externalPassage?.inbox ?? walletPassage.appendingPathComponent("inbox", isDirectory: true),
-                             config: { WalletDesk.Config(passage: passage, peer: Driver.walletPeers[0].peerID) },
+                             config: { [weak self] in WalletDesk.Config(passage: passage, peer: self?.walletPeer ?? "") },
                              now: { clock.now() })
         desk.findPassage = { nil }
+        desk.openSettings = { [weak self] in self?.showSettings(.wallet) }
         // Sign in browser wallet: never the user's browser. The page's address is kept for `wallet-page`, which renders
         // it in a web view of the sandbox's own (no wallet extension there).
         desk.openBrowser = { [weak self] url in self?.walletPageURL = url }
@@ -308,6 +309,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         if preferences.walletPeerID.isEmpty { preferences.walletPeerID = Driver.walletPeers[0].peerID }
         return desk
     }()
+    /// The Wallet Manager peer the wallet desk sends to: the first made-up one, or none after `wallet-peer none`.
+    var walletPeer = Driver.walletPeers[0].peerID
     /// The fake Wallet Manager's next result number, per request.
     var walletSequence: [String: Int64] = [:]
     /// The wallet desk's clock: the real one, moved ahead by `wallet-later`.
@@ -944,7 +947,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh)"),
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint and the Wallet Manager's checks"),
         ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
-        ("wallet-click send|retry|discard|browser", "presses that button on the newest wallet request card in the selected chat (send goes to the sandbox's fake passage, never the real one; browser serves the local page but never opens a browser: wallet-page shows it)"),
+        ("wallet-click send|retry|discard|browser|settings", "presses that button on the newest wallet request card in the selected chat (send goes to the sandbox's fake passage, never the real one; browser serves the local page but never opens a browser: wallet-page shows it; settings opens Settings › Wallet)"),
+        ("wallet-peer none|chosen", "no Wallet Manager peer chosen for the wallet desk (as with None in Settings › Wallet: cards offer the browser wallet and Open Settings instead of Send), or the made-up one again; the cards redraw"),
         ("wallet-page [NAME]", "draws the local Sign in browser wallet page as served (the one wallet-click browser opened, else one for a made-up request), in a web view of the sandbox's own with no wallet extension, light and dark: NAME-light.png, NAME-dark.png (default wallet-page)"),
         ("wallet-answer received|proposed|signed|submitted|rejected|failed", "the fake Wallet Manager's Mac answers the newest card's request: the card shows it, and the asking fake session gets it as a message"),
         ("wallet [STATE]", "shows a made-up wallet request card as the sheet, in STATE: " + Driver.walletCards.map(\.state).joined(separator: ", ") + " (all: every state, one under another); settings wallet shows its Settings tab"),
@@ -1018,6 +1022,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
             ("sent-from-browser", with(.sentFromBrowser(txHash: hash, explorerURL: URL(string: "https://scan.chain.genlayer.com/tx/" + hash)))),
             ("rejected-in-wallet", with(.rejectedInWallet)),
             ("browser-no-answer", with(.browserNoAnswer)),
+            ("no-wallet-manager", { var card = with(.waiting); card.setupNeeded = WalletCardModel.noPeerNote; return card }()),
+            ("no-wallet-manager-wallet-id", {
+                var card = with(.waiting)
+                (card.from, card.wallet, card.browserSignable, card.setupNeeded) = ("example-hardware", nil, false, WalletCardModel.noPeerNote)
+                return card
+            }()),
         ]
     }()
 
@@ -1061,8 +1071,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
         let arguments = ["request"] + ["--workspace", "--from", "--chain", "--to", "--amount"].flatMap { [$0, values[$0]!] }
             + ["--reason", "Pay the example invoice for the test deployment.", "--label", fake.label]
-        let ran = WalletAsk.run(arguments, environment: ["VIBESWITCHER_SESSION": id.uuidString], cwd: fake.cwd, peerChosen: true,
-                               folder: walletDesk.folder)
+        let ran = WalletAsk.run(arguments, environment: ["VIBESWITCHER_SESSION": id.uuidString], cwd: fake.cwd,
+                               walletManager: walletPeer.isEmpty ? .noPeer : .ready, folder: walletDesk.folder)
         guard ran.status == 0 else { return reply(false, ran.error) }
         walletDesk.refresh { [weak self] in self?.settle { reply(true, ran.output) } }
     }
@@ -1080,9 +1090,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
         return (true, lines.joined(separator: "\n"))
     }
 
-    /// `wallet-click send|retry|discard`: that button on the newest card in the selected session's chat.
+    /// `wallet-click send|retry|discard|browser|settings`: that button on the newest card in the selected session's chat.
     private func walletClick(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
-        guard let action = WalletCardModel.Action(rawValue: what) else { return reply(false, "wallet-click send, retry, discard or browser") }
+        guard let action = WalletCardModel.Action(rawValue: what) else { return reply(false, "wallet-click send, retry, discard, browser or settings") }
         guard let card = walletCard else { return reply(false, "no wallet request in this chat: wallet-ask first") }
         guard card.actions.contains(action) else {
             return reply(false, "the card (\(WalletCardModel.title(card.state))) has no \(action.title): " + card.actions.map(\.title).joined(separator: ", "))
@@ -1616,6 +1626,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
         case "wallet-page": walletPage(rest.isEmpty ? "wallet-page" : rest, reply)
         case "wallet-click": walletClick(rest, reply)
+        case "wallet-peer":
+            guard rest == "none" || rest == "chosen" else { return reply(false, "wallet-peer none|chosen") }
+            walletPeer = rest == "none" ? "" : Driver.walletPeers[0].peerID
+            walletDesk.refresh(polling: false) { [weak self] in
+                self?.settle { reply(true, "Wallet Manager peer: \(rest)\n" + (self?.walletCardText().1 ?? "")) }
+            }
         case "wallet-answer": walletAnswer(rest, reply)
         case "wallet":
             let state = rest.isEmpty ? "waiting-for-you" : rest

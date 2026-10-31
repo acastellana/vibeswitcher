@@ -9,7 +9,7 @@ struct WalletPeerChoice: Equatable, Hashable, Identifiable {
 }
 
 /// Settings › Wallet: which Passage peer is the Wallet Manager's Mac, and which `passage` carries requests there. Until a peer is
-/// chosen, wallet requests are refused.
+/// chosen, requests still show as cards, and the browser wallet signs those from an 0x address.
 /// Settings › Wallet's peers, read from `passage peers --no-discovery --json` off the main thread: again each time the
 /// tab shows and when the passage path changes; the latest read wins (one for a path typed since is dropped). With
 /// them, which Passage was used.
@@ -67,7 +67,7 @@ struct WalletSettingsTab: View {
     @ObservedObject var peerList: WalletPeerList
     var peers: [WalletPeerChoice] { peerList.peers }
 
-    static let refusedNote = "Wallet requests are refused until a Wallet Manager peer is chosen."
+    static let noPeerNote = "No Wallet Manager chosen: requests still show as cards, and one from an 0x address can be signed in the browser wallet."
 
     /// The picker's rows: the peers given, and the saved one still, when it isn't among them (so a peer that's away
     /// isn't dropped from your settings by opening them).
@@ -76,9 +76,9 @@ struct WalletSettingsTab: View {
         return peers + [WalletPeerChoice(peerID: saved, name: "Not found now (\(saved))")]
     }
 
-    /// The line under the picker: refused until a peer is chosen, else where requests go.
+    /// The line under the picker: what requests can do until a peer is chosen, else where they go.
     static func status(_ peers: [WalletPeerChoice], saved: String) -> String {
-        guard !saved.isEmpty else { return refusedNote }
+        guard !saved.isEmpty else { return noPeerNote }
         let name = peers.first { $0.peerID == saved }?.name ?? saved
         return "Requests go to \(name) once you press Send to Wallet Manager on their card. Nothing is sent before that."
     }

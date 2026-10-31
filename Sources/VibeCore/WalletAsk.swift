@@ -3,8 +3,8 @@ import Foundation
 /// How an agent in a session VibeSwitcher started asks for a transaction: `vs-wallet request …` (Resources/bin, on every
 /// session's PATH; it runs `vibeswitcher-mcp --wallet-request …`). The request is checked by the same strict parser
 /// the Wallet Manager uses and filed, 0600, in `folder`; the app shows it as a card in the asking session's chat, and nothing
-/// goes to the Wallet Manager until the user presses Send to Wallet Manager there. The Wallet Manager's answer comes back to the session as a
-/// message. Nothing here sends, signs or reads a key.
+/// goes until the user presses Send to Wallet Manager there, or Sign in browser wallet (from an 0x address; it works with no
+/// Wallet Manager set up). The answer comes back to the session as a message. Nothing here sends, signs or reads a key.
 public enum WalletAsk {
     /// Where filed requests wait for the user: `~/.vibeswitcher/wallet-requests/asked/<id>.json`, each the request's own
     /// bytes (wallet-request v1).
@@ -17,6 +17,8 @@ public enum WalletAsk {
         Files a transaction request from this session. It shows as a card in this session's chat in VibeSwitcher;
         nothing is sent until the user presses Send to Wallet Manager there. The Wallet Manager's Mac checks it and the user signs it
         there; VibeSwitcher never signs. The Wallet Manager's answers come back to this session as messages.
+        From an 0x address, the card also offers Sign in browser wallet: the browser's wallet extension signs it, without the
+        Wallet Manager's checks. It works with no Wallet Manager set up; a wallet id (not 0x) needs the Wallet Manager.
 
           --workspace   the Wallet Manager's workspace the wallet is in
           --from        the wallet to send from: its id in that workspace, or its 0x address
@@ -156,22 +158,71 @@ public enum WalletAsk {
             + "signed. If the transaction is still needed, tell the user, or file a new request with vs-wallet request."
     }
 
+    /// Whether the Wallet Manager can be reached from here, as Settings › Wallet has it: requests are filed either way;
+    /// without it, the browser wallet is the way to sign one (from an 0x address).
+    public enum WalletManager: Equatable {
+        case ready
+        /// No Wallet Manager peer is chosen in Settings › Wallet.
+        case noPeer
+        /// No Passage: none found with no path set, or the path set isn't absolute.
+        case noPassage
+
+        /// Why it isn't set up, in a few words; nil when ready.
+        public var why: String? {
+            switch self {
+            case .ready: return nil
+            case .noPeer: return "no Wallet Manager peer is chosen in VibeSwitcher's Settings › Wallet"
+            case .noPassage: return "Passage isn't found (set its path in VibeSwitcher's Settings › Wallet)"
+            }
+        }
+
+        /// As the app's defaults have it: the peer chosen (`walletPeerID`) and Passage (`walletPassagePath`; empty:
+        /// `passage` on `path`, the session's PATH, else Passage.app in `apps`).
+        public static func from(peer: String, passagePath: String, path: String?, apps: [URL] = PassageCommand.appLocations) -> WalletManager {
+            guard !peer.isEmpty else { return .noPeer }
+            let found = PassageCommand.resolve(setting: passagePath, onPath: { onPath("passage", path: path) }, apps: apps)
+            return found == nil ? .noPassage : .ready
+        }
+
+        /// The first executable `name` in the folders of `path` (a PATH value), as an absolute path.
+        static func onPath(_ name: String, path: String?) -> String? {
+            for folder in (path ?? "").split(separator: ":") where folder.hasPrefix("/") {
+                let file = (String(folder) as NSString).appendingPathComponent(name)
+                var directory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: file, isDirectory: &directory), !directory.boolValue,
+                   FileManager.default.isExecutableFile(atPath: file) { return file }
+            }
+            return nil
+        }
+    }
+
     /// `vs-wallet request …`, as the CLI runs it: what to print, and the exit status (0 filed, 1 refused, 2 usage).
-    /// `peerChosen`: whether Settings › Wallet names the Wallet Manager peer (until then requests are refused).
-    public static func run(_ arguments: [String], environment: [String: String], cwd: String, peerChosen: Bool,
+    /// `walletManager`: whether Settings › Wallet has the Wallet Manager set up. Filed either way; without it the output
+    /// says the browser wallet is the way to sign it (or, for a wallet id, that it waits for the Wallet Manager).
+    public static func run(_ arguments: [String], environment: [String: String], cwd: String, walletManager: WalletManager,
                            folder: URL = WalletAsk.folder, now: Date = Date()) -> (status: Int32, output: String, error: String) {
         guard let command = arguments.first, command == "request" else {
             return arguments.first.map { ["help", "--help", "-h"].contains($0) } == true ? (0, usage, "") : (2, "", usage)
         }
-        guard peerChosen else {
-            return (1, "", "vs-wallet: refused: no Wallet Manager peer is chosen in VibeSwitcher's Settings › Wallet, so wallet requests are refused. Ask the user to choose one.")
-        }
         do {
             let request = try request(Array(arguments.dropFirst()), environment: environment, cwd: cwd, now: now)
             try file(request, in: folder)
-            return (0, "Filed wallet request \(request.id): it waits on its card in this session's chat in VibeSwitcher, and nothing is sent "
-                       + "until the user presses Send to Wallet Manager there. It expires at \(WalletRequestFormat.string(request.expiresAt)). "
-                       + "The Wallet Manager's answers will come to this session as messages; don't file it again.", "")
+            let expires = "It expires at \(WalletRequestFormat.string(request.expiresAt))."
+            guard let why = walletManager.why else {
+                return (0, "Filed wallet request \(request.id): it waits on its card in this session's chat in VibeSwitcher, and nothing is sent "
+                           + "until the user presses Send to Wallet Manager there. \(expires) "
+                           + "The Wallet Manager's answers will come to this session as messages; don't file it again.", "")
+            }
+            let card = "Filed wallet request \(request.id): its card is up in this session's chat in VibeSwitcher. "
+                + "The Wallet Manager isn't set up yet (\(why)), "
+            guard WalletBrowser.canSign(request) else {
+                return (0, card + "and a browser wallet can't sign for a wallet id (--from \(request.from)): it waits on its card until the "
+                           + "user sets up the Wallet Manager in Settings › Wallet and sends it. To use the browser wallet instead, ask the user "
+                           + "to discard it and file it again from the wallet's 0x address. \(expires)", "")
+            }
+            return (0, card + "so the browser wallet is the way to sign: nothing is sent until the user presses Sign in browser wallet on "
+                       + "the card and confirms it in the wallet's own popup (without the Wallet Manager's checks). \(expires) "
+                       + "What happens will come to this session as a message; don't file it again.", "")
         } catch let refusal as Refusal {
             return (1, "", "vs-wallet: refused: \(refusal.description)")
         } catch {
