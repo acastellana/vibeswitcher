@@ -2404,3 +2404,5 @@
 - 2026-10-31 23:09 Audit of wallet-requests-work: complete, clean, round 1: 4 Nit open
 - 2026-10-31 23:11 Audit of wallet-e2e-sh-refreshes: complete, clean, round 1: 1 Nit open
 - 2026-10-31 23:21 Merged wallet-e2e-sh-refreshes: wallet-e2e.sh refreshes the Wallet Manager's node_modules when its lockfile is newer
+- 2026-10-31 23:21 Automatically (auto_advance): Merged wallet-e2e-sh-refreshes (wallet-e2e.sh refreshes the Wallet Manager's node_modules when its lockfile is newer) into main at 62221c68, on its passing audit and the full test run.
+- 2026-10-31 23:29 Merged wallet-requests-work: Wallet requests work without a Wallet Manager chosen: the card offers the browser wallet
