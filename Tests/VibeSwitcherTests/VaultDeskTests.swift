@@ -352,7 +352,10 @@ struct VaultDeskTests {
         clock.now = request.expiresAt
         await refreshed(s.desk)
         #expect(s.told.messages.count == 1)
-        #expect(s.told.messages.first?.text.contains("without being sent") == true)
+        let text = try #require(s.told.messages.first?.text)
+        #expect(text.contains("without being sent") && text.contains("never reached the vault"))
+        // The user did press Send: the message mustn't say they didn't.
+        #expect(text.contains("or Passage couldn't deliver it") && !text.contains("didn't click"))
     }
 
     @Test func aSentRequestThatExpiresIsntToldAsUnsent() async throws {

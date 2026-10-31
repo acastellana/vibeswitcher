@@ -150,9 +150,9 @@ public enum VaultAsk {
 
     /// What the asking session hears when its request reached its expiry without the user sending it.
     public static func expiredUnsent(_ request: VaultRequest) -> String {
-        "Vault request \(request.id) expired at \(VaultFormat.string(request.expiresAt)) without being sent: the user didn't "
-            + "click Send to vault on its card, so it never reached the vault and nothing was signed. If the transaction is "
-            + "still needed, tell the user, or file a new request with vs-vault request."
+        "Vault request \(request.id) expired at \(VaultFormat.string(request.expiresAt)) without being sent: it never "
+            + "reached the vault (the user didn't send it from its card, or Passage couldn't deliver it), so nothing was "
+            + "signed. If the transaction is still needed, tell the user, or file a new request with vs-vault request."
     }
 
     /// `vs-vault request …`, as the CLI runs it: what to print, and the exit status (0 filed, 1 refused, 2 usage).
