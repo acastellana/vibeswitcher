@@ -2419,3 +2419,7 @@
 - 2026-10-31 23:57 Automatically (auto_advance): Started a worker on wallet-e2e-a-failed (wallet-e2e: a failed check in a non-rejected result is a warning, not a failure (recipient-known, calldata)).
 - 2026-11-01 00:08 Raised wallet-e2e-a-failed to audit (the risk check, at 50b5a836): it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$loop/vault/hold")
 - 2026-11-01 00:08 Automatically (auto_advance): Started the audit of wallet-e2e-a-failed at 50b5a836 (The risk check raised it to audit: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$loop/vault/hold")).
+- 2026-11-01 00:21 Audit of wallet-e2e-a-failed: complete, clean, round 1: 2 Nit open
+- 2026-11-01 00:30 Merged wallet-e2e-a-failed: wallet-e2e: a failed check in a non-rejected result is a warning, not a failure (recipient-known, calldata)
+- 2026-11-01 00:30 Flaky in wallet-e2e-a-failed's merge: theExitSourceReapsAtOnce() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 00:30 Planned fix-the-flaky-test-13: theExitSourceReapsAtOnce() flaked 3 times within 7 days
