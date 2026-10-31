@@ -2256,3 +2256,6 @@
 - 2026-10-31 12:22 Automatically (auto_advance): Started a worker on main-s-full-suite-2 (Main's full suite is green after the 2026-10-31 GitHub merge).
 - 2026-10-31 12:33 Review of main-s-full-suite-2: audit
 - 2026-10-31 12:36 Automatically (auto_advance): Started the audit of main-s-full-suite-2 at 80d7388d (Its review is audit).
+- 2026-10-31 12:46 Audit of main-s-full-suite-2: complete, clean, round 1: 1 Pre-existing open
+- 2026-10-31 12:47 Planned hosthandovertests: HostHandoverTests.aHandoverKeepsEverySession waits for the whole "bg=<pid>" line
+- 2026-10-31 12:53 Merged main-s-full-suite-2: Main's full suite is green after the 2026-10-31 GitHub merge; openpty serialized in PTYSpawn
