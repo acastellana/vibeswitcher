@@ -2210,3 +2210,4 @@
 - 2026-10-31 10:52 Automatically (auto_advance): Cleaned up readscreen-reads-the (freed 1.0 GB of build output and temporary folders). It stays done.
 - 2026-10-31 10:52 Started a worker on steer-inbox-read-on
 - 2026-10-31 10:52 Automatically (auto_advance): Started a worker on steer-inbox-read-on (Steer inbox read on the main thread every second (SteerInbox.pending in watchSteering, refreshSteering)), its after tasks done (readscreen-reads-the).
+- 2026-10-31 11:11 Merged steer-inbox-read-on: Steer inbox read on the main thread every second (SteerInbox.pending in watchSteering, refreshSteering) (no audit: review none)
