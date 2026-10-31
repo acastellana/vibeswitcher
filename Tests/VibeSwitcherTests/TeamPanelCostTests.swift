@@ -124,6 +124,96 @@ struct TeamPanelCostTests {
         #expect(lines.made == first + 3)
     }
 
+    // MARK: TeamSummaryModel.line(LeadDecision) < LeadTeamView.Lines.lines < LeadTeamView.glancing (hang-20261031-003909)
+
+    /// A lead's decisions.md of a busy day: 64 decisions, about 44 KB, two in three long enough for a summary (synthetic).
+    static func decisions(_ count: Int = 64) -> [LeadDecision] {
+        let words = ["merge", "the", "worker's", "branch", "after", "its", "suite", "passes", "under", "load", "then", "retire"]
+        return (0..<count).map { index in
+            let length = index % 3 == 0 ? 8 : 30 + index % 20
+            let text = (0..<length).map { words[($0 + index) % words.count] }.joined(separator: " ")
+            let why = String(repeating: "Because the lead checked it twice — and it held. ", count: 10)
+            return LeadDecision(at: 1_793_400_000 + Double(index) * 61.25, text: text, why: why)
+        }
+    }
+
+    /// A model that writes a line for each decision at once, on the calling thread.
+    static func summaries() -> TeamSummaryModel {
+        TeamSummaryModel(generate: { prompt in "Plain line \(prompt.utf8.count)" }, run: { $0() }, deliver: { $0() })
+    }
+
+    func glance(_ board: LeadBoard, _ decisions: [LeadDecision], _ lines: (rows: [String: String], decisions: [String: String])) -> TeamGlance {
+        TeamGlance(board: board, rows: [], openable: [], notices: [:], decisions: decisions, lines: lines.rows, decisionLines: lines.decisions,
+                   openRows: [], showFinished: false, openDecisions: [], showEarlier: false, clock: nil, open: { _ in }, answer: { _, _ in })
+    }
+
+    @Test func theDecisionLinesCostLittleAsSummariesCome() {
+        let decisions = Self.decisions()
+        let bytes = decisions.reduce(0) { $0 + $1.text.utf8.count + $1.why.utf8.count + 24 }
+        #expect(decisions.count == 64 && (40_000...48_000).contains(bytes), "\(bytes) bytes")
+        let long = decisions.filter(DecisionFeed.needsSummary)
+        #expect(long.count == 42)
+        let summaries = Self.summaries()
+        summaries.request(rows: [], decisions: decisions)
+        let board = LeadBoard()
+        let lines = LeadTeamView.Lines()
+        func pass(_ version: Int) -> TeamGlance {
+            glance(board, decisions, lines.lines(rows: [], decisions: decisions, version: version, summary: { summaries.line($0) },
+                                                 decisionSummary: { summaries.line($0) }))
+        }
+        var last = pass(summaries.version)
+        #expect(last.decisionLines.count == 42 && last.decisionLines[long[0].id] == "Plain line \(SummaryPrompts.decision(long[0].text, why: long[0].why).utf8.count)")
+        // A task's summary came each time (the version moved), the decisions and their lines didn't: the glance drawn
+        // again is the same, and a pass costs less than walking every decision's text 3 times (`String.count`, what each
+        // pass did for each decision, with making its key and its id). Both measured as this thread's CPU time, in turns,
+        // so a slower core or a loaded Mac slows both alike: 1.2 walks now, 6 before.
+        let passes = 500
+        var same = 0
+        var cost: UInt64 = 0, walks: UInt64 = 0, walked = 0
+        for version in 1...passes {
+            let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+            let next = pass(summaries.version + version)
+            if next == last { same += 1 }
+            let passed = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+            walked &+= decisions.reduce(0) { $0 + $1.text.count }
+            walks += clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - passed
+            cost += passed - start
+            last = next
+        }
+        #expect(same == passes)
+        #expect(walked > 0)
+        let ratio = Double(cost) / Double(walks)
+        #expect(ratio < 3, "a pass cost \(ratio) walks of the decisions' texts (\(Double(cost) / Double(passes) / 1000) µs of CPU)")
+    }
+
+    @Test func theDecisionLinesFollowTheirSummariesAndDecisions() {
+        var decisions = Self.decisions(12)
+        let summaries = TeamSummaryModel(generate: { _ in nil }, run: { $0() }, deliver: { $0() })
+        let lines = LeadTeamView.Lines()
+        func look() -> [String: String] {
+            lines.lines(rows: [], decisions: decisions, version: summaries.version, summary: { summaries.line($0) },
+                        decisionSummary: { summaries.line($0) }).decisions
+        }
+        // None written (the model gave nothing): none shown.
+        summaries.request(rows: [], decisions: decisions)
+        #expect(look().isEmpty)
+        // A new decision, long, its line written: shown, under its id.
+        let added = LeadDecision(at: 1_793_500_000, text: String(repeating: "Retire the old picker once the new one ships. ", count: 3), why: "")
+        decisions.append(added)
+        let writing = TeamSummaryModel(generate: { _ in "Retire the old picker" }, run: { $0() }, deliver: { $0() })
+        writing.request(rows: [], decisions: decisions)
+        let written = lines.lines(rows: [], decisions: decisions, version: 1, summary: { _ in nil }, decisionSummary: { writing.line($0) }).decisions
+        #expect(written[added.id] == "Retire the old picker")
+        #expect(written.count == decisions.filter(DecisionFeed.needsSummary).count)
+        // The same decision with another text is another decision: its line isn't the old one's.
+        decisions[decisions.count - 1].text = String(repeating: "Keep the old picker for one more release instead. ", count: 3)
+        let edited = lines.lines(rows: [], decisions: decisions, version: 2, summary: { _ in nil }, decisionSummary: { writing.line($0) }).decisions
+        #expect(edited[decisions.last!.id] == nil && edited[added.id] == nil)
+        // Summaries turned off: none.
+        writing.enabled = false
+        #expect(lines.lines(rows: [], decisions: decisions, version: 3, summary: { _ in nil }, decisionSummary: { writing.line($0) }).decisions.isEmpty)
+    }
+
     // MARK: LeadTeamPane.body (173905, 175702): the Mac-wide line off the main thread
 
     @Test func theMacLineIsMadeOffTheMainThreadOncePerSessions() async {

@@ -60,6 +60,23 @@ struct SessionStoreTests {
         #expect(await until { store.scansApplied > before })
     }
 
+    /// The window's readScreen tells whether the selected Claude session's agent is idle for steering each second, on
+    /// the main thread: from the hook event the scan read off it, not its state file (hang-20261031-102359). Its files
+    /// gone after the scan, the sessions still say which agent works and which is idle.
+    @Test func sessionsCarryTheirHookEventSoSteeringNeedsNoFileRead() async throws {
+        AppStatus.enabled = false
+        defer { try? FileManager.default.removeItem(at: stateDir) }
+        let store = try store(started: Date())
+        try await refreshAndSettle(store)
+        try FileManager.default.removeItem(at: stateDir)
+        let working = try #require(store.sessions.first { $0.tty == "ttys970" })
+        let finished = try #require(store.sessions.first { $0.tty == "ttys971" })
+        #expect(working.hookEvent == "PreToolUse")
+        #expect(finished.hookEvent == "Stop")
+        #expect(LeadDelivery.way(for: working) == .steer)
+        #expect(LeadDelivery.way(for: finished) == .type)
+    }
+
     @Test func scansThatFindNothingNewDontRepublish() async throws {
         AppStatus.enabled = false
         defer { try? FileManager.default.removeItem(at: stateDir) }

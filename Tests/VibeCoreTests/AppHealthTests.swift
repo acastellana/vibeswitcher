@@ -40,8 +40,10 @@ struct AppHealthTests: LeadTeamFixture {
         """
     }
 
-    /// A `sample` report whose main thread's busiest path runs through `frames` (outermost first) under a timer.
-    static func sample(_ frames: [String] = ["SessionStore.rescan()", "specialized ChatModel.reload(from:)", "TranscriptReader.parse(_:)"]) -> String {
+    /// A `sample` report whose main thread's busiest path runs through `frames` (outermost first) under a timer, its
+    /// 2300 samples at the top of that path spread over `pcs` instructions of `leaf` (230, 10 each: running code).
+    static func sample(_ frames: [String] = ["SessionStore.rescan()", "specialized ChatModel.reload(from:)", "TranscriptReader.parse(_:)"],
+                       pcs: Int = 230, leaf: String = "_platform_memmove") -> String {
         var lines = """
         Analysis of sampling VibeSwitcher (pid 4242) every 1 millisecond
         Process:         VibeSwitcher [4242]
@@ -68,6 +70,10 @@ struct AppHealthTests: LeadTeamFixture {
             depth += "  "
         }
         lines.append("\(depth)2300 memmove  (in libsystem_platform.dylib) + 1  [0x9]")
+        for pc in 0..<pcs {
+            let count = 2300 / pcs + (pc < 2300 % pcs ? 1 : 0)
+            lines.append("\(depth)  \(count) \(leaf)  (in libsystem_platform.dylib) + \(pc * 4)  [0x\(String(0x1_9b00_0000 + pc * 4, radix: 16))]")
+        }
         lines += [
             "    +       !       100 LeadController.refresh()  (in VibeSwitcher) + 1  [0xa]",
             "    +       100 __CFRunLoopServiceMachPort  (in CoreFoundation) + 1  [0xb]",
@@ -160,6 +166,110 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(AppHealth.sampleInside(start: since.addingTimeInterval(2), end: since.addingTimeInterval(3.5)) == 0.5)
         #expect(AppHealth.sampleInside(start: since.addingTimeInterval(2), end: nil) == 1)
         #expect(AppHealth.sampleStart("no header") == nil)
+    }
+
+    /// Running code is sampled at hundreds of instructions; a starved thread (a loaded Mac, or paging back in) sits on
+    /// a few for hundreds of samples each, as hang-20261031-001452's 2298 samples on 18 PCs did.
+    @Test func aClusteredSampleIsLikelyStarvationAndASpreadOneRealWork() throws {
+        // 2300 samples on 18 PCs at the top of the path, plus the path's 5 (frames' own samples, two siblings).
+        let clustered = try #require(AppHealth.spread(sample: Self.sample(pcs: 18)))
+        #expect(clustered.samples == 2600 && clustered.pcs == 23, "\(clustered)")
+        #expect(clustered.top == "_platform_memmove" && abs(clustered.topShare - 128.0 / 2600) < 0.0001)
+        #expect(clustered.waiting == 0)
+        #expect(AppHealth.verdict(clustered, sampleInside: 1) == .starved)
+        // Sampled after it answered, a thread still clustered (not in a wait) was still starved.
+        #expect(AppHealth.verdict(clustered, sampleInside: 0) == .starved)
+        #expect(AppHealth.describe(clustered, verdict: .starved)
+                == "main thread's sample: 2600 samples on 23 top-of-stack PCs (0.9%), the busiest 5% of them (_platform_memmove): likely starvation or paging, not the app's work")
+
+        let spread = try #require(AppHealth.spread(sample: Self.sample()))
+        #expect(spread.samples == 2600 && spread.pcs == 235, "\(spread)")
+        #expect(AppHealth.verdict(spread, sampleInside: 1) == .work)
+        #expect(AppHealth.verdict(spread, sampleInside: nil) == .work)
+        // Work sampled after the stall isn't the stall's.
+        #expect(AppHealth.verdict(spread, sampleInside: 0.2) == nil)
+        #expect(AppHealth.describe(spread, verdict: .work).hasSuffix(": real work"))
+
+        // Either side of the threshold: 34 samples a PC is starvation, fewer isn't.
+        let edge = AppHealth.Spread(samples: 2040, pcs: 60, top: "x", topShare: 0.1, waiting: 0)
+        #expect(AppHealth.verdict(edge, sampleInside: 1) == .starved)
+        #expect(AppHealth.verdict(AppHealth.Spread(samples: 2040, pcs: 61, top: "x", topShare: 0.1, waiting: 0), sampleInside: 1) == .work)
+
+        // Few PCs, but blocked in the kernel: a wait (a lock, a synchronous message), the app's to fix.
+        let blocked = try #require(AppHealth.spread(sample: Self.sample(pcs: 3, leaf: "mach_msg2_trap")))
+        #expect(blocked.waiting > 0.88 && blocked.top == "mach_msg2_trap", "\(blocked)")
+        #expect(AppHealth.verdict(blocked, sampleInside: 1) == .waiting)
+        // After it answered, that's the idle run loop: nothing said.
+        #expect(AppHealth.verdict(blocked, sampleInside: 0) == nil)
+        // Too few samples to tell (100 here).
+        let few = try #require(AppHealth.spread(sample: Self.frameless("AG::Subgraph::update(unsigned int)")))
+        #expect(few.samples == 100 && few.pcs == 1)
+        #expect(AppHealth.verdict(few, sampleInside: 1) == nil)
+        #expect(AppHealth.spread(sample: "no call graph") == nil)
+    }
+
+    /// The .log's header keeps the load at the stall and the verdict; a hang reads its load back and its verdict from its
+    /// sample.
+    @Test func aHangReportKeepsItsLoadAndVerdict() throws {
+        let spread = try #require(AppHealth.spread(sample: Self.sample(pcs: 18)))
+        let header = AppHealth.hangHeader(since: start, duration: 9.1, sampleInside: 1, load: 23.456, cpus: 10, spread: spread, verdict: .starved)
+        #expect(header == "vibeswitcher-hang: since=1761393730.000 duration=9.1 sample-inside=1.00 load=23.46 cpus=10 samples=2600 pcs=23 top-share=0.05 verdict=starved")
+        var log = Self.log().components(separatedBy: "\n")
+        log[0] = header
+        let hang = AppHealth.hang(name: "hang-20261025-140210", log: log.joined(separator: "\n"), sample: Self.sample(pcs: 18))
+        #expect(hang.load == 23.46 && hang.cpus == 10)
+        #expect(hang.spread == spread)
+        #expect(hang.verdict == .starved)
+        // A report from before: no load, and its verdict still from its sample.
+        let old = AppHealth.hang(name: "hang-20261025-140210", log: Self.log(), sample: Self.sample())
+        #expect(old.load == nil && old.cpus == nil && old.verdict == .work)
+    }
+
+    /// A starved freeze is told as one, with no task asked for it; real work reads as before.
+    @Test func aStarvedFreezeIsToldAsStarvationAndAsksNoTask() throws {
+        let folders = try folders()
+        var watch = AppHealth.Watch()
+        func header(_ inside: Double) -> String {
+            AppHealth.hangHeader(since: start, duration: 9.1, sampleInside: inside, load: 23.4, cpus: 10)
+        }
+        func log(_ inside: Double) -> String { header(inside) + "\n" + Self.log().components(separatedBy: "\n").dropFirst().joined(separator: "\n") }
+        try writeHang("hang-20261025-140210", in: folders, log: log(1), sample: Self.sample(pcs: 18))
+        watch.saw(hangs: folders.hangNames(), crashes: [], now: start)
+        watch.look(now: start.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
+        let starved = try #require(watch.pending.first)
+        #expect(starved.contains("- hang-20261025-140210: likely starvation: the Mac was loaded or paging; no app work to fix (main thread's sample: 2600 samples "
+                                 + "on 23 top-of-stack PCs (0.9%), the busiest 5% of them (_platform_memmove); 1-minute load 23.4 on 10 cores); stuck 9.1 s; "
+                                 + "lead session selected, chat shown, window key;"), "\(starved)")
+        #expect(starved.hasSuffix("That freeze looks like starvation (the Mac loaded or paging), not the app's work: no task for it; the reports have the full stacks."),
+                "\(starved)")
+        #expect(!starved.contains("into a task"))
+        noSecrets(starved)
+
+        // The same frames doing real work two hours on: told as before, not counted as a repeat of the starved one.
+        watch.pending = []
+        let later = start.addingTimeInterval(2 * 3600)
+        try writeHang("hang-20261025-160210", in: folders, log: log(1))
+        watch.saw(hangs: folders.hangNames(), crashes: [], now: later)
+        watch.look(now: later.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
+        let work = try #require(watch.pending.first)
+        #expect(work.contains("- hang-20261025-160210: stuck 9.1 s; lead session selected, chat shown, window key; footprint 812 MB (peak 900 MB); "
+                              + "top app frames: TranscriptReader.parse(_:) < ChatModel.reload(from:) < SessionStore.rescan() < closure #1 in Heartbeat.every(_:_:) "
+                              + "(100% of its sample inside the stall) — main thread's sample: 2600 samples on 235 top-of-stack PCs"), "\(work)")
+        #expect(work.contains(": real work; 1-minute load 23.4 on 10 cores"))
+        #expect(!work.contains("likely starvation"))
+        #expect(work.hasSuffix("Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks."), "\(work)")
+
+        // Both in one digest: each told, the task line says the starved one needs none.
+        watch.pending = []
+        let third = start.addingTimeInterval(30 * 3600)
+        try writeHang("hang-20261026-180000", in: folders, log: log(1), sample: Self.sample(["Other.freeze()"], pcs: 10))
+        try writeHang("hang-20261026-180100", in: folders, log: log(1), sample: Self.sample(["Third.freeze()"]))
+        watch.saw(hangs: folders.hangNames(), crashes: [], now: third)
+        watch.look(now: third.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
+        let both = try #require(watch.pending.first)
+        #expect(both.contains("- hang-20261026-180000: likely starvation:") && both.contains("- hang-20261026-180100: stuck"), "\(both)")
+        #expect(both.hasSuffix("Turn what's a real bug into a task (one already on the board needs nothing; one marked likely starvation needs none); "
+                               + "read the reports for the full stacks."), "\(both)")
     }
 
     @Test func aReportFromBeforeTheHeaderStillReads() {
@@ -298,6 +408,81 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(watch.pending.contains { $0.contains("hang-20261026-150210:") })
     }
 
+    /// A `sample` report the size and shape of the biggest real ones (hang-20261028-070725's: 1.9 MB, 9401 lines, its
+    /// main thread's 2450 nested up to 120 deep): a main thread of 2560 frames over a 60-frame spine, 28 more threads of
+    /// 240 frames each, then the stack totals and the binary images.
+    static let bigSample: String = {
+        var lines = """
+        Analysis of sampling VibeSwitcher (pid 4242) every 1 millisecond
+        Process:         VibeSwitcher [4242]
+        Path:            /Applications/VibeSwitcher.app/Contents/MacOS/VibeSwitcher
+        Date/Time:       2026-10-31 00:39:12.345 +0100
+        Launch Time:     2026-10-30 09:00:00.000 +0100
+
+        Physical footprint:         812.4M
+        Physical footprint (peak):  900.0M
+        ----
+
+        Call graph:
+        """.components(separatedBy: "\n")
+        var address = 0x1_0000_0000
+        // "    + ! : | 12 name  (in Image) + 4  [0x…]  File.swift:1", its marks two wide a level.
+        func line(_ level: Int, _ count: Int, _ name: String, _ image: String) {
+            address += 4
+            let marks = (0..<level).map { ["  ", "! ", ": ", "| "][$0 % 4] }.joined()
+            lines.append("    + \(marks)\(count) \(name)  (in \(image)) + \(address % 997)  [0x\(String(address, radix: 16))]  File\(level).swift:\(address % 89)")
+        }
+        // Each thread: a spine of `spine` frames, then `chains` chains of `length` frames, the first the busiest.
+        func thread(_ number: Int, label: String, spine: Int, chains: Int, length: Int, image: String) {
+            let total = 2500
+            lines.append("    \(total) Thread_\(number)   \(label)")
+            for level in 0..<spine { line(level, total, "Spine\(number).frame\(level)()", level % 3 == 0 ? "AppKit" : image) }
+            for chain in 0..<chains {
+                let count = chain == 0 ? total - (chains - 1) * 20 - 100 : 20
+                for level in 0..<length {
+                    let name = level == length - 1 ? (chain % 5 == 0 ? "_platform_memmove" : "objc_msgSend") : "closure #\(level) in Chain\(chain).step\(level)(_:)"
+                    line(spine + level, count, name, level == length - 1 ? "libsystem_platform.dylib" : image)
+                }
+            }
+        }
+        thread(100, label: "DispatchQueue_1: com.apple.main-thread  (serial)", spine: 60, chains: 50, length: 50, image: "VibeSwitcher")
+        for number in 101..<129 { thread(number, label: "DispatchQueue_\(number): com.apple.root.utility-qos  (concurrent)", spine: 40, chains: 8, length: 25, image: "Foundation") }
+        lines += ["", "Total number in stack (recursive counted multiple times):"]
+        for index in 0..<50 { lines.append("        \(2500 - index)       Spine.frame\(index)()  (in VibeSwitcher)") }
+        lines += ["", "Binary Images:"]
+        for index in 0..<1000 {
+            lines.append("       0x\(String(0x1_8000_0000 + index * 0x10000, radix: 16)) -        0x\(String(0x1_8000_ffff + index * 0x10000, radix: 16))  "
+                         + "com.apple.framework\(index) (1.0) <5A3B1C2D-0000-1111-2222-\(String(format: "%012d", index))> /System/Library/Frameworks/Framework\(index).framework/Framework\(index)")
+        }
+        return lines.joined(separator: "\n")
+    }()
+
+    /// Reading a hang's sample (its start, the main thread's busiest path and spread) costs tens of milliseconds of CPU,
+    /// not seconds: 2026-10-31, hang-20261031-003909's sample of 2 MB cost the watchdog 2.3 s of CPU (a user-interactive
+    /// thread splitting it into lines with `components(separatedBy:)`) on a Mac already starving the app. Measured as
+    /// this thread's CPU time (a busy Mac keeping it waiting doesn't add to it), the best of three.
+    @Test func readingABigSampleCostsMillisecondsOfCPU() throws {
+        let sample = Self.bigSample
+        #expect(sample.utf8.count > 1_800_000 && sample.utf8.count < 2_600_000, "\(sample.utf8.count) bytes")
+        var best = TimeInterval.infinity
+        var read: (start: Date?, path: [(name: String, image: String)], spread: AppHealth.Spread?)?
+        for _ in 0..<3 {
+            let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+            read = (AppHealth.sampleStart(sample), AppHealth.busiestPath(sample: sample), AppHealth.spread(sample: sample))
+            best = min(best, TimeInterval(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1e9)
+        }
+        print("SampleReadCost \(sample.utf8.count) bytes: \(String(format: "%.1f", best * 1000)) ms of CPU")
+        // What it reads is what it read before.
+        let result = try #require(read)
+        #expect(result.start == Date(timeIntervalSince1970: 1_793_403_552.345))
+        #expect(result.path.count == 110 && result.path.first?.name == "Spine100.frame0()" && result.path.last?.name == "_platform_memmove", "\(result.path.map(\.name))")
+        #expect(result.path[60].name == "closure #0 in Chain0.step0(_:)" && result.path[60].image == "VibeSwitcher")
+        let spread = try #require(result.spread)
+        #expect(spread == AppHealth.Spread(samples: 2500, pcs: 51, top: "_platform_memmove", topShare: 1420.0 / 2500, waiting: 0), "\(spread)")
+        // 24 ms in a debug build on 2026-10-31's Mac; 250 ms split by `components(separatedBy:)`.
+        #expect(best < 0.08, "\(Int(best * 1000)) ms of CPU to read a \(sample.utf8.count)-byte sample")
+    }
+
     /// A sample whose main thread's busiest path has no app frame: a SwiftUI stall ending in `leaf`.
     static func frameless(_ leaf: String) -> String {
         """
@@ -417,8 +602,8 @@ struct AppHealthTests: LeadTeamFixture {
     @Test func aQuietDaySendsNothing() throws {
         let folders = try folders()
         var watch = AppHealth.Watch()
-        watch.look(now: day(0), folders: folders, memory: AppHealth.Memory(footprint: 300, peak: 320, atLaunch: 290, launched: day(0, hour: 9)))
-        watch.look(now: day(1, hour: 0), folders: folders, memory: AppHealth.Memory(footprint: 305, peak: 320, atLaunch: 290, launched: day(0, hour: 9)))
+        watch.look(now: day(0), folders: folders, memory: AppHealth.Memory(footprint: 300, peak: 320, settled: .init(footprint: 290, at: day(0, hour: 10)), launched: day(0, hour: 9)))
+        watch.look(now: day(1, hour: 0), folders: folders, memory: AppHealth.Memory(footprint: 305, peak: 320, settled: .init(footprint: 290, at: day(0, hour: 10)), launched: day(0, hour: 9)))
         #expect(watch.pending.isEmpty)
     }
 
@@ -429,13 +614,13 @@ struct AppHealthTests: LeadTeamFixture {
         for offset in -7 ... -1 { watch.days[AppHealth.Watch.day(day(offset))] = AppHealth.Watch.Day(hangs: 1, crashes: 0, errors: 0) }
         watch.days[AppHealth.Watch.day(day(0))] = AppHealth.Watch.Day(hangs: 5, crashes: 1, errors: 12)
         watch.lookedOn = AppHealth.Watch.day(day(0))
-        let memory = AppHealth.Memory(footprint: 1300, peak: 1400, atLaunch: 300, launched: day(0, hour: 4))
+        let memory = AppHealth.Memory(footprint: 1300, peak: 1400, settled: .init(footprint: 300, at: day(0, hour: 4)), launched: day(0, hour: 4))
         watch.look(now: day(1, hour: 0), folders: folders, memory: memory)
         #expect(watch.pending.count == 1)
         let trend = try #require(watch.pending.first)
         #expect(trend.contains("VibeSwitcher's day, \(AppHealth.Watch.day(day(0)))"), "\(trend)")
         #expect(trend.contains("5 freezes (1.0 a day over the 7 days before), 1 crash, 12 error lines."))
-        #expect(trend.contains("footprint 1300 MB, peak 1400 MB since launch 20 h ago, +50 MB an hour since launch (growing: worth a look)."))
+        #expect(trend.contains("footprint 1300 MB, peak 1400 MB since launch 20 h ago, +50 MB an hour since it settled at 300 MB (growing: worth a look)."))
         // Once a day.
         watch.look(now: day(1, hour: 9), folders: folders, memory: memory)
         #expect(watch.pending.count == 1)
@@ -445,10 +630,52 @@ struct AppHealthTests: LeadTeamFixture {
         let folders = try folders()
         var watch = AppHealth.Watch()
         watch.lookedOn = AppHealth.Watch.day(day(0))
-        watch.look(now: day(1, hour: 0), folders: folders, memory: AppHealth.Memory(footprint: 2000, peak: 2100, atLaunch: 300, launched: day(0, hour: 0)))
+        watch.look(now: day(1, hour: 0), folders: folders, memory: AppHealth.Memory(footprint: 2000, peak: 2100, settled: .init(footprint: 300, at: day(0, hour: 1)), launched: day(0, hour: 0)))
         #expect(watch.pending.count == 1)
         #expect(watch.pending[0].contains("0 freezes"))
         #expect(watch.pending[0].contains("growing: worth a look"))
+    }
+
+    /// 10-30: launched at 18:30 with a 32 MB footprint (nothing loaded yet), settled at 149 MB once its window,
+    /// sessions and chats were up, 186 MB at the digest past midnight: +28 MB an hour counted from launch, about 7
+    /// from where it settled. A quiet day with that sends nothing.
+    @Test func growthIsCountedFromWhereTheFootprintSettledNotFromLaunch() throws {
+        let folders = try folders()
+        let launched = Calendar.current.date(bySettingHour: 18, minute: 30, second: 0, of: day(0))!
+        var settling = AppHealth.Settling(launched: launched)
+        settling.read(32, now: launched)
+        settling.read(140, now: launched.addingTimeInterval(10 * 60))
+        settling.read(160, now: launched.addingTimeInterval(31 * 60))
+        settling.read(149, now: launched.addingTimeInterval(35 * 60))
+        settling.read(175, now: launched.addingTimeInterval(50 * 60))
+        settling.read(120, now: launched.addingTimeInterval(61 * 60))
+        #expect(settling.settled == AppHealth.Memory.Settled(footprint: 149, at: launched.addingTimeInterval(35 * 60)))
+        #expect(settling.wants(now: launched.addingTimeInterval(59 * 60)))
+        #expect(!settling.wants(now: launched.addingTimeInterval(60 * 60)))
+        // Asleep through the window: the first reading after it.
+        var asleep = AppHealth.Settling(launched: launched)
+        asleep.read(32, now: launched)
+        #expect(asleep.wants(now: launched.addingTimeInterval(3 * 3600)))
+        asleep.read(150, now: launched.addingTimeInterval(3 * 3600))
+        asleep.read(140, now: launched.addingTimeInterval(3 * 3600 + 60))
+        #expect(asleep.settled == AppHealth.Memory.Settled(footprint: 150, at: launched.addingTimeInterval(3 * 3600)))
+        #expect(!asleep.wants(now: launched.addingTimeInterval(3 * 3600 + 120)))
+        let digest = day(1, hour: 0).addingTimeInterval(60)
+        let memory = AppHealth.Memory(footprint: 186, peak: 328, settled: settling.settled, launched: launched)
+        let growth = try #require(memory.growth(now: digest))
+        #expect(growth > 7 && growth < 8, "\(growth)")
+        var watch = AppHealth.Watch()
+        watch.lookedOn = AppHealth.Watch.day(day(0))
+        watch.look(now: digest, folders: folders, memory: memory)
+        #expect(watch.pending.isEmpty, "\(watch.pending)")
+    }
+
+    @Test func noGrowthIsToldBeforeTheFootprintSettledOrSoonAfter() {
+        let launched = day(0, hour: 9)
+        #expect(AppHealth.Memory(footprint: 900, peak: 900, settled: nil, launched: launched).growth(now: day(0, hour: 20)) == nil)
+        let settled = AppHealth.Memory.Settled(footprint: 150, at: day(0, hour: 10))
+        #expect(AppHealth.Memory(footprint: 400, peak: 400, settled: settled, launched: launched).growth(now: day(0, hour: 11)) == nil)
+        #expect(AppHealth.Memory(footprint: 400, peak: 400, settled: settled, launched: launched).growth(now: day(0, hour: 12)) == 125)
     }
 
     @Test func theTrendCountsRepeatsOnce() throws {

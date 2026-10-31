@@ -15,6 +15,23 @@ struct LeadDeliveryTests {
         #expect(LeadDelivery.way(for: nil) == .type)
     }
 
+    /// A session by the hook event the store's scan read for it: idle (typed) or working (steered) alike.
+    @Test func aSessionsWayIsByTheHookEventTheScanRead() {
+        var session = Session(tty: "ttys1", agent: .claude, pid: 1, startedAt: Date(), cwd: nil, project: "p", task: nil,
+                              status: .idle, statusSince: Date(), detail: nil, hasHooks: true, inTerminalApp: false)
+        for event in ["Stop", "SessionStart", "SessionEnd", "Notification", "PermissionRequest"] {
+            session.hookEvent = event
+            #expect(LeadDelivery.way(for: session) == .type, "\(event)")
+            #expect(LeadDelivery.way(for: session) == LeadDelivery.way(for: state(event)))
+        }
+        for event in ["PreToolUse", "PostToolUse", "UserPromptSubmit"] {
+            session.hookEvent = event
+            #expect(LeadDelivery.way(for: session) == .steer, "\(event)")
+        }
+        session.hookEvent = nil
+        #expect(LeadDelivery.way(for: session) == .type)
+    }
+
     @Test func typedSystemMessagesAreMarkedAndNotTheUsers() {
         let text = LeadDelivery.typed("Worker add-b finished.", from: .system("worker add-b"))
         #expect(text.hasPrefix("[VibeSwitcher"))

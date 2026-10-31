@@ -357,6 +357,7 @@ final class SessionStore: ObservableObject {
             session.screenPosition = tab?.position
             session.terminalWindowID = tab?.windowID
             session.eventAt = item.hook?.lastEventAt
+            session.hookEvent = item.hook?.lastEvent
             session.transcriptPath = transcripts[item.tty]
             session.hostID = window?.id
             session.startFolder = window?.cwd

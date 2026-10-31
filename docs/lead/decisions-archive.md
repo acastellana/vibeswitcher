@@ -284,3 +284,127 @@ The watcher is off by default and only vibeswitcher's lead should get its digest
 
 The user answered 5405CE2E with "Install now (I'm here for the password)", and the battery was well above the 10 % limit. Checked after the install: the host is still pid 31589, the app relaunched as pid 98346, and advancing.lock is held. The lead tool servers that were already running keep the old code until their sessions restart.
 
+# Archived 2026-10-31 10:33:33: Superseded: the base branch has been main since 2026-10-29, PR #1 landed, and the hold on other leads was lifted for review on 2026-10-24.
+
+## 2026-10-17 13:28 Base branch is project-lead, not main. Workers start from project-lead and verified work fast-forwards project-lead. main/origin/main stay untouched; moving them is a release decision for the user. test_command will be `swift build && swift test` (README's development check).
+
+project-lead is the live product: the installed app (12:15) was built from its head (aff7317), and main is 70 commits behind and equal to origin/main. aff7317 already implements "a lead builds on the branch checked out when it first started", but this lead's tool server started at 12:12 from the previous build, which always used main. Reconnecting the server picks up that fix, so no files need editing.
+
+## 2026-10-20 16:19:43 GitHub's main is fast-forwarded from project-lead by the user when they ask (a8d93c2 → 9dca1f7 on 2026-10-20 at 16:2x; project-lead now tracks origin/project-lead); the lead never pushes (its shell is denied) and hands the user the exact command. The redaction tests' made-up Slack-webhook fixture (commit b99cd4c) was allowed through GitHub push protection by the user as "used in tests"; task pushes-never-trip-github keeps it from recurring.
+
+The user asked "push to gh" and "lets merge to main"; main was a straight ancestor, so a fast-forward kept history linear and the checkout on project-lead for the workers.
+
+## 2026-10-20 16:28:07 The lead does not message or otherwise touch the other projects' leads (project-c, TGE-ANALYSIS) for now: no SendMessage to them, no reviewing or reporting on their sessions; cross-project hygiene is left to the user and those leads.
+
+The user's instruction on 2026-10-20 at 16:5x ("i dont want you to touch the othr leads for now") after the lead informed both leads about the end-of-day wrap-up.
+
+## 2026-10-27 18:12:00 PR #1 (host security boundaries) lands through project-lead as task land-pr-1-host. The PR's commit is applied with its authorship kept, the review's fixes go on top, and it gets a full audit and the merge gate; the user then pushes and closes the PR. On OSC 52, terminal clipboard writes are allowed only from the focused, visible pane, and refused from hidden terminals, replays and background panes.
+
+The user said "review and work towards merge". The PR touches sensitive paths (the host, the vault, build-app.sh) and would break Apple Events under Hardened Runtime as written. Allowing OSC 52 from the focused pane keeps nvim and tmux copying working, while closing the hidden-output attack the PR targets. The user can still choose to block it entirely.
+
+# Archived 2026-10-31 10:33:35: Obsolete: plans and holds for work that has since been done or released.
+
+## 2026-10-17 16:41 The chat layout hang is taken by a lead worker (fix-the-chat-layout) right away, ahead of the rest of phase 2. The user's own session keeps HangWatchdog.swift, and lead workers stay out of it. Evaluation runs must set CFFIXED_USER_HOME as well as HOME to isolate from ~/.vibeswitcher.
+
+A 13-minute main-thread hang happened live at 16:26 on the current build, triggered by opening the chat for this lead's transcript. That contradicts the other session's 'no real hangs since 10:48', and it's the worst user-facing defect found so far. NSHomeDirectory ignores $HOME on macOS (engineering finding E-30), so HOME alone doesn't isolate test runs.
+
+## 2026-10-17 16:51 Phase 2 order, one worker per area so files don't collide: (1) chat hang and the lead's self-configuration (running); (2) session detection; (3) standard Mac keys (⌘W closes the window, End Session moves elsewhere and always confirms; full Edit menu); (4) the lead's worker-state bugs and question withdrawal; (5) first run and one Settings window; (6) accessibility, after the chat fix lands. Security fixes get top priority as soon as that report is verified. Product calls are made by the HIG and the UX report, not by asking the user.
+
+The user asked the lead to decide big-picture questions itself. Ordering by user impact, with no two workers in the same files, avoids rebase conflicts. ⌘W ending sessions risks data loss and breaks a universal Mac convention.
+
+## 2026-10-19 17:37:49 Product choices made by the lead on 2026-10-19 19:3x for the user's two feature requests, without asking (reversible, in branches, audited before merge): (1) the voice briefing is one "Brief me" button in the window toolbar and the menu bar popover, 70–90 words written by the same headless Claude path as the team one-liners, in a language chosen in Settings (default the Mac's first preferred language), spoken by ElevenLabs when an API key is set in Settings (kept in the Keychain) and by the Mac's own voice otherwise; the text is redacted before any model or network call and leaves the Mac only on the button; the phone gets the same button in a follow-up task. (2) The New Project sheet takes a name, a location prefilled from a new "Projects folder" setting (default ~/dev), git init with README, .gitignore and a first commit on the default branch, and a "Then" choice (nothing, open a session with a preset, start the lead with a first goal); no license or template pickers and no GitHub creation unless the user asks. Verifier 2.0 part 2 merged with audit_finders left at 1; the lead will try 2 on a sensitive-path task after the next install and record the cost.
+
+The user asked for the features and left the details open ("I don't know if there need to be any other settings"); these are the smallest versions that do the job, and the user can ask for more once they see them.
+
+## 2026-10-21 00:15:37 The chat settle matrix passed 64/64 at 12/12 on a quiet Mac (2026-10-20 23:23–00:03, docs/eval/chat-bench-settle-2026-10-20.md, pending audit). regression_command is not set to the full matrix: at 37–40 minutes per run it would make every merge ten times slower. Recommendation for the user, to settle in the morning: a short regression command per merge (`chat-bench-settle.sh -n 3` on the 8 top/middle × 1200/1728 × LIVE/STACK cases, about 3 minutes, judged with the merge's load gate) and the full matrix on demand or nightly; the lead's current tools have no regression_command parameter, so it is set after the next lead restart.
+
+The matrix is the evidence the earlier decision asked for, but its cost per merge is the wrong trade; the 8-case subset is where every real finding came from (top/1728 page 2, the two-heights artifact), and 11 of 768 runs still needed the starved allowance when six jobs hit the same phase together, which the full matrix would turn into merge noise.
+
+## 2026-10-21 17:55:46 The picker card's settling work stops after picker-card-the-two. Its two remaining Nits (in the app, ScreenRead.at is the call time; the refusal notice says "changed; here it is now" for one read while the card still shows the old question) stay recorded on the task, not as new tasks.
+
+Four rounds have closed every case that put half-drawn text on the card. What's left changes, at worst, a notice for one 0.15 s read. Further rounds cost more than they protect until the user reports a visible problem.
+
+## 2026-10-25 08:03:22 Lead Process v3, phases 1 and 2, are being built: (1) finished-work-lands: done work merges or gets its audit, and planned tasks start, without waiting for the lead's turn. Merges land overnight too. (2) steadier-merge-gate: one rerun of failing tests at merge, a flake ledger, and early catch-up messages when project-lead overlaps a running branch. (3) workers-run-a-sandboxed: workers run an isolated copy of the app and screenshot it. (4) done-reports-carry: done reports need evidence per acceptance check, plus a blind self-check. (5) audit-v3-blocking: Important findings need a failure scenario, workers fix or answer them, re-roll after 2 rounds, and the verifier runs on a different model. All five run in parallel. Four are audited (guard rails, isolation, concurrency); the evidence task is review none.
+
+The user answered 'Start Phases 1 and 2 together' on 2026-10-25. Data from 2026-10-22..25: 59% of task time was finished work waiting for the lead, about 1.15 of 5 worker slots were used, 17 of 29 failing merges passed on retry, 21 conflicts cost 40.7 task-hours, about 30% of Important findings were dismissed, and the user found 35 bugs by hand. The design follows OpenAI's Symphony and harness write-ups, Anthropic's risk-tiered review, and the research on self-review and fix-loop decay. Overnight merges were taken as included: the merge policy is auto, and nothing reaches the app before the user installs.
+
+## 2026-10-26 08:25:23 Lifted the hold on the-app-s-memory and merged it: FootprintRelief runs only while the app isn't frontmost.
+
+The hold was for the malloc-lock stall (183–572 ms with 8 MB slack, on a loaded Mac). Now that the relief only runs in the background, at 24 MB slack its longest run measured 42 ms. The leak fix (d6ecc41, HostConnection.finish clears its handlers) stays as it was.
+
+## 2026-10-27 15:58:02 Which logo? (The four concepts are in the update.) → A · Stack
+
+The lead proposed it with a 30 min timer and the user didn't answer in time, so it went ahead (question 33419991). Why it was asked: The worker is waiting on the pick to make it the app and phone icon.
+
+## 2026-10-28 21:12:59 Merges are held (auto_advance off) on team-panel-and-inspector, a-full-suite-run, missing-tools-at-lead, keep-awake-s-power and urgent-mac-limit until the leaked line in docs/lead/progress.md (written by auto_advance at 20:37 on 2026-10-28) is scrubbed by the user. Then the lead merges them by hand, urgent-mac-limit first, and turns auto_advance back on.
+
+PrivateNamesLint fails every merge's full suite on that one line, and each failed merge sends a passing branch back to its worker, wasting worker and review cycles. Only the user can edit docs/lead (workers are refused and the lead has no file edits).
+
+# Archived 2026-10-31 10:33:36: Now enforced by the code or workflow.md (test_command, test_timeout_min, merge_policy, audit's trial merge and settings scan, the witness's power reports, the all-done signal, the audit-restart check).
+
+## 2026-10-18 18:20:47 merges-and-worker-limits may add a test_timeout_min key (default 45) to workflow.md: it's parsed in LeadWorkflow.swift and can be set through configure. LeadWorkflow.swift and configure's entry have been added to its boundaries.
+
+E-17 asks for the merge's test-time bound to be configurable, and workflow.md is where every other workflow setting already lives. The edit is one key, one parse line and one configure entry, each with tests.
+
+## 2026-10-18 22:16:10 New lead (22:12). merge_policy is now written as auto in workflow.md, per the user's 18:50 choice; the policy question is settled and never asked again. Merge order changes from the 21:41 plan: nothing merges while the Mac is under the pastedeliverytests-hold verifier's deliberate load (96 `yes` processes, load 160–190); when that audit passes, pastedeliverytests-hold merges first (test-only, one file), because its fix removes the flaky test that failed tool-servers-update's merge and would flake every other merge; then tool-servers-update, the-user-s-own, a-running-lead-keeps, the-witness-doesn-t (expect a LeadWitness conflict), merges-and-worker-limits. stale-git-index-lock reruns its last full check only once the 1-minute load is under 40. Sessions of four merged tasks (no-silent-data-loss, tests-stay-green-under, input-is-never-cut, a-successful-handover-is) are cleaned up now to free memory.
+
+Every merge runs the full suite, and PasteDeliveryTests fails under load; landing its fix first makes the other five merges reliable. The verifier's heavy-load phase is finite and ends before its full-suite runs. Earlier tonight memory pressure killed workers and a 15-minute hang hit the user, so idle sessions of merged tasks shouldn't stay alive.
+
+## 2026-10-19 17:53:47 test_command is now `bash scripts/test.sh` (set 2026-10-19 20:3x). The script, from home-or-vibeswitcher, runs `swift build && swift test` on a fresh scratch HOME, CFFIXED_USER_HOME, VIBESWITCHER_HOME and TMPDIR under /tmp that it removes on exit. Reason: the same branch adds a guard that refuses to run the tests against the real ~/.vibeswitcher, and the lead's running tool server (older than today's merge-runner scratch-HOME fix) ran the merge's tests on the real home, so the merge was refused by that guard. With the wrapper, every merge, worker and verifier run is isolated whatever server runs it. home-or-vibeswitcher must merge first (it carries the script); every later branch is rebased onto it.
+
+A merge that writes into the user's real app folder was today's recurring incident class (app.log lines, Keychain dialogs); the guard is right to refuse, and the wrapper makes the isolation the default rather than something each caller remembers.
+
+## 2026-10-20 10:44:17 audit runs a trial merge onto the lead's branch first and refuses a conflicting branch naming the files (task audit-refuses-a-branch-2).
+
+2026-10-20 retrospective: a-role-session-s passed a complete audit and only then was found to conflict with work merged meanwhile, costing a resolution round and a second verifier.
+
+## 2026-10-20 10:44:19 audit judges settings changes from the branch's commits, reports untracked files in the worktree as leftovers, and workers keep scratch in their session TMPDIR, never inside the worktree (task audit-tells-untracked).
+
+2026-10-20 retrospective: untracked bench scratch homes (.scratch/…/.claude/…) in the chat-paging worktree were taken for settings changes; the verifier started with settings off and waited on a trust question the lead had to end.
+
+## 2026-10-20 10:44:21 The witness tells the lead about power changes (on battery with level and estimate, back on AC) and status shows the state; the lead's rule stays: on battery no new starts or merges, in-flight work finishes, resume on power (task the-witness-tells-the).
+
+2026-10-20 retrospective: three battery switches in 12 h were handled only through the lead's own shell watches, which a replacement lead after a handover would not have.
+
+## 2026-10-24 22:42:24 All-done signal is app-side: VibeSwitcher detects from board.json that the board went from open work to clear, with at least one merge, and puts a green "All tasks finished" card in the lead's chat. The card has a plain-words summary written by headless Claude through Briefing's redaction, falling back to a written summary when the model is unavailable or AI summaries are off. A green check shows on the lead's sidebar row until the user opens that lead. No sound or push for now.
+
+The user asked for a clear signal plus a simple-terms AI summary when all tasks finish. Detecting it in the app makes it reliable without depending on the lead. Reusing Briefing keeps secrets out of the prompt and respects the user's AI-summaries setting.
+
+## 2026-10-27 20:14:32 Same setback twice: the lead restarted an audit that auto_advance's verifier was already running, ending it. The fix is a check in the tool (task audit-must-not-end), not a note. Until it lands, the lead reads board(task) for a running verifier before calling audit on an auto_advance task. Today's freeze storm (20 freezes of 2–25 s with project-b's long lead chat) is one task, lead-chat-freezes-of, with an accessibility bench as its regression check; the incident's own task is folded into it.
+
+Rule 10: a setback that happens twice gets a check. Freezes that long are material. The bench in that task is the check that runs before merge, so a second task would duplicate it.
+
+# Archived 2026-10-31 10:33:37: Install records: history, already in progress.md; nothing in them decides anything now.
+
+## 2026-10-26 08:42:36 Installed project-lead at b91fa2e on 2026-10-26 08:42, on battery at 82%. It brings the whole batch: notifications, the memory leak, time budgets, receipts, CLAUDE.md, rule checks, flake fixes and switch fixes.
+
+The user answered 133FA6B0 with "Install now". Checked: the host is still pid 31589, the app relaunched as pid 12647, and the lead's tool server (pid 10199) switched in place to the new binary (inode 304239769) and holds advancing.lock again.
+
+## 2026-10-26 13:57:12 Installed project-lead at e6278af on 2026-10-26 13:56. It brings the risk check, REVIEW.md, the security checklist, revert, the slim AGENTS.md, archive_decisions and the hang stacks. Then archived 70 superseded or obsolete decisions; decisions.md keeps 47.
+
+The user answered F770E6F6 with "Install now". Checked: the host is still pid 31589, the app relaunched as pid 97924, and the lead's tool server switched in place to inode 307525655 and holds advancing.lock. The archive list is docs/process/lead-rules.md's superseded and obsolete entries, minus the ones only partly superseded.
+
+## 2026-10-26 21:09:21 Installed project-lead at 325207e on 2026-10-26 21:08 (battery 52 %): revert follow-ups, the verifier eval set, the README fix.
+
+The user answered A1BE83E7 "Install now". Verified: host pid 31589 unchanged, app relaunched as pid 62220, the lead's tool server (pid 10199) switched in place to inode 309016916 and holds advancing.lock.
+
+## 2026-10-27 11:12:24 Installed project-lead at 1236e30 on 2026-10-27 11:12; the user ran the install. It brings the phone's lead/team UI and answers, the lead-chat freeze fix (chip strip, focus loop, Team rows cache) and the time-budget off-main fix. The lead's earlier attempt at 05:2x failed to sign with errSecInternalComponent, with the Mac locked and no keychain prompt possible.
+
+The user answered E6FC9C18 "Install now" and ran it themselves after the failed try. Verified: host pid 31589 unchanged, app pid 80943, lead tool server switched to inode 312283634 and holds advancing.lock. Next: watch the health watcher's freeze reports with this lead's chat open to confirm the fix; Spaces.currentDesktops (a window-server call on main in SessionStore.apply) is the next suspect if freezes remain.
+
+## 2026-10-27 15:22:53 Installed the status-first sidebar icons and folder-starts-lead batch at 15:21 on 2026-10-27, at the user's answer to F2AF00BC. The host (pid 31589) and the tool servers kept running. The app logo is one task, app-logo-concepts-first: concepts first, the user picks, then the same worker wires the pick in. It has auto_advance off and an audit, because it touches build-app.sh.
+
+The logo is a taste call, so the user chooses from rendered options. One agent owns it end to end. Phase 1 must not be merged on its own, so auto_advance is off.
+
+## 2026-10-27 16:45:16 Installed the new app logo (A · Stack) at 16:45 on 2026-10-27, at the user's answer to E37EB3C9. The host (pid 31589) kept running, and the installed Info.plist has CFBundleIconFile = AppIcon. Nothing has been pushed: project-lead is 50 commits ahead of origin/project-lead and of origin/main (dc2b9e3).
+
+The user asked for the install. The lead never pushes; the user does.
+
+## 2026-10-28 08:00:12 Installed project-lead at 30e58fd on 2026-10-28 at 07:58, at the user's answer to C2D62447. It includes PR #1's host security, the board-read freeze fixes, the message-delivery check and the audit guard. The host handed over in place (pid 31589, build 1793170724), the app proved itself and sees all 23 sessions, and the app is signed runtime with apple-events. A regression followed: the Mac-wide census counts only the lead's own team, fixed by task turn-this-incident-into-5, started at once. Until it merges, the lead counts other projects' team sessions with ps before starting work.
+
+The user asked for the install. The census regression comes from PR #1's filtered hello and defeats the shared Mac-wide limit, so it takes priority over the other planned work.
+
+## 2026-10-28 12:38:37 2026-10-28: installed project-lead three times today, all at the user's answers: 07:58 (PR #1 and more), 11:12 (the archive, memory, census, issue #2, sidebar, tool-server log, host backlog) and 11:38 (the big freeze fix). The fourth install at 12:37 is 69c62b3: the MCP keeper, the multi-line Run button, the main-thread fix and flake de-duplication. The user pushed project-lead and main to 69c62b3, and closed PR #1 and issue #2 on GitHub (lead-drafted notes). Pending: the user restarts this lead once, so its own tool server runs under the keeper; until then a /mcp reconnect may still be needed.
+
+Records what's installed and pushed, and the one step left for the keeper to cover the lead's own session.
+

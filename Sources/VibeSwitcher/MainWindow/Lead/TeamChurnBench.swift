@@ -580,18 +580,20 @@ enum AXClient {
         .map { unsafeBitCast($0, to: EntryPoint.self) }
 
     /// Turns on SwiftUI's accessibility in every hosting view of the window (`NSHostingView.accessibilityEnabled`'s
-    /// setter, called with the view as its self: a closure's context goes where a method's self does). How many.
+    /// setter, called with the view as its self: a closure's context goes where a method's self does), those `only`
+    /// takes. How many. The context is borrowed for the call (a closure's is guaranteed), not retained: a retained one
+    /// kept every view attached alive for good, which a soak attaching each chat shown saw as views no window holds.
     @discardableResult
-    static func attach(_ window: NSWindow) -> Int {
+    static func attach(_ window: NSWindow, only: (NSView) -> Bool = { _ in true }) -> Int {
         guard let setter = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "$s7SwiftUI13NSHostingViewC20accessibilityEnabledSbvsTj"),
               let content = window.contentView else { return 0 }
         func hosts(_ view: NSView) -> [NSView] {
             (String(describing: type(of: view)).hasPrefix("NSHostingView<") ? [view] : []) + view.subviews.flatMap(hosts)
         }
-        let found = hosts(content)
+        let found = hosts(content).filter(only)
         for host in found {
-            let enable = unsafeBitCast((setter, Unmanaged.passRetained(host).toOpaque()), to: ((Bool) -> Void).self)
-            enable(true)
+            let enable = unsafeBitCast((setter, Unmanaged.passUnretained(host).toOpaque()), to: ((Bool) -> Void).self)
+            withExtendedLifetime(host) { enable(true) }
         }
         return found.count
     }

@@ -765,6 +765,13 @@ struct LeadTeamView: View {
     /// 175314).
     final class Lines {
         private var kept: (rows: [TeamRow], decisions: [LeadDecision], version: Int, rowLines: [String: String], decisionLines: [String: String])?
+        /// The decisions that can have a line (`DecisionFeed.needsSummary`) with their ids, made once a decisions
+        /// list: every summary that comes moves the version, and counting each decision's characters and making its id
+        /// from its whole text again each time showed in a freeze (hang-20261031-003909).
+        private var long: (decisions: [LeadDecision], entries: [(id: String, decision: LeadDecision)])?
+        /// The decision lines last given, in `long`'s order, and by id: the same ones are handed back as they were, so
+        /// the glance finds them equal at once.
+        private var given: (lines: [String?], byID: [String: String])?
         /// How many times the lines were looked up (for tests).
         private(set) var made = 0
 
@@ -776,10 +783,24 @@ struct LeadTeamView: View {
             made += 1
             var rowLines: [String: String] = [:]
             for row in rows { if let line = summary(row) { rowLines[row.id] = line } }
-            var decisionLines: [String: String] = [:]
-            for decision in decisions { if let line = decisionSummary(decision) { decisionLines[decision.id] = line } }
+            let decisionLines = decisionLines(decisions, decisionSummary)
             kept = version.map { (rows, decisions, $0, rowLines, decisionLines) }
             return (rowLines, decisionLines)
+        }
+
+        private func decisionLines(_ decisions: [LeadDecision], _ decisionSummary: (LeadDecision) -> String?) -> [String: String] {
+            if long?.decisions.isSameStorage(as: decisions) != true {
+                // A short one is shown whole (`DecisionFeed.line`): no line is looked up for it.
+                long = (decisions, decisions.filter(DecisionFeed.needsSummary).map { ($0.id, $0) })
+                given = nil
+            }
+            let entries = long!.entries
+            let lines = entries.map { decisionSummary($0.decision) }
+            if let given, given.lines == lines { return given.byID }
+            var byID: [String: String] = [:]
+            for (entry, line) in zip(entries, lines) { if let line { byID[entry.id] = line } }
+            given = (lines, byID)
+            return byID
         }
     }
 

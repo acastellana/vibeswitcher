@@ -8,8 +8,14 @@ import VibeCore
 final class TeamSummaryModel: ObservableObject {
     /// Settings' "AI summaries" switch.
     @Published var enabled = true {
-        didSet { version += 1 }
+        didSet {
+            isOn = enabled
+            version += 1
+        }
     }
+    /// `enabled` as a plain read: the lines look it up for every task and decision on each pass, and a @Published read
+    /// is a dynamic cast each time (`line(LeadDecision)`'s top frame in hang-20261031-003909).
+    private var isOn = true
     /// Counts the changes to what `line` gives (a line come, the switch turned): a view keeps the lines it looked up
     /// while it's the same.
     private(set) var version = 0
@@ -19,6 +25,10 @@ final class TeamSummaryModel: ObservableObject {
     private var needs: [String: Bool] = [:]
     /// How many times a message's need was worked out (for tests).
     private(set) var needsMade = 0
+    /// Each decision's summary key, nil when it's short enough to be shown whole, by its time (and checked against its
+    /// text): counting a decision's characters and making its key from its whole text, for every decision on every
+    /// pass of the Team tab's lines, is worked out once a decision instead.
+    private var decisionKeys: [Double: (text: String, key: String?)] = [:]
     /// What the main thread knows about a team member's session (by host id): its host session, and the transcript
     /// the scan found for its agent.
     var lookup: (String) -> (session: HostSession?, transcript: String?) = { _ in (nil, nil) }
@@ -52,28 +62,38 @@ final class TeamSummaryModel: ObservableObject {
         return needs
     }
 
+    /// `DecisionFeed.summaryKey` of a decision that needs a summary (nil: it doesn't), once a decision.
+    func summaryKey(_ decision: LeadDecision) -> String? {
+        if let known = decisionKeys[decision.at], known.text == decision.text { return known.key }
+        let key = DecisionFeed.needsSummary(decision) ? DecisionFeed.summaryKey(decision) : nil
+        // Every lead's decisions of the app's run, edited ones included: forgotten all at once now and then.
+        if decisionKeys.count >= 4_096 { decisionKeys.removeAll() }
+        decisionKeys[decision.at] = (decision.text, key)
+        return key
+    }
+
     /// The summary of what a row's agent is doing, when there's one (nil: show the fallback).
     func line(_ row: TeamRow) -> String? {
-        guard enabled, let key = row.summaryKey else { return nil }
+        guard isOn, let key = row.summaryKey else { return nil }
         return summarizer.cached(key)
     }
 
     /// The plain summary of a long decision, when there's one.
     func line(_ decision: LeadDecision) -> String? {
-        guard enabled, DecisionFeed.needsSummary(decision) else { return nil }
-        return summarizer.cached(DecisionFeed.summaryKey(decision))
+        guard isOn, let key = summaryKey(decision) else { return nil }
+        return summarizer.cached(key)
     }
 
     /// The TL;DR of a long message VibeSwitcher handed a lead (by its chat entry's id), when there's one.
     func line(_ message: TeamMessage, id: String) -> String? {
-        guard enabled, needsSummary(message, id: id) else { return nil }
+        guard isOn, needsSummary(message, id: id) else { return nil }
         return summarizer.cached(Self.messageKey(id))
     }
 
     /// Asks for a message's TL;DR, once: its text never changes, so the cache never finds it due again (not after
     /// a failure either).
     func request(_ message: TeamMessage, id: String) {
-        guard enabled, needsSummary(message, id: id) else { return }
+        guard isOn, needsSummary(message, id: id) else { return }
         summarizer.line(Self.messageKey(id), fingerprint: "message") { SummaryPrompts.message(message) }
     }
 
@@ -82,7 +102,7 @@ final class TeamSummaryModel: ObservableObject {
     /// Asks for the lines that are due: each task at work (when its agent's transcript changed, at most every three
     /// minutes) and each recent long decision (once).
     func request(rows: [TeamRow], decisions: [LeadDecision]) {
-        guard enabled else { return }
+        guard isOn else { return }
         for row in rows where row.isLive {
             guard let agent = row.agent, let key = row.summaryKey else { continue }
             let known = lookup(agent)
@@ -101,8 +121,9 @@ final class TeamSummaryModel: ObservableObject {
                 }
             }
         }
-        for decision in decisions where DecisionFeed.needsSummary(decision) {
-            summarizer.line(DecisionFeed.summaryKey(decision), fingerprint: decision.text) {
+        for decision in decisions {
+            guard let key = summaryKey(decision) else { continue }
+            summarizer.line(key, fingerprint: decision.text) {
                 SummaryPrompts.decision(decision.text, why: decision.why)
             }
         }

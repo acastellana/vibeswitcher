@@ -435,10 +435,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let canRun = model.selectedRow.map { $0.hostID != nil && actions.isLive($0) && $0.session?.agent == .claude } == true && host.isUsable
         if chat.runner.canRun != canRun { chat.runner.canRun = canRun }
         // Messages steered to this session that are still waiting (also from before a relaunch), and whether its
-        // agent is idle (then they won't be taken by themselves).
+        // agent is idle (then they won't be taken by themselves). Idle by the hook event the store's scan read off the
+        // main thread: this runs each second, and a state file read here stalled the window (hang-20261031-102359).
         if let session = model.selectedRow?.session, session.agent == .claude {
-            chat.watchSteering(tty: session.tty, agentPid: session.pid,
-                               idle: LeadDelivery.way(for: HookState.load(from: VibePaths.stateFile(tty: session.tty))) == .type)
+            chat.watchSteering(tty: session.tty, agentPid: session.pid, idle: LeadDelivery.way(for: session) == .type)
         } else {
             chat.watchSteering(tty: nil, agentPid: nil, idle: false)
         }

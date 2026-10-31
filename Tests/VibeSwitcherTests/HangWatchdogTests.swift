@@ -41,6 +41,9 @@ struct HangWatchdogTests {
         while recovered() == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
         let log = try #require(recovered(), "no report with the stall's length; writes: \(writes.all.count)")
         let lines = log.components(separatedBy: "\n")
+        // The 1-minute load when it got stuck, in the header and in words.
+        #expect(lines[0].contains(" load=") && lines[0].contains(" cpus=\(ProcessInfo.processInfo.activeProcessorCount)"), "\(lines[0])")
+        #expect(lines.contains { $0.hasPrefix("Main thread stuck since ") && $0.contains("; 1-minute load ") }, "\(log)")
         let caught = try #require(lines.first { $0.hasPrefix(AppHealth.caughtTitle) }, "\(log)")
         // Caught from about 0.5 s into it (well before the 2 s it takes to be a stall), on to its end.
         let range = try #require(caught.firstMatch(of: #/from ([\d.]+) s to ([\d.]+) s/#))
@@ -52,6 +55,39 @@ struct HangWatchdogTests {
         #expect(frames.first?.contains("blockTheMainThreadInjected") == true, "\(frames)")
         let hang = AppHealth.hang(name: "hang-x", log: log, sample: nil)
         #expect(hang.caught && (hang.duration ?? 0) >= 2.5, "\(hang)")
+    }
+
+    /// A finished sample is read at utility QoS, whatever thread its end was told on: 2026-10-31, read on the
+    /// user-interactive thread `sample`'s termination handler ran on, it took CPU from an app the Mac was starving.
+    @Test func aSampleIsReadAtUtilityQoS() throws {
+        let file = temp.url("hang-x.txt")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try """
+        Analysis of sampling VibeSwitcher (pid 4242) every 1 millisecond
+        Date/Time:       2026-10-31 00:39:12.345 +0100
+
+        Call graph:
+            300 Thread_100   DispatchQueue_1: com.apple.main-thread  (serial)
+            + 300 start  (in dyld) + 6076  [0x18e0b0274]
+            +   300 mach_msg2_trap  (in libsystem_kernel.dylib) + 8  [0x19b1beb80]
+            300 Thread_101
+        """.write(to: file, atomically: true, encoding: .utf8)
+        final class Read: @unchecked Sendable {
+            var qos: qos_class_t?
+            var start: Date?
+            var spread: AppHealth.Spread?
+        }
+        let read = Read(), done = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInteractive).async {
+            HangWatchdog.read(sample: file) { start, spread in
+                (read.qos, read.start, read.spread) = (qos_class_self(), start, spread)
+                done.signal()
+            }
+        }
+        #expect(done.wait(timeout: .now() + 60) == .success)
+        #expect(read.qos == QOS_CLASS_UTILITY, "\(String(describing: read.qos?.rawValue))")
+        #expect(read.start == Date(timeIntervalSince1970: 1_793_403_552.345))
+        #expect(read.spread == AppHealth.Spread(samples: 300, pcs: 1, top: "mach_msg2_trap", topShare: 1, waiting: 1))
     }
 
     /// Reports are kept a week, up to a total size, the oldest going first: 2026-10-28, the ten newest were all that
