@@ -1,0 +1,320 @@
+#!/bin/bash
+# A stand-in for Passage's `passage` command line between two Macs, on one Mac: two sides, "dev" (VibeSwitcher's) and
+# "vault" (the Wallet Manager's), each with a scratch inbox of its own and a fixed made-up peer ID, each the other's only
+# paired peer. What one side sends lands in the other side's inbox. It never runs Passage, reads the Keychain, touches
+# Passage's real inbox or pairings, or uses the network: a file copy between two scratch folders stands in for the
+# encrypted link (Passage's own tests cover that). scripts/e2e/wallet-e2e.sh runs it, one wrapper per side.
+#
+# Environment (both required):
+#   LOOP_PASSAGE_ROOT  an absolute folder holding dev/ and vault/ (made here as needed); the paths printed are spelled
+#                      from it as given, so give it as the apps are told the inbox (dev/inbox, vault/inbox)
+#   LOOP_PASSAGE_SIDE  dev or vault
+#
+# Commands, output and exit codes as in ~/dev/passage/README.md's command table (the subset both apps call):
+#   send <peer> <file>|- [--name N] [--timeout S]   copies into <other>/inbox/<this side's peer ID>/<UTC>-<name>
+#                                                   (0600, never over a file: -2-, -3-… as Passage), prints
+#                                                   sent<TAB><peer ID><TAB><name><TAB><bytes>; 4 when nobody listens
+#                                                   on the other side within --timeout (default 5)
+#   inbox [peer] [--json]                           this side's inbox, oldest first
+#   peers [--no-discovery] [--json] [--wait S]      the other side; reachable while its `listen` runs
+#   listen [--json]                                 marks this side listening and prints each arrival until SIGTERM
+#   version, help
+# Anything else, --yes included (neither app passes it, and there's no secret check here), exits 2.
+#
+# Faults a run sets, per side (the side that sends):
+#   <side>/fault  one line, taken by the next send (then removed): deliver-then-fail (the file arrives, then exit 1 as
+#                 a connection that dropped before the acknowledgement) or unreachable (nothing arrives, exit 4)
+#   <side>/hold   while it exists every send from this side is unreachable (exit 4): the other Mac is away
+# Each call is logged to <side>/calls, one line of its arguments.
+set -uo pipefail
+
+DEV_PEER=de0e2e01
+VAULT_PEER=0a1b2c3d
+DEV_NAME="Loop dev Mac"
+VAULT_NAME="Loop vault Mac"
+PAIRED_AT="2026-10-31T00:00:00Z"
+MAX_NAME_BYTES=255
+
+usage_text() {
+    cat <<'EOF'
+usage: passage <command> [options]   (scripts/e2e/loop-passage: the loop stand-in, two sides on one Mac)
+
+  peers [--no-discovery] [--json] [--wait S]   paired peers; which ones are reachable now
+  send <peer> <file>|- [--name N] [--timeout S]
+                                              send a file, or text from stdin, to a peer that is listening
+  listen [--json]                             receive from paired peers into the inbox until Ctrl-C
+  inbox [peer] [--json]                       list received messages
+  version
+  help
+
+<peer> is a peer ID (8 hex characters) or a peer's name. Exit codes: 0 ok, 1 failure, 2 usage,
+3 not paired, 4 not reachable.
+EOF
+}
+
+fail() { echo "passage: $*" >&2; exit 1; }
+usage() { echo "passage: $*" >&2; usage_text >&2; exit 2; }
+
+root=${LOOP_PASSAGE_ROOT:-}
+side=${LOOP_PASSAGE_SIDE:-}
+[[ $root == /* && -d $root ]] || fail "LOOP_PASSAGE_ROOT must be an absolute folder (scripts/e2e/loop-passage)"
+case $side in
+    dev) me=$DEV_PEER; other_side=vault; other=$VAULT_PEER; other_name=$VAULT_NAME ;;
+    vault) me=$VAULT_PEER; other_side=dev; other=$DEV_PEER; other_name=$DEV_NAME ;;
+    *) fail "LOOP_PASSAGE_SIDE must be dev or vault" ;;
+esac
+here=$root/$side
+there=$root/$other_side
+umask 077
+mkdir -p "$here/inbox" "$here/listening" "$there/inbox" "$there/listening" || fail "can't make the loop's folders under $root"
+printf '%s\n' "$*" >>"$here/calls"
+
+# A JSON string.
+json() {
+    local s=$1
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\t'/\\t}
+    s=${s//$'\n'/\\n}
+    s=${s//$'\r'/\\r}
+    printf '"%s"' "$s"
+}
+
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# Sets $resolved to the peer a <peer> argument names (only the other side is paired), or exits 3. Not called in $(…):
+# the exit has to end the command.
+resolve_peer() {
+    local spec
+    spec=$(lower "$1")
+    if [[ $spec == "$other" || $spec == "$(lower "$other_name")" ]]; then resolved=$other; return; fi
+    echo "passage: no paired peer named $1" >&2
+    exit 3
+}
+
+# Whether `listen` runs on side $1 (a live pid in its listening/ folder).
+listening() {
+    local file pid
+    for file in "$root/$1/listening"/*; do
+        [[ -f $file ]] || continue
+        pid=$(basename "$file")
+        if [[ $pid =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then return 0; fi
+        rm -f "$file"
+    done
+    return 1
+}
+
+# Passage's InboxName.sanitize: separators, `:` and control characters to `_`, trimmed, no leading dot, at most 128
+# bytes, `unnamed` when nothing's left.
+sanitize() {
+    local name
+    name=$(printf '%s' "$1" | LC_ALL=C tr '/\\:\001-\037\177' '_')
+    name=$(printf '%s' "$name" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    [[ $name == .* ]] && name="_${name#.}"
+    name=$(printf '%s' "$name" | LC_ALL=C cut -c1-128)
+    [[ -n $name ]] || name=unnamed
+    printf '%s' "$name"
+}
+
+# What the sender called a file: its name without the timestamp and any collision counter (Passage's senderName).
+sender_name() {
+    local file=$1 rest
+    [[ $file =~ ^[0-9]{8}T[0-9]{6}Z- ]] || { printf '%s' "$file"; return; }
+    rest=${file:17}
+    [[ $rest =~ ^[0-9]+-(.+)$ ]] && rest=${BASH_REMATCH[1]}
+    [[ -n $rest ]] && printf '%s' "$rest" || printf '%s' "$file"
+}
+
+seconds_ok() { [[ $1 =~ ^[0-9]+([.][0-9]+)?$ ]]; }
+
+# Parses options into: positional (array), json, no_discovery, opt_name, opt_timeout, opt_wait; refuses what $1
+# (the command) doesn't take.
+parse() {
+    local command=$1 takes=$2 max=$3 arg
+    shift 3
+    positional=()
+    json=""; no_discovery=""; opt_name=""; opt_timeout=""; opt_wait=""
+    local have_name="" have_timeout="" have_wait=""
+    while [[ $# -gt 0 ]]; do
+        arg=$1
+        shift
+        case $arg in
+            --json|--no-discovery)
+                [[ " $takes " == *" $arg "* ]] || usage "$command doesn't take $arg"
+                [[ $arg == --json ]] && json=1 || no_discovery=1 ;;
+            --name|--timeout|--wait|--name=*|--timeout=*|--wait=*)
+                local key=${arg%%=*} value
+                if [[ $arg == *=* ]]; then value=${arg#*=}; else
+                    [[ $# -gt 0 ]] || usage "$key needs a value"
+                    value=$1; shift
+                fi
+                [[ " $takes " == *" $key "* ]] || usage "$command doesn't take $key"
+                case $key in
+                    --name) opt_name=$value; have_name=1 ;;
+                    --timeout) seconds_ok "$value" || usage "--timeout needs a number of seconds"; opt_timeout=$value; have_timeout=1 ;;
+                    --wait) seconds_ok "$value" || usage "--wait needs a number of seconds"; opt_wait=$value; have_wait=1 ;;
+                esac ;;
+            -) positional+=("$arg") ;;
+            -*) usage "unknown option $arg" ;;
+            *) positional+=("$arg") ;;
+        esac
+    done
+    if [[ -n $have_name ]]; then
+        local bytes
+        bytes=$(printf '%s' "$opt_name" | LC_ALL=C wc -c | tr -d ' ')
+        ((bytes >= 1 && bytes <= MAX_NAME_BYTES)) || usage "--name must be 1 to $MAX_NAME_BYTES bytes"
+    fi
+    (( ${#positional[@]} <= max )) || usage "$command: unexpected argument ${positional[$max]}"
+}
+
+# Waits up to $1 seconds for `listen` on the other side.
+wait_for_listener() {
+    local deadline
+    deadline=$(awk -v s="$1" 'BEGIN { printf "%d", s * 10 }')
+    local tenths=0
+    until listening "$other_side"; do
+        ((tenths >= deadline)) && return 1
+        sleep 0.1
+        tenths=$((tenths + 1))
+    done
+}
+
+cmd_send() {
+    parse send "--name --timeout" 2 "$@"
+    (( ${#positional[@]} == 2 )) || usage "send needs a peer and a file (or - for stdin)"
+    local peer source=${positional[1]} name tmp bytes
+    resolve_peer "${positional[0]}"
+    peer=$resolved
+    tmp=$(mktemp "$here/.sending.XXXXXX") || fail "can't make a file under $here"
+    if [[ $source == - ]]; then
+        cat >"$tmp" || { rm -f "$tmp"; fail "can't read stdin"; }
+        name=${opt_name:-stdin}
+    else
+        [[ -e $source ]] || { rm -f "$tmp"; fail "no such file: $source"; }
+        [[ -d $source ]] && { rm -f "$tmp"; fail "$source is a directory"; }
+        cat <"$source" >"$tmp" 2>/dev/null || { rm -f "$tmp"; fail "can't read $source"; }
+        name=${opt_name:-$(basename "$source")}
+    fi
+    name=$(sanitize "$name")
+    bytes=$(wc -c <"$tmp" | tr -d ' ')
+
+    local fault=""
+    if [[ -f $here/fault ]] && mv "$here/fault" "$here/fault.taken.$$" 2>/dev/null; then
+        fault=$(head -1 "$here/fault.taken.$$" | tr -d '[:space:]')
+        rm -f "$here/fault.taken.$$"
+    fi
+    if [[ -e $here/hold || $fault == unreachable ]] || ! wait_for_listener "${opt_timeout:-5}"; then
+        rm -f "$tmp"
+        echo "passage: $other_name ($peer) is not reachable on the local network. Is \`passage listen\` running there?" >&2
+        exit 4
+    fi
+
+    # Into place under a free name: `ln` never replaces a file, so a name taken (the same second) moves on to -2-, -3-…
+    local folder=$there/inbox/$me stamp final counter=1
+    mkdir -p "$folder" && chmod 700 "$there/inbox" "$folder" || { rm -f "$tmp"; fail "the inbox couldn't store the message"; }
+    chmod 600 "$tmp"
+    stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    while :; do
+        if ((counter == 1)); then final=$folder/$stamp-$name; else final=$folder/$stamp-$counter-$name; fi
+        ln "$tmp" "$final" 2>/dev/null && break
+        counter=$((counter + 1))
+        ((counter > 10000)) && { rm -f "$tmp"; fail "the inbox couldn't store the message"; }
+    done
+    rm -f "$tmp"
+    printf '%s\t%s\t%s\n' "$me" "$name" "$final" >>"$there/received.log"
+
+    if [[ $fault == deliver-then-fail ]]; then
+        echo "passage: the peer closed the connection (it doesn't accept this pairing, or the handshake failed)" >&2
+        exit 1
+    fi
+    printf 'sent\t%s\t%s\t%s\n' "$peer" "$name" "$bytes"
+}
+
+cmd_inbox() {
+    parse inbox "--json" 1 "$@"
+    local folders=() spec
+    if (( ${#positional[@]} == 1 )); then
+        spec=$(lower "${positional[0]}")
+        if [[ $spec =~ ^[0-9a-f]{8}$ ]]; then folders=("$spec")   # an unpaired peer's folder is still listable by ID
+        else resolve_peer "${positional[0]}"; folders=("$resolved"); fi
+    else
+        local dir
+        for dir in "$here/inbox"/*; do [[ -d $dir ]] && folders+=("$(basename "$dir")"); done
+    fi
+    local peer file base
+    # Oldest first: the file names start with the UTC time; the same second ties by name.
+    for peer in ${folders[@]+"${folders[@]}"}; do
+        for file in "$here/inbox/$peer"/*; do
+            [[ -f $file && ! -L $file && $file != *.partial ]] || continue
+            base=$(basename "$file")
+            printf '%s\t%s\t%s\n' "$base" "$peer" "$file"
+        done
+    done | LC_ALL=C sort -t $'\t' -k1,1 -k2,2 | while IFS=$'\t' read -r base peer file; do
+        local size received name
+        size=$(stat -f %z "$file")
+        name=$(sender_name "$base")
+        received=""
+        [[ $base =~ ^([0-9]{8}T[0-9]{6}Z)- ]] && received=${BASH_REMATCH[1]}
+        if [[ -n $json ]]; then
+            printf '{"name":%s,"path":%s,"peerID":%s,"receivedAt":%s,"size":%s}\n' "$(json "$name")" "$(json "$file")" \
+                "$(json "$peer")" "$([[ -n $received ]] && json "$received" || echo null)" "$size"
+        else
+            printf '%s\t%s\t%s\t%s\n' "$peer" "${received:--}" "$size" "$file"
+        fi
+    done
+}
+
+cmd_peers() {
+    parse peers "--no-discovery --json --wait" 0 "$@"
+    local reachable=null mark=paired
+    if [[ -z $no_discovery ]]; then
+        if wait_for_listener "${opt_wait:-2}"; then reachable=true; mark=reachable; else reachable=false; mark=unreachable; fi
+    fi
+    if [[ -n $json ]]; then
+        printf '{"name":%s,"pairedAt":%s,"peerID":%s,"reachable":%s}\n' "$(json "$other_name")" "$(json "$PAIRED_AT")" "$(json "$other")" "$reachable"
+    else
+        printf '%s\t%s\t%s\n' "$other" "$mark" "$other_name"
+    fi
+}
+
+cmd_listen() {
+    parse listen "--json" 0 "$@"
+    local log=$here/received.log marker=$here/listening/$$ seen sleeper=""
+    touch "$log"
+    seen=$(wc -l <"$log" | tr -d ' ')
+    : >"$marker"
+    trap 'rm -f "$marker"; [[ -n $sleeper ]] && kill "$sleeper" 2>/dev/null; echo "stopped listening" >&2; exit 0' TERM INT
+    echo "listening on port 0 for paired peers (Ctrl-C stops)" >&2
+    while :; do
+        local total
+        total=$(wc -l <"$log" | tr -d ' ')
+        if ((total > seen)); then
+            tail -n +"$((seen + 1))" "$log" | head -n "$((total - seen))" | while IFS=$'\t' read -r peer name path; do
+                if [[ -n $json ]]; then
+                    printf '{"name":%s,"path":%s,"peerID":%s}\n' "$(json "$name")" "$(json "$path")" "$(json "$peer")"
+                else
+                    printf '%s\t%s\t%s\n' "$peer" "$name" "$path"
+                fi
+            done
+            seen=$total
+        fi
+        # Waited on in the background, so SIGTERM is taken at once.
+        sleep 0.2 &
+        sleeper=$!
+        wait "$sleeper"
+        sleeper=""
+    done
+}
+
+[[ $# -gt 0 ]] || usage "no command"
+command=$1
+shift
+case $command in
+    send) cmd_send "$@" ;;
+    inbox) cmd_inbox "$@" ;;
+    peers) cmd_peers "$@" ;;
+    listen) cmd_listen "$@" ;;
+    version|--version) parse version "" 0 "$@"; echo "passage 1.0" ;;
+    help|--help|-h) usage_text ;;
+    *) usage "unknown command $command" ;;
+esac
