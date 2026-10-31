@@ -129,6 +129,31 @@ final class HeavySlotsWatch: @unchecked Sendable {
     }
 }
 
+/// `LeadWitness.Power` and what it has told, looked at off the main thread (`LeadController.lookAtPower`), one look at
+/// a time. The limit in Settings is the main thread's (`Preferences`): it's read there as each look starts and handed in.
+final class PowerLook: @unchecked Sendable {
+    private var power: LeadWitness.Power?
+    private let lock = NSLock()
+    /// Under `lock`: the limit handed to the look under way.
+    private var limit = PowerWatch.defaultLimit
+    /// How many looks, and how many of them on the main thread (for tests).
+    private(set) var looks = 0
+    private(set) var lookedOnMain = 0
+
+    init(read: @escaping () -> PowerState?, file: URL = PowerState.file) {
+        power = LeadWitness.Power(read: read, limit: { [unowned self] in self.limit }, file: file)
+    }
+
+    func look(limit: Int) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        looks += 1
+        if Thread.isMainThread { lookedOnMain += 1 }
+        self.limit = limit
+        return power?.look()
+    }
+}
+
 /// What the witness reads of a lead's team at each look, on `LeadReads`' queue: a team's transcripts are a few hundred
 /// KB each to parse (thirty of them froze the window when read on the main thread). The sessions as they were when the
 /// look began, what each member it watches is doing (`LeadObserver.watching`), the oldest message waiting for each
@@ -313,7 +338,9 @@ final class LeadController: ObservableObject {
     /// The Mac's power source, read once a minute: a hold under the battery limit in Settings, and the resume after
     /// it, is told to every running lead (see `LeadWitness.Power`). None until the app gives it the reader
     /// (`watchPower`): benches and tests read nothing.
-    private var power: LeadWitness.Power?
+    private(set) var power: PowerLook?
+    /// The limit in Settings, read on the main thread at each look.
+    private var powerLimit: () -> Int = { PowerWatch.defaultLimit }
     private var powerTimer: Heartbeat.Subscription?
     /// The working policy in Settings › Project lead, told to each running lead once when it changes and once when
     /// this build first runs (see `LeadWitness.PolicyWatch`); none until the app starts it (`watchPolicy`).
@@ -1303,9 +1330,10 @@ final class LeadController: ObservableObject {
     }
 
     /// Reads the power source with `read` once a minute from now on (the first a minute in: the host has said which
-    /// leads run by then), holding work below `limit` (the setting, read at each look).
-    func watchPower(limit: @escaping () -> Int, _ read: @escaping () -> PowerState?) {
-        power = LeadWitness.Power(read: read, limit: limit)
+    /// leads run by then), holding work below `limit` (the setting, read at each look); each reading is kept in `file`.
+    func watchPower(limit: @escaping () -> Int, file: URL = PowerState.file, _ read: @escaping () -> PowerState?) {
+        power = PowerLook(read: read, file: file)
+        powerLimit = limit
         powerTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtPower() }
     }
 
@@ -1375,9 +1403,13 @@ final class LeadController: ObservableObject {
         }
     }
 
-    /// A hold on battery, or the resume after one: to each running lead, as the witness.
-    func lookAtPower() {
-        guard let text = power?.look() else { return }
+    /// A hold on battery, or the resume after one: to each running lead, as the witness. `then` hears on the main
+    /// thread what was told, once the look is done (nil: nothing to tell; tests).
+    func lookAtPower(then: @escaping (String?) -> Void = { _ in }) {
+        guard let watch = power else { return then(nil) }
+        let text = watch.look(limit: powerLimit())
+        defer { then(text) }
+        guard let text else { return }
         for root in leadRoots {
             deliver(text, from: .system("witness"), root: root)
             // The lead's tool server looks again at what it held (see `LeadAdvance`).
