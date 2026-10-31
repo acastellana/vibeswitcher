@@ -223,15 +223,51 @@ final class AppHealthWatcher: @unchecked Sendable {
 
     // MARK: Memory
 
-    /// The app's own footprint now and its peak (`task_vm_info` of this process), against its footprint when this
-    /// reader was made (at launch).
-    static func memoryReader() -> () -> AppHealth.Memory? {
-        let launched = Date()
-        let atLaunch = ownFootprint()?.now ?? 0
+    /// The app's own footprint now and its peak (`task_vm_info` of this process), against the footprint it settled at
+    /// (`AppHealth.Settling`: read once a minute, off the main thread, in the hour after this reader was made at launch).
+    static func memoryReader(footprint: @escaping @Sendable () -> (now: Double, peak: Double)? = { ownFootprint() }) -> () -> AppHealth.Memory? {
+        let settling = Settling(launched: Date(), footprint: footprint)
+        settling.start()
         return {
-            guard let reading = ownFootprint() else { return nil }
-            return AppHealth.Memory(footprint: reading.now, peak: reading.peak, atLaunch: atLaunch, launched: launched)
+            guard let reading = footprint() else { return nil }
+            return AppHealth.Memory(footprint: reading.now, peak: reading.peak, settled: settling.settled, launched: settling.launched)
         }
+    }
+
+    /// `AppHealth.Settling`'s readings, once a minute on a queue of its own until it's done.
+    final class Settling: @unchecked Sendable {
+        let launched: Date
+        private let footprint: @Sendable () -> (now: Double, peak: Double)?
+        private let queue = DispatchQueue(label: "vibeswitcher.memory-settling", qos: .utility)
+        private var settling: AppHealth.Settling
+        private var timer: DispatchSourceTimer?
+
+        init(launched: Date, footprint: @escaping @Sendable () -> (now: Double, peak: Double)?) {
+            self.launched = launched
+            self.footprint = footprint
+            settling = AppHealth.Settling(launched: launched)
+        }
+
+        var settled: AppHealth.Memory.Settled? { queue.sync { settling.settled } }
+
+        func start() {
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(wallDeadline: .now() + AppHealth.Settling.from, repeating: 60, leeway: .seconds(10))
+            timer.setEventHandler { [weak self] in self?.read(now: Date()) }
+            timer.resume()
+            self.timer = timer
+        }
+
+        /// A reading (on its queue; tests call it with their own clock); the timer ends once no more are wanted.
+        func read(now: Date) {
+            if let reading = footprint() { settling.read(reading.now, now: now) }
+            if !settling.wants(now: now) {
+                timer?.cancel()
+                timer = nil
+            }
+        }
+
+        deinit { timer?.cancel() }
     }
 
     /// This process's footprint and its peak, in MB.

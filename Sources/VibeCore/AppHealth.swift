@@ -19,7 +19,7 @@ public enum AppHealth {
     public static let repeatWithin: TimeInterval = 24 * 3600
     /// The programs whose crash reports are VibeSwitcher's.
     public static let programs = ["VibeSwitcher", "vibeswitcher-host", "vibeswitcher-mcp"]
-    /// Memory growing at least this fast (MB an hour), over at least `growthAfter` since launch, is worth a trend line
+    /// Memory growing at least this fast (MB an hour), over at least `growthAfter` since it settled, is worth a trend line
     /// on a day with nothing else.
     public static let worryingGrowth: Double = 25
     public static let growthAfter: TimeInterval = 2 * 3600
@@ -669,25 +669,70 @@ public enum AppHealth {
         }
     }
 
-    /// The app's memory as it reads it now: its footprint, its peak since launch, and its footprint at launch (MB).
+    /// The app's memory as it reads it now: its footprint, its peak since launch, and the footprint it settled at (MB).
     public struct Memory: Equatable, Sendable {
         public var footprint: Double
         public var peak: Double
-        public var atLaunch: Double
+        /// The footprint it settled at once its window, sessions and chats had loaded (`Settling`), and when; nil before.
+        /// Growth is counted from here, not from launch: the footprint read at launch (~30 MB, before anything loaded)
+        /// made the climb to a day's working set in its first minutes read as growth all day (10-30: "+28 MB an hour"
+        /// over 6 h, while each relief's floor went 149 → 182 MB in that time and the last two hours 182 → 186).
+        public var settled: Settled?
         public var launched: Date
 
-        public init(footprint: Double, peak: Double, atLaunch: Double, launched: Date) {
+        public struct Settled: Equatable, Sendable {
+            public var footprint: Double
+            public var at: Date
+
+            public init(footprint: Double, at: Date) {
+                self.footprint = footprint
+                self.at = at
+            }
+        }
+
+        public init(footprint: Double, peak: Double, settled: Settled?, launched: Date) {
             self.footprint = footprint
             self.peak = peak
-            self.atLaunch = atLaunch
+            self.settled = settled
             self.launched = launched
         }
 
-        /// MB an hour since launch; nil before `growthAfter`.
+        /// MB an hour since it settled; nil before it had, or less than `growthAfter` since.
         public func growth(now: Date) -> Double? {
-            let hours = now.timeIntervalSince(launched) / 3600
-            guard now.timeIntervalSince(launched) >= AppHealth.growthAfter else { return nil }
-            return (footprint - atLaunch) / hours
+            guard let settled, now.timeIntervalSince(settled.at) >= AppHealth.growthAfter else { return nil }
+            return (footprint - settled.footprint) / (now.timeIntervalSince(settled.at) / 3600)
+        }
+    }
+
+    /// The footprint the app settles at: the least read (once a minute) between `from` and `until` after launch, once
+    /// the window, its sessions and chats have loaded and malloc has given its free pages back (`FootprintRelief`). The
+    /// least, as a terminal's GPU memory or a transcript being read lifts a reading for a moment.
+    public struct Settling: Equatable, Sendable {
+        public static let from: TimeInterval = 30 * 60
+        public static let until: TimeInterval = 60 * 60
+
+        public let launched: Date
+        public private(set) var settled: Memory.Settled?
+
+        public init(launched: Date) {
+            self.launched = launched
+        }
+
+        /// Whether readings are still taken: until `until` after launch, or later until one came (the Mac asleep
+        /// through the window).
+        public func wants(now: Date) -> Bool { now.timeIntervalSince(launched) < Self.until || settled == nil }
+
+        /// A reading at `now`: kept when it's in the window and the least so far, or the first after the window
+        /// when none came in it.
+        public mutating func read(_ footprint: Double, now: Date) {
+            let since = now.timeIntervalSince(launched)
+            guard since >= Self.from else { return }
+            if since >= Self.until {
+                if settled == nil { settled = Memory.Settled(footprint: footprint, at: now) }
+                return
+            }
+            guard footprint < settled?.footprint ?? .infinity else { return }
+            settled = Memory.Settled(footprint: footprint, at: now)
         }
     }
 
@@ -931,7 +976,9 @@ public enum AppHealth {
             if let memory {
                 let hours = now.timeIntervalSince(memory.launched) / 3600
                 parts.append(String(format: "Memory now: footprint %.0f MB, peak %.0f MB since launch %.0f h ago", memory.footprint, memory.peak, hours)
-                             + (growth.map { String(format: ", %@%.0f MB an hour since launch", $0 >= 0 ? "+" : "", $0) } ?? "")
+                             + (growth.flatMap { growth in memory.settled.map {
+                                 String(format: ", %@%.0f MB an hour since it settled at %.0f MB", growth >= 0 ? "+" : "", growth, $0.footprint)
+                             } } ?? "")
                              + (growing ? " (growing: worth a look)." : "."))
             }
             if !repeats.isEmpty {

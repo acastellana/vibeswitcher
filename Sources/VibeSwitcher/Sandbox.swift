@@ -253,6 +253,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
     var sheetName: String?
     /// The phone's web app, once `phone` serves it.
     var phone: PhoneAccess?
+    /// The day's actions on a timer, while `soak` runs them.
+    var soakRun: SoakRun?
     /// What the drive asked for that the sandbox doesn't do (Terminal, a real agent, an alert).
     var refused: [String] = []
     private var cancellables: Set<AnyCancellable> = []
@@ -853,6 +855,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
+        ("soak [MINUTES [every SECONDS] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. LIST leaves out sessions, stream, dictation, team, ax, reports. With no MINUTES: the log so far"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
@@ -1284,6 +1287,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "extras": extras { problem in reply(problem == nil, problem ?? "the lead's board has a proposal, a revised question, an all-done card and results") }
         case "phone": servePhone(reply)
         case "dictation": dictate(rest, reply)
+        case "soak": soak(rest, reply)
         case "select":
             guard let row = WindowGroups.filter(model.sections, query: rest).first?.rows.first else { return reply(false, "no row matches \(rest)") }
             model.selectedID = row.id
@@ -1605,6 +1609,238 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
         }
         take([("light", .aqua), ("dark", .darkAqua)][...])
+    }
+}
+
+// MARK: Soak
+
+/// `soak`'s run: what it leaves out, its timers, its log (STATE/soak.log) and its minutes' samples.
+final class SoakRun {
+    let minutes: Double
+    let every: Double
+    let without: Set<String>
+    let log: URL
+    let started = Date()
+    let relief = FootprintRelief()
+    var timers: [Heartbeat.Subscription] = []
+    var cycles = 0
+    var minute = 0
+    var least = Double.infinity
+    var baseline: HeapCensus.Result?
+    var running = true
+    /// Each minute's least footprint (MB).
+    var floors: [Double] = []
+
+    init(minutes: Double, every: Double, without: Set<String>, log: URL) {
+        self.minutes = minutes
+        self.every = every
+        self.without = without
+        self.log = log
+    }
+
+    func note(_ line: String) {
+        let stamped = String(format: "%6.1f min  ", Date().timeIntervalSince(started) / 60) + line + "\n"
+        if let handle = try? FileHandle(forWritingTo: log) {
+            handle.seekToEndOfFile()
+            handle.write(Data(stamped.utf8))
+            try? handle.close()
+        } else {
+            try? VibePaths.writePrivate(Data(stamped.utf8), to: log)
+        }
+    }
+}
+
+extension Driver {
+    /// `soak MINUTES [every SECONDS] [without LIST]`, `soak stop`, `soak` (the log so far).
+    func soak(_ rest: String, _ reply: @escaping (Bool, String) -> Void) {
+        let words = rest.split(separator: " ").map(String.init)
+        let log = state.appendingPathComponent("soak.log")
+        if words.isEmpty { return reply(true, (try? String(contentsOf: log, encoding: .utf8)) ?? "no soak run yet") }
+        if words == ["stop"] {
+            soakFinish()
+            return reply(true, "stopped")
+        }
+        guard soakRun == nil, let minutes = Double(words[0]), minutes > 0 else {
+            return reply(false, soakRun == nil ? "soak MINUTES [every SECONDS] [without LIST]" : "a soak is running (soak stop)")
+        }
+        func value(_ flag: String) -> String? { words.firstIndex(of: flag).flatMap { words.indices.contains($0 + 1) ? words[$0 + 1] : nil } }
+        let run = SoakRun(minutes: minutes, every: max(5, value("every").flatMap(Double.init) ?? 20),
+                          without: Set((value("without") ?? "").split(separator: ",").map(String.init)), log: log)
+        soakRun = run
+        run.note("soak: \(minutes) minutes, a cycle every \(run.every) s" + (run.without.isEmpty ? "" : ", without \(run.without.sorted().joined(separator: ", "))"))
+        // As the app runs it: malloc's free pages given back once the footprint grew 24 MB (the sandbox is never frontmost).
+        run.relief.start()
+        run.timers.append(Heartbeat.shared.every(5) { [weak run] in
+            guard let run, let now = AppHealthWatcher.ownFootprint()?.now else { return }
+            run.least = min(run.least, now)
+        })
+        run.timers.append(Heartbeat.shared.every(60) { [weak self] in self?.soakMinute() })
+        soakCycle()
+        reply(true, "soaking for \(minutes) minutes: STATE/soak.log")
+    }
+
+    /// The minute's line: the footprint, malloc's, and the per-session state's counts; what grew by class at minute 2
+    /// (the baseline) and every 30 minutes.
+    private func soakMinute() {
+        guard let run = soakRun else { return }
+        run.minute += 1
+        var stats = malloc_statistics_t()
+        malloc_zone_statistics(nil, &stats)
+        let now = AppHealthWatcher.ownFootprint()?.now ?? 0
+        let floor = min(run.least, now)
+        run.least = .infinity
+        run.floors.append(floor)
+        let reliefs = run.relief.made
+        run.note(String(format: "minute %3d  footprint %6.1f MB (least %6.1f)  malloc in use %6.1f MB  ", run.minute, now, floor,
+                        Double(stats.size_in_use) / 1_048_576)
+                 + "cycles \(run.cycles)  fakes \(fakeList.count)  host sessions \(host.sessions.count)  rows \(store.sessions.count)  "
+                 + "chats \(IdleBench.Live.chats.map(String.init) ?? "n/a")  terminal views \(IdleBench.Live.views.map(String.init) ?? "n/a")  "
+                 + "dictation runs \(dictation.runs.count) notices \(dictation.notices.count) deliveries \(dictation.deliveries.count) "
+                 + "turning on \(dictation.turningOn.count)  reliefs \(reliefs.reliefs)")
+        if run.minute == 2 || run.minute % 30 == 0 { soakCensus(run) }
+        if Double(run.minute) >= run.minutes { soakFinish() }
+    }
+
+    private func soakCensus(_ run: SoakRun) {
+        DispatchQueue.global().async {
+            let census = HeapCensus.take()
+            DispatchQueue.main.async {
+                guard let baseline = run.baseline else {
+                    run.baseline = census
+                    return run.note(String(format: "census: %ld blocks, %.1f MB (the baseline)", census.total.blocks, Double(census.total.bytes) / 1_048_576))
+                }
+                run.note(String(format: "census: %ld blocks, %.1f MB; grew since minute 2:", census.total.blocks, Double(census.total.bytes) / 1_048_576))
+                for row in HeapCensus.growth(from: baseline, to: census, top: 25) {
+                    run.note(String(format: "  %-70@ %+8.2f MB %+8ld blocks (%ld → %ld)", String(row.name.prefix(70)) as NSString,
+                                    Double(row.after.bytes - row.before.bytes) / 1_048_576, row.after.blocks - row.before.blocks,
+                                    row.before.blocks, row.after.blocks))
+                }
+            }
+        }
+    }
+
+    private func soakFinish() {
+        guard let run = soakRun, run.running else { return }
+        run.running = false
+        run.timers.forEach { $0.cancel() }
+        run.timers = []
+        soakCensus(run)
+        // A least-squares line through each minute's least footprint after the first 10 (the caches filling).
+        let points = Array(run.floors.enumerated().dropFirst(10))
+        if points.count >= 3 {
+            let meanX = points.map { Double($0.offset) }.reduce(0, +) / Double(points.count)
+            let meanY = points.map(\.element).reduce(0, +) / Double(points.count)
+            let spread = points.reduce(0.0) { $0 + pow(Double($1.offset) - meanX, 2) }
+            let slope = points.reduce(0.0) { $0 + (Double($1.offset) - meanX) * ($1.element - meanY) } / spread
+            run.note(String(format: "RESULT soak-growth-mb-per-hour %.1f (each minute's least, minutes 11-%d; %.1f → %.1f MB)", slope * 60,
+                            run.floors.count, points.first?.element ?? 0, points.last?.element ?? 0))
+        }
+        run.note("soak: done after \(run.cycles) cycles")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            if self?.soakRun === run { self?.soakRun = nil }
+        }
+    }
+
+    /// One cycle of the day's actions, each step after the last one's answer; the next cycle `every` seconds after this
+    /// one started.
+    private func soakCycle() {
+        guard let run = soakRun, run.running else { return }
+        run.cycles += 1
+        let cycle = run.cycles, off = run.without
+        let began = Date()
+        typealias Step = (name: String, run: (@escaping (Bool, String) -> Void) -> Void)
+        func command(_ words: String...) -> Step { (words.joined(separator: " "), { [weak self] in self?.handle(words, reply: $0) }) }
+        var steps: [Step] = []
+        let label = "Soak \(cycle)"
+        if !off.contains("sessions") {
+            steps.append(command("new", label))
+            steps.append(command("chat", label))
+        } else {
+            steps.append(command("chat", "Fake Claude"))
+        }
+        if !off.contains("stream") {
+            let reply = (0..<12).map { "Step \(cycle).\($0): the change reads the board once, keeps its rows, and the tests pass." }
+                .joined(separator: "\n\n") + "\n\n```swift\nlet rows = TeamRows.rows(board, seen: seen) // \(cycle)\n```"
+            let done = (try? JSONSerialization.data(withJSONObject: ["op": "done", "reply": reply])).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            steps += [command("type", "Cycle \(cycle): run the tests and tell me what changed"), command("send"),
+                      command("tell", #"{"op": "work"}"#), command("tell", done)]
+            steps.append(("poll", { [weak self] done in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self?.window?.chat.poll(); done(true, "") }
+            }))
+        }
+        if !off.contains("dictation") {
+            steps += [command("tell", #"{"op": "voice", "mode": "hold", "transcript": "run the tests on the composer"}"#),
+                      command("dictation", "press"), command("dictation", "release")]
+        }
+        if !off.contains("team") {
+            let leadUp = fakeList.contains { $0.label.hasPrefix("Lead · ") }
+            steps.append(command("lead"))
+            steps.append(("team tab", { done in
+                UserDefaults.standard.set(cycle % 2 == 0 ? "team" : "overview", forKey: "inspectorTab")
+                done(true, "")
+            }))
+            if leadUp {
+                if let worker = fakeList.first(where: { $0.label.hasPrefix("Worker: ") }) {
+                    if cycle % 4 == 0 { steps.append(("end worker", { [weak self] in self?.soakEnd([worker.id], $0) })) }
+                } else {
+                    steps.append(command("team"))
+                }
+                steps.append(command("unfold"))
+            }
+            if !off.contains("reports"), leadUp { steps.append(command("churn", "3")) }
+        }
+        if !off.contains("ax") {
+            steps.append(("ax", { [weak self] done in
+                guard let window = self?.window?.window else { return done(false, "no window") }
+                done(true, "\(Self.soakAttach(window)) hosts attached, \(AXClient.walk(window)) elements")
+            }))
+        }
+        if !off.contains("sessions") {
+            steps.append(("end oldest", { [weak self] done in
+                guard let self else { return done(true, "") }
+                let soaked = self.fakeList.filter { $0.label.hasPrefix("Soak ") }
+                    .sorted { (Int($0.label.dropFirst(5)) ?? 0) < (Int($1.label.dropFirst(5)) ?? 0) }
+                self.soakEnd(soaked.dropLast(3).map(\.id), done)
+            }))
+        }
+        func next(_ rest: ArraySlice<Step>) {
+            guard let run = soakRun, run.running else { return }
+            guard let step = rest.first else {
+                let wait = max(0.5, run.every - Date().timeIntervalSince(began))
+                DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in self?.soakCycle() }
+                return
+            }
+            Sandbox.doing = "soak: \(step.name)"
+            step.run { [weak run] ok, text in
+                if !ok { run?.note("cycle \(cycle): \(step.name.prefix(60)) failed: \(text.prefix(200))") }
+                DispatchQueue.main.async { next(rest.dropFirst()) }
+            }
+        }
+        next(steps[...])
+    }
+
+    /// Hosting views an accessibility client was attached to: each one once (a new one, a newly shown chat's, too).
+    private static let attached = NSHashTable<NSView>.weakObjects()
+
+    private static func soakAttach(_ window: NSWindow) -> Int {
+        AXClient.attach(window) { view in
+            guard !attached.contains(view) else { return false }
+            attached.add(view)
+            return true
+        }
+    }
+
+    /// Ends the sessions and removes them, as End Session and then removing its row do.
+    private func soakEnd(_ ids: [UUID], _ done: @escaping (Bool, String) -> Void) {
+        guard !ids.isEmpty else { return done(true, "") }
+        ids.forEach(host.kill)
+        waitFor({ [weak self] in self?.host.sessions.allSatisfy { !ids.contains($0.id) || !$0.isLive } ?? true }) { [weak self] _ in
+            guard let self else { return done(true, "") }
+            for id in ids { self.window?.pane.forget(id); self.host.remove(id) }
+            self.waitFor({ !self.host.sessions.contains { ids.contains($0.id) } }) { gone in
+                done(gone, gone ? "" : "\(ids.count) sessions not removed")
+            }
+        }
     }
 }
 
