@@ -2397,3 +2397,7 @@
 - 2026-10-31 22:35 Automatically (auto_advance): Started a worker on wallet-e2e-sh-refreshes (wallet-e2e.sh refreshes the Wallet Manager's node_modules when its lockfile is newer), its after tasks done (local-end-to-end).
 - 2026-10-31 22:35 Started a worker on wallet-requests-work
 - 2026-10-31 22:35 Automatically (auto_advance): Started a worker on wallet-requests-work (Wallet requests work without a Wallet Manager chosen: the card offers the browser wallet).
+- 2026-10-31 22:56 Raised wallet-e2e-sh-refreshes to audit (the risk check, at 06369048): it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$npm_log")
+- 2026-10-31 22:56 Automatically (auto_advance): wallet-e2e-sh-refreshes is audited, not merged: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$npm_log") (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-10-31 22:59 Automatically (auto_advance): Started the audit of wallet-e2e-sh-refreshes at 06369048 (Its review is audit. (audited: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$npm_log"), as the risk check found.)).
+- 2026-10-31 22:59 Automatically (auto_advance): Started the audit of wallet-requests-work at 882b99f9 (Its review is audit).
