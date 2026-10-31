@@ -2406,3 +2406,11 @@
 - 2026-10-31 23:21 Merged wallet-e2e-sh-refreshes: wallet-e2e.sh refreshes the Wallet Manager's node_modules when its lockfile is newer
 - 2026-10-31 23:21 Automatically (auto_advance): Merged wallet-e2e-sh-refreshes (wallet-e2e.sh refreshes the Wallet Manager's node_modules when its lockfile is newer) into main at 62221c68, on its passing audit and the full test run.
 - 2026-10-31 23:29 Merged wallet-requests-work: Wallet requests work without a Wallet Manager chosen: the card offers the browser wallet
+- 2026-10-31 23:29 Automatically (auto_advance): Merged wallet-requests-work (Wallet requests work without a Wallet Manager chosen: the card offers the browser wallet) into main at 308a5fcc, on its passing audit and the full test run.
+- 2026-10-31 23:29 Automatically (auto_advance): Cleaned up wallet-e2e-sh-refreshes (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-10-31 23:30 Automatically (auto_advance): Cleaned up wallet-requests-work; ended pid 48092 (Worker: Wallet requests work without a Wallet Manager chosen: the card offers the browser wallet) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-10-31 23:30 Update: Today: wallet requests end to end, a browser-wallet fallback, and five reliability fixes — **Landed (all audited, full suite at each merge)**
+- 2026-10-31 23:30 Planned verifiers-don-t-run: Verifiers don't run a full suite of their own: the merge's run is the one full suite (review audit)
+- 2026-10-31 23:30 Started a worker on verifiers-don-t-run
+- 2026-10-31 23:30 Automatically (auto_advance): Started a worker on verifiers-don-t-run (Verifiers don't run a full suite of their own: the merge's run is the one full suite).
+- 2026-10-31 23:30 Update: Retrospective: wallet requests batch (2026-10-31) — **Went well**

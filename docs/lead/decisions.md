@@ -183,3 +183,7 @@ User's call, 2026-10-31. Two unrelated things were both called "vault" in VibeSw
 
 User, 2026-10-31: the vault Mac isn't at hand, so test everything locally; the GitHub transfer is later, at the end. Passage can't pair a Mac with itself, and the rules forbid touching real pairings, so the loop stands in for the transport.
 
+## 2026-10-31 23:30:46 From the 2026-10-31 wallet batch retrospective. (1) Before building a feature that integrates with another app or a second Mac, the lead first checks the real environment on this Mac: the other app's CLI on the PATH or in /Applications and how it's invoked, the names VibeSwitcher already uses, and what happens with nothing set up. The plan covers each case (task contexts name it). Today three follow-up tasks came from skipping that: the vault/wallet name clash, Passage.app not on the PATH, and no fallback without a Wallet Manager. (2) Verifiers stop running a full suite of their own, and the merge's run is the one full suite (task verifiers-don-t-run-a, with verifier-eval). (3) Cross-project work runs through the other project's lead by cross-session message, with the shared contract (docs/protocol and vectors) and an on-demand end-to-end script both sides can run.
+
+The batch landed (13 tasks, no reverts, 2 incidents turned into checks). But three tasks were rework from environment facts that one look would have shown, and doubled full-suite runs added to a load the user complained about.
+
