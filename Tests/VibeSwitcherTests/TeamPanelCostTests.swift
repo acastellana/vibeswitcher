@@ -375,6 +375,50 @@ struct TeamPanelCostTests {
         #expect(watch.looks == 1 && watch.lookedOnMain == 0)
     }
 
+    // MARK: VibePaths.writePrivate < LeadWitness.Power.look < LeadController.lookAtPower (hang-20261031-193728)
+
+    @Test func thePowerIsLookedAtOffTheMainThread() async throws {
+        let controller = try controller()
+        // A read (and the reading's write after it) that a slow disk holds until the test lets it go.
+        let entered = DispatchSemaphore(value: 0)
+        let gate = DispatchSemaphore(value: 0)
+        let ended = Flag()
+        controller.watchPower(limit: { 50 }, file: temp.url("team-panel-cost-power.json")) {
+            entered.signal()
+            // Only a guard: the test lets it go long before (and without the fix, the main thread waits all of it).
+            _ = gate.wait(timeout: .now() + 5)
+            ended.set()
+            return PowerState(onBattery: true, percent: 20)
+        }
+        var told: [String?] = []
+        controller.lookAtPower { told.append($0) }
+        // The look started, and the main thread was let go while it waits.
+        #expect(entered.wait(timeout: .now() + hangGuard) == .success, "the look never started")
+        #expect(!ended.value, "the look held the main thread until its read ended")
+        var turned = false
+        DispatchQueue.main.async { turned = true }
+        #expect(await until { turned }, "the main thread didn't run while the look waited")
+        #expect(told.isEmpty)
+        // Let go: the hold is told once, on the main thread.
+        gate.signal()
+        #expect(await until { told.count == 1 }, "the look never came back")
+        #expect(told.first??.contains("under your 50 % limit") == true)
+        let watch = try #require(controller.power)
+        #expect(watch.looks == 1 && watch.lookedOnMain == 0)
+        var again = false
+        DispatchQueue.main.async { again = true }
+        #expect(await until { again })
+        #expect(told.count == 1)
+    }
+
+    /// A flag set on one thread and read on another.
+    final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var set_ = false
+        var value: Bool { lock.withLock { set_ } }
+        func set() { lock.withLock { set_ = true } }
+    }
+
     // MARK: The Team list's accessibility tree (AccessibilityNode.updateChildren, impliedVisibility)
 
     struct ExposedRoot: View {

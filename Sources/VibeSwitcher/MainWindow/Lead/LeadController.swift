@@ -341,6 +341,8 @@ final class LeadController: ObservableObject {
     private(set) var power: PowerLook?
     /// The limit in Settings, read on the main thread at each look.
     private var powerLimit: () -> Int = { PowerWatch.defaultLimit }
+    /// Where the power source is looked at (`lookAtPower`).
+    private let powerQueue = DispatchQueue(label: "VibeSwitcher.power-look", qos: .utility)
     private var powerTimer: Heartbeat.Subscription?
     /// The working policy in Settings › Project lead, told to each running lead once when it changes and once when
     /// this build first runs (see `LeadWitness.PolicyWatch`); none until the app starts it (`watchPolicy`).
@@ -1403,17 +1405,24 @@ final class LeadController: ObservableObject {
         }
     }
 
-    /// A hold on battery, or the resume after one: to each running lead, as the witness. `then` hears on the main
-    /// thread what was told, once the look is done (nil: nothing to tell; tests).
+    /// A hold on battery, or the resume after one: to each running lead, as the witness. The reading is read and
+    /// written on a queue of its own (`powerQueue`), never the main thread: on a loaded Mac writing it held the window
+    /// (hang-20261031-193728). `then` hears on the main thread what was told, once the look is done (nil: nothing to
+    /// tell; tests).
     func lookAtPower(then: @escaping (String?) -> Void = { _ in }) {
         guard let watch = power else { return then(nil) }
-        let text = watch.look(limit: powerLimit())
-        defer { then(text) }
-        guard let text else { return }
-        for root in leadRoots {
-            deliver(text, from: .system("witness"), root: root)
-            // The lead's tool server looks again at what it held (see `LeadAdvance`).
-            LeadAdvance.nudge(root: root)
+        let limit = powerLimit()
+        powerQueue.async { [weak self] in
+            let text = watch.look(limit: limit)
+            DispatchQueue.main.async {
+                defer { then(text) }
+                guard let self, let text else { return }
+                for root in self.leadRoots {
+                    self.deliver(text, from: .system("witness"), root: root)
+                    // The lead's tool server looks again at what it held (see `LeadAdvance`).
+                    LeadAdvance.nudge(root: root)
+                }
+            }
         }
     }
 
