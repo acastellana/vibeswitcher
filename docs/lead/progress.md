@@ -2179,3 +2179,6 @@
 - 2026-10-31 01:10 Automatically (auto_advance): Merged hang-reports-say-when (Hang reports say when a freeze was starvation or paging, not the app's work) into main at 848e6ea3, review none: on its worker's done report on e5b90640 and the full test run.
 - 2026-10-31 01:11 Automatically (auto_advance): Cleaned up hang-reports-say-when; ended pid 16982 (Worker: Hang reports say when a freeze was starvation or paging, not the app's work) (freed 1.1 GB of build output and temporary folders). It stays done.
 - 2026-10-31 01:11 Update: Freeze reports say starved, waiting or real work (hang-reports-say-when) — **What changed:**
+- 2026-10-31 01:17 Planned hang-watchdog-spends-2: Hang watchdog spends ~2.3 s of CPU parsing each sample (AppHealth.sampleStart components(separatedBy:) at user-interactive QoS)
+- 2026-10-31 01:25 Merged team-pane-s-lines: Team pane's lines over all decisions on every render (string indexing in LeadTeamView.Lines / TeamSummaryModel.line) (no audit: review none)
+- 2026-10-31 01:25 Flaky in team-pane-s-lines's merge: theExitSourceReapsAtOnce() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
