@@ -3,7 +3,7 @@ import SwiftUI
 import VibeCore
 
 /// Raw values are what `--settings TAB` takes.
-enum SettingsTab: String, CaseIterable { case general, agents, phone, launch, terminal }
+enum SettingsTab: String, CaseIterable { case general, agents, phone, launch, terminal, vault }
 
 final class SettingsSelection: ObservableObject {
     @Published var tab: SettingsTab = .general
@@ -21,7 +21,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     init(preferences: Preferences, setup: SetupModel, phoneAccess: PhoneAccess,
          recentProjects: @escaping () -> [String], showWelcome: @escaping () -> Void, host: HostClient? = nil,
-         briefing: BriefingModel? = nil, dictation: DictationController? = nil, policy: WorkingPolicyEditor? = nil) {
+         briefing: BriefingModel? = nil, dictation: DictationController? = nil, policy: WorkingPolicyEditor? = nil,
+         vaultPeers: VaultPeerList = VaultPeerList(load: { _ in [] })) {
         self.setup = setup
         self.briefing = briefing
         self.dictation = dictation
@@ -34,7 +35,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.contentView = NSHostingView(rootView: SettingsView(preferences: preferences, setup: setup, phoneAccess: phoneAccess,
                                                                   selection: selection, recentProjects: recentProjects,
                                                                   showWelcome: showWelcome, host: host, briefing: briefing,
-                                                                  dictation: dictation, policy: policy))
+                                                                  dictation: dictation, policy: policy, vaultPeers: vaultPeers))
         window.center()
     }
 
@@ -77,6 +78,7 @@ struct SettingsView: View {
     var briefing: BriefingModel? = nil
     var dictation: DictationController? = nil
     var policy: WorkingPolicyEditor? = nil
+    var vaultPeers = VaultPeerList(load: { _ in [] })
 
     var body: some View {
         TabView(selection: $selection.tab) {
@@ -91,6 +93,8 @@ struct SettingsView: View {
                 .tabItem { Label("Launch", systemImage: "play.rectangle") }.tag(SettingsTab.launch)
             TerminalSettings(preferences: preferences)
                 .tabItem { Label("Terminal", systemImage: "terminal") }.tag(SettingsTab.terminal)
+            VaultSettingsTab(preferences: preferences, peerList: vaultPeers)
+                .tabItem { Label("Vault", systemImage: "lock.shield") }.tag(SettingsTab.vault)
         }
         .padding(20)
         .frame(width: SettingsWindowController.size.width, height: SettingsWindowController.size.height)

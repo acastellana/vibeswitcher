@@ -180,7 +180,8 @@ public enum Shell {
             }
             _ = readers.wait(timeout: .now() + grace)
         }
-        return Git.Result(status: process.terminationStatus, output: output.text, error: errors.text, timedOut: timedOut, cancelled: cancelled)
+        return Git.Result(status: process.terminationStatus, output: output.text, error: errors.text, timedOut: timedOut, cancelled: cancelled,
+                          signaled: process.signaled)
     }
 
     /// Stops a program and everything it started: its family and its process group, asked with TERM, then, once it's
@@ -202,6 +203,8 @@ extension Shell {
         var processIdentifier: Int32 { get }
         var isRunning: Bool { get }
         var terminationStatus: Int32 { get }
+        /// It ended, by a signal (`terminationStatus` is the signal's number).
+        var signaled: Bool { get }
         func waitUntilExit()
     }
 
@@ -284,6 +287,12 @@ extension Shell {
 
         /// The wait status of an end that isn't known: exit 255.
         private static let unknown: Int32 = 255 << 8
+
+        var signaled: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return status.map { $0 & 0x7f != 0 } ?? false
+        }
 
         /// As Process says it: the exit status, or the signal that ended it.
         var terminationStatus: Int32 {

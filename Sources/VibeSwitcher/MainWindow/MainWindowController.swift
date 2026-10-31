@@ -50,7 +50,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         choose: { [weak self] menu, index, typing in self?.sync.choose(index, typing: typing, drawn: menu) },
         moveTab: { [weak self] tab in self?.sync.moveTab(to: tab) },
         showTerminal: { [weak self] in self?.model.showsChat = false },
-        dismissMenu: { [weak self] in self?.sync.cancel() })
+        dismissMenu: { [weak self] in self?.sync.cancel() }, vault: vault)
         .environment(\.holdLeadQuestion) { [weak leads] question in leads?.hold(question) }
         .environment(\.dictation, dictation))
     }
@@ -102,9 +102,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let briefing: BriefingModel?
     /// The composer's push to talk (none in the benches).
     private let dictation: DictationController?
+    /// The vault requests agents filed, as cards in their chats (none in the benches).
+    private let vault: VaultDesk?
 
     init(store: SessionStore, host: HostClient, model: WindowModel, actions: WindowActions, leads: LeadController,
-         briefing: BriefingModel? = nil, dictation: DictationController? = nil) {
+         briefing: BriefingModel? = nil, dictation: DictationController? = nil, vault: VaultDesk? = nil) {
+        self.vault = vault
         self.leads = leads
         self.briefing = briefing
         self.dictation = dictation

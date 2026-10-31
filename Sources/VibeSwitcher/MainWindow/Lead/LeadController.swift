@@ -1558,6 +1558,27 @@ final class LeadController: ObservableObject {
         deliver(LeadBudget.leadText(task, minutes: minutes), from: .system("witness"), root: root)
     }
 
+    /// A message from VibeSwitcher itself for the agent of window session `id` (a vault request's answer, see
+    /// `VaultDesk`): posted into its steer inbox, which its hook hands over at its next step, and typed in once it's
+    /// between turns with an empty box (`flush`), as a time budget's stop is. `then` hears on the main thread whether
+    /// it reached the inbox (false: no live session with an agent).
+    func tell(_ text: String, from sender: SteerMessage.Sender, session id: UUID, then: @escaping (Bool) -> Void = { _ in }) {
+        guard let hosted = host.sessions.first(where: { $0.id == id && $0.isLive }) else {
+            Breadcrumbs.shared.note("message for session \(id) not delivered: it isn't live")
+            return then(false)
+        }
+        let pid = store.sessions.first { $0.hostID == id && $0.tty == hosted.tty }?.pid ?? hosted.childPID
+        let agent = LeadAgent(pid: pid, tty: hosted.tty, session: id.uuidString)
+        let inbox = self.inbox
+        reads.async({ _ in
+            (try? LeadDelivery.deliver(text, from: sender, to: agent, state: HookState.load(from: VibePaths.stateFile(tty: agent.tty)),
+                                       inputIsEmpty: nil, typeInto: nil, root: inbox)) != nil
+        }) { [weak self] went in
+            if went { self?.flush(agent) }
+            then(went)
+        }
+    }
+
     /// Who a waiting message is from, in words.
     private static func sender(_ sender: SteerMessage.Sender) -> String {
         switch sender {

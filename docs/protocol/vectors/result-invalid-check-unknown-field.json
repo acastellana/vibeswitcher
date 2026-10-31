@@ -1,0 +1,19 @@
+{
+  "type": "vibeswitcher.vault-result",
+  "version": 1,
+  "id": "3f2b8c1e-5d4a-4b6f-9e0c-7a1d2e3f4a5b",
+  "sequence": 4,
+  "createdAt": "2026-10-31T12:05:00Z",
+  "status": "submitted",
+  "checks": [
+    {
+      "name": "balance",
+      "ok": true,
+      "detail": "",
+      "score": 1
+    }
+  ],
+  "txHash": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  "explorerURL": "https://explorer.example/tx/0x0000000000000000000000000000000000000000000000000000000000000001",
+  "message": "Signed on the hardware wallet and submitted."
+}

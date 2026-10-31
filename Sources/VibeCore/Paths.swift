@@ -77,6 +77,8 @@ public enum VibePaths {
     public static var hostLog: URL { root.appendingPathComponent("host.log") }
     /// Launch presets (see `LaunchPresets`).
     public static var presetsFile: URL { root.appendingPathComponent("presets.json") }
+    /// Transaction requests sent to the vault Mac and what it answered, one `<id>.json` each (see `VaultStore`).
+    public static var vaultRequestsDir: URL { root.appendingPathComponent("vault-requests") }
 
     /// Creates `~/.vibeswitcher` and its state folder private to you (0700), fixing older installs too. `root` is
     /// VibeSwitcher's folder (tests give a scratch one).

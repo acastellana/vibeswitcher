@@ -33,6 +33,18 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--test-failure
     exit(0)
 }
 
+// `vibeswitcher-mcp --request-transaction request …`, as Resources/bin/vs-vault runs it in a session VibeSwitcher started:
+// files a transaction request for the user to send to the vault from its card (see `VaultAsk`). No tool server runs;
+// nothing is sent from here. Refused until Settings › Vault names the vault peer (the app's own defaults say).
+if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--request-transaction" {
+    let peer = UserDefaults(suiteName: "dev.vibeswitcher.VibeSwitcher")?.string(forKey: "vaultPeerID") ?? ""
+    let ran = VaultAsk.run(Array(CommandLine.arguments.dropFirst(2)), environment: ProcessInfo.processInfo.environment,
+                           cwd: FileManager.default.currentDirectoryPath, peerChosen: !peer.isEmpty)
+    if !ran.output.isEmpty { print(ran.output) }
+    if !ran.error.isEmpty { FileHandle.standardError.write(Data((ran.error + "\n").utf8)) }
+    exit(ran.status)
+}
+
 // `vibeswitcher-mcp --verifier-prompt ROOT SLUG BASE MESSAGE_FILE auto|off`, for scripts/verifier-eval.sh: what an
 // audit's single verifier starts with for the branch agent/SLUG against BASE in ROOT (a scratch clone, its own
 // .vibeswitcher/workflow.md), as JSON: the prompt (LeadPrompts.verifier; the task's goal is the commit's message), the

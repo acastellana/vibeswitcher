@@ -80,6 +80,11 @@ final class Preferences: ObservableObject {
     /// The language the spoken briefing is written and read in (an ElevenLabs language code, see `BriefingLanguage`);
     /// the Mac's first preferred language until you pick one.
     @Published var briefingLanguage: String { didSet { defaults.set(briefingLanguage, forKey: "briefingLanguage") } }
+    /// The Passage peer that is the vault Mac (its peer id); empty until you choose one, and until then vault
+    /// requests are refused.
+    @Published var vaultPeerID: String { didSet { defaults.set(vaultPeerID, forKey: "vaultPeerID") } }
+    /// The `passage` command vault requests go through; empty: `passage` on the PATH.
+    @Published var vaultPassagePath: String { didSet { defaults.set(vaultPassagePath, forKey: "vaultPassagePath") } }
 
     /// `defaults`, `presetsFile` and `reduceMotion` are for tests and offscreen renders; the app uses the standard ones.
     init(defaults: UserDefaults = .standard, presetsFile: URL = VibePaths.presetsFile, reduceMotion: Bool = Motion.isReduced) {
@@ -120,6 +125,8 @@ final class Preferences: ObservableObject {
         batteryHoldBelow = PowerWatch.clamp(defaults.integer(forKey: "batteryHoldBelow"))
         briefingLanguage = defaults.string(forKey: "briefingLanguage").flatMap(BriefingLanguage.named)?.code ?? BriefingLanguage.preferred().code
         projectsFolder = defaults.string(forKey: "projectsFolder") ?? ProjectCreation.defaultLocation
+        vaultPeerID = defaults.string(forKey: "vaultPeerID") ?? ""
+        vaultPassagePath = defaults.string(forKey: "vaultPassagePath") ?? ""
     }
 
     /// Showing the sidebar after a desktop switch slides it in at the screen's edge: not by default with Reduce Motion.

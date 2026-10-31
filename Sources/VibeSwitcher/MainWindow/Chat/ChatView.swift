@@ -36,6 +36,8 @@ struct ChatContainer: View {
     let showTerminal: () -> Void
     /// Esc in the terminal: closes the slash-command menu.
     var dismissMenu: () -> Void = {}
+    /// The vault requests agents filed: the selected session's cards are pinned under its conversation.
+    var vault: VaultDesk? = nil
     /// The answer card's keys: the composer hands it ⌘1–⌘9, ↩ and ↑ / ↓ while it's empty. Held, not observed.
     @State private var cardKeys = AnswerCardKeys()
     /// What you were writing under the lead's questions, kept when one closes (it moves into the conversation).
@@ -75,6 +77,9 @@ struct ChatContainer: View {
                 // Its questions that closed without your answer, where they closed (only open ones are pinned under it).
                 .onChange(of: lead?.board.questions ?? [], initial: true) { _, questions in chat.showQuestions(questions, notices: leads.answerNotices) }
                 .onChange(of: leads.answerNotices) { _, notices in chat.showQuestions(lead?.board.questions ?? [], notices: notices) }
+            if let vault, let session = model.selectedRow?.hostID {
+                VaultRequestStrip(desk: vault, session: session)
+            }
             Divider()
             if let row = model.selectedRow {
                 if row.hostID != nil, actions.isLive(row), row.session == nil {

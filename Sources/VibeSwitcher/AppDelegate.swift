@@ -14,6 +14,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private lazy var notifier: Notifier? = Bundle.main.bundleIdentifier == nil ? nil : Notifier(preferences: preferences)
     private lazy var phoneAccess = PhoneAccess(store: store)
     private var settingsWindow: SettingsWindowController?
+    /// The transaction requests agents file (`vs-vault request`), as cards in their chats: nothing goes to the vault
+    /// until you press Send to vault; the vault's answers go back to the asking session as messages.
+    private lazy var vaultDesk: VaultDesk = {
+        let desk = VaultDesk(config: { [weak self] in
+            VaultDesk.Config(passage: self?.preferences.vaultPassagePath ?? "", peer: self?.preferences.vaultPeerID ?? "")
+        })
+        desk.deliver = { [weak self] session, text in
+            guard let id = UUID(uuidString: session) else { return }
+            self?.leadController.tell(text, from: .system("from the vault"), session: id)
+        }
+        return desk
+    }()
+    /// Settings › Vault's peers: `passage peers --no-discovery --json`, read off the main thread each time the tab shows
+    /// and when the passage path changes.
+    private let vaultPeers = VaultPeerList()
     /// Hooks, permissions and login item: their live state for the welcome window and Settings.
     private lazy var setup: SetupModel = {
         let model = SetupModel(preferences: preferences, system: .live(notifier: notifier))
@@ -150,6 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         hostClient.connectIfRunning()
         // Leads' witness and questions work with the window closed too.
         _ = leadController
+        vaultDesk.start()
         appHealth = AppHealthWatcher { [weak self] text in self?.leadController.tellAppHealth(text) ?? false }
         appHealth?.start()
         if UserDefaults.standard.bool(forKey: "windowWasOpen") {
@@ -577,7 +593,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 preferences: preferences, setup: setup, phoneAccess: phoneAccess,
                 recentProjects: { [weak self] in self?.popoverState.recentProjects.map(\.path) ?? [] },
                 showWelcome: { [weak self] in self?.showWelcome(firstRun: false) }, host: hostClient, briefing: briefing,
-                dictation: dictation, policy: WorkingPolicyEditor(saved: { [weak self] in self?.leadController.lookAtPolicy() }))
+                dictation: dictation, policy: WorkingPolicyEditor(saved: { [weak self] in self?.leadController.lookAtPolicy() }),
+                vaultPeers: vaultPeers)
         }
         loadRecentProjects()
         settingsWindow?.show(tab: tab)
@@ -630,7 +647,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     func showMainWindow(select hostID: UUID? = nil) {
         if mainWindow == nil {
             let controller = MainWindowController(store: store, host: hostClient, model: windowModel, actions: windowActions,
-                                                  leads: leadController, briefing: briefing, dictation: dictation)
+                                                  leads: leadController, briefing: briefing, dictation: dictation, vault: vaultDesk)
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
             controller.pane.configure = { [weak self] view in
                 guard let self else { return }
@@ -822,6 +839,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         SidebarWorkspace.restoreHiddenWindows(timeout: 1)
         store.saveLedger()
         phoneAccess.shutdown()
+        vaultDesk.close()
         // Script blocks written for Run and not run yet.
         RunnableCommand.Script.removeAll()
     }
