@@ -2389,3 +2389,5 @@
 - 2026-10-31 21:50 Automatically (auto_advance): Started the audit of local-end-to-end at 39cece00 (It touches sensitive_paths (AGENTS.md, Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
 - 2026-10-31 22:07 Audit of local-end-to-end: complete, clean, round 1: 4 Nit open
 - 2026-10-31 22:08 Planned wallet-e2e-sh-refreshes: wallet-e2e.sh refreshes the Wallet Manager's node_modules when its lockfile is newer
+- 2026-10-31 22:17 Planned wallet-requests-work: Wallet requests work without a Wallet Manager chosen: the card offers the browser wallet (review audit)
+- 2026-10-31 22:23 Merged local-end-to-end: Local end-to-end: VibeSwitcher → loop Passage → Wallet Manager → back, on this Mac
