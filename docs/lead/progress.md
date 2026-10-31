@@ -2176,3 +2176,6 @@
 - 2026-10-31 00:55 Automatically (auto_advance): Merged 9-s-swiftui-layout (9 s SwiftUI layout freeze on a calm Mac (environment comparisons in a window layout pass)) into main at 475ea046, review none: on its worker's done report on 45b3e430 and the full test run.
 - 2026-10-31 00:56 Automatically (auto_advance): Cleaned up 9-s-swiftui-layout; ended pid 88726 (Worker: 9 s SwiftUI layout freeze on a calm Mac (environment comparisons in a window layout pass)) (freed 1.6 GB of build output and temporary folders). It stays done.
 - 2026-10-31 01:10 Merged hang-reports-say-when: Hang reports say when a freeze was starvation or paging, not the app's work (no audit: review none)
+- 2026-10-31 01:10 Automatically (auto_advance): Merged hang-reports-say-when (Hang reports say when a freeze was starvation or paging, not the app's work) into main at 848e6ea3, review none: on its worker's done report on e5b90640 and the full test run.
+- 2026-10-31 01:11 Automatically (auto_advance): Cleaned up hang-reports-say-when; ended pid 16982 (Worker: Hang reports say when a freeze was starvation or paging, not the app's work) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-31 01:11 Update: Freeze reports say starved, waiting or real work (hang-reports-say-when) — **What changed:**
