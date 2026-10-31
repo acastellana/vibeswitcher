@@ -125,9 +125,34 @@ public enum VaultAsk {
         return try handle.read(upToCount: VaultFormat.maxFileBytes + 1) ?? Data()
     }
 
-    /// Removes a filed request (sent, discarded, or refused).
+    /// Removes a filed request (sent, discarded, or refused), and its expiry note's marker.
     public static func remove(_ id: String, in folder: URL = VaultAsk.folder) {
         try? FileManager.default.removeItem(at: folder.appendingPathComponent("\(id).json"))
+        try? FileManager.default.removeItem(at: expiryMarker(id, in: folder))
+    }
+
+    /// Beside a filed request that expired unsent, once its agent was told (`.<id>.expired`: `filed` reads no
+    /// dot-file), so a restarted app doesn't tell it again.
+    static func expiryMarker(_ id: String, in folder: URL) -> URL {
+        folder.appendingPathComponent(".\(id).expired")
+    }
+
+    /// Whether the asking agent was told that request `id` expired unsent.
+    public static func toldExpired(_ id: String, in folder: URL = VaultAsk.folder) -> Bool {
+        FileManager.default.fileExists(atPath: expiryMarker(id, in: folder).path)
+    }
+
+    /// Records that the asking agent was told that request `id` expired unsent. False when it couldn't be recorded.
+    @discardableResult
+    public static func markToldExpired(_ id: String, in folder: URL = VaultAsk.folder) -> Bool {
+        (try? VibePaths.writePrivate(Data(), to: expiryMarker(id, in: folder))) != nil
+    }
+
+    /// What the asking session hears when its request reached its expiry without the user sending it.
+    public static func expiredUnsent(_ request: VaultRequest) -> String {
+        "Vault request \(request.id) expired at \(VaultFormat.string(request.expiresAt)) without being sent: the user didn't "
+            + "click Send to vault on its card, so it never reached the vault and nothing was signed. If the transaction is "
+            + "still needed, tell the user, or file a new request with vs-vault request."
     }
 
     /// `vs-vault request …`, as the CLI runs it: what to print, and the exit status (0 filed, 1 refused, 2 usage).

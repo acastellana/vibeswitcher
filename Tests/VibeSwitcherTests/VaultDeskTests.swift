@@ -289,6 +289,91 @@ struct VaultDeskTests {
         #expect(s.desk.cards.isEmpty)
     }
 
+    @Test func anUnsentRequestThatExpiresTellsItsSessionOnce() async throws {
+        let clock = Clock()
+        let s = try setup(clock: clock)
+        defer { s.desk.close() }
+        let request = Self.request()
+        try VaultAsk.file(request, in: s.asked)
+        await refreshed(s.desk)
+        #expect(s.told.messages.isEmpty)
+        clock.now = request.expiresAt
+        await refreshed(s.desk)
+        // The delivery was queued on the main thread before the refresh's `then`.
+        #expect(s.told.messages.count == 1)
+        let told = try #require(s.told.messages.first)
+        #expect(told.session == Self.session.uuidString.lowercased())
+        #expect(told.text.contains(request.id) && told.text.contains("expired") && told.text.contains("without being sent"))
+        #expect(told.text.contains("expired at 2026-11-01T12:00:00"))
+        #expect(s.fake.sends.isEmpty)
+        // Looked at again, and by an app started again (a desk of its own on the same folder): not told again.
+        await refreshed(s.desk)
+        let again = VaultDesk(folder: s.asked, store: s.store, inbox: s.fake.inbox,
+                              config: { VaultDesk.Config(passage: s.fake.executable, peer: VaultFakePassage.peer) },
+                              now: { clock.now }, log: { _ in })
+        again.findPassage = { nil }
+        again.deliver = { session, text in s.told.messages.append((session, text)) }
+        await refreshed(again)
+        again.close()
+        #expect(s.told.messages.count == 1)
+        // Its card goes past the time any answer could come, and its marker with it.
+        clock.now = request.expiresAt.addingTimeInterval(VaultCourier.resultGrace + 1)
+        await refreshed(s.desk)
+        #expect(s.desk.cards.isEmpty)
+        #expect(!VaultAsk.toldExpired(request.id, in: s.asked))
+        #expect(s.told.messages.count == 1)
+    }
+
+    @Test func aRequestThatExpiredWhileTheAppWasntRunningIsStillTold() async throws {
+        let clock = Clock()
+        let s = try setup(clock: clock)
+        defer { s.desk.close() }
+        let request = Self.request()
+        try VaultAsk.file(request, in: s.asked)
+        clock.now = request.expiresAt.addingTimeInterval(VaultCourier.resultGrace + 1)
+        await refreshed(s.desk)
+        #expect(s.desk.cards.isEmpty)
+        #expect(s.told.messages.count == 1)
+        #expect(s.told.messages.first?.text.contains("without being sent") == true)
+        await refreshed(s.desk)
+        #expect(s.told.messages.count == 1)
+    }
+
+    @Test func aRequestPassageCouldntDeliverIsToldAsUnsentWhenItExpires() async throws {
+        let clock = Clock()
+        let s = try setup(clock: clock)
+        defer { s.desk.close() }
+        let request = Self.request()
+        try VaultAsk.file(request, in: s.asked)
+        await refreshed(s.desk)
+        try s.fake.setSendExit(4)
+        await acted(s.desk, .send, request.id)
+        #expect(s.desk.cards.first?.state == .unreachable(message: "passage: fake exit 4"))
+        clock.now = request.expiresAt
+        await refreshed(s.desk)
+        #expect(s.told.messages.count == 1)
+        #expect(s.told.messages.first?.text.contains("without being sent") == true)
+    }
+
+    @Test func aSentRequestThatExpiresIsntToldAsUnsent() async throws {
+        let clock = Clock()
+        let s = try setup(clock: clock)
+        defer { s.desk.close() }
+        let sent = Self.request(1), unsure = Self.request(2)
+        try VaultAsk.file(sent, in: s.asked)
+        try VaultAsk.file(unsure, in: s.asked)
+        await refreshed(s.desk)
+        await acted(s.desk, .send, sent.id)
+        try s.fake.setSendExit(1)
+        await acted(s.desk, .send, unsure.id)
+        #expect(s.desk.cards.map(\.state) == [.sent, .unsure(message: "passage: fake exit 1")])
+        clock.now = sent.expiresAt
+        await refreshed(s.desk)
+        clock.now = sent.expiresAt.addingTimeInterval(VaultCourier.resultGrace + 1)
+        await refreshed(s.desk)
+        #expect(s.told.messages.isEmpty, "\(s.told.messages)")
+    }
+
     @Test func aFiledFileThatIsntARequestIsRefused() async throws {
         let s = try setup()
         defer { s.desk.close() }
@@ -490,5 +575,50 @@ struct VaultDeliveryTests {
         #expect(pending().isEmpty)
         let transcript = try String(contentsOf: h.transcript, encoding: .utf8)
         #expect(transcript.contains(request.id) && transcript.contains("the vault says received"))
+    }
+
+    @Test func anUnsentRequestsExpiryReachesTheAskingSessionsAgent() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        let stateDir = temp.url("state")
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+        let store = SessionStore(scanner: SessionScanner(processes: { [:] }, stateDir: { stateDir }, cwd: { _ in nil }, arguments: { _ in [] }))
+        let controller = LeadController(host: h.host, store: store, vault: LeadVault.Book().vault(folder: temp.url("vault"), as: { .app }),
+                                        inbox: h.steerRoot, home: h.chat.home) { _ in "exec /bin/sleep 600 #" }
+        controller.answersTrust = false
+        h.tell(["op": "work"])
+        try await h.settle { $0.contains("Working") }
+
+        let fake = try VaultFakePassage(temp)
+        let asked = temp.url("asked")
+        let request = VaultDeskTests.request(session: h.session.id)
+        let desk = VaultDesk(folder: asked, store: VaultStore(folder: temp.url("requests")), inbox: fake.inbox,
+                             config: { VaultDesk.Config(passage: fake.executable, peer: VaultFakePassage.peer) },
+                             now: { request.expiresAt.addingTimeInterval(1) }, log: { _ in })
+        defer { desk.close() }
+        desk.deliver = { session, text in
+            controller.tell(text, from: .system("from the vault"), session: UUID(uuidString: session)!)
+        }
+        try VaultAsk.file(request, in: asked)
+        var done = false
+        desk.refresh { done = true }
+        #expect(await until { done })
+        #expect(desk.cards(for: h.session.id).first?.state == .expired)
+        #expect(fake.calls.isEmpty)
+
+        let pending = { SteerInbox.pending(tty: h.session.tty, root: h.steerRoot).filter { $0.text.contains(request.id) } }
+        try await h.waitFor { pending().count == 1 }
+        let message = try #require(pending().first)
+        #expect(message.from == .system("from the vault"))
+        #expect(message.text.contains("without being sent"))
+        h.hookTakes()
+        #expect(pending().isEmpty)
+        let transcript = try String(contentsOf: h.transcript, encoding: .utf8)
+        #expect(transcript.contains(request.id) && transcript.contains("without being sent"))
+        // Looked at again: once only.
+        done = false
+        desk.refresh { done = true }
+        #expect(await until { done })
+        #expect(pending().isEmpty)
     }
 }

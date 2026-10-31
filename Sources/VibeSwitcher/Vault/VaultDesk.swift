@@ -6,7 +6,8 @@ import VibeCore
 /// way to the vault Mac and back: nothing goes until the user presses Send to vault on the card (`act(.send)`); Retry
 /// sends again after Passage couldn't reach the vault or stopped unsure; Discard drops the request (and forgets it, so
 /// its answers are no longer listened for). Each result the vault sends back updates the card and goes to the asking
-/// session as a message (`deliver`). VibeSwitcher never signs or judges: the card shows what the vault said.
+/// session as a message (`deliver`), as does a request that expires before the user sent it. VibeSwitcher never signs
+/// or judges: the card shows what the vault said.
 ///
 /// Its state lives on a queue of its own (`work`), where Passage runs (a send blocks for seconds); `cards` is
 /// published on the main thread.
@@ -160,6 +161,17 @@ final class VaultDesk: ObservableObject {
             try? FileManager.default.removeItem(at: file)
         }
         let time = now()
+        // Expired with nothing sent (no record of a send, nor a send under way): the asking agent hears it, once. Before
+        // the card goes below, so an app that wasn't running at the time still tells it.
+        for request in filed where request.isExpired(now: time) && local[request.id] != .sent && !VaultAsk.toldExpired(request.id, in: folder)
+            && courier?.record(request.id) == nil && !FileManager.default.fileExists(atPath: store.file(request.id).path) {
+            guard VaultAsk.markToldExpired(request.id, in: folder) else {
+                log("couldn't record that \(request.id) expired unsent; its agent hears it at the next look")
+                continue
+            }
+            log("\(request.id) expired unsent: telling its session")
+            tell(request, VaultAsk.expiredUnsent(request))
+        }
         // Past the time any answer can come: its card goes (the record of what was sent stays in the store).
         for request in filed where time >= request.expiresAt.addingTimeInterval(VaultCourier.resultGrace) {
             VaultAsk.remove(request.id, in: folder)
