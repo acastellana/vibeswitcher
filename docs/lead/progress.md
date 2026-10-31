@@ -2393,3 +2393,7 @@
 - 2026-10-31 22:23 Merged local-end-to-end: Local end-to-end: VibeSwitcher → loop Passage → Wallet Manager → back, on this Mac
 - 2026-10-31 22:23 Automatically (auto_advance): Merged local-end-to-end (Local end-to-end: VibeSwitcher → loop Passage → Wallet Manager → back, on this Mac) into main at b8009e3d, on its passing audit and the full test run.
 - 2026-10-31 22:23 Automatically (auto_advance): Cleaned up local-end-to-end; ended pid 88761 (Worker: Local end-to-end: VibeSwitcher → loop Passage → Wallet Manager → back, on this Mac) (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-10-31 22:35 Started a worker on wallet-e2e-sh-refreshes
+- 2026-10-31 22:35 Automatically (auto_advance): Started a worker on wallet-e2e-sh-refreshes (wallet-e2e.sh refreshes the Wallet Manager's node_modules when its lockfile is newer), its after tasks done (local-end-to-end).
+- 2026-10-31 22:35 Started a worker on wallet-requests-work
+- 2026-10-31 22:35 Automatically (auto_advance): Started a worker on wallet-requests-work (Wallet requests work without a Wallet Manager chosen: the card offers the browser wallet).
