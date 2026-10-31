@@ -144,8 +144,17 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
 
 @Suite(.serialized, hostTestLimit) struct HostHandoverTests {
     static let counter = "i=0; while :; do i=$((i+1)); echo n=$i; sleep 0.1; done"
-    /// A job in a process group of its own (job control), then a line read and a telling exit status.
-    static let job = "set -m; \(keepRunning) & echo bg=$!; read line; echo got:$line; exit 7"
+    /// A job in a process group of its own (job control), then a line read and a telling exit status. Its pid is
+    /// printed as `bg=<pid>.`: the closing dot tells a whole pid from one the screen shows only part of.
+    static let job = "set -m; \(keepRunning) & echo bg=$!.; read line; echo got:$line; exit 7"
+
+    /// The background job's pid, once the screen shows its whole `bg=<pid>.` line (nil before that).
+    static func backgroundPID(_ screen: String?) -> pid_t? {
+        guard let line = screen?.split(separator: "\n").first(where: { $0.hasPrefix("bg=") }), line.hasSuffix(".") else { return nil }
+        let digits = line.dropFirst(3).dropLast()
+        guard !digits.isEmpty, digits.allSatisfy(\.isASCII), digits.allSatisfy(\.isNumber) else { return nil }
+        return pid_t(digits)
+    }
     /// A full-screen program's screen: drawn with cursor moves, then left as it is.
     static let painted = "printf '\\033[2J\\033[H\\033[5;10HBOX\\033[10;1Hstatus line'; \(keepRunning)"
 
@@ -175,10 +184,10 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         #expect(eventually { client.exitStatus(done.id) == 3 })
         #expect(eventually { counted(client.screen(counter.id) ?? "").last ?? 0 >= 5 })
         #expect(eventually { client.screen(shell.id)?.contains("$") == true })
-        #expect(eventually { client.screen(job.id)?.contains("bg=") == true })
         #expect(eventually { client.screen(painted.id)?.contains("status line") == true })
-        let line = client.screen(job.id)?.split(separator: "\n").first { $0.hasPrefix("bg=") }
-        let background = pid_t(line.map { String($0.dropFirst(3)) } ?? "") ?? 0
+        // Read from the same screen that showed the whole line: a read as "bg=" appears, before its digits, has no pid.
+        var background: pid_t = 0
+        #expect(eventually { Self.backgroundPID(client.screen(job.id)).map { background = $0 } != nil })
         #expect(background > 0 && getpgid(background) == background && background != job.childPID)
         return Scene(host: host, client: client, counter: counter, shell: shell, job: job, painted: painted, done: done, background: background,
                      startedAt: startedAt)
