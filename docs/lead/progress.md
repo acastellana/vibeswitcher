@@ -2335,3 +2335,4 @@
 - 2026-10-31 18:00 Automatically (auto_advance): Started a worker on rename-the-vault-request (Rename the vault-request feature to "wallet requests" (VibeSwitcher's "vault" means only the lead's vault)), its after tasks done (agents-know-they-can).
 - 2026-10-31 18:13 Planned wallet-requests-find: Wallet requests find Passage.app by themselves (no `passage` symlink needed)
 - 2026-10-31 18:19 Planned local-end-to-end: Local end-to-end: VibeSwitcher → loop Passage → Wallet Manager → back, on this Mac
+- 2026-10-31 18:27 Automatically (auto_advance): Started the audit of rename-the-vault-request at 4c3f66aa (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift, scripts/build-app.sh), so it's treated as audit whatever its review says).
