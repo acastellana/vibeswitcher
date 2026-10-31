@@ -2188,3 +2188,5 @@
 - 2026-10-31 01:25 Automatically (auto_advance): Started a worker on hang-watchdog-spends-2 (Hang watchdog spends ~2.3 s of CPU parsing each sample (AppHealth.sampleStart components(separatedBy:) at user-interactive QoS)).
 - 2026-10-31 01:39 Raised hang-watchdog-spends-2 to audit (the risk check, at 8ab62bad): it has code that adds locks or threads (Sources/VibeSwitcher/HangWatchdog.swift: static let reading = DispatchQueue(label: "vibeswitcher.hang-sample", qos: .util)
 - 2026-10-31 01:39 Automatically (auto_advance): Started the audit of hang-watchdog-spends-2 at 8ab62bad (The risk check raised it to audit: it has code that adds locks or threads (Sources/VibeSwitcher/HangWatchdog.swift: static let reading = DispatchQueue(label: "vibeswitcher.hang-sample", qos: .util)).
+- 2026-10-31 01:51 Audit of hang-watchdog-spends-2: complete, clean, round 1: 3 Nit open
+- 2026-10-31 01:57 Merged hang-watchdog-spends-2: Hang watchdog spends ~2.3 s of CPU parsing each sample (AppHealth.sampleStart components(separatedBy:) at user-interactive QoS)
