@@ -2356,3 +2356,7 @@
 - 2026-10-31 19:52 Merged the-main-thread-blocks: The main thread blocks writing to the session host's socket (HostConnection.flush from SessionStore.refresh)
 - 2026-10-31 19:52 Automatically (auto_advance): Merged the-main-thread-blocks (The main thread blocks writing to the session host's socket (HostConnection.flush from SessionStore.refresh)) into main at 6a7433c4, on its passing audit and the full test run.
 - 2026-10-31 19:52 Automatically (auto_advance): Cleaned up the-main-thread-blocks; ended pid 44186 (Worker: The main thread blocks writing to the session host's socket (HostConnection.flush from SessionStore.refresh)) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-10-31 19:59 Audit of wallet-requests-find: complete, clean, round 1: 2 Nit open
+- 2026-10-31 20:00 Raised the-power-check-writes to audit (the risk check, at f68b028f): it has code that adds locks or threads (Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift: private let lock = NSLock())
+- 2026-10-31 20:00 Automatically (auto_advance): the-power-check-writes is audited, not merged: it has code that adds locks or threads (Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift: private let lock = NSLock()) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-10-31 20:09 Merged wallet-requests-find: Wallet requests find Passage.app by themselves (no `passage` symlink needed)
