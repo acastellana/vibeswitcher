@@ -175,19 +175,31 @@ final class HangWatchdog: @unchecked Sendable {
         sample.standardError = FileHandle.nullDevice
         // Not waited for: the stacks go on being caught while it runs. Its end is written by the next tick.
         sample.terminationHandler = { [weak self] _ in
-            guard let self else { return }
-            let text = try? String(contentsOf: file, encoding: .utf8)
-            let start = text.flatMap(AppHealth.sampleStart), spread = text.flatMap { AppHealth.spread(sample: $0) }
-            self.lock.lock()
-            if self.report?.name == name {
-                self.report?.sampleStart = start
-                self.report?.spread = spread
-                self.report?.sampleDone = true
+            Self.read(sample: file) { start, spread in
+                guard let self else { return }
+                self.lock.lock()
+                if self.report?.name == name {
+                    self.report?.sampleStart = start
+                    self.report?.spread = spread
+                    self.report?.sampleDone = true
+                }
+                self.lock.unlock()
+                self.prune()
             }
-            self.lock.unlock()
-            self.prune()
         }
         do { try sample.run() } catch { prune() }
+    }
+
+    /// Where a finished sample is read. 2026-10-31: read on the termination handler's thread, a user-interactive one,
+    /// it took the CPU from an app the Mac was already starving (hang-20261031-003909).
+    static let reading = DispatchQueue(label: "vibeswitcher.hang-sample", qos: .utility)
+
+    /// A finished sample's start and main-thread spread, read on `reading`, then `done` there.
+    static func read(sample file: URL, done: @escaping @Sendable (Date?, AppHealth.Spread?) -> Void) {
+        reading.async {
+            let text = try? String(contentsOf: file, encoding: .utf8)
+            done(text.flatMap(AppHealth.sampleStart), text.flatMap { AppHealth.spread(sample: $0) })
+        }
     }
 
     /// The report's .log as known now: the stacks caught so far; once the stall's over, its length; once the sample's
