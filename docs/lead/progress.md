@@ -2211,3 +2211,6 @@
 - 2026-10-31 10:52 Started a worker on steer-inbox-read-on
 - 2026-10-31 10:52 Automatically (auto_advance): Started a worker on steer-inbox-read-on (Steer inbox read on the main thread every second (SteerInbox.pending in watchSteering, refreshSteering)), its after tasks done (readscreen-reads-the).
 - 2026-10-31 11:11 Merged steer-inbox-read-on: Steer inbox read on the main thread every second (SteerInbox.pending in watchSteering, refreshSteering) (no audit: review none)
+- 2026-10-31 11:11 Automatically (auto_advance): Merged steer-inbox-read-on (Steer inbox read on the main thread every second (SteerInbox.pending in watchSteering, refreshSteering)) into main at e446945c, review none: on its worker's done report on b5bdcfc1 and the full test run.
+- 2026-10-31 11:11 Automatically (auto_advance): Cleaned up steer-inbox-read-on; ended pid 89583 (Worker: Steer inbox read on the main thread every second (SteerInbox.pending in watchSteering, refreshSteering)) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-31 11:11 Update: No file reads on the main thread when following a chat (readscreen-reads-the, steer-inbox-read-on) — **What changed:**
