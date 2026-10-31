@@ -2333,3 +2333,4 @@
 - 2026-10-31 17:57 Automatically (auto_advance): Cleaned up agents-know-they-can; ended pid 82440 (Worker: Agents know they can ask for a transaction (vs-vault), and hear when a request expires unsent) (freed 1.1 GB of build output and temporary folders). It stays done.
 - 2026-10-31 18:00 Started a worker on rename-the-vault-request
 - 2026-10-31 18:00 Automatically (auto_advance): Started a worker on rename-the-vault-request (Rename the vault-request feature to "wallet requests" (VibeSwitcher's "vault" means only the lead's vault)), its after tasks done (agents-know-they-can).
+- 2026-10-31 18:13 Planned wallet-requests-find: Wallet requests find Passage.app by themselves (no `passage` symlink needed)
