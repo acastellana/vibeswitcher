@@ -362,11 +362,12 @@ public enum AppHealth {
         case waiting
     }
 
-    /// At least this many samples on average a PC is starvation. Chosen from the 101 reports in ~/.vibeswitcher/debug
-    /// on 2026-10-31 whose sample wasn't mostly in a wait: 54 clustered ones had 2 to 58 PCs over 1799-2493 samples (at
-    /// least 39 samples a PC; hang-20261031-001452's 18 over 2298), the spread ones 71 to 441 (at most 33 a PC; the
-    /// accessibility work of 2026-10-30 09:57-10:08, 148-282 PCs). No report fell between 33 and 39.
-    public static let starvedSamplesPerPC = 35
+    /// At least this many samples on average a PC is starvation. Chosen from the 108 reports in ~/.vibeswitcher/debug
+    /// on 2026-10-31 whose sample wasn't mostly in a wait: 59 clustered ones had 2 to 63 PCs over 1799-2493 samples (at
+    /// least 35.8 samples a PC, hang-20261031-005657's 63 over 2254; hang-20261031-001452's 18 over 2298), the spread
+    /// ones 71 to 441 (at most 32.7 a PC, hang-20261028-191005's 71 over 2325; the accessibility work of 2026-10-30
+    /// 09:57-10:08, 148-282 PCs). None fell between 32.7 and 35.8.
+    public static let starvedSamplesPerPC = 34
     /// Fewer samples than this say nothing either way (`sample` itself starved: hang-20261028-070849 got 10 in 3 s).
     public static let verdictSamples = 200
     /// At least this share in a kernel wait is a wait, not starvation: the 10-30 11:40 and 11:51 freezes had 91% and

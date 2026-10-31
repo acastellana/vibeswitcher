@@ -190,10 +190,10 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(AppHealth.verdict(spread, sampleInside: 0.2) == nil)
         #expect(AppHealth.describe(spread, verdict: .work).hasSuffix(": real work"))
 
-        // Either side of the threshold: 35 samples a PC is starvation, fewer isn't.
-        let edge = AppHealth.Spread(samples: 2100, pcs: 60, top: "x", topShare: 0.1, waiting: 0)
+        // Either side of the threshold: 34 samples a PC is starvation, fewer isn't.
+        let edge = AppHealth.Spread(samples: 2040, pcs: 60, top: "x", topShare: 0.1, waiting: 0)
         #expect(AppHealth.verdict(edge, sampleInside: 1) == .starved)
-        #expect(AppHealth.verdict(AppHealth.Spread(samples: 2100, pcs: 61, top: "x", topShare: 0.1, waiting: 0), sampleInside: 1) == .work)
+        #expect(AppHealth.verdict(AppHealth.Spread(samples: 2040, pcs: 61, top: "x", topShare: 0.1, waiting: 0), sampleInside: 1) == .work)
 
         // Few PCs, but blocked in the kernel: a wait (a lock, a synchronous message), the app's to fix.
         let blocked = try #require(AppHealth.spread(sample: Self.sample(pcs: 3, leaf: "mach_msg2_trap")))
