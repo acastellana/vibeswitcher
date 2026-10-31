@@ -39,7 +39,8 @@ enum Sandbox {
         }
         guard let statePath = arguments.first.map({ ($0 as NSString).standardizingPath }), statePath.hasPrefix("/"),
               let shotsPath = value("--shots").map({ ($0 as NSString).standardizingPath }), shotsPath.hasPrefix("/") else {
-            refuse("usage: VibeSwitcher --sandbox STATE --shots DIR [--minutes N] [--fake-claude PATH] [--empty] (absolute paths); "
+            refuse("usage: VibeSwitcher --sandbox STATE --shots DIR [--minutes N] [--fake-claude PATH] [--empty] "
+                   + "[--wallet-passage PATH --wallet-inbox DIR] (absolute paths); "
                    + "run it with scripts/sandbox-app.sh")
         }
         if let problem = refusal(state: statePath, bundleID: Bundle.main.bundleIdentifier, root: VibePaths.root.path,
@@ -55,9 +56,25 @@ enum Sandbox {
         _ = app.setActivationPolicy(.prohibited)
         VibePaths.ensurePrivateDirectories()
         let minutes = value("--minutes").flatMap(Double.init).flatMap { $0 > 0 ? $0 : nil } ?? 10
+        // An outside passage for wallet requests (scripts/e2e/wallet-e2e.sh's loop stand-in), with the inbox it lists:
+        // both or neither, absolute. Without them the sandbox's own fake passage plays the Wallet Manager's Mac.
+        let walletPassage = value("--wallet-passage"), walletInbox = value("--wallet-inbox")
+        if walletPassage != nil || walletInbox != nil {
+            guard let walletPassage, let walletInbox, walletPassage.hasPrefix("/"), walletInbox.hasPrefix("/") else {
+                refuse("--wallet-passage PATH and --wallet-inbox DIR go together, as absolute paths")
+            }
+            // Never the real Passage: not its app's binary (nor a link to it), nor its inbox.
+            let real = URL(fileURLWithPath: walletPassage).resolvingSymlinksInPath().path
+            guard (walletPassage as NSString).lastPathComponent == "passage",
+                  ![walletPassage, real].contains(where: { $0.range(of: ".app/", options: .caseInsensitive) != nil }) else {
+                refuse("--wallet-passage \(walletPassage): a stand-in script named passage (scripts/e2e/loop-passage's side), never Passage itself")
+            }
+            guard !walletInbox.contains("app.passage.Passage") else { refuse("--wallet-inbox \(walletInbox): never Passage's own inbox") }
+        }
         let driver = Driver(state: URL(fileURLWithPath: statePath, isDirectory: true),
                             shots: URL(fileURLWithPath: shotsPath, isDirectory: true),
-                            fakeClaude: value("--fake-claude"), minutes: minutes, empty: arguments.contains("--empty"))
+                            fakeClaude: value("--fake-claude"), minutes: minutes, empty: arguments.contains("--empty"),
+                            walletPassage: walletPassage.flatMap { path in walletInbox.map { (path, URL(fileURLWithPath: $0, isDirectory: true)) } })
         app.delegate = driver
         withExtendedLifetime(driver) { app.run() }
         exit(0)
@@ -224,6 +241,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
     let minutes: Double
     /// Started with no session (`run --empty`): no session host either until something asks for one, as at a first launch.
     let empty: Bool
+    /// `run --passage PATH --passage-inbox DIR`: wallet requests go through this passage (the e2e run's loop stand-in)
+    /// and results are read from this inbox, instead of the sandbox's own fake passage.
+    let externalPassage: (path: String, inbox: URL)?
     let store: SessionStore
     let host: HostClient
     let model = WindowModel()
@@ -269,11 +289,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
         return folder
     }()
     lazy var walletDesk: WalletDesk = {
-        let passage = walletPassage.appendingPathComponent("passage").path
+        let passage = externalPassage?.path ?? walletPassage.appendingPathComponent("passage").path
+        let clock = walletClock
         let desk = WalletDesk(folder: state.appendingPathComponent("wallet/asked", isDirectory: true),
                              store: WalletRequestStore(folder: state.appendingPathComponent("wallet/requests", isDirectory: true)),
-                             inbox: walletPassage.appendingPathComponent("inbox", isDirectory: true),
-                             config: { WalletDesk.Config(passage: passage, peer: Driver.walletPeers[0].peerID) })
+                             inbox: externalPassage?.inbox ?? walletPassage.appendingPathComponent("inbox", isDirectory: true),
+                             config: { WalletDesk.Config(passage: passage, peer: Driver.walletPeers[0].peerID) },
+                             now: { clock.now() })
         desk.findPassage = { nil }
         // Sign in browser wallet: never the user's browser. The page's address is kept for `wallet-page`, which renders
         // it in a web view of the sandbox's own (no wallet extension there).
@@ -288,6 +310,14 @@ private final class Driver: NSObject, NSApplicationDelegate {
     }()
     /// The fake Wallet Manager's next result number, per request.
     var walletSequence: [String: Int64] = [:]
+    /// The wallet desk's clock: the real one, moved ahead by `wallet-later`.
+    let walletClock = WalletClock()
+    final class WalletClock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var ahead: TimeInterval = 0
+        func now() -> Date { lock.withLock { Date().addingTimeInterval(ahead) } }
+        func advance(_ seconds: TimeInterval) { lock.withLock { ahead += seconds } }
+    }
     /// The local page Sign in browser wallet opened last (`wallet-click browser`), for `wallet-page`.
     var walletPageURL: URL?
     /// `wallet-page`'s web view and the made-up request's server, while it draws.
@@ -337,12 +367,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
     let watchdog = HangWatchdog(samples: false)
     var control: URL { state.appendingPathComponent("control", isDirectory: true) }
 
-    init(state: URL, shots: URL, fakeClaude: String?, minutes: Double, empty: Bool) {
+    init(state: URL, shots: URL, fakeClaude: String?, minutes: Double, empty: Bool, walletPassage: (String, URL)? = nil) {
         self.state = state
         self.shots = shots
         self.fakeClaude = fakeClaude
         self.minutes = minutes
         self.empty = empty
+        self.externalPassage = walletPassage.map { (path: $0.0, inbox: $0.1) }
         // Its own host: its own lock (not the user's host.lock: a host on it is the user's, which reads its vault key
         // from the Keychain), its socket in this home, ending with this process however it ends.
         let key = SandboxKey()
@@ -910,7 +941,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
         ("soak [MINUTES [every SECONDS] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. LIST leaves out sessions, stream, dictation, team, ax, reports. With no MINUTES: the log so far"),
-        ("wallet-ask [address]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet"),
+        ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh)"),
+        ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint and the Wallet Manager's checks"),
+        ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
         ("wallet-click send|retry|discard|browser", "presses that button on the newest wallet request card in the selected chat (send goes to the sandbox's fake passage, never the real one; browser serves the local page but never opens a browser: wallet-page shows it)"),
         ("wallet-page [NAME]", "draws the local Sign in browser wallet page as served (the one wallet-click browser opened, else one for a made-up request), in a web view of the sandbox's own with no wallet extension, light and dark: NAME-light.png, NAME-dark.png (default wallet-page)"),
         ("wallet-answer received|proposed|signed|submitted|rejected|failed", "the fake Wallet Manager's Mac answers the newest card's request: the card shows it, and the asking fake session gets it as a message"),
@@ -1011,13 +1044,23 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     /// `wallet-ask`: the selected fake session's agent files a made-up request, as `vs-wallet request` does
     /// (`WalletAsk.run`, its session's id in its environment).
-    private func walletAsk(address: Bool = false, _ reply: @escaping (Bool, String) -> Void) {
+    private func walletAsk(_ words: [String], _ reply: @escaping (Bool, String) -> Void) {
         guard let row = model.selectedRow, let id = row.hostID, let fake = fakeList.first(where: { $0.id == id }) else {
             return reply(false, "no fake session selected: chat NAME first")
         }
-        let arguments = ["request", "--workspace", "example", "--from", address ? "0x0000000000000000000000000000000000000001" : "example-hardware", "--chain", "42424242",
-                         "--to", "0x0000000000000000000000000000000000000002", "--amount", "12500000000000000000",
-                         "--reason", "Pay the example invoice for the test deployment.", "--label", fake.label]
+        let address = words.first == "address"
+        var values = ["--workspace": "example", "--from": address ? "0x0000000000000000000000000000000000000001" : "example-hardware",
+                      "--chain": "42424242", "--to": "0x0000000000000000000000000000000000000002", "--amount": "12500000000000000000"]
+        var rest = words.dropFirst(address ? 1 : 0)
+        while let option = rest.first {
+            guard values[option] != nil, rest.count >= 2 else {
+                return reply(false, "wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI]: not \(option)")
+            }
+            values[option] = rest.dropFirst().first!
+            rest = rest.dropFirst(2)
+        }
+        let arguments = ["request"] + ["--workspace", "--from", "--chain", "--to", "--amount"].flatMap { [$0, values[$0]!] }
+            + ["--reason", "Pay the example invoice for the test deployment.", "--label", fake.label]
         let ran = WalletAsk.run(arguments, environment: ["VIBESWITCHER_SESSION": id.uuidString], cwd: fake.cwd, peerChosen: true,
                                folder: walletDesk.folder)
         guard ran.status == 0 else { return reply(false, ran.error) }
@@ -1026,6 +1069,16 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     /// The newest card of the selected session's chat.
     private var walletCard: WalletCardModel? { model.selectedRow?.hostID.flatMap { walletDesk.cards(for: $0).last } }
+
+    /// `wallet-card`: the newest card as lines a script reads (`state Received`, `check chain failed …`).
+    private func walletCardText() -> (Bool, String) {
+        guard let card = walletCard else { return (false, "no wallet request in this chat: wallet-ask first") }
+        var lines = ["id \(card.id)", "state \(WalletCardModel.title(card.state))", "detail \(card.detail)",
+                     "from \(card.from) on \(card.chainText)", "not-picked-up \(card.notPickedUp ? "yes" : "no")"]
+        lines += card.checks.map { "check \($0.name) \($0.ok ? "ok" : "failed") \($0.detail)" }
+        lines.append("actions " + card.actions.map(\.rawValue).joined(separator: " "))
+        return (true, lines.joined(separator: "\n"))
+    }
 
     /// `wallet-click send|retry|discard`: that button on the newest card in the selected session's chat.
     private func walletClick(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
@@ -1553,7 +1606,14 @@ private final class Driver: NSObject, NSApplicationDelegate {
             showSettings(tab)
             settle { reply(true, "settings shown on \(tab.rawValue)") }
         case "sheet": showSheet(rest, reply)
-        case "wallet-ask": walletAsk(address: rest == "address", reply)
+        case "wallet-ask": walletAsk(Array(words.dropFirst()), reply)
+        case "wallet-card": let (ok, text) = walletCardText(); reply(ok, text)
+        case "wallet-later":
+            guard let minutes = Double(rest), minutes > 0 else { return reply(false, "wallet-later MINUTES (more than 0)") }
+            walletClock.advance(minutes * 60)
+            walletDesk.refresh(polling: false) { [weak self] in
+                self?.settle { reply(true, "the wallet desk's clock moved \(rest) min ahead\n" + (self?.walletCardText().1 ?? "")) }
+            }
         case "wallet-page": walletPage(rest.isEmpty ? "wallet-page" : rest, reply)
         case "wallet-click": walletClick(rest, reply)
         case "wallet-answer": walletAnswer(rest, reply)
