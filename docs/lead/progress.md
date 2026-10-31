@@ -2348,3 +2348,4 @@
 - 2026-10-31 19:27 Started a worker on wallet-requests-find
 - 2026-10-31 19:27 Automatically (auto_advance): Started a worker on wallet-requests-find (Wallet requests find Passage.app by themselves (no `passage` symlink needed)), its after tasks done (rename-the-vault-request).
 - 2026-10-31 19:27 Automatically (auto_advance): Started the audit of the-main-thread-blocks at a4b3ef50 (Its review is audit).
+- 2026-10-31 19:38 Planned the-power-check-writes: The power check writes its state file on the main thread (LeadController.lookAtPower)
