@@ -2186,3 +2186,5 @@
 - 2026-10-31 01:25 Automatically (auto_advance): Cleaned up team-pane-s-lines; ended pid 21071 (Worker: Team pane's lines over all decisions on every render (string indexing in LeadTeamView.Lines / TeamSummaryModel.line)) (freed 1.1 GB of build output and temporary folders). It stays done.
 - 2026-10-31 01:25 Started a worker on hang-watchdog-spends-2
 - 2026-10-31 01:25 Automatically (auto_advance): Started a worker on hang-watchdog-spends-2 (Hang watchdog spends ~2.3 s of CPU parsing each sample (AppHealth.sampleStart components(separatedBy:) at user-interactive QoS)).
+- 2026-10-31 01:39 Raised hang-watchdog-spends-2 to audit (the risk check, at 8ab62bad): it has code that adds locks or threads (Sources/VibeSwitcher/HangWatchdog.swift: static let reading = DispatchQueue(label: "vibeswitcher.hang-sample", qos: .util)
+- 2026-10-31 01:39 Automatically (auto_advance): Started the audit of hang-watchdog-spends-2 at 8ab62bad (The risk check raised it to audit: it has code that adds locks or threads (Sources/VibeSwitcher/HangWatchdog.swift: static let reading = DispatchQueue(label: "vibeswitcher.hang-sample", qos: .util)).
