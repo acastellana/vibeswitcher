@@ -395,10 +395,11 @@ struct TeamPanelCostTests {
         // The look started, and the main thread was let go while it waits.
         #expect(entered.wait(timeout: .now() + hangGuard) == .success, "the look never started")
         #expect(!ended.value, "the look held the main thread until its read ended")
+        // Checked before the main thread first turns: what's queued for it can't have run yet.
+        #expect(told.isEmpty)
         var turned = false
         DispatchQueue.main.async { turned = true }
         #expect(await until { turned }, "the main thread didn't run while the look waited")
-        #expect(told.isEmpty)
         // Let go: the hold is told once, on the main thread.
         gate.signal()
         #expect(await until { told.count == 1 }, "the look never came back")
