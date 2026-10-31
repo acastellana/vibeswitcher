@@ -11,7 +11,8 @@ public enum LeadLaunch {
         public var promptFile: String
         public var mcpFile: String
         public var settingsFile: String
-        /// What the session's environment adds (`SpawnRequest.env`): its TMPDIR, a folder of its own (see `SessionTemp`).
+        /// What the session's environment adds (`SpawnRequest.env`): its TMPDIR, a folder of its own (see `SessionTemp`),
+        /// and its role (`SessionNote.roleVariable`).
         public var environment: [String: String] = [:]
     }
 
@@ -179,6 +180,8 @@ public enum LeadLaunch {
         if let model { parts.append("--model \(quote(model))") }
         parts.append("-- \(quote(start))")
         var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
+        // Marks the role's session: its hook gives it none of the notes plain sessions get (`SessionNote`).
+        prepared.environment[SessionNote.roleVariable] = role.rawValue
         // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
         let cwd = cwd ?? task.map { Worktrees.path(root: root, slug: $0) } ?? root
         if let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary) { prepared.environment["TMPDIR"] = temporary.path + "/" }
