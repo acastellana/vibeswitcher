@@ -2259,3 +2259,8 @@
 - 2026-10-31 12:46 Audit of main-s-full-suite-2: complete, clean, round 1: 1 Pre-existing open
 - 2026-10-31 12:47 Planned hosthandovertests: HostHandoverTests.aHandoverKeepsEverySession waits for the whole "bg=<pid>" line
 - 2026-10-31 12:53 Merged main-s-full-suite-2: Main's full suite is green after the 2026-10-31 GitHub merge; openpty serialized in PTYSpawn
+- 2026-10-31 12:53 Automatically (auto_advance): Merged main-s-full-suite-2 (Main's full suite is green after the 2026-10-31 GitHub merge; openpty serialized in PTYSpawn) into main at 4e37c912, on its passing audit and the full test run.
+- 2026-10-31 12:53 Automatically (auto_advance): Cleaned up main-s-full-suite-2; ended pid 12866 (Worker: Main's full suite is green after the 2026-10-31 GitHub merge) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-10-31 12:53 Started a worker on hosthandovertests
+- 2026-10-31 12:53 Automatically (auto_advance): Started a worker on hosthandovertests (HostHandoverTests.aHandoverKeepsEverySession waits for the whole "bg=<pid>" line), its after tasks done (main-s-full-suite-2).
+- 2026-10-31 12:54 Update: Sessions started at once no longer lose a terminal (openpty serialized in the host) — **What changed:** On macOS 27, `openpty` fails for some threads when several call it at the same time (a probe outside the app: 40 of 200 calls failed, 0 with a mutex). The host now holds one lock aro…
