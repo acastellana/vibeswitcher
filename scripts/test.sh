@@ -116,6 +116,8 @@ perf_tests=(
     FootprintBenchTests/theWindowClosedIsUnder150MBAndChurnGrowsItAtMost10Percent
     PowerBenchTests/idleUnder1PercentAndLeadWorkUnder3
     BoardBenchTests/aBigBoardRefreshedBlocksTheMainThreadUnder50ms
+    AccessibilityTreeBenchTests
+    HostingViewDepthTests
 )
 
 if [[ ${1:-} == --leftovers ]]; then
