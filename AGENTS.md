@@ -23,6 +23,7 @@ vs-heavy bash scripts/test.sh                       # full suite, only when aske
 bash scripts/test.sh --filter 'AccessibilityLint|DebugAidsLint|HomePathLint|KeychainLint|PreferencesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
 scripts/test-under-load.sh --load 24 -r 3 -f 'NewTests'   # new or changed tests, under load, before reporting done
 bash scripts/test.sh --perf                         # benches, only on a calm Mac
+bash scripts/e2e/wallet-e2e.sh                      # on demand: sandbox → loop passage → ~/dev/wallet-manager and back, 5 cases
 ```
 
 UI changes: show them in the sandbox, each step its own command: `bash scripts/sandbox-app.sh run`, then
