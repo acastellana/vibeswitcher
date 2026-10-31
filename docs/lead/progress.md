@@ -2304,3 +2304,5 @@
 - 2026-10-31 16:51 Incident: `build-app.sh --install` replaced the bundle of a VibeSwitcher that was still running. Its process check (`pgrep -x VibeSwitcher`) finds nothing from a sandboxe…; planned turn-this-incident-into-7 to turn it into a check
 - 2026-10-31 16:51 Started a worker on turn-this-incident-into-7
 - 2026-10-31 16:51 Automatically (auto_advance): Started a worker on turn-this-incident-into-7 (Turn this incident into a check: `build-app.sh --install` replaced the bundle of a VibeSwitch…).
+- 2026-10-31 17:08 Raised turn-this-incident-into-7 to audit (the risk check, at 64766a7f): it changes test or build infrastructure the suite relies on (scripts/lib/install-app.sh)
+- 2026-10-31 17:08 Automatically (auto_advance): turn-this-incident-into-7 is audited, not merged: it changes test or build infrastructure the suite relies on (scripts/lib/install-app.sh) (the risk check raised it from review none). Its audit starts once the Mac has room.
