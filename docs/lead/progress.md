@@ -2326,3 +2326,6 @@
 - 2026-10-31 17:43 Automatically (auto_advance): Started the audit of agents-know-they-can at e490d8d3 (An audit was started on it: its verdict decides).
 - 2026-10-31 17:48 Audit of agents-know-they-can: complete, clean, round 2: 1 Important closed, 1 Pre-existing open
 - 2026-10-31 17:50 Merged turn-this-incident-into-6: Turn this incident into a check: A worker's or verifier's session that hits the account's usa…
+- 2026-10-31 17:50 Automatically (auto_advance): Merged turn-this-incident-into-6 (Turn this incident into a check: A worker's or verifier's session that hits the account's usa…) into main at f3e7054f, on its passing audit and the full test run.
+- 2026-10-31 17:50 Automatically (auto_advance): Cleaned up turn-this-incident-into-6; ended pid 76535 (Worker: Turn this incident into a check: A worker's or verifier's session that hits the account's usa…) (freed 2.6 GB of build output and temporary folders). It stays done.
+- 2026-10-31 17:57 Merged agents-know-they-can: Agents know they can ask for a transaction (vs-vault), and hear when a request expires unsent
