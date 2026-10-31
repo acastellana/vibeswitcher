@@ -2289,3 +2289,9 @@
 - 2026-10-31 16:12 Planned agents-know-they-can: Agents know they can ask for a transaction (vs-vault), and hear when a request expires unsent
 - 2026-10-31 16:22 Audit of vault-requests-in-the: complete, clean, round 1: 3 Nit open
 - 2026-10-31 16:27 Merged vault-requests-in-the: Vault requests wired end to end: agents ask, the card sends, the result comes back
+- 2026-10-31 16:27 Started a worker on agents-know-they-can
+- 2026-10-31 16:27 Automatically (auto_advance): Started a worker on agents-know-they-can (Agents know they can ask for a transaction (vs-vault), and hear when a request expires unsent), its after tasks done (vault-requests-in-the).
+- 2026-10-31 16:27 Folded vault-requests-the into vault-requests-in-the: that task carries its work
+- 2026-10-31 16:27 Folded vault-request-card-and into vault-requests-in-the: that task carries its work
+- 2026-10-31 16:27 Folded test-under-load-sh into vault-requests-in-the: that task carries its work
+- 2026-10-31 16:28 Update: Vault requests: agents ask, you click Send to vault, the answer comes back — **What changed** (one commit on main, 64e3b83)
