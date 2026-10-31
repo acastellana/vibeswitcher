@@ -76,13 +76,47 @@ public final class WalletRequestStore: @unchecked Sendable {
     // MARK: The former folder
 
     /// Carries the requests over from `old` (`~/.vibeswitcher/vault-requests`, the folder's name while the feature
-    /// was called vault requests) to `new`, then removes `old`: the whole folder in one move when `new` isn't there
-    /// yet, else entry by entry, keeping what `new` already has. Nothing to do once `old` is gone, so it runs once.
+    /// was called vault requests) to `new`, their former `type`s renamed (`renameTypes`), then removes `old`: the
+    /// whole folder in one move when `new` isn't there yet, else entry by entry, keeping what `new` already has. Nothing to do once `old` is gone, so it runs once.
     /// On a failure `old` stays (what was moved stays moved) for the next launch, and the error is thrown.
     public static func carryOver(from old: URL = VibePaths.formerVaultRequestsDir,
                                  to new: URL = VibePaths.walletRequestsDir) throws {
         guard kind(old) != nil else { return }
+        try renameTypes(in: old)
         try move(old, into: new)
+    }
+
+    /// The `type`s the formats had while they were vault-request and vault-result v1, and theirs now.
+    static let formerTypes = ["vibeswitcher.vault-request": WalletRequest.type, "vibeswitcher.vault-result": WalletResult.type]
+
+    /// Every `.json` file under `folder` (a filed request, or a record with its request and results) written again
+    /// with the former `type`s renamed, and nothing else changed, so the readers, which take only the new ones, read
+    /// it as before. A file that isn't JSON, or holds no former type, is left as it is.
+    private static func renameTypes(in folder: URL) throws {
+        if kind(folder) == .typeDirectory {
+            for name in try FileManager.default.contentsOfDirectory(atPath: folder.path) {
+                try renameTypes(in: folder.appendingPathComponent(name))
+            }
+        } else if kind(folder) == .typeRegular, folder.pathExtension == "json",
+                  let data = try? Data(contentsOf: folder), data.count <= maxRecordBytes,
+                  let value = try? WalletRequestFormat.Value.parse(data) {
+            let renamed = renameTypes(value)
+            if renamed != value { try VibePaths.writePrivate(renamed.encoded(), to: folder) }
+        }
+    }
+
+    static func renameTypes(_ value: WalletRequestFormat.Value) -> WalletRequestFormat.Value {
+        switch value {
+        case .object(let members):
+            return .object(members.map { member in
+                if member.key == "type", case let .string(type) = member.value, let now = formerTypes[type] {
+                    return .init(member.key, .string(now))
+                }
+                return .init(member.key, renameTypes(member.value))
+            })
+        case .array(let values): return .array(values.map(renameTypes))
+        default: return value
+        }
     }
 
     private static func move(_ old: URL, into new: URL) throws {

@@ -200,4 +200,32 @@ struct WalletAskTests {
         try WalletRequestStore.carryOver(from: old, to: new)
         #expect(!FileManager.default.fileExists(atPath: new.path))
     }
+
+    /// What an earlier version filed and recorded, in the formats' former `type`s: read as before once carried over.
+    @Test func carriedOverRequestsAndRecordsStillReadWithTheirFormerTypesRenamed() throws {
+        let old = scratch.url("vault-requests"), new = scratch.url("wallet-requests")
+        func former(_ data: Data) -> Data {
+            Data(String(decoding: data, as: UTF8.self)
+                .replacingOccurrences(of: "\"vibeswitcher.wallet-request\"", with: "\"vibeswitcher.vault-request\"")
+                .replacingOccurrences(of: "\"vibeswitcher.wallet-result\"", with: "\"vibeswitcher.vault-result\"").utf8)
+        }
+        let asked = try WalletAsk.request(Array(Self.valid.dropFirst()), environment: Self.environment, cwd: "/work/example-project", now: Self.now)
+        let sent = try WalletAsk.request(Array(Self.with("--amount", "2").dropFirst()), environment: Self.environment, cwd: "/work/example-project", now: Self.now)
+        let result = WalletResult(id: sent.id, sequence: 1, createdAt: Self.now.addingTimeInterval(60), status: .received,
+                                  checks: [.init(name: "balance", ok: true, detail: "covers it")], message: "")
+        let record = WalletRequestStore.Record(request: sent, state: .sent, results: [result])
+        try VibePaths.ensurePrivate(old.appendingPathComponent("asked"))
+        try VibePaths.writePrivate(former(try asked.encoded()), to: old.appendingPathComponent("asked/\(asked.id).json"))
+        try VibePaths.writePrivate(former(WalletRequestStore.encode(record)), to: old.appendingPathComponent("\(sent.id).json"))
+        // As the earlier version wrote them, today's readers refuse them.
+        #expect(WalletAsk.filed(in: old.appendingPathComponent("asked")).requests.isEmpty)
+        #expect(WalletRequestStore(folder: old).load().isEmpty)
+
+        try WalletRequestStore.carryOver(from: old, to: new)
+        let filed = WalletAsk.filed(in: new.appendingPathComponent("asked"))
+        #expect(filed.refused.isEmpty)
+        #expect(filed.requests == [asked])
+        #expect(WalletRequestStore(folder: new).load() == [record])
+        #expect(!FileManager.default.fileExists(atPath: old.path))
+    }
 }
