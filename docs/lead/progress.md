@@ -2323,3 +2323,6 @@
 - 2026-10-31 17:37 Automatically (auto_advance): Cleaned up turn-this-incident-into-7 (freed 1.0 GB of build output and temporary folders). It stays done.
 - 2026-10-31 17:38 Update: Install no longer replaces a running app it can't see — **What changed:** `scripts/build-app.sh --install` now finds the running app with `ps`, by its executable path inside /Applications/VibeSwitcher.app, instead of `pgrep`, which a sandboxed shell (a `!`…
 - 2026-10-31 17:39 Audit of turn-this-incident-into-6: complete, clean, round 1: 3 Nit open
+- 2026-10-31 17:43 Automatically (auto_advance): Started the audit of agents-know-they-can at e490d8d3 (An audit was started on it: its verdict decides).
+- 2026-10-31 17:48 Audit of agents-know-they-can: complete, clean, round 2: 1 Important closed, 1 Pre-existing open
+- 2026-10-31 17:50 Merged turn-this-incident-into-6: Turn this incident into a check: A worker's or verifier's session that hits the account's usa…
