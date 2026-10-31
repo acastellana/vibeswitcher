@@ -152,7 +152,8 @@ wm_poll() { curl -s --max-time 30 -o /dev/null "${wm_url}requests"; }
 sb() { bash scripts/sandbox-app.sh --dir "$sandbox_dir" --shots "$shots" "$@"; }
 sandbox_started=1
 sb --minutes 30 ${binary:+--binary "$binary"} --passage "$loop/dev/bin/passage" --passage-inbox "$dev_root/dev/inbox" run || die "the sandbox didn't start"
-sb chat >/dev/null || die "the sandbox has no fake session's chat"
+# Each case in a fake session of its own, so its chat holds just its card.
+session() { sb new "$1" >/dev/null && sb chat "$1" >/dev/null || die "couldn't start and show the fake session $1"; }
 
 # The newest card's field ($1: state, id, not-picked-up…), from `wallet-card`.
 card() { sb wallet-card | sed -n "s/^$1 //p" | head -1; }
@@ -181,15 +182,16 @@ requests_in_vault_inbox() { ls "$loop/vault/inbox/$DEV_PEER" 2>/dev/null | grep 
 
 failures=0
 report() {   # report NUMBER TITLE pass|fail DETAIL SHOT
-    local shot=$shots/$5-light.png
+    local shot=$shots/$5-main-light.png   # the main window's, as `shot` names it
     say "case $1 $2: $3 ($4)"
     say "  shot: $shot"
     [[ $3 == pass ]] || failures=$((failures + 1))
 }
-shot() { sb shot "$1" >/dev/null || say "  (couldn't take shot $1)"; }
+shot() { sb scroll bottom >/dev/null; sb shot "$1" >/dev/null || say "  (couldn't take shot $1)"; }
 
 # 1. A valid testnet transfer: waiting → sent → received. Its answer is held back until the card has shown Sent.
 touch "$loop/vault/hold"
+session "Case 1 agent"
 ask; seen="waiting"
 send send
 [[ $(card state) == Sent ]] && seen+=" → sent"
@@ -208,6 +210,7 @@ else
 fi
 
 # 2. An unknown wallet: rejected, naming the wallet check.
+session "Case 2 agent"
 ask --from no-such-wallet
 send send
 id=$(card id)
@@ -222,6 +225,7 @@ else
 fi
 
 # 3. The wrong chain: the testnet wallet asked for mainnet (42424242).
+session "Case 3 agent"
 ask --chain 42424242
 send send
 wm_poll
@@ -236,6 +240,7 @@ fi
 
 # 5. Unsure, then Retry: the first copy arrives but the send fails (exit 1), so the card is unsure; the Wallet Manager
 # takes that copy (its answer held back); Retry delivers the same id again, which it ignores; then the answer goes.
+session "Case 5 agent"
 touch "$loop/vault/hold"
 ask
 echo deliver-then-fail >"$loop/dev/fault"
@@ -264,6 +269,7 @@ fi
 
 # 4. The Wallet Manager stopped: delivered to the vault Mac but never picked up.
 if stop_wallet_manager; then
+    session "Case 4 agent"
     ask
     send send
     id=$(card id)
