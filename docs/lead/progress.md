@@ -2200,3 +2200,7 @@
 - 2026-10-31 02:22 Update: Overnight batch: health reporting and freezes — **Merged since the last install:**
 - 2026-10-31 04:47 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-10-31 10:25 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-10-31 10:33 Update: Retrospective: dictation, freezes and the merge gate (2026-10-29 → 10-31) — **Landed (about 20 tasks, no reverts):**
+- 2026-10-31 10:34 Planned readscreen-reads-the: readScreen reads the session's hook state file on the main thread (HookState.load in followChat)
+- 2026-10-31 10:34 Started a worker on readscreen-reads-the
+- 2026-10-31 10:34 Automatically (auto_advance): Started a worker on readscreen-reads-the (readScreen reads the session's hook state file on the main thread (HookState.load in followChat)).
