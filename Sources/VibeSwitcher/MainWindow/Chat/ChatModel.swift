@@ -508,19 +508,69 @@ final class ChatModel: ObservableObject {
     @Published private(set) var steeringStranded = false
 
     /// Follows the selected session's waiting steered messages (from the inbox, so they show after a relaunch too).
+    /// The inbox is read on `inbox`, never on the main thread (this runs each second), and what it holds is shown on
+    /// main once read.
     func watchSteering(tty: String?, agentPid: Int32?, idle: Bool) {
         guard let tty, let agentPid else {
             if !steering.isEmpty { steering = [] }
             steeringTTY = nil
+            watched = nil
             if steeringStranded { steeringStranded = false }
             return
         }
         steeringTTY = tty
-        var waiting = SteerInbox.pending(tty: tty, root: steerRoot).filter { $0.agentPid == agentPid && $0.from == .user }
-        let landed = Set(waiting.map(\.id))
-        waiting += inFlight.filter { $0.tty == tty && $0.message.agentPid == agentPid && !landed.contains($0.message.id) }.map(\.message)
-        if waiting != steering { steering = waiting }
-        let stranded = idle && !waiting.isEmpty
+        watched = (tty, agentPid, idle)
+        readSteering()
+    }
+
+    /// The session `watchSteering` follows: its terminal, its agent, and whether that agent is idle.
+    private var watched: (tty: String, agentPid: Int32, idle: Bool)?
+    /// What the strip reads from the inbox: the messages waiting there, and (`delivered`: only while the strip shows
+    /// some) the ids of those agents took. On `inbox`; a scratch loader in tests.
+    var loadSteering: (_ tty: String, _ root: URL, _ delivered: Bool) -> (pending: [SteerMessage], delivered: Set<String>) = { tty, root, delivered in
+        (SteerInbox.pending(tty: tty, root: root), delivered ? SteerInbox.delivered(tty: tty, root: root) : [])
+    }
+    /// A read of the inbox for the strip is on its way (one at a time: behind a post waiting on the lock they'd pile
+    /// up), and whether another was asked for meanwhile (done once it's in, with what's watched then).
+    private(set) var steerReading = false
+    private var steerReadAgain = false
+
+    /// Reads the watched terminal's inbox on `inbox`, then shows it (`showSteering`) on main.
+    private func readSteering() {
+        guard let tty = steeringTTY else { return }
+        guard !steerReading else { steerReadAgain = true; return }
+        steerReading = true
+        let root = steerRoot, delivered = !steering.isEmpty, load = loadSteering
+        inbox { [weak self, onMain] in
+            let read = load(tty, root, delivered)
+            onMain {
+                guard let self else { return }
+                self.steerReading = false
+                self.showSteering(read, tty: tty)
+                if self.steerReadAgain {
+                    self.steerReadAgain = false
+                    self.readSteering()
+                }
+            }
+        }
+    }
+
+    /// What `tty`'s inbox holds, shown in the strip: the watched agent's messages waiting there and those on their way
+    /// in; then, of those shown, the ones its agent took or that left the inbox dropped. A read of a terminal no
+    /// longer followed shows nothing.
+    private func showSteering(_ read: (pending: [SteerMessage], delivered: Set<String>), tty: String) {
+        guard tty == steeringTTY else { return }
+        if let watched, watched.tty == tty {
+            var waiting = read.pending.filter { $0.agentPid == watched.agentPid && $0.from == .user }
+            let landed = Set(waiting.map(\.id))
+            waiting += inFlight.filter { $0.tty == tty && $0.message.agentPid == watched.agentPid && !landed.contains($0.message.id) }.map(\.message)
+            if waiting != steering { steering = waiting }
+        }
+        // Taken, or gone from the inbox (a new agent on that terminal dropped it); one still on its way stays.
+        let pending = Set(read.pending.map(\.id))
+        let left = steering.filter { !read.delivered.contains($0.id) && (pending.contains($0.id) || steerSending.contains($0.id)) }
+        if left != steering { steering = left }
+        let stranded = (watched?.tty == tty && watched?.idle == true) && !steering.isEmpty
         if stranded != steeringStranded { steeringStranded = stranded }
     }
 
@@ -540,14 +590,10 @@ final class ChatModel: ObservableObject {
         }
     }
 
-    /// Drops steered messages the agent has taken (they show from the transcript then).
+    /// Drops steered messages the agent has taken (they show from the transcript then): read like `watchSteering`'s.
     func refreshSteering() {
-        guard let tty = steeringTTY, !steering.isEmpty else { return }
-        let delivered = SteerInbox.delivered(tty: tty, root: steerRoot)
-        let pending = Set(SteerInbox.pending(tty: tty, root: steerRoot).map(\.id))
-        // Taken, or gone from the inbox (a new agent on that terminal dropped it); one still on its way stays.
-        let left = steering.filter { !delivered.contains($0.id) && (pending.contains($0.id) || steerSending.contains($0.id)) }
-        if left != steering { steering = left }
+        guard steeringTTY != nil, !steering.isEmpty else { return }
+        readSteering()
     }
 
     /// Records a sent message until the transcript shows it: queued for after the turn, or typed into an idle

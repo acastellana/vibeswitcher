@@ -820,7 +820,7 @@ final class Harness {
         chat.poll()
         _ = await VibeSwitcherTests.until { !self.chat.reading }
         heartbeat()
-        _ = await VibeSwitcherTests.until { !self.sync.confirming }
+        _ = await VibeSwitcherTests.until { !self.sync.confirming && !self.chat.steerReading }
     }
 
     /// `tick` without waiting for the read (inside an `until`).

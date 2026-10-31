@@ -105,6 +105,7 @@ struct SteerOffMainTests {
         #expect(waiting.map(\.id) == [id])
         #expect(SteerInbox.verified(waiting, sealer: .for(chat.steerRoot)).map(\.from) == [.user])
         chat.watchSteering(tty: tty, agentPid: agentPid, idle: false)
+        #expect(await until { !chat.steerReading })
         #expect(chat.steering.map(\.id) == [id])
         #expect(chat.sendNotice == nil)
     }
@@ -114,7 +115,8 @@ struct SteerOffMainTests {
         let message = SteerMessage(text: "never mind", from: .user, agentPid: agentPid)
         try SteerInbox.post(message, tty: tty, root: chat.steerRoot)
         chat.watchSteering(tty: tty, agentPid: agentPid, idle: true)
-        #expect(chat.steering.map(\.id) == [message.id])
+        // Read off the main thread: shown once it's in.
+        #expect(await until { chat.steering.map(\.id) == [message.id] })
         let holder = try holdLock(file, for: 60)
         defer { holder.process.terminate() }
         var taken: SteerMessage?
