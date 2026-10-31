@@ -32,3 +32,4 @@
 - 2026-10-31 00:40 Automatically (auto_advance): Merged turn-this-incident-into-2 (Turn this incident into a check: auto_advance merged a task the lead had set to kept: it ran …) into main at cd9d55fc, on its passing audit and the full test run.
 - 2026-10-31 00:40 Automatically (auto_advance): Cleaned up turn-this-incident-into-2; ended pid 59273 (Worker: Turn this incident into a check: auto_advance merged a task the lead had set to kept: it ran …) (freed 2.4 GB of build output and temporary folders). It stays done.
 - 2026-10-31 00:40 Update: Retrospective: install fix batch (2026-10-30/31) — **Landed (4 tasks):** build-app-sh-install (install really restarts the app), test-under-load-sh (load runner works with Swift 6.4's per-target bundles), main-s-full-suite (VoiceOver duration fixed to…
+- 2026-10-31 02:59 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
