@@ -2204,3 +2204,5 @@
 - 2026-10-31 10:34 Planned readscreen-reads-the: readScreen reads the session's hook state file on the main thread (HookState.load in followChat)
 - 2026-10-31 10:34 Started a worker on readscreen-reads-the
 - 2026-10-31 10:34 Automatically (auto_advance): Started a worker on readscreen-reads-the (readScreen reads the session's hook state file on the main thread (HookState.load in followChat)).
+- 2026-10-31 10:46 Planned steer-inbox-read-on: Steer inbox read on the main thread every second (SteerInbox.pending in watchSteering, refreshSteering)
+- 2026-10-31 10:52 Merged readscreen-reads-the: readScreen reads the session's hook state file on the main thread (HookState.load in followChat) (no audit: review none)
