@@ -108,10 +108,10 @@ mkdir -p "$APP/Contents/Resources"
 cp -R Web "$APP/Contents/Resources/Web"
 # The app's icon (CFBundleIconFile in Info.plist), drawn by scripts/app-icon.sh.
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-# vs-heavy and vs-vault, on PATH in every session the app starts (the session host puts this folder first).
+# vs-heavy and vs-wallet, on PATH in every session the app starts (the session host puts this folder first).
 mkdir -p "$APP/Contents/Resources/bin"
 cp Resources/bin/vs-heavy "$APP/Contents/Resources/bin/vs-heavy"
-cp Resources/bin/vs-vault "$APP/Contents/Resources/bin/vs-vault"
+cp Resources/bin/vs-wallet "$APP/Contents/Resources/bin/vs-wallet"
 # SwiftPM resource bundles (SwiftTerm's Metal shaders); found through Bundle.main.resourceURL.
 for bundle in "$BIN"/*.bundle; do [[ -e "$bundle" ]] && cp -R "$bundle" "$APP/Contents/Resources/"; done
 # Sign with the stable local identity if it exists (scripts/setup-signing.sh), so macOS keeps granted

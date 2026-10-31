@@ -1558,8 +1558,8 @@ final class LeadController: ObservableObject {
         deliver(LeadBudget.leadText(task, minutes: minutes), from: .system("witness"), root: root)
     }
 
-    /// A message from VibeSwitcher itself for the agent of window session `id` (a vault request's answer, see
-    /// `VaultDesk`): posted into its steer inbox, which its hook hands over at its next step, and typed in once it's
+    /// A message from VibeSwitcher itself for the agent of window session `id` (a wallet request's answer, see
+    /// `WalletDesk`): posted into its steer inbox, which its hook hands over at its next step, and typed in once it's
     /// between turns with an empty box (`flush`), as a time budget's stop is. `then` hears on the main thread whether
     /// it reached the inbox (false: no live session with an agent).
     func tell(_ text: String, from sender: SteerMessage.Sender, session id: UUID, then: @escaping (Bool) -> Void = { _ in }) {

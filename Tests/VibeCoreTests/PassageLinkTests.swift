@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import VibeCore
 
-/// VibeSwitcher's Passage link to the vault Mac, against a fake `passage` script in a scratch folder (never the real
+/// VibeSwitcher's Passage link to the Wallet Manager's Mac, against a fake `passage` script in a scratch folder (never the real
 /// one, its Keychain, pairings or inbox): what `passage send` is run with and how each exit code reads, which inbox
 /// results are taken, `passage listen` running only while a request is outstanding, and the records surviving a
 /// restart.
@@ -72,7 +72,7 @@ struct PassageLinkTests {
             let stamp = String(format: "20261031T1201%02dZ", second)
             let path = dir.appendingPathComponent("\(stamp)-\(name)").path
             try data.write(to: URL(fileURLWithPath: path))
-            let line = VaultFormat.Value.object([.init("peerID", .string(peer)), .init("name", .string(name)),
+            let line = WalletRequestFormat.Value.object([.init("peerID", .string(peer)), .init("name", .string(name)),
                                                  .init("size", .integer(Int64(data.count))), .init("receivedAt", .string(stamp)),
                                                  .init("path", .string(path))]).encoded()
             let handle = try FileHandle(forWritingTo: file("inbox.jsonl").creatingIfMissing())
@@ -83,11 +83,11 @@ struct PassageLinkTests {
         }
 
         @discardableResult
-        func receive(_ result: VaultResult, from peer: String = PassageLinkTests.peer, second: Int = 0) throws -> String {
-            try receive(result.encoded(), name: VaultResult.fileName(result.id), from: peer, second: second)
+        func receive(_ result: WalletResult, from peer: String = PassageLinkTests.peer, second: Int = 0) throws -> String {
+            try receive(result.encoded(), name: WalletResult.fileName(result.id), from: peer, second: second)
         }
 
-        var link: PassageLink { PassageLink(executable: executable, vaultPeer: PassageLinkTests.peer, inboxFolder: inbox)! }
+        var link: PassageLink { PassageLink(executable: executable, walletPeer: PassageLinkTests.peer, inboxFolder: inbox)! }
     }
 
     /// What a courier logged.
@@ -108,21 +108,21 @@ struct PassageLinkTests {
 
     static let created = Date(timeIntervalSince1970: 1_793_448_000)   // 2026-10-31T12:00:00Z
 
-    static func request(_ number: Int = 1) -> VaultRequest {
-        var request = VaultFormatTests.request()
+    static func request(_ number: Int = 1) -> WalletRequest {
+        var request = WalletRequestFormatTests.request()
         request.id = String(format: "00000000-0000-4000-8000-%012d", number)
         return request
     }
 
-    static func result(_ request: VaultRequest, _ status: VaultResult.Status, sequence: Int64) -> VaultResult {
-        var result = VaultResult(id: request.id, sequence: sequence, createdAt: created.addingTimeInterval(60), status: status,
+    static func result(_ request: WalletRequest, _ status: WalletResult.Status, sequence: Int64) -> WalletResult {
+        var result = WalletResult(id: request.id, sequence: sequence, createdAt: created.addingTimeInterval(60), status: status,
                                  checks: [.init(name: "format", ok: true, detail: "")], message: status.rawValue)
         if status == .submitted { result.txHash = "0x" + String(repeating: "ab", count: 32) }
         return result
     }
 
-    func courier(_ fake: FakePassage, log: Log, store: VaultStore? = nil) -> VaultCourier {
-        VaultCourier(link: fake.link, store: store ?? VaultStore(folder: scratch.url("requests")), log: { [log] in log.note($0) },
+    func courier(_ fake: FakePassage, log: Log, store: WalletRequestStore? = nil) -> WalletCourier {
+        WalletCourier(link: fake.link, store: store ?? WalletRequestStore(folder: scratch.url("requests")), log: { [log] in log.note($0) },
                      now: { Self.created.addingTimeInterval(30) })
     }
 
@@ -136,17 +136,17 @@ struct PassageLinkTests {
         let request = Self.request()
         #expect(courier.send(request) == .passage(.sent))
         let send = try #require(fake.calls.first { $0.hasPrefix("send ") })
-        let file = courier.store.folder.appendingPathComponent("outbox/vault-request-\(request.id).json").path
-        #expect(send == "send \(Self.peer) \(file) --name vault-request-\(request.id).json")
+        let file = courier.store.folder.appendingPathComponent("outbox/wallet-request-\(request.id).json").path
+        #expect(send == "send \(Self.peer) \(file) --name wallet-request-\(request.id).json")
         #expect(!fake.calls.joined().contains("--yes"))
         // What went is the request's own checked file, and the copy sent isn't left behind.
-        #expect(try VaultRequest.parse(Data(contentsOf: fake.file("sent-vault-request-\(request.id).json"))) == request)
+        #expect(try WalletRequest.parse(Data(contentsOf: fake.file("sent-wallet-request-\(request.id).json"))) == request)
         #expect(!FileManager.default.fileExists(atPath: file))
         #expect(courier.outstanding == [request])
         #expect(courier.record(request.id)?.state == .sent)
     }
 
-    /// 2–5 end before anything went: the record goes. 1 and the rest may have reached the vault: it stays, unsure.
+    /// 2–5 end before anything went: the record goes. 1 and the rest may have reached the Wallet Manager: it stays, unsure.
     @Test(arguments: [(Int32(1), PassageLink.SendOutcome.failed("passage: fake exit 1"), true),
                       (2, .usage("passage: fake exit 2"), false), (3, .noSuchPeer("passage: fake exit 3"), false),
                       (4, .peerNotListening("passage: fake exit 4"), false), (5, .refusedAsSecret("passage: fake exit 5"), false),
@@ -178,12 +178,12 @@ struct PassageLinkTests {
         let fake = try FakePassage(scratch)
         try "\(signal)\n".write(to: fake.file("send-signal"), atomically: true, encoding: .utf8)
         let file = scratch.url("request.json")
-        try VaultFormatTests.request().encoded().write(to: file)
-        let outcome = fake.link.send(file: file, id: VaultFormatTests.request().id)
+        try WalletRequestFormatTests.request().encoded().write(to: file)
+        let outcome = fake.link.send(file: file, id: WalletRequestFormatTests.request().id)
         #expect(outcome == .unexpected("passage send was ended by signal \(signal)"))
     }
 
-    /// Unsure: it takes the vault's results, and the very same request may go again under its id; another may not.
+    /// Unsure: it takes the Wallet Manager's results, and the very same request may go again under its id; another may not.
     @Test func anUnsureRequestIsTrackedAndMayBeResent() throws {
         let fake = try FakePassage(scratch)
         try fake.setSendExit(1)
@@ -223,7 +223,7 @@ struct PassageLinkTests {
         defer { courier.close() }
         let request = Self.request()
         let done = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) var outcome: VaultCourier.SendOutcome?
+        nonisolated(unsafe) var outcome: WalletCourier.SendOutcome?
         Thread.detachNewThread {
             outcome = courier.send(request)
             done.signal()
@@ -245,10 +245,10 @@ struct PassageLinkTests {
         let fake = try FakePassage(scratch)
         let link = fake.link
         let file = scratch.url("request.json")
-        try VaultFormatTests.request().encoded().write(to: file)
-        #expect(link.send(file: file, id: VaultFormatTests.request().id) == .sent)
+        try WalletRequestFormatTests.request().encoded().write(to: file)
+        #expect(link.send(file: file, id: WalletRequestFormatTests.request().id) == .sent)
         try Data().write(to: fake.file("send-quiet"))
-        guard case .unexpected = link.send(file: file, id: VaultFormatTests.request().id) else {
+        guard case .unexpected = link.send(file: file, id: WalletRequestFormatTests.request().id) else {
             Issue.record("exit 0 without the sent line counted as sent")
             return
         }
@@ -258,7 +258,7 @@ struct PassageLinkTests {
         let fake = try FakePassage(scratch)
         let courier = courier(fake, log: Log())
         defer { courier.close() }
-        let request = VaultFormatTests.request(reason: "key " + VaultFormatTests.hex64)
+        let request = WalletRequestFormatTests.request(reason: "key " + WalletRequestFormatTests.hex64)
         guard case let .refused(why) = courier.send(request) else {
             Issue.record("sent a request holding key material")
             return
@@ -313,7 +313,7 @@ struct PassageLinkTests {
         #expect(courier.send(request) == .passage(.sent))
         let path = try fake.receive(Self.result(request, .received, sequence: 1), from: Self.otherPeer)
         #expect(courier.poll().isEmpty)
-        #expect(log.lines.contains("ignored \(path): from peer \(Self.otherPeer), not the vault peer \(Self.peer)"))
+        #expect(log.lines.contains("ignored \(path): from peer \(Self.otherPeer), not the Wallet Manager peer \(Self.peer)"))
         #expect(courier.record(request.id)?.results.isEmpty == true)
     }
 
@@ -346,14 +346,14 @@ struct PassageLinkTests {
         defer { courier.close() }
         let request = Self.request()
         #expect(courier.send(request) == .passage(.sent))
-        let name = VaultResult.fileName(request.id)
+        let name = WalletResult.fileName(request.id)
         let broken = try fake.receive(Data("{\"type\":".utf8), name: name)
         let wrongID = try fake.receive(Self.result(Self.request(2), .received, sequence: 1).encoded(), name: name, second: 1)
         let note = try fake.receive(Data("hello".utf8), name: "note.txt", second: 2)
         #expect(courier.poll().isEmpty)
         #expect(log.lines.contains { $0.hasPrefix("ignored \(broken): refused: not JSON") })
         #expect(log.lines.contains("ignored \(wrongID): its id \(Self.request(2).id) isn't its name's \(request.id)"))
-        #expect(log.lines.contains("ignored \(note): not a vault result (note.txt)"))
+        #expect(log.lines.contains("ignored \(note): not a wallet result (note.txt)"))
     }
 
     // MARK: Listening
@@ -388,8 +388,8 @@ struct PassageLinkTests {
     @Test func outstandingRequestsSurviveARestartAsPrivateFiles() throws {
         let fake = try FakePassage(scratch)
         // The app's own folder, under VibeSwitcher's home (a scratch one in a test run).
-        let store = VaultStore()
-        #expect(store.folder == VibePaths.root.appendingPathComponent("vault-requests"))
+        let store = WalletRequestStore()
+        #expect(store.folder == VibePaths.root.appendingPathComponent("wallet-requests"))
         let request = Self.request(Int.random(in: 100...999_999))
         defer { store.remove(request.id) }
         let log = Log()
@@ -404,16 +404,16 @@ struct PassageLinkTests {
         #expect(info.st_mode & 0o777 == 0o700)
 
         // A new courier over a new store on the same folder: the app after a restart.
-        let second = courier(fake, log: log, store: VaultStore())
+        let second = courier(fake, log: log, store: WalletRequestStore())
         defer { second.close() }
         #expect(second.outstanding.contains(request))
-        #expect(second.record(request.id) == VaultStore.Record(request: request, state: .sent))
+        #expect(second.record(request.id) == WalletRequestStore.Record(request: request, state: .sent))
         // Still outstanding, so it listens again.
         #expect(second.listenerPID != nil)
         try fake.receive(Self.result(request, .received, sequence: 1))
         #expect(second.poll().map(\.id) == [request.id])
         // The result is kept too, and its inbox file isn't taken twice after another restart.
-        let third = courier(fake, log: log, store: VaultStore())
+        let third = courier(fake, log: log, store: WalletRequestStore())
         defer { third.close() }
         #expect(third.record(request.id)?.results.map(\.status) == [.received])
         #expect(third.poll().isEmpty)
@@ -425,7 +425,7 @@ struct PassageLinkTests {
         let id = Self.request().id
         try VibePaths.writePrivate(Data("{}".utf8), to: folder.appendingPathComponent("\(id).json"))
         let log = Log()
-        #expect(VaultStore(folder: folder).load(log: log.note).isEmpty)
+        #expect(WalletRequestStore(folder: folder).load(log: log.note).isEmpty)
         #expect(log.lines.contains { $0.hasPrefix("kept \(id).json aside") })
         #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(id).json").path))
     }

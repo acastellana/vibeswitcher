@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import VibeCore
 
-/// A session VibeSwitcher started hears at its start that it can ask for a transaction with vs-vault (the hook's
+/// A session VibeSwitcher started hears at its start that it can ask for a transaction with vs-wallet (the hook's
 /// SessionStart reply); a lead's, worker's or verifier's doesn't, nor a session VibeSwitcher didn't start.
 struct SessionNoteTests {
     let temp = Scratch()
@@ -23,12 +23,12 @@ struct SessionNoteTests {
         return output["additionalContext"]
     }
 
-    @Test func aNewSessionsContextCarriesTheVaultNote() throws {
+    @Test func aNewSessionsContextCarriesTheWalletNote() throws {
         for source in ["startup", "resume", "clear"] {
             let context = try #require(try Self.context(SessionNote.output(payload: Self.start(source), environment: Self.session)))
             #expect(context == SessionNote.text)
-            #expect(context.contains("vs-vault request"))
-            #expect(context.contains("Send to vault"))
+            #expect(context.contains("vs-wallet request"))
+            #expect(context.contains("Send to Wallet Manager"))
             #expect(context.contains("never holds or takes keys"))
         }
         // The main thread's start, as Claude Code marks it (no agent id, or an empty one).

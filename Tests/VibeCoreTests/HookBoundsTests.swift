@@ -353,7 +353,7 @@ struct HookBoundsTests {
     /// The built hook hands a session VibeSwitcher started its note at its start, as Claude Code reads a hook's reply:
     /// one JSON object on stdout, the note as added context (`SessionNote`). A worker's session, nothing.
     @Test(.enabled(if: HookBoundsTests.terminal != nil, "the hook records for no terminal from here"))
-    func aSessionStartsHookRepliesWithTheVaultNote() throws {
+    func aSessionStartsHookRepliesWithTheWalletNote() throws {
         let home = try home()
         let start: [String: Any] = ["hook_event_name": "SessionStart", "source": "startup", "session_id": "s"]
         let session = "11111111-2222-4333-8444-555555555555"

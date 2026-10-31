@@ -3,29 +3,29 @@ import Foundation
 import Testing
 @testable import VibeCore
 
-/// vault-request v1 and vault-result v1 (docs/protocol/vault-request.md): the strict parser refuses each thing the
+/// wallet-request v1 and wallet-result v1 (docs/protocol/wallet-request.md): the strict parser refuses each thing the
 /// format doesn't allow, and a request holding anything shaped like key material. Made-up values only: workspace
 /// "example", addresses 0x000…01.
-struct VaultFormatTests {
+struct WalletRequestFormatTests {
     static let created = Date(timeIntervalSince1970: 1_793_448_000)   // 2026-10-31T12:00:00Z
     static let someone = "0x0000000000000000000000000000000000000001"
     static let token = "0x00000000000000000000000000000000000000aa"
 
-    static func request(action: VaultRequest.Action = .transfer, reason: String = "Pay the example invoice.") -> VaultRequest {
-        VaultRequest(id: "00000000-0000-4000-8000-000000000001", createdAt: created, expiresAt: created.addingTimeInterval(86_400),
+    static func request(action: WalletRequest.Action = .transfer, reason: String = "Pay the example invoice.") -> WalletRequest {
+        WalletRequest(id: "00000000-0000-4000-8000-000000000001", createdAt: created, expiresAt: created.addingTimeInterval(86_400),
                      requestedBy: .init(project: "example-project", session: "example-session", label: "Example"),
                      workspace: "example", from: "example-wallet", chainId: 42_424_242, action: action, to: someone,
                      asset: action == .call ? "native" : token, amount: action == .call ? "0" : "1000000",
                      data: action == .call ? "0xa9059cbb" : nil, reason: reason)
     }
 
-    static func result(status: VaultResult.Status = .received, sequence: Int64 = 1) -> VaultResult {
-        VaultResult(id: "00000000-0000-4000-8000-000000000001", sequence: sequence, createdAt: created.addingTimeInterval(60),
+    static func result(status: WalletResult.Status = .received, sequence: Int64 = 1) -> WalletResult {
+        WalletResult(id: "00000000-0000-4000-8000-000000000001", sequence: sequence, createdAt: created.addingTimeInterval(60),
                     status: status, checks: [.init(name: "format", ok: true, detail: "")], message: "Received.")
     }
 
     /// `value` with `key` set to `new` (nil removes it), in `path`'s object ("requestedBy", or "" for the top).
-    static func edit(_ value: VaultFormat.Value, _ key: String, _ new: VaultFormat.Value?, in path: String = "") -> VaultFormat.Value {
+    static func edit(_ value: WalletRequestFormat.Value, _ key: String, _ new: WalletRequestFormat.Value?, in path: String = "") -> WalletRequestFormat.Value {
         guard case var .object(members) = value else { return value }
         if !path.isEmpty {
             let index = members.firstIndex { $0.key == path }!
@@ -40,34 +40,34 @@ struct VaultFormatTests {
         return .object(members)
     }
 
-    static func parseRequest(_ value: VaultFormat.Value) throws -> VaultRequest { try VaultRequest.parse(value.encoded()) }
-    static func parseResult(_ value: VaultFormat.Value) throws -> VaultResult { try VaultResult.parse(value.encoded()) }
+    static func parseRequest(_ value: WalletRequestFormat.Value) throws -> WalletRequest { try WalletRequest.parse(value.encoded()) }
+    static func parseResult(_ value: WalletRequestFormat.Value) throws -> WalletResult { try WalletResult.parse(value.encoded()) }
 
     // MARK: Round trips and the doc's examples
 
     @Test func aRequestAndAResultRoundTrip() throws {
         for request in [Self.request(), Self.request(action: .call)] {
-            #expect(try VaultRequest.parse(request.encoded()) == request)
+            #expect(try WalletRequest.parse(request.encoded()) == request)
         }
-        let submitted = VaultResult(id: Self.request().id, sequence: 4, createdAt: Self.created.addingTimeInterval(600), status: .submitted,
+        let submitted = WalletResult(id: Self.request().id, sequence: 4, createdAt: Self.created.addingTimeInterval(600), status: .submitted,
                                     checks: [.init(name: "balance", ok: true, detail: "enough")], txHash: "0x" + String(repeating: "ab", count: 32),
                                     explorerURL: "https://explorer.example/tx/0x" + String(repeating: "ab", count: 32), message: "Submitted.")
-        #expect(try VaultResult.parse(submitted.encoded()) == submitted)
+        #expect(try WalletResult.parse(submitted.encoded()) == submitted)
     }
 
     /// The doc's two examples are the format: each parses, and writes back byte for byte (one line, a newline).
     @Test func theDocsExamplesParse() throws {
         let doc = try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("docs/protocol/vault-request.md"), encoding: .utf8)
+            .deletingLastPathComponent().appendingPathComponent("docs/protocol/wallet-request.md"), encoding: .utf8)
         let blocks = doc.components(separatedBy: "```json\n").dropFirst().map { $0.components(separatedBy: "```")[0] }
         #expect(blocks.count == 2)
-        let request = try VaultRequest.parse(Data(blocks[0].utf8))
+        let request = try WalletRequest.parse(Data(blocks[0].utf8))
         #expect(request.workspace == "example")
-        let result = try VaultResult.parse(Data(blocks[1].utf8))
+        let result = try WalletResult.parse(Data(blocks[1].utf8))
         #expect(result.id == request.id)
         // Pretty-printed in the doc; the same values written compactly parse to the same.
-        #expect(try VaultRequest.parse(request.encoded()) == request)
-        #expect(try VaultResult.parse(result.encoded()) == result)
+        #expect(try WalletRequest.parse(request.encoded()) == request)
+        #expect(try WalletResult.parse(result.encoded()) == result)
     }
 
     static var vectors: URL {
@@ -76,7 +76,7 @@ struct VaultFormatTests {
     }
 
     /// A refusal as the vectors name it: the kind of failure, and its field (none for the file's size or its JSON).
-    static func refusal(_ failure: VaultFormat.Failure) -> (String, String?) {
+    static func refusal(_ failure: WalletRequestFormat.Failure) -> (String, String?) {
         switch failure {
         case .tooLarge: ("tooLarge", nil)
         case .notJSON: ("notJSON", nil)
@@ -91,12 +91,12 @@ struct VaultFormatTests {
     /// The shared vectors (docs/protocol/vectors/index.json), which the Wallet Manager tests too: each valid file
     /// parses and writes back to the same value; each invalid one is refused for its stated reason, on its field.
     @Test func theSharedVectorsHold() throws {
-        let index = try VaultFormat.Fields(VaultFormat.Value.parse(Data(contentsOf: Self.vectors.appendingPathComponent("index.json"))),
+        let index = try WalletRequestFormat.Fields(WalletRequestFormat.Value.parse(Data(contentsOf: Self.vectors.appendingPathComponent("index.json"))),
                                            path: "", allowed: ["format", "vectors"])
         var listed: Set<String> = ["index.json"]
         var counts: [String: Int] = [:]
         for item in try index.array("vectors") {
-            let vector = try VaultFormat.Fields(item, path: "vector", allowed: ["file", "kind", "valid", "refusal", "field", "note"])
+            let vector = try WalletRequestFormat.Fields(item, path: "vector", allowed: ["file", "kind", "valid", "refusal", "field", "note"])
             let file = try vector.string("file"), kind = try vector.string("kind")
             listed.insert(file)
             #expect(!(try vector.string("note")).isEmpty, "\(file)")
@@ -104,12 +104,12 @@ struct VaultFormatTests {
             let parse: (Data) throws -> Void
             switch kind {
             case "request": parse = { data in
-                let request = try VaultRequest.parse(data)
-                #expect(try VaultRequest.parse(request.encoded()) == request, "\(file)")
+                let request = try WalletRequest.parse(data)
+                #expect(try WalletRequest.parse(request.encoded()) == request, "\(file)")
             }
             case "result": parse = { data in
-                let result = try VaultResult.parse(data)
-                #expect(try VaultResult.parse(result.encoded()) == result, "\(file)")
+                let result = try WalletResult.parse(data)
+                #expect(try WalletResult.parse(result.encoded()) == result, "\(file)")
             }
             default: Issue.record("\(file): unknown kind \(kind)"); continue
             }
@@ -122,7 +122,7 @@ struct VaultFormatTests {
             do {
                 try parse(data)
                 Issue.record("\(file) parsed, but should be refused (\(expected.0) \(expected.1 ?? ""))")
-            } catch let failure as VaultFormat.Failure {
+            } catch let failure as WalletRequestFormat.Failure {
                 let got = Self.refusal(failure)
                 #expect(got.0 == expected.0 && got.1 == expected.1, "\(file): refused as \(failure)")
             }
@@ -136,52 +136,52 @@ struct VaultFormatTests {
 
     /// The doc's examples are the first vectors of each kind.
     @Test func theDocsExamplesAreVectors() throws {
-        let doc = try String(contentsOf: Self.vectors.deletingLastPathComponent().appendingPathComponent("vault-request.md"), encoding: .utf8)
+        let doc = try String(contentsOf: Self.vectors.deletingLastPathComponent().appendingPathComponent("wallet-request.md"), encoding: .utf8)
         let blocks = doc.components(separatedBy: "```json\n").dropFirst().map { $0.components(separatedBy: "```")[0] }
-        #expect(try VaultRequest.parse(Data(blocks[0].utf8))
-            == VaultRequest.parse(Data(contentsOf: Self.vectors.appendingPathComponent("request-valid-transfer-native.json"))))
-        #expect(try VaultResult.parse(Data(blocks[1].utf8))
-            == VaultResult.parse(Data(contentsOf: Self.vectors.appendingPathComponent("result-valid-submitted.json"))))
+        #expect(try WalletRequest.parse(Data(blocks[0].utf8))
+            == WalletRequest.parse(Data(contentsOf: Self.vectors.appendingPathComponent("request-valid-transfer-native.json"))))
+        #expect(try WalletResult.parse(Data(blocks[1].utf8))
+            == WalletResult.parse(Data(contentsOf: Self.vectors.appendingPathComponent("result-valid-submitted.json"))))
     }
 
     @Test func theWordlistIsBIP39English() {
-        let file = VaultWordlist.text.split(separator: " ").joined(separator: "\n") + "\n"
+        let file = WalletWordlist.text.split(separator: " ").joined(separator: "\n") + "\n"
         let digest = SHA256.hash(data: Data(file.utf8)).map { String(format: "%02x", $0) }.joined()
         #expect(digest == "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda")
-        #expect(VaultWordlist.words.count == 2048)
+        #expect(WalletWordlist.words.count == 2048)
     }
 
     // MARK: Refused: unknown fields
 
     @Test func unknownFieldsAreRefused() throws {
         let request = Self.request().value
-        #expect(throws: VaultFormat.Failure.unknownField("note")) { try Self.parseRequest(Self.edit(request, "note", .string("x"))) }
-        #expect(throws: VaultFormat.Failure.unknownField("requestedBy.host")) {
+        #expect(throws: WalletRequestFormat.Failure.unknownField("note")) { try Self.parseRequest(Self.edit(request, "note", .string("x"))) }
+        #expect(throws: WalletRequestFormat.Failure.unknownField("requestedBy.host")) {
             try Self.parseRequest(Self.edit(request, "host", .string("x"), in: "requestedBy"))
         }
         let result = Self.result().value
-        #expect(throws: VaultFormat.Failure.unknownField("signature")) { try Self.parseResult(Self.edit(result, "signature", .string("x"))) }
-        let check = VaultFormat.Value.array([.object([.init("name", .string("a")), .init("ok", .bool(true)), .init("detail", .string("")),
+        #expect(throws: WalletRequestFormat.Failure.unknownField("signature")) { try Self.parseResult(Self.edit(result, "signature", .string("x"))) }
+        let check = WalletRequestFormat.Value.array([.object([.init("name", .string("a")), .init("ok", .bool(true)), .init("detail", .string("")),
                                                      .init("extra", .bool(true))])])
-        #expect(throws: VaultFormat.Failure.unknownField("checks[0].extra")) { try Self.parseResult(Self.edit(result, "checks", check)) }
+        #expect(throws: WalletRequestFormat.Failure.unknownField("checks[0].extra")) { try Self.parseResult(Self.edit(result, "checks", check)) }
     }
 
     // MARK: Refused: wrong types
 
     @Test func wrongTypesAreRefused() throws {
         let request = Self.request().value
-        #expect(throws: VaultFormat.Failure.wrongType("chainId", "a whole number")) {
+        #expect(throws: WalletRequestFormat.Failure.wrongType("chainId", "a whole number")) {
             try Self.parseRequest(Self.edit(request, "chainId", .string("42424242")))
         }
-        #expect(throws: VaultFormat.Failure.wrongType("amount", "a string")) { try Self.parseRequest(Self.edit(request, "amount", .integer(1))) }
-        #expect(throws: VaultFormat.Failure.wrongType("requestedBy", "an object")) {
+        #expect(throws: WalletRequestFormat.Failure.wrongType("amount", "a string")) { try Self.parseRequest(Self.edit(request, "amount", .integer(1))) }
+        #expect(throws: WalletRequestFormat.Failure.wrongType("requestedBy", "an object")) {
             try Self.parseRequest(Self.edit(request, "requestedBy", .string("me")))
         }
-        #expect(throws: VaultFormat.Failure.wrongType("reason", "a string")) { try Self.parseRequest(Self.edit(request, "reason", .null)) }
+        #expect(throws: WalletRequestFormat.Failure.wrongType("reason", "a string")) { try Self.parseRequest(Self.edit(request, "reason", .null)) }
         let result = Self.result().value
-        let check = VaultFormat.Value.array([.object([.init("name", .string("a")), .init("ok", .string("yes")), .init("detail", .string(""))])])
-        #expect(throws: VaultFormat.Failure.wrongType("checks[0].ok", "true or false")) { try Self.parseResult(Self.edit(result, "checks", check)) }
-        #expect(throws: VaultFormat.Failure.wrongType("checks", "an array")) { try Self.parseResult(Self.edit(result, "checks", .object([]))) }
+        let check = WalletRequestFormat.Value.array([.object([.init("name", .string("a")), .init("ok", .string("yes")), .init("detail", .string(""))])])
+        #expect(throws: WalletRequestFormat.Failure.wrongType("checks[0].ok", "true or false")) { try Self.parseResult(Self.edit(result, "checks", check)) }
+        #expect(throws: WalletRequestFormat.Failure.wrongType("checks", "an array")) { try Self.parseResult(Self.edit(result, "checks", .object([]))) }
     }
 
     /// Numbers are whole and unsigned; a key may not repeat; a top-level array isn't a request.
@@ -192,7 +192,7 @@ struct VaultFormatTests {
                     text.replacingOccurrences(of: "\"chainId\":42424242", with: "\"chainId\":-1"),
                     text.replacingOccurrences(of: "\"workspace\":\"example\"", with: "\"workspace\":\"example\",\"workspace\":\"other\""),
                     "[" + text + "]", text + "{}", "\u{FEFF}" + text] {
-            #expect(throws: VaultFormat.Failure.self) { try VaultRequest.parse(Data(bad.utf8)) }
+            #expect(throws: WalletRequestFormat.Failure.self) { try WalletRequest.parse(Data(bad.utf8)) }
         }
     }
 
@@ -200,11 +200,11 @@ struct VaultFormatTests {
 
     @Test func filesOver64KiBAreRefused() throws {
         let data = Self.request().value.encoded()
-        let padded = data + Data(repeating: 0x20, count: VaultFormat.maxFileBytes + 1 - data.count)
-        #expect(throws: VaultFormat.Failure.tooLarge(VaultFormat.maxFileBytes + 1)) { try VaultRequest.parse(padded) }
-        #expect(throws: VaultFormat.Failure.tooLarge(VaultFormat.maxFileBytes + 1)) { try VaultResult.parse(padded) }
+        let padded = data + Data(repeating: 0x20, count: WalletRequestFormat.maxFileBytes + 1 - data.count)
+        #expect(throws: WalletRequestFormat.Failure.tooLarge(WalletRequestFormat.maxFileBytes + 1)) { try WalletRequest.parse(padded) }
+        #expect(throws: WalletRequestFormat.Failure.tooLarge(WalletRequestFormat.maxFileBytes + 1)) { try WalletResult.parse(padded) }
         // Exactly 64 KiB is still read.
-        #expect(try VaultRequest.parse(padded.dropLast()) == Self.request())
+        #expect(try WalletRequest.parse(padded.dropLast()) == Self.request())
     }
 
     // MARK: Refused: addresses
@@ -213,11 +213,11 @@ struct VaultFormatTests {
                       "0X" + String(repeating: "0", count: 40), String(repeating: "0", count: 42), " 0x" + String(repeating: "0", count: 40)])
     func badAddressesAreRefused(_ address: String) {
         let request = Self.request().value
-        #expect(throws: VaultFormat.Failure.self) { try Self.parseRequest(Self.edit(request, "to", .string(address))) }
-        #expect(throws: VaultFormat.Failure.self) { try Self.parseRequest(Self.edit(request, "asset", .string(address))) }
+        #expect(throws: WalletRequestFormat.Failure.self) { try Self.parseRequest(Self.edit(request, "to", .string(address))) }
+        #expect(throws: WalletRequestFormat.Failure.self) { try Self.parseRequest(Self.edit(request, "asset", .string(address))) }
         // `from` may be a wallet id instead: only one that starts as an address must be one.
         if address.lowercased().hasPrefix("0x") || address.hasPrefix(" ") {
-            #expect(throws: VaultFormat.Failure.self) { try Self.parseRequest(Self.edit(request, "from", .string(address))) }
+            #expect(throws: WalletRequestFormat.Failure.self) { try Self.parseRequest(Self.edit(request, "from", .string(address))) }
         }
     }
 
@@ -236,7 +236,7 @@ struct VaultFormatTests {
         var result = Self.result(status: .submitted)
         result.txHash = hash
         let value = Self.edit(result.value, "explorerURL", .string(link))
-        #expect(throws: VaultFormat.Failure.self) { try Self.parseResult(value) }
+        #expect(throws: WalletRequestFormat.Failure.self) { try Self.parseResult(value) }
     }
 
     @Test func anExplorerLinkNamesOnlyItsOwnHash() throws {
@@ -244,12 +244,12 @@ struct VaultFormatTests {
         var result = Self.result(status: .submitted)
         result.txHash = hash
         result.explorerURL = "https://explorer.example/tx/" + hash
-        #expect(try VaultResult.parse(result.encoded()).explorerURL == result.explorerURL)
+        #expect(try WalletResult.parse(result.encoded()).explorerURL == result.explorerURL)
         let other = Self.edit(result.value, "explorerURL", .string("https://explorer.example/tx/0x" + String(repeating: "cd", count: 32)))
-        #expect(throws: VaultFormat.Failure.self) { try Self.parseResult(other) }
+        #expect(throws: WalletRequestFormat.Failure.self) { try Self.parseResult(other) }
         // No hash, no link.
         let bare = Self.edit(Self.result(status: .received).value, "explorerURL", .string("https://explorer.example/"))
-        #expect(throws: VaultFormat.Failure.invalid("explorerURL", "only with a hash")) { try Self.parseResult(bare) }
+        #expect(throws: WalletRequestFormat.Failure.invalid("explorerURL", "only with a hash")) { try Self.parseResult(bare) }
     }
 
     // MARK: Refused: status
@@ -257,27 +257,27 @@ struct VaultFormatTests {
     @Test(arguments: ["approved", "Received", "", "done", "pending"])
     func unknownStatusValuesAreRefused(_ status: String) {
         let value = Self.edit(Self.result().value, "status", .string(status))
-        #expect(throws: VaultFormat.Failure.self) { try Self.parseResult(value) }
+        #expect(throws: WalletRequestFormat.Failure.self) { try Self.parseResult(value) }
     }
 
     @Test func everyDocumentedStatusIsTaken() throws {
-        for status in VaultResult.Status.allCases {
+        for status in WalletResult.Status.allCases {
             var result = Self.result(status: status)
             if status == .submitted { result.txHash = "0x" + String(repeating: "ab", count: 32) }
-            #expect(try VaultResult.parse(result.encoded()).status == status)
+            #expect(try WalletResult.parse(result.encoded()).status == status)
         }
         // submitted needs its transaction; received can't name one.
-        #expect(throws: VaultFormat.Failure.missingField("txHash")) { try Self.parseResult(Self.result(status: .submitted).value) }
+        #expect(throws: WalletRequestFormat.Failure.missingField("txHash")) { try Self.parseResult(Self.result(status: .submitted).value) }
         let early = Self.edit(Self.result(status: .received).value, "txHash", .string("0x" + String(repeating: "ab", count: 32)))
-        #expect(throws: VaultFormat.Failure.self) { try Self.parseResult(early) }
+        #expect(throws: WalletRequestFormat.Failure.self) { try Self.parseResult(early) }
     }
 
     // MARK: Other request rules
 
     @Test func theRequestsOwnRulesHold() {
         let request = Self.request().value
-        let refused: [VaultFormat.Value] = [
-            Self.edit(request, "type", .string("vibeswitcher.vault-result")), Self.edit(request, "version", .integer(2)),
+        let refused: [WalletRequestFormat.Value] = [
+            Self.edit(request, "type", .string("vibeswitcher.wallet-result")), Self.edit(request, "version", .integer(2)),
             Self.edit(request, "id", .string("00000000-0000-4000-8000-00000000000A")), Self.edit(request, "id", .string("not-a-uuid")),
             Self.edit(request, "expiresAt", .string("2026-10-31T12:00:00Z")), Self.edit(request, "expiresAt", .string("2026-11-30T12:00:00Z")),
             Self.edit(request, "createdAt", .string("2026-10-31T12:00:00.5Z")), Self.edit(request, "createdAt", .string("2026-02-30T12:00:00Z")),
@@ -291,12 +291,12 @@ struct VaultFormatTests {
             Self.edit(request, "project", nil, in: "requestedBy"), Self.edit(request, "label", .string("two\nlines"), in: "requestedBy"),
         ]
         for value in refused {
-            #expect(throws: VaultFormat.Failure.self, "\(String(decoding: value.encoded(), as: UTF8.self))") { try Self.parseRequest(value) }
+            #expect(throws: WalletRequestFormat.Failure.self, "\(String(decoding: value.encoded(), as: UTF8.self))") { try Self.parseRequest(value) }
         }
         let call = Self.request(action: .call).value
         for value in [Self.edit(call, "data", nil), Self.edit(call, "data", .string("0xa9059c")), Self.edit(call, "data", .string("a9059cbb")),
                       Self.edit(call, "asset", .string(Self.token))] {
-            #expect(throws: VaultFormat.Failure.self) { try Self.parseRequest(value) }
+            #expect(throws: WalletRequestFormat.Failure.self) { try Self.parseRequest(value) }
         }
         // A reason may run over lines, and up to 1000 characters.
         #expect((try? Self.parseRequest(Self.edit(request, "reason", .string("one\ntwo" + String(repeating: "é", count: 993))))) != nil)
@@ -308,13 +308,13 @@ struct VaultFormatTests {
 
     @Test func aRunOf64HexDigitsIsRefused() {
         let request = Self.request().value
-        #expect(throws: VaultFormat.Failure.keyMaterial("reason", "64 or more hex digits in a row")) {
+        #expect(throws: WalletRequestFormat.Failure.keyMaterial("reason", "64 or more hex digits in a row")) {
             try Self.parseRequest(Self.edit(request, "reason", .string("use key " + Self.hex64 + " please")))
         }
-        #expect(throws: VaultFormat.Failure.keyMaterial("reason", "64 or more hex digits in a row")) {
+        #expect(throws: WalletRequestFormat.Failure.keyMaterial("reason", "64 or more hex digits in a row")) {
             try Self.parseRequest(Self.edit(request, "reason", .string("0x" + Self.hex64)))
         }
-        #expect(throws: VaultFormat.Failure.keyMaterial("requestedBy.label", "64 or more hex digits in a row")) {
+        #expect(throws: WalletRequestFormat.Failure.keyMaterial("requestedBy.label", "64 or more hex digits in a row")) {
             try Self.parseRequest(Self.edit(request, "label", .string(Self.hex64), in: "requestedBy"))
         }
         // 63 isn't a key; calldata is made of 32-byte words, and isn't screened.
@@ -326,14 +326,14 @@ struct VaultFormatTests {
     @Test func twelveBIP39WordsAreRefused() {
         let words = "abandon ability able about above absent absorb abstract absurd abuse access accident"
         let request = Self.request().value
-        #expect(throws: VaultFormat.Failure.keyMaterial("reason", "12 or more BIP39 words in a row")) {
+        #expect(throws: WalletRequestFormat.Failure.keyMaterial("reason", "12 or more BIP39 words in a row")) {
             try Self.parseRequest(Self.edit(request, "reason", .string("My words: " + words)))
         }
         // Any case and any separator between them.
-        #expect(throws: VaultFormat.Failure.keyMaterial("reason", "12 or more BIP39 words in a row")) {
+        #expect(throws: WalletRequestFormat.Failure.keyMaterial("reason", "12 or more BIP39 words in a row")) {
             try Self.parseRequest(Self.edit(request, "reason", .string(words.uppercased().replacingOccurrences(of: " ", with: ", "))))
         }
-        #expect(throws: VaultFormat.Failure.keyMaterial("requestedBy.session", "12 or more BIP39 words in a row")) {
+        #expect(throws: WalletRequestFormat.Failure.keyMaterial("requestedBy.session", "12 or more BIP39 words in a row")) {
             try Self.parseRequest(Self.edit(request, "session", .string(words.replacingOccurrences(of: " ", with: "-")), in: "requestedBy"))
         }
         // Eleven isn't a phrase.
@@ -343,7 +343,7 @@ struct VaultFormatTests {
 
     @Test func aBeginBlockIsRefused() {
         let block = "-----" + "BEGIN EC PRIVATE KEY-----\nMHcCAQEE\n-----" + "END EC PRIVATE KEY-----"
-        #expect(throws: VaultFormat.Failure.keyMaterial("reason", "a -----BEGIN block")) {
+        #expect(throws: WalletRequestFormat.Failure.keyMaterial("reason", "a -----BEGIN block")) {
             try Self.parseRequest(Self.edit(Self.request().value, "reason", .string(block)))
         }
     }
@@ -353,15 +353,15 @@ struct VaultFormatTests {
             Monthly payment to the design contractor for October, as agreed in the project budget. The invoice is in the \
             shared folder; please check the amount against it before signing. Thanks!
             """
-        #expect(try VaultRequest.parse(Self.request(reason: reason).encoded()).reason == reason)
+        #expect(try WalletRequest.parse(Self.request(reason: reason).encoded()).reason == reason)
     }
 
     @Test func aResultIsScreenedButForItsHashes() throws {
         var result = Self.result(status: .failed)
         result.txHash = "0x" + Self.hex64
         result.safeTxHash = "0x" + Self.hex64
-        #expect(try VaultResult.parse(result.encoded()).txHash == result.txHash)
+        #expect(try WalletResult.parse(result.encoded()).txHash == result.txHash)
         result.message = "key " + Self.hex64
-        #expect(throws: VaultFormat.Failure.keyMaterial("message", "64 or more hex digits in a row")) { try VaultResult.parse(result.value.encoded()) }
+        #expect(throws: WalletRequestFormat.Failure.keyMaterial("message", "64 or more hex digits in a row")) { try WalletResult.parse(result.value.encoded()) }
     }
 }

@@ -1,16 +1,16 @@
 import SwiftUI
 import VibeCore
 
-/// A transaction an agent asked for (`VaultCardModel`): who asked, from where to where, how much, on which chain and
-/// why, then what the vault answered. Calm by design: one tinted border in the state's color, the request as a short
-/// table, and buttons only where you can act (`VaultCardModel.actions(for:)`).
-struct VaultCard: View {
-    let card: VaultCardModel
+/// A transaction an agent asked for (`WalletCardModel`): who asked, from where to where, how much, on which chain and
+/// why, then what the Wallet Manager answered. Calm by design: one tinted border in the state's color, the request as a short
+/// table, and buttons only where you can act (`WalletCardModel.actions(for:)`).
+struct WalletCard: View {
+    let card: WalletCardModel
     /// A button pressed: the caller sends, discards or retries; the card only shows the state it's given.
-    var act: (VaultCardModel.Action) -> Void = { _ in }
+    var act: (WalletCardModel.Action) -> Void = { _ in }
     @IncreasedContrast private var increased
 
-    static func tint(_ state: VaultCardModel.State) -> Color {
+    static func tint(_ state: WalletCardModel.State) -> Color {
         switch state {
         case .waiting, .unreachable, .unsure: return SessionStatus.needsInput.color
         case .sent, .received, .proposed, .signedNotSubmitted: return SessionStatus.working.color
@@ -20,7 +20,7 @@ struct VaultCard: View {
         }
     }
 
-    static func symbol(_ state: VaultCardModel.State) -> String {
+    static func symbol(_ state: WalletCardModel.State) -> String {
         switch state {
         case .waiting: return "hand.raised.fill"
         case .sent: return "paperplane.fill"
@@ -62,10 +62,10 @@ struct VaultCard: View {
                 .accessibilityHidden(true)
             Text("Transaction request").font(.system(size: 13.5, weight: .bold))
             Spacer(minLength: 8)
-            Label(VaultCardModel.title(card.state), systemImage: Self.symbol(card.state))
+            Label(WalletCardModel.title(card.state), systemImage: Self.symbol(card.state))
                 .labelStyle(.titleAndIcon)
                 .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(tint)
-                .accessibilityLabel("State: \(VaultCardModel.title(card.state))")
+                .accessibilityLabel("State: \(WalletCardModel.title(card.state))")
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
@@ -94,7 +94,7 @@ struct VaultCard: View {
             }
             .accessibilityElement(children: .combine)
             row(card.calldataBytes == nil ? "To" : "Contract", card.to, mono: true)
-            if let bytes = card.calldataBytes { row("Call", "\(bytes) bytes of calldata, decoded and shown on the vault Mac") }
+            if let bytes = card.calldataBytes { row("Call", "\(bytes) bytes of calldata, decoded and shown on the Wallet Manager's Mac") }
             row("Workspace", card.workspace)
             row("Requested by", card.requestedBy)
             row("Reason", card.reason)
@@ -118,7 +118,7 @@ struct VaultCard: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// What the vault sent back that's worth keeping: the transaction hash and its explorer link.
+    /// What the Wallet Manager sent back that's worth keeping: the transaction hash and its explorer link.
     @ViewBuilder private var outcome: some View {
         switch card.state {
         case .signed(let hash, let url):
@@ -151,7 +151,7 @@ struct VaultCard: View {
 
     private var checks: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("The vault's checks").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(.secondary)
+            Text("The Wallet Manager's checks").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(.secondary)
             ForEach(card.checks, id: \.self) { check in
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     let warning = card.isWarning(check)
@@ -186,10 +186,10 @@ struct VaultCard: View {
     }
 }
 
-/// The vault requests the selected session's agent filed, pinned under its conversation: each a `VaultCard` whose
-/// buttons go to the desk (nothing is sent until Send to vault is pressed). Empty: nothing shown.
-struct VaultRequestStrip: View {
-    @ObservedObject var desk: VaultDesk
+/// The wallet requests the selected session's agent filed, pinned under its conversation: each a `WalletCard` whose
+/// buttons go to the desk (nothing is sent until Send to Wallet Manager is pressed). Empty: nothing shown.
+struct WalletRequestStrip: View {
+    @ObservedObject var desk: WalletDesk
     let session: UUID
 
     var body: some View {
@@ -198,7 +198,7 @@ struct VaultRequestStrip: View {
             ScrollView {
                 VStack(spacing: 10) {
                     ForEach(cards) { card in
-                        VaultCard(card: card) { action in desk.act(action, on: card.id) }
+                        WalletCard(card: card) { action in desk.act(action, on: card.id) }
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 10)

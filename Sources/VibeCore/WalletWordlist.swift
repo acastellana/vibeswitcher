@@ -1,7 +1,7 @@
 /// The BIP39 English wordlist (2048 words, bip-0039/english.txt; SHA-256 of the file, one word per line:
-/// 2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda, checked by VaultFormatTests). Only used to
-/// recognize a recovery phrase pasted into a vault request (`VaultFormat.keyMaterial`), never to make one.
-enum VaultWordlist {
+/// 2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda, checked by WalletRequestFormatTests). Only used to
+/// recognize a recovery phrase pasted into a wallet request (`WalletRequestFormat.keyMaterial`), never to make one.
+enum WalletWordlist {
     static let words: Set<Substring> = Set(text.split(separator: " "))
 
     static let text = """

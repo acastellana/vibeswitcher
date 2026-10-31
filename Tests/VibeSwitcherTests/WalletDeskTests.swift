@@ -8,7 +8,7 @@ import VibeCore
 /// A fake `passage` in a scratch folder (never the real one, its Keychain, pairings or inbox): `calls` holds one line
 /// of arguments per run; `send-exit` sets send's exit code; `inbox.jsonl` is what `inbox` prints, `peers.jsonl` what
 /// `peers` prints; `listen` sleeps until it's stopped.
-struct VaultFakePassage {
+struct WalletFakePassage {
     static let peer = "0a1b2c3d"
     let folder: URL
     var executable: String { folder.appendingPathComponent("passage").path }
@@ -46,16 +46,16 @@ struct VaultFakePassage {
     var sends: [String] { calls.filter { $0.hasPrefix("send ") } }
     func setSendExit(_ code: Int32) throws { try "\(code)\n".write(to: file("send-exit"), atomically: true, encoding: .utf8) }
 
-    /// Puts `result` in the inbox from the vault peer, as passage would, and lists it in `inbox.jsonl`.
-    func receive(_ result: VaultResult, second: Int) throws {
+    /// Puts `result` in the inbox from the Wallet Manager peer, as passage would, and lists it in `inbox.jsonl`.
+    func receive(_ result: WalletResult, second: Int) throws {
         let data = try result.encoded()
-        let name = VaultResult.fileName(result.id)
+        let name = WalletResult.fileName(result.id)
         let dir = inbox.appendingPathComponent(Self.peer, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let stamp = String(format: "20261031T1201%02dZ", second)
         let path = dir.appendingPathComponent("\(stamp)-\(name)").path
         try data.write(to: URL(fileURLWithPath: path))
-        let line = VaultFormat.Value.object([.init("peerID", .string(Self.peer)), .init("name", .string(name)),
+        let line = WalletRequestFormat.Value.object([.init("peerID", .string(Self.peer)), .init("name", .string(name)),
                                              .init("size", .integer(Int64(data.count))), .init("receivedAt", .string(stamp)),
                                              .init("path", .string(path))]).encoded()
         let list = file("inbox.jsonl")
@@ -64,11 +64,11 @@ struct VaultFakePassage {
     }
 }
 
-/// The vault desk: requests agents filed show as cards that wait for Send to vault (nothing goes before the click);
-/// Send, Retry and Discard; the vault's results update the card and go to the asking session.
+/// The Wallet Manager desk: requests agents filed show as cards that wait for Send to Wallet Manager (nothing goes before the click);
+/// Send, Retry and Discard; the Wallet Manager's results update the card and go to the asking session.
 @MainActor
 @Suite(.serialized)
-struct VaultDeskTests {
+struct WalletDeskTests {
     let temp = Scratch()
     static let created = Date(timeIntervalSince1970: 1_793_448_000)   // 2026-10-31T12:00:00Z
     static let session = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
@@ -78,41 +78,41 @@ struct VaultDeskTests {
     }
 
     struct Setup {
-        let fake: VaultFakePassage
-        let desk: VaultDesk
+        let fake: WalletFakePassage
+        let desk: WalletDesk
         let asked: URL
-        let store: VaultStore
+        let store: WalletRequestStore
         let told: Told
     }
 
     final class Clock: @unchecked Sendable {
-        var now = VaultDeskTests.created.addingTimeInterval(30)
+        var now = WalletDeskTests.created.addingTimeInterval(30)
     }
 
-    func setup(peer: String = VaultFakePassage.peer, clock: Clock = Clock()) throws -> Setup {
-        let fake = try VaultFakePassage(temp)
+    func setup(peer: String = WalletFakePassage.peer, clock: Clock = Clock()) throws -> Setup {
+        let fake = try WalletFakePassage(temp)
         let asked = temp.url("asked")
-        let store = VaultStore(folder: temp.url("requests"))
-        let desk = VaultDesk(folder: asked, store: store, inbox: fake.inbox,
-                             config: { VaultDesk.Config(passage: fake.executable, peer: peer) }, now: { clock.now }, log: { _ in })
+        let store = WalletRequestStore(folder: temp.url("requests"))
+        let desk = WalletDesk(folder: asked, store: store, inbox: fake.inbox,
+                             config: { WalletDesk.Config(passage: fake.executable, peer: peer) }, now: { clock.now }, log: { _ in })
         desk.findPassage = { nil }
         let told = Told()
         desk.deliver = { session, text in told.messages.append((session, text)) }
         return Setup(fake: fake, desk: desk, asked: asked, store: store, told: told)
     }
 
-    /// A request as `vs-vault request` files it from the session `session`.
-    static func request(_ number: Int = 1, session: UUID = VaultDeskTests.session) -> VaultRequest {
-        VaultRequest(id: String(format: "00000000-0000-4000-8000-%012d", number), createdAt: created, expiresAt: created.addingTimeInterval(86_400),
+    /// A request as `vs-wallet request` files it from the session `session`.
+    static func request(_ number: Int = 1, session: UUID = WalletDeskTests.session) -> WalletRequest {
+        WalletRequest(id: String(format: "00000000-0000-4000-8000-%012d", number), createdAt: created, expiresAt: created.addingTimeInterval(86_400),
                      requestedBy: .init(project: "example-project", session: session.uuidString.lowercased(), label: "Example agent"),
                      workspace: "example", from: "example-hardware", chainId: 42_424_242, action: .transfer,
                      to: "0x0000000000000000000000000000000000000001", asset: "native", amount: "1250000000000000000",
                      reason: "Pay the example invoice.")
     }
 
-    static func result(_ request: VaultRequest, _ status: VaultResult.Status, sequence: Int64) -> VaultResult {
-        var result = VaultResult(id: request.id, sequence: sequence, createdAt: created.addingTimeInterval(60), status: status,
-                                 checks: [.init(name: "balance", ok: true, detail: "covers it")], message: "The vault says \(status.rawValue).")
+    static func result(_ request: WalletRequest, _ status: WalletResult.Status, sequence: Int64) -> WalletResult {
+        var result = WalletResult(id: request.id, sequence: sequence, createdAt: created.addingTimeInterval(60), status: status,
+                                 checks: [.init(name: "balance", ok: true, detail: "covers it")], message: "The Wallet Manager says \(status.rawValue).")
         if status == .submitted {
             result.txHash = "0x" + String(repeating: "ab", count: 32)
             result.explorerURL = "https://explorer.example/tx/" + result.txHash!
@@ -120,19 +120,19 @@ struct VaultDeskTests {
         return result
     }
 
-    func refreshed(_ desk: VaultDesk) async {
+    func refreshed(_ desk: WalletDesk) async {
         var done = false
         desk.refresh { done = true }
         _ = await until { done }
     }
 
-    func acted(_ desk: VaultDesk, _ action: VaultCardModel.Action, _ id: String) async {
+    func acted(_ desk: WalletDesk, _ action: WalletCardModel.Action, _ id: String) async {
         var done = false
         desk.act(action, on: id) { done = true }
         _ = await until { done }
     }
 
-    func polled(_ desk: VaultDesk) async {
+    func polled(_ desk: WalletDesk) async {
         var done = false
         desk.poll { done = true }
         _ = await until { done }
@@ -142,7 +142,7 @@ struct VaultDeskTests {
         let s = try setup()
         defer { s.desk.close() }
         let request = Self.request()
-        try VaultAsk.file(request, in: s.asked)
+        try WalletAsk.file(request, in: s.asked)
         await refreshed(s.desk)
         let card = try #require(s.desk.cards(for: Self.session).first)
         #expect(card.state == .waiting)
@@ -161,9 +161,9 @@ struct VaultDeskTests {
         await acted(s.desk, .send, request.id)
         #expect(s.fake.sends.count == 1)
         let sent = try #require(s.fake.sends.first)
-        #expect(sent.hasPrefix("send \(VaultFakePassage.peer) ") && sent.hasSuffix("--name vault-request-\(request.id).json"))
+        #expect(sent.hasPrefix("send \(WalletFakePassage.peer) ") && sent.hasSuffix("--name wallet-request-\(request.id).json"))
         #expect(!sent.contains("--yes"))
-        #expect(try Data(contentsOf: s.fake.file("sent-vault-request-\(request.id).json")) == request.encoded())
+        #expect(try Data(contentsOf: s.fake.file("sent-wallet-request-\(request.id).json")) == request.encoded())
         #expect(s.desk.cards.first?.state == .sent)
         #expect(s.desk.cards.first?.actions == [])
         // A second Send isn't offered once it went.
@@ -171,11 +171,11 @@ struct VaultDeskTests {
         #expect(s.fake.sends.count == 1)
     }
 
-    @Test func theVaultsAnswersUpdateTheCardAndGoToTheAskingSession() async throws {
+    @Test func theWalletManagersAnswersUpdateTheCardAndGoToTheAskingSession() async throws {
         let s = try setup()
         defer { s.desk.close() }
         let request = Self.request()
-        try VaultAsk.file(request, in: s.asked)
+        try WalletAsk.file(request, in: s.asked)
         await refreshed(s.desk)
         await acted(s.desk, .send, request.id)
         try s.fake.receive(Self.result(request, .received, sequence: 1), second: 1)
@@ -189,7 +189,7 @@ struct VaultDeskTests {
         let hash = "0x" + String(repeating: "ab", count: 32)
         #expect(s.desk.cards.first?.state == .signed(txHash: hash, explorerURL: URL(string: "https://explorer.example/tx/" + hash)))
         #expect(s.told.messages.map(\.session) == [Self.session.uuidString.lowercased(), Self.session.uuidString.lowercased()])
-        #expect(s.told.messages[0].text.contains("the vault says received: The vault says received."))
+        #expect(s.told.messages[0].text.contains("the Wallet Manager says received: The Wallet Manager says received."))
         #expect(s.told.messages[1].text.contains("submitted") && s.told.messages[1].text.contains(hash))
         #expect(s.told.messages[1].text.contains("This request is finished."))
         // Each answer once.
@@ -197,11 +197,11 @@ struct VaultDeskTests {
         #expect(s.told.messages.count == 2)
     }
 
-    @Test func retryResendsAfterPassageCouldntReachTheVault() async throws {
+    @Test func retryResendsAfterPassageCouldntReachTheWalletManager() async throws {
         let s = try setup()
         defer { s.desk.close() }
         let request = Self.request()
-        try VaultAsk.file(request, in: s.asked)
+        try WalletAsk.file(request, in: s.asked)
         await refreshed(s.desk)
         try s.fake.setSendExit(4)
         await acted(s.desk, .send, request.id)
@@ -217,13 +217,13 @@ struct VaultDeskTests {
         let s = try setup()
         defer { s.desk.close() }
         let request = Self.request()
-        try VaultAsk.file(request, in: s.asked)
+        try WalletAsk.file(request, in: s.asked)
         await refreshed(s.desk)
         try s.fake.setSendExit(1)
         await acted(s.desk, .send, request.id)
         let card = try #require(s.desk.cards.first)
         #expect(card.state == .unsure(message: "passage: fake exit 1"))
-        #expect(card.detail.contains("may have reached the vault"))
+        #expect(card.detail.contains("may have reached the Wallet Manager"))
         #expect(card.actions == [.retry, .discard])
         // The same request again, under its id.
         try s.fake.setSendExit(0)
@@ -236,8 +236,8 @@ struct VaultDeskTests {
         let s = try setup()
         defer { s.desk.close() }
         let waiting = Self.request(1), unsure = Self.request(2)
-        try VaultAsk.file(waiting, in: s.asked)
-        try VaultAsk.file(unsure, in: s.asked)
+        try WalletAsk.file(waiting, in: s.asked)
+        try WalletAsk.file(unsure, in: s.asked)
         await refreshed(s.desk)
         await acted(s.desk, .discard, waiting.id)
         #expect(s.desk.cards.map(\.id) == [unsure.id])
@@ -254,21 +254,21 @@ struct VaultDeskTests {
         #expect(s.desk.cards.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: s.store.file(unsure.id).path))
         _ = await until { s.told.messages.count == 2 }
-        #expect(s.told.messages.last?.text.contains("may have reached the vault") == true)
+        #expect(s.told.messages.last?.text.contains("may have reached the Wallet Manager") == true)
         // Not shown again on the next look.
         await refreshed(s.desk)
         #expect(s.desk.cards.isEmpty)
     }
 
-    @Test func withoutAVaultPeerSendGoesNowhereAndSaysWhy() async throws {
+    @Test func withoutAWalletManagerPeerSendGoesNowhereAndSaysWhy() async throws {
         let s = try setup(peer: "")
         defer { s.desk.close() }
         let request = Self.request()
-        try VaultAsk.file(request, in: s.asked)
+        try WalletAsk.file(request, in: s.asked)
         await refreshed(s.desk)
         await acted(s.desk, .send, request.id)
         #expect(s.fake.calls.isEmpty)
-        #expect(s.desk.cards.first?.state == .unreachable(message: "no vault peer is chosen in Settings › Vault"))
+        #expect(s.desk.cards.first?.state == .unreachable(message: "no Wallet Manager peer is chosen in Settings › Wallet"))
     }
 
     @Test func anUnsentRequestExpiresAndCantBeSent() async throws {
@@ -276,7 +276,7 @@ struct VaultDeskTests {
         let s = try setup(clock: clock)
         defer { s.desk.close() }
         let request = Self.request()
-        try VaultAsk.file(request, in: s.asked)
+        try WalletAsk.file(request, in: s.asked)
         clock.now = request.expiresAt.addingTimeInterval(1)
         await refreshed(s.desk)
         #expect(s.desk.cards.first?.state == .expired)
@@ -284,7 +284,7 @@ struct VaultDeskTests {
         await acted(s.desk, .send, request.id)
         #expect(s.fake.sends.isEmpty)
         // Past the time any answer could come, its card goes.
-        clock.now = request.expiresAt.addingTimeInterval(VaultCourier.resultGrace + 1)
+        clock.now = request.expiresAt.addingTimeInterval(WalletCourier.resultGrace + 1)
         await refreshed(s.desk)
         #expect(s.desk.cards.isEmpty)
     }
@@ -294,7 +294,7 @@ struct VaultDeskTests {
         let s = try setup(clock: clock)
         defer { s.desk.close() }
         let request = Self.request()
-        try VaultAsk.file(request, in: s.asked)
+        try WalletAsk.file(request, in: s.asked)
         await refreshed(s.desk)
         #expect(s.told.messages.isEmpty)
         clock.now = request.expiresAt
@@ -308,8 +308,8 @@ struct VaultDeskTests {
         #expect(s.fake.sends.isEmpty)
         // Looked at again, and by an app started again (a desk of its own on the same folder): not told again.
         await refreshed(s.desk)
-        let again = VaultDesk(folder: s.asked, store: s.store, inbox: s.fake.inbox,
-                              config: { VaultDesk.Config(passage: s.fake.executable, peer: VaultFakePassage.peer) },
+        let again = WalletDesk(folder: s.asked, store: s.store, inbox: s.fake.inbox,
+                              config: { WalletDesk.Config(passage: s.fake.executable, peer: WalletFakePassage.peer) },
                               now: { clock.now }, log: { _ in })
         again.findPassage = { nil }
         again.deliver = { session, text in s.told.messages.append((session, text)) }
@@ -317,10 +317,10 @@ struct VaultDeskTests {
         again.close()
         #expect(s.told.messages.count == 1)
         // Its card goes past the time any answer could come, and its marker with it.
-        clock.now = request.expiresAt.addingTimeInterval(VaultCourier.resultGrace + 1)
+        clock.now = request.expiresAt.addingTimeInterval(WalletCourier.resultGrace + 1)
         await refreshed(s.desk)
         #expect(s.desk.cards.isEmpty)
-        #expect(!VaultAsk.toldExpired(request.id, in: s.asked))
+        #expect(!WalletAsk.toldExpired(request.id, in: s.asked))
         #expect(s.told.messages.count == 1)
     }
 
@@ -329,8 +329,8 @@ struct VaultDeskTests {
         let s = try setup(clock: clock)
         defer { s.desk.close() }
         let request = Self.request()
-        try VaultAsk.file(request, in: s.asked)
-        clock.now = request.expiresAt.addingTimeInterval(VaultCourier.resultGrace + 1)
+        try WalletAsk.file(request, in: s.asked)
+        clock.now = request.expiresAt.addingTimeInterval(WalletCourier.resultGrace + 1)
         await refreshed(s.desk)
         #expect(s.desk.cards.isEmpty)
         #expect(s.told.messages.count == 1)
@@ -344,7 +344,7 @@ struct VaultDeskTests {
         let s = try setup(clock: clock)
         defer { s.desk.close() }
         let request = Self.request()
-        try VaultAsk.file(request, in: s.asked)
+        try WalletAsk.file(request, in: s.asked)
         await refreshed(s.desk)
         try s.fake.setSendExit(4)
         await acted(s.desk, .send, request.id)
@@ -353,7 +353,7 @@ struct VaultDeskTests {
         await refreshed(s.desk)
         #expect(s.told.messages.count == 1)
         let text = try #require(s.told.messages.first?.text)
-        #expect(text.contains("without being sent") && text.contains("never reached the vault"))
+        #expect(text.contains("without being sent") && text.contains("never reached the Wallet Manager"))
         // The user did press Send: the message mustn't say they didn't.
         #expect(text.contains("or Passage couldn't deliver it") && !text.contains("didn't click"))
     }
@@ -363,8 +363,8 @@ struct VaultDeskTests {
         let s = try setup(clock: clock)
         defer { s.desk.close() }
         let sent = Self.request(1), unsure = Self.request(2)
-        try VaultAsk.file(sent, in: s.asked)
-        try VaultAsk.file(unsure, in: s.asked)
+        try WalletAsk.file(sent, in: s.asked)
+        try WalletAsk.file(unsure, in: s.asked)
         await refreshed(s.desk)
         await acted(s.desk, .send, sent.id)
         try s.fake.setSendExit(1)
@@ -372,7 +372,7 @@ struct VaultDeskTests {
         #expect(s.desk.cards.map(\.state) == [.sent, .unsure(message: "passage: fake exit 1")])
         clock.now = sent.expiresAt
         await refreshed(s.desk)
-        clock.now = sent.expiresAt.addingTimeInterval(VaultCourier.resultGrace + 1)
+        clock.now = sent.expiresAt.addingTimeInterval(WalletCourier.resultGrace + 1)
         await refreshed(s.desk)
         #expect(s.told.messages.isEmpty, "\(s.told.messages)")
     }
@@ -382,7 +382,7 @@ struct VaultDeskTests {
         defer { s.desk.close() }
         try VibePaths.ensurePrivate(s.asked)
         let bad = s.asked.appendingPathComponent("\(Self.request().id).json")
-        try Data(#"{"type":"vibeswitcher.vault-request"}"#.utf8).write(to: bad)
+        try Data(#"{"type":"vibeswitcher.wallet-request"}"#.utf8).write(to: bad)
         await refreshed(s.desk)
         #expect(s.desk.cards.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: bad.path))
@@ -393,20 +393,20 @@ struct VaultDeskTests {
         let s = try setup()
         defer { s.desk.close() }
         let first = Self.request(1), second = Self.request(2)
-        try VaultAsk.file(first, in: s.asked)
-        try VaultAsk.file(second, in: s.asked)
+        try WalletAsk.file(first, in: s.asked)
+        try WalletAsk.file(second, in: s.asked)
         await refreshed(s.desk)
         await acted(s.desk, .send, first.id)
         // Rewritten under the same id after it went: the card still shows what was sent.
         var changed = first
         changed.amount = "9000000000000000000"
-        try VaultAsk.file(changed, in: s.asked)
+        try WalletAsk.file(changed, in: s.asked)
         await refreshed(s.desk)
         #expect(s.desk.cards.first { $0.id == first.id }?.amount == "1.25")
         // Rewritten while its card shows the old one: the click sends nothing; the card then shows the new one, waiting.
         var swapped = second
         swapped.to = "0x00000000000000000000000000000000000000ff"
-        try VaultAsk.file(swapped, in: s.asked)
+        try WalletAsk.file(swapped, in: s.asked)
         s.desk.refresh()
         await acted(s.desk, .send, second.id)
         #expect(s.fake.sends.count == 1)
@@ -419,14 +419,14 @@ struct VaultDeskTests {
         let s = try setup(peer: "")
         defer { s.desk.close() }
         let request = Self.request()
-        try VaultAsk.file(request, in: s.asked)
-        try s.store.save(VaultStore.Record(request: request, state: .unsure))
+        try WalletAsk.file(request, in: s.asked)
+        try s.store.save(WalletRequestStore.Record(request: request, state: .unsure))
         await refreshed(s.desk)
         #expect(s.desk.cards.first?.state == .unsure(message: nil))
         await acted(s.desk, .discard, request.id)
         #expect(!FileManager.default.fileExists(atPath: s.store.file(request.id).path))
         _ = await until { s.told.messages.count == 1 }
-        #expect(s.told.messages.first?.text.contains("may have reached the vault") == true)
+        #expect(s.told.messages.first?.text.contains("may have reached the Wallet Manager") == true)
     }
 
     /// Blind check #2: a send an earlier run was in the middle of (`sending`) shows as unsure and may be sent again.
@@ -434,8 +434,8 @@ struct VaultDeskTests {
         let s = try setup()
         defer { s.desk.close() }
         let request = Self.request()
-        try VaultAsk.file(request, in: s.asked)
-        try s.store.save(VaultStore.Record(request: request, state: .sending))
+        try WalletAsk.file(request, in: s.asked)
+        try s.store.save(WalletRequestStore.Record(request: request, state: .sending))
         await refreshed(s.desk)
         let card = try #require(s.desk.cards.first)
         #expect(card.state == .unsure(message: nil))
@@ -448,54 +448,54 @@ struct VaultDeskTests {
     // MARK: Requests and results on the card
     // MARK: Requests and results on the card
 
-    @Test func amountsAndResultsReadAsTheVaultSaidThem() throws {
-        #expect(VaultCardModel.units("1000000000000000000", decimals: 18) == "1")
-        #expect(VaultCardModel.units("250000000000000000", decimals: 18) == "0.25")
-        #expect(VaultCardModel.units("1", decimals: 18) == "0.000000000000000001")
-        #expect(VaultCardModel.units("0", decimals: 18) == "0")
+    @Test func amountsAndResultsReadAsTheWalletManagerSaidThem() throws {
+        #expect(WalletCardModel.units("1000000000000000000", decimals: 18) == "1")
+        #expect(WalletCardModel.units("250000000000000000", decimals: 18) == "0.25")
+        #expect(WalletCardModel.units("1", decimals: 18) == "0.000000000000000001")
+        #expect(WalletCardModel.units("0", decimals: 18) == "0")
         var request = Self.request()
         request.asset = "0x00000000000000000000000000000000000000aa"
         request.amount = "1000"
-        let token = VaultCardModel(request: request, requestedBy: "x", state: .waiting)
+        let token = WalletCardModel(request: request, requestedBy: "x", state: .waiting)
         #expect(token.amount == "1000" && token.asset == "base units of token 0x000000…00aa")
         request.chainId = 5
         request.asset = "native"
-        #expect(VaultCardModel(request: request, requestedBy: "x", state: .waiting).asset == "(the chain's native coin)")
+        #expect(WalletCardModel(request: request, requestedBy: "x", state: .waiting).asset == "(the chain's native coin)")
         var call = Self.request()
         call.action = .call
         call.data = "0xa9059cbb"
         call.amount = "0"
-        #expect(VaultCardModel(request: call, requestedBy: "x", state: .waiting).calldataBytes == 4)
+        #expect(WalletCardModel(request: call, requestedBy: "x", state: .waiting).calldataBytes == 4)
 
         let base = Self.request()
-        #expect(VaultCardModel.state(Self.result(base, .signed, sequence: 3)) == .signedNotSubmitted)
+        #expect(WalletCardModel.state(Self.result(base, .signed, sequence: 3)) == .signedNotSubmitted)
         var rejected = Self.result(base, .rejected, sequence: 2)
         rejected.message = ""
         rejected.checks = [.init(name: "recipient", ok: false, detail: "not in the address book")]
-        #expect(VaultCardModel.state(rejected) == .rejected(reason: "failed recipient"))
+        #expect(WalletCardModel.state(rejected) == .rejected(reason: "failed recipient"))
         var proposed = Self.result(base, .proposed, sequence: 2)
         proposed.safeTxHash = "0x" + String(repeating: "cd", count: 32)
-        let record = VaultStore.Record(request: base, state: .sent, results: [Self.result(base, .received, sequence: 1), proposed])
-        let read = VaultCardModel.state(of: record, unsure: nil, now: Self.created)
+        let record = WalletRequestStore.Record(request: base, state: .sent, results: [Self.result(base, .received, sequence: 1), proposed])
+        let read = WalletCardModel.state(of: record, unsure: nil, now: Self.created)
         #expect(read.state == .proposed(safeTxHash: proposed.safeTxHash) && read.wallet == .safe)
     }
 
     /// Blind check #1: the list is read again when asked (the tab showing, the path changing), and the latest read wins.
     @Test func thePeerListIsReadAgainAndTheLatestReadWins() async throws {
-        let fake = try VaultFakePassage(temp)
+        let fake = try WalletFakePassage(temp)
         let release = DispatchSemaphore(value: 0)
-        let list = VaultPeerList(load: { path in
+        let list = WalletPeerList(load: { path in
             if path == "slow" { release.wait() }
-            return VaultPeerChoice.list(passage: fake.executable)
+            return WalletPeerChoice.list(passage: fake.executable)
         })
-        try (#"{"peerID":"0a1b2c3d","name":"Example vault Mac"}"# + "\n").write(to: fake.file("peers.jsonl"), atomically: true, encoding: .utf8)
+        try (#"{"peerID":"0a1b2c3d","name":"Example Wallet Manager Mac"}"# + "\n").write(to: fake.file("peers.jsonl"), atomically: true, encoding: .utf8)
         var shown = 0
         list.reload(passagePath: "slow") { shown += 1 }
         list.reload(passagePath: fake.executable) { shown += 10 }
         #expect(await until { shown == 10 })
         #expect(list.peers.map(\.peerID) == ["0a1b2c3d"])
         // Paired since: read again, it's there.
-        try (#"{"peerID":"0a1b2c3d","name":"Example vault Mac"}"# + "\n" + #"{"peerID":"0d0d0d0d","name":"Example laptop"}"# + "\n")
+        try (#"{"peerID":"0a1b2c3d","name":"Example Wallet Manager Mac"}"# + "\n" + #"{"peerID":"0d0d0d0d","name":"Example laptop"}"# + "\n")
             .write(to: fake.file("peers.jsonl"), atomically: true, encoding: .utf8)
         list.reload(passagePath: fake.executable) { shown += 100 }
         #expect(await until { shown == 110 })
@@ -507,32 +507,32 @@ struct VaultDeskTests {
         #expect(list.peers.map(\.peerID) == ["0a1b2c3d", "0d0d0d0d"])
     }
 
-    // MARK: Settings › Vault's peers
-    // MARK: Settings › Vault's peers
+    // MARK: Settings › Wallet's peers
+    // MARK: Settings › Wallet's peers
 
     @Test func settingsListsThePeersPassageNames() throws {
-        let fake = try VaultFakePassage(temp)
-        let lines = [#"{"peerID":"0a1b2c3d","name":"Example vault Mac","reachable":null,"pairedAt":"2026-10-01T00:00:00Z"}"#,
+        let fake = try WalletFakePassage(temp)
+        let lines = [#"{"peerID":"0a1b2c3d","name":"Example Wallet Manager Mac","reachable":null,"pairedAt":"2026-10-01T00:00:00Z"}"#,
                      #"{"peerID":"not-a-peer","name":"Odd"}"#,
                      #"{"peerID":"0d0d0d0d","name":"","reachable":null}"#]
         try (lines.joined(separator: "\n") + "\n").write(to: fake.file("peers.jsonl"), atomically: true, encoding: .utf8)
-        let peers = try #require(VaultPeerChoice.list(passage: fake.executable))
-        #expect(peers == [VaultPeerChoice(peerID: "0a1b2c3d", name: "Example vault Mac (0a1b2c3d)"),
-                          VaultPeerChoice(peerID: "0d0d0d0d", name: "(unnamed)")])
+        let peers = try #require(WalletPeerChoice.list(passage: fake.executable))
+        #expect(peers == [WalletPeerChoice(peerID: "0a1b2c3d", name: "Example Wallet Manager Mac (0a1b2c3d)"),
+                          WalletPeerChoice(peerID: "0d0d0d0d", name: "(unnamed)")])
         #expect(fake.calls == ["peers --no-discovery --json"])
-        #expect(VaultPeerChoice.list(passage: "relative/passage") == nil)
+        #expect(WalletPeerChoice.list(passage: "relative/passage") == nil)
     }
 }
 
-/// The vault's answer reaches the asking session's agent as a message, through the steering path the lead's messages
+/// The Wallet Manager's answer reaches the asking session's agent as a message, through the steering path the lead's messages
 /// take (its steer inbox, handed over by its hook): on the chat harness's fake Claude on a scratch pty, through a
 /// scratch session host; never a real session.
 @MainActor
 @Suite(.serialized)
-struct VaultDeliveryTests {
+struct WalletDeliveryTests {
     let temp = Scratch()
 
-    @Test func theVaultsAnswerReachesTheAskingSessionsAgent() async throws {
+    @Test func theWalletManagersAnswerReachesTheAskingSessionsAgent() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
         let stateDir = temp.url("state")
@@ -545,17 +545,17 @@ struct VaultDeliveryTests {
         h.tell(["op": "work"])
         try await h.settle { $0.contains("Working") }
 
-        let fake = try VaultFakePassage(temp)
+        let fake = try WalletFakePassage(temp)
         let asked = temp.url("asked")
-        let desk = VaultDesk(folder: asked, store: VaultStore(folder: temp.url("requests")), inbox: fake.inbox,
-                             config: { VaultDesk.Config(passage: fake.executable, peer: VaultFakePassage.peer) },
-                             now: { VaultDeskTests.created.addingTimeInterval(30) }, log: { _ in })
+        let desk = WalletDesk(folder: asked, store: WalletRequestStore(folder: temp.url("requests")), inbox: fake.inbox,
+                             config: { WalletDesk.Config(passage: fake.executable, peer: WalletFakePassage.peer) },
+                             now: { WalletDeskTests.created.addingTimeInterval(30) }, log: { _ in })
         defer { desk.close() }
         desk.deliver = { session, text in
-            controller.tell(text, from: .system("from the vault"), session: UUID(uuidString: session)!)
+            controller.tell(text, from: .system("from the Wallet Manager"), session: UUID(uuidString: session)!)
         }
-        let request = VaultDeskTests.request(session: h.session.id)
-        try VaultAsk.file(request, in: asked)
+        let request = WalletDeskTests.request(session: h.session.id)
+        try WalletAsk.file(request, in: asked)
         var done = false
         desk.refresh { done = true }
         #expect(await until { done })
@@ -563,7 +563,7 @@ struct VaultDeliveryTests {
         done = false
         desk.act(.send, on: request.id) { done = true }
         #expect(await until { done })
-        try fake.receive(VaultDeskTests.result(request, .received, sequence: 1), second: 1)
+        try fake.receive(WalletDeskTests.result(request, .received, sequence: 1), second: 1)
         done = false
         desk.poll { done = true }
         #expect(await until { done })
@@ -571,13 +571,13 @@ struct VaultDeliveryTests {
         let pending = { SteerInbox.pending(tty: h.session.tty, root: h.steerRoot).filter { $0.text.contains(request.id) } }
         try await h.waitFor { pending().count == 1 }
         let message = try #require(pending().first)
-        #expect(message.from == .system("from the vault"))
-        #expect(message.text.contains("the vault says received"))
+        #expect(message.from == .system("from the Wallet Manager"))
+        #expect(message.text.contains("the Wallet Manager says received"))
         // Its hook hands it over at the agent's next step: in the agent's transcript, as added context.
         h.hookTakes()
         #expect(pending().isEmpty)
         let transcript = try String(contentsOf: h.transcript, encoding: .utf8)
-        #expect(transcript.contains(request.id) && transcript.contains("the vault says received"))
+        #expect(transcript.contains(request.id) && transcript.contains("the Wallet Manager says received"))
     }
 
     @Test func anUnsentRequestsExpiryReachesTheAskingSessionsAgent() async throws {
@@ -592,17 +592,17 @@ struct VaultDeliveryTests {
         h.tell(["op": "work"])
         try await h.settle { $0.contains("Working") }
 
-        let fake = try VaultFakePassage(temp)
+        let fake = try WalletFakePassage(temp)
         let asked = temp.url("asked")
-        let request = VaultDeskTests.request(session: h.session.id)
-        let desk = VaultDesk(folder: asked, store: VaultStore(folder: temp.url("requests")), inbox: fake.inbox,
-                             config: { VaultDesk.Config(passage: fake.executable, peer: VaultFakePassage.peer) },
+        let request = WalletDeskTests.request(session: h.session.id)
+        let desk = WalletDesk(folder: asked, store: WalletRequestStore(folder: temp.url("requests")), inbox: fake.inbox,
+                             config: { WalletDesk.Config(passage: fake.executable, peer: WalletFakePassage.peer) },
                              now: { request.expiresAt.addingTimeInterval(1) }, log: { _ in })
         defer { desk.close() }
         desk.deliver = { session, text in
-            controller.tell(text, from: .system("from the vault"), session: UUID(uuidString: session)!)
+            controller.tell(text, from: .system("from the Wallet Manager"), session: UUID(uuidString: session)!)
         }
-        try VaultAsk.file(request, in: asked)
+        try WalletAsk.file(request, in: asked)
         var done = false
         desk.refresh { done = true }
         #expect(await until { done })
@@ -612,7 +612,7 @@ struct VaultDeliveryTests {
         let pending = { SteerInbox.pending(tty: h.session.tty, root: h.steerRoot).filter { $0.text.contains(request.id) } }
         try await h.waitFor { pending().count == 1 }
         let message = try #require(pending().first)
-        #expect(message.from == .system("from the vault"))
+        #expect(message.from == .system("from the Wallet Manager"))
         #expect(message.text.contains("without being sent"))
         h.hookTakes()
         #expect(pending().isEmpty)

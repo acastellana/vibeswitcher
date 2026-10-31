@@ -1,8 +1,8 @@
 import Foundation
 
-/// The shared rules of the vault formats (docs/protocol/vault-request.md): a strict JSON reader and writer, the field
+/// The shared rules of the wallet formats (docs/protocol/wallet-request.md): a strict JSON reader and writer, the field
 /// shapes, and the screen for key material. Everything unusual is refused, never repaired.
-public enum VaultFormat {
+public enum WalletRequestFormat {
     /// The largest file either side reads or writes: 64 KiB.
     public static let maxFileBytes = 64 * 1024
     /// How deep a document may nest (the formats themselves need 3).
@@ -26,7 +26,7 @@ public enum VaultFormat {
 
         public var description: String {
             switch self {
-            case let .tooLarge(bytes): "the file is \(bytes) bytes, over the \(VaultFormat.maxFileBytes)-byte limit"
+            case let .tooLarge(bytes): "the file is \(bytes) bytes, over the \(WalletRequestFormat.maxFileBytes)-byte limit"
             case let .notJSON(why): "not JSON as the format takes it: \(why)"
             case let .unknownField(field): "unknown field \(field)"
             case let .missingField(field): "missing field \(field)"
@@ -269,11 +269,11 @@ public enum VaultFormat {
         init(_ value: Value, path: String, allowed: [String]) throws {
             guard case let .object(list) = value else { throw Failure.wrongType(path, "an object") }
             self.path = path
-            for member in list where !allowed.contains(member.key) { throw Failure.unknownField(VaultFormat.name(member.key, in: path)) }
+            for member in list where !allowed.contains(member.key) { throw Failure.unknownField(WalletRequestFormat.name(member.key, in: path)) }
             members = Dictionary(uniqueKeysWithValues: list.map { ($0.key, $0.value) })
         }
 
-        func name(_ key: String) -> String { VaultFormat.name(key, in: path) }
+        func name(_ key: String) -> String { WalletRequestFormat.name(key, in: path) }
 
         func has(_ key: String) -> Bool { members[key] != nil }
 
@@ -309,7 +309,7 @@ public enum VaultFormat {
 
     // MARK: Shapes
 
-    /// 0x and 40 hex digits, either case (the vault checks an EIP-55 checksum).
+    /// 0x and 40 hex digits, either case (the Wallet Manager checks an EIP-55 checksum).
     public static func isAddress(_ text: String) -> Bool {
         let bytes = Array(text.utf8)
         return bytes.count == 42 && bytes[0] == UInt8(ascii: "0") && bytes[1] == UInt8(ascii: "x") && bytes[2...].allSatisfy(isHex)
@@ -396,7 +396,7 @@ public enum VaultFormat {
         var words = 0
         for word in text.lowercased().split(whereSeparator: { !("a"..."z").contains($0) }) {
             // A word next to a letter outside a–z (é, ß) is cut there; the pieces still count only if they're words.
-            words = VaultWordlist.words.contains(word) ? words + 1 : 0
+            words = WalletWordlist.words.contains(word) ? words + 1 : 0
             if words >= 12 { return "12 or more BIP39 words in a row" }
         }
         return nil

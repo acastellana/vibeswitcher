@@ -1,14 +1,14 @@
 import Foundation
 
-/// VibeSwitcher's side of the Passage link to the vault Mac: the `passage` CLI (Passage's README, "Command line"),
-/// run as a program, never through a shell. Sends a request file to the vault peer, lists what the vault peer sent
+/// VibeSwitcher's side of the Passage link to the Wallet Manager's Mac: the `passage` CLI (Passage's README, "Command line"),
+/// run as a program, never through a shell. Sends a request file to the Wallet Manager peer, lists what the Wallet Manager peer sent
 /// (`passage inbox <peer> --json`) and runs `passage listen` while there's something to hear. Inbox files are
 /// untrusted data: read only as bytes for the strict parser, never opened or run.
 public struct PassageLink: Sendable {
     /// The `passage` executable, an absolute path.
     public let executable: String
-    /// The vault Mac's peer ID: 8 lower-case hex digits (a name could match another peer).
-    public let vaultPeer: String
+    /// The Wallet Manager's Mac's peer ID: 8 lower-case hex digits (a name could match another peer).
+    public let walletPeer: String
     /// Passage's inbox folder, holding one folder per peer ID.
     public let inboxFolder: URL
 
@@ -17,13 +17,13 @@ public struct PassageLink: Sendable {
         URL(fileURLWithPath: VibePaths.home).appendingPathComponent("Library/Application Support/app.passage.Passage/inbox", isDirectory: true)
     }
 
-    /// Nil unless `executable` is an absolute path and `vaultPeer` a peer ID.
-    public init?(executable: String, vaultPeer: String, inboxFolder: URL = PassageLink.defaultInbox) {
-        let peer = Array(vaultPeer.utf8)
+    /// Nil unless `executable` is an absolute path and `walletPeer` a peer ID.
+    public init?(executable: String, walletPeer: String, inboxFolder: URL = PassageLink.defaultInbox) {
+        let peer = Array(walletPeer.utf8)
         guard executable.hasPrefix("/"), peer.count == 8,
               peer.allSatisfy({ ($0 >= 0x30 && $0 <= 0x39) || ($0 >= 0x61 && $0 <= 0x66) }) else { return nil }
         self.executable = executable
-        self.vaultPeer = vaultPeer
+        self.walletPeer = walletPeer
         self.inboxFolder = inboxFolder.standardizedFileURL
     }
 
@@ -31,22 +31,22 @@ public struct PassageLink: Sendable {
 
     /// How a `passage send` went, by its exit code (Passage's README, "Exit codes"), each with what it said on stderr.
     public enum SendOutcome: Equatable, Sendable {
-        /// 0, and it printed `sent<TAB><vault peer><TAB><name><TAB><bytes>`.
+        /// 0, and it printed `sent<TAB><Wallet Manager peer><TAB><name><TAB><bytes>`.
         case sent
         /// 1: the connection, the handshake, the file, the inbox or the Keychain failed.
         case failed(String)
         /// 2: passage didn't take the command line.
         case usage(String)
-        /// 3: no paired peer is the vault peer.
+        /// 3: no paired peer is the Wallet Manager peer.
         case noSuchPeer(String)
-        /// 4: the vault peer is paired but no `passage listen` answered for it.
+        /// 4: the Wallet Manager peer is paired but no `passage listen` answered for it.
         case peerNotListening(String)
         /// 5: passage refused the content as looking like a secret (it's never confirmed: no --yes, no terminal).
         case refusedAsSecret(String)
         /// Any other end: another exit code, a signal, past the time limit, couldn't start, or exit 0 without the line.
         case unexpected(String)
 
-        /// Whether the vault may have the file all the same: passage gave up after connecting (1), or ended in a way
+        /// Whether the Wallet Manager may have the file all the same: passage gave up after connecting (1), or ended in a way
         /// that says nothing (`unexpected`). The others (2–5) end before anything is sent.
         public var mayHaveArrived: Bool {
             switch self {
@@ -56,12 +56,12 @@ public struct PassageLink: Sendable {
         }
     }
 
-    /// Sends `file` as `vault-request-<id>.json` to the vault peer, waiting up to `timeout` for passage to finish. Never
+    /// Sends `file` as `wallet-request-<id>.json` to the Wallet Manager peer, waiting up to `timeout` for passage to finish. Never
     /// with --yes: if passage's secret check fires the request isn't sent (5). It runs in a session of its own, with no
     /// terminal to ask on. Blocks: call it off the main thread.
     public func send(file: URL, id: String, timeout: TimeInterval = 120) -> SendOutcome {
-        let name = VaultRequest.fileName(id)
-        let result = Shell.run(executable: executable, args: ["send", vaultPeer, file.path, "--name", name], in: "/",
+        let name = WalletRequest.fileName(id)
+        let result = Shell.run(executable: executable, args: ["send", walletPeer, file.path, "--name", name], in: "/",
                                timeout: timeout, ownSession: true)
         let said = Self.brief(result.error)
         if result.timedOut || result.cancelled { return .unexpected("passage send was stopped: \(result.timedOut ? "out of time" : "cancelled")") }
@@ -71,8 +71,8 @@ public struct PassageLink: Sendable {
         case 0:
             let line = result.output.split(separator: "\n").first { $0.hasPrefix("sent\t") }.map(String.init)
             let fields = line?.split(separator: "\t", omittingEmptySubsequences: false).map(String.init) ?? []
-            guard fields.count == 4, fields[1] == vaultPeer, fields[2] == name else {
-                return .unexpected("passage send exited 0 without saying it sent \(name) to \(vaultPeer)")
+            guard fields.count == 4, fields[1] == walletPeer, fields[2] == name else {
+                return .unexpected("passage send exited 0 without saying it sent \(name) to \(walletPeer)")
             }
             return .sent
         case 1: return .failed(said)
@@ -105,10 +105,10 @@ public struct PassageLink: Sendable {
         public var description: String
     }
 
-    /// What the vault peer has sent, oldest first: `passage inbox <vault peer> --json`. Any line that isn't an object
+    /// What the Wallet Manager peer has sent, oldest first: `passage inbox <Wallet Manager peer> --json`. Any line that isn't an object
     /// with string `peerID`, `name` and `path` fails the whole listing.
     public func inbox(timeout: TimeInterval = 60) -> Result<[InboxEntry], InboxFailure> {
-        let result = Shell.run(executable: executable, args: ["inbox", vaultPeer, "--json"], in: "/", timeout: timeout, ownSession: true)
+        let result = Shell.run(executable: executable, args: ["inbox", walletPeer, "--json"], in: "/", timeout: timeout, ownSession: true)
         guard result.ok else {
             let why = result.timedOut ? "out of time" : result.cancelled ? "cancelled" : "exit \(result.status)"
             let said = Self.brief(result.error)
@@ -116,7 +116,7 @@ public struct PassageLink: Sendable {
         }
         var entries: [InboxEntry] = []
         for (number, line) in result.output.split(separator: "\n").enumerated() where !line.trimmingCharacters(in: .whitespaces).isEmpty {
-            guard case let .object(members)? = try? VaultFormat.Value.parse(Data(line.utf8)) else {
+            guard case let .object(members)? = try? WalletRequestFormat.Value.parse(Data(line.utf8)) else {
                 return .failure(InboxFailure(description: "passage inbox: line \(number + 1) isn't a JSON object"))
             }
             func text(_ key: String) -> String? {
@@ -131,12 +131,12 @@ public struct PassageLink: Sendable {
         return .success(entries)
     }
 
-    /// The bytes of an inbox file the vault peer sent: only a regular file (no link followed) directly in
-    /// `<inbox>/<vault peer>/`, named `<timestamp>-<name>`, of at most 64 KiB.
+    /// The bytes of an inbox file the Wallet Manager peer sent: only a regular file (no link followed) directly in
+    /// `<inbox>/<Wallet Manager peer>/`, named `<timestamp>-<name>`, of at most 64 KiB.
     public func read(_ entry: InboxEntry) throws -> Data {
-        let folder = inboxFolder.appendingPathComponent(vaultPeer, isDirectory: true).path + "/"
-        guard entry.peerID == vaultPeer, entry.path.hasPrefix(folder) else {
-            throw InboxFailure(description: "\(entry.path) isn't in the vault peer's inbox folder")
+        let folder = inboxFolder.appendingPathComponent(walletPeer, isDirectory: true).path + "/"
+        guard entry.peerID == walletPeer, entry.path.hasPrefix(folder) else {
+            throw InboxFailure(description: "\(entry.path) isn't in the Wallet Manager peer's inbox folder")
         }
         let file = String(entry.path.dropFirst(folder.count))
         guard !file.contains("/"), file.hasSuffix("-" + entry.name), !file.hasPrefix(".") else {
@@ -149,9 +149,9 @@ public struct PassageLink: Sendable {
         guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG else {
             throw InboxFailure(description: "\(entry.path) isn't a regular file")
         }
-        guard info.st_size <= VaultFormat.maxFileBytes else { throw VaultFormat.Failure.tooLarge(Int(info.st_size)) }
-        let data = try handle.read(upToCount: VaultFormat.maxFileBytes + 1) ?? Data()
-        guard data.count <= VaultFormat.maxFileBytes else { throw VaultFormat.Failure.tooLarge(data.count) }
+        guard info.st_size <= WalletRequestFormat.maxFileBytes else { throw WalletRequestFormat.Failure.tooLarge(Int(info.st_size)) }
+        let data = try handle.read(upToCount: WalletRequestFormat.maxFileBytes + 1) ?? Data()
+        guard data.count <= WalletRequestFormat.maxFileBytes else { throw WalletRequestFormat.Failure.tooLarge(data.count) }
         return data
     }
 

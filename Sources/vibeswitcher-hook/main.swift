@@ -87,7 +87,7 @@ if lock >= 0 { close(lock) }
 // tells this process is in (nothing said here names one), so a commit of yours on a lead's base is taken as yours.
 for (root, step) in GitMoves.steps(for: payload) { try? LeadVault.standard.record(step, root: root) }
 
-// A session VibeSwitcher started hears, as it starts, that it can ask for a transaction (vs-vault).
+// A session VibeSwitcher started hears, as it starts, that it can ask for a transaction (vs-wallet).
 if agent == .claude, let note = SessionNote.output(payload: payload, environment: ProcessInfo.processInfo.environment) {
     signal(SIGPIPE, SIG_IGN)
     try? FileHandle.standardOutput.write(contentsOf: note)

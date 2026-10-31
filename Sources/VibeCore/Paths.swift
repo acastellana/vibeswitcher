@@ -77,8 +77,11 @@ public enum VibePaths {
     public static var hostLog: URL { root.appendingPathComponent("host.log") }
     /// Launch presets (see `LaunchPresets`).
     public static var presetsFile: URL { root.appendingPathComponent("presets.json") }
-    /// Transaction requests sent to the vault Mac and what it answered, one `<id>.json` each (see `VaultStore`).
-    public static var vaultRequestsDir: URL { root.appendingPathComponent("vault-requests") }
+    /// Transaction requests sent to the Wallet Manager's Mac and what it answered, one `<id>.json` each (see `WalletRequestStore`).
+    public static var walletRequestsDir: URL { root.appendingPathComponent("wallet-requests") }
+    /// Where `walletRequestsDir` was while the feature was called vault requests (until 2026-10-31); carried over
+    /// once at launch (`WalletRequestStore.carryOver`).
+    public static var formerVaultRequestsDir: URL { root.appendingPathComponent("vault-requests") }
 
     /// Creates `~/.vibeswitcher` and its state folder private to you (0700), fixing older installs too. `root` is
     /// VibeSwitcher's folder (tests give a scratch one).

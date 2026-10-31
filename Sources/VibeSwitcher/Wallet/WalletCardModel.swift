@@ -1,19 +1,19 @@
 import Foundation
 
-/// What a vault request card shows: a transaction an agent asked for, and where it is on its way to the vault Mac and
+/// What a wallet request card shows: a transaction an agent asked for, and where it is on its way to the Wallet Manager's Mac and
 /// back. Plain values only, already worded for display (the amount in its asset's units, not base units), so the card
 /// doesn't depend on the request and result types it will be built from: a caller maps those onto this.
 ///
 /// VibeSwitcher never signs or judges the transaction: the card makes the request plain to read and shows what the
-/// vault answered. Nothing leaves the Mac until you press Send to vault (`Action.send`, only while `.waiting`).
-struct VaultCardModel: Equatable, Identifiable {
+/// Wallet Manager answered. Nothing leaves the Mac until you press Send to Wallet Manager (`Action.send`, only while `.waiting`).
+struct WalletCardModel: Equatable, Identifiable {
     /// The request's id, for the card's identity and its actions.
     var id: String
-    /// The vault's workspace the `from` wallet is in (the request's `workspace`).
+    /// The Wallet Manager's workspace the `from` wallet is in (the request's `workspace`).
     var workspace: String
     var from: String
-    /// What kind of wallet `from` is, when known: the request doesn't say (the vault resolves it); a Safe shows once the
-    /// vault answers with a Safe transaction.
+    /// What kind of wallet `from` is, when known: the request doesn't say (the Wallet Manager resolves it); a Safe shows once the
+    /// Wallet Manager answers with a Safe transaction.
     var wallet: Wallet?
     var to: String
     var chainID: Int
@@ -28,7 +28,7 @@ struct VaultCardModel: Equatable, Identifiable {
     /// Who asked: the session's name.
     var requestedBy: String
     var state: State
-    /// The vault's checks, when it sent any (with a rejection, but also along with other answers).
+    /// The Wallet Manager's checks, when it sent any (with a rejection, but also along with other answers).
     var checks: [Check] = []
 
     /// The kinds of wallet a request can come from: it decides what signing it means.
@@ -55,24 +55,24 @@ struct VaultCardModel: Equatable, Identifiable {
         case waiting
         /// Handed to Passage, no answer yet.
         case sent
-        /// Passage couldn't reach the vault Mac (and why, when it said).
+        /// Passage couldn't reach the Wallet Manager's Mac (and why, when it said).
         case unreachable(message: String?)
-        /// Passage stopped after it may have delivered it (exit 1, a signal, out of time): the vault may have it.
+        /// Passage stopped after it may have delivered it (exit 1, a signal, out of time): the Wallet Manager may have it.
         case unsure(message: String?)
         /// It didn't leave this Mac and sending again won't change that (Passage refused it as a secret, its format).
         case notSent(reason: String)
-        /// The vault has it and is checking it.
+        /// The Wallet Manager has it and is checking it.
         case received
-        /// The vault proposed it to the Safe, where it waits for the other owners' signatures (its Safe transaction
+        /// The Wallet Manager proposed it to the Safe, where it waits for the other owners' signatures (its Safe transaction
         /// hash, when it said).
         case proposed(safeTxHash: String?)
-        /// Signed on the vault, not yet submitted to the chain.
+        /// Signed on the Wallet Manager's Mac, not yet submitted to the chain.
         case signedNotSubmitted
-        /// Signed on the vault's hardware wallet and sent.
+        /// Signed on the Wallet Manager's hardware wallet and sent.
         case signed(txHash: String, explorerURL: URL?)
-        /// The vault refused it.
+        /// The Wallet Manager refused it.
         case rejected(reason: String)
-        /// The vault tried and something failed.
+        /// The Wallet Manager tried and something failed.
         case failed(message: String)
         /// No answer in time, or you didn't send it in time: it can't be sent any more.
         case expired
@@ -84,7 +84,7 @@ struct VaultCardModel: Equatable, Identifiable {
 
         var title: String {
             switch self {
-            case .send: return "Send to vault"
+            case .send: return "Send to Wallet Manager"
             case .discard: return "Discard"
             case .retry: return "Retry"
             }
@@ -92,7 +92,7 @@ struct VaultCardModel: Equatable, Identifiable {
     }
 
     /// The buttons the card shows in `state`, the main one first. Send only while waiting: once a request has left,
-    /// nothing on this card sends it again but Retry, after Passage said it couldn't reach the vault.
+    /// nothing on this card sends it again but Retry, after Passage said it couldn't reach the Wallet Manager.
     static func actions(for state: State) -> [Action] {
         switch state {
         case .waiting: return [.send, .discard]
@@ -104,7 +104,7 @@ struct VaultCardModel: Equatable, Identifiable {
 
     var actions: [Action] { Self.actions(for: state) }
 
-    /// A check that failed in an answer that isn't a rejection (an "unknown calldata" check on a proposal): the vault
+    /// A check that failed in an answer that isn't a rejection (an "unknown calldata" check on a proposal): the Wallet Manager
     /// went on, and the person there decides; shown as a warning, not as a failure.
     func isWarning(_ check: Check) -> Bool {
         if check.ok { return false }
@@ -135,8 +135,8 @@ struct VaultCardModel: Equatable, Identifiable {
         switch state {
         case .waiting: return "Waiting for you"
         case .sent: return "Sent"
-        case .unreachable: return "Vault not reachable"
-        case .unsure: return "May have reached the vault"
+        case .unreachable: return "Wallet Manager not reachable"
+        case .unsure: return "May have reached the Wallet Manager"
         case .notSent: return "Not sent"
         case .signedNotSubmitted: return "Signed, not yet submitted"
         case .received: return "Received"
@@ -151,29 +151,29 @@ struct VaultCardModel: Equatable, Identifiable {
     /// What the state means, in a line under the request; signing reads as `wallet` signs.
     static func detail(_ state: State, wallet: Wallet?) -> String {
         switch state {
-        case .waiting: return "Nothing has left this Mac. Send it to the vault to check and sign, or discard it."
-        case .sent: return "Sent through Passage. Waiting for the vault to answer."
+        case .waiting: return "Nothing has left this Mac. Send it to the Wallet Manager to check and sign, or discard it."
+        case .sent: return "Sent through Passage. Waiting for the Wallet Manager to answer."
         case .unreachable(let message):
-            return "Passage couldn't reach the vault Mac" + (message.map { ": \($0)." } ?? ".") + " Nothing was sent."
+            return "Passage couldn't reach the Wallet Manager's Mac" + (message.map { ": \($0)." } ?? ".") + " Nothing was sent."
         case .unsure(let message):
-            return "Passage stopped before the vault confirmed it" + (message.map { ": \($0)." } ?? ".")
-                + " It may have reached the vault: its answer shows here if it did. Retry sends the same request again (the vault"
-                + " ignores a repeat); Discard stops waiting for it here, though the vault may still act on it."
+            return "Passage stopped before the Wallet Manager confirmed it" + (message.map { ": \($0)." } ?? ".")
+                + " It may have reached the Wallet Manager: its answer shows here if it did. Retry sends the same request again (the Wallet Manager"
+                + " ignores a repeat); Discard stops waiting for it here, though the Wallet Manager may still act on it."
         case .notSent(let reason): return "Not sent: \(reason). Nothing left this Mac."
-        case .signedNotSubmitted: return "Signed on the vault; waiting for it to be submitted to the chain."
+        case .signedNotSubmitted: return "Signed on the Wallet Manager's Mac; waiting for it to be submitted to the chain."
         case .received:
             switch wallet {
-            case nil: return "The vault has it and is checking it. It's signed there, not here."
-            case .hardware: return "The vault has it and is checking it. Sign it there on the hardware wallet."
-            case .hot: return "The vault has it and is checking it."
-            case .safe: return "The vault has it and is checking it. Sign it there to propose it to the Safe."
+            case nil: return "The Wallet Manager has it and is checking it. It's signed there, not here."
+            case .hardware: return "The Wallet Manager has it and is checking it. Sign it there on the hardware wallet."
+            case .hot: return "The Wallet Manager has it and is checking it."
+            case .safe: return "The Wallet Manager has it and is checking it. Sign it there to propose it to the Safe."
             }
         case .proposed:
             return wallet == .safe ? "Proposed to the Safe: waiting for the other owners' signatures."
                 : "Proposed: waiting for the other signatures."
-        case .signed: return wallet == .safe ? "Signed by the Safe's owners and submitted." : "Signed on the vault and submitted."
-        case .rejected(let reason): return "The vault refused it: \(reason)"
-        case .failed(let message): return "The vault couldn't finish it: \(message)"
+        case .signed: return wallet == .safe ? "Signed by the Safe's owners and submitted." : "Signed on the Wallet Manager's Mac and submitted."
+        case .rejected(let reason): return "The Wallet Manager refused it: \(reason)"
+        case .failed(let message): return "The Wallet Manager couldn't finish it: \(message)"
         case .expired: return "No longer valid: it can't be sent. Ask the agent again if it's still needed."
         }
     }
@@ -182,7 +182,7 @@ struct VaultCardModel: Equatable, Identifiable {
 
     /// The card as text, for Copy.
     var text: String {
-        var lines = ["Vault request: \(Self.title(state))",
+        var lines = ["Wallet request: \(Self.title(state))",
                      "Workspace: \(workspace)", "From: \(from)" + (wallet.map { " (\($0.title))" } ?? ""), "To: \(to)",
                      "Amount: \(amount) \(asset)", "Chain: \(chainText)",
                      "Reason: \(reason)", "Requested by: \(requestedBy)"]

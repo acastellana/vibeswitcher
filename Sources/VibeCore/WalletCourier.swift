@@ -1,10 +1,10 @@
 import Foundation
 
-/// Carries vault requests to the vault Mac and their results back (docs/protocol/vault-request.md, "The life of a
-/// request"): checks a request, records it (`VaultStore`), sends it with `PassageLink`, takes the vault peer's results
+/// Carries wallet requests to the Wallet Manager's Mac and their results back (docs/protocol/wallet-request.md, "The life of a
+/// request"): checks a request, records it (`WalletRequestStore`), sends it with `PassageLink`, takes the Wallet Manager peer's results
 /// for outstanding requests from the inbox, and keeps `passage listen` running exactly while one is outstanding.
 /// Every call may block on passage: call it off the main thread. Any thread.
-public final class VaultCourier: @unchecked Sendable {
+public final class WalletCourier: @unchecked Sendable {
     /// How a `send` went: refused here before passage ran, or passage's own outcome.
     public enum SendOutcome: Equatable, Sendable {
         /// The request wasn't sent: it breaks the format (key material included), it's expired, or its id is taken.
@@ -18,21 +18,21 @@ public final class VaultCourier: @unchecked Sendable {
     public static let restartDelay: TimeInterval = 60
 
     public let link: PassageLink
-    public let store: VaultStore
+    public let store: WalletRequestStore
     private let log: @Sendable (String) -> Void
     private let now: @Sendable () -> Date
     private let lock = NSLock()
-    private var records: [String: VaultStore.Record] = [:]
+    private var records: [String: WalletRequestStore.Record] = [:]
     /// Inbox paths already taken, or ignored and logged by this courier: each is looked at once.
     private var handled: Set<String> = []
     private var listener: PassageListener?
     private var listenerStarted: Date?
     private var endNoted = false
-    private var hearTaken: (@Sendable ([VaultResult]) -> Void)?
+    private var hearTaken: (@Sendable ([WalletResult]) -> Void)?
 
     /// Loads the records `store` holds, and starts `passage listen` if any is outstanding.
-    public init(link: PassageLink, store: VaultStore = VaultStore(),
-                log: @escaping @Sendable (String) -> Void = { Breadcrumbs.shared.note("vault: " + $0) },
+    public init(link: PassageLink, store: WalletRequestStore = WalletRequestStore(),
+                log: @escaping @Sendable (String) -> Void = { Breadcrumbs.shared.note("wallet: " + $0) },
                 now: @escaping @Sendable () -> Date = { Date() }) {
         self.link = link
         self.store = store
@@ -56,32 +56,32 @@ public final class VaultCourier: @unchecked Sendable {
 
     // MARK: Requests
 
-    /// Waiting on the vault: sent (or being sent), with no final result, and not past `expiresAt` + `resultGrace`.
-    public var outstanding: [VaultRequest] {
+    /// Waiting on the Wallet Manager: sent (or being sent), with no final result, and not past `expiresAt` + `resultGrace`.
+    public var outstanding: [WalletRequest] {
         lock.lock()
         defer { lock.unlock() }
         return outstandingLocked(at: now()).map(\.request)
     }
 
-    public func record(_ id: String) -> VaultStore.Record? {
+    public func record(_ id: String) -> WalletRequestStore.Record? {
         lock.lock()
         defer { lock.unlock() }
         return records[id]
     }
 
-    private func outstandingLocked(at time: Date) -> [VaultStore.Record] {
+    private func outstandingLocked(at time: Date) -> [WalletRequestStore.Record] {
         records.values.filter { isOutstanding($0, at: time) }.sorted { $0.request.createdAt < $1.request.createdAt }
     }
 
-    private func isOutstanding(_ record: VaultStore.Record, at time: Date) -> Bool {
+    private func isOutstanding(_ record: WalletRequestStore.Record, at time: Date) -> Bool {
         !record.finished && time < record.request.expiresAt.addingTimeInterval(Self.resultGrace)
     }
 
     /// Checks `request` (the strict parser, on the very bytes that go), records it as sending, starts listening, sends
-    /// it as `vault-request-<id>.json`, and drops the record only when passage says it didn't go (2–5). When the vault
+    /// it as `wallet-request-<id>.json`, and drops the record only when passage says it didn't go (2–5). When the Wallet Manager
     /// may have it all the same (exit 1, a signal, out of time) the record stays, `unsure`, and still takes results; the
-    /// same request may then be sent again, under its id (the vault acts on an id once, and ignores a repeat).
-    public func send(_ request: VaultRequest) -> SendOutcome {
+    /// same request may then be sent again, under its id (the Wallet Manager acts on an id once, and ignores a repeat).
+    public func send(_ request: WalletRequest) -> SendOutcome {
         let bytes: Data
         do {
             bytes = try request.encoded()
@@ -89,7 +89,7 @@ public final class VaultCourier: @unchecked Sendable {
             log("refused request \(request.id): \(error)")
             return .refused("\(error)")
         }
-        guard !request.isExpired(now: now()) else { return .refused("the request expired at \(VaultFormat.string(request.expiresAt))") }
+        guard !request.isExpired(now: now()) else { return .refused("the request expired at \(WalletRequestFormat.string(request.expiresAt))") }
         lock.lock()
         let resend = records[request.id] != nil
         if let known = records[request.id] {
@@ -98,7 +98,7 @@ public final class VaultCourier: @unchecked Sendable {
                 return .refused("a request with id \(request.id) was sent already")
             }
         } else {
-            let record = VaultStore.Record(request: request, state: .sending)
+            let record = WalletRequestStore.Record(request: request, state: .sending)
             do {
                 try store.save(record)
             } catch {
@@ -108,11 +108,11 @@ public final class VaultCourier: @unchecked Sendable {
             records[request.id] = record
         }
         lock.unlock()
-        // Listening before it goes: the vault's first result may come back at once.
+        // Listening before it goes: the Wallet Manager's first result may come back at once.
         syncListener()
 
         let outbox = store.folder.appendingPathComponent("outbox", isDirectory: true)
-        let file = outbox.appendingPathComponent(VaultRequest.fileName(request.id))
+        let file = outbox.appendingPathComponent(WalletRequest.fileName(request.id))
         let outcome: PassageLink.SendOutcome
         var written = false
         do {
@@ -140,13 +140,13 @@ public final class VaultCourier: @unchecked Sendable {
             }
         }
         lock.unlock()
-        log("request \(request.id) to \(link.vaultPeer): \(outcome)")
+        log("request \(request.id) to \(link.walletPeer): \(outcome)")
         syncListener()
         return .passage(outcome)
     }
 
     /// Forgets the request (Discard on its card): its record goes, from memory and from `store`, and its results are
-    /// no longer taken; `passage listen` stops when nothing else is outstanding. A request the vault may have (`unsure`)
+    /// no longer taken; `passage listen` stops when nothing else is outstanding. A request the Wallet Manager may have (`unsure`)
     /// may still be acted on there: forgetting it only stops VibeSwitcher listening for it. False when it isn't known.
     @discardableResult
     public func forget(_ id: String) -> Bool {
@@ -162,7 +162,7 @@ public final class VaultCourier: @unchecked Sendable {
 
     /// Hears every result taken, by any `poll` (the ones `passage listen` sets off included), on the polling thread,
     /// after the records are saved. Nil: none.
-    public func onTaken(_ hear: (@Sendable ([VaultResult]) -> Void)?) {
+    public func onTaken(_ hear: (@Sendable ([WalletResult]) -> Void)?) {
         lock.lock()
         hearTaken = hear
         lock.unlock()
@@ -170,12 +170,12 @@ public final class VaultCourier: @unchecked Sendable {
 
     // MARK: Results
 
-    /// Takes the vault peer's new results for outstanding requests from the inbox, in `sequence` order, and returns
+    /// Takes the Wallet Manager peer's new results for outstanding requests from the inbox, in `sequence` order, and returns
     /// them. Everything else it finds is ignored and logged once: a file from another peer, one that isn't a result,
     /// a result for an id that isn't outstanding (unknown, finished, expired), one that doesn't parse or whose id isn't
     /// its name's, and a result that isn't after the last one taken (a repeat, or one after a final result).
     @discardableResult
-    public func poll() -> [VaultResult] {
+    public func poll() -> [WalletResult] {
         let entries: [PassageLink.InboxEntry]
         switch link.inbox() {
         case let .success(list): entries = list
@@ -185,20 +185,20 @@ public final class VaultCourier: @unchecked Sendable {
         }
         lock.lock()
         let time = now()
-        var candidates: [(entry: PassageLink.InboxEntry, result: VaultResult)] = []
+        var candidates: [(entry: PassageLink.InboxEntry, result: WalletResult)] = []
         for entry in entries where !handled.contains(entry.path) {
             func ignore(_ why: String) {
                 handled.insert(entry.path)
                 log("ignored \(entry.path): \(why)")
             }
-            guard entry.peerID == link.vaultPeer else { ignore("from peer \(entry.peerID), not the vault peer \(link.vaultPeer)"); continue }
-            guard let id = VaultResult.id(fromFileName: entry.name) else { ignore("not a vault result (\(entry.name))"); continue }
+            guard entry.peerID == link.walletPeer else { ignore("from peer \(entry.peerID), not the Wallet Manager peer \(link.walletPeer)"); continue }
+            guard let id = WalletResult.id(fromFileName: entry.name) else { ignore("not a wallet result (\(entry.name))"); continue }
             guard let record = records[id] else { ignore("a result for an unknown request id \(id)"); continue }
             guard !record.finished else { ignore("a result for request \(id), already finished (\(record.results.last!.status.rawValue))"); continue }
             guard isOutstanding(record, at: time) else { ignore("a result for request \(id), expired"); continue }
-            let result: VaultResult
+            let result: WalletResult
             do {
-                result = try VaultResult.parse(link.read(entry))
+                result = try WalletResult.parse(link.read(entry))
             } catch {
                 ignore("refused: \(error)")
                 continue
@@ -206,7 +206,7 @@ public final class VaultCourier: @unchecked Sendable {
             guard result.id == id else { ignore("its id \(result.id) isn't its name's \(id)"); continue }
             candidates.append((entry, result))
         }
-        var taken: [VaultResult] = []
+        var taken: [WalletResult] = []
         for (entry, result) in candidates.enumerated().sorted(by: { ($0.element.result.sequence, $0.offset) < ($1.element.result.sequence, $1.offset) }).map(\.element) {
             handled.insert(entry.path)
             guard var record = records[result.id] else { continue }

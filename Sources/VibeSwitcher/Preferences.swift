@@ -80,16 +80,17 @@ final class Preferences: ObservableObject {
     /// The language the spoken briefing is written and read in (an ElevenLabs language code, see `BriefingLanguage`);
     /// the Mac's first preferred language until you pick one.
     @Published var briefingLanguage: String { didSet { defaults.set(briefingLanguage, forKey: "briefingLanguage") } }
-    /// The Passage peer that is the vault Mac (its peer id); empty until you choose one, and until then vault
-    /// requests are refused.
-    @Published var vaultPeerID: String { didSet { defaults.set(vaultPeerID, forKey: "vaultPeerID") } }
-    /// The `passage` command vault requests go through; empty: `passage` on the PATH.
-    @Published var vaultPassagePath: String { didSet { defaults.set(vaultPassagePath, forKey: "vaultPassagePath") } }
+    /// The Passage peer that is the Wallet Manager's Mac (its peer id); empty until you choose one, and until then
+    /// wallet requests are refused.
+    @Published var walletPeerID: String { didSet { defaults.set(walletPeerID, forKey: "walletPeerID") } }
+    /// The `passage` command wallet requests go through; empty: `passage` on the PATH.
+    @Published var walletPassagePath: String { didSet { defaults.set(walletPassagePath, forKey: "walletPassagePath") } }
 
     /// `defaults`, `presetsFile` and `reduceMotion` are for tests and offscreen renders; the app uses the standard ones.
     init(defaults: UserDefaults = .standard, presetsFile: URL = VibePaths.presetsFile, reduceMotion: Bool = Motion.isReduced) {
         self.defaults = defaults
         self.presetsFile = presetsFile
+        Self.carryOverWalletKeys(defaults)
         // Decided once, at first launch, and kept: turning Reduce Motion on later doesn't flip it behind your back.
         if defaults.object(forKey: "sidebarFlashOnSwitch") == nil {
             defaults.set(Self.flashOnSwitchByDefault(reduceMotion: reduceMotion), forKey: "sidebarFlashOnSwitch")
@@ -125,8 +126,20 @@ final class Preferences: ObservableObject {
         batteryHoldBelow = PowerWatch.clamp(defaults.integer(forKey: "batteryHoldBelow"))
         briefingLanguage = defaults.string(forKey: "briefingLanguage").flatMap(BriefingLanguage.named)?.code ?? BriefingLanguage.preferred().code
         projectsFolder = defaults.string(forKey: "projectsFolder") ?? ProjectCreation.defaultLocation
-        vaultPeerID = defaults.string(forKey: "vaultPeerID") ?? ""
-        vaultPassagePath = defaults.string(forKey: "vaultPassagePath") ?? ""
+        walletPeerID = defaults.string(forKey: "walletPeerID") ?? ""
+        walletPassagePath = defaults.string(forKey: "walletPassagePath") ?? ""
+    }
+
+    /// The keys `walletPeerID` and `walletPassagePath` had while the feature was called vault requests (until
+    /// 2026-10-31): their values carried over once, unless the new key is already set, and the old keys removed.
+    static let formerWalletKeys = [("vaultPeerID", "walletPeerID"), ("vaultPassagePath", "walletPassagePath")]
+
+    static func carryOverWalletKeys(_ defaults: UserDefaults) {
+        for (old, new) in formerWalletKeys {
+            guard let value = defaults.object(forKey: old) else { continue }
+            if defaults.object(forKey: new) == nil { defaults.set(value, forKey: new) }
+            defaults.removeObject(forKey: old)
+        }
     }
 
     /// Showing the sidebar after a desktop switch slides it in at the screen's edge: not by default with Reduce Motion.

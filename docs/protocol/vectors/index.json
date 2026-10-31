@@ -1,5 +1,5 @@
 {
-  "format": "Test vectors for vault-request v1 and vault-result v1 (docs/protocol/vault-request.md)",
+  "format": "Test vectors for wallet-request v1 and wallet-result v1 (docs/protocol/wallet-request.md)",
   "vectors": [
     {
       "file": "request-valid-transfer-native.json",
@@ -23,7 +23,7 @@
       "file": "request-valid-mixed-case-address.json",
       "kind": "request",
       "valid": true,
-      "note": "A recipient address in mixed case: the format takes it (the vault checks EIP-55)."
+      "note": "A recipient address in mixed case: the format takes it (the Wallet Manager checks EIP-55)."
     },
     {
       "file": "request-valid-limits.json",

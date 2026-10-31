@@ -245,35 +245,35 @@ private final class Driver: NSObject, NSApplicationDelegate {
         controller.checkKey()
         return controller
     }()
-    /// The vault requests fake agents file (`vault-ask`), through a fake `passage` in the state folder: never the real
-    /// one, its Keychain, pairings or inbox. The vault Mac is played by `vault-answer`.
-    lazy var vaultPassage: URL = {
-        let folder = state.appendingPathComponent("vault-passage", isDirectory: true)
+    /// The wallet requests fake agents file (`wallet-ask`), through a fake `passage` in the state folder: never the real
+    /// one, its Keychain, pairings or inbox. The Wallet Manager's Mac is played by `wallet-answer`.
+    lazy var walletPassage: URL = {
+        let folder = state.appendingPathComponent("wallet-passage", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder.appendingPathComponent("inbox"), withIntermediateDirectories: true)
         let script = folder.appendingPathComponent("passage")
         try? Driver.fakePassage(folder.path).write(to: script, atomically: true, encoding: .utf8)
         chmod(script.path, 0o755)
-        let peers = Driver.vaultPeers.map { #"{"peerID":"\#($0.peerID)","name":"\#($0.name)","reachable":null}"# }.joined(separator: "\n") + "\n"
+        let peers = Driver.walletPeers.map { #"{"peerID":"\#($0.peerID)","name":"\#($0.name)","reachable":null}"# }.joined(separator: "\n") + "\n"
         try? peers.write(to: folder.appendingPathComponent("peers.jsonl"), atomically: true, encoding: .utf8)
         return folder
     }()
-    lazy var vault: VaultDesk = {
-        let passage = vaultPassage.appendingPathComponent("passage").path
-        let desk = VaultDesk(folder: state.appendingPathComponent("vault/asked", isDirectory: true),
-                             store: VaultStore(folder: state.appendingPathComponent("vault/requests", isDirectory: true)),
-                             inbox: vaultPassage.appendingPathComponent("inbox", isDirectory: true),
-                             config: { VaultDesk.Config(passage: passage, peer: Driver.vaultPeers[0].peerID) })
+    lazy var walletDesk: WalletDesk = {
+        let passage = walletPassage.appendingPathComponent("passage").path
+        let desk = WalletDesk(folder: state.appendingPathComponent("wallet/asked", isDirectory: true),
+                             store: WalletRequestStore(folder: state.appendingPathComponent("wallet/requests", isDirectory: true)),
+                             inbox: walletPassage.appendingPathComponent("inbox", isDirectory: true),
+                             config: { WalletDesk.Config(passage: passage, peer: Driver.walletPeers[0].peerID) })
         desk.findPassage = { nil }
         // The answer goes to the fake session's agent the way it would to a real one: its steer inbox, typed in between turns.
         desk.deliver = { [weak self] session, text in
             guard let id = UUID(uuidString: session) else { return }
-            self?.leads.tell(text, from: .system("from the vault"), session: id)
+            self?.leads.tell(text, from: .system("from the Wallet Manager"), session: id)
         }
-        if preferences.vaultPeerID.isEmpty { preferences.vaultPeerID = Driver.vaultPeers[0].peerID }
+        if preferences.walletPeerID.isEmpty { preferences.walletPeerID = Driver.walletPeers[0].peerID }
         return desk
     }()
-    /// The fake vault's next result number, per request.
-    var vaultSequence: [String: Int64] = [:]
+    /// The fake Wallet Manager's next result number, per request.
+    var walletSequence: [String: Int64] = [:]
     var window: MainWindowController?
     /// The main window's actions (`sheet new-session-menu` lists the empty sidebar's menu from them).
     var windowActions: WindowActions?
@@ -386,7 +386,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         Breadcrumbs.shared.note("sandbox: quitting")
         // Its fake `passage listen`, ended by its pid.
-        vault.close()
+        walletDesk.close()
         Breadcrumbs.shared.flush()
         RunnableCommand.Script.removeAll()
     }
@@ -820,7 +820,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             projectCreated: { [weak self] folder, _ in self?.refuse("starting a lead in the new project \(folder)") })
         windowActions = actions
         let controller = MainWindowController(store: store, host: host, model: model, actions: actions, leads: leads, briefing: briefing,
-                                              dictation: dictation, vault: vault)
+                                              dictation: dictation, wallet: walletDesk)
         controller.pane.configure = { [weak self, weak controller] view in
             guard let self else { return }
             let dark = (view.window ?? controller?.window)?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -847,7 +847,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 phoneAccess: PhoneAccess(store: store), recentProjects: { [] }, showWelcome: { [weak self] in self?.refuse("the welcome window") },
                 host: host, briefing: briefing, dictation: dictation, policy: WorkingPolicyEditor(),
                 // Its own fake passage's peers, whatever the path setting says: never the real passage.
-                vaultPeers: VaultPeerList(load: { [passage = vaultPassage.appendingPathComponent("passage").path] _ in VaultPeerChoice.list(passage: passage) }))
+                walletPeers: WalletPeerList(load: { [passage = walletPassage.appendingPathComponent("passage").path] _ in WalletPeerChoice.list(passage: passage) }))
         }
         guard let window = settings?.window else { return }
         Sandbox.hide(window)
@@ -889,10 +889,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
         ("soak [MINUTES [every SECONDS] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. LIST leaves out sessions, stream, dictation, team, ax, reports. With no MINUTES: the log so far"),
-        ("vault-ask", "the selected fake session's agent files a made-up transaction request, as vs-vault request does: its card shows in that chat, waiting for Send to vault"),
-        ("vault-click send|retry|discard", "presses that button on the newest vault request card in the selected chat (send goes to the sandbox's fake passage, never the real one)"),
-        ("vault-answer received|proposed|signed|submitted|rejected|failed", "the fake vault Mac answers the newest card's request: the card shows it, and the asking fake session gets it as a message"),
-        ("vault [STATE]", "shows a made-up vault request card as the sheet, in STATE: " + Driver.vaultCards.map(\.state).joined(separator: ", ") + " (all: every state, one under another); settings vault shows its Settings tab"),
+        ("wallet-ask", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager"),
+        ("wallet-click send|retry|discard", "presses that button on the newest wallet request card in the selected chat (send goes to the sandbox's fake passage, never the real one)"),
+        ("wallet-answer received|proposed|signed|submitted|rejected|failed", "the fake Wallet Manager's Mac answers the newest card's request: the card shows it, and the asking fake session gets it as a message"),
+        ("wallet [STATE]", "shows a made-up wallet request card as the sheet, in STATE: " + Driver.walletCards.map(\.state).joined(separator: ", ") + " (all: every state, one under another); settings wallet shows its Settings tab"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
@@ -930,13 +930,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }),
     ]
 
-    /// The vault request card (`VaultCard`) in each state, made-up values only, for `vault STATE`.
-    static let vaultCards: [(state: String, card: VaultCardModel)] = {
-        let request = VaultCardModel(
+    /// The wallet request card (`WalletCard`) in each state, made-up values only, for `wallet STATE`.
+    static let walletCards: [(state: String, card: WalletCardModel)] = {
+        let request = WalletCardModel(
             id: "example-request", workspace: "example", from: "0x0000000000000000000000000000000000000001", wallet: .hardware,
             to: "0x0000000000000000000000000000000000000002", chainID: 42424242, asset: "GEN", amount: "12.5",
             reason: "Pay the example invoice for the test deployment.", requestedBy: "example-agent", state: .waiting)
-        func with(_ state: VaultCardModel.State, checks: [VaultCardModel.Check] = []) -> VaultCardModel {
+        func with(_ state: WalletCardModel.State, checks: [WalletCardModel.Check] = []) -> WalletCardModel {
             var card = request
             card.state = state
             card.checks = checks
@@ -946,7 +946,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         return [
             ("waiting-for-you", with(.waiting)),
             ("sent", with(.sent)),
-            ("unreachable", with(.unreachable(message: "the vault peer is offline"))),
+            ("unreachable", with(.unreachable(message: "the Wallet Manager peer is offline"))),
             ("received", with(.received, checks: [.init(name: "Recipient", ok: true, detail: "in the address book")])),
             ("proposed", { var card = with(.proposed(safeTxHash: hash)); card.wallet = .safe; return card }()),
             ("signed", with(.signed(txHash: hash, explorerURL: URL(string: "https://explorer.example/tx/" + hash)),
@@ -961,12 +961,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ]
     }()
 
-    /// The vault peers the sandbox's fake `passage peers` lists: made up.
-    static let vaultPeers = [VaultPeerChoice(peerID: "0a1b2c3d", name: "Example vault Mac"),
-                             VaultPeerChoice(peerID: "0d0d0d0d", name: "Example laptop")]
+    /// The Wallet Manager peers the sandbox's fake `passage peers` lists: made up.
+    static let walletPeers = [WalletPeerChoice(peerID: "0a1b2c3d", name: "Example Wallet Manager Mac"),
+                             WalletPeerChoice(peerID: "0d0d0d0d", name: "Example laptop")]
 
     /// A fake `passage` in `folder`: `send` copies the file there and says it sent it; `inbox` prints `inbox.jsonl`
-    /// (what `vault-answer` puts there); `peers` prints `peers.jsonl`; `listen` sleeps until it's stopped by its pid.
+    /// (what `wallet-answer` puts there); `peers` prints `peers.jsonl`; `listen` sleeps until it's stopped by its pid.
     static func fakePassage(_ folder: String) -> String {
         """
         #!/bin/bash
@@ -982,47 +982,47 @@ private final class Driver: NSObject, NSApplicationDelegate {
         """
     }
 
-    /// `vault-ask`: the selected fake session's agent files a made-up request, as `vs-vault request` does
-    /// (`VaultAsk.run`, its session's id in its environment).
-    private func vaultAsk(_ reply: @escaping (Bool, String) -> Void) {
+    /// `wallet-ask`: the selected fake session's agent files a made-up request, as `vs-wallet request` does
+    /// (`WalletAsk.run`, its session's id in its environment).
+    private func walletAsk(_ reply: @escaping (Bool, String) -> Void) {
         guard let row = model.selectedRow, let id = row.hostID, let fake = fakeList.first(where: { $0.id == id }) else {
             return reply(false, "no fake session selected: chat NAME first")
         }
         let arguments = ["request", "--workspace", "example", "--from", "example-hardware", "--chain", "42424242",
                          "--to", "0x0000000000000000000000000000000000000002", "--amount", "12500000000000000000",
                          "--reason", "Pay the example invoice for the test deployment.", "--label", fake.label]
-        let ran = VaultAsk.run(arguments, environment: ["VIBESWITCHER_SESSION": id.uuidString], cwd: fake.cwd, peerChosen: true,
-                               folder: vault.folder)
+        let ran = WalletAsk.run(arguments, environment: ["VIBESWITCHER_SESSION": id.uuidString], cwd: fake.cwd, peerChosen: true,
+                               folder: walletDesk.folder)
         guard ran.status == 0 else { return reply(false, ran.error) }
-        vault.refresh { [weak self] in self?.settle { reply(true, ran.output) } }
+        walletDesk.refresh { [weak self] in self?.settle { reply(true, ran.output) } }
     }
 
     /// The newest card of the selected session's chat.
-    private var vaultCard: VaultCardModel? { model.selectedRow?.hostID.flatMap { vault.cards(for: $0).last } }
+    private var walletCard: WalletCardModel? { model.selectedRow?.hostID.flatMap { walletDesk.cards(for: $0).last } }
 
-    /// `vault-click send|retry|discard`: that button on the newest card in the selected session's chat.
-    private func vaultClick(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
-        guard let action = VaultCardModel.Action(rawValue: what) else { return reply(false, "vault-click send, retry or discard") }
-        guard let card = vaultCard else { return reply(false, "no vault request in this chat: vault-ask first") }
+    /// `wallet-click send|retry|discard`: that button on the newest card in the selected session's chat.
+    private func walletClick(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard let action = WalletCardModel.Action(rawValue: what) else { return reply(false, "wallet-click send, retry or discard") }
+        guard let card = walletCard else { return reply(false, "no wallet request in this chat: wallet-ask first") }
         guard card.actions.contains(action) else {
-            return reply(false, "the card (\(VaultCardModel.title(card.state))) has no \(action.title): " + card.actions.map(\.title).joined(separator: ", "))
+            return reply(false, "the card (\(WalletCardModel.title(card.state))) has no \(action.title): " + card.actions.map(\.title).joined(separator: ", "))
         }
-        vault.act(action, on: card.id) { [weak self] in
-            self?.settle { reply(true, "\(action.title): the card is now \(self?.vaultCard.map { VaultCardModel.title($0.state) } ?? "gone")") }
+        walletDesk.act(action, on: card.id) { [weak self] in
+            self?.settle { reply(true, "\(action.title): the card is now \(self?.walletCard.map { WalletCardModel.title($0.state) } ?? "gone")") }
         }
     }
 
-    /// `vault-answer STATUS`: the fake vault Mac answers the newest card's request (received, proposed, signed,
+    /// `wallet-answer STATUS`: the fake Wallet Manager's Mac answers the newest card's request (received, proposed, signed,
     /// submitted, rejected, failed), as a result in the fake inbox; the desk takes it.
-    private func vaultAnswer(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
-        guard let status = VaultResult.Status(rawValue: what) else {
-            return reply(false, "vault-answer " + VaultResult.Status.allCases.map(\.rawValue).joined(separator: "|"))
+    private func walletAnswer(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard let status = WalletResult.Status(rawValue: what) else {
+            return reply(false, "wallet-answer " + WalletResult.Status.allCases.map(\.rawValue).joined(separator: "|"))
         }
-        guard let card = vaultCard else { return reply(false, "no vault request in this chat: vault-ask first") }
-        let sequence = (vaultSequence[card.id] ?? 0) + 1
-        vaultSequence[card.id] = sequence
+        guard let card = walletCard else { return reply(false, "no wallet request in this chat: wallet-ask first") }
+        let sequence = (walletSequence[card.id] ?? 0) + 1
+        walletSequence[card.id] = sequence
         let hash = "0x" + String(repeating: "0", count: 61) + "abc"
-        var result = VaultResult(id: card.id, sequence: sequence, createdAt: Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970)),
+        var result = WalletResult(id: card.id, sequence: sequence, createdAt: Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970)),
                                  status: status, checks: [.init(name: "Recipient", ok: true, detail: "in the address book"),
                                                           .init(name: "Amount", ok: status != .rejected, detail: status == .rejected ? "over the daily limit" : "under the daily limit")],
                                  message: status == .submitted ? "Signed on the hardware wallet and submitted." : status == .rejected ? "The amount is over the daily limit." : "")
@@ -1033,30 +1033,30 @@ private final class Driver: NSObject, NSApplicationDelegate {
         if status == .failed { result.message = "The hardware wallet was disconnected." }
         do {
             let data = try result.encoded()
-            let peer = Driver.vaultPeers[0].peerID
-            let dir = vaultPassage.appendingPathComponent("inbox/\(peer)", isDirectory: true)
+            let peer = Driver.walletPeers[0].peerID
+            let dir = walletPassage.appendingPathComponent("inbox/\(peer)", isDirectory: true)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let name = VaultResult.fileName(card.id)
+            let name = WalletResult.fileName(card.id)
             let path = dir.appendingPathComponent(String(format: "20261031T1200%02dZ-", Int(sequence)) + name).path
             try data.write(to: URL(fileURLWithPath: path))
-            let line = VaultFormat.Value.object([.init("peerID", .string(peer)), .init("name", .string(name)),
+            let line = WalletRequestFormat.Value.object([.init("peerID", .string(peer)), .init("name", .string(name)),
                                                  .init("size", .integer(Int64(data.count))), .init("path", .string(path))]).encoded()
-            let list = vaultPassage.appendingPathComponent("inbox.jsonl")
+            let list = walletPassage.appendingPathComponent("inbox.jsonl")
             try (((try? Data(contentsOf: list)) ?? Data()) + line + Data("\n".utf8)).write(to: list)
         } catch {
-            return reply(false, "the fake vault couldn't write its result: \(error)")
+            return reply(false, "the fake Wallet Manager couldn't write its result: \(error)")
         }
-        vault.poll { [weak self] in
-            self?.settle { reply(true, "the vault said \(status.rawValue): the card is now \(self?.vaultCard.map { VaultCardModel.title($0.state) } ?? "gone")") }
+        walletDesk.poll { [weak self] in
+            self?.settle { reply(true, "the Wallet Manager said \(status.rawValue): the card is now \(self?.walletCard.map { WalletCardModel.title($0.state) } ?? "gone")") }
         }
     }
 
-    /// `vault STATE`'s sheets: a card per state, and all of them.
-    static var vaultSheets: [(name: String, make: (Driver) -> AnyView)] {
-        vaultCards.map { entry in
-            ("vault-" + entry.state, { _ in AnyView(VaultCard(card: entry.card).frame(width: 520).padding(16)) })
-        } + [("vault-all", { _ in
-            AnyView(VStack(spacing: 12) { ForEach(vaultCards, id: \.state) { VaultCard(card: $0.card) } }.frame(width: 520).padding(16))
+    /// `wallet STATE`'s sheets: a card per state, and all of them.
+    static var walletSheets: [(name: String, make: (Driver) -> AnyView)] {
+        walletCards.map { entry in
+            ("wallet-" + entry.state, { _ in AnyView(WalletCard(card: entry.card).frame(width: 520).padding(16)) })
+        } + [("wallet-all", { _ in
+            AnyView(VStack(spacing: 12) { ForEach(walletCards, id: \.state) { WalletCard(card: $0.card) } }.frame(width: 520).padding(16))
         })]
     }
 
@@ -1469,15 +1469,15 @@ private final class Driver: NSObject, NSApplicationDelegate {
             showSettings(tab)
             settle { reply(true, "settings shown on \(tab.rawValue)") }
         case "sheet": showSheet(rest, reply)
-        case "vault-ask": vaultAsk(reply)
-        case "vault-click": vaultClick(rest, reply)
-        case "vault-answer": vaultAnswer(rest, reply)
-        case "vault":
+        case "wallet-ask": walletAsk(reply)
+        case "wallet-click": walletClick(rest, reply)
+        case "wallet-answer": walletAnswer(rest, reply)
+        case "wallet":
             let state = rest.isEmpty ? "waiting-for-you" : rest
-            guard state == "all" || Self.vaultCards.contains(where: { $0.state == state }) else {
-                return reply(false, "no vault state \(state): " + (Self.vaultCards.map(\.state) + ["all"]).joined(separator: ", "))
+            guard state == "all" || Self.walletCards.contains(where: { $0.state == state }) else {
+                return reply(false, "no wallet state \(state): " + (Self.walletCards.map(\.state) + ["all"]).joined(separator: ", "))
             }
-            showSheet("vault-" + state, reply)
+            showSheet("wallet-" + state, reply)
         case "close":
             switch rest {
             case "settings": settings?.close()
@@ -1661,7 +1661,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             Sandbox.hide(shown)
             return settle { reply(true, "sheet \(name) shown") }
         }
-        guard let entry = (Self.sheets + Self.vaultSheets).first(where: { $0.name == name }) else {
+        guard let entry = (Self.sheets + Self.walletSheets).first(where: { $0.name == name }) else {
             return reply(false, "no sheet \(name): " + (Self.sheets.map(\.name) + Self.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", "))
         }
         guard let parent = window?.window else { return reply(false, "no window") }

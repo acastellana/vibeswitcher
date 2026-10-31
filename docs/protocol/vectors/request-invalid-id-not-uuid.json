@@ -1,5 +1,5 @@
 {
-  "type": "vibeswitcher.vault-request",
+  "type": "vibeswitcher.wallet-request",
   "version": 1,
   "id": "request-1",
   "createdAt": "2026-10-31T12:00:00Z",
