@@ -69,6 +69,12 @@ sandbox_started=""
 cleanup() {
     local pid
     [[ -n $sandbox_started ]] && bash scripts/sandbox-app.sh --dir "$sandbox_dir" quit >/dev/null 2>&1
+    # Any `passage listen` still marked in the loop (the sandbox's, if it didn't stop its own): its pid is the marker's
+    # name, and its command line doesn't name the run's folder, so pgrep below wouldn't see it.
+    local marker
+    for marker in "$loop"/dev/listening/* "$loop"/vault/listening/*; do
+        [[ -f $marker && $(basename "$marker") =~ ^[0-9]+$ ]] && pids+=("$(basename "$marker")")
+    done
     for pid in ${pids[@]+"${pids[@]}"}; do kill -0 "$pid" 2>/dev/null && kill "$pid" 2>/dev/null; done
     for pid in ${pids[@]+"${pids[@]}"}; do
         for _ in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
@@ -76,7 +82,7 @@ cleanup() {
     done
     local left
     # Anything still running with the run's folder in its command line (either spelling of it).
-    left=$( { pgrep -f "$run"; pgrep -f "$dev_root/"; } 2>/dev/null | sort -u | tr '\n' ' ')
+    left=$( { pgrep -f "$run"; pgrep -f "$dev_root/"; for pid in ${pids[@]+"${pids[@]}"}; do kill -0 "$pid" 2>/dev/null && echo "$pid"; done; } 2>/dev/null | sort -u | tr '\n' ' ')
     if [[ -n $left ]]; then say "left running: pids $left(started with $run)"; else say "stopped everything it started: nothing of the run is left running"; fi
     if [[ -n $keep ]]; then say "kept the run's folder: $run (the sandbox's log: $sandbox_dir/app.log)"; else rm -rf "$run" "$sandbox_dir" </dev/null; fi
 }

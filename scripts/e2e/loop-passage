@@ -286,6 +286,8 @@ cmd_listen() {
     trap 'rm -f "$marker"; [[ -n $sleeper ]] && kill "$sleeper" 2>/dev/null; echo "stopped listening" >&2; exit 0' TERM INT
     echo "listening on port 0 for paired peers (Ctrl-C stops)" >&2
     while :; do
+        # The run's folder removed (its owner gone without a SIGTERM): nothing is left to listen for.
+        [[ -d $here/listening ]] || { echo "stopped listening: $here is gone" >&2; exit 0; }
         local total
         total=$(wc -l <"$log" | tr -d ' ')
         if ((total > seen)); then
