@@ -2349,3 +2349,8 @@
 - 2026-10-31 19:27 Automatically (auto_advance): Started a worker on wallet-requests-find (Wallet requests find Passage.app by themselves (no `passage` symlink needed)), its after tasks done (rename-the-vault-request).
 - 2026-10-31 19:27 Automatically (auto_advance): Started the audit of the-main-thread-blocks at a4b3ef50 (Its review is audit).
 - 2026-10-31 19:38 Planned the-power-check-writes: The power check writes its state file on the main thread (LeadController.lookAtPower)
+- 2026-10-31 19:42 Audit of the-main-thread-blocks: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-10-31 19:43 Started a worker on the-power-check-writes
+- 2026-10-31 19:43 Automatically (auto_advance): Started a worker on the-power-check-writes (The power check writes its state file on the main thread (LeadController.lookAtPower)).
+- 2026-10-31 19:43 Automatically (auto_advance): Started the audit of wallet-requests-find at ebc81aa6 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-10-31 19:52 Merged the-main-thread-blocks: The main thread blocks writing to the session host's socket (HostConnection.flush from SessionStore.refresh)
