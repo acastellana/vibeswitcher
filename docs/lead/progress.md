@@ -2278,3 +2278,7 @@
 - 2026-10-31 15:01 Planned vault-request-card-and: Vault request card and Settings › Vault (UI only, on its own display model)
 - 2026-10-31 15:01 Started a worker on vault-request-card-and
 - 2026-10-31 15:01 Automatically (auto_advance): Started a worker on vault-request-card-and (Vault request card and Settings › Vault (UI only, on its own display model)).
+- 2026-10-31 15:16 Automatically (auto_advance): Started the audit of vault-request-card-and at 71f19adc (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-10-31 15:16 Planned test-under-load-sh: test-under-load.sh fails when xcode-select points at Command Line Tools
+- 2026-10-31 15:16 Started a worker on test-under-load-sh
+- 2026-10-31 15:16 Automatically (auto_advance): Started a worker on test-under-load-sh (test-under-load.sh fails when xcode-select points at Command Line Tools).

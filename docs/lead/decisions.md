@@ -167,3 +167,7 @@ On 2026-10-30, a ~130-commit pull left main failing 2 tests on this Mac (Spanish
 
 User's direction, 2026-10-31: the keys stay on one isolated Mac behind a hardware wallet, and agents can only ask. The repo names Passage because the code calls its CLI. The wallet app and wallet profiles stay generic in the repo, under the 2026-10-28 naming rule.
 
+## 2026-10-31 15:15:54 The wallet app's baseline is developed on this Mac as its own project (code and made-up data only), and the vault Mac pulls it from a private repository and runs it. The app holds no keys or data: it reads a versioned per-workspace folder structure on the encrypted volume, with hardware, hot and Safe wallets in every workspace. Hot-wallet keys are the only keys stored, encrypted in the volume. Transactions cross between the Macs only through Passage. VibeSwitcher on the vault Mac is for availability and never carries requests, keys or approvals. VibeSwitcher's request format (docs/protocol/vault-request.md and its vectors) is the contract both projects test against.
+
+User's direction, 2026-10-31: keep the vault domain as safe as possible but VibeSwitcher always available. Keeping one narrow channel and a single shared format lets us verify the integration here without real keys ever being on this Mac.
+
