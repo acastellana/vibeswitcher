@@ -171,3 +171,7 @@ User's direction, 2026-10-31: the keys stay on one isolated Mac behind a hardwar
 
 User's direction, 2026-10-31: keep the vault domain as safe as possible but VibeSwitcher always available. Keeping one narrow channel and a single shared format lets us verify the integration here without real keys ever being on this Mac.
 
+## 2026-10-31 15:34:17 Vault feature batch (2026-10-31): no full suite or load runs until the whole feature works, then one check at the end. vault-requests-in-the merges the three finished branches (vault-requests-the, vault-request-card-and, test-under-load-sh) into its own, gets the one audit (focused tests, diff and shots, no audit-side suite) and the one merge (the full suite). The three are then folded into it. auto_advance is off on all four, and the lead starts vault-requests-in-the once vault-requests-the's worker reports done. This sets aside, for this batch only, the 2026-10-23 rule that each worker proves its new tests under load before reporting done: it's done once, at the end.
+
+User, 2026-10-31: our load and test runs were slowing other projects' leads, and they asked to wait until the whole thing is finished and test once at the end.
+

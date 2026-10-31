@@ -2282,3 +2282,6 @@
 - 2026-10-31 15:16 Planned test-under-load-sh: test-under-load.sh fails when xcode-select points at Command Line Tools
 - 2026-10-31 15:16 Started a worker on test-under-load-sh
 - 2026-10-31 15:16 Automatically (auto_advance): Started a worker on test-under-load-sh (test-under-load.sh fails when xcode-select points at Command Line Tools).
+- 2026-10-31 15:30 Audit of vault-request-card-and: complete, clean, round 1: 1 Important open, 2 Nit open
+- 2026-10-31 15:30 Automatically (auto_advance): Sent vault-request-card-and's worker the open Important findings vault-request-card-and:F1 from its audit at 71f19adc.
+- 2026-10-31 15:33 The worker on vault-request-card-and answered findings: vault-request-card-and:F1 fixed at e48350ec: Commit e48350e: the sandbox's name for the vault card's first state is now 'waiting-for-you' (Sandbox.swift:912 and the `vault` command's default at :1352), matching the card's 'Waiting for you' badge. I renamed it instead of allow-listing 'waiting' for Sandbox.swift, because an allow-list entry would hide real session-state misuse anywhere in that file. GlossaryTests/everyStateWordIsTheGlossarys fails with the fix reverted (git diff 71f19ad HEAD -- S…
