@@ -2195,3 +2195,6 @@
 - 2026-10-31 02:01 Automatically (auto_advance): Started the audit of app-memory-grows-28 at a3e45d40 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
 - 2026-10-31 02:16 Audit of app-memory-grows-28: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
 - 2026-10-31 02:22 Merged app-memory-grows-28: App memory grows ~28 MB an hour (footprint 154 → 186 MB in a day, peak 328 MB)
+- 2026-10-31 02:22 Automatically (auto_advance): Merged app-memory-grows-28 (App memory grows ~28 MB an hour (footprint 154 → 186 MB in a day, peak 328 MB)) into main at 0b0a50b8, on its passing audit and the full test run.
+- 2026-10-31 02:22 Automatically (auto_advance): Cleaned up app-memory-grows-28; ended pid 64688 (Worker: App memory grows ~28 MB an hour (footprint 154 → 186 MB in a day, peak 328 MB)) (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-10-31 02:22 Update: Overnight batch: health reporting and freezes — **Merged since the last install:**
