@@ -53,3 +53,9 @@ Evidence: 2026-10-31 ~16:46, the user ran `! scripts/build-app.sh --install` fro
 
 Check: task turn-this-incident-into-7 turns it into a check that runs before merge.
 
+## 2026-11-01 00:32:38 A verifier's session waits indefinitely on a permission prompt the user can't see or reach, often for read-only commands, and the only way out is restarting the audit, which throws away the finders' work. It has happened twice.
+
+Evidence: Reported by another project's lead. (1) 2026-10-31 ~16:2x: vault-structure-v1's verifier hung on a probe script's permission prompt (that project's incidents.md, 16:23). (2) 2026-11-01 00:31: crypto-hardening-harness's audit finder waited on a prompt for `git ls-files -s …; git remote -v; git branch -r | grep …; grep … package-lock.json`, all read-only. Each time the lead could only restart the audit. Two fixes are wanted. (a) Verifiers (and finders) run read-only git (ls-files, remote -v, branch -r/-a, log, show, diff, status, rev-parse, merge-base, cat-file) and grep/rg/head/tail/wc/sort without a prompt, including when chained with ; && | in one command, as long as every part is on the read-only list. (b) The witness treats a verifier or finder waiting on a permission prompt for more than ~2 minutes as stuck: it declines the prompt with a reason the verifier can act on ('No one answers verifier prompts: use only read-only commands, or report what you couldn't check') and tells the lead what was asked, instead of leaving the audit hanging.
+
+Check: task turn-this-incident-into-8 turns it into a check that runs before merge.
+

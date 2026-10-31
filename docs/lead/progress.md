@@ -2423,3 +2423,9 @@
 - 2026-11-01 00:30 Merged wallet-e2e-a-failed: wallet-e2e: a failed check in a non-rejected result is a warning, not a failure (recipient-known, calldata)
 - 2026-11-01 00:30 Flaky in wallet-e2e-a-failed's merge: theExitSourceReapsAtOnce() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
 - 2026-11-01 00:30 Planned fix-the-flaky-test-13: theExitSourceReapsAtOnce() flaked 3 times within 7 days
+- 2026-11-01 00:30 Automatically (auto_advance): Merged wallet-e2e-a-failed (wallet-e2e: a failed check in a non-rejected result is a warning, not a failure (recipient-known, calldata)) into main at 5f5e3e04, on its passing audit and the full test run. (Its first test run failed on theExitSourceReapsAtOnce() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/wallet-e2e-a-failed/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibeswitcher/flakes/2026….)
+- 2026-11-01 00:30 Automatically (auto_advance): Cleaned up wallet-e2e-a-failed; ended pid 86896 (Worker: wallet-e2e: a failed check in a non-rejected result is a warning, not a failure (recipient-known, calldata)) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 00:30 Started a worker on fix-the-flaky-test-13
+- 2026-11-01 00:30 Automatically (auto_advance): Started a worker on fix-the-flaky-test-13 (Fix the flaky test theExitSourceReapsAtOnce()).
+- 2026-11-01 00:32 Incident: A verifier's session waits indefinitely on a permission prompt the user can't see or reach, often for read-only commands, and the only way out is restarting the…; planned turn-this-incident-into-8 to turn it into a check
+- 2026-11-01 00:32 Review of turn-this-incident-into-8: audit
