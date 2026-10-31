@@ -2337,3 +2337,4 @@
 - 2026-10-31 18:19 Planned local-end-to-end: Local end-to-end: VibeSwitcher → loop Passage → Wallet Manager → back, on this Mac
 - 2026-10-31 18:27 Automatically (auto_advance): Started the audit of rename-the-vault-request at 4c3f66aa (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift, scripts/build-app.sh), so it's treated as audit whatever its review says).
 - 2026-10-31 18:39 Planned the-main-thread-blocks: The main thread blocks writing to the session host's socket (HostConnection.flush from SessionStore.refresh) (review audit)
+- 2026-10-31 18:54 Audit of rename-the-vault-request: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
