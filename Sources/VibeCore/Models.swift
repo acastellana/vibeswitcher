@@ -128,6 +128,9 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var activitySince: Date?
     /// When the agent's last hook event arrived (the phone re-reads the conversation when it changes).
     public var eventAt: Double?
+    /// That event's name ("Stop", "PreToolUse"…), as the store's scan read it off the main thread: what tells whether
+    /// the agent takes a steer (`LeadDelivery.way(for:)`) without reading its state file on main.
+    public var hookEvent: String?
     /// The agent's transcript, already checked to be inside its folders (`TranscriptReader.checkedURL`).
     public var transcriptPath: String?
     /// The session host's id for it when it runs in VibeSwitcher's window; nil in Terminal.app or elsewhere.

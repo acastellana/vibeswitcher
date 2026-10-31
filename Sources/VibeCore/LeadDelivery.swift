@@ -6,9 +6,16 @@ import CryptoKit
 public enum LeadDelivery {
     public enum Way: Equatable, Sendable { case steer, type }
 
-    public static func way(for state: HookState?) -> Way {
-        guard let state else { return .type }
-        return ["Stop", "SessionStart", "SessionEnd", "Notification", "PermissionRequest"].contains(state.lastEvent) ? .type : .steer
+    public static func way(for state: HookState?) -> Way { way(lastEvent: state?.lastEvent) }
+
+    /// A session's way by the hook event the store's scan read for it (`Session.hookEvent`): for the main thread,
+    /// which reads no state file.
+    public static func way(for session: Session) -> Way { way(lastEvent: session.hookEvent) }
+
+    /// No hook event (no hooks, or none for this agent yet): typed in.
+    static func way(lastEvent: String?) -> Way {
+        guard let lastEvent else { return .type }
+        return ["Stop", "SessionStart", "SessionEnd", "Notification", "PermissionRequest"].contains(lastEvent) ? .type : .steer
     }
 
     static let prefix = "[VibeSwitcher"
