@@ -6,8 +6,9 @@
 # is stood in for. Run on demand (never part of scripts/test.sh): it needs the Wallet Manager's checkout.
 #
 # scripts/e2e/wallet-e2e.sh [--wallet-manager DIR] [--binary PATH] [--keep]
-#   --wallet-manager DIR  the Wallet Manager's checkout (~/dev/wallet-manager), run read-only: nothing is written there.
-#                         Its node_modules must be there (`npm ci --ignore-scripts` in it, once).
+#   --wallet-manager DIR  the Wallet Manager's checkout (~/dev/wallet-manager). Nothing is written there but its
+#                         git-ignored node_modules: when node_modules/.package-lock.json is missing or older than its
+#                         package-lock.json, the run first says so and runs `npm ci --ignore-scripts` in it.
 #   --binary PATH         this build of VibeSwitcher (vibeswitcher-host beside it) instead of building (sandbox-app.sh).
 #   --keep                keeps the run's scratch folder (logs, vault, inboxes) and says where; else it's removed.
 #
@@ -33,7 +34,7 @@ while [[ $# -gt 0 ]]; do
         --wallet-manager) wm=$2; shift 2 ;;
         --binary) binary=$2; shift 2 ;;
         --keep) keep=1; shift ;;
-        -h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
         *) echo "unknown option $1 (--help)"; exit 64 ;;
     esac
 done
@@ -51,7 +52,19 @@ die() { say "wallet-e2e: $*"; exit 1; }
 command -v node >/dev/null || die "node isn't on the PATH"
 wm=$(cd "$wm" 2>/dev/null && pwd -P) || die "no Wallet Manager checkout at $wm (--wallet-manager DIR)"
 [[ -f $wm/src/server/main.ts && -f $wm/src/dev/fake-chain-cli.ts ]] || die "$wm isn't the Wallet Manager's checkout (no src/server/main.ts)"
-[[ -d $wm/node_modules ]] || die "$wm has no node_modules: run \`npm ci --ignore-scripts\` there once (its own lockfile)"
+# Its dependencies as its lockfile has them: npm writes node_modules/.package-lock.json at each install, so one missing or
+# older than package-lock.json means the lockfile changed since (a dependency added, e.g.). --ignore-scripts: no
+# package's install scripts run; npm ci writes only node_modules. Its output goes to a log, named if it fails.
+installed=$wm/node_modules/.package-lock.json
+if [[ ! -f $installed || $wm/package-lock.json -nt $installed ]]; then
+    command -v npm >/dev/null || die "$wm's node_modules is out of date and npm isn't on the PATH"
+    say "wallet-e2e: $wm's node_modules is missing or older than its package-lock.json: running \`npm ci --ignore-scripts\` there"
+    npm_log=$(mktemp "${TMPDIR:-/tmp}/wallet-e2e-npm-ci.XXXXXX") || die "can't make a log file for npm ci"
+    (cd "$wm" && npm ci --ignore-scripts) >"$npm_log" 2>&1 </dev/null
+    npm_status=$?
+    ((npm_status == 0)) || die "\`npm ci --ignore-scripts\` failed in $wm (exit $npm_status); its output: $npm_log"
+    rm -f "$npm_log"
+fi
 
 # The run's scratch folder, resolved: the Wallet Manager refuses an inbox reached through a link (/tmp is one).
 run=$(mktemp -d "${TMPDIR:-/tmp}/wallet-e2e.XXXXXX") || die "can't make a scratch folder"

@@ -48,12 +48,12 @@ while [[ $# -gt 0 ]]; do
         --wait) wait_for=$2; shift 2 ;;
         --passage) passage=$2; shift 2 ;;
         --passage-inbox) passage_inbox=$2; shift 2 ;;
-        -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
         --*) echo "unknown option $1 (--help)"; exit 64 ;;
         *) break ;;
     esac
 done
-[[ $# -gt 0 ]] || { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
+[[ $# -gt 0 ]] || { awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 64; }
 if [[ -n $passage || -n $passage_inbox ]]; then
     [[ $passage == /* && $passage_inbox == /* && -x $passage && -d $passage_inbox ]] ||
         { echo "--passage PATH --passage-inbox DIR go together: an executable and a folder, absolute paths"; exit 64; }
