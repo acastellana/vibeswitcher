@@ -186,10 +186,12 @@ final class WalletDesk: ObservableObject {
     @discardableResult
     private func courier(_ config: Config) throws -> WalletCourier {
         guard !config.peer.isEmpty else { throw WalletAsk.Refusal("no Wallet Manager peer is chosen in Settings › Wallet") }
-        if config.passage.isEmpty, foundPassage == nil { foundPassage = findPassage() }
-        let passage = config.passage.isEmpty ? foundPassage : PassageCommand.forPath(config.passage)
+        // Only spaces is no path, as Settings reads it.
+        let unset = config.passage.trimmingCharacters(in: .whitespaces).isEmpty
+        if unset, foundPassage == nil { foundPassage = findPassage() }
+        let passage = unset ? foundPassage : PassageCommand.forPath(config.passage)
         guard let passage else {
-            throw WalletAsk.Refusal(config.passage.isEmpty
+            throw WalletAsk.Refusal(unset
                 ? "Passage isn't found (no passage on the PATH, no Passage.app in /Applications or ~/Applications): set its path in Settings › Wallet"
                 : "the passage path in Settings › Wallet isn't absolute")
         }

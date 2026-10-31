@@ -533,8 +533,9 @@ struct WalletDeskTests {
         return (fake, desk, asked)
     }
 
-    @Test func withNoPathSetPassageAppIsFoundAndRunAsItsCLI() async throws {
-        let (fake, desk, asked) = try appSetup { _ in "" }
+    @Test(arguments: ["", "  "])
+    func withNoPathSetPassageAppIsFoundAndRunAsItsCLI(setting: String) async throws {
+        let (fake, desk, asked) = try appSetup { _ in setting }
         defer { desk.close() }
         let request = Self.request()
         try WalletAsk.file(request, in: asked)

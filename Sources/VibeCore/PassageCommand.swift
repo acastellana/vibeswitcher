@@ -36,10 +36,11 @@ public struct PassageCommand: Equatable, Sendable {
         var path = setting.trimmingCharacters(in: .whitespaces)
         guard path.hasPrefix("/") else { return nil }
         while path.count > 1, path.hasSuffix("/") { path.removeLast() }
-        if path.hasSuffix(".app") { return PassageCommand(executable: binary(ofApp: path), leading: ["cli"]) }
+        // The file system ignores case: `…/passage.APP` is the bundle and `…/contents/macos/Passage` its binary.
+        if path.lowercased().hasSuffix(".app") { return PassageCommand(executable: binary(ofApp: path), leading: ["cli"]) }
         if (path as NSString).lastPathComponent == "passage" { return PassageCommand(executable: path) }
         let real = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-        let inApp = [path, real].contains { $0.range(of: ".app/Contents/MacOS/") != nil }
+        let inApp = [path, real].contains { $0.range(of: ".app/Contents/MacOS/", options: .caseInsensitive) != nil }
         return PassageCommand(executable: path, leading: inApp ? ["cli"] : [])
     }
 
@@ -58,7 +59,7 @@ public struct PassageCommand: Equatable, Sendable {
 
     /// How Settings names it: the app bundle for a binary inside one (`/Applications/Passage.app`), else the path.
     public var shown: String {
-        guard let range = executable.range(of: ".app/Contents/MacOS/", options: .backwards) else { return executable }
+        guard let range = executable.range(of: ".app/Contents/MacOS/", options: [.backwards, .caseInsensitive]) else { return executable }
         return String(executable[..<executable.index(range.lowerBound, offsetBy: 4)])
     }
 }

@@ -23,6 +23,10 @@ struct PassageCommandTests {
         #expect(PassageCommand.forPath(binary) == PassageCommand(executable: binary, leading: ["cli"]))
         #expect(PassageCommand.forPath("/opt/example/bin/passage") == PassageCommand(executable: "/opt/example/bin/passage"))
         #expect(PassageCommand.forPath("/opt/example/bin/other-passage-cli") == PassageCommand(executable: "/opt/example/bin/other-passage-cli"))
+        // The file system ignores case, so neither does this.
+        #expect(PassageCommand.forPath("/Applications/passage.APP") == PassageCommand(executable: "/Applications/passage.APP/Contents/MacOS/Passage", leading: ["cli"]))
+        #expect(PassageCommand.forPath(app + "/contents/macos/Passage")?.leading == ["cli"])
+        #expect(PassageCommand(executable: app + "/contents/macos/Passage").shown == app)
         #expect(PassageCommand.forPath("relative/passage") == nil)
         #expect(PassageCommand.forPath("Passage.app") == nil)
         #expect(PassageCommand.forPath(binary)?.arguments(["peers", "--json"]) == ["cli", "peers", "--json"])
