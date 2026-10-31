@@ -181,10 +181,16 @@ public final class PassageListener: @unchecked Sendable {
         process = try Shell.Spawned([command.executable] + command.arguments(["listen"]), in: "/", environment: ProcessInfo.processInfo.environment,
                                     output: out, errors: err, session: true)
         pid = process.processIdentifier
+        // Each line as it comes: read(2) returns what the pipe holds. FileHandle's read(upToCount:) waits on a pipe for
+        // the whole count or the end, so a line went unheard until 4 KiB had piled up or passage ended.
         Thread.detachNewThread {
             let reading = out.reading
-            while let chunk = try? reading.read(upToCount: 4096), !chunk.isEmpty {
-                for _ in 0..<chunk.filter({ $0 == 0x0a }).count { heard() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while true {
+                let count = Darwin.read(reading.fileDescriptor, &buffer, buffer.count)
+                if count < 0, errno == EINTR { continue }
+                guard count > 0 else { break }
+                for _ in 0..<buffer[..<count].filter({ $0 == 0x0a }).count { heard() }
             }
         }
         // Its log (addresses, peer IDs) isn't kept; read so it can't fill the pipe.
