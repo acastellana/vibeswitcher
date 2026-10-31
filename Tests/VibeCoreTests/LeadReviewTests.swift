@@ -276,7 +276,39 @@ struct LeadPolicyPromptTests {
             #expect(!text.contains("run every acceptance check again") && text.contains("never a new Nit"), "\(scope)")
         }
         let first = LeadPrompts.verifier(task: Self.task, root: "/r", workflow: LeadWorkflow.parse("---\ntest_command: make test\n---"))
-        #expect(!first.contains(LeadPrompts.Policy.reaudit) && first.contains("run every acceptance check and `make test`"))
+        #expect(!first.contains(LeadPrompts.Policy.reaudit) && first.contains("run every acceptance check, the tests the branch adds or changes"))
+    }
+
+    /// The merge's run is the one full suite: a single verifier runs the focused and changed tests and the lints, and
+    /// the full suite only for a branch touching shared test or build infrastructure (2026-10-31, the wallet batch).
+    @Test func aVerifierLeavesTheFullSuiteToTheMergeButForTestInfrastructure() throws {
+        let temp = Scratch()
+        let root = temp.url("lints").path
+        try FileManager.default.createDirectory(atPath: root + "/Tests/A", withIntermediateDirectories: true)
+        for name in ["PrivateWriteLintTests.swift", "KeychainLintTests.swift"] { try "".write(toFile: root + "/Tests/A/" + name, atomically: true, encoding: .utf8) }
+        let workflow = LeadWorkflow.parse("---\ntest_command: bash scripts/test.sh\n---")
+        let prompt = LeadPrompts.verifier(task: Self.task, root: root, workflow: workflow)
+        for needle in ["run every acceptance check, the tests the branch adds or changes, focused tests of the code it touches, and the "
+                       + "repository's lint tests (`bash scripts/test.sh --filter 'KeychainLint|PrivateWriteLint'`)",
+                       "Don't run the full suite (`bash scripts/test.sh`) yourself: merge(task) runs it right after a passing audit, and a "
+                       + "failure there goes back to the worker the same way, so that run is the one full suite.",
+                       "Exception: a branch that touches shared test or build infrastructure (test scripts such as scripts/test.sh or "
+                       + "scripts/lib, the test harness, build settings such as Package.swift) still gets your full run (`vs-heavy bash scripts/test.sh`)"] {
+            #expect(prompt.contains(needle), "missing \(needle)")
+        }
+        #expect(!prompt.contains("run every acceptance check and `bash scripts/test.sh`"))
+        // No test_command: merge runs no tests, and the exception still holds.
+        let untested = LeadPrompts.verifier(task: Self.task, root: root, workflow: LeadWorkflow.parse(""))
+        #expect(untested.contains("This project has no test_command, so merge runs no tests: run a full suite of your own (under "
+                                  + "`vs-heavy`) only when the branch touches shared test or build infrastructure"))
+        #expect(untested.contains("the repository's lint tests (`swift test --filter 'KeychainLint|PrivateWriteLint'`)"))
+        // A finder, or a verifier of a merged result, reads the audit's own run instead: no rule of its own.
+        let finder = LeadPrompts.Finder(index: 1, size: 2, focus: .contract, commit: "abcdef12", logs: [], run: "passed", sensitive: [], nitCap: 3)
+        let merged = LeadPrompts.Merged(commit: "11112222", base: "main", head: "33334444", files: ["a.swift"], logs: [], run: "passed")
+        for shared in [LeadPrompts.verifier(task: Self.task, root: root, workflow: workflow, finder: finder),
+                       LeadPrompts.verifier(task: Self.task, root: root, workflow: workflow, merged: merged)] {
+            #expect(!shared.contains("Don't run the full suite") && !shared.contains("the tests the branch adds or changes"))
+        }
     }
 
     @Test func theLeadIsToldWhenToChooseAnAuditAndThatNitsNeverBecomeTasks() {

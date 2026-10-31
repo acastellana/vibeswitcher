@@ -594,6 +594,35 @@ public enum LeadPrompts {
                 + "and don't repeat runs or benches the contract doesn't ask for."
         }
 
+        /// What a single verifier runs besides the acceptance checks (`lints`: as in `workerLints`): the branch's own
+        /// tests, focused ones of the code it touches, and the lints, which take seconds and catch what a filtered run
+        /// misses (a-base-branch-the's F1, a PrivateWriteLint failure, was once found only by a full run).
+        public static func verifierTests(_ lints: [String], test: String?) -> String {
+            let which = lints.isEmpty ? "the repository-wide lint or check tests, if any"
+                : "the repository's lint tests (`\(test ?? "swift test") --filter '\(lints.joined(separator: "|"))'`)"
+            return "the tests the branch adds or changes, focused tests of the code it touches, and \(which)"
+        }
+
+        /// What counts as shared test or build infrastructure, where a verifier still runs the full suite.
+        public static let sharedInfrastructure = "shared test or build infrastructure (test scripts such as scripts/test.sh "
+            + "or scripts/lib, the test harness, build settings such as Package.swift)"
+
+        /// The single verifier's full-suite rule (2026-10-31, after the wallet batch ran every audited task's full
+        /// suite twice on a Mac shared at load 40–190): merge(task) runs test_command right after a passing audit, and
+        /// a failure there goes back to the worker the same way, so that run is the one full suite. A branch that
+        /// touches shared test or build infrastructure still gets the verifier's own run: it can change what merge's
+        /// run checks.
+        public static func verifierSuite(test: String?) -> String {
+            guard let test else {
+                return "This project has no test_command, so merge runs no tests: run a full suite of your own (under "
+                    + "`vs-heavy`) only when the branch touches \(sharedInfrastructure)."
+            }
+            return "Don't run the full suite (`\(test)`) yourself: merge(task) runs it right after a passing audit, and a "
+                + "failure there goes back to the worker the same way, so that run is the one full suite. Exception: a branch "
+                + "that touches \(sharedInfrastructure) still gets your full run (`vs-heavy \(test)`), since a change there "
+                + "can change what merge's run checks."
+        }
+
         /// The repository's lint tests, run with the affected ones before a worker reports done (`lints`: their filter
         /// names, see `lintTests(in:)`; none found, the brief names them generically). On 2026-10-24 a worker ran only
         /// its filtered tests, as `workerTesting` says, and the audit's full run found a PrivateWriteLint failure: an
@@ -1288,7 +1317,9 @@ public enum LeadPrompts {
     public static func verifier(task: LeadTask, root: String, workflow: LeadWorkflow, reaudit: Reaudit? = nil, finder: Finder? = nil,
                                 merged: Merged? = nil, notes: Notes = Notes(), report: String? = nil, policy: String = WorkingPolicy.load(),
                                 guide: String? = nil, security: String? = nil) -> String {
-        """
+        // A finder, or a single verifier of a merged result, reads the audit's own run of the whole suite instead.
+        let sharedRun = finder != nil || merged?.run != nil
+        return """
         You are the verifier for a task of the project lead of \(root). You are read-only: don't edit, fix, commit or \
         stage anything. Check the branch agent/\(task.slug) in this worktree against its contract, independently of \
         what the worker said.
@@ -1297,9 +1328,9 @@ public enum LeadPrompts {
         \(finder.map { "\n" + finding($0) + "\n" } ?? "")
         \(merged.map { Self.merged($0) + "\n" } ?? "")
         \(reaudit.map(recheck) ?? """
-        Check: run every acceptance check\(finder != nil || merged?.run != nil ? "" : workflow.testCommand.map { " and `\($0)`" } ?? ""); read the whole change \
+        Check: run every acceptance check\(sharedRun ? "" : ", " + Policy.verifierTests(Policy.lintTests(in: root), test: workflow.testCommand)); read the whole change \
         (`git diff \(workflow.base)...HEAD`, `git log \(workflow.base)..HEAD`); look for edits outside the boundaries, weakened or deleted \
-        tests, hard-coded results, leftovers and anything that only looks done.
+        tests, hard-coded results, leftovers and anything that only looks done.\(sharedRun ? "" : " " + Policy.verifierSuite(test: workflow.testCommand))
         """)
         \(notesRule)
         \(routineCallsRule)

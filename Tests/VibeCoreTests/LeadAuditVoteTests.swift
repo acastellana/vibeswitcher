@@ -305,7 +305,8 @@ struct LeadAuditFindersTests: LeadTeamFixture {
             #expect(text.contains(log))
             #expect(text.contains("the test command passed"))
             #expect(text.contains("Don't build the whole project or run the whole suite again"))
-            #expect(!text.contains("run every acceptance check and `test -f b.txt"), "no run of the test command of its own")
+            #expect(!text.contains("run every acceptance check and `test -f b.txt") && !text.contains("`vs-heavy test -f b.txt`"),
+                    "no run of the test command of its own")
         }
         let board = BoardStore(root: root).load().task("add-b")
         #expect(board?.panel?.size == 3 && board?.panel?.logs == [log])
