@@ -197,7 +197,8 @@ struct HookBoundsTests {
     /// `warmUp`). A stall only adds to `seconds`, so a least time is asserted on it; a most time on `own`, taken from
     /// the last poll that saw `input` unread, so it's never under the hook's own. Exec to first read is logged. A hook
     /// whose read isn't seen (an empty input, one that left without) has `own` from its exec too.
-    func runHook(home: URL, input: FileHandle) throws -> (status: Int32, reason: Process.TerminationReason, seconds: TimeInterval, own: TimeInterval, stdout: Data) {
+    /// `environment` sets (or, with nil, removes) variables of the hook's environment over this process's.
+    func runHook(home: URL, input: FileHandle, environment changes: [String: String?] = [:]) throws -> (status: Int32, reason: Process.TerminationReason, seconds: TimeInterval, own: TimeInterval, stdout: Data) {
         #expect(FileManager.default.isExecutableFile(atPath: Self.hook.path), "build it first: swift build")
         _ = Self.warmUp
         let output = temp.url("hook-stdout")
@@ -209,6 +210,7 @@ struct HookBoundsTests {
         environment["HOME"] = home.path
         environment["CFFIXED_USER_HOME"] = home.path
         environment["VIBESWITCHER_HOME"] = nil  // the run's own (scripts/test.sh) would come before this home
+        for (name, value) in changes { environment[name] = value }
         process.environment = environment
         process.standardInput = input
         process.standardOutput = try FileHandle(forWritingTo: output)
@@ -346,5 +348,28 @@ struct HookBoundsTests {
         #expect(held.seconds >= 0.95 && held.own < 2.9, "took \(held.seconds) s from its exec, \(held.own) s its own")
         #expect(HookState.load(from: state)?.lastPrompt == Self.clipBefore(prompt))
         flock(lock, LOCK_UN)
+    }
+
+    /// The built hook hands a session VibeSwitcher started its note at its start, as Claude Code reads a hook's reply:
+    /// one JSON object on stdout, the note as added context (`SessionNote`). A worker's session, nothing.
+    @Test(.enabled(if: HookBoundsTests.terminal != nil, "the hook records for no terminal from here"))
+    func aSessionStartsHookRepliesWithTheVaultNote() throws {
+        let home = try home()
+        let start: [String: Any] = ["hook_event_name": "SessionStart", "source": "startup", "session_id": "s"]
+        let session = "11111111-2222-4333-8444-555555555555"
+        let run = try runHook(home: home, input: payload(start),
+                              environment: ["VIBESWITCHER_SESSION": session, SessionNote.roleVariable: nil])
+        #expect(run.reason == .exit && run.status == 0)
+        let object = try #require(try JSONSerialization.jsonObject(with: run.stdout) as? [String: Any],
+                                  "\(String(decoding: run.stdout, as: UTF8.self))")
+        let output = try #require(object["hookSpecificOutput"] as? [String: String])
+        #expect(output == ["hookEventName": "SessionStart", "additionalContext": SessionNote.text])
+
+        let worker = try runHook(home: home, input: payload(start),
+                                 environment: ["VIBESWITCHER_SESSION": session, SessionNote.roleVariable: "worker"])
+        #expect(worker.reason == .exit && worker.status == 0 && worker.stdout.isEmpty)
+        let outside = try runHook(home: home, input: payload(start),
+                                  environment: ["VIBESWITCHER_SESSION": nil, SessionNote.roleVariable: nil])
+        #expect(outside.reason == .exit && outside.status == 0 && outside.stdout.isEmpty)
     }
 }
