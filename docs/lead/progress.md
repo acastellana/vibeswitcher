@@ -2275,3 +2275,6 @@
 - 2026-10-31 14:54 Planned vault-requests-in-the: Vault requests in the app: agents ask, you see it, the result comes back (review audit)
 - 2026-10-31 14:56 Started a worker on vault-requests-the
 - 2026-10-31 14:56 Automatically (auto_advance): Started a worker on vault-requests-the (Vault requests: the request/result format and the Passage link).
+- 2026-10-31 15:01 Planned vault-request-card-and: Vault request card and Settings › Vault (UI only, on its own display model)
+- 2026-10-31 15:01 Started a worker on vault-request-card-and
+- 2026-10-31 15:01 Automatically (auto_advance): Started a worker on vault-request-card-and (Vault request card and Settings › Vault (UI only, on its own display model)).
