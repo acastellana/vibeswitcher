@@ -2417,3 +2417,5 @@
 - 2026-10-31 23:42 Planned wallet-e2e-a-failed: wallet-e2e: a failed check in a non-rejected result is a warning, not a failure (recipient-known, calldata)
 - 2026-10-31 23:57 Started a worker on wallet-e2e-a-failed
 - 2026-10-31 23:57 Automatically (auto_advance): Started a worker on wallet-e2e-a-failed (wallet-e2e: a failed check in a non-rejected result is a warning, not a failure (recipient-known, calldata)).
+- 2026-11-01 00:08 Raised wallet-e2e-a-failed to audit (the risk check, at 50b5a836): it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$loop/vault/hold")
+- 2026-11-01 00:08 Automatically (auto_advance): Started the audit of wallet-e2e-a-failed at 50b5a836 (The risk check raised it to audit: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$loop/vault/hold")).
