@@ -59,6 +59,7 @@ struct PassageLinkTests {
                     trap 'echo TERM > "$here/listen.stopped"; kill $! 2>/dev/null; exit 0' TERM
                     /bin/sleep 3600 &
                     echo $$ > "$here/listen.pid"
+                    if [ -e "$here/listen-line" ]; then cat "$here/listen-line"; fi
                     wait $!
                     exit 0 ;;
                 esac
@@ -367,6 +368,19 @@ struct PassageLinkTests {
     }
 
     // MARK: Listening
+
+    /// A line `passage listen` prints is heard as it's printed, while passage keeps running: not once 4 KiB have piled
+    /// up or it ends (FileHandle's read(upToCount:) waits on a pipe for both; found by scripts/e2e/loop-passage).
+    @Test func aListenLineIsHeardWhilePassageRuns() throws {
+        let fake = try FakePassage(scratch)
+        try "\(Self.peer)\twallet-result-x.json\t/made/up/path\n".write(to: fake.file("listen-line"), atomically: true, encoding: .utf8)
+        let link = try #require(PassageLink(command: fake.command, walletPeer: Self.peer, inboxFolder: fake.inbox))
+        let heard = DispatchSemaphore(value: 0)
+        let listener = try link.listen { heard.signal() }
+        defer { listener.stop() }
+        #expect(heard.wait(timeout: .now() + hangGuard) == .success)
+        #expect(listener.isRunning)
+    }
 
     @Test func passageListenRunsOnlyWhileARequestIsOutstanding() throws {
         let fake = try FakePassage(scratch)
