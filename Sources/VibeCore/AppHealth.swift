@@ -47,7 +47,7 @@ public enum AppHealth {
 
     /// When a `sample` report's sampling began, its "Date/Time:" line ("2026-10-26 11:19:20.374 +0100").
     public static func sampleStart(_ sample: String) -> Date? {
-        guard let line = sample.components(separatedBy: "\n").prefix(40).first(where: { $0.hasPrefix("Date/Time:") }) else { return nil }
+        guard let line = headerLine(sample, "Date/Time:", within: 40) else { return nil }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS Z"
@@ -194,13 +194,15 @@ public enum AppHealth {
             hang.sampled = true
             hang.footprint = sampleMegabytes(sample, "Physical footprint:")
             hang.peak = sampleMegabytes(sample, "Physical footprint (peak):")
-            hang.spread = spread(sample: sample)
-            hang.frames = appFrames(sample: sample, image: "VibeSwitcher")
-            if hang.frames.isEmpty { hang.systemFrames = systemFrames(sample: sample) }
+            let graph = mainThreadGraph(sample: sample), path = graph.map(busiestPath) ?? []
+            hang.spread = graph.flatMap(spread)
+            hang.frames = appFrames(path: path, image: "VibeSwitcher")
+            if hang.frames.isEmpty { hang.systemFrames = systemFrames(path: path) }
         }
         // The stacks caught while it was stuck say what blocked it; the sample may have begun after it answered.
         if let log, log.contains("\n" + caughtTitle) {
-            let frames = appFrames(sample: log, image: "VibeSwitcher"), system = frames.isEmpty ? systemFrames(sample: log) : []
+            let path = busiestPath(sample: log)
+            let frames = appFrames(path: path, image: "VibeSwitcher"), system = frames.isEmpty ? systemFrames(path: path) : []
             if !frames.isEmpty || !system.isEmpty {
                 hang.caught = true
                 hang.frames = frames
@@ -237,7 +239,7 @@ public enum AppHealth {
 
     /// A `sample` header's size ("Physical footprint:  512.3M"), in MB.
     static func sampleMegabytes(_ sample: String, _ label: String) -> Double? {
-        guard let line = sample.components(separatedBy: "\n").prefix(60).first(where: { $0.hasPrefix(label) }) else { return nil }
+        guard let line = headerLine(sample, label, within: 60) else { return nil }
         let value = line.dropFirst(label.count).trimmingCharacters(in: .whitespaces)
         guard let unit = value.last, let number = Double(value.dropLast()) else { return Double(value).map { $0 / 1_048_576 } }
         switch unit {
@@ -255,13 +257,21 @@ public enum AppHealth {
     /// The main thread's busiest path in a `sample` report's call graph, as its frames in `image` (by function name),
     /// the top of the stack first, at most 5.
     public static func appFrames(sample: String, image: String) -> [String] {
-        frames(busiestPath(sample: sample).filter { $0.image == image }.map(\.name))
+        appFrames(path: busiestPath(sample: sample), image: image)
+    }
+
+    static func appFrames(path: [(name: String, image: String)], image: String) -> [String] {
+        frames(path.filter { $0.image == image }.map(\.name))
     }
 
     /// With no app frame on that path (a SwiftUI or AttributeGraph stall): its top 3 frames whatever their image,
     /// "name (image)", the top first.
     public static func systemFrames(sample: String) -> [String] {
-        Array(frames(busiestPath(sample: sample).map { "\($0.name) (\($0.image))" }).prefix(3))
+        systemFrames(path: busiestPath(sample: sample))
+    }
+
+    static func systemFrames(path: [(name: String, image: String)]) -> [String] {
+        Array(frames(path.map { "\($0.name) (\($0.image))" }).prefix(3))
     }
 
     /// `names` (outermost first) without wrappers and repeats, the top of the stack first, at most 5.
@@ -276,7 +286,11 @@ public enum AppHealth {
     /// The main thread's busiest path (at each frame, the callee with the most samples), outermost first: each frame's
     /// function name and image.
     static func busiestPath(sample: String) -> [(name: String, image: String)] {
-        guard let (_, nodes, children) = mainThreadGraph(sample: sample) else { return [] }
+        mainThreadGraph(sample: sample).map(busiestPath) ?? []
+    }
+
+    static func busiestPath(_ graph: Graph) -> [(name: String, image: String)] {
+        let (nodes, children) = (graph.nodes, graph.children)
         let roots = nodes.indices.filter { nodes[$0].parent == nil }
         guard var current = roots.max(by: { nodes[$0].count < nodes[$1].count }) else { return [] }
         var path = [current]
@@ -296,34 +310,64 @@ public enum AppHealth {
     }
 
     /// The main thread's block of a `sample` report's call graph: its sample count (its thread line's), and each frame
-    /// line under it (outermost first) with its parent and children, as indices.
-    static func mainThreadGraph(sample: String) -> (samples: Int, nodes: [(depth: Int, count: Int, text: String, parent: Int?)], children: [[Int]])? {
-        let lines = sample.components(separatedBy: "\n")
-        guard let graph = lines.firstIndex(where: { $0.hasPrefix("Call graph:") }) else { return nil }
+    /// line under it (outermost first) with its parent and children, as indices. Read once for all its readers.
+    typealias Graph = (samples: Int, nodes: [(depth: Int, count: Int, text: String, parent: Int?)], children: [[Int]])
+
+    /// 2026-10-31: split into lines with `components(separatedBy:)` (the whole report, for each reader), a 2 MB sample
+    /// cost a quarter of a second of CPU, and the watchdog read it at user-interactive QoS on a Mac already starving
+    /// the app (hang-20261031-003909). Now its lines are read by their newline bytes, from the call graph to the end of
+    /// the main thread's block only.
+    static func mainThreadGraph(sample: String) -> Graph? {
         // The main thread's block: its line, then every line indented deeper.
+        var inGraph = false
         var thread: (depth: Int, count: Int)?
         var nodes: [(depth: Int, count: Int, text: String, parent: Int?)] = []
         var children: [[Int]] = []
         var stack: [Int] = []
-        for line in lines[(graph + 1)...] {
-            guard let (depth, count, text) = graphLine(line) else {
-                if thread != nil { break }
-                continue
+        forEachLine(sample) { line in
+            guard inGraph else {
+                inGraph = line.utf8.starts(with: "Call graph:".utf8)
+                return true
             }
+            guard let (depth, count, text) = graphLine(line) else { return thread == nil }
             if let top = thread?.depth {
-                if depth <= top { break }
+                if depth <= top { return false }
                 while let last = stack.last, nodes[last].depth >= depth { stack.removeLast() }
-                nodes.append((depth, count, text, stack.last))
+                nodes.append((depth, count, String(text), stack.last))
                 children.append([])
                 if let parent = stack.last { children[parent].append(nodes.count - 1) }
                 stack.append(nodes.count - 1)
-            } else if text.hasPrefix("Thread_") {
+            } else if text.utf8.starts(with: "Thread_".utf8) {
                 // The first thread is the main one (sample lists it first, as "com.apple.main-thread").
                 thread = (depth, count)
             }
+            return true
         }
         guard let thread else { return nil }
         return (thread.count, nodes, children)
+    }
+
+    /// Each line of `text` (split at its newline bytes), in order, until `body` returns false.
+    static func forEachLine(_ text: String, _ body: (Substring) -> Bool) {
+        let utf8 = text.utf8
+        var start = utf8.startIndex
+        while start < utf8.endIndex {
+            let end = utf8[start...].firstIndex(of: UInt8(ascii: "\n")) ?? utf8.endIndex
+            guard body(text[start..<end]) else { return }
+            start = end == utf8.endIndex ? end : utf8.index(after: end)
+        }
+    }
+
+    /// The first of a report's first `within` lines that starts with `prefix`.
+    static func headerLine(_ text: String, _ prefix: String, within: Int) -> Substring? {
+        var found: Substring?
+        var seen = 0
+        forEachLine(text) { line in
+            seen += 1
+            if line.utf8.starts(with: prefix.utf8) { found = line }
+            return found == nil && seen < within
+        }
+        return found
     }
 
     // MARK: Starvation or work
@@ -381,7 +425,12 @@ public enum AppHealth {
 
     /// The main thread's spread in a `sample` report: each frame's samples not in a callee were taken at its address.
     public static func spread(sample: String) -> Spread? {
-        guard let (samples, nodes, children) = mainThreadGraph(sample: sample), samples > 0 else { return nil }
+        mainThreadGraph(sample: sample).flatMap(spread)
+    }
+
+    static func spread(_ graph: Graph) -> Spread? {
+        let (samples, nodes, children) = graph
+        guard samples > 0 else { return nil }
         var atPC: [String: (count: Int, name: String)] = [:]
         for (index, node) in nodes.enumerated() {
             let own = node.count - children[index].reduce(0) { $0 + nodes[$1].count }
@@ -429,18 +478,29 @@ public enum AppHealth {
 
     /// A call graph line ("    + ! : | 2345 frame  (in Image) + 12  [0x…]"): its depth (the width of its tree
     /// marks), its sample count and its text.
-    static func graphLine(_ line: String) -> (Int, Int, String)? {
+    /// Read by its bytes: its marks and digits are ASCII.
+    static func graphLine(_ line: Substring) -> (Int, Int, Substring)? {
+        let utf8 = line.utf8
+        var index = utf8.startIndex
         var depth = 0
-        var rest = Substring(line)
-        while let first = rest.first, " +!:|".contains(first) {
-            depth += 1
-            rest = rest.dropFirst()
+        marks: while index < utf8.endIndex {
+            switch utf8[index] {
+            case UInt8(ascii: " "), UInt8(ascii: "+"), UInt8(ascii: "!"), UInt8(ascii: ":"), UInt8(ascii: "|"):
+                depth += 1
+                index = utf8.index(after: index)
+            default: break marks
+            }
         }
-        let digits = rest.prefix { $0.isNumber }
-        guard !digits.isEmpty, let count = Int(digits) else { return nil }
-        rest = rest.dropFirst(digits.count)
-        guard rest.first == " " else { return nil }
-        return (depth, count, String(rest.dropFirst()))
+        var count = 0, digits = 0
+        while index < utf8.endIndex, case let byte = utf8[index], byte >= UInt8(ascii: "0"), byte <= UInt8(ascii: "9") {
+            // Past 18 digits it isn't a count (`Int` would overflow).
+            guard digits < 18 else { return nil }
+            count = count * 10 + Int(byte - UInt8(ascii: "0"))
+            digits += 1
+            index = utf8.index(after: index)
+        }
+        guard digits > 0, index < utf8.endIndex, utf8[index] == UInt8(ascii: " ") else { return nil }
+        return (depth, count, line[utf8.index(after: index)...])
     }
 
     // MARK: Crashes

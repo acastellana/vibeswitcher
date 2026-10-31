@@ -408,6 +408,81 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(watch.pending.contains { $0.contains("hang-20261026-150210:") })
     }
 
+    /// A `sample` report the size and shape of the biggest real ones (hang-20261028-070725's: 1.9 MB, 9401 lines, its
+    /// main thread's 2450 nested up to 120 deep): a main thread of 2560 frames over a 60-frame spine, 28 more threads of
+    /// 240 frames each, then the stack totals and the binary images.
+    static let bigSample: String = {
+        var lines = """
+        Analysis of sampling VibeSwitcher (pid 4242) every 1 millisecond
+        Process:         VibeSwitcher [4242]
+        Path:            /Applications/VibeSwitcher.app/Contents/MacOS/VibeSwitcher
+        Date/Time:       2026-10-31 00:39:12.345 +0100
+        Launch Time:     2026-10-30 09:00:00.000 +0100
+
+        Physical footprint:         812.4M
+        Physical footprint (peak):  900.0M
+        ----
+
+        Call graph:
+        """.components(separatedBy: "\n")
+        var address = 0x1_0000_0000
+        // "    + ! : | 12 name  (in Image) + 4  [0x…]  File.swift:1", its marks two wide a level.
+        func line(_ level: Int, _ count: Int, _ name: String, _ image: String) {
+            address += 4
+            let marks = (0..<level).map { ["  ", "! ", ": ", "| "][$0 % 4] }.joined()
+            lines.append("    + \(marks)\(count) \(name)  (in \(image)) + \(address % 997)  [0x\(String(address, radix: 16))]  File\(level).swift:\(address % 89)")
+        }
+        // Each thread: a spine of `spine` frames, then `chains` chains of `length` frames, the first the busiest.
+        func thread(_ number: Int, label: String, spine: Int, chains: Int, length: Int, image: String) {
+            let total = 2500
+            lines.append("    \(total) Thread_\(number)   \(label)")
+            for level in 0..<spine { line(level, total, "Spine\(number).frame\(level)()", level % 3 == 0 ? "AppKit" : image) }
+            for chain in 0..<chains {
+                let count = chain == 0 ? total - (chains - 1) * 20 - 100 : 20
+                for level in 0..<length {
+                    let name = level == length - 1 ? (chain % 5 == 0 ? "_platform_memmove" : "objc_msgSend") : "closure #\(level) in Chain\(chain).step\(level)(_:)"
+                    line(spine + level, count, name, level == length - 1 ? "libsystem_platform.dylib" : image)
+                }
+            }
+        }
+        thread(100, label: "DispatchQueue_1: com.apple.main-thread  (serial)", spine: 60, chains: 50, length: 50, image: "VibeSwitcher")
+        for number in 101..<129 { thread(number, label: "DispatchQueue_\(number): com.apple.root.utility-qos  (concurrent)", spine: 40, chains: 8, length: 25, image: "Foundation") }
+        lines += ["", "Total number in stack (recursive counted multiple times):"]
+        for index in 0..<50 { lines.append("        \(2500 - index)       Spine.frame\(index)()  (in VibeSwitcher)") }
+        lines += ["", "Binary Images:"]
+        for index in 0..<1000 {
+            lines.append("       0x\(String(0x1_8000_0000 + index * 0x10000, radix: 16)) -        0x\(String(0x1_8000_ffff + index * 0x10000, radix: 16))  "
+                         + "com.apple.framework\(index) (1.0) <5A3B1C2D-0000-1111-2222-\(String(format: "%012d", index))> /System/Library/Frameworks/Framework\(index).framework/Framework\(index)")
+        }
+        return lines.joined(separator: "\n")
+    }()
+
+    /// Reading a hang's sample (its start, the main thread's busiest path and spread) costs tens of milliseconds of CPU,
+    /// not seconds: 2026-10-31, hang-20261031-003909's sample of 2 MB cost the watchdog 2.3 s of CPU (a user-interactive
+    /// thread splitting it into lines with `components(separatedBy:)`) on a Mac already starving the app. Measured as
+    /// this thread's CPU time (a busy Mac keeping it waiting doesn't add to it), the best of three.
+    @Test func readingABigSampleCostsMillisecondsOfCPU() throws {
+        let sample = Self.bigSample
+        #expect(sample.utf8.count > 1_800_000 && sample.utf8.count < 2_600_000, "\(sample.utf8.count) bytes")
+        var best = TimeInterval.infinity
+        var read: (start: Date?, path: [(name: String, image: String)], spread: AppHealth.Spread?)?
+        for _ in 0..<3 {
+            let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+            read = (AppHealth.sampleStart(sample), AppHealth.busiestPath(sample: sample), AppHealth.spread(sample: sample))
+            best = min(best, TimeInterval(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1e9)
+        }
+        print("SampleReadCost \(sample.utf8.count) bytes: \(String(format: "%.1f", best * 1000)) ms of CPU")
+        // What it reads is what it read before.
+        let result = try #require(read)
+        #expect(result.start == Date(timeIntervalSince1970: 1_793_403_552.345))
+        #expect(result.path.count == 110 && result.path.first?.name == "Spine100.frame0()" && result.path.last?.name == "_platform_memmove", "\(result.path.map(\.name))")
+        #expect(result.path[60].name == "closure #0 in Chain0.step0(_:)" && result.path[60].image == "VibeSwitcher")
+        let spread = try #require(result.spread)
+        #expect(spread == AppHealth.Spread(samples: 2500, pcs: 51, top: "_platform_memmove", topShare: 1420.0 / 2500, waiting: 0), "\(spread)")
+        // 24 ms in a debug build on 2026-10-31's Mac; 250 ms split by `components(separatedBy:)`.
+        #expect(best < 0.08, "\(Int(best * 1000)) ms of CPU to read a \(sample.utf8.count)-byte sample")
+    }
+
     /// A sample whose main thread's busiest path has no app frame: a SwiftUI stall ending in `leaf`.
     static func frameless(_ leaf: String) -> String {
         """
