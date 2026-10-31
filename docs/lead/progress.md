@@ -2365,3 +2365,9 @@
 - 2026-10-31 20:16 Automatically (auto_advance): Started the audit of the-power-check-writes at f68b028f (Its review is audit. (audited: it has code that adds locks or threads (Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift: private let lock = NSLock()), as the risk check found.)).
 - 2026-10-31 20:18 Automatically (auto_advance): Started the audit of wallet-request-fallback at 72a1a8a8 (Its review is audit).
 - 2026-10-31 20:23 Planned swiftui-accessibility: SwiftUI accessibility work dominates the window's freezes: measure which views, then flatten their accessibility trees
+- 2026-10-31 20:26 Audit of the-power-check-writes: complete, clean, round 1: 1 Nit open
+- 2026-10-31 20:27 Started a worker on swiftui-accessibility
+- 2026-10-31 20:27 Automatically (auto_advance): Started a worker on swiftui-accessibility (SwiftUI accessibility work dominates the window's freezes: measure which views, then flatten their accessibility trees).
+- 2026-10-31 20:28 Audit of wallet-request-fallback: complete, clean, round 1: 3 Nit open
+- 2026-10-31 20:36 Merged the-power-check-writes: The power check writes its state file on the main thread (LeadController.lookAtPower)
+- 2026-10-31 20:36 Flaky in the-power-check-writes's merge: theScreenRouteReadsATerminalTabOffTheMainThread() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
