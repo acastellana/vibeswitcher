@@ -2206,3 +2206,7 @@
 - 2026-10-31 10:34 Automatically (auto_advance): Started a worker on readscreen-reads-the (readScreen reads the session's hook state file on the main thread (HookState.load in followChat)).
 - 2026-10-31 10:46 Planned steer-inbox-read-on: Steer inbox read on the main thread every second (SteerInbox.pending in watchSteering, refreshSteering)
 - 2026-10-31 10:52 Merged readscreen-reads-the: readScreen reads the session's hook state file on the main thread (HookState.load in followChat) (no audit: review none)
+- 2026-10-31 10:52 Automatically (auto_advance): Merged readscreen-reads-the (readScreen reads the session's hook state file on the main thread (HookState.load in followChat)) into main at eef3b8cb, review none: on its worker's done report on 89e550a7 and the full test run.
+- 2026-10-31 10:52 Automatically (auto_advance): Cleaned up readscreen-reads-the (freed 1.0 GB of build output and temporary folders). It stays done.
+- 2026-10-31 10:52 Started a worker on steer-inbox-read-on
+- 2026-10-31 10:52 Automatically (auto_advance): Started a worker on steer-inbox-read-on (Steer inbox read on the main thread every second (SteerInbox.pending in watchSteering, refreshSteering)), its after tasks done (readscreen-reads-the).
