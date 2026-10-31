@@ -25,12 +25,19 @@ public enum PTYSpawn {
         _exit(127)
     }
 
+    private static let openptyLock = NSLock()
+
     /// `failure`: posix_spawn's errno when it couldn't start the launcher (0 when the terminal couldn't be made).
     static func spawn(launcher: String, executable: String, args: [String], env: [String], directory: String,
                       size: inout winsize, failure: inout Int32) -> (pid: pid_t, masterFD: Int32)? {
         var master: Int32 = -1
         var slave: Int32 = -1
-        guard openpty(&master, &slave, nil, nil, &size) == 0 else { return nil }
+        // One at a time: on macOS 27, openpty called from several threads at once fails for some of them (errno -6),
+        // and sessions start from several threads at once.
+        openptyLock.lock()
+        let opened = openpty(&master, &slave, nil, nil, &size)
+        openptyLock.unlock()
+        guard opened == 0 else { return nil }
         _ = fcntl(master, F_SETFD, FD_CLOEXEC)
         // From the master (the kernel names it): ttyname's buffer is shared between threads, and on a busy Mac it
         // can find no name yet for a terminal just made.
