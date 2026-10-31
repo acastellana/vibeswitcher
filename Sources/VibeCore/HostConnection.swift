@@ -35,11 +35,20 @@ public final class HostConnection {
     /// it was, or with no key to answer it with.
     private var held: Data?
 
+    /// The write(2) each send ends in (tests: one that notes where it runs, or stalls as one does on a loaded Mac).
+    typealias Write = (Int32, UnsafeRawPointer?, Int) -> Int
+    private let write: Write
+
     /// `patience`: how long to retry a refused connect (see `UnixSocket.connect`); the app's own connection, made on
     /// the main thread, doesn't wait.
-    public init(path: String, queue: DispatchQueue, appKey: SymmetricKey? = HostConnection.appKey, patience: TimeInterval = 0) throws {
+    public convenience init(path: String, queue: DispatchQueue, appKey: SymmetricKey? = HostConnection.appKey, patience: TimeInterval = 0) throws {
+        try self.init(path: path, queue: queue, appKey: appKey, patience: patience, write: { Darwin.write($0, $1, $2) })
+    }
+
+    init(path: String, queue: DispatchQueue, appKey: SymmetricKey?, patience: TimeInterval = 0, write: @escaping Write) throws {
         fd = try UnixSocket.connect(path: path, patience: patience)
         self.queue = queue
+        self.write = write
         self.appKey = appKey
         held = appKey == nil ? nil : Data()
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
@@ -130,7 +139,7 @@ public final class HostConnection {
 
     private func flush() {
         while !outgoing.isEmpty {
-            let written = outgoing.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+            let written = outgoing.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
             if written > 0 {
                 outgoing = Data(outgoing.dropFirst(written))
             } else if written < 0, errno == EAGAIN || errno == EINTR {
