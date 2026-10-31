@@ -402,14 +402,21 @@ public final class HostedSession {
         onChange?(info)
     }
 
-    /// The exit source's event: the program ended.
+    /// The exit source's event: the program ended. The kernel posts it a moment before the program can be reaped, and
+    /// under load that moment is long enough for `waitpid` to find it still exiting (9 of 5,000 kills beside 24 busy
+    /// loops, 2026-11-01): then the poll looks again at its shortest delay, its backoff starting over, rather than at
+    /// its next look (up to 30 s off). The source doesn't fire again: an exit is posted once.
     func exitEvent() {
-        reap()
+        guard !reap(), let exitPoll else { return }
+        exitPolls = 0
+        exitPoll.schedule(after: Self.exitPollDelays[0], repeating: nil, leeway: .milliseconds(20))
     }
 
-    private func reap() {
+    /// Reaps the program if it ended; whether it did (false too once reaped already).
+    @discardableResult
+    private func reap() -> Bool {
         var status: Int32 = 0
-        guard waitpid(info.childPID, &status, WNOHANG) == info.childPID else { return }
+        guard waitpid(info.childPID, &status, WNOHANG) == info.childPID else { return false }
         let signal = status & 0x7f
         let code = signal == 0 ? (status >> 8) & 0xff : 128 + signal
         exitSource?.cancel()
@@ -428,6 +435,7 @@ public final class HostedSession {
             self.onEnd?(status)
             self.onChange?(self.info)
         }
+        return true
     }
 
     /// Once the parser got through everything the session printed, its last screen is kept and the rest let go

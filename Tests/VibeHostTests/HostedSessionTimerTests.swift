@@ -82,8 +82,10 @@ struct HostedSessionTimerTests {
         #expect(probe.queue.sync { session.info.isLive && !poll.cancelled })
     }
 
-    /// A program ending once the exit source is registered is reaped at once, with no look of the poll's, which then
-    /// stops.
+    /// A program ending once the exit source is registered is reaped on its event, with no look of the poll's, which
+    /// then stops. Under load the event can come a moment before the program can be reaped (see
+    /// `anExitEventBeforeTheProgramCanBeReapedLooksAgainSoon`): the poll then looks again soon, here when the test
+    /// fires it, its clock being the test's.
     @Test func theExitSourceReapsAtOnce() throws {
         let probe = SessionProbe()
         let timers = FakeTimers(queue: probe.queue)
@@ -92,9 +94,36 @@ struct HostedSessionTimerTests {
         let pid = probe.queue.sync { session.info.childPID }
         #expect(eventually { (ProcessTable.info(pid: pid)?.comm ?? "") == "sleep" })
         kill(pid, SIGTERM)
-        #expect(eventually { probe.queue.sync { session.info.exit != nil } })
+        #expect(eventually {
+            let (ended, early) = probe.queue.sync { (session.info.exit != nil, poll.schedules.count > 1) }
+            if !ended, early { timers.fire(poll) }
+            return ended
+        })
         #expect(probe.queue.sync { session.info.exit?.signal } == SIGTERM)
-        #expect(probe.queue.sync { poll.schedules.count == 1 && poll.cancelled })
+        // The poll never looked on its own: only the event's early look (at 50 ms), if any, came after its first.
+        #expect(probe.queue.sync { poll.cancelled && (poll.schedules.count == 1 || poll.schedules[1].after == 0.05) })
+    }
+
+    /// The exit source's event can come a moment before the program can be reaped (the kernel posts it first): the
+    /// poll then looks again at its shortest delay, its backoff starting over, not at its next look up to 30 s off.
+    @Test func anExitEventBeforeTheProgramCanBeReapedLooksAgainSoon() throws {
+        let probe = SessionProbe()
+        let timers = FakeTimers(queue: probe.queue)
+        let session = try start("exec sleep 600", probe: probe, timers: timers)
+        defer { end(session, probe: probe) }
+        let poll = try #require(timers.made(.exitPoll).first)
+        // The backoff well under way: the next look is 30 s off.
+        for _ in 0..<4 { timers.fire(poll) }
+        #expect(probe.queue.sync { poll.schedules.last?.after } == 30)
+        // The event while the program can't be reaped (still running here, standing in for one still exiting).
+        probe.queue.sync { session.exitEvent() }
+        #expect(probe.queue.sync { session.info.isLive && !poll.cancelled })
+        let soon = try #require(probe.queue.sync { poll.schedules.last })
+        #expect(probe.queue.sync { poll.schedules.count } == 6)
+        #expect(soon.after == 0.05 && soon.repeating == nil && soon.leeway == .milliseconds(20))
+        // Its backoff starts over: a look finding it running schedules the next at 1 s.
+        timers.fire(poll)
+        #expect(probe.queue.sync { poll.schedules.last?.after } == 1)
     }
 
     /// The watchdog runs while the parser has work, stops at its first look that finds none, and starts again with
