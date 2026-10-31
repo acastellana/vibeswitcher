@@ -2271,3 +2271,7 @@
 - 2026-10-31 13:11 Update: Today: GitHub merge, install, two host-test fixes landed — **Landed**
 - 2026-10-31 11:42 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-10-31 13:26 accepted 37 commits on main that you ran from VibeSwitcher's window: 6e3b810 Merge branch 'main' of https://github.com/acastellana/vibeswitcher; 6000cb5 Lead: decisions and progress; bf953f0 Lead: decisions and progress; …
+- 2026-10-31 14:54 Planned vault-requests-the: Vault requests: the request/result format and the Passage link (review audit)
+- 2026-10-31 14:54 Planned vault-requests-in-the: Vault requests in the app: agents ask, you see it, the result comes back (review audit)
+- 2026-10-31 14:56 Started a worker on vault-requests-the
+- 2026-10-31 14:56 Automatically (auto_advance): Started a worker on vault-requests-the (Vault requests: the request/result format and the Passage link).

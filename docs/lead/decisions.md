@@ -163,3 +163,7 @@ build-app-sh-install's verifier found TeamRowsTests.voiceOverReadsTheRow and Hom
 
 On 2026-10-30, a ~130-commit pull left main failing 2 tests on this Mac (Spanish locale, Swift 6.4 per-target bundles). It surfaced only at the first merge and held 3 tasks back.
 
+## 2026-10-31 14:54:51 Vault requests: VibeSwitcher only initiates transactions. It writes a strict, secret-free request (vault-request v1, specified in docs/protocol/vault-request.md), sends it through the `passage` CLI to the paired vault Mac, and shows the vault's result and delivers it back to the session that asked. A wallet app on the vault Mac checks each request and proposes it, and the user signs there with a hardware wallet. VibeSwitcher never signs, holds keys or judges whether a transaction is correct. Two tasks carry it: vault-requests-the, then vault-requests-in-the. Both are audited (security).
+
+User's direction, 2026-10-31: the keys stay on one isolated Mac behind a hardware wallet, and agents can only ask. The repo names Passage because the code calls its CLI. The wallet app and wallet profiles stay generic in the repo, under the 2026-10-28 naming rule.
+
