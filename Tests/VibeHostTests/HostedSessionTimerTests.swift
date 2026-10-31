@@ -58,10 +58,16 @@ struct HostedSessionTimerTests {
         }
     }
 
-    func end(_ session: HostedSession, probe: SessionProbe) {
+    /// Kills the program and waits for its reap. The poll looks at each turn (its clock is the test's): the exit
+    /// event can come before the program can be reaped (see `HostedSession.exitEvent`), and then only a look reaps it.
+    func end(_ session: HostedSession, probe: SessionProbe, timers: FakeTimers) {
         let pid = probe.queue.sync { session.info.childPID }
         kill(pid, SIGKILL)
-        _ = eventually { probe.queue.sync { session.info.exit != nil } }
+        _ = eventually {
+            if probe.queue.sync(execute: { session.info.exit != nil }) { return true }
+            timers.made(.exitPoll).forEach(timers.fire)
+            return false
+        }
     }
 
     /// A look 50 ms in, then at 1 and 5 s, then every 30 s, each scheduled once the one before looked.
@@ -69,7 +75,7 @@ struct HostedSessionTimerTests {
         let probe = SessionProbe()
         let timers = FakeTimers(queue: probe.queue)
         let session = try start("exec sleep 600", probe: probe, timers: timers)
-        defer { end(session, probe: probe) }
+        defer { end(session, probe: probe, timers: timers) }
         let poll = try #require(timers.made(.exitPoll).first)
         #expect(timers.made(.exitPoll).count == 1)
         for _ in 0..<5 { timers.fire(poll) }
@@ -110,7 +116,7 @@ struct HostedSessionTimerTests {
         let probe = SessionProbe()
         let timers = FakeTimers(queue: probe.queue)
         let session = try start("exec sleep 600", probe: probe, timers: timers)
-        defer { end(session, probe: probe) }
+        defer { end(session, probe: probe, timers: timers) }
         let poll = try #require(timers.made(.exitPoll).first)
         // The backoff well under way: the next look is 30 s off.
         for _ in 0..<4 { timers.fire(poll) }
@@ -132,7 +138,7 @@ struct HostedSessionTimerTests {
         let probe = SessionProbe()
         let timers = FakeTimers(queue: probe.queue)
         let session = try start("printf 'ready\\n'; exec cat", probe: probe, timers: timers)
-        defer { end(session, probe: probe) }
+        defer { end(session, probe: probe, timers: timers) }
         let first = try #require(timers.made(.parserWatchdog).first)
         // A quarter of the stall limit (10 s), at most 1 s, repeated.
         let schedule = try #require(probe.queue.sync { first.schedules.first })
