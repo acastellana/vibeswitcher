@@ -2360,3 +2360,5 @@
 - 2026-10-31 20:00 Raised the-power-check-writes to audit (the risk check, at f68b028f): it has code that adds locks or threads (Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift: private let lock = NSLock())
 - 2026-10-31 20:00 Automatically (auto_advance): the-power-check-writes is audited, not merged: it has code that adds locks or threads (Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift: private let lock = NSLock()) (the risk check raised it from review none). Its audit starts once the Mac has room.
 - 2026-10-31 20:09 Merged wallet-requests-find: Wallet requests find Passage.app by themselves (no `passage` symlink needed)
+- 2026-10-31 20:09 Automatically (auto_advance): Merged wallet-requests-find (Wallet requests find Passage.app by themselves (no `passage` symlink needed)) into main at bb042414, on its passing audit and the full test run.
+- 2026-10-31 20:10 Automatically (auto_advance): Cleaned up wallet-requests-find; ended pid 3764 (Worker: Wallet requests find Passage.app by themselves (no `passage` symlink needed)) (freed 1.2 GB of build output and temporary folders). It stays done.
