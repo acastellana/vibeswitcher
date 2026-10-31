@@ -148,7 +148,8 @@ struct DiskSpaceTests: LeadTeamFixture {
         #expect(!lead.call("start_worker", ["task": "two"]).isError)
         let worktree = Worktrees.path(root: root, slug: "one")
         let tmpdir = try #require(runtime.environments["session-1"]?["TMPDIR"])
-        #expect(runtime.environments["session-1"] == ["TMPDIR": SessionTemp.folder(cwd: worktree, name: "worker-one", in: sessions).path + "/"])
+        #expect(runtime.environments["session-1"] == ["TMPDIR": SessionTemp.folder(cwd: worktree, name: "worker-one", in: sessions).path + "/",
+                                                      SessionNote.roleVariable: "worker"])
         #expect((try FileManager.default.attributesOfItem(atPath: tmpdir)[.posixPermissions] as? Int) == 0o700)
         let other = try #require(runtime.environments["session-2"]?["TMPDIR"])
         #expect(other != tmpdir)
