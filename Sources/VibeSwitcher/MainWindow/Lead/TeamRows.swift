@@ -640,7 +640,12 @@ enum DecisionFeed {
         return recent.isEmpty ? 30 : 5
     }
 
-    static func needsSummary(_ decision: LeadDecision) -> Bool { decision.text.count > long }
+    /// Longer than `long` characters, walking at most that many (never the whole text).
+    static func needsSummary(_ decision: LeadDecision) -> Bool {
+        let text = decision.text
+        guard text.utf8.count > long, let end = text.index(text.startIndex, offsetBy: long, limitedBy: text.endIndex) else { return false }
+        return end != text.endIndex
+    }
 
     static func summaryKey(_ decision: LeadDecision) -> String { "decision|\(decision.id)" }
 
