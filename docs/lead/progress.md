@@ -2401,3 +2401,5 @@
 - 2026-10-31 22:56 Automatically (auto_advance): wallet-e2e-sh-refreshes is audited, not merged: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$npm_log") (the risk check raised it from review none). Its audit starts once the Mac has room.
 - 2026-10-31 22:59 Automatically (auto_advance): Started the audit of wallet-e2e-sh-refreshes at 06369048 (Its review is audit. (audited: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$npm_log"), as the risk check found.)).
 - 2026-10-31 22:59 Automatically (auto_advance): Started the audit of wallet-requests-work at 882b99f9 (Its review is audit).
+- 2026-10-31 23:09 Audit of wallet-requests-work: complete, clean, round 1: 4 Nit open
+- 2026-10-31 23:11 Audit of wallet-e2e-sh-refreshes: complete, clean, round 1: 1 Nit open
