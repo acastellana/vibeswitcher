@@ -2313,3 +2313,9 @@
 - 2026-10-31 17:12 Ended turn-this-incident-into-7's worker (idle since its done report on 64766a7f) to make room on the Mac for its audit
 - 2026-10-31 17:12 Automatically (auto_advance): Started the audit of turn-this-incident-into-7 at 64766a7f (Its review is audit. (audited: it changes test or build infrastructure the suite relies on (scripts/lib/install-app.sh), as the risk check found.)).
 - 2026-10-31 17:16 Planned rename-the-vault-request: Rename the vault-request feature to "wallet requests" (VibeSwitcher's "vault" means only the lead's vault)
+- 2026-10-31 17:27 Audit of turn-this-incident-into-7: complete, clean, round 1: 1 Nit open
+- 2026-10-31 17:29 Audit of agents-know-they-can: complete, clean, round 1: 1 Important open, 1 Pre-existing open
+- 2026-10-31 17:29 Automatically (auto_advance): Sent agents-know-they-can's worker the open Important findings agents-know-they-can:F1 from its audit at 19785088.
+- 2026-10-31 17:31 Planned wallet-request-fallback: Wallet request fallback: sign in the browser's wallet (Rabby/MetaMask), plus a "not picked up" hint (review audit)
+- 2026-10-31 17:34 The worker on agents-know-they-can answered findings: agents-know-they-can:F1 fixed at e490d8d3: Commit e490d8d. DiskSpaceTests.cleanupRemovesTheTasksSessionTMPDIRs compared a worker's whole spawn environment with TMPDIR alone. The branch now also sets SessionNote.roleVariable ("worker") through LeadLaunch.prepare, as the lead decided, so the expectation now includes that variable. No other test compares a role's whole environment (grep for environments[...] == and .environment ==). Full suite at e490d8d: vs-heavy bash scripts/test.sh printed 'Test…
+- 2026-10-31 17:37 Merged turn-this-incident-into-7: Turn this incident into a check: `build-app.sh --install` replaced the bundle of a VibeSwitch…
