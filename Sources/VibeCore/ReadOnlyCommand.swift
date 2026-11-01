@@ -575,7 +575,9 @@ public enum ReadOnlyCommand {
             "log": history, "show": history, "diff": history,
             "rev-list": history.with("--count"), "diff-tree": history.with("--no-commit-id"),
             // Its search flags: no `--open-files-in-pager` (`-O`, which runs a pager), `--no-index` or `--untracked`
-            // (files git doesn't track), `--textconv` (a program), `--recurse-submodules` or `--threads`. A pattern is
+            // (files git doesn't track), `--textconv` (a program), `--recurse-submodules` or `--threads`, and no `-f`
+            // (patterns from a file): git opens it from the top of the work tree, not the shell's folder the path check
+            // judges it from (`git grep -f ../x` in a subfolder reads outside), and `-f -` reads its input. A pattern is
             // a word like any other, so the path check reads it: one that looks like a path outside still prompts.
             "grep": GitOptions(
                 long: ["--cached", "--exclude-standard", "--invert-match", "--ignore-case", "--word-regexp", "--text",
@@ -585,9 +587,10 @@ public enum ReadOnlyCommand {
                        "--show-function", "--function-context", "--and", "--or", "--not", "--quiet", "--all-match"],
                 valued: ["--max-depth", "--context", "--before-context", "--after-context", "--max-count"],
                 optional: ["--color"],
-                letters: "viwaIrEGFPnhHlLzocpWq", valuedLetters: "CBAmef", counts: true),
+                letters: "viwaIrEGFPnhHlLzocpWq", valuedLetters: "CBAme", counts: true),
+            // No `--full-tree`: its paths are from the top of the work tree, not the shell's folder.
             "ls-tree": GitOptions(
-                long: ["--long", "--name-only", "--name-status", "--object-only", "--full-name", "--full-tree"],
+                long: ["--long", "--name-only", "--name-status", "--object-only", "--full-name"],
                 valued: ["--format"], optional: ["--abbrev"], letters: "drtlz"),
             "check-ignore": GitOptions(long: ["--quiet", "--verbose", "--non-matching"], letters: "qvnz"),
             "status": GitOptions(

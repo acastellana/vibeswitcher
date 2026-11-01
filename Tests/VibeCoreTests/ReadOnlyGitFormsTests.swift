@@ -16,7 +16,7 @@ struct ReadOnlyGitFormsTests {
         let privateDir = scratch + "/private", repo = scratch + "/repo"
         try FileManager.default.createDirectory(atPath: privateDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
-        try Data("SECRET-SEAL-VALUE\n".utf8).write(to: URL(fileURLWithPath: privateDir + "/seal"))
+        try Data("SECRET-SEAL-VALUE(\n".utf8).write(to: URL(fileURLWithPath: privateDir + "/seal"))
         let setup = "git init -q -b main && mkdir sub && echo a > a && echo b > sub/b && echo build > .gitignore"
             + " && ln -s ../private/seal inner && ln -s \(privateDir) linkdir && git add -A && git commit -qm one"
             + " && git checkout -qb other && echo c >> sub/b && git commit -qam two && git checkout -q main"
@@ -134,5 +134,31 @@ struct ReadOnlyGitFormsTests {
         // The parser alone, for a role without a worktree too.
         for command in refused { #expect(!ReadOnlyCommand.allows(command), "\(command)") }
         #expect(ReadOnlyCommand.allows("git merge-tree --write-tree --merge-base=\(base) main other"))
+    }
+
+    /// From a subfolder of the worktree (the audit's F1, F2): git grep opens `-f`'s file from the top of the work tree,
+    /// not the shell's folder the path check judges it from, so in `sub`, `git grep -E -f ../private/seal` looked inside
+    /// (sub/../private) and read outside (repo/../private), printing the seal in its regex error. `-f` prompts in every
+    /// spelling, as does `-f -` (its input) and ls-tree's `--full-tree` (paths from the top); the listed forms still run.
+    @Test func fromASubfolderGitOpensFilesWhereThePathCheckLooks() throws {
+        let (repo, _, _) = try repository()
+        let sub = repo + "/sub"
+        #expect(try LeadLaunchOutsideReadsTests.shell("git grep -E -f ../private/seal", in: sub).contains("SECRET-SEAL-VALUE"), "not a leak")
+        let refused = ["git grep -E -f ../private/seal", "git grep -E -f ../private/seal HEAD", "git grep -f b HEAD", "git grep -fb HEAD",
+                       "git grep -nfb", "git grep -f - HEAD", "git grep -e x -f b", "git ls-tree --full-tree HEAD a",
+                       "git ls-tree --full-tree -r HEAD"]
+        let reads = ["git grep -n b HEAD -- .", "git grep -n b other -- b", "git grep -n -e b -e c other", "git log main..other --stat -- b",
+                     "git diff main...other --stat -- b", "git show HEAD --cc -- ../a", "git ls-tree HEAD b", "git ls-tree -r --name-only HEAD",
+                     "git check-ignore -q ../build", "git merge-tree --write-tree main other", "git diff -Ob main other --stat",
+                     "git rev-list --count main..other -- b", "git diff-tree -r --cc HEAD -- ../a"]
+        let roles = try roles(repo)
+        for command in reads {
+            let out = try LeadLaunchOutsideReadsTests.shell(command, in: sub)
+            #expect(!out.contains("usage:") && !out.contains("fatal:") && !out.contains("error:"), "not a git form: \(command): \(out)")
+        }
+        for role in roles {
+            for command in refused { #expect(!role.runsUnasked(command, cwd: sub), "\(role.role): \(command)") }
+            for command in reads { #expect(role.runsUnasked(command, cwd: sub), "\(role.role): \(command)") }
+        }
     }
 }
