@@ -279,7 +279,7 @@ final class HostClient: ObservableObject {
     }
 
     /// Detached (own session, not our child for signals), stdout/stderr appended to host.log. Its pid.
-    private func startHost() throws -> pid_t {
+    func startHost() throws -> pid_t {
         let path = hostPath ?? Self.hostExecutable.path
         guard FileManager.default.isExecutableFile(atPath: path) else {
             throw HostClientError(message: "vibeswitcher-host is missing from the app")
@@ -311,14 +311,20 @@ final class HostClient: ObservableObject {
         guard result == 0 else { throw HostClientError(message: String(cString: strerror(result))) }
         // Reap it when it exits (idle exit or replacement) so it doesn't linger as a zombie.
         let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
-        source.setEventHandler { [weak self] in
-            var status: Int32 = 0
-            waitpid(pid, &status, WNOHANG)
-            self?.hostProcesses.removeValue(forKey: pid)?.cancel()
-        }
+        source.setEventHandler { [weak self] in self?.hostExited(pid) }
         source.resume()
         hostProcesses[pid] = source
         return pid
+    }
+
+    /// A test's look at a host this client started being reaped (by its exit event or `stillRuns`).
+    var onHostReaped: ((pid_t) -> Void)?
+
+    /// The exit source's event for `pid`, a host this client started: it ended.
+    func hostExited(_ pid: pid_t) {
+        var status: Int32 = 0
+        if waitpid(pid, &status, WNOHANG) == pid { onHostReaped?(pid) }
+        hostProcesses.removeValue(forKey: pid)?.cancel()
     }
 
     /// Whether `pid`, a host this client started, still runs: reaped here once it ended (one that ended before its
@@ -328,6 +334,7 @@ final class HostClient: ObservableObject {
         var status: Int32 = 0
         let reaped = waitpid(pid, &status, WNOHANG)
         if reaped == 0 || (reaped < 0 && errno == EINTR) { return true }
+        if reaped == pid { onHostReaped?(pid) }
         hostProcesses.removeValue(forKey: pid)?.cancel()
         return false
     }
