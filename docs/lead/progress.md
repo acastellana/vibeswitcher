@@ -2686,3 +2686,16 @@
 - 2026-11-01 12:23 Merged boost-release-3-7: Boost release 3/7: watch the account's usage limits and back off before hitting them
 - 2026-11-01 12:23 Flaky in boost-release-3-7's merge: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
 - 2026-11-01 12:23 Automatically (auto_advance): Merged boost-release-3-7 (Boost release 3/7: watch the account's usage limits and back off before hitting them) into main at 79498a95, on its passing audit and the full test run. (Its first test run failed on heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/boost-release-3-7/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswi….)
+- 2026-11-01 12:30 Audit of boost-release-4-7 at 3598755c tested its merged result 86d492e5 onto main: the test command passed
+- 2026-11-01 12:30 Automatically (auto_advance): Started the audit of boost-release-4-7 at 3598755c (Its review is audit).
+- 2026-11-01 12:30 Ended feature-impact-ledger's worker (idle since its done report on 9316df23) to make room on the Mac for its audit
+- 2026-11-01 12:30 Automatically (auto_advance): Started the audit of feature-impact-ledger at 9316df23 (Its review is audit. (audited: it changes 674 lines outside tests, over risk_lines (400), as the risk check found.)).
+- 2026-11-01 12:30 Ended fix-the-flaky-test-15's worker (idle since its done report on 53f686ae) to make room on the Mac for its audit
+- 2026-11-01 12:30 Automatically (auto_advance): Started the audit of fix-the-flaky-test-15 at 53f686ae (Its review is audit. (audited: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift), as the risk check found.)).
+- 2026-11-01 12:30 Automatically (auto_advance): Cleaned up boost-release-3-7; ended pid 81327 (Worker: Boost release 3/7: watch the account's usage limits and back off before hitting them) (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-01 12:30 Started a worker on boost-release-3b-codex
+- 2026-11-01 12:30 Automatically (auto_advance): Started a worker on boost-release-3b-codex (Boost release 3b: Codex workers for bounded tasks (spread usage across accounts), always audited by Claude), its after tasks done (boost-release-3-7).
+- 2026-11-01 12:30 Audit of boost-release-4-7: complete, clean, round 3: 2 Important closed, 1 Nit closed
+- 2026-11-01 12:32 Audit of feature-impact-ledger: complete, clean, round 1: 1 Nit open
+- 2026-11-01 12:34 Audit of fix-the-flaky-test-15: complete, clean, round 1: 1 Nit open
+- 2026-11-01 12:37 Merged boost-release-4-7: Boost release 4/7: a task's idle worker is released while its audit runs, and restarted only if findings come back
