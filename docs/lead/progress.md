@@ -2645,3 +2645,6 @@
 - 2026-11-01 10:37 Automatically (auto_advance): Started the audit of boost-release-3-7 at a8414196 (Its review is audit).
 - 2026-11-01 10:40 Audit of wallet-outcomes-always: incomplete, clean, round 1: 1 Important open, 1 Nit open
 - 2026-11-01 10:40 Automatically (auto_advance): Sent wallet-outcomes-always's worker the open Important findings wallet-outcomes-always:F1 from its audit at 7e98bce2.
+- 2026-11-01 10:42 Audit of wallet-e2e-reads-the: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-11-01 10:43 Audit of boost-release-3-7: incomplete, clean, round 1: 3 Important open, 3 Nit open
+- 2026-11-01 10:43 Automatically (auto_advance): Couldn't send boost-release-3-7's worker its open Important findings (boost-release-3-7:F1, boost-release-3-7:F2, boost-release-3-7:F3): Not started: the Mac is shared by every project's team, and its load (the greater of its 1- and 5-minute averages) is above load_threshold. Now: load 56.0 (load_threshold 24, twice the 12 cores), 11 team sessions across 3 projects (this one 4, 2 others 7) (mac_max_sessions 15). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, …
