@@ -535,3 +535,66 @@ struct WalletE2ESignPageTests {
         #expect(ran.status == 64, "\(ran.output)")
     }
 }
+
+/// `--real-testnet`'s judgement after its sign POST (`--judge-real-results DIR ID`, which runs nothing else): the results
+/// the card took for the request, from the dev side's inbox folder, in `sequence` order (not the files' names), must read
+/// received → proposed → signed → submitted, numbered 1 to 4, the submitted one with its txHash. `proposed` now comes
+/// with the POST, not with opening the page, but the order is the same; a missing or extra step, or a final `failed`,
+/// fails (1).
+struct WalletE2ERealResultsTests {
+    let scratch = Scratch()
+    static let id = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
+    static let other = "0e1d2c3b-4a59-4687-9a6b-5c4d3e2f1a0b"
+    static let tx = "0x" + String(repeating: "ab", count: 32)
+
+    /// Writes each (sequence, status, txHash) as a result for `id` under a made-up name (the names' order deliberately not
+    /// the sequence's), runs the judge on the folder: its status and output.
+    func judge(_ results: [(Int, String, String?)], id: String = id, extra: [String] = []) throws -> (status: Int32, output: String) {
+        let dir = scratch.url("inbox/0a1b2c3d")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for (index, (sequence, status, tx)) in results.enumerated() {
+            let txField = tx.map { #","txHash":"\#($0)","explorerURL":"https://explorer-asimov.genlayer.com/tx/\#($0)""# } ?? ""
+            let json = #"{"type":"wallet-result","version":1,"id":"\#(id)","sequence":\#(sequence),"createdAt":"2026-11-01T10:00:0\#(sequence)Z","status":"\#(status)","checks":[]\#(txField)}"#
+            try json.write(to: dir.appendingPathComponent("20261101T100000Z-\(results.count - index)-wallet-result-\(id).json"), atomically: true, encoding: .utf8)
+        }
+        let node = try #require(WalletE2ERealTestnetGuardTests.realNode, "node isn't on the test's PATH")
+        let path = URL(fileURLWithPath: node).deletingLastPathComponent().path + ":/usr/bin:/bin"
+        let script = WalletE2EScriptTests.repo.appendingPathComponent("scripts/e2e/wallet-e2e.sh").path
+        return try HomeIsolationTests.run("/bin/bash", [script, "--judge-real-results", dir.path, Self.id] + extra,
+                                          environment: ["PATH": path, "HOME": scratch.url("judge-home").path])
+    }
+
+    @Test func receivedProposedSignedSubmittedPassesInSequenceOrder() throws {
+        let ran = try judge([(3, "signed", nil), (1, "received", nil), (4, "submitted", Self.tx), (2, "proposed", nil)])
+        #expect(ran.status == 0, "\(ran.output)")
+        #expect(ran.output == "wallet-e2e: the results read received → proposed → signed → submitted\n", "\(ran.output)")
+    }
+
+    @Test func anotherRequestsResultsDontCount() throws {
+        let ran = try judge([(1, "received", nil), (2, "proposed", nil), (3, "signed", nil), (4, "submitted", Self.tx)], id: Self.other)
+        #expect(ran.status == 1 && ran.output == "wallet-e2e: the results read none, not received → proposed → signed → submitted\n", "\(ran.output)")
+    }
+
+    @Test(arguments: [
+        // No `proposed` (the Wallet Manager never sent it with the POST), or it came twice.
+        ([(1, "received", nil), (2, "signed", nil), (3, "submitted", tx)], "the results read received → signed → submitted, not "),
+        ([(1, "received", nil), (2, "proposed", nil), (3, "proposed", nil), (4, "signed", nil), (5, "submitted", tx)], "the results read received → proposed → proposed → signed → submitted, not "),
+        // Ended failed (a mined cancel answers `failed` with its txHash), or stopped short of submitted.
+        ([(1, "received", nil), (2, "proposed", nil), (3, "signed", nil), (4, "failed", tx)], "the results read received → proposed → signed → failed, not "),
+        ([(1, "received", nil), (2, "proposed", nil), (3, "signed", nil)], "the results read received → proposed → signed, not "),
+        // Numbered wrong, or submitted without its transaction.
+        ([(1, "received", nil), (2, "proposed", nil), (4, "signed", nil), (5, "submitted", tx)], "the results are numbered 1, 2, 4, 5, not 1 to 4"),
+        ([(1, "received", nil), (2, "proposed", nil), (3, "signed", nil), (4, "submitted", nil)], "the submitted result has no txHash (none)"),
+    ] as [([(Int, String, String?)], String)])
+    func anyOtherOrderFails(_ results: [(Int, String, String?)], _ why: String) throws {
+        let ran = try judge(results)
+        #expect(ran.status == 1, "\(ran.output)")
+        #expect(ran.output.hasPrefix("wallet-e2e: \(why)"), "\(ran.output)")
+        #expect(ran.output.split(separator: "\n").count == 1, "\(ran.output)")
+    }
+
+    @Test func takesNoOtherOption() throws {
+        let ran = try judge([(1, "received", nil)], extra: ["--amount", "1000"])
+        #expect(ran.status == 64, "\(ran.output)")
+    }
+}

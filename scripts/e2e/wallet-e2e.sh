@@ -10,6 +10,7 @@
 #                           [--wallet-manager DIR] [--binary PATH] [--keep]
 # scripts/e2e/wallet-e2e.sh --judge-case-1 SEEN RECORD
 # scripts/e2e/wallet-e2e.sh --judge-sign-page PAGE [--amount WEI]
+# scripts/e2e/wallet-e2e.sh --judge-real-results DIR ID
 #   --wallet-manager DIR  the Wallet Manager's checkout (~/dev/wallet-manager). Nothing is written there but its
 #                         git-ignored node_modules: when node_modules/.package-lock.json is missing or older than its
 #                         package-lock.json, the run first says so and runs `npm ci --ignore-scripts` in it.
@@ -22,6 +23,9 @@
 #   --judge-sign-page PAGE  runs nothing: judges a recorded signing page (PAGE, its HTML) as --real-testnet does before
 #                         its POST, for the self-transfer of --amount (1000) wei; prints its line and exits 0 when the
 #                         page signs exactly that, with no warnings, else 2 (refused).
+#   --judge-real-results DIR ID  runs nothing: judges the results for request ID in DIR (the dev side's inbox folder) as
+#                         --real-testnet does after its POST; prints their statuses in sequence order and exits 0 when
+#                         they read received → proposed → signed → submitted, the last with a txHash, else 1.
 #
 # --real-testnet: one real GenLayer testnet payment through the same chain, instead of the cases below. Never part of
 # scripts/test.sh, a merge or an audit: it broadcasts a real transaction, so it runs only when asked for by name. It
@@ -37,12 +41,14 @@
 # its docs/running.md, "Signing over HTTP (headless)", has it (GET the page, read its csrf, token and hash, POST the
 # confirmation with the passphrase on stdin): one POST, never retried, and only when the page's machine-readable fields
 # (data-sign-field / data-value, as docs/protocol/sign-page.md has them) say chain 4221, from and to the throwaway
-# wallet, the amount and no call, exactly, and its data-sign-warnings lists none. It passes when the card shows Signed (the
-# result `submitted`) with the transaction, and the RPC's eth_getTransactionReceipt says status 1 for that
-# self-transfer; it prints the explorer link.
+# wallet, the amount and no call, exactly, and its data-sign-warnings lists none. Opening the page has no side effects:
+# the card stays Received and the Wallet Manager's record unchanged; `proposed` comes with the POST. The states read
+# waiting → sent → received → (POST) → proposed → signed → submitted (after the POST, the results the card took, in
+# sequence order). It passes when the card shows Signed (the result `submitted`) with the transaction, and the RPC's
+# eth_getTransactionReceipt says status 1 for that self-transfer; it prints the explorer link.
 #   --amount WEI (1000), --from 0x… and --to 0x… (the throwaway wallet), --chain N (4221): checked, not chosen freely
-#   --dry-run             everything up to the sign POST (the page fetched and read, the card Proposed), then stops:
-#                         nothing is signed or sent
+#   --dry-run             everything up to the sign POST (the page fetched and read, the card still Received:
+#                         waiting → sent → received), then stops: nothing is signed or sent
 #   --check-guards        runs only the refusals above and says they pass: no network, no Wallet Manager or sandbox
 #                         started (the checkout's `node src/networks.ts --json`: 4221 at GenLayer's testnet RPC)
 #
@@ -69,6 +75,7 @@ binary=""
 keep=""
 judge=""
 judge_page=""
+judge_results=""
 real=""
 dry_run=""
 check_guards=""
@@ -98,6 +105,7 @@ while [[ $# -gt 0 ]]; do
         --dry-run) dry_run=1; real_options+=" $1"; shift ;;
         --check-guards) check_guards=1; real_options+=" $1"; shift ;;
         --judge-sign-page) [[ $# -ge 2 ]] || { echo "--judge-sign-page PAGE"; exit 64; }; judge_page=$2; shift 2 ;;
+        --judge-real-results) [[ $# -ge 3 ]] || { echo "--judge-real-results DIR ID"; exit 64; }; judge_results=$2; judge_results_id=$3; shift 3 ;;
         --judge-case-1) [[ $# -ge 3 ]] || { echo "--judge-case-1 SEEN RECORD"; exit 64; }; judge_seen=$2; judge_record=$3; judge=1; shift 3 ;;
         -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
         *) echo "unknown option $1 (--help)"; exit 64 ;;
@@ -187,8 +195,36 @@ sign_page_refusal() {
         if (wrong.length > 0) refuse(`the page doesn'"'"'t sign what was asked: ${wrong.map((k) => `${k} ${fields.has(k) ? fields.get(k) : "missing"}, not ${expected[k]}`).join("; ")}`);' \
         "$@" </dev/null
 }
+# real_results DIR ID: the results for request ID in DIR (the dev side's inbox folder, where the card took them), in
+# sequence order. Prints "STATUSES<TAB>TXHASH<TAB>EXPLORER" (the statuses joined with " → ") and succeeds when they read
+# received → proposed → signed → submitted, numbered 1 to 4, the submitted one with a txHash; else prints why, and fails.
+REAL_RESULTS="received → proposed → signed → submitted"
+real_results() {
+    node -e 'const fs = require("fs"), [dir, id, want] = process.argv.slice(1);
+        const fail = (why) => { console.log(why); process.exit(1) };
+        let names; try { names = fs.readdirSync(dir).filter((f) => f.endsWith(`-wallet-result-${id}.json`)) } catch { fail(`no results folder ${dir}`) }
+        const all = [];
+        for (const f of names) { try { all.push(JSON.parse(fs.readFileSync(`${dir}/${f}`, "utf8"))) } catch { fail(`the result ${f} can'"'"'t be read`) } }
+        all.sort((a, b) => a.sequence - b.sequence);
+        const seen = all.map((r) => r.status).join(" → ") || "none";
+        if (seen !== want) fail(`the results read ${seen}, not ${want}`);
+        if (all.some((r, i) => r.sequence !== i + 1)) fail(`the results are numbered ${all.map((r) => r.sequence).join(", ")}, not 1 to ${all.length}`);
+        const last = all[all.length - 1];
+        if (!/^0x[0-9a-f]{64}$/.test(last.txHash ?? "")) fail(`the submitted result has no txHash (${last.txHash ?? "none"})`);
+        process.stdout.write(`${seen}\t${last.txHash}\t${last.explorerURL ?? ""}\n`)' "$1" "$2" "$REAL_RESULTS" </dev/null
+}
+if [[ -n $judge_results ]]; then
+    [[ -z $judge && -z $judge_page && -z $real && -z $real_options ]] || { say "wallet-e2e: --judge-real-results takes nothing else"; exit 64; }
+    command -v node >/dev/null || { say "wallet-e2e: node isn't on the PATH"; exit 1; }
+    if seen=$(real_results "$judge_results" "$judge_results_id"); then
+        say "wallet-e2e: the results read ${seen%%$'\t'*}"
+        exit 0
+    fi
+    say "wallet-e2e: ${seen:-the results could not be judged}"
+    exit 1
+fi
 if [[ -n $judge_page ]]; then
-    [[ -z $judge ]] && [[ $real_options == "" || $real_options == " --amount" ]] && [[ -z $real ]] || { say "wallet-e2e: --judge-sign-page takes only --amount"; exit 64; }
+    [[ -z $judge && -z $judge_results ]] && [[ $real_options == "" || $real_options == " --amount" ]] && [[ -z $real ]] || { say "wallet-e2e: --judge-sign-page takes only --amount"; exit 64; }
     command -v node >/dev/null || { say "wallet-e2e: node isn't on the PATH"; exit 1; }
     if why=$(sign_page_refusal "$judge_page" "$TESTNET_CHAIN" "$THROWAWAY" "$THROWAWAY" "$amount"); then
         say "wallet-e2e: the signing page signs a self-transfer of $amount wei on $TESTNET_CHAIN from $THROWAWAY, with no warnings"
@@ -508,7 +544,8 @@ shot() { sb scroll bottom >/dev/null; sb shot "$1" >/dev/null || say "  (couldn'
 
 # --real-testnet: one real payment. The sandbox's fake agent asks for the self-transfer and Send is clicked; the
 # Wallet Manager checks it against GenLayer's testnet; then the /sign page is driven over HTTP exactly as its
-# docs/running.md, "Signing over HTTP (headless)", has it; the card ends Signed (the result `submitted`) and the RPC's
+# docs/running.md, "Signing over HTTP (headless)", has it. Opening the page has no side effects (the card stays
+# Received); the POST brings proposed → signed → submitted, the card ends Signed (the result `submitted`) and the RPC's
 # receipt says status 1.
 real_payment() {
     local id states final rec url sign_dir answer
@@ -520,10 +557,13 @@ real_payment() {
     states="waiting → $(card state | tr '[:upper:]' '[:lower:]')"
     [[ $id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { real_fail "the card has no request id ($id)"; return; }
 
-    # 0. A pending request, its checks done; GET /requests reads the inbox now; its card links to /sign/<id>.
+    # 0. A pending request, its checks done, the card Received (`proposed` comes only with the POST); GET /requests
+    # reads the inbox now; its card links to /sign/<id>.
     wm_poll
     final=$(await_card "Received|Proposed|Rejected") || { real_fail "no answer from the Wallet Manager on the card: $(tr '\n' ';' <<<"$final")"; return; }
-    states+=" → $(sed -n 's/^state //p' <<<"$final" | tr '[:upper:]' '[:lower:]')"
+    [[ $(sed -n 's/^state //p' <<<"$final") == Received ]] \
+        || { real_fail "the card shows $(sed -n 's/^state //p' <<<"$final") before the sign POST, not Received: $(tr '\n' ';' <<<"$final")"; return; }
+    states+=" → received"
     rec=$(record "$id")
     [[ $rec == "pending true "* ]] || { real_fail "the Wallet Manager's record isn't pending with its checks done: ${rec:-none}; card: $(tr '\n' ';' <<<"$final")"; return; }
     sign_dir=$run/sign
@@ -547,12 +587,16 @@ real_payment() {
     local why
     why=$(sign_page_refusal "$sign_dir/page.html" "$TESTNET_CHAIN" "$THROWAWAY" "$THROWAWAY" "$amount") \
         || { real_fail "refused before the sign POST: ${why:-the signing page could not be judged}"; return; }
-    final=$(await_card Proposed) || { real_fail "the card didn't show Proposed after the page: $(tr '\n' ';' <<<"$final")"; return; }
-    states+=" → proposed"
+    # Opening the page has no side effects: the card still Received, the Wallet Manager's record as it was.
+    local seen_now rec_now
+    seen_now=$(card state)
+    rec_now=$(record "$id")
+    [[ $seen_now == Received && $rec_now == "$rec" ]] \
+        || { real_fail "opening the signing page changed the request: card $seen_now (was Received), record ${rec_now:-none} (was $rec)"; return; }
     if [[ -n $dry_run ]]; then
         shot e2e-real-testnet-dry-run
         report real "testnet payment, dry run (stopped before the sign POST)" pass \
-            "$states; the page shows a self-transfer of $amount wei on $TESTNET_CHAIN from $THROWAWAY, signing hash $HASH; nothing signed or sent" e2e-real-testnet-dry-run
+            "$states; the card still Received after the page; the page shows a self-transfer of $amount wei on $TESTNET_CHAIN from $THROWAWAY, signing hash $HASH; nothing signed or sent" e2e-real-testnet-dry-run
         return
     fi
 
@@ -574,23 +618,21 @@ real_payment() {
         [[ -n $why ]] || why=$(head -c 300 "$sign_dir/reply.html" | tr '\n' ' ')
         real_fail "the sign POST answered ${posted:-nothing}, not 303 to /requests#req-$ID: $why (not retried)"; return
     fi
-    states+=" → signed (303)"
+    states+=" → (POST)"
 
     # 4. Until submitted: the signing pass looks for the receipt every 15 s; the result comes back to the card.
-    final=$(await_card "Signed|Failed" 3000) || { real_fail "no submitted result on the card in 10 minutes: $(tr '\n' ';' <<<"$final")"; return; }
-    states+=" → $(sed -n 's/^state //p' <<<"$final" | tr '[:upper:]' '[:lower:]')"
+    final=$(await_card "Signed|Failed" 3000) || { real_fail "no submitted result on the card in 10 minutes: $states; $(tr '\n' ';' <<<"$final")"; return; }
     shot e2e-real-testnet
     local tx card_hash card_url result result_hash signed_hash
     tx=$(sed -n 's/^tx //p' <<<"$final")
     card_hash=${tx%% *}; card_url=""; [[ $tx == *" "* ]] && card_url=${tx#* }
     [[ $(sed -n 's/^state //p' <<<"$final") == Signed && $card_hash =~ ^0x[0-9a-f]{64}$ ]] \
         || { real_fail "the card ended $(sed -n 's/^state //p' <<<"$final"), not Signed with a transaction: $(tr '\n' ';' <<<"$final")"; return; }
-    # The result the card took: `submitted` with that txHash, in the dev side's inbox; the vault's signed.json agrees.
-    result=$(node -e 'const fs = require("fs"), dir = process.argv[1], id = process.argv[2];
-        const all = fs.readdirSync(dir).filter((f) => f.endsWith(`-wallet-result-${id}.json`)).map((f) => JSON.parse(fs.readFileSync(`${dir}/${f}`, "utf8")));
-        const s = all.filter((r) => r.status === "submitted");
-        process.stdout.write(s.length === 1 ? `${s[0].txHash} ${s[0].explorerURL ?? ""}` : `${s.length} submitted results`)' "$loop/dev/inbox/0a1b2c3d" "$id" 2>&1)
-    result_hash=${result%% *}
+    # The results the card took, in the dev side's inbox: received → proposed → signed → submitted (the card may move
+    # through the middle ones faster than it's looked at), `submitted` with that txHash; the vault's signed.json agrees.
+    result=$(real_results "$loop/dev/inbox/0a1b2c3d" "$id") || { real_fail "$states; $result; card: $(tr '\n' ';' <<<"$final")"; return; }
+    states+=" → ${REAL_RESULTS#received → }"
+    result_hash=$(cut -f2 <<<"$result")
     signed_hash=$(jget "$(cat "$vault/requests/$id/signed.json" 2>/dev/null || echo '{}')" txHash)
     [[ $result_hash == "$card_hash" && $signed_hash == "$card_hash" ]] \
         || { real_fail "the transaction differs: card $card_hash, submitted result $result, vault signed.json ${signed_hash:-none}"; return; }
