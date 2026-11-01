@@ -25,6 +25,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             self?.leadController.tell(text, from: .system("from the Wallet Manager"), session: id)
         }
         desk.openSettings = { [weak self] in self?.showSettings(tab: .wallet) }
+        // Cards name their session as the window does, and only sessions the host runs get one.
+        desk.sessionNames = { [weak self] in
+            guard let self else { return [:] }
+            return WalletDesk.names(hosted: hostClient.sessions, rows: windowModel.allRows)
+        }
+        // And only a request the host stamped for the session it names (see `WalletStamp`).
+        desk.verifyStamps = { try LeadVault.standard.verifyWallet($0) }
         return desk
     }()
     /// Settings › Wallet's peers: `passage peers --no-discovery --json`, read off the main thread each time the tab shows
@@ -174,6 +181,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         // A peer or Passage path chosen in Settings › Wallet: the cards redraw now (Send comes back on waiting ones),
         // not at the next look. After the change lands (@Published sends before it does).
         preferences.$walletPeerID.combineLatest(preferences.$walletPassagePath)
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.walletDesk.refresh(polling: false) }
+            .store(in: &cancellables)
+        // The host's sessions known, or changed: cards of the sessions it runs show, by the window's names.
+        hostClient.$sessions
+            .map { $0.map { "\($0.id) \($0.label) \($0.title)" } }
+            .removeDuplicates()
             .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.walletDesk.refresh(polling: false) }

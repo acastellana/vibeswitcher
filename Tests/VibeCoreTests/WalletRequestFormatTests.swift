@@ -316,6 +316,39 @@ struct WalletRequestFormatTests {
         #expect((try? Self.parseRequest(Self.edit(request, "reason", .string("one\ntwo" + String(repeating: "é", count: 993))))) != nil)
     }
 
+    /// A reason can't pass for more of the card than it is: 8 lines at most, no more than 2 combining marks on one
+    /// character, nothing that draws as blank space but isn't a space.
+    @Test func reasonCantImitateOtherRows() throws {
+        let request = Self.request().value
+        func reason(_ text: String) throws -> WalletRequest { try Self.parseRequest(Self.edit(request, "reason", .string(text))) }
+        let eight = (1...8).map { "line \($0)" }.joined(separator: "\n")
+        #expect((try? reason(eight)) != nil)
+        #expect(throws: WalletRequestFormat.Failure.invalid("reason", "over 8 lines")) { try reason(eight + "\nline 9") }
+        #expect(throws: WalletRequestFormat.Failure.invalid("reason", "over 8 lines")) { try reason("pay" + String(repeating: "\n", count: 8)) }
+        // Two marks on a letter (decomposed Vietnamese) is writing; three is stacking.
+        #expect((try? reason("Tie\u{0323}\u{0302}n, e\u{0301} and a\u{0300}")) != nil)
+        #expect(throws: WalletRequestFormat.Failure.invalid("reason", "stacks more than 2 combining marks on one character")) {
+            try reason("pay e\u{0323}\u{0302}\u{0301}xample")
+        }
+        #expect(throws: WalletRequestFormat.Failure.invalid("reason", "stacks more than 2 combining marks on one character")) {
+            try reason("Z" + String(repeating: "\u{0336}", count: 20))
+        }
+        for blank: UInt32 in [0x3164, 0x115F, 0x1160, 0x2800, 0xFFA0, 0x2028, 0x2029, 0x17B4, 0xFFFC] {
+            let scalar = String(Unicode.Scalar(blank)!)
+            #expect(throws: WalletRequestFormat.Failure.invalid("reason", "holds a character that draws as blank space (U+\(String(format: "%04X", blank)))")) {
+                try reason("Pay the invoice.\n\(scalar)\nAmount: 0 GEN")
+            }
+        }
+        // Ordinary spaces, emoji (a variation selector is one mark) and non-Latin scripts are fine.
+        #expect((try? reason("Pay\u{00A0}the 👍\u{FE0F} invoice: 請求書 · счёт · فاتورة")) != nil)
+        // The CLI refuses the same, with the parser's words.
+        #expect(throws: WalletRequestFormat.Failure.self) {
+            var made = Self.request()
+            made.reason = "a\u{3164}"
+            _ = try made.encoded()
+        }
+    }
+
     // MARK: Key material
 
     static let hex64 = String(repeating: "0123456789abcdef", count: 4)

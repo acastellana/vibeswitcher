@@ -136,7 +136,7 @@ Sent by VibeSwitcher to the Wallet Manager. All fields are required unless marke
 | `asset` | string | `"native"` (the chain's own coin) or a token contract's address (an ERC-20 transfer). |
 | `amount` | string | In the asset's base units (wei for the native coin), decimal digits: `^(0\|[1-9][0-9]{0,59})$`, at most 60 digits. |
 | `data` | string | Optional: only, and always, with `"call"`: the calldata, `0x` and an even number of hex digits, 4 to 24 576 bytes (8 to 49 152 digits). |
-| `reason` | string | text(1000), 1–1000: why, in the requester's words. Shown to the person who signs. |
+| `reason` | string | text(1000), 1–1000: why, in the requester's words. Shown to the person who signs, set apart as the requester's words. So that it can't pass for more of what the signer reads than it is, also: at most **8 lines** (7 line feeds); no more than **2 combining marks** (Unicode categories Mn, Mc, Me) in a row, that is on one base character; and none of the characters that draw as blank space or a line break without being a space, a line feed, or a control or format character: U+115F, U+1160 (Hangul fillers), U+17B4, U+17B5 (Khmer inherent vowels), U+2028, U+2029 (line and paragraph separators), U+2800 (Braille blank), U+3164, U+FFA0 (Hangul fillers), U+FFFC (object replacement). |
 
 And, across fields:
 
@@ -398,6 +398,13 @@ are updated together.
 
 ### History
 
+- 2026-11-01: still version 1. `reason` is stricter: at most 8 lines, no more than 2 combining marks on one base
+  character, and none of a list of blank lookalikes (U+115F, U+1160, U+17B4, U+17B5, U+2028, U+2029, U+2800, U+3164,
+  U+FFA0, U+FFFC), so that an agent's reason can't stack into, blank out or line-break past the rows around it where
+  the signer reads it. A v1 reader that doesn't apply them takes every request this one does (vectors:
+  `request-valid-reason-8-lines.json`, `request-invalid-reason-9-lines.json`,
+  `request-invalid-reason-combining-marks.json`, `request-invalid-reason-hangul-filler.json`,
+  `request-invalid-reason-line-separator.json`).
 - 2026-11-01: still version 1. A request from the configured VibeSwitcher peer, named `wallet-request-<id>.json` with
   `<id>` an id, that doesn't parse or breaks the format (64 KiB, JSON, fields, key material, its `id` not its name's)
   is now answered with `rejected` under that `<id>`, its only check `format` with a detail of at most 300 characters

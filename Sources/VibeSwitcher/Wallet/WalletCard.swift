@@ -76,35 +76,117 @@ struct WalletCard: View {
         .accessibilityAddTraits(.isHeader)
     }
 
-    /// The request, a row per fact: the amount first and largest, as it's what a glance is for.
+    /// The request, a row per fact: the amount first and largest, as it's what a glance is for; for a contract call, what
+    /// the call does (decoded, or plainly unknown) comes first instead, and the native value it sends after. Then who
+    /// asked, and the reason set apart as the agent's words.
     private var request: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
-            GridRow {
-                label("Amount")
-                Text("\(card.amount) \(card.asset)").font(.system(size: 15, weight: .semibold)).monospacedDigit()
-            }
-            row("Chain", card.chainText)
-            GridRow {
-                label("From")
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(card.from).font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.middle)
-                        .help(card.from)
-                    if let wallet = card.wallet {
-                        Text(wallet.title).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary)
-                            .padding(.horizontal, 6).padding(.vertical, 1.5)
-                            .background(Capsule().strokeBorder(.secondary.opacity(0.5), lineWidth: 1))
-                            .fixedSize()
+        VStack(alignment: .leading, spacing: 9) {
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
+                if let call = card.call {
+                    callRows(call)
+                } else {
+                    GridRow {
+                        label("Amount")
+                        Text("\(card.amount) \(card.asset)").font(.system(size: 15, weight: .semibold)).monospacedDigit()
                     }
                 }
+                row("Chain", card.chainText)
+                GridRow {
+                    label("From")
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(card.from).font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                            .help(card.from)
+                        if let wallet = card.wallet {
+                            Text(wallet.title).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary)
+                                .padding(.horizontal, 6).padding(.vertical, 1.5)
+                                .background(Capsule().strokeBorder(.secondary.opacity(0.5), lineWidth: 1))
+                                .fixedSize()
+                        }
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                row(card.call == nil ? "To" : "Contract", card.to, mono: true)
+                if card.call != nil {
+                    row("Value sent", "\(card.amount) \(card.asset)")
+                    if let bytes = card.calldataBytes { row("Calldata", "\(bytes) bytes") }
+                }
+                row("Workspace", card.workspace)
+                requestedBy
             }
-            .accessibilityElement(children: .combine)
-            row(card.calldataBytes == nil ? "To" : "Contract", card.to, mono: true)
-            if let bytes = card.calldataBytes { row("Call", "\(bytes) bytes of calldata, decoded and shown on the Wallet Manager's Mac") }
-            row("Workspace", card.workspace)
-            row("Requested by", card.requestedBy)
-            row("Reason", card.reason)
+            reason
         }
         .textSelection(.enabled)
+    }
+
+    /// A contract call in words: what it does, large (red when it's unknown or grants everything), then who it lets
+    /// spend or receive what, a row each, an unlimited amount in red.
+    @ViewBuilder private func callRows(_ call: WalletCall) -> some View {
+        let red = Color(nsColor: .systemRed)
+        GridRow {
+            label("Call")
+            VStack(alignment: .leading, spacing: 1) {
+                Label {
+                    Text(call.headline)
+                } icon: {
+                    if call.alarming { Image(systemName: "exclamationmark.triangle.fill").accessibilityHidden(true) }
+                }
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(call.alarming ? red : .primary)
+                if let function = call.function {
+                    Text(function).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Call: \(call.alarming ? "warning, " : "")\(call.headline)\(call.function.map { ", \($0)" } ?? "")")
+        ForEach(Array(call.fields.enumerated()), id: \.offset) { _, field in
+            let mono = WalletRequestFormat.isAddress(field.value)
+            GridRow {
+                label(field.name)
+                Text(field.value)
+                    .font(mono ? .system(size: 12, design: .monospaced) : .system(size: 12.5, weight: field.alarming ? .semibold : .regular))
+                    .foregroundStyle(field.alarming ? red : .primary)
+                    .lineLimit(mono ? 1 : nil).truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(mono ? field.value : "")
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(field.name): \(field.alarming ? "warning, " : "")\(field.value)")
+        }
+    }
+
+    /// The session as the window names it; the agent's own label, when it gave another, beside it in its words.
+    private var requestedBy: some View {
+        GridRow {
+            label("Requested by")
+            VStack(alignment: .leading, spacing: 1) {
+                Text(card.requestedBy).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
+                if !card.requestedByLabel.isEmpty, card.requestedByLabel != card.requestedBy {
+                    Text("its label: “\(card.requestedByLabel)”").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Requested by \(card.requestedByText)")
+    }
+
+    /// The reason, quoted and set apart under the rows, so nothing in it reads as one of them.
+    private var reason: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(WalletCardModel.reasonTitle).font(.system(size: 11.5)).foregroundStyle(.secondary)
+            Text("“\(card.reason)”")
+                .font(.system(size: 12.5).italic())
+                .lineLimit(WalletRequestFormat.maxReasonLines)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 10)
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 1.5).fill(.secondary.opacity(increased ? 1 : 0.45)).frame(width: 3)
+                }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(WalletCardModel.reasonTitle): \(card.reason)")
     }
 
     /// The filed request changed after it went to the browser wallet: the card shows what the page was made from.

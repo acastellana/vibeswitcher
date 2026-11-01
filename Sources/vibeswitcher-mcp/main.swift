@@ -55,8 +55,9 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--wallet-reque
     let walletManager = WalletAsk.WalletManager.from(peer: defaults?.string(forKey: "walletPeerID") ?? "",
                                                     passagePath: defaults?.string(forKey: "walletPassagePath") ?? "",
                                                     path: environment["PATH"])
-    let ran = WalletAsk.run(Array(CommandLine.arguments.dropFirst(2)), environment: environment,
-                           cwd: FileManager.default.currentDirectoryPath, walletManager: walletManager)
+    // The session host says which session this process runs in, and stamps the request for it.
+    let ran = WalletAsk.run(Array(CommandLine.arguments.dropFirst(2)), cwd: FileManager.default.currentDirectoryPath,
+                           walletManager: walletManager, vault: .standard)
     if !ran.output.isEmpty { print(ran.output) }
     if !ran.error.isEmpty { FileHandle.standardError.write(Data((ran.error + "\n").utf8)) }
     exit(ran.status)

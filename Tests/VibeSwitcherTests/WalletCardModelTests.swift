@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import VibeCore
 @testable import VibeSwitcher
 
 /// The wallet request card's display model: which buttons each state shows (Send to Wallet Manager only while waiting), the
@@ -61,6 +62,38 @@ struct WalletCardModelTests {
         #expect(!card.isWarning(unknown))
         #expect(card.text.contains("✗ calldata"))
         #expect(!card.isWarning(.init(name: "balance", ok: true)))
+    }
+
+    /// A contract call: the card says what it does (an approve's spender, an unlimited amount), never just "0 GEN", and
+    /// no longer claims the Wallet Manager decodes it; who asked is the session's name with the agent's label beside
+    /// it; the reason is quoted as the agent's words.
+    @Test func aCallSaysWhatItDoesAndTheReasonIsTheAgents() {
+        let approve = "0x095ea7b3" + String(repeating: "0", count: 24) + "00000000000000000000000000000000000000bb" + String(repeating: "f", count: 64)
+        let request = WalletRequest(createdAt: Date(timeIntervalSince1970: 1_793_448_000), expiresAt: Date(timeIntervalSince1970: 1_793_534_400),
+                                    requestedBy: .init(project: "p", session: "s", label: "Payroll bot"), workspace: "example",
+                                    from: "0x00000000000000000000000000000000000000aa", chainId: 42_424_242, action: .call,
+                                    to: "0x00000000000000000000000000000000000000cc", asset: "native", amount: "0", data: approve,
+                                    reason: "Routine.\nAmount: 1 GEN")
+        let card = WalletCardModel(request: request, requestedBy: "Fix login", label: "Payroll bot", state: .waiting)
+        #expect(card.call?.headline == "Approve a spender" && card.call?.alarming == true)
+        let text = card.text
+        #expect(text.contains("Call: Approve a spender (approve(address,uint256))"))
+        #expect(text.contains("  Spender: 0x00000000000000000000000000000000000000bb"))
+        #expect(text.contains("  Amount: Unlimited ("))
+        #expect(text.contains("Value sent: 0 GEN") && !text.contains("\nAmount: 0 GEN"))
+        #expect(!text.contains("decoded and shown on the Wallet Manager's Mac"))
+        #expect(text.contains("Requested by: Fix login (the agent's label: Payroll bot)"))
+        #expect(text.contains("Reason, in the agent's words: “Routine.\nAmount: 1 GEN”"))
+        // Any other calldata: plainly unknown.
+        var other = request
+        other.data = "0x12345678"
+        let unknown = WalletCardModel(request: other, requestedBy: "Fix login", state: .waiting)
+        #expect(unknown.text.contains("Call: Unknown contract call: it may move tokens"))
+        // A transfer: its amount, no call; the same label as the name isn't repeated.
+        var transfer = request
+        (transfer.action, transfer.data, transfer.amount) = (.transfer, nil, "1000000000000000000")
+        let plain = WalletCardModel(request: transfer, requestedBy: "Payroll bot", label: "Payroll bot", state: .waiting)
+        #expect(plain.call == nil && plain.text.contains("Amount: 1 GEN") && plain.requestedByText == "Payroll bot")
     }
 
     @Test func chainNames() {

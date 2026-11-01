@@ -81,6 +81,15 @@ struct WalletDeskTests {
     let temp = Scratch()
     static let created = Date(timeIntervalSince1970: 1_793_448_000)   // 2026-10-31T12:00:00Z
     static let session = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
+    /// The name the window gives the test's session.
+    static let sessionName = "Example session"
+
+    /// The sessions the session host runs, as the desk reads them: the test's own, and `others`.
+    static func names(_ others: UUID...) -> [String: String] {
+        var names = [session.uuidString.lowercased(): sessionName]
+        for other in others { names[other.uuidString.lowercased()] = "Harness session" }
+        return names
+    }
 
     final class Told: @unchecked Sendable {
         var messages: [(session: String, text: String)] = []
@@ -150,10 +159,89 @@ struct WalletDeskTests {
         let store = WalletRequestStore(folder: temp.url("requests"))
         let desk = WalletDesk(folder: asked, store: store, inbox: fake.inbox,
                              config: { WalletDesk.Config(passage: fake.executable, peer: peers?.id ?? peer) }, now: { clock.now }, log: { _ in })
+        desk.sessionNames = { WalletDeskTests.names() }
+        desk.verifyStamps = WalletTestStamps.verify
         desk.findPassage = { nil }
         let told = Told()
         desk.deliver = { session, text in told.messages.append((session, text)) }
         return Setup(fake: fake, desk: desk, asked: asked, store: store, told: told)
+    }
+
+    /// A filed request names a session; only one the session host runs gets a card, named as the window names it. With no
+    /// sessions known (the default, or the host not answered yet), no card at all.
+    @Test func aRequestFromASessionTheHostDoesntRunGetsNoCard() async throws {
+        let s = try setup()
+        let stranger = UUID(uuidString: "99999999-2222-4333-8444-555555555555")!
+        try WalletAsk.file(Self.request(2, session: stranger), in: s.asked)
+        try WalletAsk.file(Self.request(1), in: s.asked)
+        await refreshed(s.desk)
+        #expect(s.desk.cards.map(\.id) == [Self.request(1).id])
+        // Nothing can be done to a request without a card.
+        var done = false
+        s.desk.act(.discard, on: Self.request(2).id) { done = true }
+        _ = await until { done }
+        #expect(FileManager.default.fileExists(atPath: s.asked.appendingPathComponent("\(Self.request(2).id).json").path))
+        // Once the host runs it, its card shows, by the window's name.
+        s.desk.sessionNames = { Self.names(stranger) }
+        await refreshed(s.desk)
+        #expect(s.desk.cards(for: stranger).map(\.requestedBy) == ["Harness session"])
+        // Fail closed: a desk that knows no sessions shows nothing.
+        s.desk.sessionNames = { [:] }
+        await refreshed(s.desk)
+        #expect(s.desk.cards.isEmpty)
+        #expect(s.fake.sends.isEmpty)
+    }
+
+    /// The session on a card is the one the host stamped the request for, from the filing process: a request written
+    /// into the folder by hand (naming a session the host runs), one stamped for another session than it names (a
+    /// session its filer started, say), one whose seal isn't the host's, or one rewritten after filing gets no card,
+    /// and goes. While the host can't be asked, no card either, and nothing goes.
+    @Test func onlyARequestTheHostStampedForTheSessionItNamesGetsACard() async throws {
+        let s = try setup()
+        let child = UUID(uuidString: "99999999-2222-4333-8444-555555555555")!
+        s.desk.sessionNames = { Self.names(child) }
+        let stamped = Self.request(1)
+        try WalletAsk.file(stamped, in: s.asked)
+        // By hand: the bytes, no stamp.
+        let byHand = Self.request(2)
+        try VibePaths.writePrivate(try byHand.encoded(), to: s.asked.appendingPathComponent("\(byHand.id).json"))
+        // Filed from the session that started `child`, naming `child`: the host seals it for its own session only.
+        let fromParent = Self.request(3, session: child)
+        let parentStamp = try WalletTestStamps.stamp(Self.request(3))
+        try VibePaths.writePrivate(try fromParent.encoded(), to: s.asked.appendingPathComponent("\(fromParent.id).json"))
+        try VibePaths.writePrivate(JSONEncoder().encode(WalletStamp(session: child.uuidString.lowercased(), digest: WalletStamp.digest(try fromParent.encoded()),
+                                                                  seal: parentStamp.seal)), to: WalletAsk.stampFile(fromParent.id, in: s.asked))
+        // A seal made up for the right session and bytes.
+        let forged = Self.request(4)
+        try VibePaths.writePrivate(try forged.encoded(), to: s.asked.appendingPathComponent("\(forged.id).json"))
+        try VibePaths.writePrivate(JSONEncoder().encode(WalletStamp(session: Self.session.uuidString.lowercased(), digest: WalletStamp.digest(try forged.encoded()),
+                                                                  seal: String(repeating: "ab", count: 32))), to: WalletAsk.stampFile(forged.id, in: s.asked))
+        // Stamped, then rewritten (another amount) under its stamp.
+        let rewritten = Self.request(5)
+        try WalletAsk.file(rewritten, in: s.asked)
+        var changed = rewritten
+        changed.amount = "999"
+        try VibePaths.writePrivate(try changed.encoded(), to: s.asked.appendingPathComponent("\(rewritten.id).json"))
+
+        await refreshed(s.desk)
+        #expect(s.desk.cards.map(\.id) == [stamped.id])
+        for gone in [byHand, fromParent, forged, rewritten] {
+            #expect(!FileManager.default.fileExists(atPath: s.asked.appendingPathComponent("\(gone.id).json").path), "\(gone.id)")
+            #expect(!FileManager.default.fileExists(atPath: WalletAsk.stampFile(gone.id, in: s.asked).path), "\(gone.id)")
+        }
+
+        // The host can't be asked: a new request waits with no card, and stays filed; once it answers, its card shows.
+        struct Down: Error {}
+        s.desk.verifyStamps = { _ in throw Down() }
+        let later = Self.request(6)
+        try WalletAsk.file(later, in: s.asked)
+        await refreshed(s.desk)
+        #expect(s.desk.cards.map(\.id) == [stamped.id])
+        #expect(FileManager.default.fileExists(atPath: s.asked.appendingPathComponent("\(later.id).json").path))
+        s.desk.verifyStamps = WalletTestStamps.verify
+        await refreshed(s.desk)
+        #expect(s.desk.cards.map(\.id) == [stamped.id, later.id])
+        #expect(s.fake.sends.isEmpty && s.told.messages.isEmpty)
     }
 
     /// A request as `vs-wallet request` files it from the session `session`.
@@ -204,7 +292,9 @@ struct WalletDeskTests {
         #expect(card.actions == [.send, .discard])
         #expect(card.workspace == "example")
         #expect(card.amount == "1.25" && card.asset == "GEN")
-        #expect(card.requestedBy == "Example agent")
+        // Named as the window names the session; the agent's own label beside it.
+        #expect(card.requestedBy == Self.sessionName && card.requestedByLabel == "Example agent")
+        #expect(card.requestedByText == "Example session (the agent's label: Example agent)")
         // Another session's chat doesn't show it.
         #expect(s.desk.cards(for: UUID()).isEmpty)
         // Looked at again, and a poll: still nothing sent.
@@ -421,6 +511,8 @@ struct WalletDeskTests {
         let again = WalletDesk(folder: s.asked, store: s.store, inbox: s.fake.inbox,
                               config: { WalletDesk.Config(passage: s.fake.executable, peer: WalletFakePassage.peer) },
                               now: { clock.now }, log: { _ in })
+        again.sessionNames = { WalletDeskTests.names() }
+        again.verifyStamps = WalletTestStamps.verify
         again.findPassage = { nil }
         again.deliver = { session, text in s.told.messages.append((session, text)) }
         await refreshed(again)
@@ -618,6 +710,8 @@ struct WalletDeskTests {
         let later = WalletDesk(folder: s.asked, store: s.store, inbox: s.fake.inbox,
                                config: { WalletDesk.Config(passage: s.fake.executable, peer: WalletFakePassage.peer) },
                                now: { clock.now }, log: { _ in })
+        later.sessionNames = { WalletDeskTests.names() }
+        later.verifyStamps = WalletTestStamps.verify
         defer { later.close() }
         await refreshed(later)
         #expect(later.cards.first?.state == .sent)
@@ -698,6 +792,8 @@ struct WalletDeskTests {
         let desk = WalletDesk(folder: asked, store: WalletRequestStore(folder: temp.url("requests")), inbox: fake.inbox,
                              config: { WalletDesk.Config(passage: setting, peer: WalletFakePassage.peer) },
                              now: { WalletDeskTests.created.addingTimeInterval(30) }, log: { _ in })
+        desk.sessionNames = { WalletDeskTests.names() }
+        desk.verifyStamps = WalletTestStamps.verify
         // No passage on the PATH; Passage.app where /Applications would be (one missing before it, as ~/Applications may be).
         desk.findPassage = { PassageCommand.resolve(setting: "", onPath: { nil }, apps: [self.temp.url("missing/Passage.app"), fake.app]) }
         return (fake, desk, asked)
@@ -837,6 +933,8 @@ struct WalletDeliveryTests {
         let desk = WalletDesk(folder: asked, store: WalletRequestStore(folder: temp.url("requests")), inbox: fake.inbox,
                              config: { WalletDesk.Config(passage: fake.executable, peer: WalletFakePassage.peer) },
                              now: { WalletDeskTests.created.addingTimeInterval(30) }, log: { _ in })
+        desk.sessionNames = { WalletDeskTests.names(h.session.id) }
+        desk.verifyStamps = WalletTestStamps.verify
         defer { desk.close() }
         desk.deliver = { session, text in
             controller.tell(text, from: .system("from the Wallet Manager"), session: UUID(uuidString: session)!)
@@ -885,6 +983,8 @@ struct WalletDeliveryTests {
         let desk = WalletDesk(folder: asked, store: WalletRequestStore(folder: temp.url("requests")), inbox: fake.inbox,
                              config: { WalletDesk.Config(passage: fake.executable, peer: WalletFakePassage.peer) },
                              now: { request.expiresAt.addingTimeInterval(1) }, log: { _ in })
+        desk.sessionNames = { WalletDeskTests.names(h.session.id) }
+        desk.verifyStamps = WalletTestStamps.verify
         defer { desk.close() }
         desk.deliver = { session, text in
             controller.tell(text, from: .system("from the Wallet Manager"), session: UUID(uuidString: session)!)

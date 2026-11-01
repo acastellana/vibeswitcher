@@ -152,7 +152,7 @@ public struct WalletRequest: Equatable, Sendable {
             guard asset == "native" else { throw WalletRequestFormat.Failure.invalid(fields.name("asset"), "a call sends only native") }
         }
         let reason = try fields.string("reason")
-        try WalletRequestFormat.checkText(reason, field: fields.name("reason"), limit: 1000, multiline: true)
+        try WalletRequestFormat.checkReason(reason, field: fields.name("reason"))
         let request = WalletRequest(id: id, createdAt: created, expiresAt: expires, requestedBy: requester, workspace: workspace,
                                    from: from, chainId: chain, action: action, to: to, asset: asset, amount: amount, data: data,
                                    reason: reason)

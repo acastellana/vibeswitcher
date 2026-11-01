@@ -2,7 +2,8 @@ import Foundation
 
 /// How an agent in a session VibeSwitcher started asks for a transaction: `vs-wallet request …` (Resources/bin, on every
 /// session's PATH; it runs `vibeswitcher-mcp --wallet-request …`). The request is checked by the same strict parser
-/// the Wallet Manager uses and filed, 0600, in `folder`; the app shows it as a card in the asking session's chat, and nothing
+/// the Wallet Manager uses and filed, 0600, in `folder`, with the session host's stamp for the session the filing process
+/// runs in (`WalletStamp`); the app shows it as a card in that session's chat (and only a request the host stamped), and nothing
 /// goes until the user presses Send to Wallet Manager there, or Sign in browser wallet (from an 0x address; it works with no
 /// Wallet Manager set up). The answer comes back to the session as a message. Nothing here sends, signs or reads a key.
 public enum WalletAsk {
@@ -27,9 +28,9 @@ public enum WalletAsk {
           --amount      in the asset's base units (wei for the native coin), decimal digits
           --asset       native (the default) or a token contract's 0x address (an ERC-20 transfer)
           --data        calldata: makes it a contract call (its asset native; its amount the value sent, 0 allowed)
-          --reason      why, in your words: shown to the person who signs (up to 1000 characters)
+          --reason      why, in your words: shown, quoted as yours, to the person who signs (up to 1000 characters, 8 lines)
           --expires-in  how long it stands if not acted on: 90m, 24h (the default), 3d; 7d at most
-          --label       a label for people (the session's name, say)
+          --label       a label for people (the card names the session as VibeSwitcher knows it, and shows this beside it)
         Never put a key, seed or recovery phrase in any field: such text is refused.
         """
 
@@ -38,12 +39,11 @@ public enum WalletAsk {
         public init(_ description: String) { self.description = description }
     }
 
-    /// The request the arguments (after `request`) ask for, made `now` in the session `environment` names; refused with
-    /// the parser's reason (the field and its rule) for anything the format doesn't take.
-    public static func request(_ arguments: [String], environment: [String: String], cwd: String, now: Date = Date()) throws -> WalletRequest {
-        guard let session = environment["VIBESWITCHER_SESSION"], let id = UUID(uuidString: session) else {
-            throw Refusal("this isn't a session VibeSwitcher started (no VIBESWITCHER_SESSION): run it from the agent's session in VibeSwitcher")
-        }
+    /// The request the arguments (after `request`) ask for, made `now` from `session` (the session the host tells
+    /// the filing process runs in: `LeadVault.walletSession`); refused with the parser's reason (the field and its
+    /// rule) for anything the format doesn't take.
+    public static func request(_ arguments: [String], session: String, cwd: String, now: Date = Date()) throws -> WalletRequest {
+        guard let id = UUID(uuidString: session) else { throw Refusal("the session host named no session (\(session))") }
         var values: [String: String] = [:]
         let known = ["--workspace", "--from", "--chain", "--to", "--amount", "--asset", "--data", "--reason", "--expires-in", "--label"]
         var words = arguments.makeIterator()
@@ -90,17 +90,34 @@ public enum WalletAsk {
         return seconds
     }
 
-    /// Files `request` for the app: `<folder>/<id>.json`, 0600 in a 0700 folder.
-    public static func file(_ request: WalletRequest, in folder: URL = WalletAsk.folder) throws {
+    /// Files `request` for the app with the session host's `stamp` on its bytes: `<folder>/<id>.seal`, then
+    /// `<folder>/<id>.json`, each 0600 in a 0700 folder. Refused when the stamp isn't for these bytes and the session
+    /// the request names.
+    public static func file(_ request: WalletRequest, stamp: WalletStamp, in folder: URL = WalletAsk.folder) throws {
+        let bytes = try request.encoded()
+        guard stamp.session == request.requestedBy.session.lowercased(), stamp.digest == WalletStamp.digest(bytes) else {
+            throw Refusal("the session host's stamp isn't for this request")
+        }
         try VibePaths.ensurePrivate(folder)
-        try VibePaths.writePrivate(request.encoded(), to: folder.appendingPathComponent("\(request.id).json"))
+        // The stamp first: the app never sees the request without it.
+        try VibePaths.writePrivate(JSONEncoder().encode(stamp), to: stampFile(request.id, in: folder))
+        try VibePaths.writePrivate(bytes, to: folder.appendingPathComponent("\(request.id).json"))
+    }
+
+    /// Beside a filed request: the session host's stamp on it (see `WalletStamp`).
+    public static func stampFile(_ id: String, in folder: URL = WalletAsk.folder) -> URL {
+        folder.appendingPathComponent("\(id).seal")
     }
 
     /// The requests filed in `folder`, oldest first, each checked again by the strict parser (the folder is a file
-    /// anyone's shell can write). One that doesn't parse, or whose id isn't its name's, is named in `refused`.
-    public static func filed(in folder: URL = WalletAsk.folder) -> (requests: [WalletRequest], refused: [(file: URL, why: String)]) {
+    /// anyone's shell can write), with the stamp filed beside each (`stamps`, by id; the app asks the session host
+    /// whether it's the host's). One that doesn't parse, whose id isn't its name's, or with no stamp for its bytes and
+    /// the session it names, is named in `refused`.
+    public static func filed(in folder: URL = WalletAsk.folder)
+        -> (requests: [WalletRequest], stamps: [String: WalletStamp], refused: [(file: URL, why: String)]) {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
         var requests: [WalletRequest] = []
+        var stamps: [String: WalletStamp] = [:]
         var refused: [(URL, String)] = []
         for name in names.sorted() where name.hasSuffix(".json") && !name.hasPrefix(".") {
             let file = folder.appendingPathComponent(name)
@@ -108,12 +125,19 @@ public enum WalletAsk {
                 let data = try read(file)
                 let request = try WalletRequest.parse(data)
                 guard "\(request.id).json" == name else { throw Refusal("its id \(request.id) isn't its name's") }
+                guard let stamp = try? JSONDecoder().decode(WalletStamp.self, from: read(stampFile(request.id, in: folder))) else {
+                    throw Refusal("it has no session host stamp (vs-wallet request files one; this was written some other way)")
+                }
+                guard stamp.digest == WalletStamp.digest(data), stamp.session == request.requestedBy.session.lowercased() else {
+                    throw Refusal("its session host stamp is for other bytes or another session")
+                }
                 requests.append(request)
+                stamps[request.id] = stamp
             } catch {
                 refused.append((file, "\(error)"))
             }
         }
-        return (requests.sorted { ($0.createdAt, $0.id) < ($1.createdAt, $1.id) }, refused)
+        return (requests.sorted { ($0.createdAt, $0.id) < ($1.createdAt, $1.id) }, stamps, refused)
     }
 
     /// A regular file's bytes (no link followed), 64 KiB at most.
@@ -130,6 +154,7 @@ public enum WalletAsk {
     /// Removes a filed request (sent, discarded, or refused), its expiry note's marker and its browser wallet mark.
     public static func remove(_ id: String, in folder: URL = WalletAsk.folder) {
         try? FileManager.default.removeItem(at: folder.appendingPathComponent("\(id).json"))
+        try? FileManager.default.removeItem(at: stampFile(id, in: folder))
         try? FileManager.default.removeItem(at: expiryMarker(id, in: folder))
         try? FileManager.default.removeItem(at: WalletBrowser.markFile(id, in: folder))
     }
@@ -199,14 +224,32 @@ public enum WalletAsk {
     /// `vs-wallet request …`, as the CLI runs it: what to print, and the exit status (0 filed, 1 refused, 2 usage).
     /// `walletManager`: whether Settings › Wallet has the Wallet Manager set up. Filed either way; without it the output
     /// says the browser wallet is the way to sign it (or, for a wallet id, that it waits for the Wallet Manager).
-    public static func run(_ arguments: [String], environment: [String: String], cwd: String, walletManager: WalletManager,
-                           folder: URL = WalletAsk.folder, now: Date = Date()) -> (status: Int32, output: String, error: String) {
+    /// `vault`: the session host's (`LeadVault.standard` in the CLI; the sandbox's own there). It says which session the
+    /// calling process runs in, from that process (never from what it says, VIBESWITCHER_SESSION included), and stamps
+    /// the request's bytes for that session; the app shows only a request the host stamped. Refused when it can't be
+    /// asked, or places the process in no session.
+    public static func run(_ arguments: [String], cwd: String, walletManager: WalletManager, folder: URL = WalletAsk.folder,
+                           now: Date = Date(), vault: LeadVault) -> (status: Int32, output: String, error: String) {
         guard let command = arguments.first, command == "request" else {
             return arguments.first.map { ["help", "--help", "-h"].contains($0) } == true ? (0, usage, "") : (2, "", usage)
         }
         do {
-            let request = try request(Array(arguments.dropFirst()), environment: environment, cwd: cwd, now: now)
-            try file(request, in: folder)
+            let session: String
+            do {
+                session = try vault.walletSession()
+            } catch {
+                throw Refusal("VibeSwitcher's session host didn't say which of its sessions this process runs in (\(error)): "
+                              + "run it from the agent's own session in VibeSwitcher, with VibeSwitcher running")
+            }
+            let request = try request(Array(arguments.dropFirst()), session: session, cwd: cwd, now: now)
+            let digest = WalletStamp.digest(try request.encoded())
+            let seal: String
+            do {
+                seal = try vault.sealWallet(session: session, digest: digest)
+            } catch {
+                throw Refusal("VibeSwitcher's session host didn't stamp the request (\(error))")
+            }
+            try file(request, stamp: WalletStamp(session: session, digest: digest, seal: seal), in: folder)
             let expires = "It expires at \(WalletRequestFormat.string(request.expiresAt))."
             guard let why = walletManager.why else {
                 return (0, "Filed wallet request \(request.id): it waits on its card in this session's chat in VibeSwitcher, and nothing is sent "

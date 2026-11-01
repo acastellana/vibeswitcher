@@ -129,6 +129,8 @@ struct WalletBrowserDeskTests {
         let store = WalletRequestStore(folder: temp.url("requests"))
         let desk = WalletDesk(folder: asked, store: store, inbox: fake.inbox,
                               config: { WalletDesk.Config(passage: fake.executable, peer: peer.id) }, now: { clock.now }, log: { _ in })
+        desk.sessionNames = { WalletDeskTests.names() }
+        desk.verifyStamps = WalletTestStamps.verify
         desk.findPassage = { nil }
         let told = WalletDeskTests.Told()
         desk.deliver = { session, text in told.messages.append((session, text)) }
@@ -575,6 +577,8 @@ struct WalletBrowserDeskTests {
         let later = WalletDesk(folder: s.base.asked, store: s.base.store, inbox: s.base.fake.inbox,
                                config: { WalletDesk.Config(passage: s.base.fake.executable, peer: WalletFakePassage.peer) },
                                now: { clock.now }, log: { _ in })
+        later.sessionNames = { WalletDeskTests.names() }
+        later.verifyStamps = WalletTestStamps.verify
         defer { later.close() }
         let told = WalletDeskTests.Told()
         later.deliver = { told.messages.append(($0, $1)) }
@@ -635,8 +639,53 @@ struct WalletBrowserDeskTests {
         other.chainId = 5
         #expect(try #require(WalletSignPage.data(for: other))["addChain"] == nil)
         // Never asks for a key, seed or passphrase.
-        for word in ["seed", "private key", "passphrase", "mnemonic", "<input"] { #expect(!html.lowercased().contains(word), "\(word)") }
+        for word in ["seed", "private key", "passphrase", "mnemonic", "<textarea", "contenteditable"] { #expect(!html.lowercased().contains(word), "\(word)") }
+        // Its one input is the confirmation checkbox (hidden but for a grant or a call not decoded here).
+        #expect(html.components(separatedBy: "<input").count == 2 && html.contains(#"<input type="checkbox" id="confirm">"#))
         #expect(WalletSignPage.html(for: WalletDeskTests.request()) == nil)
+    }
+
+    static let spender = "0x00000000000000000000000000000000000000bb"
+    /// approve(spender, 2^256−1): the classic drain.
+    static let approveAll = "0x095ea7b3" + String(repeating: "0", count: 24) + "00000000000000000000000000000000000000bb" + String(repeating: "f", count: 64)
+
+    /// A contract call from an 0x address, sending nothing with it.
+    static func call(_ data: String) -> WalletRequest {
+        var request = request()
+        request.action = .call
+        request.amount = "0"
+        request.data = data
+        return request
+    }
+
+    static func rows(_ data: [String: Any]) -> [[String: String]] { data["rows"] as? [[String: String]] ?? [] }
+
+    /// On the browser path nothing else decodes the call: the page does, an approve reads as one (unlimited in red, and
+    /// a box to tick naming the spender and the amount), anything else plainly as an unknown call. Who asked is the
+    /// session's name as VibeSwitcher knows it, the reason set apart in quotes.
+    @Test func aCallsPageSaysWhatItDoesAndAGrantAsksToBeConfirmed() throws {
+        let request = Self.call(Self.approveAll)
+        let data = try #require(WalletSignPage.data(for: request, requestedBy: "Session A"))
+        let rows = Self.rows(data)
+        #expect(rows.first == ["label": "Call", "value": "Approve a spender", "kind": "big bad"])
+        #expect(rows.contains(["label": "Spender", "value": Self.spender, "kind": "mono"]))
+        #expect(rows.first { $0["label"] == "Amount" }?["value"]?.hasPrefix("Unlimited (") == true)
+        #expect(rows.first { $0["label"] == "Amount" }?["kind"] == "bad")
+        #expect(rows.contains(["label": "Value sent", "value": "0 GEN", "kind": ""]))
+        #expect(rows.last == ["label": "Requested by", "value": "Session A (the agent's label: Example agent)", "kind": ""])
+        #expect(data["confirm"] as? String == "I understand this lets \(Self.spender) spend an unlimited amount of the token \(request.to) from this wallet.")
+        #expect(data["reason"] as? String == "“Pay the example invoice.”" && data["reasonTitle"] as? String == "Reason, in the agent's words")
+        let html = try #require(WalletSignPage.html(for: request, requestedBy: "Session A"))
+        #expect(!html.contains("decoded") && !html.contains("Wallet Manager's Mac"))
+
+        let unknown = try #require(WalletSignPage.data(for: Self.call("0x12345678" + String(repeating: "0", count: 64))))
+        #expect(Self.rows(unknown).first == ["label": "Call", "value": "Unknown contract call: it may move tokens", "kind": "big bad"])
+        // Not decoded here: the same deliberate tick before the wallet is asked.
+        #expect((unknown["confirm"] as? String)?.contains("wasn't decoded here, and it may move tokens from this wallet") == true)
+        // A transfer: the amount first, nothing to confirm.
+        let transfer = try #require(WalletSignPage.data(for: Self.request()))
+        #expect(Self.rows(transfer).first == ["label": "Amount", "value": "1.25 GEN", "kind": "big"])
+        #expect(transfer["confirm"] == nil)
     }
 }
 
@@ -664,6 +713,8 @@ struct WalletBrowserDeliveryTests {
         let desk = WalletDesk(folder: asked, store: WalletRequestStore(folder: temp.url("requests")), inbox: fake.inbox,
                               config: { WalletDesk.Config(passage: fake.executable, peer: WalletFakePassage.peer) },
                               now: { WalletDeskTests.created.addingTimeInterval(30) }, log: { _ in })
+        desk.sessionNames = { WalletDeskTests.names(h.session.id) }
+        desk.verifyStamps = WalletTestStamps.verify
         defer { desk.close() }
         desk.deliver = { session, text in
             controller.tell(text, from: .system("from the Wallet Manager"), session: UUID(uuidString: session)!)
@@ -725,12 +776,16 @@ struct WalletSignPageScriptTests {
         let json = String(decoding: try JSONSerialization.data(withJSONObject: data, options: [.sortedKeys]), as: UTF8.self)
         context.evaluateScript("""
             var window = globalThis, elements = {}, posts = [], calls = [], listeners = {};
+            function make(tag) {
+              return { tag: tag, textContent: "", className: "", disabled: false, hidden: false, checked: false, listeners: {}, children: [],
+                addEventListener: function (type, f) { this.listeners[type] = f; },
+                appendChild: function (child) { this.children.push(child); } };
+            }
             function element(id) {
-              if (!elements[id]) elements[id] = { textContent: "", className: "", disabled: false, listeners: {},
-                addEventListener: function (type, f) { this.listeners[type] = f; } };
+              if (!elements[id]) elements[id] = make("#" + id);
               return elements[id];
             }
-            var document = { getElementById: element };
+            var document = { getElementById: element, createElement: make };
             function addEventListener(type, f) { listeners[type] = f; }
             function fetch(url, options) { posts.push({ url: url, body: JSON.parse(options.body) }); return Promise.resolve({ ok: true, status: 204 }); }
             element("request").textContent = JSON.stringify(\(json));
@@ -764,6 +819,52 @@ struct WalletSignPageScriptTests {
             throw { code: 4200, message: "unsupported " + a.method };
         } }
         """
+    }
+
+    /// An approve: its rows say so, and the wallet isn't asked until the box naming the spender and amount is ticked.
+    @Test func aGrantNeedsItsBoxTickedBeforeTheWalletIsAsked() throws {
+        let hash = "0x" + String(repeating: "ab", count: 32)
+        let request = WalletBrowserDeskTests.call(WalletBrowserDeskTests.approveAll)
+        let context = try Self.page(request, ethereum: Self.wallet(send: #"return "\#(hash)";"#))
+        #expect(Self.value(context, "element('rows').children[1].textContent") == "Approve a spender")
+        #expect(Self.value(context, "element('rows').children[1].className") == "big bad")
+        #expect(Self.value(context, "element('confirmRow').hidden") == "false")
+        #expect(Self.value(context, "element('confirmText').textContent").contains("spend an unlimited amount of the token"))
+        #expect(Self.value(context, "element('sign').disabled") == "true")
+        #expect(Self.status(context).hasPrefix("Tick the box above first"))
+        // Pressed anyway (a disabled button's click, sent by a script): the wallet isn't asked.
+        Self.click(context)
+        #expect(Self.value(context, "calls.length") == "0")
+        context.evaluateScript("element('confirm').checked = true; element('confirm').listeners.change()")
+        #expect(Self.value(context, "element('sign').disabled") == "false")
+        Self.click(context)
+        #expect(Self.value(context, "JSON.stringify(posts)") == #"[{"url":"result","body":{"txHash":"\#(hash)"}}]"#)
+        #expect(Self.value(context, "window.ethereum.tx.data") == WalletBrowserDeskTests.approveAll)
+    }
+
+    /// A call not decoded here: the same box, saying it may move tokens, before the wallet is asked.
+    @Test func anUnknownCallNeedsItsBoxTickedBeforeTheWalletIsAsked() throws {
+        let hash = "0x" + String(repeating: "cd", count: 32)
+        let data = "0x12345678" + String(repeating: "0", count: 64)
+        let context = try Self.page(WalletBrowserDeskTests.call(data), ethereum: Self.wallet(send: #"return "\#(hash)";"#))
+        #expect(Self.value(context, "element('rows').children[1].textContent") == "Unknown contract call: it may move tokens")
+        #expect(Self.value(context, "element('confirmRow').hidden") == "false")
+        #expect(Self.value(context, "element('confirmText').textContent").contains("it may move tokens from this wallet"))
+        #expect(Self.value(context, "element('sign').disabled") == "true")
+        Self.click(context)
+        #expect(Self.value(context, "calls.length") == "0")
+        context.evaluateScript("element('confirm').checked = true; element('confirm').listeners.change()")
+        Self.click(context)
+        #expect(Self.value(context, "window.ethereum.tx.data") == data)
+    }
+
+    /// A transfer has no box: the page is ready as before.
+    @Test func aTransferHasNoBoxToTick() throws {
+        let context = try Self.page(ethereum: Self.wallet(send: "return null;"))
+        // The script leaves the row as the page has it (hidden), its sentence empty.
+        #expect(Self.value(context, "element('confirmText').textContent") == "")
+        #expect(Self.value(context, "element('sign').disabled") == "false")
+        #expect(Self.value(context, "element('rows').children[1].textContent") == "1.25 GEN")
     }
 
     @Test func noWalletSaysSo() throws {

@@ -38,6 +38,12 @@
       "note": "An ordinary English reason, many of whose words are BIP39 words but never 12 in a row: not key material."
     },
     {
+      "file": "request-valid-reason-8-lines.json",
+      "kind": "request",
+      "valid": true,
+      "note": "A reason of 8 lines, the most it may have, whose last holds a letter with two combining marks (decomposed Vietnamese), the most one character may carry."
+    },
+    {
       "file": "request-valid-64kib.json",
       "kind": "request",
       "valid": true,
@@ -470,6 +476,38 @@
       "refusal": "invalid",
       "field": "reason",
       "note": "A bidi override (U+202E) in reason."
+    },
+    {
+      "file": "request-invalid-reason-9-lines.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "reason",
+      "note": "A reason of 9 lines: over 8."
+    },
+    {
+      "file": "request-invalid-reason-combining-marks.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "reason",
+      "note": "Three combining marks (U+0323 U+0302 U+0301) on one letter in reason: over 2."
+    },
+    {
+      "file": "request-invalid-reason-hangul-filler.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "reason",
+      "note": "A Hangul filler (U+3164), which draws as blank space, in reason."
+    },
+    {
+      "file": "request-invalid-reason-line-separator.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "reason",
+      "note": "A line separator (U+2028), which draws as a line break the line count doesn't see, in reason."
     },
     {
       "file": "request-invalid-key-hex.json",

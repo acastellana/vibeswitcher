@@ -288,6 +288,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         try? peers.write(to: folder.appendingPathComponent("peers.jsonl"), atomically: true, encoding: .utf8)
         return folder
     }()
+    /// The sandbox's stand-in for the session host's vault, which stamps wallet requests (see `WalletStamp`).
+    let walletVault = LeadVault.Book()
     lazy var walletDesk: WalletDesk = {
         let passage = externalPassage?.path ?? walletPassage.appendingPathComponent("passage").path
         let clock = walletClock
@@ -298,6 +300,15 @@ private final class Driver: NSObject, NSApplicationDelegate {
                              now: { clock.now() })
         desk.findPassage = { nil }
         desk.openSettings = { [weak self] in self?.showSettings(.wallet) }
+        // The sandbox's host runs its fake sessions: named as the window lists them.
+        desk.sessionNames = { [weak self] in
+            guard let self else { return [:] }
+            let titles = Dictionary(model.allRows.compactMap { row in row.hostID.map { ($0, row.title) } }, uniquingKeysWith: { first, _ in first })
+            return Dictionary(fakeList.map { ($0.id.uuidString.lowercased(), titles[$0.id] ?? $0.label) }, uniquingKeysWith: { first, _ in first })
+        }
+        // Only a request its vault stamped (`wallet-ask` files through it, as the host's for the selected fake session).
+        let book = walletVault
+        desk.verifyStamps = { [folder = state] stamps in try book.vault(folder: folder.appendingPathComponent("wallet/vault"), as: { .app }).verifyWallet(stamps) }
         // Sign in browser wallet: never the user's browser. The page's address is kept for `wallet-page`, which renders
         // it in a web view of the sandbox's own (no wallet extension there).
         desk.openBrowser = { [weak self] url in self?.walletPageURL = url }
@@ -944,7 +955,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
         ("soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. every other cycle a worker shaped like a real one (a task on the lead's board, a transcript of MB MB of tool calls, default 4, its steer inbox, its chat and its terminal fed a build's output) ended by the role sweep, its footprint once removed, and RESULT soak-worker-growth-mb. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet, workers. With no MINUTES: the log so far"),
-        ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh)"),
+        ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m] [--data 0x…] [--reason TEXT]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh); --data makes it a contract call (an approve's calldata, say)"),
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint, transaction (tx HASH [EXPLORER URL], once signed and submitted) and the Wallet Manager's checks"),
         ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
         ("wallet-click send|retry|discard|browser|settings", "presses that button on the newest wallet request card in the selected chat (send goes to the sandbox's fake passage, never the real one; browser serves the local page but never opens a browser: wallet-page shows it; settings opens Settings › Wallet)"),
@@ -1053,7 +1064,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     }
 
     /// `wallet-ask`: the selected fake session's agent files a made-up request, as `vs-wallet request` does
-    /// (`WalletAsk.run`, its session's id in its environment).
+    /// (`WalletAsk.run`, the sandbox's vault placing it in that session, as the host would from its process).
     private func walletAsk(_ words: [String], _ reply: @escaping (Bool, String) -> Void) {
         guard let row = model.selectedRow, let id = row.hostID, let fake = fakeList.first(where: { $0.id == id }) else {
             return reply(false, "no fake session selected: chat NAME first")
@@ -1063,17 +1074,27 @@ private final class Driver: NSObject, NSApplicationDelegate {
                       "--chain": "42424242", "--to": "0x0000000000000000000000000000000000000002", "--amount": "12500000000000000000",
                       "--expires-in": "24h"]
         var rest = words.dropFirst(address ? 1 : 0)
+        var data: String?
+        var reason = "Pay the example invoice for the test deployment."
         while let option = rest.first {
-            guard values[option] != nil, rest.count >= 2 else {
-                return reply(false, "wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m]: not \(option)")
+            guard values[option] != nil || ["--data", "--reason"].contains(option), rest.count >= 2 else {
+                return reply(false, "wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m] "
+                             + "[--data 0x…] [--reason TEXT]: not \(option)")
             }
-            values[option] = rest.dropFirst().first!
+            let value = rest.dropFirst().first!
+            switch option {
+            case "--data": data = value
+            case "--reason": reason = value
+            default: values[option] = value
+            }
             rest = rest.dropFirst(2)
         }
         let arguments = ["request"] + ["--workspace", "--from", "--chain", "--to", "--amount", "--expires-in"].flatMap { [$0, values[$0]!] }
-            + ["--reason", "Pay the example invoice for the test deployment.", "--label", fake.label]
-        let ran = WalletAsk.run(arguments, environment: ["VIBESWITCHER_SESSION": id.uuidString], cwd: fake.cwd,
-                               walletManager: walletPeer.isEmpty ? .noPeer : .ready, folder: walletDesk.folder, now: walletClock.now())
+            + (data.map { ["--data", $0] } ?? []) + ["--reason", reason, "--label", fake.label]
+        // The process is in the selected fake session, as the host would tell.
+        let vault = walletVault.vault(folder: state.appendingPathComponent("wallet/vault"), as: { .session(id.uuidString) }, userOpened: true)
+        let ran = WalletAsk.run(arguments, cwd: fake.cwd, walletManager: walletPeer.isEmpty ? .noPeer : .ready,
+                               folder: walletDesk.folder, now: walletClock.now(), vault: vault)
         guard ran.status == 0 else { return reply(false, ran.error) }
         walletDesk.refresh { [weak self] in self?.settle { reply(true, ran.output) } }
     }

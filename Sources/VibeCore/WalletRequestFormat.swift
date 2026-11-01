@@ -364,6 +364,46 @@ public enum WalletRequestFormat {
         }
     }
 
+    /// The most lines a request's `reason` may have (7 line feeds).
+    public static let maxReasonLines = 8
+    /// The most combining marks (Unicode Mn, Mc, Me) a reason may stack on one base character.
+    public static let maxCombiningMarks = 2
+
+    /// Characters that draw as nothing, or as a line break, though Unicode doesn't class them as control, format or
+    /// space characters: a reason holding one could pass for blank space, an empty line or the end of the reason.
+    public static let blankLookalikes: Set<UInt32> = [
+        0x115F, 0x1160,   // Hangul choseong and jungseong fillers
+        0x17B4, 0x17B5,   // Khmer inherent vowels
+        0x2028, 0x2029,   // line and paragraph separators (a line break past the line count)
+        0x2800,           // Braille pattern blank
+        0x3164,           // Hangul filler
+        0xFFA0,           // halfwidth Hangul filler
+        0xFFFC,           // object replacement character
+    ]
+
+    /// A request's `reason`: text(1000) as `checkText` has it, and so that it can't pass for more of the card than it is:
+    /// at most `maxReasonLines` lines, no more than `maxCombiningMarks` combining marks on one base character (marks
+    /// stacked into other rows), and none of `blankLookalikes`.
+    static func checkReason(_ text: String, field: String) throws {
+        try checkText(text, field: field, limit: 1000, multiline: true)
+        let lines = text.unicodeScalars.reduce(1) { $0 + ($1 == "\n" ? 1 : 0) }
+        guard lines <= maxReasonLines else { throw Failure.invalid(field, "over \(maxReasonLines) lines") }
+        var marks = 0
+        for scalar in text.unicodeScalars {
+            if blankLookalikes.contains(scalar.value) {
+                throw Failure.invalid(field, "holds a character that draws as blank space (U+\(String(format: "%04X", scalar.value)))")
+            }
+            switch scalar.properties.generalCategory {
+            case .nonspacingMark, .spacingMark, .enclosingMark:
+                marks += 1
+                guard marks <= maxCombiningMarks else {
+                    throw Failure.invalid(field, "stacks more than \(maxCombiningMarks) combining marks on one character")
+                }
+            default: marks = 0
+            }
+        }
+    }
+
     /// `YYYY-MM-DDTHH:MM:SSZ`, a real date and time (UTC, whole seconds).
     static func date(_ text: String, field: String) throws -> Date {
         guard let date = timestamp.date(from: text), timestamp.string(from: date) == text else {

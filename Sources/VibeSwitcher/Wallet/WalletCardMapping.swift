@@ -4,12 +4,15 @@ import VibeCore
 /// wallet-request and wallet-result v1 (docs/protocol/wallet-request.md) as the card shows them: the amount in its
 /// asset's units where they're known, and each status as the card's state, word for word what the Wallet Manager said.
 extension WalletCardModel {
-    /// The card for `request`, in `state`; `requestedBy`: the asking session's name as the window shows it.
-    init(request: WalletRequest, requestedBy: String, state: State, checks: [Check] = [], wallet: Wallet? = nil) {
+    /// The card for `request`, in `state`; `requestedBy`: the asking session's name as the window shows it; `label`: the
+    /// agent's own (`requestedBy.label`), shown beside it.
+    init(request: WalletRequest, requestedBy: String, label: String = "", state: State, checks: [Check] = [], wallet: Wallet? = nil) {
         let (amount, asset) = Self.amount(request)
         self.init(id: request.id, workspace: request.workspace, from: request.from, wallet: wallet, to: request.to,
                   chainID: Int(clamping: request.chainId), asset: asset, amount: amount, reason: request.reason,
-                  calldataBytes: request.data.map { ($0.utf8.count - 2) / 2 }, requestedBy: requestedBy, state: state, checks: checks,
+                  calldataBytes: request.data.map { ($0.utf8.count - 2) / 2 },
+                  call: request.data.map { WalletCall.decode($0, contract: request.to) },
+                  requestedBy: requestedBy, requestedByLabel: label, state: state, checks: checks,
                   browserSignable: WalletBrowser.canSign(request))
     }
 

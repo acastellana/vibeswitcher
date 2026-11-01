@@ -8,18 +8,24 @@ import Testing
 struct WalletAskTests {
     let scratch = Scratch()
     static let session = "11111111-2222-4333-8444-555555555555"
-    static let environment = ["VIBESWITCHER_SESSION": session.uppercased()]
     static let now = Date(timeIntervalSince1970: 1_793_448_000)   // 2026-10-31T12:00:00Z
+
+    /// The session host's vault as the tests have it, asked by a process it places in `caller` (`session` unless said).
+    func vault(_ caller: LeadVault.Caller = .session(WalletAskTests.session.uppercased()),
+               ask: (@Sendable (LeadVault.Request) throws -> LeadVault.Reply)? = nil) -> LeadVault {
+        let book = WalletTestStamps.book
+        return LeadVault(folder: scratch.url("vault")) { request in try ask?(request) ?? book.answer(request, from: caller, userOpened: true) }
+    }
 
     static let valid = ["request", "--workspace", "example", "--from", "example-hardware", "--chain", "42424242",
                         "--to", "0x0000000000000000000000000000000000000001", "--amount", "1000000000000000000",
                         "--reason", "Pay the example invoice.", "--label", "Example agent"]
 
-    func run(_ arguments: [String], environment: [String: String] = WalletAskTests.environment,
-             walletManager: WalletAsk.WalletManager = .ready) -> (status: Int32, output: String, error: String, folder: URL) {
+    func run(_ arguments: [String], walletManager: WalletAsk.WalletManager = .ready,
+             vault: LeadVault? = nil) -> (status: Int32, output: String, error: String, folder: URL) {
         let folder = scratch.url("asked")
-        let ran = WalletAsk.run(arguments, environment: environment, cwd: "/work/example-project", walletManager: walletManager,
-                                folder: folder, now: Self.now)
+        let ran = WalletAsk.run(arguments, cwd: "/work/example-project", walletManager: walletManager,
+                                folder: folder, now: Self.now, vault: vault ?? self.vault())
         return (ran.status, ran.output, ran.error, folder)
     }
 
@@ -38,10 +44,15 @@ struct WalletAskTests {
         let ran = run(Self.valid)
         #expect(ran.status == 0, "\(ran.error)")
         #expect(ran.output.contains("nothing is sent until the user presses Send to Wallet Manager"))
-        let (requests, refused) = WalletAsk.filed(in: ran.folder)
+        let (requests, stamps, refused) = WalletAsk.filed(in: ran.folder)
         #expect(refused.isEmpty)
         let request = try #require(requests.first)
         #expect(requests.count == 1)
+        // Stamped by the host for the session it placed the process in, and the stamp is the host's.
+        let stamp = try #require(stamps[request.id])
+        let bytes = try Data(contentsOf: ran.folder.appendingPathComponent("\(request.id).json"))
+        #expect(stamp.session == Self.session && stamp.digest == WalletStamp.digest(bytes))
+        #expect(try WalletTestStamps.verify([stamp]) == [true])
         #expect(request.requestedBy == .init(project: "example-project", session: Self.session, label: "Example agent"))
         #expect(request.action == .transfer && request.asset == "native" && request.chainId == 42_424_242)
         #expect(request.createdAt == Self.now && request.expiresAt == Self.now.addingTimeInterval(86_400))
@@ -85,9 +96,26 @@ struct WalletAskTests {
     }
 
     @Test func refusedOutsideAVibeSwitcherSession() {
-        let outside = run(Self.valid, environment: [:])
-        #expect(outside.status == 1 && outside.error.contains("isn't a session VibeSwitcher started"))
+        // A process the host places in no session (VIBESWITCHER_SESSION or not: it isn't read), or a host that can't be
+        // asked, or one that won't stamp: refused, nothing filed.
+        let outside = run(Self.valid, vault: vault(.unknown))
+        #expect(outside.status == 1 && outside.error.contains("didn't say which of its sessions this process runs in")
+                && outside.error.contains("isn't in any session"), "\(outside.error)")
         #expect(filed(outside.folder).isEmpty)
+        struct Down: Error, CustomStringConvertible { var description: String { "The session host didn't answer in time." } }
+        let down = run(Self.valid, vault: vault(ask: { _ in throw Down() }))
+        #expect(down.status == 1 && down.error.contains("didn't answer in time"), "\(down.error)")
+        #expect(filed(down.folder).isEmpty)
+        let unstamped = run(Self.valid, vault: vault(ask: { request in
+            if case .walletSession = request { return .session(Self.session) }
+            return .refused("A wallet request is sealed only for the session its process runs in.")
+        }))
+        #expect(unstamped.status == 1 && unstamped.error.contains("didn't stamp the request"), "\(unstamped.error)")
+        #expect(filed(unstamped.folder).isEmpty)
+        // The session the request names is the host's answer, whatever the process's environment says.
+        let other = run(Self.valid, vault: vault(.session("AAAAAAAA-2222-4333-8444-555555555555")))
+        #expect(other.status == 0, "\(other.error)")
+        #expect(WalletAsk.filed(in: other.folder).requests.first?.requestedBy.session == "aaaaaaaa-2222-4333-8444-555555555555")
         let usage = run(["send"])
         #expect(usage.status == 2 && usage.error.contains("usage: vs-wallet request"))
         #expect(run(["help"]).status == 0)
@@ -153,9 +181,71 @@ struct WalletAskTests {
         let request = WalletRequestFormatTests.request()
         try request.encoded().write(to: folder.appendingPathComponent("00000000-0000-4000-8000-000000000009.json"))
         try Data("{}".utf8).write(to: folder.appendingPathComponent("00000000-0000-4000-8000-000000000008.json"))
-        let (requests, refused) = WalletAsk.filed(in: folder)
+        let (requests, _, refused) = WalletAsk.filed(in: folder)
         #expect(requests.isEmpty)
         #expect(refused.count == 2)
+    }
+
+    /// The vault seals a wallet request only for the caller's own session, and only while that session is the user's
+    /// (the host tells: `userOpened`), so not from inside a session another one started or typed into; never from
+    /// the app or outside every session.
+    @Test func theVaultSealsAWalletRequestOnlyForTheCallersOwnSession() {
+        let book = LeadVault.Book()
+        let mine = Self.session, theirs = "aaaaaaaa-2222-4333-8444-555555555555"
+        let digest = WalletStamp.digest(Data("bytes".utf8))
+        func refused(_ reply: LeadVault.Reply) -> Bool { if case .refused = reply { return true } else { return false } }
+        #expect(book.answer(.walletSession, from: .session(mine.uppercased())) == .session(mine))
+        for caller in [LeadVault.Caller.app, .unknown] {
+            #expect(refused(book.answer(.walletSession, from: caller)))
+            #expect(refused(book.answer(.sealWalletRequest(session: mine, digest: digest), from: caller)))
+        }
+        #expect(refused(book.answer(.sealWalletRequest(session: theirs, digest: digest), from: .session(mine), userOpened: true)))
+        #expect(refused(book.answer(.sealWalletRequest(session: mine, digest: "not a digest"), from: .session(mine), userOpened: true)))
+        // Its own session, but one another session started or last typed into (the host says it isn't the user's).
+        #expect(refused(book.answer(.sealWalletRequest(session: mine, digest: digest), from: .session(mine))))
+        guard case .seal(let seal) = book.answer(.sealWalletRequest(session: mine, digest: digest), from: .session(mine.uppercased()), userOpened: true) else {
+            Issue.record("no seal"); return
+        }
+        #expect(book.answer(.verifyWalletRequests([WalletStamp(session: mine, digest: digest, seal: seal),
+                                                   WalletStamp(session: theirs, digest: digest, seal: seal),
+                                                   WalletStamp(session: mine, digest: digest, seal: "zz")]), from: .unknown)
+                == .verified([true, false, false]))
+        // A seal that isn't 64 ASCII hex digits (a stamp file is anyone's to write) is no seal, and doesn't crash the host:
+        // 62 digits and an é (64 bytes, 63 characters), signs that Int's parser takes, an odd count of digits.
+        let odd = [String(seal.prefix(62)) + "é", "+f" + String(seal.dropFirst(2)), "-0" + String(seal.dropFirst(2)), String(seal.dropLast())]
+        #expect(book.answer(.verifyWalletRequests(odd.map { WalletStamp(session: mine, digest: digest, seal: $0) }), from: .unknown)
+                == .verified([false, false, false, false]))
+        #expect(book.answer(.verifyWalletRequests([WalletStamp(session: mine, digest: digest, seal: seal.uppercased())]), from: .unknown) == .verified([true]))
+        // Another vault's key makes other seals.
+        #expect(WalletTestStamps.book.answer(.verifyWalletRequests([WalletStamp(session: mine, digest: digest, seal: seal)]), from: .app) == .verified([false]))
+    }
+
+    /// A request written into the folder some other way than through the host has no stamp for its bytes and the
+    /// session it names: refused when read. (Whether a stamp's seal is the host's, the app asks the host: `WalletDesk`.)
+    @Test func aFiledRequestWithoutTheHostsStampForItsBytesAndSessionIsRefused() throws {
+        let folder = scratch.url("asked")
+        let request = WalletRequestFormatTests.request()
+        let bytes = try request.encoded()
+        let stamp = try WalletTestStamps.stamp(request)
+        // No stamp at all: written by hand.
+        try VibePaths.ensurePrivate(folder)
+        try VibePaths.writePrivate(bytes, to: folder.appendingPathComponent("\(request.id).json"))
+        #expect(WalletAsk.filed(in: folder).refused.first?.why.contains("no session host stamp") == true)
+        // A stamp for other bytes (the file rewritten after it was filed), or for another session.
+        for wrong in [WalletStamp(session: stamp.session, digest: WalletStamp.digest(bytes + Data(" ".utf8)), seal: stamp.seal),
+                      WalletStamp(session: "aaaaaaaa-2222-4333-8444-555555555555", digest: stamp.digest, seal: stamp.seal)] {
+            try VibePaths.writePrivate(JSONEncoder().encode(wrong), to: WalletAsk.stampFile(request.id, in: folder))
+            let filed = WalletAsk.filed(in: folder)
+            #expect(filed.requests.isEmpty && filed.refused.first?.why.contains("stamp is for other bytes or another session") == true)
+        }
+        // Filing checks the same.
+        #expect(throws: WalletAsk.Refusal.self) {
+            try WalletAsk.file(request, stamp: WalletStamp(session: "aaaaaaaa-2222-4333-8444-555555555555", digest: stamp.digest, seal: stamp.seal), in: folder)
+        }
+        try WalletAsk.file(request, stamp: stamp, in: folder)
+        #expect(WalletAsk.filed(in: folder).stamps == [request.id: stamp])
+        WalletAsk.remove(request.id, in: folder)
+        #expect(!FileManager.default.fileExists(atPath: WalletAsk.stampFile(request.id, in: folder).path))
     }
 
     // MARK: The courier's Discard and its word on results
@@ -262,8 +352,8 @@ struct WalletAskTests {
                 .replacingOccurrences(of: "\"vibeswitcher.wallet-request\"", with: "\"vibeswitcher.vault-request\"")
                 .replacingOccurrences(of: "\"vibeswitcher.wallet-result\"", with: "\"vibeswitcher.vault-result\"").utf8)
         }
-        let asked = try WalletAsk.request(Array(Self.valid.dropFirst()), environment: Self.environment, cwd: "/work/example-project", now: Self.now)
-        let sent = try WalletAsk.request(Array(Self.with("--amount", "2").dropFirst()), environment: Self.environment, cwd: "/work/example-project", now: Self.now)
+        let asked = try WalletAsk.request(Array(Self.valid.dropFirst()), session: Self.session, cwd: "/work/example-project", now: Self.now)
+        let sent = try WalletAsk.request(Array(Self.with("--amount", "2").dropFirst()), session: Self.session, cwd: "/work/example-project", now: Self.now)
         let result = WalletResult(id: sent.id, sequence: 1, createdAt: Self.now.addingTimeInterval(60), status: .received,
                                   checks: [.init(name: "balance", ok: true, detail: "covers it")], message: "")
         let record = WalletRequestStore.Record(request: sent, state: .sent, results: [result])
@@ -275,9 +365,10 @@ struct WalletAskTests {
         #expect(WalletRequestStore(folder: old).load().isEmpty)
 
         try WalletRequestStore.carryOver(from: old, to: new)
-        let filed = WalletAsk.filed(in: new.appendingPathComponent("asked"))
-        #expect(filed.refused.isEmpty)
-        #expect(filed.requests == [asked])
+        let carried = new.appendingPathComponent("asked/\(asked.id).json")
+        #expect(try WalletRequest.parse(Data(contentsOf: carried)) == asked)
+        // It carries no session host stamp (filed before stamps): it never gets a card.
+        #expect(WalletAsk.filed(in: new.appendingPathComponent("asked")).requests.isEmpty)
         #expect(WalletRequestStore(folder: new).load() == [record])
         #expect(!FileManager.default.fileExists(atPath: old.path))
     }

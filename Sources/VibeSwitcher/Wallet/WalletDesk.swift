@@ -45,6 +45,16 @@ final class WalletDesk: ObservableObject {
     var findPassage: () -> PassageCommand? = { PassageCommand.resolve(setting: "", onPath: WalletPeerChoice.findPassage) }
     /// Hands a message to the asking session's agent (its id, lower case), on the main thread.
     var deliver: (_ session: String, _ text: String) -> Void = { _, _ in }
+    /// The sessions the session host runs, each id (lower case) with its name as the window shows it, read on the main
+    /// thread. A filed request whose `requestedBy.session` isn't among them gets no card, so nothing can be sent from
+    /// it: the folder is a file anyone's shell can write, and a card names its asker as VibeSwitcher knows it, never
+    /// as the request says. Fail closed: none until the host's sessions are known.
+    var sessionNames: () -> [String: String] = { [:] }
+    /// Asks the session host which of these stamps carry its seal (`LeadVault.verifyWallet`), on `work`: a filed
+    /// request gets a card only once the host confirms it stamped those bytes for the session the request names, the
+    /// one the filing process ran in. One it says no to is refused and removed; while it can't be asked, none gets a
+    /// card. Fail closed: none until set.
+    var verifyStamps: ([WalletStamp]) throws -> [Bool] = { $0.map { _ in false } }
     /// Opens Settings › Wallet (a card's Open Settings), on the main thread.
     var openSettings: () -> Void = {}
     /// Opens the local page in the browser, on the main thread (a test catches it instead: never the user's browser).
@@ -55,6 +65,14 @@ final class WalletDesk: ObservableObject {
     private let work = DispatchQueue(label: "dev.vibeswitcher.wallet-desk", qos: .userInitiated)
     // On `work` only:
     private var requests: [WalletRequest] = []
+    /// `sessionNames` as last read.
+    private var names: [String: String] = [:]
+    /// The filed requests that got no card for their session, each logged once.
+    private var unknownSession: Set<String> = []
+    /// The stamps the host confirmed, by request id.
+    private var stamped: [String: WalletStamp] = [:]
+    /// Whether the host couldn't be asked about stamps last time (logged once until it can).
+    private var stampsUnasked = false
     /// Card states before or instead of a record: being sent, couldn't reach the Wallet Manager, not sent.
     private var local: [String: WalletCardModel.State] = [:]
     /// What Passage said when it stopped unsure, per request.
@@ -84,6 +102,18 @@ final class WalletDesk: ObservableObject {
         self.log = log
     }
 
+    /// `sessionNames` from the host's sessions and the window's rows: each session's row title (its name in the list), else
+    /// its title or preset as the host has it.
+    static func names(hosted: [HostSession], rows: [WindowRow]) -> [String: String] {
+        var titles: [UUID: String] = [:]
+        for row in rows { if let id = row.hostID, titles[id] == nil { titles[id] = row.title } }
+        var names: [String: String] = [:]
+        for session in hosted {
+            names[session.id.uuidString.lowercased()] = titles[session.id] ?? (session.title.isEmpty ? session.label : session.title)
+        }
+        return names
+    }
+
     #if DEBUG
     /// Debug aid (the sandbox's soak): how many of each thing it keeps, as one line. Waits for `work`.
     var census: String {
@@ -106,7 +136,9 @@ final class WalletDesk: ObservableObject {
     /// `then` runs on the main thread once the cards are published.
     func refresh(polling: Bool = true, then: @escaping () -> Void = {}) {
         let config = self.config()
+        let names = sessionNames()
         work.async { [self] in
+            self.names = names
             reload()
             if (try? courier(config)) != nil, polling, !(courier?.outstanding.isEmpty ?? true),
                polledAt.map({ now().timeIntervalSince($0) >= 60 }) ?? true {
@@ -120,7 +152,9 @@ final class WalletDesk: ObservableObject {
     /// Asks Passage for the Wallet Manager's new results now (a test, the sandbox), then redraws.
     func poll(then: @escaping () -> Void = {}) {
         let config = self.config()
+        let names = sessionNames()
         work.async { [self] in
+            self.names = names
             if (try? courier(config)) != nil { courier?.poll() }
             publish(then: then)
         }
@@ -135,7 +169,9 @@ final class WalletDesk: ObservableObject {
             return then()
         }
         let config = self.config()
+        let names = sessionNames()
         work.async { [self] in
+            self.names = names
             // The request as recorded once sent, or as opened in the browser wallet, else as filed; only if it's still the
             // one the card showed.
             guard let request = record(id)?.request ?? marks[id]?.request ?? requests.first(where: { $0.id == id }),
@@ -206,11 +242,13 @@ final class WalletDesk: ObservableObject {
     // MARK: On `work`
 
     private func reload() {
-        let (filed, refused) = WalletAsk.filed(in: folder)
+        let (all, stamps, refused) = WalletAsk.filed(in: folder)
         for (file, why) in refused {
             log("refused filed request \(file.lastPathComponent): \(why)")
             try? FileManager.default.removeItem(at: file)
+            try? FileManager.default.removeItem(at: WalletAsk.stampFile(file.deletingPathExtension().lastPathComponent, in: folder))
         }
+        let filed = confirmed(all, stamps)
         let time = now()
         for request in filed where marks[request.id] == nil {
             marks[request.id] = WalletBrowser.mark(request.id, in: folder)
@@ -252,6 +290,34 @@ final class WalletDesk: ObservableObject {
             sentSince[request.id] = nil
         }
         requests = filed.filter { time < $0.expiresAt.addingTimeInterval(WalletCourier.resultGrace) }
+    }
+
+    /// The requests of `filed` whose stamp the session host confirms (asked only about the ones not confirmed yet). One
+    /// it says no to is removed; while it can't be asked, the unconfirmed ones wait for the next look.
+    private func confirmed(_ filed: [WalletRequest], _ stamps: [String: WalletStamp]) -> [WalletRequest] {
+        stamped = stamped.filter { stamps[$0.key] == $0.value }
+        let unconfirmed = filed.filter { stamped[$0.id] == nil }
+        if !unconfirmed.isEmpty {
+            let asked = unconfirmed.compactMap { stamps[$0.id] }
+            do {
+                let valid = try verifyStamps(asked)
+                guard valid.count == asked.count else { throw WalletAsk.Refusal("it answered for \(valid.count) of \(asked.count)") }
+                stampsUnasked = false
+                for (request, ok) in zip(unconfirmed, valid) {
+                    if ok {
+                        stamped[request.id] = stamps[request.id]
+                    } else {
+                        log("refused filed request \(request.id).json: the session host didn't stamp it for the session it names")
+                        try? FileManager.default.removeItem(at: folder.appendingPathComponent("\(request.id).json"))
+                        try? FileManager.default.removeItem(at: WalletAsk.stampFile(request.id, in: folder))
+                    }
+                }
+            } catch {
+                if !stampsUnasked { log("couldn't ask the session host whether it stamped \(asked.count) filed request(s) (\(error)): no card until it answers") }
+                stampsUnasked = true
+            }
+        }
+        return filed.filter { stamped[$0.id] != nil }
     }
 
     /// The courier for Settings › Wallet as it is now: made, or made again when the settings changed. Throws why there
@@ -349,7 +415,10 @@ final class WalletDesk: ObservableObject {
             local[id] = .expired
             return
         }
-        guard let page = WalletSignPage.html(for: request) else { return log("browser on \(id) not done: its from isn't an 0x address") }
+        guard let name = names[request.requestedBy.session.lowercased()] else {
+            return log("browser on \(id) not done: its session isn't one the session host runs")
+        }
+        guard let page = WalletSignPage.html(for: request, requestedBy: name) else { return log("browser on \(id) not done: its from isn't an 0x address") }
         let server = WalletSignServer(page: page)
         let url: URL
         do {
@@ -460,17 +529,24 @@ final class WalletDesk: ObservableObject {
             let record = self.record(filed.id)
             let mark = marks[filed.id]
             let request = record?.request ?? mark?.request ?? filed
-            drawn[request.id] = request
             let by = request.requestedBy
-            let name = by.label.isEmpty ? "an agent in \(by.project)" : by.label
+            // Named as the host runs it, or no card at all.
+            guard let name = names[by.session.lowercased()] else {
+                if unknownSession.insert(request.id).inserted {
+                    log("\(request.id): no card, its session \(by.session) isn't one the session host runs")
+                }
+                continue
+            }
+            unknownSession.remove(request.id)
+            drawn[request.id] = request
             if let mark {
-                var card = WalletCardModel(request: request, requestedBy: name, state: WalletCardModel.state(mark, chainId: request.chainId))
+                var card = WalletCardModel(request: request, requestedBy: name, label: by.label, state: WalletCardModel.state(mark, chainId: request.chainId))
                 card.fileChanged = request != filed
                 cards.append(card)
             } else if let record, local[request.id] != .sent {
                 // A stored record (and its results) decides the card over any state of this run, but for a send under way.
                 let (state, checks, wallet) = WalletCardModel.state(of: record, unsure: unsureWhy[request.id], now: time)
-                var card = WalletCardModel(request: request, requestedBy: name, state: state, checks: checks, wallet: wallet)
+                var card = WalletCardModel(request: request, requestedBy: name, label: by.label, state: state, checks: checks, wallet: wallet)
                 // Delivered, and not a word from the Wallet Manager since: after 5 minutes the card asks if it's running,
                 // counted from the send the record keeps (so a restart doesn't start it again).
                 if state == .sent, record.state == .sent {
@@ -480,9 +556,9 @@ final class WalletDesk: ObservableObject {
                 }
                 cards.append(card)
             } else if let state = local[request.id] {
-                cards.append(WalletCardModel(request: request, requestedBy: name, state: state))
+                cards.append(WalletCardModel(request: request, requestedBy: name, label: by.label, state: state))
             } else {
-                cards.append(WalletCardModel(request: request, requestedBy: name, state: request.isExpired(now: time) ? .expired : .waiting))
+                cards.append(WalletCardModel(request: request, requestedBy: name, label: by.label, state: request.isExpired(now: time) ? .expired : .waiting))
             }
             cards[cards.count - 1].setupNeeded = setupNeeded
             sessions[request.id] = by.session.lowercased()

@@ -9,24 +9,46 @@ import VibeCore
 /// block (never run, `<` escaped), shown with textContent only. The script and style are fixed, so the CSP names their
 /// hashes and nothing else runs.
 enum WalletSignPage {
-    /// The page's data for `request`, nil when it can't go this way (`from` isn't an address).
-    static func data(for request: WalletRequest) -> [String: Any]? {
+    /// The page's data for `request`, nil when it can't go this way (`from` isn't an address). `requestedBy`: the asking
+    /// session's name as VibeSwitcher knows it. The rows are drawn in order, with textContent only: for a contract call,
+    /// what it does (`WalletCall`, decoded here: nothing else on this path decodes it) comes first, then the native value
+    /// it sends; `confirm`, for one that lets someone spend the wallet's tokens, is the sentence the user ticks before
+    /// Sign in wallet works.
+    static func data(for request: WalletRequest, requestedBy: String = "") -> [String: Any]? {
         guard let tx = WalletBrowser.transaction(for: request) else { return nil }
-        let (amount, asset) = WalletCardModel.amount(request)
+        let card = WalletCardModel(request: request, requestedBy: requestedBy, label: request.requestedBy.label, state: .waiting)
         let chainHex = "0x" + String(request.chainId, radix: 16)
         var txData: [String: Any] = ["from": tx.from, "to": tx.to, "value": tx.value]
         if let data = tx.data { txData["data"] = data }
+        func row(_ label: String, _ value: String, _ kind: String = "") -> [String: String] { ["label": label, "value": value, "kind": kind] }
+        var rows: [[String: String]] = []
+        if let call = card.call {
+            rows.append(row("Call", call.headline, call.alarming ? "big bad" : "big"))
+            if let function = call.function { rows.append(row("Function", function, "mono")) }
+            for field in call.fields {
+                rows.append(row(field.name, field.value, [WalletRequestFormat.isAddress(field.value) ? "mono" : "", field.alarming ? "bad" : ""]
+                    .filter { !$0.isEmpty }.joined(separator: " ")))
+            }
+            rows.append(row("Value sent", "\(card.amount) \(card.asset)"))
+            rows.append(row("Chain", card.chainText))
+            rows.append(row("From", request.from, "mono"))
+            rows.append(row("Contract", request.to, "mono"))
+            rows.append(row("Calldata", "\(card.calldataBytes ?? 0) bytes"))
+        } else {
+            rows.append(row("Amount", "\(card.amount) \(card.asset)", "big"))
+            rows.append(row("Chain", card.chainText))
+            rows.append(row("From", request.from, "mono"))
+            rows.append(row("To", request.to, "mono"))
+            if request.asset != "native" {
+                rows.append(row("Data", "a token transfer (\(tx.data.map { ($0.utf8.count - 2) / 2 } ?? 0) bytes)"))
+            }
+        }
+        rows.append(row("Requested by", card.requestedByText))
         var page: [String: Any] = [
-            "id": request.id, "from": request.from, "to": request.to,
-            "toLabel": request.action == .call ? "Contract" : "To",
-            "chain": WalletCardModel(request: request, requestedBy: "", state: .waiting).chainText,
-            "chainHex": chainHex, "amount": "\(amount) \(asset)",
-            "data": request.data.map { "\(($0.utf8.count - 2) / 2) bytes of calldata" }
-                ?? (request.asset == "native" ? "none" : "a token transfer (\(tx.data.map { ($0.utf8.count - 2) / 2 } ?? 0) bytes)"),
-            "reason": request.reason,
-            "requestedBy": request.requestedBy.label.isEmpty ? "an agent in \(request.requestedBy.project)" : request.requestedBy.label,
-            "tx": txData,
+            "id": request.id, "chain": card.chainText, "chainHex": chainHex, "rows": rows,
+            "reasonTitle": WalletCardModel.reasonTitle, "reason": "“\(request.reason)”", "tx": txData,
         ]
+        if let confirm = card.call?.confirmation { page["confirm"] = confirm }
         if let chain = WalletBrowser.addableChains[request.chainId] {
             page["addChain"] = ["chainId": chainHex, "chainName": chain.name, "rpcUrls": [chain.rpc], "blockExplorerUrls": [chain.explorer],
                                 "nativeCurrency": ["name": chain.symbol, "symbol": chain.symbol, "decimals": chain.decimals]] as [String: Any]
@@ -35,8 +57,8 @@ enum WalletSignPage {
     }
 
     /// The whole page for `request`, or nil when it can't go this way.
-    static func html(for request: WalletRequest) -> String? {
-        guard let data = data(for: request),
+    static func html(for request: WalletRequest, requestedBy: String = "") -> String? {
+        guard let data = data(for: request, requestedBy: requestedBy),
               let json = try? JSONSerialization.data(withJSONObject: data, options: [.sortedKeys]) else { return nil }
         return html(json: String(decoding: json, as: UTF8.self))
     }
@@ -68,15 +90,9 @@ enum WalletSignPage {
             <main>
             <h1>Transaction request</h1>
             <p class="warn">This skips the Wallet Manager's checks. Your wallet's own popup shows the real transaction: read it there before you confirm.</p>
-            <dl>
-            <dt>Amount</dt><dd id="amount" class="big"></dd>
-            <dt>Chain</dt><dd id="chain"></dd>
-            <dt>From</dt><dd id="from" class="mono"></dd>
-            <dt id="toLabel">To</dt><dd id="to" class="mono"></dd>
-            <dt>Data</dt><dd id="data"></dd>
-            <dt>Requested by</dt><dd id="requestedBy"></dd>
-            <dt>Reason</dt><dd id="reason"></dd>
-            </dl>
+            <dl id="rows"></dl>
+            <section class="reason"><h2 id="reasonTitle"></h2><blockquote id="reason"></blockquote></section>
+            <p id="confirmRow" class="confirm" hidden><label><input type="checkbox" id="confirm"> <span id="confirmText"></span></label></p>
             <button id="sign" type="button" disabled>Sign in wallet</button>
             <p id="status" role="status" aria-live="polite"></p>
             <p id="hash" class="mono"></p>
@@ -107,6 +123,13 @@ enum WalletSignPage {
         dt{color:var(--muted);text-align:right}
         dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
         .big{font-size:18px;font-weight:600}
+        .bad{color:var(--bad);font-weight:600}
+        .reason{margin:0 0 20px}
+        .reason h2{font-size:13px;font-weight:400;color:var(--muted);margin:0 0 4px}
+        blockquote{margin:0;padding:2px 0 2px 12px;border-left:3px solid var(--line);font-style:italic;white-space:pre-wrap;overflow-wrap:anywhere}
+        .confirm{margin:0 0 16px;padding:10px 12px;border:1px solid var(--bad);border-radius:8px}
+        .confirm label{display:flex;gap:8px;align-items:flex-start;cursor:pointer}
+        .confirm input{margin-top:4px}
         .mono{font-family:ui-monospace,Menlo,monospace;font-size:13px;overflow-wrap:anywhere}
         button{font:inherit;font-weight:600;padding:9px 18px;border-radius:8px;border:0;background:var(--accent);color:#fff;cursor:pointer}
         button:disabled{opacity:.45;cursor:default}
@@ -120,10 +143,27 @@ enum WalletSignPage {
           "use strict";
           var req = JSON.parse(document.getElementById("request").textContent);
           function el(id) { return document.getElementById(id); }
-          ["amount", "chain", "from", "to", "toLabel", "data", "requestedBy", "reason"].forEach(function (key) {
-            el(key).textContent = req[key];
+          var rows = el("rows");
+          req.rows.forEach(function (row) {
+            var dt = document.createElement("dt"), dd = document.createElement("dd");
+            dt.textContent = row.label;
+            dd.textContent = row.value;
+            if (row.kind) dd.className = row.kind;
+            rows.appendChild(dt);
+            rows.appendChild(dd);
           });
+          el("reasonTitle").textContent = req.reasonTitle;
+          el("reason").textContent = req.reason;
           var button = el("sign");
+          // A call that lets someone spend the wallet's tokens: Sign in wallet works only once the user ticks the sentence
+          // naming the spender and the amount.
+          var confirm = el("confirm");
+          if (req.confirm) {
+            el("confirmText").textContent = req.confirm;
+            el("confirmRow").hidden = false;
+            confirm.addEventListener("change", function () { ready(); });
+          }
+          function confirmed() { return !req.confirm || confirm.checked === true; }
           var finished = false;
           function say(text, kind) { el("status").textContent = text; el("status").className = kind || ""; }
           function lower(text) { return String(text).toLowerCase(); }
@@ -133,6 +173,11 @@ enum WalletSignPage {
             if (!window.ethereum) {
               button.disabled = true;
               say("No wallet extension was found in this browser. Turn one on (Rabby, MetaMask) for this page, then reload it.", "error");
+              return;
+            }
+            if (!confirmed()) {
+              button.disabled = true;
+              say("Tick the box above first: this call lets someone else spend from this wallet.");
               return;
             }
             button.disabled = false;
@@ -153,7 +198,7 @@ enum WalletSignPage {
 
           async function sign() {
             var eth = window.ethereum;
-            if (!eth || finished) return;
+            if (!eth || finished || !confirmed()) return;
             button.disabled = true;
             try {
               say("Asking the wallet for its accounts…");
@@ -225,7 +270,7 @@ enum WalletSignPage {
             } catch (e) {
               say("The wallet said: " + errorText(e) + ". Nothing was sent; you can try again.", "error");
             } finally {
-              if (!finished) button.disabled = !window.ethereum;
+              if (!finished) button.disabled = !window.ethereum || !confirmed();
             }
           }
           button.addEventListener("click", sign);

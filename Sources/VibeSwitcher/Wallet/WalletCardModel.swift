@@ -1,4 +1,5 @@
 import Foundation
+import VibeCore
 
 /// What a wallet request card shows: a transaction an agent asked for, and where it is on its way to the Wallet Manager's Mac and
 /// back. Plain values only, already worded for display (the amount in its asset's units, not base units), so the card
@@ -25,8 +26,12 @@ struct WalletCardModel: Equatable, Identifiable {
     var reason: String
     /// A contract call's calldata size in bytes; nil for a transfer.
     var calldataBytes: Int? = nil
-    /// Who asked: the session's name.
+    /// A contract call's calldata in words (`WalletCall`); nil for a transfer.
+    var call: WalletCall? = nil
+    /// Who asked: the session's name as VibeSwitcher knows it (the window's), never as the request says.
     var requestedBy: String
+    /// The label the agent gave (`--label`): shown beside the name as the agent's own words; empty when it gave none.
+    var requestedByLabel: String = ""
     var state: State
     /// The Wallet Manager's checks, when it sent any (with a rejection, but also along with other answers).
     var checks: [Check] = []
@@ -259,15 +264,27 @@ struct WalletCardModel: Equatable, Identifiable {
         return state == .sent && notPickedUp ? line + " " + Self.notPickedUpNote : line
     }
 
+    /// "Requested by"'s line: the session's name, and the agent's own label beside it when it gave one.
+    var requestedByText: String {
+        requestedByLabel.isEmpty || requestedByLabel == requestedBy ? requestedBy : "\(requestedBy) (the agent's label: \(requestedByLabel))"
+    }
+
+    /// The label over the reason: whose words they are.
+    static let reasonTitle = "Reason, in the agent's words"
+
     /// The card as text, for Copy.
     var text: String {
-        var lines = ["Wallet request: \(Self.title(state))",
-                     "Workspace: \(workspace)", "From: \(from)" + (wallet.map { " (\($0.title))" } ?? ""), "To: \(to)",
-                     "Amount: \(amount) \(asset)", "Chain: \(chainText)",
-                     "Reason: \(reason)", "Requested by: \(requestedBy)"]
-        if let calldataBytes { lines.append("Contract call: \(calldataBytes) bytes of calldata") }
-        lines += [
-                     detail]
+        var lines = ["Wallet request: \(Self.title(state))", "Workspace: \(workspace)", "From: \(from)" + (wallet.map { " (\($0.title))" } ?? "")]
+        if let call {
+            lines.append("Contract: \(to)")
+            lines.append("Call: \(call.headline)" + (call.function.map { " (\($0))" } ?? ""))
+            lines += call.fields.map { "  \($0.name): \($0.value)" }
+            lines.append("Value sent: \(amount) \(asset)")
+            if let calldataBytes { lines.append("Calldata: \(calldataBytes) bytes") }
+        } else {
+            lines += ["To: \(to)", "Amount: \(amount) \(asset)"]
+        }
+        lines += ["Chain: \(chainText)", "Requested by: \(requestedByText)", "\(Self.reasonTitle): “\(reason)”", detail]
         if fileChanged { lines.append("⚠ " + Self.fileChangedNote) }
         if let setupNeeded, actions.contains(.settings) { lines.append(setupNeeded) }
         switch state {
