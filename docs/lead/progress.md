@@ -2432,3 +2432,8 @@
 - 2026-11-01 00:59 Started a worker on turn-this-incident-into-8
 - 2026-11-01 00:59 Automatically (auto_advance): Started a worker on turn-this-incident-into-8 (Turn this incident into a check: A verifier's session waits indefinitely on a permission prom…).
 - 2026-11-01 00:59 Automatically (auto_advance): Started the audit of fix-the-flaky-test-13 at 333b2ed1 (It touches sensitive_paths (Sources/VibeHost/HostedSession.swift), so it's treated as audit whatever its review says).
+- 2026-11-01 01:10 Audit of fix-the-flaky-test-13: complete, clean, round 1: 2 Pre-existing open
+- 2026-11-01 01:11 Planned the-app-s-host: The app's host exit watcher gives up if the exit event comes before the host can be reaped (HostClient.swift:313-317)
+- 2026-11-01 01:11 Planned strict-paths-an: Strict paths: an Important finding on configured paths blocks auto-merge, even unconfirmed, until the lead rules (review audit)
+- 2026-11-01 01:11 Planned wallet-e2e-real-testnet: wallet-e2e --real-testnet: one real GenLayer testnet payment through the whole chain on this Mac
+- 2026-11-01 01:12 Planned spec-an-unparseable: Spec: an unparseable request gets `rejected` (format check) when its file name's id is valid and it came from the configured peer

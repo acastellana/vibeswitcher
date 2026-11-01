@@ -187,3 +187,7 @@ User, 2026-10-31: the vault Mac isn't at hand, so test everything locally; the G
 
 The batch landed (13 tasks, no reverts, 2 incidents turned into checks). But three tasks were rework from environment facts that one look would have shown, and doubled full-suite runs added to a load the user complained about.
 
+## 2026-11-01 01:12:23 The user approved real GenLayer testnet transactions for the end-to-end harness (2026-11-01, F9C2A658): one proving run now, and on demand later, only with an explicit --real-testnet. Each run is a self-transfer of at most 1000 wei from the Wallet Manager project's throwaway testnet wallet (0x4c50…ab99), never mainnet or any other wallet, never in normal tests, merges or audits.
+
+Production readiness: the Wallet Manager's lead and an independent review both asked for one real payment through the whole chain before more features. It broadcasts publicly, which is why it was the user's call.
+
