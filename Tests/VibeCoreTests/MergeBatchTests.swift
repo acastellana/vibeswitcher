@@ -253,6 +253,44 @@ struct MergeBatchTests: LeadTeamFixture {
                 "\(toWorker("add-break", root, runtime))")
     }
 
+    /// After a split, the tasks restacked for the next run are checked again as merge checks them: one whose branch
+    /// moved during the first run (a commit its verifier never saw) is refused, not landed at the commit it had then.
+    /// The breaker, first on the stack, is told it fails on main with it on top (no stack without it passed).
+    @Test func tasksRestackedAfterASplitAreCheckedAgainBeforeTheyLand() throws {
+        let moved = temp.url("moved").path
+        let root = try repo()
+        let zTree = Worktrees.path(root: root, slug: "add-z")
+        // The first run, besides failing, commits once more on add-z's branch.
+        try commit(["scripts/test.sh": """
+            #!/bin/bash
+            echo "run $* | $(ls *.txt | tr '\\n' ' ')" >> \(RecentProjects.shellQuote(runs))
+            if [[ ! -e \(RecentProjects.shellQuote(moved)) ]]; then
+              touch \(RecentProjects.shellQuote(moved))
+              (cd \(RecentProjects.shellQuote(zTree)) && echo more >> z.txt && git add z.txt && git commit -q -m "more z")
+            fi
+            if [[ -e break.txt ]]; then
+              printf '%s\\n' \(Self.failure.split(separator: "\n").map { RecentProjects.shellQuote(String($0)) }.joined(separator: " "))
+              exit 1
+            fi
+            echo "✔ Test run with 2 tests passed after 0.020 seconds."
+            """], in: root, "the suite")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.macLimits = { MacLimits(maxSessions: 12) }
+        #expect(!lead.call("configure", ["test_command": "bash scripts/test.sh", "merge_policy": "auto", "auto_advance": false, "records_dir": ""]).isError)
+        try audited(lead, runtime, root: root, "add-break", ["break.txt": "b\n"])
+        try audited(lead, runtime, root: root, "add-z", ["z.txt": "zed\n"])
+
+        let merged = lead.call("merge", ["tasks": ["add-break", "add-z"]])
+        #expect(merged.isError, "nothing merged: \(merged.text)")
+        #expect(merged.text.contains("add-z: not merged.") && merged.text.contains("has commits the verifier didn't see"), "\(merged.text)")
+        #expect(merged.text.contains("It was tested in a batch, first on the stack: it fails on main with it on top."), "\(merged.text)")
+        #expect(!merged.text.contains("the stack without it passes"), "\(merged.text)")
+        #expect(landed(root).isEmpty)
+        #expect(ran(first: true).count == 2, "the whole stack, then add-break alone: \(ran())")
+        #expect(board(root).task("add-z")?.status == .review && board(root).task("add-break")?.status == .failed)
+    }
+
     /// A batch failing on a test that passes its rerun merges on the rerun, flake recorded once, and isn't split.
     @Test func aFlakeInTheBatchMergesOnTheRerunWithoutSplitting() throws {
         let root = try repo()

@@ -205,8 +205,16 @@ extension LeadToolset {
                 return false
             case .merged: break
             }
-            try? vault.setHead(tip, root: root, branch: base)
             let order = prefix.map(\.task.slug)
+            // Moved, but not recorded: nothing is said merged that the board and the vault don't hold (merge throws then).
+            func unrecorded(_ what: String, _ error: Error) -> Bool {
+                let text = "\(base) was fast-forwarded to \(tip.prefix(8)) with \(order.joined(separator: ", ")), but \(what) (\(error)), so their merge isn't recorded: check \(base) and the board before merging anything more."
+                for slug in order { ends[slug] = .refused(text) }
+                stopped = text
+                try? store.appendProgress("Batch merge of \(order.joined(separator: ", ")) not recorded: \(text)")
+                return false
+            }
+            do { try vault.setHead(tip, root: root, branch: base) } catch { return unrecorded("the vault couldn't record its head", error) }
             let last = order[order.count - 1]
             var flaked: (plan: MergeRerun.Plan, failed: String, log: String?)?
             if case .flaked(let plan, let failed, let again) = passing.outcome {
@@ -226,7 +234,8 @@ extension LeadToolset {
                 brought[gate.task.slug] = Int(Git.run(["rev-list", "--count", "\(below)..\(stack.tips[index])"], in: root).output)
                 usage[gate.task.slug] = receiptUsage(gate.task)
             }
-            let planned = (try? store.update { board -> [(test: String, slug: String, noted: Bool)] in
+            let planned: [(test: String, slug: String, noted: Bool)]
+            do { planned = try store.update { board -> [(test: String, slug: String, noted: Bool)] in
                 for (index, gate) in prefix.enumerated() {
                     guard let at = board.taskIndex(gate.task.slug) else { continue }
                     board.tasks[at].status = .done
@@ -239,7 +248,7 @@ extension LeadToolset {
                 }
                 return planFlakeFixes(&board, flakes: flakes, slug: last, commit: tip, at: flakedAt, logged: Set(flakeLines.keys),
                                       log: flakeLog, workflow: workflow)
-            }) ?? []
+            } } catch { return unrecorded("the board couldn't be written", error) }
             let decided = Date()
             let together = order.count > 1 ? " (in a batch: \(order.joined(separator: ", ")) landed on one test run)" : " (in a batch, on a test run of its own)"
             for gate in prefix {
@@ -288,9 +297,11 @@ extension LeadToolset {
                 ends[slug] = .refused("Its tests failed in the batch, but the board couldn't be written (\(error)).")
                 return
             }
-            let context = before.isEmpty ? "" : " The batch's tasks before it on the stack (\(before.joined(separator: ", "))) passed without it and merged first, so they're on \(base) now."
+            // First on the stack: what failed was the base with it alone on top.
+            let context = before.isEmpty ? "It was tested in a batch, first on the stack: it fails on \(base) with it on top."
+                : "It was tested in a batch: the stack with it on top fails, the stack without it passes. The batch's tasks before it on the stack (\(before.joined(separator: ", "))) merged first, so they're on \(base) now."
             ends[slug] = .failed(testFailure(output, slug: slug, base: base, commit: gate.commit, onto: onto, worktree: place)
-                                 + "\nIt was tested in a batch: the stack with it on top fails, the stack without it passes.\(context)")
+                                 + "\n" + context)
             try? store.appendProgress("Didn't merge \(slug) in the batch: \(what.lowercased()) with it on \(base)" + (last.isEmpty ? "" : " (\(Self.clip(last, 200)))") + "; back to its worker")
             lines.append("\(slug) breaks the stack: \(what.lowercased())" + (last.isEmpty ? "" : " (\(Self.clip(last, 200)))") + "; it's failed, with the output for its worker.")
         }
@@ -315,7 +326,32 @@ extension LeadToolset {
         }
 
         var pending = gates
+        var round = 0
         batch: while !pending.isEmpty, stopped == nil {
+            round += 1
+            // Restacked after a split: each is checked again as merge checks it before its run (its gate was read before
+            // the first run, minutes ago: a new commit, a finding, a withdrawn approval since then counts).
+            if round > 1 {
+                pending = pending.compactMap { gate in
+                    let slug = gate.task.slug
+                    do {
+                        let again = try mergeGate(slug)
+                        if let changed = changedMeanwhile(slug, since: gate.task, tests: "were run in a batch, and it's to be tested again") {
+                            ends[slug] = .refused(changed.text)
+                            return nil
+                        }
+                        return again
+                    } catch let problem as Problem {
+                        ends[slug] = .refused(problem.text)
+                        lines.append("\(slug) left out of the next run: merge's own checks refuse it now.")
+                        return nil
+                    } catch {
+                        ends[slug] = .refused("\(error)")
+                        return nil
+                    }
+                }
+                guard !pending.isEmpty else { break }
+            }
             if let error = stack.reset(to: onto) {
                 stopped = error
                 break
