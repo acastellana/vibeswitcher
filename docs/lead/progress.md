@@ -2788,3 +2788,5 @@
 - 2026-11-01 16:52 Audit of heavy-jobs-fit-their: complete, clean, round 1: 3 Nit open
 - 2026-11-01 16:57 Audit of the-test-suite-leaves: complete, clean, round 1: 1 Nit open
 - 2026-11-01 17:05 Merged heavy-jobs-fit-their: Heavy jobs fit their slot: vs-heavy gives each job a core budget, and our builds and tests honour it
+- 2026-11-01 17:05 Automatically (auto_advance): Merged heavy-jobs-fit-their (Heavy jobs fit their slot: vs-heavy gives each job a core budget, and our builds and tests honour it) into main at 8fde5718, on its passing audit and the full test run.
+- 2026-11-01 17:23 Merged the-test-suite-leaves: The test suite leaves hundreds of zombie processes (a test helper had 431 unreaped children)
