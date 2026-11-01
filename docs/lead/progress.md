@@ -2704,3 +2704,13 @@
 - 2026-11-01 12:43 Automatically (auto_advance): Merged feature-impact-ledger (Feature impact ledger + metrics script: track which changes help, and why) into main at b6c44f6a, on its passing audit and the full test run.
 - 2026-11-01 12:50 Merged fix-the-flaky-test-15: Fix the flaky test heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared()
 - 2026-11-01 12:50 Flaky in fix-the-flaky-test-15's merge: itCountsWhileOtherThreadsAllocate() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 12:50 Automatically (auto_advance): Merged fix-the-flaky-test-15 (Fix the flaky test heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared()) into main at 573ebf46, on its passing audit and the full test run. (Its first test run failed on itCountsWhileOtherThreadsAllocate() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/fix-the-flaky-test-15/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibeswitcher/….)
+- 2026-11-01 12:50 Automatically (auto_advance): Cleaned up boost-release-4-7 (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 12:50 Automatically (auto_advance): Cleaned up feature-impact-ledger (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 12:50 Automatically (auto_advance): Cleaned up fix-the-flaky-test-15 (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 12:52 Started a worker on boost-release-5-7
+- 2026-11-01 12:52 Automatically (auto_advance): Started a worker on boost-release-5-7 (Boost release 5/7: batched merges: test several passed tasks together, split automatically on failure), its after tasks done (boost-release-4-7).
+- 2026-11-01 12:52 Started a worker on leadauditreleasetests
+- 2026-11-01 12:52 Automatically (auto_advance): Started a worker on leadauditreleasetests (LeadAuditReleaseTests: the wait for the message has no overall time limit (line 139)), its after tasks done (boost-release-4-7).
+- 2026-11-01 12:52 Automatically (auto_advance): Started the audit of wallet-path-robustness at d8e85e06 (Its review is audit).
+- 2026-11-01 12:52 Automatically (auto_advance): Started the audit of read-only-git-parser at f8dcd45d (Its review is audit).
