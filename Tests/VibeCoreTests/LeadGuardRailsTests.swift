@@ -530,7 +530,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         }
         // A worker removes a file of its worktree's with git rm (never the lead's records); a verifier removes nothing.
         let worker = try permissions("worker-add-b", runtime), verifier = try permissions("verify-add-b", runtime)
-        #expect(Self.allowed("git rm b.txt", by: worker))
+        #expect(Self.allowed("git rm b.txt", by: worker, hook: try hook("worker-add-b", runtime, cwd: worktree)))
         let brief = String(decoding: try launchFile("--append-system-prompt-file", "worker-add-b", runtime), as: UTF8.self)
         #expect(brief.contains("`git rm <path>` is for tracked files your change deletes"))
         // An untracked file left in the worktree is named in the report, never removed: the brief no longer asks for it,
@@ -567,6 +567,19 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         return (permissions["allow"] ?? [], permissions["deny"] ?? [])
     }
 
+    /// The `PermissionRequest` hook a session was started with, as the scope its parser runs in with the shell in `cwd`.
+    func hook(_ name: String, _ runtime: FakeRuntime, cwd: String) throws -> ReadOnlyCommand.Scope {
+        try #require(Self.hook(settings: try settings(name, runtime), cwd: cwd))
+    }
+
+    static func hook(settings: [String: Any]?, cwd: String) -> ReadOnlyCommand.Scope? {
+        guard let groups = (settings?["hooks"] as? [String: Any])?["PermissionRequest"] as? [[String: Any]],
+              let command = (groups.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String,
+              let words = ReadOnlyCommand.parts(of: command)?.first, words.dropFirst().first == ReadOnlyCommand.hookArgument,
+              let options = ReadOnlyCommand.hookOptions(Array(words.dropFirst(2))) else { return nil }
+        return ReadOnlyCommand.Scope(root: options.root, cwd: cwd, writes: options.writes)
+    }
+
     /// The environment a session's commands run with (its `--settings` file's `env`).
     func environment(_ name: String, _ runtime: FakeRuntime) throws -> [String: String] {
         try settings(name, runtime)["env"] as? [String: String] ?? [:]
@@ -591,9 +604,12 @@ struct LeadGuardRailsTests: LeadTeamFixture {
     static func denied(_ command: String, by rules: [String]) -> Bool {
         [true, false].allSatisfy { empty in rules.contains { matches($0, command, emptyStar: empty) } }
     }
-    static func allowed(_ command: String, by rules: (allow: [String], deny: [String])) -> Bool {
+    /// With `hook`, what the allow rules don't take goes to the role's `PermissionRequest` hook (`ReadOnlyCommand`), as
+    /// Claude Code asks it about what the deny rules let through.
+    static func allowed(_ command: String, by rules: (allow: [String], deny: [String]), hook: ReadOnlyCommand.Scope? = nil) -> Bool {
         [true, false].allSatisfy { empty in
-            !rules.deny.contains { matches($0, command, emptyStar: empty) } && rules.allow.contains { matches($0, command, emptyStar: empty) }
+            !rules.deny.contains { matches($0, command, emptyStar: empty) }
+                && (rules.allow.contains { matches($0, command, emptyStar: empty) } || hook.map { ReadOnlyCommand.allows(command, in: $0) } == true)
         }
     }
 
@@ -623,18 +639,20 @@ struct LeadGuardRailsTests: LeadTeamFixture {
                            "git switch \(base)", "git switch agent/other", "git switch -C agent/other",
                            "git reset --hard \(base)", "git reset --hard \(base)~1", "git reset --hard agent/other", "git reset --hard main",
                            "git commit --amend", "git worktree remove ../other", "git branch -D agent/other"]
-        for command in allowed + reads { #expect(Self.allowed(command, by: rules), "allowed: \(command)") }
+        let workerHook = try hook("worker-add-b", runtime, cwd: worktree)
+        for command in allowed + reads { #expect(Self.allowed(command, by: rules, hook: workerHook), "allowed: \(command)") }
         for command in deniedForms { #expect(Self.denied(command, by: rules.deny), "denied: \(command)") }
         // Rules don't remember: after any denial, reading git is still allowed, without asking.
         for command in deniedForms + reads where !Self.denied(command, by: rules.deny) {
-            #expect(Self.allowed(command, by: rules), "after a denial: \(command)")
+            #expect(Self.allowed(command, by: rules, hook: workerHook), "after a denial: \(command)")
         }
         // The lead and verifiers read git without asking too; none of them writes with it.
         for role in [LeadLaunch.Role.lead, .verifier] {
             let theirs = (LeadLaunch.allow(role, base: base), LeadLaunch.deny(role, base: base))
-            for command in reads { #expect(Self.allowed(command, by: theirs), "\(role): \(command)") }
+            let readOnly = ReadOnlyCommand.Scope(root: worktree, cwd: worktree)
+            for command in reads { #expect(Self.allowed(command, by: theirs, hook: readOnly), "\(role): \(command)") }
             for command in allowed + ["git diff --output=x.txt"] where !reads.contains(command) {
-                #expect(!Self.allowed(command, by: theirs), "\(role): \(command)")
+                #expect(!Self.allowed(command, by: theirs, hook: readOnly), "\(role): \(command)")
             }
         }
 
@@ -681,7 +699,9 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         for command in told {
             #expect(command.hasPrefix("git "), "said with something in front: \(command)")
             for joint in ["|", "&&", ";", "2>&1", ">"] { #expect(!command.contains(joint), "said with \(joint): \(command)") }
-            #expect(Self.allowed(command, by: rules), "the brief says it, the rules refuse it: \(command)")
+            let worktree = Worktrees.path(root: root, slug: "add-b")
+            #expect(Self.allowed(command, by: rules, hook: try hook("worker-add-b", runtime, cwd: worktree)),
+                    "the brief says it, the rules refuse it: \(command)")
         }
         for command in commands where !told.contains(command) { #expect(Self.denied(command, by: rules.deny), "\(command)") }
         // A worker that types env in front of one (to keep git's editor away) is refused: the session has no need.
@@ -749,15 +769,16 @@ struct LeadGuardRailsTests: LeadTeamFixture {
             let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
             let permissions = try #require(settings?["permissions"] as? [String: [String]])
             let rules = (allow: permissions["allow"] ?? [], deny: permissions["deny"] ?? [])
+            let hook = try #require(Self.hook(settings: settings, cwd: root))
             // No export: neither role has an allow for git archive, tar or mkdir, and none of the escapes runs unasked.
             #expect(!rules.allow.contains { $0.contains("git archive") || $0.contains("tar ") || $0.contains("mkdir") }, "\(role): \(rules.allow)")
             for command in ["git archive \(preFix)", "git archive --remote=x --exec=/bin/sh HEAD", "git archive --add-file=/x HEAD",
                             "tar -x -C \(scratch)pre-fix", "mkdir -p \(scratch)pre-fix", "git worktree add --detach \(scratch)pre-fix \(preFix)"] {
-                #expect(!Self.allowed(command, by: rules), "\(role): \(command)")
+                #expect(!Self.allowed(command, by: rules, hook: hook), "\(role): \(command)")
             }
             // The worker's way, its reverse patch from git; the read-only verifier applies nothing.
             for command in ["git diff \(preFix) HEAD -- a.txt", "git apply -R", "git apply"] {
-                #expect(Self.allowed(command, by: rules) == (role == .worker || command.hasPrefix("git diff")), "\(role): \(command)")
+                #expect(Self.allowed(command, by: rules, hook: hook) == (role == .worker || command.hasPrefix("git diff")), "\(role): \(command)")
             }
         }
         // And it does what the brief says, in the worktree: the fix out, its test kept, and back with git status clean.

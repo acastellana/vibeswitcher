@@ -25,11 +25,13 @@ if let at = CommandLine.arguments.dropFirst().firstIndex(of: MCPKeeper.flag) {
     exit(MCPKeeper.run(executable: executable, arguments: arguments))
 }
 
-// `vibeswitcher-mcp --read-only-permission`, as a verifier's `PermissionRequest` hook (see `LeadLaunch.prepare`): the
-// event's JSON on stdin; prints the allow for a command line that only reads (`ReadOnlyCommand`), nothing otherwise
-// (the prompt shows). First, so a hook runs none of the server's code.
-if CommandLine.arguments.count == 2, CommandLine.arguments[1] == ReadOnlyCommand.hookArgument {
-    if let answer = ReadOnlyCommand.hookAnswer(FileHandle.standardInput.readDataToEndOfFile()) {
+// `vibeswitcher-mcp --read-only-permission --root WORKTREE [--worker]`, as a role's `PermissionRequest` hook (see
+// `LeadLaunch.hooks`): the event's JSON on stdin; prints the allow for a command line that only reads inside WORKTREE
+// (and for a worker, its own commits: `ReadOnlyCommand`), nothing otherwise (the prompt shows). First, so a hook runs
+// none of the server's code.
+if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == ReadOnlyCommand.hookArgument {
+    if let options = ReadOnlyCommand.hookOptions(Array(CommandLine.arguments.dropFirst(2))),
+       let answer = ReadOnlyCommand.hookAnswer(FileHandle.standardInput.readDataToEndOfFile(), root: options.root, writes: options.writes) {
         FileHandle.standardOutput.write(answer)
     }
     exit(0)
@@ -78,7 +80,9 @@ if CommandLine.arguments.count == 7, CommandLine.arguments[1] == "--verifier-pro
     let prompt = LeadPrompts.verifier(task: task, root: root, workflow: workflow, guide: LeadRisk.reviewGuide(root: root, base: base), security: security)
     let settings: [String: Any] = ["permissions": ["allow": LeadLaunch.allow(.verifier, base: base),
                                                    "deny": LeadLaunch.deny(.verifier, base: base, records: workflow.recordsDir)],
-                                   "env": LeadLaunch.environment(.verifier)]
+                                   "env": LeadLaunch.environment(.verifier),
+                                   // Its git reads go through the hook, as in an audit (the clone is its worktree).
+                                   "hooks": LeadLaunch.hooks(.verifier, server: Bundle.main.executablePath ?? CommandLine.arguments[0], root: root)]
     let model = workflow.auditModel(workerModel: LeadWorkflow.claudeModel(command: "claude", home: NSHomeDirectory()))
     let out: [String: Any] = ["prompt": prompt, "settings": settings, "model": model, "security": security ?? NSNull()]
     let data = (try? JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys])) ?? Data()

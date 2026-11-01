@@ -15,7 +15,7 @@ struct VerifierPromptTests {
     static let allowed = [
         // The second incident's command, as the finder ran it.
         "git ls-files -s Package.swift; git remote -v; git branch -r | grep origin/main; grep -n lodash package-lock.json",
-        "git log --oneline -5", "git --no-pager log -3 --stat", "git show HEAD:Sources/a.swift", "git diff main...HEAD -- Sources",
+        "git log --oneline -5", "git log -3 --stat", "git show HEAD:Sources/a.swift", "git diff main...HEAD -- Sources",
         "git status --short", "git rev-parse HEAD", "git merge-base main HEAD", "git cat-file -p HEAD", "git blame -L 1,9 a.swift",
         "git remote", "git remote -v", "git branch -a", "git branch -r", "git branch -av", "git branch --show-current",
         "git branch --list 'agent/*'", "git branch --merged main", "git branch -r --contains HEAD", "git branch --sort=-committerdate",
@@ -32,7 +32,7 @@ struct VerifierPromptTests {
     /// The ones that still prompt: anything that writes, runs something else, isn't on the list, or doesn't parse.
     static let refused = [
         "", "   ", "ls", "cat a.txt", "git", "git config user.name x", "git config --list", "git push", "git fetch", "git checkout main",
-        "git -C ../other log", "git -c core.pager=x log", "git --git-dir=/x log", "GIT_PAGER=x git log", "env git log",
+        "git -C ../other log", "git -c core.pager=x log", "git --no-pager log -3", "git -P log", "git --literal-pathspecs log", "git --git-dir=/x log", "GIT_PAGER=x git log", "env git log",
         // git branch that changes something.
         "git branch foo", "git branch -D foo", "git branch -d foo", "git branch -m a b", "git branch -M a", "git branch -f a HEAD",
         "git branch --force a", "git branch -u origin/x", "git branch --set-upstream-to=origin/x", "git branch -c a b",
@@ -100,9 +100,10 @@ struct VerifierPromptTests {
         #expect(ReadOnlyCommand.hookAnswer(Data("not json".utf8)) == nil)
     }
 
-    /// The verifier's settings carry the hook (by the tool server, which answers it); the lead's and workers' don't,
-    /// and the verifier's deny rules are as they were (Claude Code asks the hook only about what they let through).
-    @Test func onlyTheVerifiersSettingsCarryTheHook() throws {
+    /// Every role's settings carry the hook (by the tool server, which answers it), confined to where the role works
+    /// (a worker's with its commits too), and its deny rules are as they were (Claude Code asks the hook only about
+    /// what they let through).
+    @Test func everyRolesSettingsCarryTheHook() throws {
         let root = temp.url("verifier-hook").path
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "x", base: "claude", prompt: "p",
@@ -110,16 +111,14 @@ struct VerifierPromptTests {
                                                 temporary: temp.url("session-tmp"))
             let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
             let hooks = settings["hooks"] as? [String: Any]
-            guard role == .verifier else {
-                #expect(hooks == nil, "\(role)")
-                continue
-            }
             let groups = try #require(hooks?["PermissionRequest"] as? [[String: Any]])
             #expect(groups.count == 1 && groups[0]["matcher"] as? String == "Bash")
             let handler = try #require((groups[0]["hooks"] as? [[String: Any]])?.first)
-            #expect(handler["command"] as? String == "'/opt/vibe switcher/vibeswitcher-mcp' --read-only-permission")
+            let worktree = role == .lead ? root : Worktrees.path(root: root, slug: "x")
+            #expect(handler["command"] as? String == "'/opt/vibe switcher/vibeswitcher-mcp' --read-only-permission --root '\(worktree)'"
+                    + (role == .worker ? " --worker" : ""))
             let deny = try #require((settings["permissions"] as? [String: Any])?["deny"] as? [String])
-            #expect(deny == LeadLaunch.deny(.verifier))
+            #expect(deny == LeadLaunch.deny(role))
         }
     }
 

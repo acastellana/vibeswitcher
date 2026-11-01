@@ -15,12 +15,16 @@ import VibeCore
         "git log --oneline -5 && git status --short", "git cat-file -p HEAD | head -5", "rg -n TODO Sources | wc -l",
     ]
     /// What still prompts (the witness declines it once no one has answered: `LeadWitness.stuckPrompts`).
-    static let prompting = ["git config user.name x", "git log > out.txt", "git branch -D main", "git log $(rm -rf x)", "ls; git log"]
+    static let prompting = ["git config user.name x", "git log > out.txt", "git branch -D main", "git log $(rm -rf x)", "ls; git log",
+                            "git diff --no-index /var/empty ~/.vibeswitcher/lead", "head ../../x", "git -P log"]
 
     @Test func theVerifiersSettingsLetReadOnlyCommandLinesRunWithoutAPrompt() throws {
         let mcp = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         #expect(FileManager.default.isExecutableFile(atPath: mcp), "no built tool server at \(mcp)")
         let root = temp.url("verifier-hook").path
+        // The worktree the audit runs in, where the hook confines its paths (the event's cwd).
+        let worktree = Worktrees.path(root: root, slug: "audit-me")
+        try FileManager.default.createDirectory(atPath: worktree, withIntermediateDirectories: true)
         let launch = try LeadLaunch.prepare(role: .verifier, root: root, task: "audit-me", base: "claude", prompt: "p", start: "Check.",
                                             server: mcp, name: "verifier-audit-me", temporary: temp.url("session-tmp"))
         let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
@@ -30,20 +34,20 @@ import VibeCore
             .flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }.compactMap { $0["command"] as? String }
 
         for line in Self.readOnly {
-            #expect(try runsWithoutAPrompt(line, allow: allow, hooks: hooks),
+            #expect(try runsWithoutAPrompt(line, allow: allow, hooks: hooks, cwd: worktree),
                     "`\(line)` waits on a permission prompt no one answers (allow rules \(allow), PermissionRequest hooks \(hooks))")
         }
         // The hook allows none of these (the allow rules are as they were, and Claude Code's own parser keeps a
         // redirection or a substitution from matching them).
         #expect(!hooks.isEmpty)
         for line in Self.prompting {
-            for hook in hooks { #expect(try !hookAllows(hook, line), "`\(line)` runs without a prompt") }
+            for hook in hooks { #expect(try !hookAllows(hook, line, cwd: worktree), "`\(line)` runs without a prompt") }
         }
     }
 
     /// Whether Claude Code runs `line` without asking: each of its parts (split at `;`, `&&`, `||`, `|`) matches an
     /// allow rule (`Bash(<prefix>:*)` or `Bash(<command>)`), or a `PermissionRequest` hook answers allow.
-    func runsWithoutAPrompt(_ line: String, allow: [String], hooks: [String]) throws -> Bool {
+    func runsWithoutAPrompt(_ line: String, allow: [String], hooks: [String], cwd: String) throws -> Bool {
         let parts = line.replacingOccurrences(of: "&&", with: ";").replacingOccurrences(of: "||", with: ";")
             .replacingOccurrences(of: "|", with: ";").split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }
         let byRules = parts.allSatisfy { part in
@@ -54,13 +58,13 @@ import VibeCore
             }
         }
         if byRules { return true }
-        for hook in hooks where try hookAllows(hook, line) { return true }
+        for hook in hooks where try hookAllows(hook, line, cwd: cwd) { return true }
         return false
     }
 
-    /// Runs `hook` as Claude Code does for a Bash call of `line`, and reads its answer.
-    func hookAllows(_ hook: String, _ line: String) throws -> Bool {
-        let event: [String: Any] = ["session_id": "s", "hook_event_name": "PermissionRequest", "cwd": "/Users/x/repo", "permission_mode": "default",
+    /// Runs `hook` as Claude Code does for a Bash call of `line` from the shell's folder `cwd`, and reads its answer.
+    func hookAllows(_ hook: String, _ line: String, cwd: String) throws -> Bool {
+        let event: [String: Any] = ["session_id": "s", "hook_event_name": "PermissionRequest", "cwd": cwd, "permission_mode": "default",
                                     "tool_name": "Bash", "tool_input": ["command": line, "description": "probe"]]
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")

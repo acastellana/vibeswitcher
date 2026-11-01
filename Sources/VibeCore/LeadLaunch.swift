@@ -40,6 +40,34 @@ public enum LeadLaunch {
     static let privateFiles = ["Read(~/.vibeswitcher/lead/**)", "Edit(~/.vibeswitcher/lead/**)",
                                "Read(~/.vibeswitcher/steer/**)", "Edit(~/.vibeswitcher/steer/**)"]
 
+    /// A first layer, before the hook's parser (`hooks`, `ReadOnlyCommand`), which is what keeps them from running
+    /// unasked: the git forms that print a file from outside the repository, where the Read rules above don't look
+    /// (shown on git 2.39, 2026-11-01): `git diff --no-index`, and `git diff` given a path outside
+    /// the work tree (it then compares the files without `--no-index`); a path from home, up out of the checkout, or
+    /// behind an expansion or a quote is refused, since a rule can't tell where it points. `git blame`
+    /// annotating another file's contents or reading its revisions from one, `git log --stdin`, a commit message taken
+    /// from a file, and pathspecs read from one (git prints each line it can't match). Refused to every role.
+    static let outsideReads: [String] = {
+        // Not a path written absolute: one inside the worktree is an everyday form (round 1's F9), and the hook's
+        // parser tells it from one outside, symlinks resolved.
+        let paths: [String] = ["~", "../", "\"~", "'~", "\"../", "'../"]
+        var rules: [String] = arguments("git diff", starting: ["--no-index"] + paths)
+        // A path that climbs out partway (`sub/../../x`, `./../x`); a revision range (`main...HEAD`) has no `/..`.
+        rules += ["Bash(git diff*$*)", "Bash(git diff*`*)", "Bash(git diff */..*)"]
+        rules += arguments("git blame", starting: ["--contents", "-S", "--ignore-revs-file"])
+        rules += arguments("git log", starting: ["--stdin"])
+        rules += ["Bash(git log --stdin)", "Bash(git log * --stdin)"]
+        rules += arguments("git commit", starting: ["-F", "--file"])
+        rules.append("Bash(git *--pathspec-from-file*)")
+        return rules
+    }()
+
+    /// Rules refusing `command` with an argument that starts with one of `starting`, first or later: `command *` alone
+    /// would leave the first argument out wherever a `*` must match some text.
+    static func arguments(_ command: String, starting: [String]) -> [String] {
+        starting.flatMap { ["Bash(\(command) \($0)*)", "Bash(\(command) * \($0)*)"] }
+    }
+
     /// The user's own settings for every project, edited in Settings › Project lead (the app writes them; no role's
     /// session does): the Mac-wide limits on sessions and load (`MacLimits`) and the working policy (`WorkingPolicy`).
     /// They aren't among the vault's guarded settings, so a worker that wrote them could raise its own cap.
@@ -65,9 +93,9 @@ public enum LeadLaunch {
     public static func deny(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
         switch role {
         case .lead:
-            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + userSettings + killsByName
+            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + outsideReads + userSettings + killsByName
         case .verifier:
-            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + userSettings + killsByName + debuggers
+            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
             // the brief gives, or `git rebase <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
@@ -91,16 +119,19 @@ public enum LeadLaunch {
                 rules += ["Edit(\(records)/**)", "Write(\(records)/**)", "Bash(git add \(records)*)", "Bash(git rm \(records)*)",
                           "Bash(git rm * \(records)*)"]
             }
-            return rules + gitAround + privateFiles + userSettings + killsByName + debuggers
+            return rules + gitAround + privateFiles + outsideReads + userSettings + killsByName + debuggers
         }
     }
 
     /// The git commands `deny` refuses `role`, as its prompt lists them: each `Bash(...)` rule that runs git, without
     /// its `:*` ("git worktree", "git checkout * main", "env git"). Made from the rules, so the list never drifts from them.
+    /// Not `outsideReads`: patterns of quotes, backticks and wildcards that read as noise in a brief (round 1's F8), for
+    /// reads no brief asks for.
     public static func deniedGit(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
         var seen = Set<String>()
+        let patterns = Set(outsideReads)
         return deny(role, base: base, records: records).compactMap { rule -> String? in
-            guard rule.hasPrefix("Bash("), rule.hasSuffix(")") else { return nil }
+            guard rule.hasPrefix("Bash("), rule.hasSuffix(")"), !patterns.contains(rule) else { return nil }
             var command = String(rule.dropFirst("Bash(".count).dropLast())
             if command.hasSuffix(":*") { command.removeLast(2) }
             guard command.hasPrefix("git ") || command.hasSuffix(" git") || command.hasSuffix("/git") else { return nil }
@@ -112,32 +143,35 @@ public enum LeadLaunch {
     /// as that server only). Which tools a role gets is its capability's business (see `LeadVault`).
     static let ownTools = "mcp__vibeswitcher__*"
 
-    /// What each role may do without asking, the deny rules permitting: its VibeSwitcher tools (they never wait on a
-    /// prompt, whether or not auto mode, the default since Claude Code 2.1.284, is on), reading git at any time
-    /// (after a denied command too), and for a worker, committing, removing a file its change deletes (`git rm`: only
-    /// files git tracks in this checkout, so nothing outside its worktree), bringing its branch up to date with `base`,
-    /// and taking a fix out of its worktree and putting it back (`git diff <commit> HEAD -- <files> | git apply -R`, the
-    /// patch from git on its input: `LeadPrompts.Policy.regressionTest`).
+    /// What each role may do without asking, the deny rules permitting, by rule: its VibeSwitcher tools (they never
+    /// wait on a prompt, whether or not auto mode, the default since Claude Code 2.1.284, is on), `git branch
+    /// --show-current`, and for a worker, the bare steps of bringing its branch up to date with `base` and taking a fix
+    /// out and putting it back with `git apply` (the patch from git on its input: `LeadPrompts.Policy.regressionTest`).
+    /// Every other git read, and a worker's `git add`, `git rm` and `git commit`, goes to the role's hook (`hooks`): a
+    /// rule such as `Bash(git diff:*)` lets through any spelling of any argument, and on 2026-11-01 `git diff --no-index
+    /// /var/empty <file>` printed the lead's private files past the Read rules, as did global options, abbreviations,
+    /// `--stdin`, `..` and commit's `--template`, which no list of deny rules can enumerate.
     public static func allow(_ role: Role, base: String? = nil) -> [String] {
-        let reads = [ownTools, "Bash(git log:*)", "Bash(git diff:*)", "Bash(git status:*)", "Bash(git show:*)", "Bash(git rev-parse:*)",
-                     "Bash(git merge-base:*)", "Bash(git ls-files:*)", "Bash(git blame:*)", "Bash(git branch --show-current)"]
+        let reads = [ownTools, "Bash(git branch --show-current)"]
         guard role == .worker else { return reads }
-        var rules = reads + ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git rm:*)", "Bash(git rebase --continue)", "Bash(git rebase --abort)",
-                             "Bash(git rebase --skip)", "Bash(git merge --continue)", "Bash(git merge --abort)", "Bash(git apply -R)", "Bash(git apply)"]
+        var rules = reads + ["Bash(git rebase --continue)", "Bash(git rebase --abort)", "Bash(git rebase --skip)", "Bash(git merge --continue)",
+                             "Bash(git merge --abort)", "Bash(git apply -R)", "Bash(git apply)"]
         if let base { rules += ["Bash(git rebase \(base))", "Bash(git merge \(base))", "Bash(git merge --no-edit \(base))"] }
         return rules
     }
 
-    /// The hooks a role's own settings add: a verifier's (an audit's finders too) `PermissionRequest` hook lets a
-    /// command line that only reads run without a prompt (`ReadOnlyCommand`), chained or not: no one answers a
-    /// verifier's prompts, and two audits hung on prompts for read-only git and grep (2026-10-31, 2026-11-01). Claude
-    /// Code asks it only about what the deny rules let through; anything it doesn't allow prompts as before (and the
-    /// witness declines that when no one answers: `LeadWitness.stuckPrompts`). The lead's and workers' rules stay as
-    /// they are. Loaded from `--settings` whatever `--setting-sources` says.
-    static func hooks(_ role: Role, server: String) -> [String: Any]? {
-        guard role == .verifier else { return nil }
-        let command = "\(RecentProjects.shellQuote(server)) \(ReadOnlyCommand.hookArgument)"
-        return ["PermissionRequest": [["matcher": "Bash", "hooks": [["type": "command", "command": command, "timeout": 10]]]]]
+    /// The hook every role's settings add: its `PermissionRequest` hook lets a command line run without a prompt when
+    /// it parses cleanly as git reads and grep/rg/head/tail/wc/sort with known flags, every path in the role's worktree
+    /// `root` (symlinks resolved), and for a worker its own `git add`, `git rm`, `git commit -m` and `git apply`
+    /// (`ReadOnlyCommand`), chained or not. No one answers a verifier's prompts, and two audits hung on prompts for
+    /// read-only git and grep (2026-10-31, 2026-11-01). Claude Code asks it only about what the deny rules let through
+    /// (`outsideReads` stays a first layer); anything it doesn't allow prompts as an unlisted command does (and the
+    /// witness declines a verifier's when no one answers it: `LeadWitness.stuckPrompts`). Loaded from `--settings`
+    /// whatever `--setting-sources` says.
+    public static func hooks(_ role: Role, server: String, root: String) -> [String: Any] {
+        var words = [RecentProjects.shellQuote(server), ReadOnlyCommand.hookArgument, ReadOnlyCommand.rootArgument, RecentProjects.shellQuote(root)]
+        if role == .worker { words.append(ReadOnlyCommand.workerArgument) }
+        return ["PermissionRequest": [["matcher": "Bash", "hooks": [["type": "command", "command": words.joined(separator: " "), "timeout": 10]]]]]
     }
 
     /// The environment a role's session (and every command it runs) starts with. A worker's git never opens an
@@ -176,7 +210,9 @@ public enum LeadLaunch {
                                    to: URL(fileURLWithPath: mcpFile))
         var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch), "deny": deny(role, base: branch, records: records)]]
         if !environment(role).isEmpty { settings["env"] = environment(role) }
-        if let hooks = hooks(role, server: server) { settings["hooks"] = hooks }
+        // Where it's started (the task's worktree, else `root`): the hook's paths stay in it.
+        let cwd = cwd ?? task.map { Worktrees.path(root: root, slug: $0) } ?? root
+        settings["hooks"] = hooks(role, server: server, root: cwd)
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: settingsFile))
         let quote = RecentProjects.shellQuote
@@ -196,7 +232,6 @@ public enum LeadLaunch {
         // Marks the role's session: its hook gives it none of the notes plain sessions get (`SessionNote`).
         prepared.environment[SessionNote.roleVariable] = role.rawValue
         // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
-        let cwd = cwd ?? task.map { Worktrees.path(root: root, slug: $0) } ?? root
         if let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary) { prepared.environment["TMPDIR"] = temporary.path + "/" }
         return prepared
     }
