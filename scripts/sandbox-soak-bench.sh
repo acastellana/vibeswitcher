@@ -37,7 +37,7 @@ minutes=$(( (hours * cycles * 15 + 59) / 60 + 1 ))
 ((minutes > max_minutes)) && minutes=$max_minutes
 sandbox=(bash scripts/sandbox-app.sh --dir "$dir")
 on_exit "${sandbox[*]} quit >/dev/null 2>&1 < /dev/null"
-"${sandbox[@]}" "${binary[@]}" --minutes $((minutes + 5)) run >/dev/null
+"${sandbox[@]}" ${binary[@]+"${binary[@]}"} --minutes $((minutes + 5)) run >/dev/null
 "${sandbox[@]}" soak "$minutes" every 3 hour "$cycles" ${without:+without "$without"} >/dev/null
 state=$(cat "$dir/state")
 log=$state/soak.log

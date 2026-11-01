@@ -11,6 +11,7 @@ import Testing
 /// while the Mac's 1-minute load is under load_threshold, as FootprintBenchTests; over it the numbers are printed. A
 /// bench, run only by `scripts/test.sh --perf`.
 struct SandboxSoakBenchTests {
+    private let scratch = Scratch()
     /// MB per simulated hour (20 cycles): the soak's least footprint wanders by up to ~8 MB between hours (its window
     /// and layers redrawn: 7.9 over hours 2-3 on 11-01 with nothing growing), so only a growth well over the noise
     /// fails it. The user's 11-01 install grew ~15 MB a real hour, about 5 MB per 20 sessions churned.
@@ -27,20 +28,21 @@ struct SandboxSoakBenchTests {
         process.arguments = [repo.appendingPathComponent("scripts/sandbox-soak-bench.sh").path, "--binary", app.path,
                              "--dir", repo.appendingPathComponent(".build/sandbox-soak-bench").path, "5"]
         process.currentDirectoryURL = repo
-        let pipe = Pipe()
-        process.standardOutput = pipe
+        // To a file, not a pipe: reading a pipe to its end would wait out a script that never ends, before the guard.
+        let output = scratch.url("sandbox-soak-bench-output")
+        FileManager.default.createFile(atPath: output.path, contents: nil)
+        process.standardOutput = try FileHandle(forWritingTo: output)
         process.standardError = FileHandle.nullDevice
         let ended = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in ended.signal() }
         try process.run()
-        let output = pipe.fileHandleForReading.readDataToEndOfFile()
         // The script bounds its own run (the soak's minutes); this only guards a script that never ends.
         if ended.wait(timeout: .now() + 3 * hangGuard) == .timedOut {
             process.terminate()
             Issue.record("the soak bench hung")
             return
         }
-        let text = String(decoding: output, as: UTF8.self)
+        let text = (try? String(contentsOf: output, encoding: .utf8)) ?? ""
         print(text)
         let loads = [loadBefore, MacLoad.oneMinute()].compactMap { $0 }
         guard let highest = loads.max(), highest < limitLoad else {
