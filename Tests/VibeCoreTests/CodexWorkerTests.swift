@@ -26,8 +26,10 @@ struct CodexWorkerTests: LeadTeamFixture {
 
     /// A stand-in for Codex: writes each argument it was given, NUL-separated, to `log`, and exits.
     func fakeCodex(log: String) throws -> String {
-        let path = temp.url("bin/codex").path
-        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        // In a folder of the scratch's own (removed with it).
+        let folder = temp.url("bin").path
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        let path = folder + "/codex"
         try "#!/bin/sh\nprintf '%s\\0' \"$@\" > '\(log)'\n".write(toFile: path, atomically: true, encoding: .utf8)
         chmod(path, 0o755)
         return path
