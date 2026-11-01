@@ -35,7 +35,7 @@ The lead turns what you ask for into tasks on its board. Each task has a contrac
 
 A task can also have a review level (below), an `after` list (tasks that must be done first), its own time budget
 (`budget_min`), a `model` for its worker (as `claude --model` takes it: `sonnet` for a mechanical task; left out, the
-worker runs on the project's Claude command's model, as before) and `auto_advance: false` to keep it out of automatic
+worker runs on the project's Claude command's model, as before; given, it replaces a `--model` that command names) and `auto_advance: false` to keep it out of automatic
 moves. The lead changes a task with
 `update_task`. A task's state (`LeadBoard.swift:549`) is planned, running, review (reported done, being checked), done
 (merged), failed, blocked, kept, folded, abandoned or reverted. A task made by
@@ -183,9 +183,13 @@ resets. VibeSwitcher reads what Claude Code exposes (`AccountUsage.swift`), best
 - **The status line's input.** For a Claude.ai subscriber, after a session's first reply, Claude Code hands the status
   line `rate_limits`: `five_hour` and `seven_day`, each with `used_percentage` (0–100) and `resets_at` (epoch seconds),
   and `spend_limit` behind a gateway. These are the whole account's. The sessions VibeSwitcher starts (lead, workers,
-  verifiers) get its status line, which keeps them in `~/.vibeswitcher/account-usage.json` and then runs your own
-  status line (`statusLine` in `~/.claude/settings.json`) with the same input, so it reads as yours. Your own sessions
-  are untouched. There's no per-model percentage there.
+  verifiers) get its status line. It runs your own status line with the same input and prints its output byte for byte
+  first, then keeps the windows in `~/.vibeswitcher/account-usage.json`, so the line reads as yours, and nothing of
+  VibeSwitcher's that fails stops it from showing. Your status line is found as Claude Code layers its settings: the
+  project's `.claude/settings.local.json`, then its `.claude/settings.json`, then `~/.claude/settings.local.json`, then
+  `~/.claude/settings.json`. A verifier looks only at your user settings, since it runs with `--setting-sources user`
+  and the branch's project settings were written by a worker. Your own sessions are untouched. There's no per-model
+  percentage there.
 - **Transcripts** say nothing about usage until a request is refused. Then the API-error line carries `apiError`
   (`usage_limit_reached`, or `model_requires_usage_credits` when only that model is out, as Fable was on 2026-11-01),
   `rateLimitType` (`five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, `seven_day_overage_included`) and
