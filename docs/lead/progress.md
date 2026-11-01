@@ -2674,3 +2674,10 @@
 - 2026-11-01 11:41 Automatically (auto_advance): Cleaned up wallet-outcomes-always; ended pid 61396 (Worker: Wallet outcomes always reach the agent: undelivered messages kept on disk and retried) (freed 3.0 GB of build output and temporary folders). It stays done.
 - 2026-11-01 11:42 Started a worker on wallet-path-robustness
 - 2026-11-01 11:42 Automatically (auto_advance): Started a worker on wallet-path-robustness (Wallet path robustness: no typed path is ever run, polls coalesce, records are bounded and read safely), its after tasks done (wallet-outcomes-always).
+- 2026-11-01 11:50 Audit of boost-release-3-7 at 7b8bc913 tested its merged result 1bacef01 onto main: the test command passed
+- 2026-11-01 11:50 Automatically (auto_advance): Started the audit of boost-release-3-7 at 7b8bc913 (Its review is audit).
+- 2026-11-01 11:53 Audit of boost-release-3-7: complete, clean, round 2: 3 Important closed, 3 Nit closed
+- 2026-11-01 12:09 Planned read-only-git-parser: Read-only git parser: allow the everyday forms other projects' workers and verifiers use (merge-tree, --stat, show --cc, git grep <rev>), and a worker's diff | apply -R proof (review audit)
+- 2026-11-01 12:09 Automatically (auto_advance): Merge of boost-release-4-7 failed: Tests fail rebased onto main: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() Sent its worker the output; it's back at work.
+- 2026-11-01 12:09 Automatically (auto_advance): feature-impact-ledger is audited, not merged: it changes 674 lines outside tests, over risk_lines (400) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-01 12:09 Automatically (auto_advance): fix-the-flaky-test-15 is audited, not merged: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift) (the risk check raised it from review none). Its audit starts once the Mac has room.
