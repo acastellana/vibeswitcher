@@ -2573,3 +2573,6 @@
 - 2026-11-01 08:25 Automatically (auto_advance): Merged workers-and-verifiers-2 (Workers and verifiers can read the lead's private files through `git diff --no-index` (Bash(git diff:*) bypasses the Read deny)) into main at 85f3e417, on its passing audit and the full test run.
 - 2026-11-01 08:27 Planned wallet-requests-know: Wallet requests know Ethereum, Base and their testnets (names, explorer links, browser-wallet chain switch)
 - 2026-11-01 08:34 Merged app-memory-steps-up: App memory steps up 17–20 MB after a real worker session ends: reproduce and fix
+- 2026-11-01 08:34 Automatically (auto_advance): Merged app-memory-steps-up (App memory steps up 17–20 MB after a real worker session ends: reproduce and fix) into main at dde41def, on its passing audit and the full test run.
+- 2026-11-01 08:34 Automatically (auto_advance): Cleaned up workers-and-verifiers-2 (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-01 08:34 Automatically (auto_advance): Cleaned up app-memory-steps-up; ended pid 48805 (Worker: App memory steps up 17–20 MB after a real worker session ends: reproduce and fix) (freed 1.6 GB of build output and temporary folders). It stays done.
