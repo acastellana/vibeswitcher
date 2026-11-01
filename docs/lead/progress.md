@@ -2663,3 +2663,10 @@
 - 2026-11-01 11:21 Automatically (auto_advance): Started the audit of wallet-outcomes-always at 5b0fde62 (Its review is audit).
 - 2026-11-01 11:27 Audit of wallet-outcomes-always: complete, clean, round 2: 1 Important closed, 1 Nit open
 - 2026-11-01 11:28 The worker on boost-release-3-7 answered findings: boost-release-3-7:F1 fixed at 7b8bc913: 7152c68 + 425feeb. The user's status line now runs through posix_spawn and a single-thread kqueue loop (UsageStatusLine.runCommand). F_SETNOSIGPIPE on the stdin pipe. Writing stops at the child's exit (NOTE_EXIT handled first) or at EV_EOF on the pipe. main.swift ignores SIGPIPE (and sets F_SETNOSIGPIPE on stdout) before the --status-line branch; the child starts with SIGPIPE at its default. The user's output is shown first, byte for byte as Data, and the …
+- 2026-11-01 11:28 Audit of boost-release-4-7 at 85756efa tested its merged result c762f860 onto main: the test command passed
+- 2026-11-01 11:28 Automatically (auto_advance): Started the audit of boost-release-4-7 at 85756efa (Its review is audit).
+- 2026-11-01 11:31 Audit of boost-release-4-7: complete, clean, round 2: 2 Important (1 open), 1 Nit closed
+- 2026-11-01 11:31 Planned leadauditreleasetests: LeadAuditReleaseTests: the wait for the message has no overall time limit (line 139)
+- 2026-11-01 11:31 boost-release-4-7 back in review: no Important finding open, and its audit passed
+- 2026-11-01 11:41 Merged wallet-outcomes-always: Wallet outcomes always reach the agent: undelivered messages kept on disk and retried
+- 2026-11-01 11:41 Flaky in wallet-outcomes-always's merge: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
