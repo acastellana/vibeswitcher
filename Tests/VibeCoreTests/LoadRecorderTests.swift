@@ -102,7 +102,8 @@ struct LoadRecorderTests {
     @Test func noArgumentsPathsOrSecretsAreRecorded() throws {
         let folder = temp.url("stats")
         let home = "/Users/me"
-        let secrets = ["sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz012345", "hunter2", "ghp_0123456789abcdefABCDEF0123456789abcd"]
+        // Shaped like credentials only at run time: the files hold none (`SecretShapeLintTests`).
+        let secrets = ["sk-" + "ant-api03-" + String(repeating: "Ab0", count: 12), "hunter2", "gh" + "p_" + String(repeating: "a1B", count: 12)]
         let table = [
             LoadProcess(pid: 100, ppid: 1, pgid: 100, comm: "/usr/bin/python3 train.py --api-key \(secrets[0])", cpuSeconds: 0),
             LoadProcess(pid: 101, ppid: 100, pgid: 100, comm: "python3 worker.py --password=\(secrets[1])", cpuSeconds: 0),
@@ -166,7 +167,7 @@ struct LoadRecorderTests {
         #expect(LoadStats.project(ofFolder: "/Users/me/dev/vs/.vibeswitcher/worktrees/task-a/Tests", home: home, isRepository: repo) == "vs")
         #expect(LoadStats.project(ofFolder: "/Users/me/Documents/taxes", home: home, isRepository: repo) == nil)
         #expect(LoadStats.project(ofFolder: home, home: home, isRepository: { _ in true }) == nil)
-        #expect(LoadStats.project(ofFolder: "/private/tmp/x", home: home, isRepository: repo) == nil)
+        #expect(LoadStats.project(ofFolder: "/opt/build/x", home: home, isRepository: repo) == nil)
         #expect(LoadStats.commandName("/opt/homebrew/bin/node --inspect secret.js") == "node")
         #expect(LoadStats.commandName("") == "?")
     }
