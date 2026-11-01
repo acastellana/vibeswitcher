@@ -2790,3 +2790,11 @@
 - 2026-11-01 17:05 Merged heavy-jobs-fit-their: Heavy jobs fit their slot: vs-heavy gives each job a core budget, and our builds and tests honour it
 - 2026-11-01 17:05 Automatically (auto_advance): Merged heavy-jobs-fit-their (Heavy jobs fit their slot: vs-heavy gives each job a core budget, and our builds and tests honour it) into main at 8fde5718, on its passing audit and the full test run.
 - 2026-11-01 17:23 Merged the-test-suite-leaves: The test suite leaves hundreds of zombie processes (a test helper had 431 unreaped children)
+- 2026-11-01 17:23 Automatically (auto_advance): Merged the-test-suite-leaves (The test suite leaves hundreds of zombie processes (a test helper had 431 unreaped children)) into main at b981307b, on its passing audit and the full test run.
+- 2026-11-01 17:23 Automatically (auto_advance): Cleaned up heavy-jobs-fit-their (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-11-01 17:24 Automatically (auto_advance): Cleaned up the-test-suite-leaves; ended pid 26223 (Worker: The test suite leaves hundreds of zombie processes (a test helper had 431 unreaped children)) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 17:27 Started a worker on test-under-load-sh-2
+- 2026-11-01 17:27 Automatically (auto_advance): Started a worker on test-under-load-sh-2 (test-under-load.sh builds through heavy_swift too (its bare swift build ignores the core budget)), its after tasks done (heavy-jobs-fit-their).
+- 2026-11-01 17:27 Started a worker on wallet-e2e-sh-the
+- 2026-11-01 17:27 Automatically (auto_advance): Started a worker on wallet-e2e-sh-the (wallet-e2e.sh: the real-testnet case no longer waits for Proposed before the sign POST (the Wallet Manager sends it with the POST now)).
+- 2026-11-01 17:27 Automatically (auto_advance): Didn't audit boost-release-6-7: Not audited, no verifier started: a trial merge of agent/boost-release-6-7 (40fed0d6) onto main (git merge-tree) conflicts, so it can't land as it is. Files: docs/guide/project-lead.md. main's commits that touched them since agent/boost-release-6-7 last took it in (at ec9c3ba9): 9a39119 heavy_swift: two modules at once with half the share of compiles each (SwiftPM's -j N alone ran N×N: 12 frontends at -j 4); policy and docs give that SwiftPM line (docs/guide/project-lead.md); 86b5e25 Working pol…
