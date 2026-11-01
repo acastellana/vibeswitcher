@@ -2824,3 +2824,7 @@
 - 2026-11-01 19:14 Audit of test-under-load-sh-2: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
 - 2026-11-01 19:16 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-11-01 19:21 The worker on boost-release-6-7 answered findings: boost-release-6-7:F1 fixed at 124033a4: 63b7d85: LeadLaunch.userSettings now denies Edit/Write(~/.vibeswitcher/boost.json) to the lead, workers and verifiers, as it does mac-limits.json. BoostLimits clamps every value as it's read and decoded: load_threshold ≤ 4× the cores, sessions and workers ≤ 4× the cores, heavy slots ≤ one per core. Tests: LeadLaunchTests.noRoleMayWriteTheUsersMacWideSettings (now includes boost.json) and BoostTests.anOutOfRangeBoostFileIsClamped. Both fail with the fix tak…
+- 2026-11-01 19:32 Audit of boost-release-6-7 at 124033a4 tested its merged result eeaf4dc8 onto main: test command failed
+- 2026-11-01 19:32 Automatically (auto_advance): Started the audit of boost-release-6-7 at 124033a4 (Its review is audit).
+- 2026-11-01 19:39 Audit of boost-release-6-7: complete, clean, round 2: 3 Important closed, 3 Nit closed
+- 2026-11-01 19:42 Merged test-under-load-sh-2: test-under-load.sh builds through heavy_swift too (its bare swift build ignores the core budget)
