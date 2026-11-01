@@ -77,6 +77,16 @@ enum HeapCensus {
             while keys[index] != 0, keys[index] != key { index = (index + 1) & (capacity - 1) }
             keys[index] = key
         }
+
+        /// Copies the counts (not the keys, which a census never changes) into `other`, of the same capacity.
+        func copyCounts(to other: inout Tables) {
+            other.counts.update(from: counts, count: capacity)
+            other.bytes.update(from: bytes, count: capacity)
+            other.unclassedCounts.update(from: unclassedCounts, count: HeapCensus.bucketNames.count)
+            other.unclassedBytes.update(from: unclassedBytes, count: HeapCensus.bucketNames.count)
+            other.totalBlocks = totalBlocks
+            other.totalBytes = totalBytes
+        }
     }
 
     nonisolated(unsafe) fileprivate static var tables: Tables?
@@ -84,6 +94,9 @@ enum HeapCensus {
     /// The biggest block whose first word is read for its class: an object bigger than this is rare, and is counted
     /// in its size's bucket instead.
     static let classedUpTo = 16 * 1024
+
+    /// How many times a zone whose enumeration fails partway is counted again (see `take`).
+    static let attemptsPerZone = 5
 
     /// One census at a time: each fills the one `tables` the enumerator's callback writes (a soak's hourly census
     /// and the one at its end could overlap, each counting into the other's buffers and freeing them).
@@ -130,9 +143,27 @@ enum HeapCensus {
         // allocating while it held the zones' (fork) lock, aborted the process (_os_unfair_lock_recursive_abort under
         // _xzm_fork_lock_wait, the sandbox's soak, 11-01). The others keep running, so a block may come or go while it's
         // counted: a census is a close count, not an exact one.
+        // So is a zone's enumeration that stops partway, the rest of that zone uncounted: it says so (KERN_FAILURE, when
+        // another thread changed a block list under it; 1 census in 40 with ten threads allocating, and it dropped 15,000
+        // of the zone's 25,000 blocks), and that zone is counted again from what was counted before it.
+        var saved = Tables(capacity: capacity, keys: built.keys, counts: .allocate(capacity: capacity),
+                           bytes: .allocate(capacity: capacity), unclassedCounts: .allocate(capacity: bucketNames.count),
+                           unclassedBytes: .allocate(capacity: bucketNames.count), mask: mask)
+        defer {
+            saved.counts.deallocate(); saved.bytes.deallocate()
+            saved.unclassedCounts.deallocate(); saved.unclassedBytes.deallocate()
+        }
         for zone in zones {
-            _ = zone.pointee.introspect?.pointee.enumerator?(mach_task_self_, nil, UInt32(MALLOC_PTR_IN_USE_RANGE_TYPE),
-                                                            vm_address_t(UInt(bitPattern: zone)), censusRead, censusRecord)
+            guard let enumerate = zone.pointee.introspect?.pointee.enumerator else { continue }
+            tables?.copyCounts(to: &saved)
+            for attempt in 1...attemptsPerZone {
+                let status = enumerate(mach_task_self_, nil, UInt32(MALLOC_PTR_IN_USE_RANGE_TYPE),
+                                       vm_address_t(UInt(bitPattern: zone)), censusRead, censusRecord)
+                // The last attempt's partial count stays: a close count beats none.
+                guard status != KERN_SUCCESS, attempt < attemptsPerZone, var partial = tables else { break }
+                saved.copyCounts(to: &partial)
+                tables = partial
+            }
         }
         guard let counted = tables else { return Result() }
         tables = nil
