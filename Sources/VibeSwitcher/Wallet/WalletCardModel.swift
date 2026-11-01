@@ -190,15 +190,8 @@ struct WalletCardModel: Equatable, Identifiable {
         return true
     }
 
-    /// The chains the card names; others read "chain <id>".
-    static func chainName(_ id: Int) -> String {
-        switch id {
-        case 42424242: return "GenLayer"
-        case 4221: return "GenLayer testnet"
-        case 1: return "Ethereum"
-        default: return "chain \(id)"
-        }
-    }
+    /// The chains the card names (`WalletChain.known`); others read "chain <id>".
+    static func chainName(_ id: Int) -> String { WalletChain.name(Int64(id)) }
 
     var chainName: String { Self.chainName(chainID) }
 

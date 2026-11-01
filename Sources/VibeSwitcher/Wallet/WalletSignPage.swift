@@ -49,8 +49,8 @@ enum WalletSignPage {
             "reasonTitle": WalletCardModel.reasonTitle, "reason": "“\(request.reason)”", "tx": txData,
         ]
         if let confirm = card.call?.confirmation { page["confirm"] = confirm }
-        if let chain = WalletBrowser.addableChains[request.chainId] {
-            page["addChain"] = ["chainId": chainHex, "chainName": chain.name, "rpcUrls": [chain.rpc], "blockExplorerUrls": [chain.explorer],
+        if let chain = WalletBrowser.addableChains[request.chainId], let rpc = chain.rpc {
+            page["addChain"] = ["chainId": chainHex, "chainName": chain.name, "rpcUrls": [rpc], "blockExplorerUrls": [chain.explorer],
                                 "nativeCurrency": ["name": chain.symbol, "symbol": chain.symbol, "decimals": chain.decimals]] as [String: Any]
         }
         return page

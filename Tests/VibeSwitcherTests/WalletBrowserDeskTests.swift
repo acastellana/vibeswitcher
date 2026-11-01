@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 import JavaScriptCore
 import Testing
@@ -925,6 +926,64 @@ struct WalletSignPageScriptTests {
         #expect(Self.value(context, "JSON.stringify(window.ethereum.added)")
                 == #"{"blockExplorerUrls":["https://scan.chain.genlayer.com"],"chainId":"0x28757b2","chainName":"GenLayer","nativeCurrency":{"decimals":18,"name":"GEN","symbol":"GEN"},"rpcUrls":["https://rpc.chain.genlayer.com"]}"#)
         #expect(Self.value(context, "posts.length") == "1")
+    }
+
+    /// Base and Base Sepolia unknown to the wallet: added with their official public RPC, explorer and ETH, then switched to.
+    @Test func baseIsAddedWhenTheWalletDoesntKnowIt() throws {
+        let hash = "0x" + String(repeating: "cd", count: 32)
+        for (id, hex, name, rpc, explorer) in [(Int64(8453), "0x2105", "Base", "https://mainnet.base.org", "https://basescan.org"),
+                                               (84532, "0x14a34", "Base Sepolia", "https://sepolia.base.org", "https://sepolia.basescan.org")] {
+            var request = WalletBrowserDeskTests.request()
+            request.chainId = id
+            let context = try Self.page(request, ethereum: Self.wallet(chain: "0x1", switchError: #"{ code: 4902, message: "Unrecognized chain" }"#,
+                                                                       send: #"return "\#(hash)";"#))
+            Self.click(context)
+            #expect(Self.value(context, "JSON.stringify(window.ethereum.added)")
+                    == #"{"blockExplorerUrls":["\#(explorer)"],"chainId":"\#(hex)","chainName":"\#(name)","nativeCurrency":{"decimals":18,"name":"ETH","symbol":"ETH"},"rpcUrls":["\#(rpc)"]}"#)
+            #expect(Self.value(context, "window.ethereum.chain") == hex)
+            #expect(Self.value(context, "posts.length") == "1")
+            #expect(Self.value(context, "element('rows').children[3].textContent") == "\(name) (\(id))")
+        }
+    }
+
+    /// Ethereum and Sepolia ship in every wallet: switched to, never added; the wallet's error is shown when it can't.
+    @Test func ethereumAndSepoliaAreOnlySwitchedTo() throws {
+        let hash = "0x" + String(repeating: "cd", count: 32)
+        for (id, hex, name) in [(Int64(1), "0x1", "Ethereum"), (11_155_111, "0xaa36a7", "Sepolia")] {
+            var request = WalletBrowserDeskTests.request()
+            request.chainId = id
+            #expect(try #require(WalletSignPage.data(for: request))["addChain"] == nil)
+            let switched = try Self.page(request, ethereum: Self.wallet(chain: "0x2105", send: #"return "\#(hash)";"#))
+            Self.click(switched)
+            #expect(Self.value(switched, "window.ethereum.chain") == hex)
+            #expect(!Self.value(switched, "calls.join()").contains("wallet_addEthereumChain"))
+            #expect(Self.value(switched, "posts.length") == "1")
+            #expect(Self.value(switched, "element('rows').children[3].textContent") == "\(name) (\(id))")
+            let refused = try Self.page(request, ethereum: Self.wallet(chain: "0x2105", switchError: #"{ code: 4902, message: "Unrecognized chain" }"#,
+                                                                       send: "return null;"))
+            Self.click(refused)
+            #expect(Self.status(refused).contains("Unrecognized chain"))
+            #expect(!Self.value(refused, "calls.join()").contains("wallet_addEthereumChain"))
+            #expect(!Self.value(refused, "calls.join()").contains("eth_sendTransaction"))
+        }
+    }
+
+    /// The CSP names the hashes of the script and style the page actually carries, whatever chain it's for.
+    @Test func theCSPHashesMatchThePageOnEveryKnownChain() throws {
+        func hash(_ text: String) -> String { "'sha256-" + Data(SHA256.hash(data: Data(text.utf8))).base64EncodedString() + "'" }
+        func between(_ html: String, _ open: String, _ close: String) -> String? {
+            guard let start = html.range(of: open), let end = html.range(of: close, range: start.upperBound..<html.endIndex) else { return nil }
+            return String(html[start.upperBound..<end.lowerBound])
+        }
+        for id in WalletChain.known.keys.sorted() + [5] {
+            var request = WalletBrowserDeskTests.request()
+            request.chainId = id
+            let html = try #require(WalletSignPage.html(for: request))
+            let script = try #require(between(html, "<script>", "</script>"))
+            let style = try #require(between(html, "<style>", "</style>"))
+            #expect(WalletSignPage.csp.contains("script-src \(hash(script));"), "chain \(id)")
+            #expect(WalletSignPage.csp.contains("style-src \(hash(style));"), "chain \(id)")
+        }
     }
 
     /// Another chain is only switched to; the wallet's error is shown when it can't.

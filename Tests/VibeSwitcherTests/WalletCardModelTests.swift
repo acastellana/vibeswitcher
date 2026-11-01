@@ -99,6 +99,10 @@ struct WalletCardModelTests {
     @Test func chainNames() {
         #expect(WalletCardModel.chainName(42424242) == "GenLayer")
         #expect(WalletCardModel.chainName(1) == "Ethereum")
+        #expect(WalletCardModel.chainName(11155111) == "Sepolia")
+        #expect(WalletCardModel.chainName(8453) == "Base")
+        #expect(WalletCardModel.chainName(84532) == "Base Sepolia")
+        #expect(WalletCardModel.chainName(4221) == "GenLayer Testnet")
         #expect(WalletCardModel.chainName(5) == "chain 5")
         var card = WalletCardModel(id: "r", workspace: "example", from: "0x01", wallet: .hardware, to: "0x02", chainID: 42424242, asset: "GEN",
                                   amount: "1", reason: "a test", requestedBy: "example-agent", state: .waiting)

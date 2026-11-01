@@ -44,20 +44,41 @@ struct WalletBrowserTests {
         #expect(!WalletBrowser.canSign(Self.request(from: "example-hardware")))
     }
 
-    @Test func genLayerChainsAreAddableWithTheirExplorers() throws {
-        let main = try #require(WalletBrowser.addableChains[42_424_242])
-        #expect(main.rpc == "https://rpc.chain.genlayer.com" && main.explorer == "https://scan.chain.genlayer.com")
-        #expect(main.symbol == "GEN" && main.decimals == 18)
-        let test = try #require(WalletBrowser.addableChains[4221])
-        #expect(test.rpc == "https://rpc.testnet-chain.genlayer.com" && test.explorer == "https://scan.testnet-chain.genlayer.com")
-        #expect(test.symbol == "GEN" && test.decimals == 18)
-        #expect(WalletBrowser.addableChains.count == 2)
+    /// One table names the six chains and links their EIP-3091 explorers, for the card, the messages and the page.
+    @Test func knownChainsHaveTheirNamesAndExplorers() {
+        let expected: [(Int64, String, String, String)] = [
+            (1, "Ethereum", "https://etherscan.io", "ETH"),
+            (11_155_111, "Sepolia", "https://sepolia.etherscan.io", "ETH"),
+            (8453, "Base", "https://basescan.org", "ETH"),
+            (84532, "Base Sepolia", "https://sepolia.basescan.org", "ETH"),
+            (4221, "GenLayer Testnet", "https://scan.testnet-chain.genlayer.com", "GEN"),
+            (42_424_242, "GenLayer", "https://scan.chain.genlayer.com", "GEN"),
+        ]
+        #expect(WalletChain.known.count == expected.count)
         let hash = "0x" + String(repeating: "ab", count: 32)
-        #expect(WalletBrowser.explorerURL(chainId: 42_424_242, txHash: hash)?.absoluteString == "https://scan.chain.genlayer.com/tx/" + hash)
-        #expect(WalletBrowser.explorerURL(chainId: 4221, txHash: hash)?.absoluteString == "https://scan.testnet-chain.genlayer.com/tx/" + hash)
-        #expect(WalletBrowser.explorerURL(chainId: 1, txHash: hash)?.absoluteString == "https://etherscan.io/tx/" + hash)
+        for (id, name, explorer, symbol) in expected {
+            #expect(WalletChain.name(id) == name)
+            #expect(WalletChain.named(id)?.symbol == symbol && WalletChain.named(id)?.decimals == 18)
+            #expect(WalletBrowser.explorerURL(chainId: id, txHash: hash)?.absoluteString == "\(explorer)/tx/\(hash)")
+        }
+        #expect(WalletChain.name(5) == "chain 5" && WalletChain.named(5) == nil)
         #expect(WalletBrowser.explorerURL(chainId: 5, txHash: hash) == nil)
-        #expect(WalletBrowser.explorerURL(chainId: 1, txHash: "0x12") == nil)
+        #expect(WalletBrowser.explorerURL(chainId: 8453, txHash: "0x12") == nil)
+    }
+
+    /// Base, Base Sepolia and GenLayer's two are added with their official public RPCs; Ethereum and Sepolia, which
+    /// wallets ship, are only switched to.
+    @Test func chainsWithAPublicRPCAreAddable() throws {
+        let rpcs: [Int64: String] = [
+            8453: "https://mainnet.base.org", 84532: "https://sepolia.base.org",
+            42_424_242: "https://rpc.chain.genlayer.com", 4221: "https://rpc.testnet-chain.genlayer.com",
+        ]
+        #expect(WalletBrowser.addableChains.mapValues(\.rpc) == rpcs)
+        #expect(WalletBrowser.addableChains[1] == nil && WalletBrowser.addableChains[11_155_111] == nil)
+        let base = try #require(WalletBrowser.addableChains[8453])
+        #expect(base.name == "Base" && base.symbol == "ETH" && base.decimals == 18 && base.explorer == "https://basescan.org")
+        let baseSepolia = try #require(WalletBrowser.addableChains[84532])
+        #expect(baseSepolia.name == "Base Sepolia" && baseSepolia.symbol == "ETH" && baseSepolia.explorer == "https://sepolia.basescan.org")
     }
 
     /// Only exactly `{"txHash": "0x" + 64 hex}` or `{"rejected": true}` is taken.

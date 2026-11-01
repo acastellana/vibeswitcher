@@ -23,7 +23,8 @@ public enum WalletAsk {
 
           --workspace   the Wallet Manager's workspace the wallet is in
           --from        the wallet to send from: its id in that workspace, or its 0x address
-          --chain       the chain id (1 Ethereum, 42424242 GenLayer, 4221 GenLayer testnet)
+          --chain       the chain id (1 Ethereum, 11155111 Sepolia, 8453 Base, 84532 Base Sepolia,
+                        42424242 GenLayer, 4221 GenLayer Testnet)
           --to          the recipient (a transfer) or the contract called (with --data): 0x and 40 hex digits
           --amount      in the asset's base units (wei for the native coin), decimal digits
           --asset       native (the default) or a token contract's 0x address (an ERC-20 transfer)

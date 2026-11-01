@@ -35,13 +35,7 @@ extension WalletCardModel {
     }
 
     /// The native coin's symbol on the chains the card names, else nil.
-    static func nativeSymbol(_ chainID: Int64) -> String? {
-        switch chainID {
-        case 1: return "ETH"
-        case 42424242, 4221: return "GEN"
-        default: return nil
-        }
-    }
+    static func nativeSymbol(_ chainID: Int64) -> String? { WalletChain.named(chainID)?.symbol }
 
     /// The amount as the card shows it: the native coin in whole units (18 decimals: "0.25 GEN"); a token's in its base
     /// units, naming the token, since its decimals aren't known here.
@@ -51,7 +45,8 @@ extension WalletCardModel {
             let short = token.count > 14 ? "\(token.prefix(8))…\(token.suffix(4))" : token
             return (request.amount, "base units of token \(short)")
         }
-        return (units(request.amount, decimals: 18), nativeSymbol(request.chainId) ?? "(the chain's native coin)")
+        return (units(request.amount, decimals: WalletChain.named(request.chainId)?.decimals ?? 18),
+                nativeSymbol(request.chainId) ?? "(the chain's native coin)")
     }
 
     /// Base units as whole units: "1000000000000000000" at 18 decimals is "1", "250000000000000000" is "0.25".

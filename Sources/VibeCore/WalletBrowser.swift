@@ -10,29 +10,15 @@ public enum WalletBrowser {
     /// How long the page is served for one request, at most.
     public static let pageLifetime: TimeInterval = 15 * 60
 
-    /// A chain the page may add to the wallet (`wallet_addEthereumChain`) when it doesn't know it yet.
-    public struct Chain: Equatable, Sendable {
-        public var id: Int64
-        public var name: String
-        public var rpc: String
-        public var explorer: String
-        public var symbol: String
-        public var decimals: Int
-    }
+    /// The chains the page may add to the wallet (`wallet_addEthereumChain`) when it doesn't know them yet: the known
+    /// ones with a public RPC (Base, Base Sepolia, GenLayer's two). Ethereum and Sepolia, which wallets ship, and any
+    /// other chain are only switched to.
+    public static let addableChains: [Int64: WalletChain] = WalletChain.known.filter { $0.value.rpc != nil }
 
-    /// GenLayer mainnet and testnet, GEN with 18 decimals. Any other chain is only switched to.
-    public static let addableChains: [Int64: Chain] = [
-        42_424_242: Chain(id: 42_424_242, name: "GenLayer", rpc: "https://rpc.chain.genlayer.com",
-                          explorer: "https://scan.chain.genlayer.com", symbol: "GEN", decimals: 18),
-        4221: Chain(id: 4221, name: "GenLayer Testnet", rpc: "https://rpc.testnet-chain.genlayer.com",
-                    explorer: "https://scan.testnet-chain.genlayer.com", symbol: "GEN", decimals: 18),
-    ]
-
-    /// Where a transaction on `chainId` can be seen: GenLayer's explorers and Etherscan; nil for other chains.
+    /// Where a transaction on `chainId` can be seen (`WalletChain.known`'s explorers); nil for other chains.
     public static func explorerURL(chainId: Int64, txHash: String) -> URL? {
         guard isHash(txHash) else { return nil }
-        let base = chainId == 1 ? "https://etherscan.io" : addableChains[chainId]?.explorer
-        return base.flatMap { URL(string: "\($0)/tx/\(txHash)") }
+        return WalletChain.named(chainId).flatMap { URL(string: "\($0.explorer)/tx/\(txHash)") }
     }
 
     /// `eth_sendTransaction`'s parameters: hex quantities and data as the wallet takes them.
