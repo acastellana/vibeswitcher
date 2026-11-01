@@ -229,7 +229,10 @@ project's `workflow.md` lines for these two are ignored.
 
 **Heavy work.** Full test suites, release builds, merges and audits' test runs take a slot from `vs-heavy`, shared by
 every project on the Mac. There are `heavy_slots` of them: `VIBESWITCHER_HEAVY_SLOTS`, else the Mac's cores ÷ 4 (3 on a
-12-core Mac). A run that finds every slot held waits, naming who holds each.
+12-core Mac). A run that finds every slot held waits, naming who holds each. Each slot's command gets `VS_HEAVY_CORES`,
+its share of the cores (the cores ÷ the slots, rounded up, at least 2), and sizes its parallelism to it:
+`swift build -j $VS_HEAVY_CORES`, `node --test --test-concurrency=$VS_HEAVY_CORES`, `make -j $VS_HEAVY_CORES`
+(see [Development](development.md)). The working policy's `vs-heavy` line tells every role so.
 
 ## The account's usage limits
 

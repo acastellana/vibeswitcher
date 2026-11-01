@@ -90,7 +90,9 @@ struct WorkingPolicyTests: LeadTeamFixture {
             #expect(prompt.contains(WorkingPolicy.heavyJobs), "\(role)")
             #expect(prompt.contains(Self.custom + "\n" + WorkingPolicy.heavyJobs), "\(role)")
         }
-        for words in ["Long or many-core jobs", "mutation testing", "fuzzing", "VMs", "load", "perf runs", "`vs-heavy"] {
+        for words in ["Long or many-core jobs", "mutation testing", "fuzzing", "VMs", "load", "perf runs", "`vs-heavy",
+                      "`$VS_HEAVY_CORES`", "`swift build -j $VS_HEAVY_CORES`", "`node --test --test-concurrency=$VS_HEAVY_CORES`",
+                      "`make -j $VS_HEAVY_CORES`"] {
             #expect(WorkingPolicy.heavyJobs.contains(words), "\(words)")
             #expect(WorkingPolicy.witnessText(Self.custom).contains(WorkingPolicy.heavyJobs))
         }

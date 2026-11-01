@@ -34,9 +34,13 @@ public enum WorkingPolicy {
     /// The rule every role gets after the user's policy, whatever it says: CPU-heavy work outside the Mac-wide slots made
     /// the worst load spikes (2026-10-31: load 72–193, an hour-long Stryker run with up to 14 node processes, another
     /// project's VMs and simulations), and VibeSwitcher tells a lead of one (see `HeavyJobs`).
+    /// A slot is one job's room, not the whole Mac (2026-11-01: a merge's swift-frontend at ~900 % CPU and two node --test
+    /// runs at about 9 cores each, all inside the slots, made load 62–84): the job sizes itself to `VS_HEAVY_CORES`.
     public static let heavyJobs = "- Long or many-core jobs (full suites, release builds, mutation testing, fuzzing, VMs, load, "
         + "simulation and perf runs) run under `vs-heavy` (`vs-heavy --timeout 2h <command>` for one over an hour), never bare: "
-        + "it holds one of the Mac-wide slots every project's work shares."
+        + "it holds one of the Mac-wide slots every project's work shares. Size the job to the slot's share of the cores, "
+        + "which it exports as `$VS_HEAVY_CORES`: `swift build -j $VS_HEAVY_CORES` (and `swift test -j`), "
+        + "`node --test --test-concurrency=$VS_HEAVY_CORES`, `make -j $VS_HEAVY_CORES`, a test runner's worker count."
 
     /// The policy as each role's prompt has it.
     public static func section(_ text: String) -> String {
