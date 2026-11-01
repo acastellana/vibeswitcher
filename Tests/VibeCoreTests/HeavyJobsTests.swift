@@ -154,7 +154,7 @@ struct HeavyJobsTests {
                        .init(pid: 401, ppid: 400, pgid: 401, rate: 0, name: "perl", cwd: Self.worktree)]
             + Table.stryker(pgid: 500, parent: 401, count: 10)
         var jobs = HeavyJobs()
-        let held = [Self.holder(pid: 400, what: "npx stryker run", in: "/private/tmp")]
+        let held = [Self.holder(pid: 400, what: "npx stryker run", in: "/Users/someone/scratch")]
         #expect(Self.looks(Table(processes: Self.session + wrapped), minutes: 20, holders: held, jobs: &jobs).allSatisfy { $0.isEmpty })
         // The same job with the slot let go (vs-heavy ended, its daemon left running): told.
         var unheld = HeavyJobs()
