@@ -93,6 +93,27 @@ extension LeadAuditFindersTests {
         #expect(Git.run(["show", "main:b.txt"], in: root).ok)
     }
 
+    /// A batch (merge_batching, merge with tasks) checks strict_paths for each task as merge does alone: the held one
+    /// stays out, held, and the other merges on the batch's run.
+    @Test func strictPathsHoldATaskOutOfABatchAndTheRestMerge() throws {
+        let runtime = FakeRuntime()
+        let (root, lead) = try strictVote(runtime, strict: "b.txt")
+        #expect(!call(lead, "add_task", ["title": "Add d", "goal": "d.txt exists", "acceptance": ["test -f d.txt"], "review": "none"]).isError)
+        #expect(!call(lead, "start_worker", ["task": "add-d"]).isError)
+        let worktree = Worktrees.path(root: root, slug: "add-d")
+        for (file, text) in ["b.txt": "bee\n", "d.txt": "dee\n"] { try text.write(toFile: worktree + "/" + file, atomically: true, encoding: .utf8) }
+        Git.run(["add", "b.txt", "d.txt"], in: worktree)
+        Git.run(["commit", "-q", "-m", "add d"], in: worktree)
+        #expect(!call(try seat("worker-add-d", runtime), "report", doneReport("added d")).isError)
+
+        let merged = call(lead, "merge", ["tasks": ["add-b", "add-d"]])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(merged.text.contains("add-b: not merged. Not merged: add-b has 1 Important finding holding it back: add-b:F1 b.txt:1"), "\(merged.text)")
+        #expect(merged.text.contains("add-d: merged at"), "\(merged.text)")
+        #expect(BoardStore(root: root).load().task("add-b")?.status == .failed && BoardStore(root: root).load().task("add-d")?.status == .done)
+        #expect(Git.run(["show", "main:d.txt"], in: root).ok)
+    }
+
     /// A held finding is a concrete concern: the lead may audit the same commit again (to judge a worker's
     /// disagreement), where a clean pass with nothing held is refused.
     @Test func strictPathsLetTheLeadAuditTheSameCommitAgainWhileAFindingIsHeld() throws {

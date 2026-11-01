@@ -219,6 +219,12 @@ public final class LeadToolset: MCPToolset {
     public var testLock: TestLock?
     /// Whether Boost mode is on now (merge_batching boost batches only then). Off until Boost mode sets it.
     var boosting: () -> Bool = { false }
+    /// merge_batching's wait (see `LeadAdvance.mergeReady`): how long a task ready to merge waits for others to batch
+    /// with, at most (a suite takes ~200 s calm, 240–500 s loaded), how many make a batch at once, and the clock the
+    /// wait is read by (faked in tests).
+    var batchWindow: TimeInterval = 180
+    var batchSize = 4
+    var batchClock: () -> Date = { Date() }
     /// Where merge appends its line of the Mac's merge stats (`MergeSample`, merges-<day>.jsonl); nil: none.
     public var mergeStats: () -> URL? = { VibePaths.statsDir }
 
