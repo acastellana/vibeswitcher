@@ -195,3 +195,7 @@ Production readiness: the Wallet Manager's lead and an independent review both a
 
 Independent read-only reviews of both projects found no way to sign or send without the user, but several states that could mislead the user into paying again, a token-approval drain risk on the browser path and the Wallet Manager's signing page, and missing production logs.
 
+## 2026-11-01 07:55:22 Audits run on Opus (configure verifier_model: opus) from 2026-11-01 06:4x until the Fable limit resets on 2026-11-05 at 12:00. The lead then switches back with configure(verifier_model: "") (the default: Fable while workers run Opus).
+
+User's answer to 19AF8BCD. The account hit its Fable usage limit, and the wallet production-readiness pass's audited tasks would otherwise wait three days. The verifier-eval baseline was measured with Fable, so Opus verdicts in this window get the same scrutiny, and nothing about the audit rules changes.
+
