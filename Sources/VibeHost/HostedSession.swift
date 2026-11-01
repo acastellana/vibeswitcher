@@ -855,7 +855,8 @@ public final class HostedSession {
             return reaped == 0 || (reaped < 0 && errno == EINTR)
         }
         guard !left.isEmpty, Date() < deadline else { return }
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.1) { reap(left, until: deadline) }
+        // Not utility: a loaded Mac starves that for seconds, and each look is one waitpid per program.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) { reap(left, until: deadline) }
     }
 }
 

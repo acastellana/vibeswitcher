@@ -15,6 +15,14 @@ final class SessionProbe {
         session.onChange = { [weak self] info in self?.locked { $0.changes.append(info) } }
     }
     func locked(_ body: (SessionProbe) -> Void) { lock.lock(); body(self); lock.unlock() }
+    /// Done with `session`: closed, and its program ended first if it wasn't reaped yet (it may be exiting still, its
+    /// output seen), so the close reaps it: a session closed with its program unreaped leaves it a zombie of the run.
+    func end(_ session: HostedSession) {
+        queue.sync {
+            if session.info.isLive { session.terminate() }
+            session.close()
+        }
+    }
     var text: String { lock.lock(); defer { lock.unlock() }; return String(decoding: buffer, as: UTF8.self) }
     var lastChange: HostSession? { lock.lock(); defer { lock.unlock() }; return changes.last }
 
@@ -73,7 +81,7 @@ struct HostedSessionTests {
         #expect(tty.hasPrefix("ttys"))
         #expect(eventually { probe.text.contains("/dev/\(tty)") }, "\(probe.diagnosis(session))")   // the PTY is its terminal
         #expect(eventually { probe.lastChange?.exit?.status == 3 })
-        probe.queue.sync { session.close() }
+        probe.end(session)
     }
 
     /// The session scan finds agents by their controlling terminal: the PTY must be it, not just stdin.
@@ -86,7 +94,7 @@ struct HostedSessionTests {
         #expect(eventually { probe.text.contains("tpgid=") }, "\(probe.diagnosis(session))")
         #expect(probe.text.contains("ctty=\(tty)"), "\(probe.diagnosis(session))")
         #expect(!probe.text.contains("tpgid=0"))
-        probe.queue.sync { session.close() }
+        probe.end(session)
     }
 
     @Test func inputReachesTheProgram() throws {
@@ -96,7 +104,7 @@ struct HostedSessionTests {
         #expect(eventually { probe.text.contains("reading") }, "\(probe.diagnosis(session))")
         probe.queue.sync { session.write(Data("hello\r".utf8)) }
         #expect(eventually { probe.text.contains("got:hello") }, "\(probe.diagnosis(session))")
-        probe.queue.sync { session.close() }
+        probe.end(session)
     }
 
     @Test func resizeAndRedrawNudgeSendSIGWINCH() throws {
@@ -111,7 +119,7 @@ struct HostedSessionTests {
         #expect(probe.queue.sync { (session.info.cols, session.info.rows) } == (100, 30))
         probe.queue.sync { session.terminate() }
         #expect(eventually { probe.lastChange?.exit != nil })
-        probe.queue.sync { session.close() }
+        probe.end(session)
     }
 
     /// The host ignores SIGPIPE/SIGHUP and runs on GCD threads (which block most signals); programs it starts
@@ -127,7 +135,7 @@ struct HostedSessionTests {
         #expect(probe.text.contains("mask=0"))
         #expect(!probe.text.contains("pipe-ignored"))
         #expect(!probe.text.contains("hup-ignored"))
-        probe.queue.sync { session.close() }
+        probe.end(session)
     }
 
     /// Ending a session stops what runs in it even if that ignores SIGHUP (the shell exits on it, the program
@@ -141,7 +149,7 @@ struct HostedSessionTests {
         #expect(pid > 0)
         probe.queue.sync { session.terminate() }
         #expect(eventually { kill(pid, 0) != 0 }, "pid \(pid) still running")
-        probe.queue.sync { session.close() }
+        probe.end(session)
     }
 
     @Test func titleAndScreenComeFromTheHeadlessTerminal() throws {
@@ -215,7 +223,7 @@ struct HostedSessionTests {
         probe.queue.sync { session.write(Data("\r".utf8)) }
         #expect(eventually { probe.lastChange?.exit != nil }, "\(probe.diagnosis(session))")
         #expect(probe.lastChange?.programStatus == nil)
-        probe.queue.sync { session.close() }
+        probe.end(session)
     }
 
     @Test func replayHoldsEarlierOutput() throws {
@@ -243,7 +251,7 @@ extension HostedSessionTests {
         #expect(eventually { probe.text.contains("Couldn't start fakesh: it should be at /no/such/bin/fakesh, and isn't (No such file or directory).") },
                 "\(probe.diagnosis(session))")
         #expect(eventually { probe.lastChange?.exit?.status == 127 })
-        probe.queue.sync { session.close() }
+        probe.end(session)
     }
 
     /// The launcher itself not there: the spawn's error says which program, at which path.

@@ -12,12 +12,13 @@ import VibeCore
 /// The three test targets build into one bundle, which one runner process loads: the watch starts once, as it loads
 /// (`watchTheRunsZombies` below), and looks at the runner's children every `ZombieWatch.interval`. A zombie that's
 /// still there `ZombieWatch.grace` after it was first seen is one nobody will reap (Foundation's `Process` reaps as
-/// the exit is posted, a host's or client's reaper within a few seconds even under load); more than
+/// the exit is posted, a session's or client's reaper within seconds even on a loaded Mac); more than
 /// `ZombieWatch.bound` of them at once fails the run, naming how many.
 struct ZombieWatch {
-    /// How long a zombie may wait for its reaper: a reaper that only runs late (a loaded Mac, a backoff of a few
-    /// seconds, see `HostClient.hostReapDelays`) is no leak.
-    static let grace: TimeInterval = 10
+    /// How long a zombie may wait for its reaper: one that only runs late is no leak (a session's exit poll looks 1 s
+    /// apart, a client's up to 5 s, see `HostClient.hostReapDelays`, and a loaded Mac starves a queue for seconds more).
+    /// A leaked zombie is never reaped: past this, they add up to over `bound` all the same.
+    static let grace: TimeInterval = 60
     /// How many lingering zombies the run tolerates at once: a test that ends a process and its reaper both, at the
     /// very moment of a look, isn't worth failing for; hundreds are.
     static let bound = 5
