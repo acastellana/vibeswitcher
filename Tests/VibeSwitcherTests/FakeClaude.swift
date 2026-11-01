@@ -281,9 +281,10 @@ def draw_permission():
              "│ Do you want to proceed?"]
     for index, label in enumerate(p["options"]):
         if index == 2 and p["amend"]:
-            # 2.1.316's No row with its text field open: the text typed, or the placeholder while there's none (the
-            # cursor on it); "No, <text>" with the cursor elsewhere.
-            label = (p["feedback"] or "and tell Claude what to do differently") if p["focus"] == 2 else "No, " + p["feedback"]
+            # 2.1.316's No row with its text field open, drawn after its label (the Bash prompt's inlineDescriptions
+            # make its Select pass showLabel): "No, " and the text typed, or the placeholder while there's none and
+            # the cursor is on it.
+            label = "No, " + (p["feedback"] or ("and tell Claude what to do differently" if p["focus"] == 2 else ""))
         lines.append("│ " + ("❯ " if p["focus"] == index else "  ") + "%d. %s" % (index + 1, label))
     lines.append("╰" + "─" * 58 + "╯")
     lines.append("Esc to cancel · Tab to amend" if p["v316"] else "Esc to cancel")

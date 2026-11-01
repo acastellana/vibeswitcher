@@ -235,12 +235,15 @@ struct VerifierPromptTests {
     @Test func eachKeyGoesOnlyWhereThePlanExpectsIt() throws {
         let plan = try #require(LeadWitness.declinePlan(screen: Self.realScreen, prompt: Self.prompt))
         #expect(plan.no == 3 && plan.amend && plan.writes.count == 6)
-        let placeholder = "and tell Claude what to do differently"
+        // 2.1.316 draws the open field after the row's label ("No, "; its Bash prompt has inlineDescriptions on).
+        let placeholder = "No, and tell Claude what to do differently"
         #expect(LeadWitness.declineMayGo(plan, step: 0, screen: Self.realScreen))
         #expect(LeadWitness.declineMayGo(plan, step: 1, screen: moved(Self.realScreen, to: 2)))
         #expect(LeadWitness.declineMayGo(plan, step: 2, screen: moved(Self.realScreen, to: 3)))
         #expect(LeadWitness.declineMayGo(plan, step: 3, screen: moved(Self.realScreen, to: 4)))
         #expect(LeadWitness.declineMayGo(plan, step: 4, screen: moved(Self.realScreen, to: 4, no: placeholder)))
+        #expect(LeadWitness.declineMayGo(plan, step: 4, screen: moved(Self.realScreen, to: 4, no: "and tell Claude what to do differently")))
+        #expect(LeadWitness.declineMayGo(plan, step: 5, screen: moved(Self.realScreen, to: 4, no: "No, " + LeadWitness.declineReason)))
         #expect(LeadWitness.declineMayGo(plan, step: 5, screen: moved(Self.realScreen, to: 4, no: LeadWitness.declineReason)))
         // The arrow's redraw not shown yet: wait (the app reads again).
         #expect(!LeadWitness.declineMayGo(plan, step: 1, screen: Self.realScreen))

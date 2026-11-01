@@ -359,8 +359,15 @@ public enum LeadWitness {
     /// select:next and select:previous.
     public static let amendKey: [UInt8] = [9]
 
-    /// The placeholder Claude Code 2.1.316's No row shows once Tab opened its text field, squashed.
+    /// The placeholder Claude Code 2.1.316's No row shows once Tab opened its text field, squashed. The Bash prompt's
+    /// menu has `inlineDescriptions` on, which its Select passes each row as `showLabel`: the open field is drawn after
+    /// its label and ", ", so the row reads "No, and tell Claude what to do differently" (`amendOpen`).
     static let amendPlaceholder = squashed("and tell Claude what to do differently")
+
+    /// Whether the No row (squashed) shows its text field open and empty: the placeholder, after "No," or alone.
+    static func amendOpen(_ row: String) -> Bool {
+        (row.hasPrefix("No,") ? String(row.dropFirst(3)) : row).hasPrefix(amendPlaceholder)
+    }
 
     /// Whether the plan's write `step` may go, by the screen now: the same prompt (its command, question and rows),
     /// and the cursor where the keys so far put it. Tab goes only on the No row still a plain "No"; the reason only
@@ -378,7 +385,7 @@ public enum LeadWitness {
         let row = squashed(menu.options[plan.no])
         if plan.amend && step == arrows { return menu.selected == plan.no && row == "No" }
         let typing = arrows + (plan.amend ? 1 : 0)
-        if step == typing { return menu.selected == plan.no && (!plan.amend || row.hasPrefix(amendPlaceholder)) }
+        if step == typing { return menu.selected == plan.no && (!plan.amend || amendOpen(row)) }
         return menu.selected == plan.no && row.contains(squashed(String(declineReason.prefix(24))))
     }
 
