@@ -89,6 +89,8 @@ public final class HostedSession {
     /// Input was refused for lack of room: more is refused until what waits went in, so none lands out of order.
     private var refusingInput = false
     private var closed = false
+    /// Told to end (`terminate`): closed before its program is reaped, the session hands it to `reap(_:until:)`.
+    private var ending = false
     static let maxPendingInput = 1 << 20
     /// Told once the input waiting for room has all gone in (or can't: the session closed). See `whenInputWent`.
     private var inputWaiters: [() -> Void] = []
@@ -794,6 +796,7 @@ public final class HostedSession {
     /// `by`: the client that asked (its process id), which its exit names.
     public func terminate(by client: pid_t? = nil) {
         guard info.isLive || readSource != nil else { return }
+        ending = true
         if let client, info.isLive, killer == nil { killer = (client, ProcessTable.info(pid: client)?.comm) }
         let groups = Set([info.childPID, tcgetpgrp(masterFD)].filter { $0 > 0 })
         // Before the shell is asked to end: once it has, what it started is launchd's.
@@ -823,8 +826,28 @@ public final class HostedSession {
         }
         exitSource?.cancel()
         exitPoll?.cancel()
+        // Its exit is no longer watched: a program told to end is reaped as it goes (`terminate` kills it 5 s on at
+        // the latest), or a host that runs on (a test's, in the test runner) keeps it a zombie for good: 431 of them
+        // in one full suite's runner, 2026-11-01. One not told to end is left alone: a handover's new image reaps it.
+        if ending, info.isLive { Self.reap([info.childPID], until: Date().addingTimeInterval(Self.reapPatience)) }
         let fd = masterFD
         done.notify(queue: queue) { Darwin.close(fd) }
+    }
+
+    /// How long a closed session's program, told to end, is looked for: past the SIGKILL `terminate` sends 5 s on,
+    /// with room for a loaded Mac.
+    static let reapPatience: TimeInterval = 60
+
+    /// Reaps each of `programs` (this process's children) once it ended, looking every 100 ms until `deadline`. One
+    /// reaped elsewhere already (the host's `exitOnceEnded`) is done with.
+    static func reap(_ programs: [pid_t], until deadline: Date) {
+        let left = programs.filter { pid in
+            var status: Int32 = 0
+            let reaped = waitpid(pid, &status, WNOHANG)
+            return reaped == 0 || (reaped < 0 && errno == EINTR)
+        }
+        guard !left.isEmpty, Date() < deadline else { return }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.1) { reap(left, until: deadline) }
     }
 }
 
