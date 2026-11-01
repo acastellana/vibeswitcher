@@ -111,7 +111,7 @@ struct HostedSessionTimerTests {
     }
 
     /// The exit source's event can come a moment before the program can be reaped (the kernel posts it first): the
-    /// poll then looks again at its shortest delay, its backoff starting over, not at its next look up to 30 s off.
+    /// poll then looks again at its shortest delay, then every second, not at its next look up to 30 s off.
     @Test func anExitEventBeforeTheProgramCanBeReapedLooksAgainSoon() throws {
         let probe = SessionProbe()
         let timers = FakeTimers(queue: probe.queue)
@@ -127,9 +127,12 @@ struct HostedSessionTimerTests {
         let soon = try #require(probe.queue.sync { poll.schedules.last })
         #expect(probe.queue.sync { poll.schedules.count } == 6)
         #expect(soon.after == 0.05 && soon.repeating == nil && soon.leeway == .milliseconds(20))
-        // Its backoff starts over: a look finding it running schedules the next at 1 s.
+        // Its backoff starts over: a look finding it running schedules the next at 1 s, and every look after it at 1 s
+        // too (it's ending: not left a zombie for the backoff's 30 s).
         timers.fire(poll)
         #expect(probe.queue.sync { poll.schedules.last?.after } == 1)
+        for _ in 0..<4 { timers.fire(poll) }
+        #expect(probe.queue.sync { poll.schedules.suffix(4).map(\.after) } == [1, 1, 1, 1])
     }
 
     /// The watchdog runs while the parser has work, stops at its first look that finds none, and starts again with

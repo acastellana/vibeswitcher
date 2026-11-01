@@ -82,7 +82,13 @@ public final class HostedSession {
     /// The looks' spacing, the last one repeated: a program the source missed is seen ended within 30 s at worst, and
     /// one ending once the source is registered (all but those that end in their first moments) at once.
     static let exitPollDelays: [TimeInterval] = [0.05, 1, 5, 30]
+    /// The looks' spacing once the exit event came (`exitEvent`) before the program could be reaped: it's ending, so
+    /// it's looked at every second until it's reaped, not left a zombie, its session shown running, for up to the
+    /// backoff's 30 s (22 sessions at once on a loaded test run's start, 2026-11-01).
+    static let endingPollDelays: [TimeInterval] = [0.05, 1]
     private var exitPolls = 0
+    /// The exit event came: the looks follow `endingPollDelays`.
+    private var exitSeen = false
     private var pendingInput = Data()
     /// The client that asked to end it (see `terminate`): its process id and name.
     private var killer: (pid: pid_t, name: String?)?
@@ -349,7 +355,8 @@ public final class HostedSession {
             self.reap()
             guard let poll = self.exitPoll else { return }
             self.exitPolls += 1
-            let delay = Self.exitPollDelays[min(self.exitPolls, Self.exitPollDelays.count - 1)]
+            let delays = self.exitSeen ? Self.endingPollDelays : Self.exitPollDelays
+            let delay = delays[min(self.exitPolls, delays.count - 1)]
             poll.schedule(after: delay, repeating: nil, leeway: .milliseconds(Int(delay * 100)))
         }
         poll.schedule(after: Self.exitPollDelays[0], repeating: nil, leeway: .milliseconds(20))
@@ -410,8 +417,9 @@ public final class HostedSession {
     /// its next look (up to 30 s off). The source doesn't fire again: an exit is posted once.
     func exitEvent() {
         guard !reap(), let exitPoll else { return }
+        exitSeen = true
         exitPolls = 0
-        exitPoll.schedule(after: Self.exitPollDelays[0], repeating: nil, leeway: .milliseconds(20))
+        exitPoll.schedule(after: Self.endingPollDelays[0], repeating: nil, leeway: .milliseconds(20))
     }
 
     /// Reaps the program if it ended; whether it did (false too once reaped already).
