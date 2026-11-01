@@ -577,7 +577,9 @@ public enum LeadPrompts {
         + "e.g. `vs-heavy npm test`; it's on PATH in this session), never bare: it runs a few at a time on this Mac (its "
         + "slots), every project's workers and merges included, and while every slot is held it waits, saying who holds "
         + "each. It stops a command still running after 60 min (exit 124): give a longer one `--timeout 2h`. Focused tests "
-        + "(one file, a filter) don't need it."
+        + "(one file, a filter) don't need it. Any other long or many-core job goes under it too: mutation testing (Stryker), "
+        + "fuzzing, VMs (colima), load, simulation and perf runs. VibeSwitcher tells your lead of one that runs on several "
+        + "cores for minutes outside it."
 
     /// What workers and verifiers are told about their scratch files: twice on 2026-10-23 a worker's
     /// `...; rm -f $TMPDIR/*.out` waited on a permission prompt until the user answered it. The lead can't answer one,

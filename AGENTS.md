@@ -34,4 +34,6 @@ A new sheet goes in the sheet list in `Sources/VibeSwitcher/Sandbox.swift`.
 ## Practices
 
 - A test waits on the event it checks (a file, a reply, a semaphore, an injected clock), never on a fixed sleep.
+- Long or many-core jobs (full suites, release builds, mutation testing, fuzzing, VMs, load and perf runs) run under
+  `vs-heavy`, never bare: VibeSwitcher tells the lead of one that holds several cores for minutes outside it.
 - `docs/lead/` is the lead's record: only the lead edits it.

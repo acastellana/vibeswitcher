@@ -226,6 +226,9 @@ public struct TestLock: Sendable {
         /// The command (or what it said it is).
         public var what: String? { parts?.what }
 
+        /// The process holding it, as its note says (`vs-heavy`'s, or the merge's or audit's): its command runs under it.
+        public var pid: Int32? { parts.flatMap { Int32($0.pid) } }
+
         /// The folder it runs in, as its note says.
         public var directory: String? { parts?.directory ?? nil }
 

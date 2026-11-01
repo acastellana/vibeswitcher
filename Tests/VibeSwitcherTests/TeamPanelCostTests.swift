@@ -375,6 +375,40 @@ struct TeamPanelCostTests {
         #expect(watch.looks == 1 && watch.lookedOnMain == 0)
     }
 
+    // MARK: ProcessTable.usage < HeavyJobs.look < LeadController.lookAtHeavyJobs (the boost release, 2026-11-01)
+
+    @Test func heavyJobsAreLookedAtOffTheMainThreadAndToldToTheUserWhenNoLeadRuns() async throws {
+        let controller = try controller()
+        let project = "/Users/someone/dev/wallet-manager"
+        // A fake table: a group of 4 node processes at a core each in the project's folder, a minute further each look.
+        let clock = HeavyJobsClock(Date(timeIntervalSince1970: 1_793_500_000))
+        let start = clock.get().addingTimeInterval(-3600)
+        let read: () -> [ProcUsage]? = {
+            let ran: Double = clock.get().timeIntervalSince(start)
+            let shell = ProcUsage(pid: 500, ppid: 90, pgid: 500, cpu: 0, started: start, name: "zsh")
+            let nodes: [ProcUsage] = (1...4).map { index in
+                ProcUsage(pid: Int32(500 + index), ppid: 500, pgid: 500, cpu: ran, started: start, name: "node")
+            }
+            return [shell] + nodes
+        }
+        let command: (Int32) -> String? = { pid in pid == 500 ? "zsh" : "node" }
+        let watch = HeavyJobsWatch(HeavyJobs(cores: 3, sustained: 60), read: read, holders: { [] }, cwd: { _ in project + "/src" },
+                                   command: command, isRepository: { $0 == project }, now: { clock.get() })
+        controller.watchHeavyJobs(watch)
+        var banners: [(String, String)] = []
+        controller.tellUser = { banners.append(($0, $1)) }
+        var told: [[HeavyJobs.Job]] = []
+        for look in 0..<3 {
+            controller.lookAtHeavyJobs(adding: [project]) { told.append($0) }
+            #expect(await until { told.count == look + 1 }, "look \(look) never came back")
+            clock.set(clock.get().addingTimeInterval(60))
+        }
+        // The second look (a minute watched) finds it; the third doesn't tell it again. No lead runs: a banner.
+        #expect(told.map(\.count) == [0, 1, 0])
+        #expect(banners.count == 1 && banners.first?.0 == "Heavy job outside vs-heavy in wallet-manager")
+        #expect(watch.looks == 3 && watch.lookedOnMain == 0)
+    }
+
     // MARK: VibePaths.writePrivate < LeadWitness.Power.look < LeadController.lookAtPower (hang-20261031-193728)
 
     @Test func thePowerIsLookedAtOffTheMainThread() async throws {
@@ -491,4 +525,13 @@ struct TeamPanelCostTests {
         exposure.place("e", top: nil)
         #expect(await until { exposure.unexposed == ["a", "d"] })
     }
+}
+
+/// The heavy-jobs look's injected clock, set by the test between looks and read on the look's queue.
+final class HeavyJobsClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var now: Date
+    init(_ now: Date) { self.now = now }
+    func get() -> Date { lock.lock(); defer { lock.unlock() }; return now }
+    func set(_ new: Date) { lock.lock(); now = new; lock.unlock() }
 }

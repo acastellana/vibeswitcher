@@ -129,6 +129,49 @@ final class HeavySlotsWatch: @unchecked Sendable {
     }
 }
 
+/// `HeavyJobs` and what it has told, looked at off the main thread (`LeadController.lookAtHeavyJobs`), one look at a
+/// time: the process table, the slots' holder notes and each heavy group's folder are read there. The projects'
+/// folders are the main thread's (the host's sessions, the boards): handed in at each look.
+final class HeavyJobsWatch: @unchecked Sendable {
+    private var jobs: HeavyJobs
+    private let lock = NSLock()
+    private let read: () -> [ProcUsage]?
+    private let holders: () -> [TestLock.Holder]
+    private let cwd: (Int32) -> String?
+    private let command: (Int32) -> String?
+    private let isRepository: (String) -> Bool
+    private let now: () -> Date
+    /// How many looks, and how many of them on the main thread (for tests).
+    private(set) var looks = 0
+    private(set) var lookedOnMain = 0
+
+    init(_ jobs: HeavyJobs = HeavyJobs(), read: @escaping () -> [ProcUsage]? = { ProcessTable.usage() },
+         holders: @escaping () -> [TestLock.Holder] = { TestLock.standard()?.holders() ?? [] },
+         cwd: @escaping (Int32) -> String? = ProcessTable.cwd(of:), command: @escaping (Int32) -> String? = ProcessTable.commandName(of:),
+         isRepository: @escaping (String) -> Bool = { FileManager.default.fileExists(atPath: ($0 as NSString).appendingPathComponent(".git")) },
+         now: @escaping () -> Date = Date.init) {
+        self.jobs = jobs
+        self.read = read
+        self.holders = holders
+        self.cwd = cwd
+        self.command = command
+        self.isRepository = isRepository
+        self.now = now
+    }
+
+    /// The jobs to tell now, among the projects whose folders are `candidates` (see `HeavyJobs.projectRoots`). A table
+    /// that couldn't be read is no look: what was watched waits for the next.
+    func look(candidates: [String]) -> [HeavyJobs.Job] {
+        lock.lock()
+        defer { lock.unlock() }
+        looks += 1
+        if Thread.isMainThread { lookedOnMain += 1 }
+        guard let processes = read() else { return [] }
+        let roots = HeavyJobs.projectRoots(candidates, isRepository: isRepository)
+        return jobs.look(processes, now: now(), holders: holders(), roots: roots, cwd: cwd, command: command)
+    }
+}
+
 /// `LeadWitness.Power` and what it has told, looked at off the main thread (`LeadController.lookAtPower`), one look at
 /// a time. The limit in Settings is the main thread's (`Preferences`): it's read there as each look starts and handed in.
 final class PowerLook: @unchecked Sendable {
@@ -366,6 +409,14 @@ final class LeadController: ObservableObject {
     /// Where the slots are looked at (`lookAtHeavySlots`).
     private let heavySlotsQueue = DispatchQueue(label: "VibeSwitcher.heavy-slots", qos: .utility)
     private var heavySlotsTimer: Heartbeat.Subscription?
+    /// Heavy jobs outside the Mac-wide slots, looked at once a minute: each is told once to its project's lead, or the
+    /// user when none runs (see `HeavyJobs`); none until the app starts it (`watchHeavyJobs`).
+    private(set) var heavyJobs: HeavyJobsWatch?
+    /// Where they're looked at (`lookAtHeavyJobs`).
+    private let heavyJobsQueue = DispatchQueue(label: "VibeSwitcher.heavy-jobs", qos: .utility)
+    private var heavyJobsTimer: Heartbeat.Subscription?
+    /// A banner for the user (title, body): a heavy job in a project no lead runs for (the app's notifier).
+    var tellUser: (String, String) -> Void = { _, _ in }
     /// The leads refused for the Mac's room or load, looked at once a minute: each is woken once there's room, whichever
     /// project's sessions ended (see `LeadWitness.RoomWaits`); none until the app starts it (`watchRoom`).
     private var roomWaits: LeadWitness.RoomWaits?
@@ -1389,6 +1440,38 @@ final class LeadController: ObservableObject {
                 defer { then() }
                 guard let self, let text else { return }
                 for root in self.leadRoots { self.deliver(text, from: .system("witness"), root: root) }
+            }
+        }
+    }
+
+    /// Looks once a minute from now on for heavy jobs outside the Mac-wide slots (see `HeavyJobs`).
+    func watchHeavyJobs(_ watch: HeavyJobsWatch = HeavyJobsWatch()) {
+        heavyJobs = watch
+        heavyJobsTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtHeavyJobs() }
+    }
+
+    /// A heavy job outside the slots: to its project's lead as the witness, or to the user as a banner when no lead
+    /// runs for it (a held message would reach a lead started later, for a job long over). The process table and each
+    /// heavy group's folder are read on a queue of their own (`heavyJobsQueue`), never the main thread. `then` hears on
+    /// the main thread what was told, once the look is done, and `adding` names project folders beyond the leads', the
+    /// boards' and the host's sessions' (tests).
+    func lookAtHeavyJobs(adding projects: [String] = [], then: @escaping ([HeavyJobs.Job]) -> Void = { _ in }) {
+        guard let watch = heavyJobs else { return then([]) }
+        let leads = leadRoots
+        let candidates = Array(leads) + Array(boards.keys) + host.sessions.map(\.cwd) + projects
+        heavyJobsQueue.async { [weak self] in
+            let jobs = watch.look(candidates: candidates)
+            DispatchQueue.main.async {
+                defer { then(jobs) }
+                guard let self else { return }
+                for job in jobs {
+                    if leads.contains(job.root) {
+                        self.deliver(LeadWitness.heavyJobText(job), from: .system("witness"), root: job.root)
+                    } else {
+                        let banner = LeadWitness.heavyJobBanner(job)
+                        self.tellUser(banner.title, banner.body)
+                    }
+                }
             }
         }
     }

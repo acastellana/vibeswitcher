@@ -87,6 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         controller.watchPower(limit: { [weak self] in self?.preferences.batteryHoldBelow ?? PowerWatch.defaultLimit }) { power.state }
         controller.watchPolicy()
         controller.watchHeavySlots()
+        controller.tellUser = { [weak self] title, body in self?.notifier?.postInfo(title: title, body: body) }
+        controller.watchHeavyJobs()
         controller.watchRoom()
         // The all-done cards' summaries, by headless Claude (benches and tests leave it unset: the written fallback).
         controller.allDone.generate = ClaudeHeadless.allDone
