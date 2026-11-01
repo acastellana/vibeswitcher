@@ -2699,3 +2699,5 @@
 - 2026-11-01 12:32 Audit of feature-impact-ledger: complete, clean, round 1: 1 Nit open
 - 2026-11-01 12:34 Audit of fix-the-flaky-test-15: complete, clean, round 1: 1 Nit open
 - 2026-11-01 12:37 Merged boost-release-4-7: Boost release 4/7: a task's idle worker is released while its audit runs, and restarted only if findings come back
+- 2026-11-01 12:37 Automatically (auto_advance): Merged boost-release-4-7 (Boost release 4/7: a task's idle worker is released while its audit runs, and restarted only if findings come back) into main at 7c48eb90, on its passing audit and the full test run.
+- 2026-11-01 12:43 Merged feature-impact-ledger: Feature impact ledger + metrics script: track which changes help, and why
