@@ -2464,3 +2464,7 @@
 - 2026-11-01 02:12 Started a worker on spec-an-unparseable
 - 2026-11-01 02:12 Automatically (auto_advance): Started a worker on spec-an-unparseable (Spec: an unparseable request gets `rejected` (format check) when its file name's id is valid and it came from the configured peer).
 - 2026-11-01 02:23 Audit of the-app-s-host: complete, clean, round 1: 1 Nit open
+- 2026-11-01 02:27 Audit of verifiers-don-t-run: complete, clean
+- 2026-11-01 02:28 Planned app-memory-grows-17: App memory grows ~17 MB an hour again (297 → 347 MB in 3 h at a steady session count)
+- 2026-11-01 02:30 Audit of strict-paths-an: complete, clean, round 1: 1 Important open, 2 Nit open, 2 Pre-existing open
+- 2026-11-01 02:30 Automatically (auto_advance): Couldn't send strict-paths-an's worker its open Important findings (strict-paths-an:F1): Not started: the Mac is shared by every project's team, and its load (the greater of its 1- and 5-minute averages) is above load_threshold. Now: load 37.2 (load_threshold 24, twice the 12 cores), 12 team sessions across 3 projects (this one 3, 2 others 9) (mac_max_sessions 15). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, …
