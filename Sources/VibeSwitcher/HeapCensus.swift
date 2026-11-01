@@ -85,8 +85,15 @@ enum HeapCensus {
     /// in its size's bucket instead.
     static let classedUpTo = 16 * 1024
 
+    /// One census at a time: each fills the one `tables` the enumerator's callback writes (a soak's hourly census
+    /// and the one at its end could overlap, each counting into the other's buffers and freeing them).
+    private static let running = NSLock()
+
     /// Counts the live blocks now. Slow (a second or so with a big heap); call it off the main thread or between phases.
+    /// A second caller waits for the first's census to end.
     static func take() -> Result {
+        running.lock()
+        defer { running.unlock() }
         var classCount: UInt32 = 0
         guard let classList = objc_copyClassList(&classCount) else { return Result() }
         defer { free(UnsafeMutableRawPointer(classList)) }

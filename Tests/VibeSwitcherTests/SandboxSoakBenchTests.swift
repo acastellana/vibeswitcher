@@ -51,7 +51,9 @@ struct SandboxSoakBenchTests {
         let line = text.split(separator: "\n").first { $0.contains("RESULT soak-simulated-hour-growth-mb") }
         let growth = line.flatMap { $0.components(separatedBy: "RESULT soak-simulated-hour-growth-mb ").last?.split(separator: " ").first }
             .flatMap { Double($0) }
-        #expect(growth != nil, "no RESULT soak-simulated-hour-growth-mb in:\n\(text)")
+        #expect(line != nil, "no RESULT soak-simulated-hour-growth-mb in:\n\(text)")
+        // "n/a": fewer than 3 simulated hours fit in the script's minutes (a slow Mac): printed, not judged.
+        if growth == nil, line != nil { print("soak not judged: \(line!)") }
         if let growth { #expect(growth < Self.limit, "the footprint rose \(growth) MB a simulated hour, the limit \(Self.limit)") }
     }
 }

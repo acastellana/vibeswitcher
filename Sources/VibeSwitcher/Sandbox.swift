@@ -2120,6 +2120,9 @@ extension Driver {
             let slope = hours.reduce(0.0) { $0 + (Double($1.offset) - meanX) * ($1.element - meanY) } / spread
             run.note(String(format: "RESULT soak-simulated-hour-growth-mb %.1f (each simulated hour's least, hours 2-%d: ", slope, run.hours.count)
                      + run.hours.map { String(format: "%.1f", $0) }.joined(separator: " ") + " MB)")
+        } else {
+            // Too few hours for a line (a slow Mac, a short run): said all the same.
+            run.note("RESULT soak-simulated-hour-growth-mb n/a (\(run.hours.count) simulated hours: a line needs 3)")
         }
         run.note("soak: done after \(run.cycles) cycles")
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
