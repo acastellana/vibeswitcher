@@ -183,74 +183,186 @@ public struct AccountUsageStore: Sendable {
         try? VibePaths.writePrivate(data, to: file)
     }
 }
-
 /// The status line VibeSwitcher gives the sessions it starts (lead, workers, verifiers; see `LeadLaunch.prepare`):
 /// `vibeswitcher-mcp --status-line`. Claude Code runs it with the session's state on its input, which carries the
-/// account's usage windows (`rate_limits`); it keeps them (`AccountUsageStore`), then runs your own status line (your
-/// Claude settings' `statusLine` command) with the same input and prints what it prints, so the session's status line
-/// reads as yours would. Your own sessions keep theirs untouched. With no status line of yours, it prints the usage.
+/// account's usage windows (`rate_limits`); it runs your own status line (the `statusLine` command your Claude settings
+/// give that session, see `userCommand`) with the same input and prints its output byte for byte, then keeps the usage
+/// (`AccountUsageStore`), so the session's status line reads as yours would. Your own sessions keep theirs untouched.
+/// With no status line of yours, it prints the usage.
 public enum UsageStatusLine {
     public static let argument = "--status-line"
+    /// Added for a verifier, started with `--setting-sources user`: only your user settings' status line is run, never
+    /// one in the branch's project settings (a worker wrote them).
+    public static let userOnlyArgument = "--user-settings-only"
     /// How long your own status line may take before it's stopped (Claude Code gives up on a slow one too).
     public static let patience: TimeInterval = 5
 
     /// The status line's settings entry for a role's `--settings`: this tool server run with `argument`.
-    public static func settings(server: String) -> [String: Any] {
-        ["type": "command", "command": RecentProjects.shellQuote(server) + " " + argument]
+    public static func settings(server: String, userOnly: Bool = false) -> [String: Any] {
+        ["type": "command", "command": RecentProjects.shellQuote(server) + " " + argument + (userOnly ? " " + userOnlyArgument : "")]
     }
 
-    /// Keeps the usage `input` carries, then returns what to print: your own status line's output, else the usage
-    /// in a few words. Never fails: input that isn't JSON keeps nothing.
-    public static func run(input: Data, store: AccountUsageStore = AccountUsageStore(), home: String = VibePaths.home, now: Date = Date(),
-                           patience: TimeInterval = UsageStatusLine.patience) -> String {
+    /// Runs a status line command: (command, input, patience) → what it printed.
+    public typealias Runner = (String, Data, TimeInterval) -> Data
+
+    /// Shows (`show`) your own status line's output first, byte for byte, so nothing of ours that fails afterwards
+    /// keeps it from showing; then keeps the usage `input` carries. With no status line of yours, shows the usage in a
+    /// few words. Never fails: input that isn't JSON keeps nothing (your status line still runs on it).
+    public static func run(input: Data, userOnly: Bool = false, store: AccountUsageStore = AccountUsageStore(), home: String = VibePaths.home,
+                           now: Date = Date(), patience: TimeInterval = UsageStatusLine.patience, runner: Runner = runCommand,
+                           show: (Data) -> Void) {
         let object = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any]
+        let command = userCommand(home: home, project: userOnly ? nil : projectFolder(object))
+        if let command { show(runner(command, input, patience)) }
         let limits = object.map { AccountUsage.fromStatusLine($0, now: now) } ?? []
         store.record(limits, now: now)
-        if let command = userCommand(home: home) { return runCommand(command, input: input, patience: patience) ?? "" }
-        return limits.map { limit in
+        guard command == nil else { return }
+        show(Data(limits.map { limit in
             let name = limit.name == "seven_day" ? "weekly" : limit.name == "five_hour" ? "5h" : limit.name.replacingOccurrences(of: "_", with: " ")
             return "\(name) \(Int(limit.usedPercent.rounded()))%"
-        }.joined(separator: " · ")
+        }.joined(separator: " · ").utf8))
     }
 
-    /// Your Claude settings' status line command (`statusLine.command` in `~/.claude/settings.json`), unless it's this one.
-    static func userCommand(home: String) -> String? {
-        let file = URL(fileURLWithPath: home).appendingPathComponent(".claude/settings.json")
-        guard let data = try? Data(contentsOf: file), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let line = object["statusLine"] as? [String: Any], (line["type"] as? String ?? "command") == "command",
-              let command = (line["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty,
-              !command.contains(argument) else { return nil }
-        return command
+    /// The session's project folder, whose `.claude` settings Claude Code layers over yours: the input's
+    /// `workspace.project_dir`, else its `cwd`, else this process's folder (Claude Code runs it in the session's).
+    static func projectFolder(_ input: [String: Any]?) -> String {
+        let workspace = input?["workspace"] as? [String: Any]
+        for candidate in [workspace?["project_dir"], input?["cwd"]] {
+            if let path = candidate as? String, path.hasPrefix("/") { return path }
+        }
+        return FileManager.default.currentDirectoryPath
     }
 
-    /// `command` run by the shell with `input`, its output; nil when it can't start or takes past `patience` (then stopped).
-    static func runCommand(_ command: String, input: Data, patience: TimeInterval) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", command]
-        let stdin = Pipe(), stdout = Pipe()
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        process.standardError = FileHandle.nullDevice
-        let ended = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in ended.signal() }
-        do { try process.run() } catch { return nil }
-        // Written and read on threads of their own: neither side's pipe filling blocks the other.
-        DispatchQueue.global().async {
-            try? stdin.fileHandleForWriting.write(contentsOf: input)
-            try? stdin.fileHandleForWriting.close()
+    /// Your status line command as Claude Code layers its settings files, the first that sets `statusLine` deciding:
+    /// the project's `.claude/settings.local.json`, its `.claude/settings.json` (nil `project`: neither), then
+    /// `~/.claude/settings.local.json` and `~/.claude/settings.json`. Nil when the deciding one isn't a command, or is
+    /// this one (it would run itself), or none sets one. A file that can't be read or parsed is passed over.
+    static func userCommand(home: String, project: String?) -> String? {
+        var files: [String] = []
+        if let project { files += [project + "/.claude/settings.local.json", project + "/.claude/settings.json"] }
+        files += [home + "/.claude/settings.local.json", home + "/.claude/settings.json"]
+        var seen = Set<String>()
+        for file in files {
+            // The project folder may be the home: its files once.
+            let path = URL(fileURLWithPath: file).standardizedFileURL.path
+            guard seen.insert(path).inserted, let data = FileManager.default.contents(atPath: path),
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let entry = object["statusLine"] else { continue }
+            guard let line = entry as? [String: Any], (line["type"] as? String ?? "command") == "command",
+                  let command = (line["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty,
+                  !command.contains(argument) else { return nil }
+            return command
         }
-        var output = Data()
-        let read = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async {
-            output = stdout.fileHandleForReading.readDataToEndOfFile()
-            read.signal()
+        return nil
+    }
+
+    /// `command` run by `/bin/sh -c` with `input` on its stdin; what it printed on stdout (stderr goes nowhere). It runs
+    /// on this thread alone (a kqueue on its pipes and its exit: no other thread or queue, so a busy process can't
+    /// starve it): the input is written as the pipe takes it and never after the command has exited or closed its end
+    /// (the pipe can't raise SIGPIPE either: `F_SETNOSIGPIPE`); its output is read until it ends. Past `patience` the
+    /// command is killed and what it printed so far is returned. It starts with SIGPIPE at its default, an empty signal
+    /// mask and no descriptor of this process but its stdin, stdout and stderr. Empty when it couldn't be started.
+    public static func runCommand(_ command: String, input: Data, patience: TimeInterval) -> Data {
+        var toChild: [Int32] = [-1, -1], fromChild: [Int32] = [-1, -1]
+        guard pipe(&toChild) == 0 else { return Data() }
+        guard pipe(&fromChild) == 0 else {
+            toChild.forEach { close($0) }
+            return Data()
         }
-        guard ended.wait(timeout: .now() + patience) == .success else {
-            process.terminate()
-            return nil
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        posix_spawn_file_actions_adddup2(&actions, toChild[0], STDIN_FILENO)
+        posix_spawn_file_actions_adddup2(&actions, fromChild[1], STDOUT_FILENO)
+        posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0)
+        var attributes: posix_spawnattr_t?
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+        var defaults = sigset_t(), mask = sigset_t()
+        sigemptyset(&defaults)
+        sigaddset(&defaults, SIGPIPE)
+        sigemptyset(&mask)
+        posix_spawnattr_setsigdefault(&attributes, &defaults)
+        posix_spawnattr_setsigmask(&attributes, &mask)
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT))
+        let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(command), nil]
+        defer { argv.forEach { free($0) } }
+        var pid: pid_t = 0
+        let spawned = posix_spawn(&pid, "/bin/sh", &actions, &attributes, argv, environ)
+        close(toChild[0])
+        close(fromChild[1])
+        var writer: Int32 = toChild[1]
+        let reader = fromChild[0]
+        guard spawned == 0 else {
+            close(writer)
+            close(reader)
+            return Data()
         }
-        _ = read.wait(timeout: .now() + 1)
-        return String(decoding: output, as: UTF8.self)
+        _ = fcntl(writer, F_SETNOSIGPIPE, 1)
+        for fd in [writer, reader] { _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) }
+        let queue = kqueue()
+        func watch(_ ident: Int32, _ filter: Int32, fflags: UInt32 = 0, flags: Int32 = EV_ADD) -> Bool {
+            var change = kevent(ident: UInt(ident), filter: Int16(filter), flags: UInt16(flags), fflags: fflags, data: 0, udata: nil)
+            return kevent(queue, &change, 1, nil, 0, nil) == 0
+        }
+        func stopWriting() {
+            guard writer >= 0 else { return }
+            close(writer) // Its kevent goes with it.
+            writer = -1
+        }
+        var output = Data(), pending = input[...]
+        // A command that has already exited (a zombie) can't be watched: it has exited.
+        var exited = queue < 0 || !watch(pid, EVFILT_PROC, fflags: UInt32(NOTE_EXIT))
+        var ended = queue < 0 || !watch(reader, EVFILT_READ)
+        if pending.isEmpty || exited || queue < 0 || !watch(writer, EVFILT_WRITE) { stopWriting() }
+        let deadline = Date().addingTimeInterval(patience)
+        var chunk = [UInt8](repeating: 0, count: 65_536)
+        while !(exited && ended) {
+            let left = deadline.timeIntervalSinceNow
+            guard left > 0 else { break }
+            var wait = timespec(tv_sec: Int(left), tv_nsec: Int((left - left.rounded(.down)) * 1e9))
+            var events = Array(repeating: kevent(), count: 4)
+            let count = kevent(queue, nil, 0, &events, Int32(events.count), &wait)
+            if count < 0 {
+                if errno == EINTR { continue }
+                break
+            }
+            let fired = events.prefix(Int(count))
+            // Its exit first: nothing is written after it.
+            if fired.contains(where: { Int32($0.filter) == EVFILT_PROC }) {
+                exited = true
+                stopWriting()
+            }
+            for event in fired where Int32(event.filter) == EVFILT_READ {
+                while true {
+                    let read = Darwin.read(reader, &chunk, chunk.count)
+                    if read > 0 { output.append(contentsOf: chunk[0..<read]); continue }
+                    if read < 0 && errno == EINTR { continue }
+                    if read == 0 || errno != EAGAIN {
+                        ended = true
+                        _ = watch(reader, EVFILT_READ, flags: EV_DELETE)
+                    }
+                    break
+                }
+            }
+            for event in fired where Int32(event.filter) == EVFILT_WRITE && writer >= 0 {
+                // Its reader gone (EV_EOF): the command closed its stdin or exited.
+                if event.flags & UInt16(EV_EOF) != 0 { stopWriting(); continue }
+                while !pending.isEmpty {
+                    let wrote = pending.withUnsafeBytes { Darwin.write(writer, $0.baseAddress, $0.count) }
+                    if wrote > 0 { pending = pending.dropFirst(wrote); continue }
+                    if wrote < 0 && errno == EINTR { continue }
+                    if wrote < 0 && errno == EAGAIN { break }
+                    pending = pending.prefix(0) // EPIPE, or anything else: the rest isn't wanted.
+                }
+                if pending.isEmpty { stopWriting() }
+            }
+        }
+        stopWriting()
+        close(reader)
+        if queue >= 0 { close(queue) }
+        if !exited { kill(pid, SIGKILL) }
+        var status: Int32 = 0
+        while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
+        return output
     }
 }

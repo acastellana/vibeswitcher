@@ -164,9 +164,10 @@ public final class LeadToolset: MCPToolset {
     /// The home whose `.claude/projects` holds its workers' and verifiers' transcripts, read for receipts (see
     /// `LeadReceipts`). A scratch one in tests.
     var claudeHome = VibePaths.home
-    /// Where the account's usage is kept (see `AccountUsage`): start_worker and audit back off near a limit. A scratch
-    /// one in tests.
-    public var usageStore = AccountUsageStore()
+    /// Where the account's usage is kept (see `AccountUsage`): start_worker and audit back off near a limit. The Mac's
+    /// (`AccountUsageStore.standardFile`) only for the session host's vault (`LeadVault.standard`); with any other
+    /// vault (tests' scratch ones), a file in its folder, so no test reads or writes the Mac's.
+    public var usageStore: AccountUsageStore
     /// How often merge reads the load again while it waits for it to drop below load_threshold.
     var loadPoll: TimeInterval = 15
     /// The Mac-wide limits as set in Settings (see `MacLimits`), read at each call. Faked in tests.
@@ -251,6 +252,8 @@ public final class LeadToolset: MCPToolset {
         self.root = root
         self.runtime = runtime
         self.vault = vault
+        usageStore = vault.folder.standardizedFileURL == LeadVault.standard.folder.standardizedFileURL
+            ? AccountUsageStore() : AccountUsageStore(file: vault.folder.appendingPathComponent("account-usage.json"))
         store = BoardStore(root: root)
         records = LeadRecords(store: store, vault: vault)
         var member: LeadVault.Member?

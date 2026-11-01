@@ -214,13 +214,15 @@ public enum LeadLaunch {
         let cwd = cwd ?? task.map { Worktrees.path(root: root, slug: $0) } ?? root
         settings["hooks"] = hooks(role, server: server, root: cwd)
         // The account's usage windows reach VibeSwitcher only through a status line's input: its own records them and
-        // shows yours (see `UsageStatusLine`).
-        settings["statusLine"] = UsageStatusLine.settings(server: server)
+        // shows yours (see `UsageStatusLine`): for a verifier, only your user settings' (its project settings don't run).
+        settings["statusLine"] = UsageStatusLine.settings(server: server, userOnly: role == .verifier)
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: settingsFile))
         let quote = RecentProjects.shellQuote
         let trimmed = base.trimmingCharacters(in: .whitespaces)
-        var parts = [trimmed.isEmpty ? "claude" : trimmed]
+        // The model given replaces one the project's command names (`--model x`, `--model=x`): `claude --help` doesn't
+        // say which of two wins.
+        var parts = [trimmed.isEmpty ? "claude" : model == nil ? trimmed : withoutModel(trimmed)]
         // From its file, so the prompt's length and characters never matter on the command line.
         parts.append("--append-system-prompt-file \(quote(promptFile))")
         parts.append("--mcp-config \(quote(mcpFile))")
@@ -237,6 +239,15 @@ public enum LeadLaunch {
         // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
         if let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary) { prepared.environment["TMPDIR"] = temporary.path + "/" }
         return prepared
+    }
+
+    /// `command` (a Claude command line) without its `--model` options (`--model x`, `--model 'x y'`, `--model=x`); the
+    /// rest as it was.
+    static func withoutModel(_ command: String) -> String {
+        let pattern = #"(^|\s+)--model(=|\s+)('[^']*'|"[^"]*"|\S+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return command }
+        let range = NSRange(command.startIndex..., in: command)
+        return regex.stringByReplacingMatches(in: command, range: range, withTemplate: "").trimmingCharacters(in: .whitespaces)
     }
 
     /// Where a new lead finds the last turns of the lead it replaces: in the project's `.vibeswitcher` folder (kept out

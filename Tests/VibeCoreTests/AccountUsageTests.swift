@@ -51,7 +51,7 @@ struct AccountUsageTests: LeadTeamFixture {
 
     /// The status line's reading kept, as a role session's status line keeps it.
     func recordStatusLine(weekly: Double, resets: Double = Date().timeIntervalSince1970 + 86_400) {
-        _ = UsageStatusLine.run(input: Data(Self.statusLine(weekly: weekly, resets: resets).utf8), store: usageStore, home: temp.url("no-home").path)
+        UsageStatusLine.run(input: Data(Self.statusLine(weekly: weekly, resets: resets).utf8), store: usageStore, home: temp.url("no-home").path) { _ in }
     }
 
     // MARK: Reading
@@ -98,25 +98,119 @@ struct AccountUsageTests: LeadTeamFixture {
         #expect(fable.hold(model: "claude-fable-5-1", now: now) != nil && fable.hold(model: "opus", now: now) == nil && fable.hold(model: nil, now: now) == nil)
     }
 
-    @Test func theStatusLineKeepsTheUsageAndShowsTheUsersOwnStatusLine() throws {
+    /// `UsageStatusLine.run`, what it showed.
+    func statusLineShows(_ input: String, home: String, userOnly: Bool = false, runner: @escaping UsageStatusLine.Runner) -> [Data] {
+        var shown: [Data] = []
+        UsageStatusLine.run(input: Data(input.utf8), userOnly: userOnly, store: usageStore, home: home, runner: runner) { shown.append($0) }
+        return shown
+    }
+
+    /// Writes `settings` (a statusLine command) as `folder/.claude/name`.
+    func settings(_ command: String, in folder: String, _ name: String = "settings.json") throws {
+        try FileManager.default.createDirectory(atPath: folder + "/.claude", withIntermediateDirectories: true)
+        let object: [String: Any] = ["statusLine": ["type": "command", "command": command]]
+        try JSONSerialization.data(withJSONObject: object).write(to: URL(fileURLWithPath: folder + "/.claude/" + name))
+    }
+
+    @Test func theStatusLineShowsTheUsersOwnStatusLineFirstThenKeepsTheUsage() throws {
         let home = temp.url("home").path
-        try FileManager.default.createDirectory(atPath: home + "/.claude", withIntermediateDirectories: true)
-        // Your own status line: it gets the same input.
-        let settings = #"{"statusLine":{"type":"command","command":"grep -o '\"seven_day\"' | head -1; echo mine"}}"#
-        try settings.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
+        try settings("my-line", in: home)
         let resets = Date().timeIntervalSince1970 + 86_400
-        // Waits for it to exit (a loaded Mac can take seconds to start a shell): its own patience is for Claude's sake.
-        let shown = UsageStatusLine.run(input: Data(Self.statusLine(weekly: 42, resets: resets).utf8), store: usageStore, home: home, patience: 120)
-        #expect(shown.split(separator: "\n") == ["\"seven_day\"", "mine"], "\(shown.debugDescription)")
+        let input = Self.statusLine(weekly: 42, resets: resets)
+        // Your own status line's output, byte for byte (not UTF-8 here), and nothing else; it got the same input.
+        let bytes = Data([0x6D, 0xFF, 0x0A, 0x00, 0x1B, 0x5B, 0x30, 0x6D])
+        var ran: [(String, Data)] = []
+        let shown = statusLineShows(input, home: home) { command, given, _ in
+            ran.append((command, given))
+            // Shown before the usage is kept.
+            #expect(usageStore.load().limits.isEmpty)
+            return bytes
+        }
+        #expect(shown == [bytes])
+        #expect(ran.map(\.0) == ["my-line"] && ran.map(\.1) == [Data(input.utf8)])
         #expect(usageStore.load().limits.first { $0.name == "seven_day" }?.usedPercent == 42)
         // None of yours: the usage, in a few words.
-        let plain = UsageStatusLine.run(input: Data(Self.statusLine(weekly: 43, resets: resets).utf8), store: usageStore, home: temp.url("bare").path)
-        #expect(plain == "5h 12% · weekly 43%", "\(plain)")
+        let plain = statusLineShows(Self.statusLine(weekly: 43, resets: resets), home: temp.url("bare").path) { _, _, _ in
+            Issue.record("no command to run")
+            return Data()
+        }
+        #expect(plain == [Data("5h 12% · weekly 43%".utf8)], "\(plain)")
         // An older reading never replaces a newer one.
         usageStore.record([AccountUsage.Limit(name: "seven_day", usedPercent: 10, resetsAt: resets, at: Date().timeIntervalSince1970 - 600)])
         #expect(usageStore.load().limits.first { $0.name == "seven_day" }?.usedPercent == 43)
-        // Not JSON: nothing kept, nothing fails.
-        #expect(UsageStatusLine.run(input: Data("garbage".utf8), store: usageStore, home: temp.url("bare").path) == "")
+        // Not JSON: nothing kept, nothing fails, and your status line still runs on it.
+        #expect(statusLineShows("garbage", home: temp.url("bare").path) { _, _, _ in Data() } == [Data()])
+        #expect(statusLineShows("garbage", home: home) { _, given, _ in given } == [Data("garbage".utf8)])
+    }
+
+    @Test func theUsersStatusLineIsFoundAsClaudeCodeLayersItsSettings() throws {
+        let home = temp.url("layers-home").path, project = temp.url("layers-project").path
+        func found(userOnly: Bool = false) -> String? {
+            var command: String?
+            _ = statusLineShows(#"{"workspace":{"project_dir":"\#(project)"}}"#, home: home, userOnly: userOnly) { given, _, _ in
+                command = given
+                return Data()
+            }
+            return command
+        }
+        #expect(found() == nil)
+        try settings("user", in: home)
+        #expect(found() == "user")
+        try settings("user-local", in: home, "settings.local.json")
+        #expect(found() == "user-local")
+        try settings("project", in: project)
+        #expect(found() == "project")
+        try settings("project-local", in: project, "settings.local.json")
+        #expect(found() == "project-local")
+        // A verifier (--setting-sources user): your user settings' only, never the branch's.
+        #expect(found(userOnly: true) == "user-local")
+        // The deciding layer's isn't a command, or is this one: none run (the layers under it don't decide).
+        try JSONSerialization.data(withJSONObject: ["statusLine": ["type": "static"]]).write(to: URL(fileURLWithPath: project + "/.claude/settings.local.json"))
+        #expect(found() == nil)
+        try settings("/x/vibeswitcher-mcp --status-line", in: project, "settings.local.json")
+        #expect(found() == nil)
+        // A file that can't be parsed is passed over.
+        try "{".write(toFile: project + "/.claude/settings.local.json", atomically: true, encoding: .utf8)
+        #expect(found() == "project")
+        // No project in the input: this process's folder's (not a scratch one's: the user's own layers then).
+        #expect(UsageStatusLine.projectFolder(["cwd": project]) == project && UsageStatusLine.projectFolder(nil) == FileManager.default.currentDirectoryPath)
+    }
+
+    // The runner, on real processes. Its patience only caps a command that doesn't end: each returns at the command's exit.
+
+    @Test func theRunnerForwardsTheCommandsOutputByteForByte() {
+        let input = Data(Self.statusLine(weekly: 42, resets: 1).utf8)
+        #expect(UsageStatusLine.runCommand("grep -o '\"seven_day\"' | head -1; printf 'mine\\377'", input: input, patience: 60)
+                == Data("\"seven_day\"\nmine".utf8) + Data([0xFF]))
+        // No input: the command's stdin ends at once.
+        #expect(UsageStatusLine.runCommand("cat; echo done", input: Data(), patience: 60) == Data("done\n".utf8))
+        // Nothing of this process's but stdin, stdout and stderr is open in it; SIGPIPE at its default.
+        // (A pipe of this process's, not close-on-exec, isn't; ls's own look at /dev/fd is one or two more.)
+        var mine: [Int32] = [-1, -1]
+        #expect(pipe(&mine) == 0)
+        defer { mine.forEach { close($0) } }
+        let fds = String(decoding: UsageStatusLine.runCommand("ls /dev/fd", input: Data(), patience: 60), as: UTF8.self)
+            .split(separator: "\n").compactMap { Int32($0) }
+        #expect(fds.starts(with: [0, 1, 2]) && fds.allSatisfy { $0 < 5 } && !fds.contains(mine[0]) && !fds.contains(mine[1]), "\(fds)")
+        #expect(UsageStatusLine.runCommand("yes | head -1", input: Data(), patience: 60) == Data("y\n".utf8))
+    }
+
+    @Test func aBigInputToACommandThatDoesntReadItStillShowsItsOutput() {
+        // 100 KB: more than a pipe holds, to a command that exits without reading it. No SIGPIPE ends this process,
+        // and nothing is written once it has exited.
+        let big = Data(repeating: 0x61, count: 100_000)
+        #expect(UsageStatusLine.runCommand("echo mine", input: big, patience: 60) == Data("mine\n".utf8))
+        // One that closes its stdin first and goes on.
+        #expect(UsageStatusLine.runCommand("exec 0<&-; echo closed", input: big, patience: 60) == Data("closed\n".utf8))
+        // One that reads it all.
+        #expect(UsageStatusLine.runCommand("wc -c | tr -d ' '", input: big, patience: 60) == Data("100000\n".utf8))
+    }
+
+    @Test func aCommandPastItsPatienceIsStoppedWithWhatItPrinted() {
+        // It printed, then never ends: stopped at its patience, what it printed kept.
+        #expect(UsageStatusLine.runCommand("echo early; exec sleep 600", input: Data(), patience: 1) == Data("early\n".utf8))
+        // Can't start (no such program): nothing, nothing fails.
+        #expect(UsageStatusLine.runCommand("/no/such/program", input: Data("x".utf8), patience: 60) == Data())
     }
 
     @Test func everyRolesSessionGetsTheUsageStatusLine() throws {
@@ -127,6 +221,37 @@ struct AccountUsageTests: LeadTeamFixture {
         let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: prepared.settingsFile))) as? [String: Any])
         let line = try #require(settings["statusLine"] as? [String: Any])
         #expect(line["command"] as? String == "'/App/vibeswitcher-mcp' --status-line")
+        // A verifier's runs only your user settings' status line (it's started with --setting-sources user).
+        let verifier = try LeadLaunch.prepare(role: .verifier, root: root, task: "t", base: "claude", prompt: "p", start: "s",
+                                              server: "/App/vibeswitcher-mcp", name: "verifier-t", folder: temp.url("run-v"), cwd: root,
+                                              temporary: temp.url("tmp"))
+        let verifierSettings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: verifier.settingsFile))) as? [String: Any])
+        #expect((verifierSettings["statusLine"] as? [String: Any])?["command"] as? String == "'/App/vibeswitcher-mcp' --status-line --user-settings-only")
+    }
+
+    @Test func aGivenModelReplacesTheOneTheProjectsCommandNames() throws {
+        let root = try repo()
+        func command(_ base: String, model: String?) throws -> String {
+            try LeadLaunch.prepare(role: .worker, root: root, task: "t", base: base, prompt: "p", start: "s", server: "/App/vibeswitcher-mcp",
+                                   name: "worker-t", model: model, folder: temp.url("run-\(UUID().uuidString)"), cwd: root, temporary: temp.url("tmp")).command
+        }
+        for base in ["claude --model opus --verbose", "claude --verbose --model=opus", "claude --model 'opus' --verbose", "claude  --model   opus"] {
+            let given = try command(base, model: "sonnet")
+            #expect(given.components(separatedBy: "--model").count == 2 && given.contains("--model 'sonnet'"), "\(given)")
+            #expect(!given.contains("opus") && given.hasPrefix("claude"), "\(given)")
+            #expect(LeadWorkflow.claudeModel(command: given) == "sonnet")
+        }
+        // Other options stay, --fallback-model too; no model given: the command as it is.
+        let kept = try command("claude --fallback-model opus --verbose --model opus", model: "sonnet")
+        #expect(kept.hasPrefix("claude --fallback-model opus --verbose --append-system-prompt-file"), "\(kept)")
+        #expect(try command("claude --model opus", model: nil).hasPrefix("claude --model opus --append-system-prompt-file"))
+    }
+
+    @Test func aLeadOnAScratchVaultNeverReadsTheMacsUsage() throws {
+        let root = try repo()
+        let tools = LeadToolset(root: root, runtime: FakeRuntime(), vault: vault)
+        #expect(tools.usageStore.file.path != AccountUsageStore.standardFile.path)
+        #expect(tools.usageStore.file.path.hasPrefix(vault.folder.path))
     }
 
     // MARK: The lead's tools
@@ -264,7 +389,7 @@ extension LeadAdvanceTests {
         let status = { (weekly: Double) in
             #"{"rate_limits":{"seven_day":{"used_percentage":\#(weekly),"resets_at":\#(resets)}}}"#
         }
-        _ = UsageStatusLine.run(input: Data(status(91).utf8), store: usageStore, home: temp.url("no-home").path)
+        UsageStatusLine.run(input: Data(status(91).utf8), store: usageStore, home: temp.url("no-home").path) { _ in }
         let advancing = Advancing(lead)
         defer { advancing.stop() }
         _ = lead.call("add_task", ["title": "First", "goal": "g", "acceptance": ["a"]])
@@ -278,7 +403,7 @@ extension LeadAdvanceTests {
         #expect(told().first?.contains("Tell the user") == true)
         #expect(task("first", root)?.status == .planned && task("second", root)?.status == .planned && runtime.spawned.isEmpty)
         // The next reading is under the threshold: they start.
-        _ = UsageStatusLine.run(input: Data(status(30).utf8), store: usageStore, home: temp.url("no-home").path)
+        UsageStatusLine.run(input: Data(status(30).utf8), store: usageStore, home: temp.url("no-home").path) { _ in }
         LeadAdvance.nudge(root: root)
         #expect(advancing.until { task("first", root)?.status == .running && task("second", root)?.status == .running })
     }

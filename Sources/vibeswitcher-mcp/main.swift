@@ -37,10 +37,17 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == ReadOnlyCommand
     exit(0)
 }
 
-// A role session's status line (see `UsageStatusLine`): keeps the account's usage, prints your own status line's output.
-if CommandLine.arguments.count == 2, CommandLine.arguments[1] == UsageStatusLine.argument {
-    let input = FileHandle.standardInput.readDataToEndOfFile()
-    FileHandle.standardOutput.write(Data(UsageStatusLine.run(input: input).utf8))
+// A role session's status line (see `UsageStatusLine`): prints your own status line's output, keeps the account's usage.
+// A reader that has gone (Claude Code closing the pipes early, your command not reading its input) makes a write fail,
+// never ends this process before your status line's output is printed: SIGPIPE ignored here (your command starts with it
+// at its default) and on stdout.
+if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == UsageStatusLine.argument {
+    signal(SIGPIPE, SIG_IGN)
+    _ = fcntl(STDOUT_FILENO, F_SETNOSIGPIPE, 1)
+    let input = (try? FileHandle.standardInput.readToEnd()) ?? Data()
+    UsageStatusLine.run(input: input, userOnly: CommandLine.arguments.dropFirst(2).contains(UsageStatusLine.userOnlyArgument)) { output in
+        try? FileHandle.standardOutput.write(contentsOf: output)
+    }
     exit(0)
 }
 
