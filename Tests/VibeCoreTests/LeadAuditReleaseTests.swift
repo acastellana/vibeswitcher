@@ -110,6 +110,41 @@ extension LeadAdvanceTests {
         #expect(LeadWitness.releasableForAdvance(board: board, seen: [worker: idle]).isEmpty)
     }
 
+    /// The lead's message goes in between the release's look at the idle worker and its end: the worker's new turn
+    /// hasn't begun (its hooks still say finished), but it isn't ended, then or at a later pass.
+    @Test func aMessageBetweenTheReleasesLookAndItsEndKeepsTheWorker() throws {
+        let (root, runtime, lead) = try team()
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "review": "audit"])
+        #expect(advancing.until { task("add-b", root)?.status == .running })
+        let worker = try #require(task("add-b", root)?.worker)
+        setStatus(worker, LeadActivity.idle(background: nil).text, runtime)
+        // The first look at the sessions once the verifier is on the board is the release's: the message goes in then.
+        let sent = NSCondition()
+        var message: MCPToolResult?
+        runtime.calls.lock()
+        runtime.onSessions = { [unowned runtime] in
+            guard BoardStore(root: root).load().task("add-b")?.verifier != nil else { return }
+            runtime.onSessions = nil
+            let result = lead.call("message", ["task": "add-b", "text": "One more thing before you go: rename b.txt."])
+            sent.lock()
+            message = result
+            sent.broadcast()
+            sent.unlock()
+        }
+        runtime.calls.unlock()
+        try work("add-b", file: "b.txt", root: root, runtime)
+        sent.lock()
+        while message == nil { #expect(sent.wait(until: Date().addingTimeInterval(60))) }
+        sent.unlock()
+        #expect(message?.isError == false, "\(message?.text ?? "")")
+        #expect(advancing.until { reports(runtime).contains { $0.contains("Started the audit of add-b") } })
+        advancing.settle()
+        #expect(!killed(worker, runtime) && task("add-b", root)?.released == nil)
+        #expect(toWorker("add-b", root, runtime).contains { $0.contains("rename b.txt") })
+    }
+
     @Test func openImportantFindingsAfterAReleaseGoToAFreshWorkerInTheSameWorktree() throws {
         let (root, runtime, lead) = try team()
         let advancing = Advancing(lead)

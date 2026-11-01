@@ -1580,6 +1580,19 @@ public final class LeadToolset: MCPToolset {
             + "Its worktree and commits stay; start_worker continues there if there's rework. "
     }
 
+    /// Delivers `text` to the task's `worker` under the task's delivery lock, which `releaseWorker` holds from its last
+    /// look at the worker through its end, recording it first (`LeadTask.messagedAt`): a worker idle when looked at is
+    /// never ended with a message just gone in, its new turn not begun yet.
+    private func deliver(_ slug: String, worker: String, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered {
+        try exclusively("deliver-\(slug)") {
+            try? store.update { board in
+                guard let index = board.taskIndex(slug), board.tasks[index].worker == worker else { return }
+                board.tasks[index].messagedAt = Date().timeIntervalSince1970
+            }
+            return try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text, clearDraft: clearDraft)
+        }
+    }
+
     /// What `releaseWorker` did: ended the worker (`released`), or the host wouldn't end it.
     struct Release {
         var released: Bool
@@ -1602,11 +1615,20 @@ public final class LeadToolset: MCPToolset {
         guard !task.awaitedVerifiers.isEmpty,
               (task.panel?.commit ?? (grant?.session == task.verifier ? grant?.auditing : nil)) == head else { return nil }
         let refused = "\(slug)'s worker wasn't released during its audit"
-        guard let sessions = try? hostSessions(refused),
-              let info = sessions.first(where: { $0.id == worker && $0.live }),
-              info.waiting == nil, info.status == LeadActivity.idle(background: nil).text,
-              (try? vault.unaudited(root: root, task: slug))?.reported == head else { return nil }
-        guard let ending = try? end([info], refused: refused).first else { return nil }
+        /// Idle between turns, with no message delivered since its done report: `info` as the host has it now.
+        func idle() -> LeadSessionInfo? {
+            guard let now = store.load().task(slug), now.worker == worker, now.stopped != worker,
+                  (now.messagedAt ?? 0) < (now.since ?? .infinity),
+                  let info = (try? hostSessions(refused))?.first(where: { $0.id == worker && $0.live }),
+                  info.waiting == nil, info.status == LeadActivity.idle(background: nil).text else { return nil }
+            return info
+        }
+        guard idle() != nil, (try? vault.unaudited(root: root, task: slug))?.reported == head else { return nil }
+        // Looked at again and ended under the delivery lock: a message can't go in between (see `deliver`).
+        guard let ending = try? exclusively("deliver-\(slug)", { () -> Ending? in
+            guard let info = idle() else { return nil }
+            return try end([info], refused: refused).first
+        }) else { return nil }
         if ending.failure != nil {
             return Release(released: false, text: "\(slug)'s worker, idle since its done report, wasn't released during its audit (\(ending.said)): it stays beside the verifier.")
         }
@@ -1630,7 +1652,7 @@ public final class LeadToolset: MCPToolset {
         let text = try self.text(arguments, "text", missing: "Nothing to send.")
         guard let worker = store.load().task(slug)?.worker else { throw Problem(text: "\(slug) has no worker.") }
         let clear = arguments["clear_draft"] as? Bool ?? false
-        let delivered = try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text, clearDraft: clear)
+        let delivered = try deliver(slug, worker: worker, text: text, clearDraft: clear)
         // Kept for the verifier: what the lead accepts here (an edit outside the contract's files) is in scope.
         let note = leadNote(.message, text, on: slug)
         try store.update { board in
@@ -2253,7 +2275,7 @@ public final class LeadToolset: MCPToolset {
             return "Its worker isn't running: start_worker again, then message it this."
         }
         do {
-            _ = try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text, clearDraft: false)
+            _ = try deliver(task.slug, worker: worker, text: text, clearDraft: false)
             return "Its worker was sent this."
         } catch {
             return "Telling its worker failed (\(error)): message it this."

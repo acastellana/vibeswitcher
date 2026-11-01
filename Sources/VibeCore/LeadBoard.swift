@@ -614,6 +614,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// and memory freed. It's `stopped` too, so its end is no news; findings the verdict sends back go to a fresh worker
     /// there (`LeadAdvance.sendBack`). Status and board say "worker released during audit", not "ended".
     public var released: String?
+    /// When the lead's tools last delivered a message to its worker (message, auto_advance's sends, a note to it):
+    /// one after its done report (`since` it went to review) starts a new turn, so that worker isn't released.
+    public var messagedAt: Double?
     public var branch: String?
     public var worktree: String?
     /// The verdict on the commit its branch is at, as long as it's there: a report on that commit keeps it; a new
