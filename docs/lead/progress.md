@@ -2701,3 +2701,6 @@
 - 2026-11-01 12:37 Merged boost-release-4-7: Boost release 4/7: a task's idle worker is released while its audit runs, and restarted only if findings come back
 - 2026-11-01 12:37 Automatically (auto_advance): Merged boost-release-4-7 (Boost release 4/7: a task's idle worker is released while its audit runs, and restarted only if findings come back) into main at 7c48eb90, on its passing audit and the full test run.
 - 2026-11-01 12:43 Merged feature-impact-ledger: Feature impact ledger + metrics script: track which changes help, and why
+- 2026-11-01 12:43 Automatically (auto_advance): Merged feature-impact-ledger (Feature impact ledger + metrics script: track which changes help, and why) into main at b6c44f6a, on its passing audit and the full test run.
+- 2026-11-01 12:50 Merged fix-the-flaky-test-15: Fix the flaky test heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared()
+- 2026-11-01 12:50 Flaky in fix-the-flaky-test-15's merge: itCountsWhileOtherThreadsAllocate() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
