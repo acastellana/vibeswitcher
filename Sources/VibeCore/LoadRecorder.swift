@@ -200,6 +200,13 @@ public struct MergeSample: Codable, Equatable, Sendable {
     public var rerunWhole: Bool?
     /// "passed", "passed_on_rerun", "failed", "hung", "conflict", "cancelled" or "error".
     public var result: String
+    /// A batched merge's (merge_batching, see `LeadToolset.mergeBatch`): the batch's id, shared by its tasks' lines;
+    /// how many tasks it started with; and how many test runs it took in all (reruns not counted), on each of its
+    /// lines. Nil for a merge tested on its own: test runs ÷ merges is then the lines without a batch, plus each
+    /// batch's runs once.
+    public var batch: String?
+    public var batchTasks: Int?
+    public var batchRuns: Int?
 
     public init(t: String, project: String, task: String, load: [Double], waitedS: Int, slotWaitS: Int?, durationS: Int,
                 firstRun: String?, reran: [String]?, rerunWhole: Bool?, result: String) {

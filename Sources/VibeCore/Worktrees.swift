@@ -775,6 +775,24 @@ public enum Worktrees {
             if cancel?.isCancelled == true { return .cancelled }
             return .error(added.error.isEmpty ? "Couldn't set up a worktree to test \(commit.prefix(8)) in." : added.error)
         }
+        if let stopped = put(commit, onto: base, in: path, records: records) { return stopped }
+        guard cancel?.isCancelled != true else { return .cancelled }
+        let tested = Git.run(["rev-parse", "HEAD"], in: path).output
+        let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
+                                           as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root, rerun: rerun, begun: begun)
+        if let stopped { return stopped }
+        if let last = outputs.last, last.name != "init_command" { output?(last.output) }
+        if let again = outputs.last, again.name == "rerun", let first = outputs.dropLast().last {
+            return .passedOnRerun(commit: tested, failed: first.output, rerun: again.output)
+        }
+        return .passed(tested)
+    }
+
+    /// Puts the worktree at `path`'s detached HEAD, `commit`, on top of `base`: rebased, or squashed into one commit
+    /// when it holds a merge; nil when HEAD is the result, else how it stopped (`conflict`, `error`, `cancelled`), with
+    /// the worktree back at a clean state. The lead's records under `records` land as the base has them.
+    static func put(_ commit: String, onto base: String, in path: String, records: String?) -> Check? {
+        let cancel = ShellCancel.current
         // A worker brings its branch up to date by merging the base in. Rebasing would drop that merge and replay
         // the commits before it, conflicts and all, so such a branch lands as one commit on top of the base; either
         // way the base's history stays a line.
@@ -795,16 +813,104 @@ public enum Worktrees {
         } else if let stopped = squash(onto: base, in: path, records: records) {
             return cancel?.isCancelled == true ? .cancelled : stopped
         }
-        guard cancel?.isCancelled != true else { return .cancelled }
-        let tested = Git.run(["rev-parse", "HEAD"], in: path).output
-        let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
-                                           as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root, rerun: rerun, begun: begun)
-        if let stopped { return stopped }
-        if let last = outputs.last, last.name != "init_command" { output?(last.output) }
-        if let again = outputs.last, again.name == "rerun", let first = outputs.dropLast().last {
-            return .passedOnRerun(commit: tested, failed: first.output, rerun: again.output)
+        return nil
+    }
+
+    /// A batch's stack (see `LeadToolset.mergeBatch`): tasks' commits put one on top of another on the base, in one
+    /// detached scratch worktree where no agent works, and a test run on any prefix of it. Each commit lands as
+    /// `rebaseAndTest` lands one (rebased, or squashed when it holds a merge; the lead's records as the base has them).
+    /// The worktree and the scratch home are removed by `remove`, also after a cancel.
+    public final class Stack {
+        public let root: String
+        let path: String
+        let home: String
+        let records: String?
+        /// The commit the stack starts from, and each commit pushed on it since (`reset`), in order.
+        public private(set) var base: String = ""
+        public private(set) var tips: [String] = []
+        /// Whether the worktree was made.
+        private var made = false
+
+        public init(root: String, scratch: URL, home: URL, records: String?) {
+            self.root = root
+            path = scratch.path
+            self.home = home.path
+            self.records = records
         }
-        return .passed(tested)
+
+        /// The stack's top: the last commit pushed, else its base.
+        public var top: String { tips.last ?? base }
+
+        /// Empties the stack onto `base` (making its worktree the first time); an error's text, or nil.
+        public func reset(to base: String) -> String? {
+            if !made {
+                remove()
+                try? FileManager.default.createDirectory(at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                         attributes: [.posixPermissions: 0o700])
+                let added = Git.run(["worktree", "add", "--detach", "-q", path, base], in: root)
+                guard added.ok else { return added.error.isEmpty ? "Couldn't set up a worktree to stack the batch in on \(base.prefix(8))." : added.error }
+                made = true
+            }
+            self.base = base
+            tips = []
+            return checkout(base)
+        }
+
+        /// Puts `commit` on top: nil when it's there (its new commit is `top`), else how it stopped, the stack as it was.
+        public func push(_ commit: String) -> Check? {
+            let under = top
+            if let error = checkout(commit) { return .error(error) }
+            if let stopped = Worktrees.put(commit, onto: under, in: path, records: records) {
+                _ = checkout(under)
+                return stopped
+            }
+            let landed = Git.run(["rev-parse", "HEAD"], in: path)
+            guard landed.ok, !landed.output.isEmpty else {
+                _ = checkout(under)
+                return .error("Couldn't read the stack's top after putting \(commit.prefix(8)) on it: \(said(landed))")
+            }
+            tips.append(landed.output)
+            return nil
+        }
+
+        /// Runs `setup` and `test` (as `rebaseAndTest` does, in a scratch home made empty first) on the stack's first
+        /// `count` commits: `passed` with the commit tested, `passedOnRerun`, `failed`, `hung`, `cancelled`, `error`.
+        public func test(prefix count: Int, setup: String?, test: String?, timeout: TimeInterval, lock: TestLock?,
+                         rerun: ((String) -> String?)?, tested output: ((String) -> Void)? = nil, begun: ((Date) -> Void)? = nil) -> Check {
+            let tip = count == 0 ? base : tips[count - 1]
+            if let error = checkout(tip) { return .error(error) }
+            try? FileManager.default.removeItem(atPath: home)
+            guard ShellCancel.current?.isCancelled != true else { return .cancelled }
+            let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
+                                               as: "VibeSwitcher's batch merge test of \(tip.prefix(8))", place: root, rerun: rerun, begun: begun)
+            if let stopped { return stopped }
+            if let last = outputs.last, last.name != "init_command" { output?(last.output) }
+            if let again = outputs.last, again.name == "rerun", let first = outputs.dropLast().last {
+                return .passedOnRerun(commit: tip, failed: first.output, rerun: again.output)
+            }
+            return .passed(tip)
+        }
+
+        /// The worktree at `commit`, whatever a run left changed or new in it (its ignored build output stays).
+        private func checkout(_ commit: String) -> String? {
+            let moved = Git.run(["checkout", "-q", "-f", "--detach", commit], in: path)
+            guard moved.ok else { return "Couldn't check out \(commit.prefix(8)) in the batch's worktree: \(said(moved))" }
+            Git.run(["clean", "-q", "-f", "-d"], in: path)
+            return nil
+        }
+
+        /// Removes the worktree and the scratch home, not stopped by a cancel.
+        public func remove() {
+            let (root, path, home) = (self.root, self.path, self.home)
+            ShellCancel.with(nil) {
+                SessionStrays.endInside(folder: path)
+                Git.run(["worktree", "remove", "--force", path], in: root)
+                try? FileManager.default.removeItem(atPath: path)
+                Git.run(["worktree", "prune"], in: root)
+                try? FileManager.default.removeItem(atPath: home)
+            }
+            made = false
+        }
     }
 
     /// How a revert's run went (`revertAndTest`).

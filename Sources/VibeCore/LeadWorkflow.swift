@@ -54,6 +54,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// or audited, a clean audit merged, open Important findings sent back, a merged task cleaned up, and a planned task
     /// whose `after` tasks are done started. False: the lead does each.
     public var autoAdvance = true
+    /// Whether merges of review-passed tasks are tested together (`merge_batching:`, see `LeadToolset.mergeBatch`):
+    /// off (each on its own run, as before), boost (only while Boost mode is on) or always. Anything else reads off.
+    public var mergeBatching: MergeBatching = .off
     /// The risk check (see `LeadRisk`): a review none task whose branch changes more lines than this is audited
     /// (`risk_lines:`; 0: no size trigger).
     public var riskLines = LeadRisk.defaultLines
@@ -122,6 +125,8 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "strict_paths": workflow.strictPaths = globs(value)
                 case "records_dir": workflow.recordsDir = recordsFolder(value)
                 case "auto_advance": workflow.autoAdvance = flag(value) ?? true
+                // One it can't read is off: one task at a time, as before.
+                case "merge_batching": workflow.mergeBatching = MergeBatching(text: value) ?? .off
                 case "risk_lines": workflow.riskLines = Int(value).map { max(0, $0) } ?? LeadRisk.defaultLines
                 case "risk_model": workflow.riskModel = flag(value) ?? true
                 case "watch_app_logs": workflow.watchAppLogs = flag(value) ?? false
@@ -162,6 +167,31 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// A size in GB (at least 0); nil when it isn't one.
     static func gigabytes(_ value: String) -> Double? {
         Double(value).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+    }
+
+    // MARK: Merge batching
+
+    /// When merges are tested in batches (`merge_batching:`): ready tasks stacked on the base in order, one test run on
+    /// the stack, split on failure (see `LeadToolset.mergeBatch`).
+    public enum MergeBatching: String, CaseIterable, Sendable {
+        case off
+        /// Only while Boost mode is on (`LeadToolset.boosting`).
+        case boost
+        case always
+
+        /// "Always", " boost " read too; nil for anything else.
+        public init?(text: String) {
+            self.init(rawValue: text.trimmingCharacters(in: .whitespaces).lowercased())
+        }
+
+        /// What it means, in a line.
+        public var meaning: String {
+            switch self {
+            case .off: return "each merge runs the test command on its own"
+            case .boost: return "while Boost mode is on, auto_advance tests the tasks ready to merge together, one run for the batch, split on failure; else one at a time"
+            case .always: return "auto_advance tests the tasks ready to merge together, one run for the batch, split on failure"
+            }
+        }
     }
 
     // MARK: Merge policy
@@ -365,7 +395,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "verifier_model", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
-                                      "auto_advance", "risk_lines", "risk_model", "watch_app_logs"]
+                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "watch_app_logs"]
 
     /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
     /// time (`BoardStore.prepare`), the lead's `configure` after.
@@ -526,6 +556,11 @@ public struct LeadWorkflow: Equatable, Sendable {
     # merged task cleaned up, and a planned task started once the tasks in its `after` list are done. false: the lead
     # does each. Empty: true.
     auto_advance: true
+    # Whether auto_advance tests the tasks ready to merge together: their branches stacked on the base in order, one
+    # run of the test command on the stack, and the base fast-forwarded to it when it passes (each task's merge recorded
+    # on its own). A failure is rerun as ever, then split to find the task that breaks it, which goes back to its worker;
+    # the rest merge. off, boost (only while Boost mode is on) or always. Empty: off.
+    merge_batching: off
     # The risk check: before a review none task merges, its branch's diff is read, and it's audited instead when it
     # changes more lines than this, or has code that deletes or rewrites files or data, changes permissions, spawns
     # processes or adds locks or threads, or changes the suite's own test or build infrastructure. 0: no size trigger.

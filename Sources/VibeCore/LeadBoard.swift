@@ -127,14 +127,18 @@ public struct LeadMergeRecord: Codable, Equatable, Sendable {
     /// false: it merged with no verdict, a `review: none` task on its worker's report and the merge's own test run;
     /// nil (older records, and every audited merge): a passing audit let it in.
     public var audited: Bool?
+    /// The tasks that landed with it on one test run of a batch (merge_batching, see `LeadToolset.mergeBatch`), in the
+    /// order they were stacked, itself among them; nil: it merged on a test run of its own.
+    public var batch: [String]?
 
-    public init(commit: String, tested: Bool, onto: String? = nil, regression: Bool? = nil, audited: Bool? = nil,
+    public init(commit: String, tested: Bool, onto: String? = nil, regression: Bool? = nil, audited: Bool? = nil, batch: [String]? = nil,
                 at: Double = Date().timeIntervalSince1970) {
         self.commit = commit
         self.tested = tested
         self.onto = onto
         self.regression = regression
         self.audited = audited
+        self.batch = batch
         self.at = at
     }
 

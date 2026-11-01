@@ -217,6 +217,8 @@ public final class LeadToolset: MCPToolset {
     /// many): the tool server sets the Mac-wide ones, every project's merges sharing them with `vs-heavy`; nil (tests
     /// that don't give scratch ones): none.
     public var testLock: TestLock?
+    /// Whether Boost mode is on now (merge_batching boost batches only then). Off until Boost mode sets it.
+    var boosting: () -> Bool = { false }
     /// Where merge appends its line of the Mac's merge stats (`MergeSample`, merges-<day>.jsonl); nil: none.
     public var mergeStats: () -> URL? = { VibePaths.statsDir }
 
@@ -413,7 +415,7 @@ public final class LeadToolset: MCPToolset {
         }
     }
 
-    private func branchHead(_ branch: String) -> String? {
+    func branchHead(_ branch: String) -> String? {
         let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"], in: root)
         return head.ok && !head.output.isEmpty ? head.output : nil
     }
@@ -500,7 +502,9 @@ public final class LeadToolset: MCPToolset {
                                          "override_usage": Self.overrideUsageProperty],
                             required: ["task"]),
                 MCPToolInfo(name: "merge", description: "Merge a task: rebase onto the lead's branch (squashed when the worker merged it in), run the test command, fast-forward that branch. An audit task (or one whose branch touches sensitive_paths) needs its passing audit; a review none task needs only its worker's done report on the branch's head and the test command passing.",
-                            properties: ["task": task], required: ["task"]),
+                            properties: ["task": task,
+                                         "tasks": P(type: "array", description: "Instead of task: two or more tasks to merge as one batch (at most \(Self.batchLimit)), each checked as merge checks it alone: their branches stacked on the base in this order, one test run on the stack, the base fast-forwarded to it when it passes (each task's merge recorded on its own). A failure is rerun as ever, then split to find the task that breaks it, which is set failed with its output; the rest merge. A task that doesn't apply on the stack is left out, failed, to merge the base",
+                                                    items: "string")]),
                 MCPToolInfo(name: "revert", description: "Undo a merged task in one step: one commit on top of the lead's branch reverts the commits its merge put there, the test command runs on it, and the branch fast-forwards to it; the task reads reverted. It only adds a commit (nothing is reset or rewritten). Refused, with the branch untouched, when the tests fail or when later commits conflict with the revert (it names the files and the tasks that touched them: plan a fix-forward task instead).",
                             properties: ["task": task, "reason": P(type: "string", description: "What the merge broke, in one line: it goes into the revert commit's message and the task's record")],
                             required: ["task", "reason"]),
@@ -565,6 +569,8 @@ public final class LeadToolset: MCPToolset {
                                          "sensitive_paths": P(type: "string", description: "The globs ask_sensitive holds back, comma-separated, as in .gitignore (empty: Claude's settings and instructions, .github, .env files, entitlements, keys)"),
                                          "strict_paths": P(type: "string", description: "Globs, comma-separated, as in .gitignore (e.g. src/signing/**): on a branch touching one, every Important finding holds merge and auto_advance, an unconfirmed one too, until you dismiss_finding it, add_task(from_finding:) it, or a re-audit closes it (empty: none)"),
                                          "auto_advance": P(type: "boolean", description: "Whether VibeSwitcher moves finished work on by itself (default true): a task reported done is merged (review none) or audited, a clean audit merged, open Important findings sent back to its worker, a merged task cleaned up, and a planned task started once its after tasks are done; you get one report of what it did. false: you do each"),
+                                         "merge_batching": P(type: "string", description: "Whether auto_advance tests the tasks ready to merge together (default off): their branches stacked on the base in order, one test run for the batch, the base fast-forwarded to the stack when it passes (each task's merge recorded on its own); a failure is rerun as ever, then split to find the task that breaks it, which goes back to its worker, and the rest merge. boost: only while Boost mode is on; always",
+                                                              options: LeadWorkflow.MergeBatching.allCases.map(\.rawValue)),
                                          "risk_lines": P(type: "integer", description: "The risk check's size trigger: a review none task whose branch changes more lines than this (added and removed) is audited instead of merged when it reports done (default 400; 0: no size trigger)"),
                                          "risk_model": P(type: "boolean", description: "Whether the risk check also asks headless Claude, from the diff's stat, the contract and the base branch's REVIEW.md (no code), to raise a review none task to audit (default true); it only raises, and a timeout or error leaves the deterministic triggers' result"),
                                          "watch_app_logs": P(type: "boolean", description: "Whether you get VibeSwitcher's own health digests (default false; only for the project that builds VibeSwitcher): its freezes, crashes and error lines as it logs them, and a daily trend, each as a witness report to turn into tasks where it's a real bug")]),
@@ -592,6 +598,11 @@ public final class LeadToolset: MCPToolset {
             case "audit": return try audit(try taskSlug(arguments), restart: arguments["restart"] as? Bool ?? false,
                                            overrideUsage: arguments["override_usage"] as? Bool ?? false)
             case "merge":
+                if let batch = arguments["tasks"] as? [String], !batch.isEmpty {
+                    let merged = try mergeTool(batch: batch)
+                    records.flush(base: base)
+                    return withGitNotice(merged)
+                }
                 let merged = try merge(try taskSlug(arguments))
                 records.flush(base: base)
                 return withGitNotice(merged)
@@ -2444,11 +2455,24 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// What the lead tells a worker whose branch conflicts with the base.
-    private static func bringUpToDate(_ base: String) -> String {
+    static func bringUpToDate(_ base: String) -> String {
         "Message its worker to bring its branch up to date by merging, in its worktree: `git merge \(base)`, resolve the conflicts, `git add` the files, then `git commit`, each command on its own (no pipes, && or 2>&1); then run the tests and report again (start_worker again if it has stopped). Then audit again; merge puts the work on top of \(base) itself."
     }
 
-    private func merge(_ slug: String) throws -> MCPToolResult {
+    /// What lets a task merge, as merge checks it before anything is tested: the task, the commit that merges, whether
+    /// a passing audit let it in, and the Important findings the lead dismissed on a verdict that failed only on them.
+    struct MergeGate {
+        let task: LeadTask
+        let commit: String
+        let audited: Bool
+        let dismissed: [LeadFinding]
+    }
+
+    /// Every check merge makes of `slug` before its test run, a batch's (`mergeBatch`) for each of its tasks too: not
+    /// merged or settled already, no battery hold, not kept, its passing audit on its branch's head (or, for review
+    /// none, its worker's done report there), no Important finding open or held by strict_paths, and the merge policy
+    /// (the user's approval of that commit when it asks for one). Throws the refusal.
+    func mergeGate(_ slug: String) throws -> MergeGate {
         guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
         if task.status == .done {
             throw Problem(text: "\(slug) is already merged" + (task.merged.map { " at \($0.commit.prefix(8)) (\(LeadBoard.clock($0.at)))" } ?? "")
@@ -2507,6 +2531,12 @@ public final class LeadToolset: MCPToolset {
                 + ". Have the worker fix \(blocking.count == 1 ? "it" : "them") and audit again, or dismiss_finding with a reason, or add_task(from_finding: …) to move one to a task of its own.")
         }
         try checkMergePolicy(task, commit: commit)
+        return MergeGate(task: task, commit: commit, audited: audited, dismissed: dismissed)
+    }
+
+    private func merge(_ slug: String) throws -> MCPToolResult {
+        let gate = try mergeGate(slug)
+        let (task, commit, audited, dismissed) = (gate.task, gate.commit, gate.audited, gate.dismissed)
         guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
             throw Problem(text: "A merge of \(slug) is already running; its result comes back to the call that started it.")
         }
@@ -2633,25 +2663,8 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].receipt = LeadReceipt(board.tasks[index], ending: .merged, questions: board.questions, usage: usage,
                                                          tests: workflow.testCommand == nil ? nil : testCount, mergeReruns: flaked == nil ? 0 : 1,
                                                          commits: brought)
-                guard !flakes.isEmpty else { return [] }
-                // The flake ledger, and a task for each test that flaked once too often (once: `recordFlakes`), unless
-                // an open task names it already: its count goes in that task's context.
-                return board.recordFlakes(flakes, task: slug, commit: tested, now: flakedAt.timeIntervalSince1970, logged: Set(flakeLines.keys),
-                                          log: flakeLog).map { test, _, counted in
-                    if let open = board.openTask(naming: test), let index = board.taskIndex(open.id) {
-                        let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let line = MergeRerun.flakeNote(test: test, flakes: counted, root: root)
-                        board.tasks[index].contract.context = context.isEmpty ? line : context + "\n\n" + line
-                        board.notePlanned(open.slug, for: test)
-                        return (test, open.slug, true)
-                    }
-                    let title = "Fix the flaky test " + Self.clip(test, 60)
-                    let fix = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title,
-                                       contract: MergeRerun.fixContract(test: test, flakes: counted, workflow: workflow, root: root))
-                    board.tasks.append(fix)
-                    board.notePlanned(fix.slug, for: test)
-                    return (test, fix.slug, false)
-                }
+                return planFlakeFixes(&board, flakes: flakes, slug: slug, commit: tested, at: flakedAt, logged: Set(flakeLines.keys),
+                                      log: flakeLog, workflow: workflow)
             }
             // Nothing ran: say so, it isn't a pass.
             let untested = workflow.testCommand == nil
@@ -2693,10 +2706,33 @@ public final class LeadToolset: MCPToolset {
         }
     }
 
+    /// The flake ledger for `flakes` of `slug`'s merge (tested at `commit`), and a task for each test that flaked once
+    /// too often (once: `recordFlakes`), unless an open task names it already: its count goes in that task's context.
+    /// Each such test, the task that has it, and whether that's an open one's note (no new task).
+    func planFlakeFixes(_ board: inout LeadBoard, flakes: [String], slug: String, commit: String, at date: Date, logged: Set<String>,
+                        log: String?, workflow: LeadWorkflow) -> [(test: String, slug: String, noted: Bool)] {
+        guard !flakes.isEmpty else { return [] }
+        return board.recordFlakes(flakes, task: slug, commit: commit, now: date.timeIntervalSince1970, logged: logged, log: log).map { test, _, counted in
+            if let open = board.openTask(naming: test), let index = board.taskIndex(open.id) {
+                let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
+                let line = MergeRerun.flakeNote(test: test, flakes: counted, root: root)
+                board.tasks[index].contract.context = context.isEmpty ? line : context + "\n\n" + line
+                board.notePlanned(open.slug, for: test)
+                return (test, open.slug, true)
+            }
+            let title = "Fix the flaky test " + Self.clip(test, 60)
+            let fix = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title,
+                               contract: MergeRerun.fixContract(test: test, flakes: counted, workflow: workflow, root: root))
+            board.tasks.append(fix)
+            board.notePlanned(fix.slug, for: test)
+            return (test, fix.slug, false)
+        }
+    }
+
     /// The base moves only through merges and reverts: anything else that moved it from where the vault last saw it
     /// (a worker's git, a hand-made commit) is something nobody audited, and is refused (`BaseMoveRefusal`). Except
     /// the user's own commits, which the vault takes when their sessions' hooks account for every one.
-    private func checkBaseMoves(base: String, current: String) throws {
+    func checkBaseMoves(base: String, current: String) throws {
         if let known = vault.head(root: root, branch: base), known != current {
             let move = Result { try vault.acceptMove(root: root, branch: base) }
             guard case .success(let taken) = move, taken.accepted, taken.to == current else {
@@ -2856,7 +2892,7 @@ public final class LeadToolset: MCPToolset {
     /// changed too gets one message to its worker to merge `base` now, naming the files, while the conflict is still
     /// small (2026-10-25: 21 merge conflicts cost 40.7 task-hours, most found only at merge). Branches that overlap no
     /// file get nothing; the lead's records count in neither. What the lead's result says about it ("" for nothing).
-    private func tellToCatchUp(merged: String, from old: String, to new: String, base: String) -> String {
+    func tellToCatchUp(merged: String, from old: String, to new: String, base: String) -> String {
         let records = Set(workflow.recordsDir.map(LeadRecords.paths) ?? [])
         let lines = { (output: String) in output.split(whereSeparator: \.isNewline).map(String.init) }
         let moved = Git.run(["diff", "--name-only", old, new], in: root)
@@ -3016,7 +3052,7 @@ public final class LeadToolset: MCPToolset {
 
     /// A failed merge's test run, told by what failed: the failing tests and their lines first (the output's end
     /// is usually the build's warnings), with all of the output saved where the lead can read it.
-    private func testFailure(_ output: String, slug: String, base: String, commit: String, onto current: String) -> String {
+    func testFailure(_ output: String, slug: String, base: String, commit: String, onto current: String, worktree: URL? = nil) -> String {
         let setup = output.hasPrefix("init_command failed:\n")
         let output = setup ? String(output.dropFirst("init_command failed:\n".count)) : output
         let saved = saveMergeLog(output, slug: slug)
@@ -3024,7 +3060,7 @@ public final class LeadToolset: MCPToolset {
         let found = failures.summary()
             ?? "Nothing in the output names a failing test or an error; it ends:\n" + String(output.suffix(1500))
         // The errors name files in the merge's own worktree (see rebaseAndTest).
-        let place = vault.scratch(root: root, "merge-\(slug)")
+        let place = worktree ?? vault.scratch(root: root, "merge-\(slug)")
         let inside = [place.path, place.resolvingSymlinksInPath().path].map { $0 + "/" }
         let files = failures.errorFiles.map { file in inside.first(where: file.hasPrefix).map { String(file.dropFirst($0.count)) } ?? file }
         let touched = baseCommits(touching: files, slug: slug, base: base, commit: commit, onto: current).map { $0 + "\n" } ?? ""
@@ -3062,14 +3098,14 @@ public final class LeadToolset: MCPToolset {
     /// Writes a merge's flake evidence to `MergeRerun.evidenceFile` (0600, in a 0700 folder in the repository's
     /// ignored `.vibeswitcher/`); its path relative to the root, as the ledger keeps it, or nil when it couldn't be
     /// written (the merge's log in the vault keeps them).
-    private func saveFlakeEvidence(_ evidence: [String: [String]], tests: [String], slug: String, commit: String, at date: Date) -> String? {
+    func saveFlakeEvidence(_ evidence: [String: [String]], tests: [String], slug: String, commit: String, at date: Date) -> String? {
         saveEvidence(MergeRerun.evidenceLog(task: slug, commit: commit, evidence: evidence, tests: tests),
                      log: MergeRerun.evidencePath(task: slug, commit: commit, at: date))
     }
 
     /// Writes `text` to `log` (relative to the root, in `.vibeswitcher/flakes/`), 0600 in a 0700 folder; `log`, or nil
     /// when it couldn't be written.
-    private func saveEvidence(_ text: String, log: String) -> String? {
+    func saveEvidence(_ text: String, log: String) -> String? {
         let file = URL(fileURLWithPath: MergeRerun.evidenceFile(root: root, log: log))
         guard (try? VibePaths.ensurePrivate(file.deletingLastPathComponent(), within: URL(fileURLWithPath: store.folder))) != nil,
               (try? VibePaths.writePrivate(Data(text.utf8), to: file)) != nil else { return nil }
@@ -3077,7 +3113,7 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// Saves a merge's test output where the lead can read it; its path, or nil when it couldn't be saved.
-    private func saveMergeLog(_ output: String, slug: String, name: String = "merge-test.log") -> String? {
+    func saveMergeLog(_ output: String, slug: String, name: String = "merge-test.log") -> String? {
         let log = vault.scratch(root: root, "\(slug)/\(name)")
         return (try? vault.ensurePrivate(log.deletingLastPathComponent())).flatMap {
             (try? Data(output.utf8).write(to: log, options: .atomic)).map { log.path }
@@ -3260,7 +3296,7 @@ public final class LeadToolset: MCPToolset {
     /// nothing starts, audits or merges while the witness's hold under the user's limit lasts (see `PowerWatch`). The
     /// lead used to keep it by hand from the witness's messages (decisions 2026-10-19 15:50, 2026-10-20 22:12): two
     /// verifiers and a merge's test run died in the Mac's sleeps on 2026-10-19 at 2 %. `not`: what didn't happen.
-    private func checkBattery(not: String) throws {
+    func checkBattery(not: String) throws {
         guard let power = power(), power.onBattery, let limit = power.heldUnder else { return }
         throw Problem(text: "\(not): the Mac is on battery at \(power.percent) %, under the user's \(limit) % limit (Settings › Project lead), "
             + "so nothing starts, audits or merges until AC power returns or the limit is lowered; work in flight finishes. "
@@ -3271,7 +3307,7 @@ public final class LeadToolset: MCPToolset {
     /// test_timeout_min; nil when it didn't wait, else how long and from what load. Throws, with the numbers, when the
     /// load didn't drop in time (nothing was tested).
     /// `doing` and `done`: what waits ("merge", "merged"; a revert's say so).
-    private func waitForLoad(_ workflow: LeadWorkflow, slug: String, doing: String = "merge", done: String = "merged") throws -> (after: TimeInterval, from: Double)? {
+    func waitForLoad(_ workflow: LeadWorkflow, slug: String, doing: String = "merge", done: String = "merged") throws -> (after: TimeInterval, from: Double)? {
         let start = Date()
         let deadline = start.addingTimeInterval(workflow.testTimeout)
         let limits = macLimits()
@@ -3623,6 +3659,11 @@ public final class LeadToolset: MCPToolset {
                 guard !value.isEmpty else { break }
                 guard let minutes = LeadWorkflow.minutes(value) else { throw Problem(text: "test_timeout_min must be a number of minutes, more than 0.") }
                 value = Self.gb(minutes)
+            case "merge_batching" where !value.isEmpty:
+                guard let batching = LeadWorkflow.MergeBatching(text: value) else {
+                    throw Problem(text: "merge_batching is one of \(LeadWorkflow.MergeBatching.allCases.map(\.rawValue).joined(separator: ", ")).")
+                }
+                value = batching.rawValue
             case "merge_policy" where !value.isEmpty:
                 guard let policy = LeadWorkflow.MergePolicy(text: value) else {
                     throw Problem(text: "merge_policy is one of \(LeadWorkflow.MergePolicy.allCases.map(\.rawValue).joined(separator: ", ")).")
@@ -3670,6 +3711,7 @@ public final class LeadToolset: MCPToolset {
                                           "merge_policy": after.mergePolicy?.rawValue ?? "", "sensitive_paths": after.sensitivePaths?.joined(separator: ", ") ?? "",
                                           "strict_paths": after.strictPaths?.joined(separator: ", ") ?? "",
                                           "records_dir": after.recordsDir ?? "", "auto_advance": String(after.autoAdvance),
+                                          "merge_batching": after.mergeBatching.rawValue,
                                           "risk_lines": String(after.riskLines), "risk_model": String(after.riskModel),
                                           "watch_app_logs": String(after.watchAppLogs)]
             // A limit cleared reads back as its default.
@@ -3677,6 +3719,7 @@ public final class LeadToolset: MCPToolset {
                             "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes), "task_budget_min": String(LeadWorkflow().taskBudgetMinutes),
                             "audit_finders": String(LeadWorkflow().auditFinders), "audit_nit_cap": String(LeadWorkflow().auditNitCap),
                             "auto_advance": String(LeadWorkflow().autoAdvance), "watch_app_logs": String(LeadWorkflow().watchAppLogs),
+                            "merge_batching": LeadWorkflow().mergeBatching.rawValue,
                             "risk_lines": String(LeadWorkflow().riskLines), "risk_model": String(LeadWorkflow().riskModel)]
             for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
                 throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
@@ -3701,7 +3744,7 @@ public final class LeadToolset: MCPToolset {
 
     /// workflow.md's guard rails (`LeadVault.guardedKeys`: its commands run as the lead, its policy and limits hold
     /// the team) count only as the lead last set them with configure, since any session of the team can write the file.
-    private func checkSettings(_ workflow: LeadWorkflow, not: String, keys: Set<String>? = nil) throws {
+    func checkSettings(_ workflow: LeadWorkflow, not: String, keys: Set<String>? = nil) throws {
         var changed: [(key: String, value: String)]
         do { changed = try vault.changedSettings(workflow, root: root) } catch {
             throw Problem(text: "\(not): the session host couldn't say what you last set workflow.md's guard rails to (\(error)).")
@@ -3718,7 +3761,7 @@ public final class LeadToolset: MCPToolset {
     /// gone from the board): the task stays as the lead set it, nothing is written to it, and nothing lands. 2026-10-30,
     /// build-app-sh-install: set kept while auto_advance's merge ran its tests; the run failed, merge set it failed,
     /// and the loop sent its worker the output and put it back to work, kept reason and all.
-    private func changedMeanwhile(_ slug: String, since started: LeadTask, tests: String) -> Problem? {
+    func changedMeanwhile(_ slug: String, since started: LeadTask, tests: String) -> Problem? {
         guard let now = store.load().task(slug) else {
             return Problem(text: "Not merged: \(slug) was removed from the board while its tests ran (they \(tests)). Nothing was changed.")
         }
@@ -3731,7 +3774,7 @@ public final class LeadToolset: MCPToolset {
                        + (now.status == .kept ? " If it's wanted after all, update_task(\(slug), status: planned) first, and say why with record_decision." : ""))
     }
 
-    private func setStatus(_ slug: String, _ status: LeadTask.Status, setback: LeadSetback? = nil) throws {
+    func setStatus(_ slug: String, _ status: LeadTask.Status, setback: LeadSetback? = nil) throws {
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].status = status
@@ -4740,6 +4783,7 @@ public final class LeadToolset: MCPToolset {
         }
         lines.append("- auto_advance: " + (workflow.autoAdvance ? "true (finished work moves on by itself: merged, audited, sent back, cleaned up; planned tasks start once their after tasks are done)"
             : "false (you start, audit, merge and clean up each task yourself)"))
+        lines.append("- merge_batching: \(workflow.mergeBatching.rawValue) (\(workflow.mergeBatching.meaning))")
         lines.append("- risk_lines: " + (workflow.riskLines > 0 ? "\(workflow.riskLines) (a review none task changing more lines is audited instead of merged)" : "0 (no size trigger)"))
         lines.append("- risk_model: " + (workflow.riskModel ? "true (headless Claude may raise a review none task to audit, from the diff's stat, the contract and REVIEW.md)" : "false (the risk check's deterministic triggers only)"))
         if workflow.watchAppLogs {

@@ -10,7 +10,7 @@ import Foundation
 extension LeadVault {
     public static let guardedKeys = ["test_command", "regression_command", "init_command", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
                                      "max_workers", "heavy_slots", "audit_finders", "audit_nit_cap", "auto_advance",
-                                     "risk_lines", "risk_model"]
+                                     "risk_lines", "risk_model", "merge_batching"]
 
     /// A guard rail as the team reads it (a limit left out is its default, "ask-all" is ask_all); a key this build
     /// doesn't read itself, as written. Empty when it isn't set.
@@ -27,6 +27,7 @@ extension LeadVault {
         case "audit_finders": return String(workflow.auditFinders)
         case "audit_nit_cap": return String(workflow.auditNitCap)
         case "auto_advance": return String(workflow.autoAdvance)
+        case "merge_batching": return workflow.mergeBatching.rawValue
         case "risk_lines": return String(workflow.riskLines)
         case "risk_model": return String(workflow.riskModel)
         // Left out: docs/lead; empty (or not a folder in the repository): local, in .vibeswitcher.
