@@ -637,6 +637,34 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(watch.pending[0].contains("growing: worth a look"))
     }
 
+    /// app-memory-steps-up: on macOS 27.2 a footprint relief gives back nothing (0 bytes in 0 ms), and the footprint stays at
+    /// its last peak with freed pages kept for reuse. The trend says so beside the growth, so it doesn't read as a leak;
+    /// a relief that gave pages back adds nothing.
+    @Test func aReliefThatFreedNothingIsToldAsPagesKeptForReuse() throws {
+        let folders = try folders()
+        var watch = AppHealth.Watch()
+        watch.lookedOn = AppHealth.Watch.day(day(0))
+        let memory = AppHealth.Memory(footprint: 2000, peak: 2100, settled: .init(footprint: 300, at: day(0, hour: 1)), launched: day(0, hour: 0),
+                                      relief: .init(before: 317, after: 317))
+        watch.look(now: day(1, hour: 0), folders: folders, memory: memory)
+        let trend = try #require(watch.pending.first)
+        #expect(trend.contains("The last footprint relief freed nothing (317 → 317 MB): macOS returned no pages (freed memory is kept for reuse)."), "\(trend)")
+
+        var freed = AppHealth.Watch()
+        freed.lookedOn = AppHealth.Watch.day(day(0))
+        var gaveBack = memory
+        gaveBack.relief = .init(before: 232, after: 204)
+        freed.look(now: day(1, hour: 0), folders: folders, memory: gaveBack)
+        let other = try #require(freed.pending.first)
+        #expect(!other.contains("relief"), "\(other)")
+    }
+
+    @Test func aReliefsLogLineSaysWhenItFreedNothing() {
+        #expect(AppHealth.reliefLine(before: 317, after: 317, took: 0)
+                == "footprint relief: 317 → 317 MB in 0 ms: macOS returned no pages (freed memory is kept for reuse)")
+        #expect(AppHealth.reliefLine(before: 232, after: 204, took: 21) == "footprint relief: 232 → 204 MB in 21 ms")
+    }
+
     /// 10-30: launched at 18:30 with a 32 MB footprint (nothing loaded yet), settled at 149 MB once its window,
     /// sessions and chats were up, 186 MB at the digest past midnight: +28 MB an hour counted from launch, about 7
     /// from where it settled. A quiet day with that sends nothing.

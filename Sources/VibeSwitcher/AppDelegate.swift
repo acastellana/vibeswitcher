@@ -176,7 +176,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.walletDesk.refresh(polling: false) }
             .store(in: &cancellables)
-        appHealth = AppHealthWatcher { [weak self] text in self?.leadController.tellAppHealth(text) ?? false }
+        appHealth = AppHealthWatcher(memory: AppHealthWatcher.memoryReader(relief: { [footprintRelief] in footprintRelief.last })) { [weak self] text in
+            self?.leadController.tellAppHealth(text) ?? false
+        }
         appHealth?.start()
         if UserDefaults.standard.bool(forKey: "windowWasOpen") {
             // Cleared until the window has been up a while: if opening it crashes the app, the next launch

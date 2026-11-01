@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import VibeCore
 @testable import VibeSwitcher
 
 /// The app gives malloc's free pages back once its footprint has grown `slack` over the last relief's (10-26).
@@ -51,5 +52,16 @@ import Testing
         look(relief)
         #expect(fake.reliefs == 1, "in the background, the next look gives the pages back")
         #expect(fake.readings.isEmpty)
+    }
+
+    /// The last relief's footprint before and after, for the health digest (which tells one that freed nothing).
+    @Test func keepsTheLastReliefsBeforeAndAfter() {
+        let slack = FootprintRelief.slack
+        let fake = Fake([100, 100 + slack, 100 + slack])
+        let relief = FootprintRelief(footprint: fake.read, relieve: { fake.reliefs += 1 }, inUse: { false })
+        look(relief)
+        #expect(relief.last == nil)
+        look(relief)
+        #expect(relief.last == AppHealth.Memory.Relief(before: 100 + slack, after: 100 + slack))
     }
 }
