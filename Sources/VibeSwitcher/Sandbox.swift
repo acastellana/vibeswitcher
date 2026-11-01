@@ -943,7 +943,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
-        ("soak [MINUTES [every SECONDS] [hour CYCLES] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet. With no MINUTES: the log so far"),
+        ("soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. every other cycle a worker shaped like a real one (a task on the lead's board, a transcript of MB MB of tool calls, default 4, its steer inbox, its chat and its terminal fed a build's output) ended by the role sweep, its footprint once removed, and RESULT soak-worker-growth-mb. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet, workers. With no MINUTES: the log so far"),
         ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh)"),
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint and the Wallet Manager's checks"),
         ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
@@ -1973,6 +1973,19 @@ final class SoakRun {
     /// The least footprint read in the simulated hour under way, and each simulated hour's (MB).
     var hourLeast = Double.infinity
     var hours: [Double] = []
+    /// The worker step's (`workers`): each real-shaped worker's footprint and malloc in use once it ended and was
+    /// removed (MB), and the size of each one's transcript (MB, `worker-mb`).
+    var workers: [(footprint: Double, malloc: Double)] = []
+    var workerMB = 4.0
+    /// The worker step's role sweep (made on its first use, with the host it ends sessions on).
+    private var roleSweep: RoleSweep?
+
+    func sweep(_ host: HostClient) -> RoleSweep {
+        if let roleSweep { return roleSweep }
+        let made = RoleSweep(roster: { [] }, end: { [weak host] session in DispatchQueue.main.async { host?.kill(session.id) } }, tell: { _ in })
+        roleSweep = made
+        return made
+    }
 
     init(minutes: Double, every: Double, without: Set<String>, hour: Int = 30, log: URL) {
         self.minutes = minutes
@@ -2011,6 +2024,7 @@ extension Driver {
         let run = SoakRun(minutes: minutes, every: max(1, value("every").flatMap(Double.init) ?? 20),
                           without: Set((value("without") ?? "").split(separator: ",").map(String.init)),
                           hour: value("hour").flatMap(Int.init) ?? 30, log: log)
+        if let mb = value("worker-mb").flatMap(Double.init), mb >= 0 { run.workerMB = mb }
         soakRun = run
         run.note("soak: \(minutes) minutes, a cycle every \(run.every) s, \(run.hour) cycles a simulated hour"
                  + (run.without.isEmpty ? "" : ", without \(run.without.sorted().joined(separator: ", "))"))
@@ -2124,6 +2138,18 @@ extension Driver {
             // Too few hours for a line (a slow Mac, a short run): said all the same.
             run.note("RESULT soak-simulated-hour-growth-mb n/a (\(run.hours.count) simulated hours: a line needs 3)")
         }
+        // Each real-shaped worker's footprint once it ended and was removed, after the first two, as a line: MB a worker.
+        let workers = Array(run.workers.map(\.footprint).enumerated().dropFirst(2))
+        if workers.count >= 3 {
+            let meanX = workers.map { Double($0.offset) }.reduce(0, +) / Double(workers.count)
+            let meanY = workers.map(\.element).reduce(0, +) / Double(workers.count)
+            let spread = workers.reduce(0.0) { $0 + pow(Double($1.offset) - meanX, 2) }
+            let slope = workers.reduce(0.0) { $0 + (Double($1.offset) - meanX) * ($1.element - meanY) } / spread
+            run.note(String(format: "RESULT soak-worker-growth-mb %.2f (each worker's footprint once ended, workers 3-%d: %.1f → %.1f MB)", slope,
+                            run.workers.count, workers.first?.element ?? 0, workers.last?.element ?? 0))
+        } else if !run.without.contains("workers") {
+            run.note("RESULT soak-worker-growth-mb n/a (\(run.workers.count) workers ended: a line needs 5)")
+        }
         run.note("soak: done after \(run.cycles) cycles")
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             if self?.soakRun === run { self?.soakRun = nil }
@@ -2177,6 +2203,13 @@ extension Driver {
                 steps.append(command("unfold"))
             }
             if !off.contains("reports"), leadUp { steps.append(command("churn", "3")) }
+            // Every other cycle a worker shaped like a real one, from its start to the role sweep ending it.
+            if !off.contains("workers"), leadUp, cycle % 2 == 0 {
+                steps.append(("worker", { [weak self] done in
+                    guard let self else { return done(true, "") }
+                    self.soakWorker(cycle, done)
+                }))
+            }
         }
         if !off.contains("wallet") {
             // The selected chat's agent files a request, and the desk's clock moves the cycle's share of the hour with
@@ -2254,6 +2287,190 @@ extension Driver {
                 done(gone, gone ? "" : "\(ids.count) sessions not removed")
             }
         }
+    }
+}
+
+// MARK: Soak: a real-shaped worker
+
+extension Driver {
+    /// A worker shaped like a real one (app-memory-steps-up), from its start to the role sweep ending it: a task on the
+    /// fake lead's board, a transcript of `worker-mb` MB of tool calls and their output as Claude Code writes them,
+    /// messages in its steer inbox, its chat and then its terminal shown with a build's and a test run's output printed
+    /// in it. Then its task merges and the role sweep (the app's `RoleSweep`, on a roster of this worker: the sandbox's
+    /// fake lead can't bind roles in the host's vault) ends it, and the lead controller removes it as it removes a
+    /// finished task's ended workers (`forgetFinished`). Its footprint once it's gone goes in the log.
+    func soakWorker(_ cycle: Int, _ done: @escaping (Bool, String) -> Void) {
+        guard let run = soakRun else { return done(true, "") }
+        let lead = "sandbox-lead", slug = "soak-worker-\(cycle)", title = "Soak worker \(cycle)", label = "Worker: Soak worker \(cycle)"
+        let root = ((home as NSString).appendingPathComponent("projects/\(lead)") as NSString).standardizingPath
+        let contract = LeadContract(goal: "The board's rows read the board once a refresh, and the Team tab keeps its rows.",
+                                    acceptance: ["TeamRows reads the board once", "Focused tests pass", "The lint filter passes"],
+                                    boundaries: ["Sources/VibeSwitcher/MainWindow/Lead", "Tests"], context: "Cycle \(cycle) of the soak.")
+        do {
+            try BoardStore(root: root).update { board in
+                board.tasks.append(LeadTask(slug: slug, title: title, contract: contract, status: .running))
+            }
+        } catch {
+            return done(false, "couldn't write the lead's board: \(error)")
+        }
+        let transcript = Self.workerTranscript(cycle: cycle, bytes: Int(run.workerMB * 1_048_576))
+        startFake(label: label, slug: "\(lead)/.vibeswitcher/worktrees/\(slug)", transcript: transcript, title: "worker-\(slug)") { [weak self] problem in
+            guard let self else { return done(true, "") }
+            if let problem { return done(false, problem) }
+            guard let fake = self.fakeList.first(where: { $0.label == label }) else { return done(false, "the worker isn't listed") }
+            try? BoardStore(root: root).update { board in
+                guard let index = board.tasks.firstIndex(where: { $0.slug == slug }) else { return }
+                board.tasks[index].worker = fake.id.uuidString
+                board.tasks[index].worktree = fake.cwd
+            }
+            // Its steer inbox: the lead's messages, as a real worker gets them between its turns.
+            for text in Self.workerMessages(cycle) { self.leads.tell(text, from: .lead("lead"), session: fake.id) }
+            // Its chat (its whole transcript read), then its terminal with real output printed in it.
+            self.chat(label) { _, _ in
+                self.model.showsChat = false
+                self.tellFake(fake, #"{"op": "print", "file": "\#(self.soakOutputFile().path)"}"#)
+                self.waitFor({ [weak self] in (self?.window?.pane.terminalView(fake.id)?.getTerminal().getTopVisibleRow() ?? 0) >= 1_000 }) { printed in
+                    self.model.showsChat = true
+                    if !printed { run.note("cycle \(cycle): the worker's terminal didn't show its output") }
+                    self.soakEndWorker(fake, slug: slug, root: root, run: run, done)
+                }
+            }
+        }
+    }
+
+    /// The worker's task merges, the role sweep ends its session, and the lead controller removes it (the soak does
+    /// what's left after 30 s, and says so); then its footprint and malloc's are noted.
+    private func soakEndWorker(_ fake: Fake, slug: String, root: String, run: SoakRun, _ done: @escaping (Bool, String) -> Void) {
+        let now = Date().timeIntervalSince1970
+        try? BoardStore(root: root).update { board in
+            guard let index = board.tasks.firstIndex(where: { $0.slug == slug }) else { return }
+            board.tasks[index].status = .done
+            board.tasks[index].since = now
+            board.tasks[index].merged = LeadMergeRecord(commit: String(format: "%08x", slug.hashValue & 0xffff_ffff), tested: true, audited: false, at: now)
+        }
+        let entries = [LeadVault.RosterEntry(root: root, session: fake.id.uuidString, role: .worker, task: slug, holds: true,
+                                             boundAt: now - 600, toolsAt: now - 590)]
+        let hosted = host.sessions
+        let sweep = run.sweep(host)
+        sweep.queue.async {
+            sweep.roster = { entries }
+            sweep.look(hosted: hosted, idleSince: { _ in nil }, agent: { _ in (nil, nil) })
+        }
+        waitFor({ [weak self] in !(self?.host.sessions.contains { $0.id == fake.id } ?? false) }) { [weak self] removed in
+            guard let self else { return done(true, "") }
+            let measure = {
+                var stats = malloc_statistics_t()
+                malloc_zone_statistics(nil, &stats)
+                let footprint = AppHealthWatcher.ownFootprint()?.now ?? 0, malloc = Double(stats.size_in_use) / 1_048_576
+                run.workers.append((footprint, malloc))
+                run.note(String(format: "worker %3d ended (%@): footprint %6.1f MB  malloc in use %6.1f MB  chats %@  terminal views %@",
+                                run.workers.count, slug, footprint, malloc, IdleBench.Live.chats.map(String.init) ?? "n/a",
+                                IdleBench.Live.views.map(String.init) ?? "n/a"))
+                done(true, "")
+            }
+            if removed { return measure() }
+            run.note("\(slug): not removed by the role sweep and the lead controller in 30 s: removed by the soak")
+            self.host.kill(fake.id)
+            self.waitFor({ [weak self] in self?.host.sessions.first { $0.id == fake.id }?.isLive != true }) { [weak self] _ in
+                self?.host.remove(fake.id)
+                self?.waitFor({ [weak self] in !(self?.host.sessions.contains { $0.id == fake.id } ?? false) }) { _ in measure() }
+            }
+        }
+    }
+
+    /// Appends a FakeClaude op to the fake's control file.
+    private func tellFake(_ fake: Fake, _ json: String) {
+        guard let file = fake.control, let handle = FileHandle(forWritingAtPath: file) else { return }
+        handle.seekToEndOfFile()
+        handle.write(Data((json + "\n").utf8))
+        try? handle.close()
+    }
+
+    /// A build's and a test run's output as a terminal shows them (colored, about 1.2 MB, 12,000 lines), written once.
+    private func soakOutputFile() -> URL {
+        let file = state.appendingPathComponent("soak-worker-output.txt")
+        if FileManager.default.fileExists(atPath: file.path) { return file }
+        var text = ""
+        for index in 0..<4_000 {
+            text += "\u{1b}[1m[\(index)/4000]\u{1b}[0m Compiling VibeSwitcher MainWindow/Lead/TeamRows\(index % 97).swift\r\n"
+            text += "Test Case '-[VibeSwitcherTests.TeamRowsTests testRow\(index)]' \u{1b}[32mpassed\u{1b}[0m (0.\(String(format: "%03d", index % 1000)) seconds).\r\n"
+            text += "    \u{1b}[2m/Users/sandbox/projects/sandbox-lead/Sources/VibeSwitcher/MainWindow/Lead/TeamRows.swift:\(index % 400): note: rows read once\u{1b}[0m\r\n"
+        }
+        try? VibePaths.writePrivate(Data(text.utf8), to: file)
+        return file
+    }
+
+    /// The lead's messages to a worker: its brief's follow-ups, a review's points, a merge's word.
+    static func workerMessages(_ cycle: Int) -> [String] {
+        let points = (1...12).map { "\($0). TeamRows.swift:\(40 + $0 * 7): the row reads the board again on each pass; read it once and keep the rows by slug." }
+        return [
+            "Cycle \(cycle): the verifier found two things to fix before the merge:\n" + points.joined(separator: "\n"),
+            "Rebase onto main first: main moved (3 commits, the board's reads). Then run the focused tests and the lint filter again.",
+            "Merged as abc\(cycle)def. Thanks: report done when the tests pass, and leave the worktree as it is.",
+        ]
+    }
+
+    /// A worker's transcript as Claude Code writes it, about `bytes` long: its brief, then rounds of tool calls (Bash,
+    /// Read, Edit, Grep) with their results (a test run's output, a file's lines, a diff), each result in the message
+    /// and again in its `toolUseResult`, as Claude Code keeps both.
+    static func workerTranscript(cycle: Int, bytes: Int) -> String {
+        let session = UUID().uuidString
+        let start = Date().addingTimeInterval(-3_600)
+        let stamps = ISO8601DateFormatter()
+        var lines: [String] = []
+        var size = 0
+        var parent: String?
+        func add(_ object: [String: Any]) {
+            var object = object
+            let id = UUID().uuidString
+            object["uuid"] = id
+            object["parentUuid"] = parent ?? NSNull()
+            object["sessionId"] = session
+            object["isSidechain"] = false
+            object["cwd"] = "/Users/sandbox/projects/sandbox-lead/.vibeswitcher/worktrees/soak-worker-\(cycle)"
+            object["timestamp"] = stamps.string(from: start.addingTimeInterval(Double(lines.count)))
+            object["version"] = "2.1.312"
+            parent = id
+            guard let data = try? JSONSerialization.data(withJSONObject: object), let line = String(data: data, encoding: .utf8) else { return }
+            lines.append(line)
+            size += line.utf8.count + 1
+        }
+        let brief = "You are a worker for the project lead. Task: the board's rows read the board once a refresh.\n\n"
+            + String(repeating: "Boundaries: Sources/VibeSwitcher/MainWindow/Lead, tests. Run the focused tests while editing.\n", count: 40)
+        add(["type": "user", "message": ["role": "user", "content": brief]])
+        var round = 0
+        while size < bytes {
+            round += 1
+            let tool = ["Bash", "Read", "Edit", "Grep"][round % 4]
+            let call = "toolu_\(cycle)_\(round)"
+            let input: [String: Any]
+            let output: String
+            switch tool {
+            case "Bash":
+                input = ["command": "bash scripts/test.sh --filter TeamRowsTests", "description": "Run the focused tests"]
+                output = (0..<160).map { "Test Case '-[VibeSwitcherTests.TeamRowsTests testRow\($0)]' passed (0.0\($0 % 10)2 seconds)." }.joined(separator: "\n")
+            case "Read":
+                input = ["file_path": "/Users/sandbox/projects/sandbox-lead/Sources/VibeSwitcher/MainWindow/Lead/TeamRows\(round % 9).swift"]
+                output = (1...220).map { "\($0)\u{2192}        let rows = TeamRows.rows(board, seen: seen) // line \($0) of round \(round)" }.joined(separator: "\n")
+            case "Edit":
+                input = ["file_path": "/Users/sandbox/projects/sandbox-lead/Sources/VibeSwitcher/MainWindow/Lead/TeamRows.swift",
+                         "old_string": String(repeating: "let rows = TeamRows.rows(board, seen: seen)\n", count: 12),
+                         "new_string": String(repeating: "let rows = cached ?? TeamRows.rows(board, seen: seen)\n", count: 12)]
+                output = "The file has been updated. Here's the result of running `cat -n` on a snippet:\n"
+                    + (1...60).map { "\($0)\u{2192}    let rows = cached ?? TeamRows.rows(board, seen: seen)" }.joined(separator: "\n")
+            default:
+                input = ["pattern": "TeamRows.rows", "output_mode": "content", "-n": true]
+                output = (1...120).map { "Sources/VibeSwitcher/MainWindow/Lead/File\($0 % 30).swift:\($0 * 3):        let rows = TeamRows.rows(board, seen: seen)" }.joined(separator: "\n")
+            }
+            add(["type": "assistant", "message": ["id": "msg_\(cycle)_\(round)", "type": "message", "role": "assistant", "model": "claude-opus-5-5",
+                                                  "content": [["type": "text", "text": "Round \(round): checking with \(tool) that the rows are read once."],
+                                                              ["type": "tool_use", "id": call, "name": tool, "input": input]],
+                                                  "usage": ["input_tokens": 12, "output_tokens": 240, "cache_read_input_tokens": 80_000 + round]]])
+            add(["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": call, "content": output]]],
+                 "toolUseResult": ["stdout": output, "stderr": "", "interrupted": false, "isImage": false]])
+        }
+        add(["type": "assistant", "message": ["role": "assistant", "content": [["type": "text", "text": "Done: the rows read the board once, and the tests pass."]]]])
+        return lines.joined(separator: "\n") + "\n"
     }
 }
 

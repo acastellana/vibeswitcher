@@ -25,7 +25,8 @@ enum FakeClaude {
 # does it draw its caret and level cursor), "processing" (seconds a recording takes to process once it ends: a
 # Space then is typed, and it drops what it heard if the box changed meanwhile, as 2.1.312's input_diverged), "stuck" (a
 # recording goes on after the Spaces stop, until Esc), "loud" (its level cursor coloured though no words show)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
-# "processed" (the recording being processed is done now, whatever "processing" said) |
+# "processed" (the recording being processed is done now, whatever "processing" said) | "print" (the bytes of "file"
+# written on its terminal, as a command's output) |
 # "exit" (it quits, as /exit)).
 # Its /voice keeps Claude Code 2.1.312's timings: a repeat chain breaks 120 ms after the last Space (the key let go),
 # 5 repeats start recording, and a second push of the key within 300 ms of a transcript going in sends it. A held
@@ -961,6 +962,13 @@ def control():
             if "focusEvents" in command:
                 state["focusEvents"] = command["focusEvents"]
                 out(ESC + ("[?1004h" if command["focusEvents"] else "[?1004l"))
+        elif op == "print":
+            # A command's output printed on its terminal (the soak's worker: a build's and a test run's).
+            with open(command["file"], "rb") as f:
+                data = f.read()
+            while data:
+                data = data[os.write(1, data):]
+            draw()
         elif op == "freeze":
             state["frozen"] = True
         elif op == "thaw":
