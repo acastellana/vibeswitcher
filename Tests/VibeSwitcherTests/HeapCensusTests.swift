@@ -32,11 +32,13 @@ struct HeapCensusTests {
         for _ in 0..<5 { results.append(HeapCensus.take()) }
         stop.set()
         #expect(ended.wait(timeout: .now() + hangGuard) == .success)
-        // Every census came back (none aborted the process) with the heap's blocks; a zone being changed under one may
-        // be skipped (2 of 5 missed the markers' zone in a run on 11-01), so it's a close count: the markers are all
-        // found in most.
+        // Every census came back (none aborted the process) with the heap's blocks; a zone being changed under one is
+        // counted again, but it's still a close count: the markers are all found in most.
         for result in results { #expect(result.total.blocks > 1_000) }
-        let found = results.map { result in result.classes.first { $0.key.contains("Marker") }?.value.blocks ?? 0 }
+        // By its exact name: other live classes have "Marker" in theirs (AppKit's _NSStateMarker, 3 or 4 blocks, and
+        // more in a full run), and the first of a dictionary's that matches is any of them.
+        let name = String(cString: class_getName(Marker.self))
+        let found = results.map { $0.classes[name]?.blocks ?? 0 }
         #expect(found.filter { $0 >= kept.count }.count >= 1, "markers found by each census: \(found), of \(kept.count)")
         withExtendedLifetime(kept) {}
     }
