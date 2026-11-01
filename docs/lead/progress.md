@@ -2659,3 +2659,5 @@
 - 2026-11-01 11:05 Automatically (auto_advance): Started the audit of boost-release-4-7 at 185090f8 (Its review is audit).
 - 2026-11-01 11:07 Audit of boost-release-4-7: incomplete, clean, round 1: 1 Important open, 1 Nit open
 - 2026-11-01 11:07 Automatically (auto_advance): Sent boost-release-4-7's worker the open Important findings boost-release-4-7:F1 from its audit at 185090f8.
+- 2026-11-01 11:19 The worker on boost-release-4-7 answered findings: boost-release-4-7:F1 fixed at 85756efa: c9617a8: WitnessOffMainTests' expected step list now includes releasableForAdvance (after leftToAdvance), the computation this branch adds to WitnessWork. The test still checks that it runs off the main thread. bash scripts/test.sh --filter WitnessOffMainTests: 2 tests passed; the full suite passes it too.; boost-release-4-7:F2 fixed at 85756efa: 85756ef: every delivery to a worker (message, auto_advance's sends, tellWorker) now goes through deliver(), whi…
+- 2026-11-01 11:21 Automatically (auto_advance): Started the audit of wallet-outcomes-always at 5b0fde62 (Its review is audit).
