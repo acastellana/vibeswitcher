@@ -42,7 +42,7 @@ struct WalletDeskRobustnessTests {
 
     /// A desk whose passage path is the list's settled one, as the app wires it, with a request outstanding in the
     /// store (so a courier made would start `passage listen` at once) and its filed copy showing a card.
-    func typingSetup() throws -> (fake: WalletFakePassage, desk: WalletDesk, list: WalletPeerList, pauses: Pauses, loads: Loads) {
+    func typingSetup(log: Loads = Loads()) throws -> (fake: WalletFakePassage, desk: WalletDesk, list: WalletPeerList, pauses: Pauses, loads: Loads) {
         let fake = try WalletFakePassage(temp, app: true)
         let pauses = Pauses()
         let loads = Loads()
@@ -57,7 +57,7 @@ struct WalletDeskRobustnessTests {
         try store.save(WalletRequestStore.Record(request: request, state: .sent))
         let desk = WalletDesk(folder: asked, store: store, inbox: fake.inbox,
                               config: { [list] in WalletDesk.Config(passage: list.settledPath, peer: WalletFakePassage.peer) },
-                              now: { WalletDeskTests.created.addingTimeInterval(30) }, log: { _ in })
+                              now: { WalletDeskTests.created.addingTimeInterval(30) }, log: { [log] in log.note($0) })
         desk.sessionNames = { WalletDeskTests.names() }
         desk.verifyStamps = WalletTestStamps.verify
         desk.sealMessage = WalletTestStamps.sealMessage
@@ -70,7 +70,8 @@ struct WalletDeskRobustnessTests {
     /// filed request would): nothing runs, not even a prefix that is itself a program (`…/Pass`, a stand-in that
     /// notes it ran). Only once typing paused is the path used: the courier is made then, and `cli listen` runs.
     @Test func aPassagePathBeingTypedIsNeverRun() async throws {
-        let (fake, desk, list, pauses, loads) = try typingSetup()
+        let log = Loads()
+        let (fake, desk, list, pauses, loads) = try typingSetup(log: log)
         defer { desk.close() }
         let target = fake.app.path
         let prefix = fake.folder.appendingPathComponent("Pass").path
@@ -83,15 +84,19 @@ struct WalletDeskRobustnessTests {
             list.typed(typed)
             await refreshed(desk)
         }
+        // No `passage listen` (nor anything else) was started: the courier logs each start as it spawns it.
+        #expect(!log.all.contains { $0.hasPrefix("passage listen started") }, "\(log.all.filter { $0.hasPrefix("passage listen") })")
         #expect(fake.calls.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: fake.file("prefix-ran").path))
-        #expect(loads.all.isEmpty && list.settledPath == "")
+        #expect(loads.all.isEmpty)
+        #expect(list.settledPath == "")
         // Typing paused: only the last keystroke's path is taken, and the peers are read through it, once.
         pauses.elapse()
         #expect(list.settledPath == target)
         #expect(await until { loads.all == [target] })
         await refreshed(desk)
         #expect(await until { fake.calls.contains("cli listen") })
+        #expect(log.all.filter { $0.hasPrefix("passage listen started") }.count == 1)
         #expect(fake.calls.allSatisfy { $0.hasPrefix("cli ") })
         #expect(!FileManager.default.fileExists(atPath: fake.file("prefix-ran").path))
     }
