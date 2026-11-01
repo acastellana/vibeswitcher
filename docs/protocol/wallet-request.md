@@ -238,7 +238,9 @@ parses (answering one with the [format check](#the-format-check) is acting on it
 already seen, whether the same request sent again or a different one, is ignored **silently**: no result of any kind, under any sequence. (Results
 are matched to requests by `id` alone, so a `rejected` for the repeat would end the original's tracking on
 VibeSwitcher while the Wallet Manager went on with it.) The Wallet Manager keeps the ids it has seen for at least 7 days past their
-`expiresAt`.
+`expiresAt`; an id answered with the [format check](#the-format-check), whose `expiresAt` it can't trust, for at
+least **14 days** after it first saw it (the longest a request can live, 7 days, and 7 more), so that a resend of
+the same request that arrives intact is still ignored.
 
 ## What each side checks
 
@@ -401,7 +403,8 @@ are updated together.
   is now answered with `rejected` under that `<id>`, its only check `format` with a detail of at most 300 characters
   that never echoes the file ([The format check](#the-format-check)); before, it got no result and its request hung at
   sent until it aged out. The file's name and the authenticated Passage peer are enough to answer it. The at-most-once
-  rule now counts the name's `<id>`, checked before the file is parsed. Such a result is an ordinary v1 result (a
+  rule now counts the name's `<id>`, checked before the file is parsed, and keeps such an id for at least 14 days after
+it was first seen. Such a result is an ordinary v1 result (a
   vector: `result-valid-rejected-format.json`); a v1 reader takes it as it is.
 - 2026-10-31: renamed, still version 1. The formats were vault-request v1 and vault-result v1, their `type`s
   `"vibeswitcher.vault-request"` and `"vibeswitcher.vault-result"`, their files `vault-request-<id>.json` and
