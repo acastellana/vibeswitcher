@@ -241,10 +241,128 @@ public enum LeadLaunch {
         return prepared
     }
 
+    // MARK: Codex workers
+
+    /// The guard rails a Claude worker's rules hold that Codex can't be made to hold, each with what checks it instead.
+    /// Codex has no per-session deny rules: its command rules (`.rules` files) load only from its own home, the
+    /// project's `.codex` folder or managed requirements, none of which a session's command line names, and its
+    /// sandbox draws no line inside the folder it writes. Listed in the Codex worker's brief, start_worker's reply and
+    /// the guide (docs/guide/project-lead.md, "Codex workers").
+    public static let codexUnenforced: [(rule: String, instead: String)] = [
+        ("git commands refused to a Claude worker (amend, reset --hard, checkout or branch -D of another agent/ branch)",
+         "its sandbox holds the ones that write outside its own branch (main, tags, config, the remote: no network); the Claude audit's integrity check reads its branch's history"),
+        ("no edits to the records folder (docs/lead)",
+         "merge takes the base's copy of the lead's records whatever the branch did to them (`Worktrees.takeBaseRecords`), and the Claude audit's integrity check reads the rest of the diff"),
+        ("no reads of VibeSwitcher's private files (~/.vibeswitcher/lead, ~/.vibeswitcher/steer)",
+         "its brief, and the session host's checks: it tells callers apart by their process, never by what they've read"),
+        ("pkill, killall and debuggers refused by rule",
+         "its brief, and its sandbox: a sandboxed command signals only its own processes"),
+    ]
+
+    /// Codex's own flags a project's Codex command may carry that would loosen the worker's sandbox or clash with the
+    /// ones `prepareCodex` gives (clap refuses an option given twice), and whether each takes a value.
+    static let codexFlags: [(flag: String, value: Bool)] = [
+        ("--dangerously-bypass-approvals-and-sandbox", false), ("--yolo", false), ("--full-auto", false), ("--approve-for-me", false),
+        ("--sandbox", true), ("-s", true), ("--ask-for-approval", true), ("-a", true), ("--cd", true), ("-C", true),
+        ("--add-dir", true), ("--profile", true), ("-p", true), ("--search", false), ("--worktree", false), ("--remote", true),
+    ]
+
+    /// The writable roots a Codex worker's sandbox adds to its worktree: the git folders its commits write (its
+    /// worktree's own git folder, the object store, and the agent/ branches' refs and logs, where git takes its
+    /// lock files) and its TMPDIR. Never the repository's other refs (main, tags), its config or another checkout.
+    /// The worktrees' shared module cache (`<root>/.vibeswitcher/module-cache`, scripts/lib/module-cache.sh), when the
+    /// repository keeps one: its builds write there.
+    public static func codexWritableRoots(cwd: String, slug: String?, temporary: String?, root: String? = nil) -> [String] {
+        let asked = Git.run(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"], in: cwd)
+        let found = asked.ok ? asked.output.split(whereSeparator: \.isNewline).map(String.init) : []
+        let common = found.first ?? (cwd as NSString).appendingPathComponent(".git")
+        let own = found.count > 1 ? found[1] : slug.map { (common as NSString).appendingPathComponent("worktrees/\($0)") } ?? common
+        var roots = [own, "\(common)/objects", "\(common)/refs/heads/agent", "\(common)/logs/refs/heads/agent"]
+        if let temporary { roots.append(temporary) }
+        if let root {
+            let cache = (root as NSString).appendingPathComponent(".vibeswitcher/module-cache")
+            var folder: ObjCBool = false
+            if FileManager.default.fileExists(atPath: cache, isDirectory: &folder), folder.boolValue { roots.append(cache) }
+        }
+        var seen = Set<String>()
+        return roots.map { URL(fileURLWithPath: $0).standardizedFileURL.path }.filter { seen.insert($0).inserted }
+    }
+
+    /// A TOML string for Codex's `-c key=value` (the value is parsed as TOML): JSON's escapes are TOML's, slashes left.
+    static func toml(_ text: String) -> String {
+        let data = (try? JSONSerialization.data(withJSONObject: text, options: [.fragmentsAllowed, .withoutEscapingSlashes])) ?? Data("\"\"".utf8)
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    static func toml(_ list: [String]) -> String { "[" + list.map { toml($0) }.joined(separator: ", ") + "]" }
+
+    /// How a Codex task's worker is started: the project's Codex command (its sandbox-loosening flags dropped) in the
+    /// worktree, with the worker's brief as Codex's developer instructions, the VibeSwitcher tool server as its one MCP
+    /// server (scoped to the role and the repository as a Claude worker's is), the workspace-write sandbox (writes in
+    /// the worktree, `codexWritableRoots` and nowhere else; no network: no push or fetch), approvals never asked (no one
+    /// answers them; a refused command's failure goes back to Codex), and the worktree trusted for this session only.
+    /// `--no-daemon`: its tool server must run under the session's own process, which is how the session host tells
+    /// which session asks (see `LeadVault.Caller`); a shared app-server daemon would start it outside every session.
+    /// What Codex can't hold is `codexUnenforced`. The files go in `folder` as `prepare`'s do: the prompt, and the
+    /// configuration given on the command line as JSON, for reading back.
+    public static func prepareCodex(root: String, task: String, base: String, prompt: String, start: String, server: String,
+                                    name: String, model: String? = nil, folder: URL? = nil, cwd: String? = nil,
+                                    temporary: URL = SessionTemp.root) throws -> Prepared {
+        let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
+        try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
+        let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
+        let configFile = (folder as NSString).appendingPathComponent("codex-config.json")
+        try LeadVault.writePrivate(Data(prompt.utf8), to: URL(fileURLWithPath: promptFile))
+        let cwd = cwd ?? Worktrees.path(root: root, slug: task)
+        let temporaryFolder = SessionTemp.make(cwd: cwd, name: name, in: temporary)
+        let writable = codexWritableRoots(cwd: cwd, slug: task, temporary: temporaryFolder?.path, root: root)
+        let args = [MCPKeeper.flag, "--role", Role.worker.rawValue, "--root", root, "--task", task]
+        // In order; each is one `-c key=value`.
+        let config: [(key: String, value: String)] = [
+            ("sandbox_workspace_write.writable_roots", toml(writable)),
+            ("sandbox_workspace_write.network_access", "false"),
+            ("projects.\(toml(cwd)).trust_level", toml("trusted")),
+            ("developer_instructions", toml(prompt)),
+            ("mcp_servers.vibeswitcher.command", toml(server)),
+            ("mcp_servers.vibeswitcher.args", toml(args)),
+            ("mcp_servers.vibeswitcher.startup_timeout_sec", "60"),
+        ]
+        let record: [String: Any] = ["config": config.map { ["key": $0.key, "value": $0.value] }, "writableRoots": writable,
+                                     "mcpServer": ["command": server, "args": args],
+                                     "unenforced": codexUnenforced.map { ["rule": $0.rule, "instead": $0.instead] }]
+        try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: record, options: [.prettyPrinted, .sortedKeys]),
+                                   to: URL(fileURLWithPath: configFile))
+        let quote = RecentProjects.shellQuote
+        let trimmed = base.trimmingCharacters(in: .whitespaces)
+        var command = withoutCodexFlags(trimmed.isEmpty ? "codex" : trimmed)
+        if model != nil { command = withoutModel(command, short: true) }
+        var parts = [command.isEmpty ? "codex" : command, "--no-daemon", "--cd \(quote(cwd))", "--sandbox workspace-write", "--ask-for-approval never"]
+        parts += config.map { "-c \(quote("\($0.key)=\($0.value)"))" }
+        if let model { parts.append("--model \(quote(model))") }
+        parts.append("-- \(quote(start))")
+        var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: configFile, settingsFile: configFile)
+        prepared.environment[SessionNote.roleVariable] = Role.worker.rawValue
+        prepared.environment.merge(environment(.worker)) { $1 }
+        if let temporaryFolder { prepared.environment["TMPDIR"] = temporaryFolder.path + "/" }
+        return prepared
+    }
+
+    /// `command` (a Codex command line) without `codexFlags`, each with its value (`-s x`, `--sandbox=x`).
+    static func withoutCodexFlags(_ command: String) -> String {
+        var result = command
+        for (flag, value) in codexFlags {
+            let escaped = NSRegularExpression.escapedPattern(for: flag)
+            let pattern = value ? #"(^|\s+)"# + escaped + #"(=|\s+)('[^']*'|"[^"]*"|\S+)"# : #"(^|\s+)"# + escaped + #"(?=\s|$)"#
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            result = regex.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "")
+        }
+        return result.trimmingCharacters(in: .whitespaces)
+    }
+
     /// `command` (a Claude command line) without its `--model` options (`--model x`, `--model 'x y'`, `--model=x`); the
-    /// rest as it was.
-    static func withoutModel(_ command: String) -> String {
-        let pattern = #"(^|\s+)--model(=|\s+)('[^']*'|"[^"]*"|\S+)"#
+    /// rest as it was. `short`: `-m x` too (Codex's).
+    static func withoutModel(_ command: String, short: Bool = false) -> String {
+        let pattern = (short ? #"(^|\s+)(--model|-m)"# : #"(^|\s+)--model"#) + #"(=|\s+)('[^']*'|"[^"]*"|\S+)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return command }
         let range = NSRange(command.startIndex..., in: command)
         return regex.stringByReplacingMatches(in: command, range: range, withTemplate: "").trimmingCharacters(in: .whitespaces)

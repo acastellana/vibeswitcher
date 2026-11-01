@@ -1077,8 +1077,25 @@ public enum LeadPrompts {
         \(Policy.workerFindings)
         \(Policy.workerBudget(LeadBudget.minutes(task, default: workflow.taskBudgetMinutes)))
         Stuck: say exactly what you need and stop. Don't fake a pass: never weaken or delete tests.
-
+        \(task.workerAgent == .codex ? "\n" + codexWorker + "\n" : "")
         \(WorkerBrief.render(task))
+        """
+    }
+
+    /// What a Codex worker's brief adds: how its tools and sandbox differ from a Claude worker's, and the rules it holds
+    /// itself because Codex can't be made to refuse them (`LeadLaunch.codexUnenforced`).
+    public static var codexWorker: String {
+        """
+        You run in the Codex CLI. Your VibeSwitcher tools are the vibeswitcher MCP server's (progress, report, ask_lead, \
+        answer_findings): call them as tools, as the brief says. Your sandbox lets you write only in this worktree, its \
+        git folders and your TMPDIR (and /tmp), with no network: no push, fetch or download. Nothing asks for approval: a \
+        command the sandbox refuses fails. Don't look for a way around it; if the task needs it, say so with ask_lead or \
+        report blocked. These rules aren't refused for you, but they're the same rules, and a Claude verifier checks \
+        your branch for them before it merges: \(LeadLaunch.codexUnenforced.map(\.rule).joined(separator: "; ")). \
+        Commit only on your branch, never amend, and never touch another agent/ branch. Keep to the contract: \
+        nothing outside its boundaries, no refactors it doesn't ask for. Blind check: if you can't start a fresh \
+        subagent, put in `blind_check` that you couldn't (a Codex worker; the Claude audit is the independent check), \
+        and list anything you doubt.
         """
     }
 

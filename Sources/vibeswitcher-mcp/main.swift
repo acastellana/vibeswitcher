@@ -205,15 +205,20 @@ final class HostRuntime: LeadRuntime {
         LeadWorkflow.claudeModel(command: claudeCommand(root: root), home: VibePaths.home)
     }
 
-    func claudeCommand(root: String) -> String {
-        // The same command the app starts Claude with (its preferences), so workers run like your own sessions.
+    func claudeCommand(root: String) -> String { command(.claude, root: root) ?? "claude" }
+
+    func codexCommand(root: String) -> String { command(.codex, root: root) ?? "codex" }
+
+    /// The same command the app starts `agent` with (its preferences and launch presets), so workers run like your own
+    /// sessions.
+    private func command(_ agent: Agent, root: String) -> String? {
         let preferences = UserDefaults(suiteName: "dev.vibeswitcher.VibeSwitcher")
         let presets = LaunchPresets.load(from: VibePaths.presetsFile,
                                          claudeCommand: preferences?.string(forKey: "claudeCommand") ?? "claude",
                                          codexCommand: preferences?.string(forKey: "codexCommand") ?? "codex")
-        let preset = presets.presets(for: root).first { $0.agent == .claude && $0.place == .window }
-            ?? presets.presets(for: root).first { $0.agent == .claude }
-        return preset.flatMap(LaunchPlan.command(for:)) ?? "claude"
+        let preset = presets.presets(for: root).first { $0.agent == agent && $0.place == .window }
+            ?? presets.presets(for: root).first { $0.agent == agent }
+        return preset.flatMap(LaunchPlan.command(for:))
     }
 
     func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String {

@@ -697,6 +697,33 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// default), its current members only: which model a session's usage-limit refusal holds back (see
     /// `AccountUsage.fromRefusal`), whatever the task's model or verifier_model says since.
     public var launchedModels: [String: String]?
+    /// The agent its worker runs (add_task's and update_task's `agent`); nil: Claude, as before. Codex implements a
+    /// bounded task only: leads and verifiers stay Claude, and a Codex task is always audited (see `codexWorked`).
+    public var agent: WorkerAgent?
+    /// A Codex worker was started on it once: its merge needs a Claude verifier's passing audit from then on, whatever
+    /// its review or agent says since (its branch holds Codex's commits).
+    public var codexWorked: Bool?
+
+    /// Who runs a task's worker. Only workers: Codex never plans, reviews or audits.
+    public enum WorkerAgent: String, Codable, Sendable, CaseIterable {
+        case claude, codex
+
+        /// "codex", " Codex ": the agent; nil for anything else.
+        public init?(text: String) { self.init(rawValue: text.trimmingCharacters(in: .whitespaces).lowercased()) }
+
+        /// As status and board name it.
+        public var name: String { self == .claude ? "Claude" : "Codex" }
+    }
+
+    /// The agent its worker runs: Claude unless the lead set codex.
+    public var workerAgent: WorkerAgent { agent ?? .claude }
+
+    /// Its merge needs a Claude verifier's passing audit because Codex works (or worked) on it; nil when not.
+    public var codexAudit: String? {
+        guard workerAgent == .codex || codexWorked == true else { return nil }
+        return workerAgent == .codex ? "Its worker is Codex, so a Claude verifier audits it whatever its review says."
+            : "A Codex worker worked on it, so a Claude verifier audits it whatever its review says."
+    }
 
     /// Notes that `sessions` were started on `model` (nil: Claude's default), keeping only its members' entries.
     public mutating func launched(_ sessions: [String], on model: String?) {

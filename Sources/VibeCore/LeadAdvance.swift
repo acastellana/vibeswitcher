@@ -629,7 +629,8 @@ public final class LeadAdvance: @unchecked Sendable {
             // The Mac's room as start_worker counts it; a refusal for it waits for the app's nudge.
             guard hasRoom(task.slug, need: 1) else { return roomWait("start_worker(\(task.slug))", need: 1) }
             // Near a usage limit on its model: another task on another model may still start.
-            if usageHeld(model: lead.workerModel(for: task)) { continue }
+            // A Codex task runs on the Codex account: Claude's limits don't hold it.
+            if task.workerAgent != .codex, usageHeld(model: lead.workerModel(for: task)) { continue }
             let after = (task.after ?? []).joined(separator: ", ")
             step("start|\(task.slug)") {
                 // Asked again in start_worker's lock: a hold set while the room was counted stands.
@@ -676,7 +677,8 @@ public final class LeadAdvance: @unchecked Sendable {
         once(key,
              "The account's usage is near a limit: \(limit.text). " + LeadToolset.usageBackoff(limit, model: model)
                 + " Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway"
-                + (limit.model == nil ? "." : ", and a task can run on another model (update_task model, configure verifier_model)."))
+                + (limit.model == nil ? "." : ", and a task can run on another model (update_task model, configure verifier_model).")
+                + " A bounded, mechanical task with a tight contract can run on Codex instead (update_task(<task>, agent: codex): the Codex account's usage, always audited by a Claude verifier); you decide.")
         return true
     }
 
