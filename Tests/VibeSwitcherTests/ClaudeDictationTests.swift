@@ -406,7 +406,10 @@ struct ClaudeDictationTests {
     @Test func heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
-        h.tell(["op": "voice", "mode": "hold"])
+        // A repeat late past FakeClaude's 120 ms gap (a full suite's load) breaks its held-Space chain, and the chain
+        // that starts again keeps a warmup space as typed: a wider gap keeps one chain, as a held key is, whatever the
+        // load. 2026-11-01: the full suite failed here three runs out of three; alone and under load it passed.
+        h.tell(["op": "voice", "mode": "hold", "gap": 1.5])
         try await h.waitFor { h.agent["voice"] as? String == "hold" }
         let prompts = h.agentPrompts
         let controller = dictation(h)
