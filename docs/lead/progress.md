@@ -2732,3 +2732,4 @@
 - 2026-11-01 13:24 Automatically (auto_advance): Started a worker on heavy-jobs-fit-their (Heavy jobs fit their slot: vs-heavy gives each job a core budget, and our builds and tests honour it).
 - 2026-11-01 13:24 Automatically (auto_advance): Started the audit of read-only-git-parser at 51a7e8a0 (Its review is audit).
 - 2026-11-01 13:25 Audit of read-only-git-parser: complete, clean, round 2: 1 Important closed, 1 Nit closed
+- 2026-11-01 13:29 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
