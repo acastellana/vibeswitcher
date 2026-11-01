@@ -2517,3 +2517,5 @@
 - 2026-11-01 03:59 Audit of turn-this-incident-into-8 at 704951af tested its merged result 09201be2 onto main: the test command passed
 - 2026-11-01 03:59 Automatically (auto_advance): Started the audit of turn-this-incident-into-8 at 704951af (Its review is audit).
 - 2026-11-01 04:03 Audit of turn-this-incident-into-8: complete, clean, round 3: 1 Important closed, 3 Nit (1 open), 1 Pre-existing closed
+- 2026-11-01 04:06 Automatically (auto_advance): Didn't start app-memory-grows-17: app-memory-grows-17's worker is still running. Send it what to do with message, or stop_worker first.
+- 2026-11-01 04:14 Merged turn-this-incident-into-8: Turn this incident into a check: A verifier's session waits indefinitely on a permission prom…
