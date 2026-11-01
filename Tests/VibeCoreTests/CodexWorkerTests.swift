@@ -237,8 +237,9 @@ struct CodexWorkerTests: LeadTeamFixture {
         let root = try repo()
         let worktree = try Worktrees.open(root: root, slug: "w", base: "main")
         try FileManager.default.createDirectory(atPath: root + "/.vibeswitcher/module-cache", withIntermediateDirectories: true)
-        let roots = LeadLaunch.codexWritableRoots(cwd: worktree, slug: "w", temporary: "/tmp/x", root: root)
+        let session = temp.url("session-tmp").path
+        let roots = LeadLaunch.codexWritableRoots(cwd: worktree, slug: "w", temporary: session, root: root)
         #expect(roots == [root + "/.git/worktrees/w", root + "/.git/objects", root + "/.git/refs/heads/agent", root + "/.git/logs/refs/heads/agent",
-                          "/tmp/x", root + "/.vibeswitcher/module-cache"], "\(roots)")
+                          URL(fileURLWithPath: session).standardizedFileURL.path, root + "/.vibeswitcher/module-cache"], "\(roots)")
     }
 }
