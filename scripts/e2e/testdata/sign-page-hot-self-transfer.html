@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review and sign · Wallet Manager</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/sign/sign.css">
+</head>
+<body>
+<div class="test-mode" role="alert"><strong>Test mode: overridden inbox (/private/tmp/wallet-e2e.XXXXXX/loop/vault/inbox), peer (de0e2e01).</strong> This is not the real vault setup: never use it on the vault Mac.</div>
+<main class="signing">
+<p><a href="/requests">← Requests</a></p>
+<h1>Review and sign</h1>
+<p class="age">This request was made 0 minutes ago (2026-11-01T09:09:55Z).</p>
+
+
+<dl><dt>Chain</dt><dd>GenLayer Testnet <span class="sub">(4221)</span></dd>
+<dt>From</dt><dd><strong>Throwaway testnet hot wallet</strong> · hot wallet <span class="sub">(throwaway)</span><br><code><span class="addr-full">0x4c50c0Ae2b75B8C17d999CA2e11118A27867ab99</span></code></dd>
+<dt>Send</dt><dd><span class="big">0.000000000000001 GEN</span><br><span class="sub">1,000 base units</span></dd>
+<dt>To</dt><dd><code><span class="addr-full">0x4c50c0Ae2b75B8C17d999CA2e11118A27867ab99</span></code></dd>
+<dt>Nonce</dt><dd>2</dd>
+<dt>Gas limit</dt><dd>25,200</dd>
+<dt>Max fee per gas</dt><dd>0.02 gwei <span class="sub">(tip 0 gwei)</span></dd>
+<dt>Network fee</dt><dd>at most 0.000000504 GEN</dd>
+<dt>Signing hash</dt><dd><code>0xc13585a86b5f094726b60d9e73b83fa90d83a1462699cb19bd9e9233326474e5</code><br><span class="sub">keccak-256 of the exact bytes signed</span></dd></dl>
+<p class="sub">Shown from the transaction's own bytes, decoded independently and checked against the request.</p>
+<form method="post" action="/sign/664f6e4e-6b82-4bda-8b05-5b24ee63398b">
+<input type="hidden" name="csrf" value="recorded-csrf-redacted">
+<input type="hidden" name="token" value="recorded-token-redacted">
+<input type="hidden" name="hash" value="0xc13585a86b5f094726b60d9e73b83fa90d83a1462699cb19bd9e9233326474e5">
+<label>The hot wallet's passphrase<input type="password" name="passphrase" autocomplete="off" required></label>
+<button type="submit">Sign and send</button>
+</form>
+<div hidden data-sign-warnings=""><span data-sign-field="from" data-value="0x4c50c0Ae2b75B8C17d999CA2e11118A27867ab99"></span><span data-sign-field="chain" data-value="4221"></span><span data-sign-field="to" data-value="0x4c50c0Ae2b75B8C17d999CA2e11118A27867ab99"></span><span data-sign-field="value" data-value="1000"></span><span data-sign-field="call" data-value="none"></span></div>
+</main>
+</body>
+</html>
