@@ -2549,3 +2549,5 @@
 - 2026-11-01 05:22 Automatically (auto_advance): Started the audit of wallet-card-can-t at 125a3180 (Its review is audit).
 - 2026-11-01 05:32 Automatically (auto_advance): Started the audit of workers-and-verifiers-2 at e66c6661 (Its review is audit).
 - 2026-11-01 05:55 Planned the-sidebar-recomputes: The sidebar recomputes its team arrangement and each lead's blocking questions on every redraw
+- 2026-11-01 06:03 Started a worker on the-sidebar-recomputes
+- 2026-11-01 06:03 Automatically (auto_advance): Started a worker on the-sidebar-recomputes (The sidebar recomputes its team arrangement and each lead's blocking questions on every redraw).
