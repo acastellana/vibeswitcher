@@ -224,8 +224,17 @@ The whole result passes [Key material](#key-material).
    `passage listen` prints a line and whenever the app asks, and takes each new result for an outstanding request,
    in `sequence` order ([VibeSwitcher, on a result](#vibeswitcher-on-a-result)).
 7. **Ended.** A request stops being outstanding when a final result is taken, or one hour after `expiresAt`
-   (a result in flight when it expired still lands). Its record stays, with every result taken. When no request is
-   outstanding VibeSwitcher ends `passage listen`.
+   (a result in flight when it expired still lands). Its record stays, with every result taken, until 30 days after
+   that hour: the next launch then removes it. When no request is outstanding VibeSwitcher ends `passage listen`.
+   It keeps that process's pid and start time beside the records while it runs, so one a crash left running is
+   ended at the next launch, by its pid, once the process with that pid has that start time and runs `… listen`.
+
+**VibeSwitcher's records.** A record file is opened without following a link, only as a regular file, and only up to
+64 KiB (its size checked before it's read); anything else under a record's name is kept aside, and a result that would
+take a record past 64 KiB is ignored. A request whose `createdAt` is more than 5 minutes ahead of the Mac's clock is
+refused (filed or sent); one more than 7 days old gets no card and its record isn't loaded. At most 30 cards show at
+once (past that the oldest finished ones give way first). One `passage inbox` runs at a time: a `passage listen` line
+that comes while it runs asks for one more listing once it's done.
 
 **Expiry.** The Wallet Manager MUST NOT propose or sign a request after its `expiresAt`; one it first sees after that it
 answers `rejected` ("expired"). A Safe whose owners finish after VibeSwitcher stopped listening is not heard of:
