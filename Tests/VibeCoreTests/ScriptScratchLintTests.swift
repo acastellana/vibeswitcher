@@ -12,8 +12,9 @@ struct ScriptScratchLintTests {
     let temp = Scratch()
 
     /// `swift build`, `swift test` or `swift run` where a command starts: at the start of a line, after `;`, `&`, `|`,
-    /// `(` or `$(`, a keyword, or variables set in front. "run swift build" in a message isn't one.
-    static let invocation = try! Regex(#"(^|[;&|(]|\b(then|do|else|exec|command|xcrun|env|time))\s*([A-Za-z_][A-Za-z0-9_]*=\S*\s+)*swift\s+(build|test|run)\b"#)
+    /// `(` or `$(`, a keyword, `bash -c '`, or variables set in front; or the same through `heavy_swift`
+    /// (scripts/lib/swift-jobs.sh, the slot's share of the cores). "run swift build" in a message isn't one.
+    static let invocation = try! Regex(#"(^|[;&|(]|-c\s+'|\b(then|do|else|exec|command|xcrun|env|time))\s*([A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(heavy_)?swift\s+(build|test|run)\b"#)
     static let sourced = try! Regex(#"^\s*(source|\.)\s+("?\$?[^ ]*/)?scripts/lib/scratch\.sh"?\s*$"#)
     static let scratched = try! Regex(#"^\s*scratch_tmpdir\s"#)
     /// TMPDIR set (`TMPDIR=…` in front of a command or alone, `${TMPDIR=…}`) or exported: only the helper does.
@@ -137,6 +138,8 @@ struct ScriptScratchLintTests {
             cd x && swift test --filter A
             FOO=1 swift run tool
             if true; then swift build; fi
+            heavy_swift build -c release
+            vs-heavy bash -c 'swift test'
             """
         let late = """
             #!/bin/bash
@@ -159,7 +162,8 @@ struct ScriptScratchLintTests {
             try FileManager.default.copyItem(at: Self.repo.appendingPathComponent("scripts/" + script), to: scripts.appendingPathComponent(script))
         }
         #expect(try Self.unscratched(under: root) == ["scripts/bare.sh:3", "scripts/bare.sh:4", "scripts/bare.sh:6", "scripts/bare.sh:7",
-                                                      "scripts/bare.sh:8", "scripts/late.sh:3", "scripts/lib/alone.sh:3"])
+                                                      "scripts/bare.sh:8", "scripts/bare.sh:9", "scripts/bare.sh:10", "scripts/late.sh:3",
+                                                      "scripts/lib/alone.sh:3"])
     }
 
     /// The helper's scratch: a short folder under /tmp, 0700, TMPDIR its tmp/ (0700), removed when the script exits:
