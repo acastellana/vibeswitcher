@@ -383,11 +383,13 @@ struct AccountUsageTests: LeadTeamFixture {
 }
 
 extension LeadAdvanceTests {
-    /// auto_advance starts nothing near a limit, and tells the lead once, with the reset time; once the window has
-    /// reset (a new reading under 80 %), the tasks start.
+    /// auto_advance starts nothing near a limit, and tells the lead once, with the reset time; at the reset (its look
+    /// again, armed once; the reading by then under 80 %) the tasks start, with nothing else nudging it.
     @Test func nearALimitAutoAdvanceStartsNothingAndTellsTheLeadOnce() throws {
         let (root, runtime, lead) = try team()
         let resets = Date().timeIntervalSince1970 + 86_400
+        let armed = Armed()
+        lead.usageWake = { date, body in armed.add(date, body) }
         let status = { (weekly: Double) in
             #"{"rate_limits":{"seven_day":{"used_percentage":\#(weekly),"resets_at":\#(resets)}}}"#
         }
@@ -404,9 +406,28 @@ extension LeadAdvanceTests {
         #expect(told().count == 1, "\(reports(runtime))")
         #expect(told().first?.contains("Tell the user") == true)
         #expect(task("first", root)?.status == .planned && task("second", root)?.status == .planned && runtime.spawned.isEmpty)
-        // The next reading is under the threshold: they start.
+        // One look again, just after the reset, however many passes held the work.
+        let wakes = armed.taken
+        #expect(wakes.map(\.0.timeIntervalSince1970) == [resets + 1])
+        // The reset: the next reading is under the threshold, and the armed look starts them.
         UsageStatusLine.run(input: Data(status(30).utf8), store: usageStore, home: temp.url("no-home").path) { _ in }
-        LeadAdvance.nudge(root: root)
+        wakes.first?.1()
         #expect(advancing.until { task("first", root)?.status == .running && task("second", root)?.status == .running })
+    }
+
+    /// The looks again a test's lead armed (`LeadToolset.usageWake`), not run.
+    final class Armed: @unchecked Sendable {
+        private let lock = NSLock()
+        private var wakes: [(Date, @Sendable () -> Void)] = []
+        func add(_ date: Date, _ body: @escaping @Sendable () -> Void) {
+            lock.lock()
+            wakes.append((date, body))
+            lock.unlock()
+        }
+        var taken: [(Date, @Sendable () -> Void)] {
+            lock.lock()
+            defer { lock.unlock() }
+            return wakes
+        }
     }
 }

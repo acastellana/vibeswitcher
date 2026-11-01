@@ -59,6 +59,34 @@ struct StatusLineBinaryTests {
         #expect(AccountUsageStore(file: URL(fileURLWithPath: home + "/.vibeswitcher/account-usage.json")).load().limits.map(\.usedPercent) == [55])
     }
 
+    @Test func claudeCodeStoppingTheStatusLineStopsYourCommandToo() throws {
+        let mcp = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
+        try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")
+        let started = temp.url("status-started")
+        // Yours hangs (a pipeline of two programs under its shell), as a network call or a git waiting on a lock does.
+        let home = try home(statusLine: "echo $$ > '\(started.path)'; \(keepRunning) | cat")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: mcp)
+        process.arguments = [UsageStatusLine.argument]
+        process.environment = ["HOME": home, "CFFIXED_USER_HOME": home, "VIBESWITCHER_HOME": home + "/.vibeswitcher", "PATH": "/usr/bin:/bin"]
+        let inputFile = temp.url("status-input")
+        try input(size: 1000).write(to: inputFile)
+        process.standardInput = try FileHandle(forReadingFrom: inputFile)
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        var pid: pid_t = 0
+        #expect(eventually { pid = (try? String(contentsOf: started, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0; return pid > 0 })
+        try #require(pid > 0)
+        // Claude Code gives up on it: TERM.
+        process.terminate()
+        process.waitUntilExit()
+        #expect(process.terminationReason == .exit && process.terminationStatus == 0, "\(process.terminationReason) \(process.terminationStatus)")
+        // Your command's whole process group is gone, not left running.
+        #expect(eventually { kill(-pid, 0) == -1 && errno == ESRCH })
+        #expect(AccountUsageStore(file: URL(fileURLWithPath: home + "/.vibeswitcher/account-usage.json")).load().limits.map(\.usedPercent) == [55])
+    }
+
     @Test func anOutputWhoseReaderHasGoneStillKeepsTheUsage() throws {
         let home = try home(statusLine: "head -c 10 >/dev/null; echo mine")
         let ran = try run(input: input(size: 100_000), home: home, output: nil)

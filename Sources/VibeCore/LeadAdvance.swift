@@ -91,6 +91,8 @@ public final class LeadAdvance: @unchecked Sendable {
     private var lines: [String] = []
     /// Refusals and holds told already (a step's, on a commit), each told once.
     private var told: Set<String> = []
+    /// The usage holds whose reset has a look again armed (`usageHeld`), each armed once.
+    private var wakes: Set<String> = []
     /// Called after each run of passes (tests wait on it).
     var passed: (() -> Void)? {
         get {
@@ -636,12 +638,22 @@ public final class LeadAdvance: @unchecked Sendable {
     }
 
     /// The account's usage is at `AccountUsage.threshold` or more of a limit on `model` (see `AccountUsage`): nothing
-    /// starts on it by itself, and the lead is told once per limit and reset, with the reset time.
+    /// starts on it by itself, and the lead is told once per limit and reset, with the reset time. Within its window a
+    /// limit's use only grows, and nothing in the project's folder changes at its reset, so a look again is armed for
+    /// just after it (a reading with no reset time: once it's no longer believed): what was held starts then.
     private func usageHeld(model: String?) -> Bool {
         guard let limit = lead.usageHold(model: model, sessions: try? lead.advanceSessions()) else { return false }
-        once("usage|\(limit.key)|\(Int(limit.resetsAt ?? limit.at))",
+        let key = "usage|\(limit.key)|\(Int(limit.resetsAt ?? limit.at))"
+        lock.lock()
+        let arm = wakes.insert(key).inserted
+        lock.unlock()
+        if arm {
+            let root = lead.root
+            lead.usageWake(Date(timeIntervalSince1970: (limit.resetsAt ?? limit.at + AccountUsage.untimed) + 1)) { LeadAdvance.nudge(root: root) }
+        }
+        once(key,
              "The account's usage is near a limit: \(limit.text). " + LeadToolset.usageBackoff(limit, model: model)
-                + " Tell the user. Nothing on it starts by itself until the reset; start_worker or audit with override_usage: true starts one anyway"
+                + " Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway"
                 + (limit.model == nil ? "." : ", and a task can run on another model (update_task model, configure verifier_model)."))
         return true
     }

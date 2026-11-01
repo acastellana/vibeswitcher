@@ -196,6 +196,8 @@ public enum UsageStatusLine {
     public static let userOnlyArgument = "--user-settings-only"
     /// How long your own status line may take before it's stopped (Claude Code gives up on a slow one too).
     public static let patience: TimeInterval = 5
+    /// The signals that stop a status line, as Claude Code stops one it gives up on (see `runCommand`).
+    public static let stopSignals: [Int32] = [SIGTERM, SIGHUP, SIGINT]
 
     /// The status line's settings entry for a role's `--settings`: this tool server run with `argument`.
     public static func settings(server: String, userOnly: Bool = false) -> [String: Any] {
@@ -259,8 +261,9 @@ public enum UsageStatusLine {
     /// on this thread alone (a kqueue on its pipes and its exit: no other thread or queue, so a busy process can't
     /// starve it): the input is written as the pipe takes it and never after the command has exited or closed its end
     /// (the pipe can't raise SIGPIPE either: `F_SETNOSIGPIPE`); its output is read until it ends. Past `patience` the
-    /// command is killed and what it printed so far is returned. It starts with SIGPIPE at its default, an empty signal
-    /// mask and no descriptor of this process but its stdin, stdout and stderr. Empty when it couldn't be started.
+    /// command is killed and what it printed so far is returned; so it is when one of `stopSignals` comes to this
+    /// process. It starts in a process group of its own, with SIGPIPE and `stopSignals` at their defaults, an empty
+    /// signal mask and no descriptor of this process but its stdin, stdout and stderr. Empty when it couldn't be started.
     public static func runCommand(_ command: String, input: Data, patience: TimeInterval) -> Data {
         var toChild: [Int32] = [-1, -1], fromChild: [Int32] = [-1, -1]
         guard pipe(&toChild) == 0 else { return Data() }
@@ -279,13 +282,23 @@ public enum UsageStatusLine {
         defer { posix_spawnattr_destroy(&attributes) }
         var defaults = sigset_t(), mask = sigset_t()
         sigemptyset(&defaults)
-        sigaddset(&defaults, SIGPIPE)
+        for signal in Self.stopSignals + [SIGPIPE] { sigaddset(&defaults, signal) }
         sigemptyset(&mask)
         posix_spawnattr_setsigdefault(&attributes, &defaults)
         posix_spawnattr_setsigmask(&attributes, &mask)
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT))
+        // A process group of its own: stopping it stops the whole of it (a pipeline's every program).
+        posix_spawnattr_setpgroup(&attributes, 0)
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETPGROUP))
         let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(command), nil]
         defer { argv.forEach { free($0) } }
+        let queue = kqueue()
+        func watch(_ ident: Int32, _ filter: Int32, fflags: UInt32 = 0, flags: Int32 = EV_ADD) -> Bool {
+            var change = kevent(ident: UInt(ident), filter: Int16(filter), flags: UInt16(flags), fflags: fflags, data: 0, udata: nil)
+            return kevent(queue, &change, 1, nil, 0, nil) == 0
+        }
+        // Claude Code stopping this status line (TERM, then KILL about 2 s later): the command is stopped with it, never
+        // left running. Watched from before it starts, and heard even while ignored (`--status-line` ignores them).
+        for signal in Self.stopSignals { _ = watch(signal, EVFILT_SIGNAL) }
         var pid: pid_t = 0
         let spawned = posix_spawn(&pid, "/bin/sh", &actions, &attributes, argv, environ)
         close(toChild[0])
@@ -295,15 +308,11 @@ public enum UsageStatusLine {
         guard spawned == 0 else {
             close(writer)
             close(reader)
+            if queue >= 0 { close(queue) }
             return Data()
         }
         _ = fcntl(writer, F_SETNOSIGPIPE, 1)
         for fd in [writer, reader] { _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) }
-        let queue = kqueue()
-        func watch(_ ident: Int32, _ filter: Int32, fflags: UInt32 = 0, flags: Int32 = EV_ADD) -> Bool {
-            var change = kevent(ident: UInt(ident), filter: Int16(filter), flags: UInt16(flags), fflags: fflags, data: 0, udata: nil)
-            return kevent(queue, &change, 1, nil, 0, nil) == 0
-        }
         func stopWriting() {
             guard writer >= 0 else { return }
             close(writer) // Its kevent goes with it.
@@ -314,9 +323,10 @@ public enum UsageStatusLine {
         var exited = queue < 0 || !watch(pid, EVFILT_PROC, fflags: UInt32(NOTE_EXIT))
         var ended = queue < 0 || !watch(reader, EVFILT_READ)
         if pending.isEmpty || exited || queue < 0 || !watch(writer, EVFILT_WRITE) { stopWriting() }
+        var stopped = false
         let deadline = Date().addingTimeInterval(patience)
         var chunk = [UInt8](repeating: 0, count: 65_536)
-        while !(exited && ended) {
+        while !(exited && ended), !stopped {
             let left = deadline.timeIntervalSinceNow
             guard left > 0 else { break }
             var wait = timespec(tv_sec: Int(left), tv_nsec: Int((left - left.rounded(.down)) * 1e9))
@@ -327,6 +337,7 @@ public enum UsageStatusLine {
                 break
             }
             let fired = events.prefix(Int(count))
+            if fired.contains(where: { Int32($0.filter) == EVFILT_SIGNAL }) { stopped = true }
             // Its exit first: nothing is written after it.
             if fired.contains(where: { Int32($0.filter) == EVFILT_PROC }) {
                 exited = true
@@ -360,7 +371,10 @@ public enum UsageStatusLine {
         stopWriting()
         close(reader)
         if queue >= 0 { close(queue) }
-        if !exited { kill(pid, SIGKILL) }
+        if !exited {
+            kill(-pid, SIGKILL)
+            kill(pid, SIGKILL)
+        }
         var status: Int32 = 0
         while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
         return output

@@ -44,6 +44,8 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == ReadOnlyCommand
 if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == UsageStatusLine.argument {
     signal(SIGPIPE, SIG_IGN)
     _ = fcntl(STDOUT_FILENO, F_SETNOSIGPIPE, 1)
+    // Claude Code stopping it: heard by your command's runner, which stops your command too, never left running.
+    for stop in UsageStatusLine.stopSignals { signal(stop, SIG_IGN) }
     let input = (try? FileHandle.standardInput.readToEnd()) ?? Data()
     UsageStatusLine.run(input: input, userOnly: CommandLine.arguments.dropFirst(2).contains(UsageStatusLine.userOnlyArgument)) { output in
         try? FileHandle.standardOutput.write(contentsOf: output)

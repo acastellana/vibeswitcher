@@ -168,6 +168,11 @@ public final class LeadToolset: MCPToolset {
     /// (`AccountUsageStore.standardFile`) only for the session host's vault (`LeadVault.standard`); with any other
     /// vault (tests' scratch ones), a file in its folder, so no test reads or writes the Mac's.
     public var usageStore: AccountUsageStore
+    /// How auto_advance arms its look again at a held limit's reset (see `LeadAdvance.usageHeld`): `body` run at
+    /// `date`, by the wall clock (a Mac asleep past it runs it on waking). Faked in tests.
+    var usageWake: (Date, @escaping @Sendable () -> Void) -> Void = { date, body in
+        DispatchQueue.global().asyncAfter(wallDeadline: .now() + max(0, date.timeIntervalSinceNow), execute: body)
+    }
     /// How often merge reads the load again while it waits for it to drop below load_threshold.
     var loadPoll: TimeInterval = 15
     /// The Mac-wide limits as set in Settings (see `MacLimits`), read at each call. Faked in tests.
