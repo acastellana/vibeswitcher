@@ -2611,3 +2611,8 @@
 - 2026-11-01 09:25 Automatically (auto_advance): Started the audit of wallet-card-can-t at b169a564 (Its review is audit).
 - 2026-11-01 09:30 Audit of wallet-card-can-t: complete, clean, round 3: 2 Important closed, 3 Nit closed
 - 2026-11-01 09:33 Merged boost-release-2-7: Boost release 2/7: heavy jobs outside the Mac-wide lock are noticed and their lead is told
+- 2026-11-01 09:33 Automatically (auto_advance): Merged boost-release-2-7 (Boost release 2/7: heavy jobs outside the Mac-wide lock are noticed and their lead is told) into main at c6e873f5, on its passing audit and the full test run.
+- 2026-11-01 09:33 Automatically (auto_advance): Cleaned up boost-release-2-7; ended pid 40253 (Worker: Boost release 2/7: heavy jobs outside the Mac-wide lock are noticed and their lead is told) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 09:43 Merged wallet-card-can-t: Wallet card can't be made misleading: who asked, the reason field, and contract calls that move tokens
+- 2026-11-01 09:43 Flaky in wallet-card-can-t's merge: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 09:43 Planned fix-the-flaky-test-15: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() flaked 3 times within 7 days
