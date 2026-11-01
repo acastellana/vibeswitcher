@@ -186,12 +186,14 @@ struct AccountUsageTests: LeadTeamFixture {
         #expect(UsageStatusLine.runCommand("cat; echo done", input: Data(), patience: 60) == Data("done\n".utf8))
         // Nothing of this process's but stdin, stdout and stderr is open in it; SIGPIPE at its default.
         // (A pipe of this process's, not close-on-exec, isn't; ls's own look at /dev/fd is one or two more.)
-        var mine: [Int32] = [-1, -1]
-        #expect(pipe(&mine) == 0)
-        defer { mine.forEach { close($0) } }
+        var pair: [Int32] = [-1, -1]
+        #expect(pipe(&pair) == 0)
+        // Numbered past what ls opens itself.
+        let mine = pair.map { fcntl($0, F_DUPFD, 100) }
+        defer { (pair + mine).forEach { close($0) } }
         let fds = String(decoding: UsageStatusLine.runCommand("ls /dev/fd", input: Data(), patience: 60), as: UTF8.self)
             .split(separator: "\n").compactMap { Int32($0) }
-        #expect(fds.starts(with: [0, 1, 2]) && fds.allSatisfy { $0 < 5 } && !fds.contains(mine[0]) && !fds.contains(mine[1]), "\(fds)")
+        #expect(fds.starts(with: [0, 1, 2]) && fds.allSatisfy { $0 < 5 } && mine.allSatisfy { $0 >= 100 && !fds.contains($0) }, "\(fds)")
         #expect(UsageStatusLine.runCommand("yes | head -1", input: Data(), patience: 60) == Data("y\n".utf8))
     }
 
