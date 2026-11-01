@@ -199,3 +199,7 @@ Independent read-only reviews of both projects found no way to sign or send with
 
 User's answer to 19AF8BCD. The account hit its Fable usage limit, and the wallet production-readiness pass's audited tasks would otherwise wait three days. The verifier-eval baseline was measured with Fable, so Opus verdicts in this window get the same scrutiny, and nothing about the audit rules changes.
 
+## 2026-11-01 08:20:57 Reading freeze reports: "N% of its sample inside the stall" is how much of the sample was taken during the stall, not the share of time in the frames listed. Before planning a freeze task, count the main thread's samples in the .txt that pass through the suspected code (the 2026-10-31 00:48 rule), and plan only if they're a real share.
+
+2026-11-01: the lead planned terminal-drawing-froze from a report saying '100% of its sample inside the stall' under SwiftTerm.buildAttributedString. 0 of 2092 main-thread samples were actually in terminal drawing. The worker checked before building and the task was abandoned, but it cost a worker start. Third-party code (SwiftTerm, a pinned dependency) was also assumed to be vendored.
+
