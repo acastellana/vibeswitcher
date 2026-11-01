@@ -855,9 +855,12 @@ public final class HostedSession {
             return reaped == 0 || (reaped < 0 && errno == EINTR)
         }
         guard !left.isEmpty, Date() < deadline else { return }
-        // Not utility: a loaded Mac starves that for seconds, and each look is one waitpid per program.
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) { reap(left, until: deadline) }
+        reaper.asyncAfter(deadline: .now() + 0.1) { reap(left, until: deadline) }
     }
+
+    /// Where `reap` looks: a queue of its own, not a global one, whose few threads busy work can hold for many seconds
+    /// (a loaded test run's sessions waited 14 s, then 2.5 min, all reaped at once when they came free).
+    private static let reaper = DispatchQueue(label: "vibeswitcher.session-reaper")
 }
 
 /// The headless terminal's delegate (in the parser, see `SessionParser`): replies to queries, title, bell, program
