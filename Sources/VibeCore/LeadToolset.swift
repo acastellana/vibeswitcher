@@ -197,7 +197,7 @@ public final class LeadToolset: MCPToolset {
     /// that don't give scratch ones): none.
     public var testLock: TestLock?
     /// Where merge appends its line of the Mac's merge stats (`MergeSample`, merges-<day>.jsonl); nil: none.
-    public var mergeStats: URL? = VibePaths.statsDir
+    public var mergeStats: () -> URL? = { VibePaths.statsDir }
 
     /// `testLock` with the workflow's heavy_slots, when set.
     func heavyLock(_ workflow: LeadWorkflow) -> TestLock? {
@@ -2267,7 +2267,7 @@ public final class LeadToolset: MCPToolset {
                                                   return rerun?.command
                                               }, tested: { testCount = LeadReceipt.testCount($0) },
                                               begun: { begun = ($0, LoadRecorder.averages() ?? []) })
-        if let folder = mergeStats {
+        if let folder = mergeStats() {
             let start = begun?.at ?? called
             let sample = MergeSample(check: checked, rerun: rerun, project: (root as NSString).lastPathComponent, task: slug,
                                      started: start, load: begun?.load ?? LoadRecorder.averages() ?? [], waited: waited?.after ?? 0,

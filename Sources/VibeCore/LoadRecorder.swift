@@ -129,14 +129,14 @@ public struct LoadSample: Codable, Equatable, Sendable {
         public var pressure: String?
         /// The share of memory the kernel counts as available, in percent.
         public var free: Int?
-        public var swapUsedMB: Int?
-        public var swapTotalMB: Int?
+        public var swapUsedMb: Int?
+        public var swapTotalMb: Int?
 
-        public init(pressure: String?, free: Int?, swapUsedMB: Int?, swapTotalMB: Int?) {
+        public init(pressure: String?, free: Int?, swapUsedMb: Int?, swapTotalMb: Int?) {
             self.pressure = pressure
             self.free = free
-            self.swapUsedMB = swapUsedMB
-            self.swapTotalMB = swapTotalMB
+            self.swapUsedMb = swapUsedMb
+            self.swapTotalMb = swapTotalMb
         }
     }
 
@@ -306,7 +306,8 @@ public final class LoadRecorder: @unchecked Sendable {
         }
     }
 
-    private let folder: URL
+    /// Where the files go, looked up at each write (the app's home, as `VibePaths` says then).
+    private let folder: () -> URL
     private let sources: Sources
     private let queue = DispatchQueue(label: "vibeswitcher.load-recorder", qos: .utility)
     /// The last look at the processes' CPU time, and when (for the next sample's CPU shares).
@@ -317,9 +318,9 @@ public final class LoadRecorder: @unchecked Sendable {
     private var busy = false
     private let lock = NSLock()
 
-    /// `folder`: where the files go (the app's is `VibePaths.statsDir`).
-    public init(folder: URL = VibePaths.statsDir, sources: Sources = .mac) {
-        self.folder = folder
+    /// `folder`: where the files go; nil: `VibePaths.statsDir`, as it is at each write.
+    public init(folder: URL? = nil, sources: Sources = .mac) {
+        self.folder = { folder ?? VibePaths.statsDir }
         self.sources = sources
     }
 
@@ -343,10 +344,10 @@ public final class LoadRecorder: @unchecked Sendable {
     @discardableResult
     public func write(census: [HostCensus], at date: Date = Date()) throws -> LoadSample {
         let sample = take(census: census, at: date)
-        try LoadStats.append(try LoadStats.line(sample), to: LoadStats.fileName("load", for: date), in: folder)
+        try LoadStats.append(try LoadStats.line(sample), to: LoadStats.fileName("load", for: date), in: folder())
         let today = LoadStats.day(date)
         if pruned != today {
-            LoadStats.prune(folder, now: date)
+            LoadStats.prune(folder(), now: date)
             pruned = today
         }
         return sample
@@ -361,7 +362,9 @@ public final class LoadRecorder: @unchecked Sendable {
             t: LoadStats.stamp(date), load: averages.map { ($0 * 100).rounded() / 100 }, cores: MacLoad.processors,
             memory: sources.memory(), sessions: Self.sessions(census),
             heavy: LoadSample.Heavy(slots: heavy.slots, held: heavy.holders.map { holder in
-                LoadSample.Heavy.Holder(slot: holder.slot, project: holder.project, task: holder.task,
+                // Its folder's project (a run in a subfolder is the repository's), else what its note says.
+                LoadSample.Heavy.Holder(slot: holder.slot, project: holder.directory.flatMap(sources.project) ?? holder.recordedProject,
+                                        task: holder.task,
                                         minutes: holder.since.map { _ in Int(holder.held(now: date) / 60) })
             }),
             top: nil, costMs: 0)
@@ -460,9 +463,9 @@ public final class LoadRecorder: @unchecked Sendable {
         var size = MemoryLayout<xsw_usage>.size
         let swapRead = sysctlbyname("vm.swapusage", &swap, &size, nil, 0) == 0
         let memory = LoadSample.Memory(pressure: pressure, free: int("kern.memorystatus_level").map(Int.init),
-                                       swapUsedMB: swapRead ? Int(swap.xsu_used / 1_048_576) : nil,
-                                       swapTotalMB: swapRead ? Int(swap.xsu_total / 1_048_576) : nil)
-        return memory == LoadSample.Memory(pressure: nil, free: nil, swapUsedMB: nil, swapTotalMB: nil) ? nil : memory
+                                       swapUsedMb: swapRead ? Int(swap.xsu_used / 1_048_576) : nil,
+                                       swapTotalMb: swapRead ? Int(swap.xsu_total / 1_048_576) : nil)
+        return memory == LoadSample.Memory(pressure: nil, free: nil, swapUsedMb: nil, swapTotalMb: nil) ? nil : memory
     }
 
     /// The Mac-wide heavy slots (`TestLock`'s folder and count as vs-heavy finds them) and who holds them.
