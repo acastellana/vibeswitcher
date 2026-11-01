@@ -54,12 +54,18 @@ final class FakeRuntime: LeadRuntime {
     /// The project's Claude command, flags included.
     var claude = "claude --dangerously-skip-permissions"
     func claudeCommand(root: String) -> String { claude }
+    /// The project's Codex command, flags included.
+    var codex = "codex"
+    func codexCommand(root: String) -> String { codex }
+    /// The agent each session was started as ("claude", "codex"), by session.
+    var agents: [String: String] = [:]
     func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String {
         calls.lock()
         defer { calls.unlock() }
         let id = "session-\(spawned.count + 1)"
         spawned.append((id, cwd, command, label, false))
         environments[id] = env
+        agents[id] = agent
         onSpawn?(id)
         return id
     }
@@ -238,6 +244,14 @@ extension LeadTeamFixture {
 
     /// What the lead last started as `name` (worker-<slug>, verify-<slug>): its session and its tool server's arguments.
     func launched(_ name: String, _ runtime: FakeRuntime) throws -> (session: String, args: [String]) {
+        // A Codex worker has no --name and no MCP file: its tool server is on its command line (`LeadLaunch.prepareCodex`).
+        let codexArgs = #"mcp_servers\.vibeswitcher\.args=(\[[^\]]*\])"#
+        if name.hasPrefix("worker-"), let spawn = runtime.spawned.last(where: {
+            $0.command.range(of: codexArgs, options: .regularExpression) != nil && $0.cwd.hasSuffix("/" + name.dropFirst("worker-".count))
+        }), let range = spawn.command.range(of: codexArgs, options: .regularExpression) {
+            let list = String(spawn.command[range].dropFirst("mcp_servers.vibeswitcher.args=".count))
+            return (spawn.id, try #require(try JSONSerialization.jsonObject(with: Data(list.utf8)) as? [String]))
+        }
         let spawn = try #require(runtime.spawned.last { $0.command.contains("--name '\(name)'") })
         let range = try #require(spawn.command.range(of: #"--mcp-config '([^']+)'"#, options: .regularExpression))
         let path = String(spawn.command[range].dropFirst("--mcp-config '".count).dropLast())

@@ -1419,10 +1419,12 @@ public final class LeadToolset: MCPToolset {
 
     /// Why `what` isn't started on `model`: the account's usage is at `AccountUsage.threshold` or more of a limit on it;
     /// nil when it isn't (or isn't known). `instead`: what else the lead can do when the limit is the model's only.
-    func usageRefusal(model: String?, sessions: [LeadSessionInfo]?, not: String, what: String, instead: String) -> String? {
+    /// `codex`: the task a Codex worker could take instead, a limit on every Claude model included (Codex's account is
+    /// another one).
+    func usageRefusal(model: String?, sessions: [LeadSessionInfo]?, not: String, what: String, instead: String, codex: String? = nil) -> String? {
         guard let limit = usageHold(model: model, sessions: sessions) else { return nil }
         return "\(not): the account's usage is near a limit, \(limit.text). " + Self.usageBackoff(limit, model: model)
-            + (limit.model == nil ? " Wait for the reset" : " Wait for the reset, or \(instead)")
+            + (limit.model == nil ? " Wait for the reset" + (codex.map { ", or " + Self.codexInstead($0) } ?? "") : " Wait for the reset, or \(instead)")
             + ", or call \(what) with override_usage: true if the user wants the rest of the limit spent."
     }
 
@@ -1433,11 +1435,24 @@ public final class LeadToolset: MCPToolset {
             + ", so the limit doesn't stop one mid-task; sessions already running go on."
     }
 
+    /// The states a task's line names no Claude worker in, Codex tasks beside it or not.
+    static let finishedStates: [LeadTask.Status] = [.done, .reverted, .folded, .abandoned]
+
+    /// The board has an open task for Codex (or one Codex worked on): status and board then name every open task's
+    /// worker's agent, Claude included.
+    static func mixedAgents(_ board: LeadBoard) -> Bool {
+        board.tasks.contains { ($0.workerAgent == .codex || $0.codexWorked == true) && !finishedStates.contains($0.status) }
+    }
+
     /// What a usage refusal offers instead of waiting for a start: another model, or Codex for a bounded mechanical
     /// task (another account's limits; always audited by a Claude verifier). The lead decides.
     static func usageInstead(_ slug: String) -> String {
-        "run it on another model (update_task(\(slug), model: sonnet) for a mechanical task), or on Codex if it's a bounded, "
-            + "mechanical task with a tight contract (update_task(\(slug), agent: codex): Codex's account, and a Claude verifier always audits it)"
+        "run it on another model (update_task(\(slug), model: sonnet) for a mechanical task), or " + codexInstead(slug)
+    }
+
+    static func codexInstead(_ slug: String) -> String {
+        "on Codex if it's a bounded, mechanical task with a tight contract (update_task(\(slug), agent: codex): Codex's account, "
+            + "and a Claude verifier always audits it)"
     }
 
     /// What a Codex worker's session is noted as having started on (`LeadTask.launchedModels`): never a Claude model's
@@ -1501,7 +1516,7 @@ public final class LeadToolset: MCPToolset {
         let codex = task.workerAgent == .codex
         let model = codex ? task.model : workerModel(for: task)
         if !codex, !overrideUsage, let refusal = usageRefusal(model: model, sessions: sessions, not: "Not started", what: "start_worker(\(slug))",
-                                                              instead: Self.usageInstead(slug)) {
+                                                              instead: Self.usageInstead(slug), codex: slug) {
             throw Problem(text: refusal)
         }
         // A worker on a full disk fails, and takes every other session with it (none can write its output).
@@ -4319,7 +4334,7 @@ public final class LeadToolset: MCPToolset {
             lines.append("\n\(state.rawValue):")
             let shown = tasks.prefix(budget)
             budget -= shown.count
-            lines += shown.map { taskLine($0, sessions) }
+            lines += shown.map { taskLine($0, sessions, mixed: Self.mixedAgents(board)) }
             if tasks.count > shown.count {
                 lines.append(Self.clip("- … and \(tasks.count - shown.count) more: " + tasks.dropFirst(shown.count).map(\.slug).joined(separator: ", "), 600))
             }
@@ -4454,11 +4469,13 @@ public final class LeadToolset: MCPToolset {
 
     /// A task in one line (bounded): its title, what its worker does, its audit, rework, why it's kept, its last
     /// progress. `sessions` nil: the host can't be read.
-    private func taskLine(_ task: LeadTask, _ sessions: [String: LeadSessionInfo]?) -> String {
+    /// `mixed` (`mixedAgents`): the board has Codex tasks, so each open one says who runs its worker.
+    private func taskLine(_ task: LeadTask, _ sessions: [String: LeadSessionInfo]?, mixed: Bool = false) -> String {
         var line = "- \(task.slug): \(Self.clip(task.title, 60))"
-        // Who runs its worker: on every open task, and on a finished one Codex worked on.
-        let finished: [LeadTask.Status] = [.done, .reverted, .folded, .abandoned]
-        if !finished.contains(task.status) || task.codexWorked == true { line += " — worker: \(task.workerAgent.name)" }
+        // Who runs its worker: Codex always; Claude, everyone's before Codex workers, beside Codex tasks only.
+        if task.workerAgent == .codex || task.codexWorked == true || (mixed && !Self.finishedStates.contains(task.status)) {
+            line += " — worker: \(task.workerAgent.name)"
+        }
         if task.reviewLevel == .audit, ![.done, .reverted].contains(task.status) { line += " — review audit" }
         if let raised = task.riskRaised, ![.done, .reverted].contains(task.status) { line += " — audited: \(Self.clip(raised.reason, 90))" }
         if task.status == .kept { line += " — kept: \(Self.clip(task.keptBecause ?? "no reason recorded", 80))" }
@@ -4782,7 +4799,7 @@ public final class LeadToolset: MCPToolset {
             let ended = sessions.flatMap { Self.endedMember(task, $0) }
             // A running task whose worker ended reads so, not running.
             let state = ended.map { $0.hasPrefix("worker") ? "worker ended" : "verifier ended" } ?? (task.isAbandoned ? "abandoned" : task.status.rawValue)
-            return Self.clip("- \(task.slug) [\(state)] " + String(taskLine(task, sessions).dropFirst(task.slug.count + 4)), 200)
+            return Self.clip("- \(task.slug) [\(state)] " + String(taskLine(task, sessions, mixed: Self.mixedAgents(board)).dropFirst(task.slug.count + 4)), 200)
         }
         let open = board.openQuestions
         if !open.isEmpty {
