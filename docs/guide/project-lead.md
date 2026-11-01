@@ -104,6 +104,10 @@ checks it instead:
 
 Review a Codex worker's output critically: it's the audit's job, and the start_worker reply says so.
 
+Not yet: a message to a Codex worker that sits idle (findings sent back after its report, the lead's message, a
+catch-up notice) waits in its inbox, because delivery types into an idle agent only when it sees Claude Code's input
+box. Until Codex's is recognised too, message such a worker again once it works, or start_worker it afresh.
+
 ## Review levels and audits
 
 Each task has a review level:
