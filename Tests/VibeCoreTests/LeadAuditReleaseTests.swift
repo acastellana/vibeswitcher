@@ -159,6 +159,26 @@ extension LeadAdvanceTests {
         #expect(advancing.until { task("add-b", root)?.status == .done && reports(runtime).contains { $0.contains("Merged add-b") } })
         #expect(Git.run(["show", "main:b.txt"], in: root).output == "bee")
         #expect(spawnedLabels(runtime).filter { $0.hasPrefix("Worker:") }.count == 1, "\(spawnedLabels(runtime))")
+        // Its audit is over: the board says nothing of a release any more.
+        #expect(!lead.call("board", [:]).text.contains("released"), "\(lead.call("board", [:]).text)")
+        #expect(!lead.call("board", ["task": "add-b"]).text.contains("Now: worker released"))
+    }
+
+    /// The lead's audit on a full Mac with auto_advance off ends the idle worker to make room (`makeRoom`): the board
+    /// says it was released, and that start_worker (not auto_advance) continues there.
+    @Test func aWorkerReleasedToMakeRoomWithAutoAdvanceOffIsLeftToTheLead() throws {
+        let (root, runtime, lead) = try team(["auto_advance": false])
+        _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "review": "audit"])
+        #expect(!lead.call("start_worker", ["task": "add-b"]).isError)
+        let worker = try #require(task("add-b", root)?.worker)
+        setStatus(worker, LeadActivity.idle(background: nil).text, runtime)
+        try work("add-b", file: "b.txt", root: root, runtime)
+        lead.macLimits = { MacLimits(maxSessions: 1) }
+        let audit = lead.call("audit", ["task": "add-b"])
+        #expect(!audit.isError && audit.text.contains("to make room"), "\(audit.text)")
+        let detail = lead.call("board", ["task": "add-b"]).text
+        #expect(detail.contains("Now: worker released during audit") && detail.contains("start_worker(add-b) continues there")
+                && !detail.contains("fresh worker there (auto_advance)"), "\(detail)")
     }
 
     /// Without the loop (auto_advance off), nothing would start a worker for the findings: the lead's audit releases none.

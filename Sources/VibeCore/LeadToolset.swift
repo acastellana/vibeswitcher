@@ -4413,8 +4413,11 @@ public final class LeadToolset: MCPToolset {
 
     /// "worker released during audit" while the task's worker is the one VibeSwitcher released for its audit
     /// (`LeadTask.released`) and isn't seen live: ended on purpose, its worktree and branch kept, never "worker ended".
+    /// Only while its audit is open (in review, or failed on the verdict until a worker takes its findings): a merged
+    /// or held task's audit is over, and says nothing of it.
     static func releasedText(_ task: LeadTask, _ sessions: [String: LeadSessionInfo]?) -> String? {
-        guard let worker = task.worker, task.released == worker, sessions?[worker]?.live != true else { return nil }
+        guard [.review, .failed].contains(task.status), let worker = task.worker, task.released == worker,
+              sessions?[worker]?.live != true else { return nil }
         return "worker released during audit"
     }
 
@@ -4642,7 +4645,9 @@ public final class LeadToolset: MCPToolset {
             if let receipt = task.receipt { lines.append("\n" + receipt.line) }
             if let sessions, let ended = Self.endedMember(task, sessions) { lines.append("\nNow: \(ended)") }
             if let released = Self.releasedText(task, sessions) {
-                lines.append("\nNow: \(released): its worktree and branch stay; findings its verdict sends back go to a fresh worker there (auto_advance), a clean verdict merges with none.")
+                lines.append("\nNow: \(released): its worktree and branch stay; "
+                             + (advances(task.slug) ? "findings its verdict sends back go to a fresh worker there (auto_advance), a clean verdict merges with none."
+                                : "auto_advance doesn't move it, so start_worker(\(task.slug)) continues there if its verdict sends findings back."))
             }
             // From the vault, where only the task's own worker records it with its done (the board's copy is anyone's).
             if let kept = try? vault.unaudited(root: root, task: task.slug), let commit = kept.reported, let evidence = kept.evidence {
