@@ -29,6 +29,9 @@ struct AccountUsageTests: LeadTeamFixture {
         #"{"session_id":"s","model":{"id":"claude-opus-5-5","display_name":"Opus"},"rate_limits":{"five_hour":{"used_percentage":\#(fiveHour),"resets_at":\#(resets - 3600)},"seven_day":{"used_percentage":\#(weekly),"resets_at":\#(resets)}}}"#
     }
 
+    /// `AccountUsage.fromRefusal`, as an optional whatever it returns.
+    func refusal(_ limit: UsageLimit, model: String?) -> AccountUsage.Limit? { AccountUsage.fromRefusal(limit, model: model) }
+
     func tail(_ lines: String) throws -> UsageLimit {
         let file = temp.url("transcript-\(UUID().uuidString).jsonl")
         try lines.write(to: file, atomically: true, encoding: .utf8)
@@ -57,14 +60,17 @@ struct AccountUsageTests: LeadTeamFixture {
         let fable = try tail(Self.fableRefusal)
         #expect(fable.kind == "seven_day_overage_included" && fable.apiError == "model_requires_usage_credits" && fable.resetsAt == 1793876400)
         // Only the model that ran out: the session's own.
-        let held = AccountUsage.fromRefusal(fable, model: "fable")
+        let held = try #require(refusal(fable, model: "fable"))
         #expect(held.model == "fable" && held.usedPercent == 100 && held.reached && held.resetsAt == 1793876400)
         let weekly = try tail(Self.weeklyRefusal)
         #expect(weekly.kind == "seven_day" && weekly.apiError == "usage_limit_reached")
         // The account's weekly limit: every model, whatever the session ran.
-        #expect(AccountUsage.fromRefusal(weekly, model: "fable").model == nil)
+        #expect(refusal(weekly, model: "fable")?.model == nil)
+        #expect(refusal(weekly, model: nil)?.model == nil)
         // A type that names a model holds that model back.
-        #expect(AccountUsage.fromRefusal(UsageLimit(said: "x", kind: "seven_day_opus"), model: nil).model == "opus")
+        #expect(refusal(UsageLimit(said: "x", kind: "seven_day_opus"), model: nil)?.model == "opus")
+        // A model-only refusal whose model isn't known (Claude's default) is no usage known, never every model.
+        #expect(refusal(fable, model: nil) == nil)
     }
 
     @Test func theStatusLinesWindowsAreTheAccountsAndUnknownUsageHoldsNothingBack() throws {
@@ -182,6 +188,42 @@ struct AccountUsageTests: LeadTeamFixture {
         #expect(!sonnet.isError, "\(sonnet.text)")
         // The lead overrides.
         #expect(!call(lead, "audit", ["task": "two", "override_usage": true]).isError)
+    }
+
+    /// The blind check's case: the lead moves audits to opus after a verifier stopped at the Fable limit, the stopped
+    /// verifier still live. Its refusal holds back fable, the model it was started on, never the new verifier_model.
+    @Test func movingAuditsToAnotherModelAfterTheFableLimitLetsThemStart() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
+        #expect(!call(lead, "start_worker", ["task": "one"]).isError)
+        #expect(!call(lead, "start_worker", ["task": "two"]).isError)
+        #expect(!call(lead, "audit", ["task": "one"]).isError)
+        let verifier = try #require(BoardStore(root: root).load().task("one")?.verifier)
+        runtime.usageLimits[verifier] = try tail(Self.fableRefusal)
+        #expect(call(lead, "audit", ["task": "two"]).isError)
+        #expect(!call(lead, "configure", ["verifier_model": "opus"]).isError)
+        let moved = call(lead, "audit", ["task": "two"])
+        #expect(!moved.isError, "\(moved.text)")
+        #expect(!usageStore.load().limits.contains { $0.model == "opus" }, "\(usageStore.load().limits)")
+        // Fable stays held back.
+        #expect(usageStore.load().current().hold(model: "fable") != nil)
+    }
+
+    /// The blind check's case: a worker on Claude's default model (not known here) stopped at a model-only limit holds
+    /// nothing back: unknown usage is no back-off, and kept for every model it would stop every start.
+    @Test func aModelOnlyRefusalOnAnUnknownModelHoldsNothingBack() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
+        #expect(!call(lead, "start_worker", ["task": "one"]).isError)
+        let worker = try #require(BoardStore(root: root).load().task("one")?.worker)
+        runtime.usageLimits[worker] = try tail(Self.fableRefusal)
+        let started = call(lead, "start_worker", ["task": "two"])
+        #expect(!started.isError, "\(started.text)")
+        #expect(usageStore.load().limits.isEmpty, "\(usageStore.load().limits)")
     }
 
     @Test func aTasksModelGoesToItsWorkersCommandAndTheDefaultIsUnchanged() throws {
