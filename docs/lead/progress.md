@@ -2525,3 +2525,7 @@
 - 2026-11-01 04:16 Automatically (auto_advance): Started a worker on workers-and-verifiers-2 (Workers and verifiers can read the lead's private files through `git diff --no-index` (Bash(git diff:*) bypasses the Read deny)), its after tasks done (turn-this-incident-into-8).
 - 2026-11-01 04:16 Automatically (auto_advance): Started the audit of wallet-card-truth-the at 4a16de46 (Its review is audit).
 - 2026-11-01 04:16 Automatically (auto_advance): Started the audit of app-memory-grows-17 at 1f8f57a1 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-11-01 04:19 Audit of wallet-card-truth-the: complete, clean, round 2: 1 Important closed, 3 Nit open
+- 2026-11-01 04:28 Merged wallet-card-truth-the: Wallet card truth: the record decides the state, and the browser path keeps what was signed
+- 2026-11-01 04:28 Flaky in wallet-card-truth-the's merge: theScreenRouteReadsATerminalTabOffTheMainThread() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 04:28 Planned fix-the-flaky-test-14: theScreenRouteReadsATerminalTabOffTheMainThread() flaked 3 times within 7 days
