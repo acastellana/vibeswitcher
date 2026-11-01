@@ -211,3 +211,7 @@ The user wants more throughput when away. A 4-day load study found freezes and s
 
 The user wants to track which features help and why, to self-improve recursively. Today's changes (one suite per task, strict paths, the boost release) were all made on reasoned guesses; the ledger turns them into checked results.
 
+## 2026-11-01 16:43:21 The Mac's heavy-work slots go from 3 to 2. The user set this in Settings on 2026-11-01.
+
+With three full suites at once, the load reached 50–120 even with each job capped at 4 cores (VS_HEAVY_CORES). Each suite starts thousands of short processes, which the core cap doesn't reach. The recorder data of both VibeSwitcher's and the Wallet Manager's leads agree. Batched merges (merged, off by default) is the other lever: it means fewer full runs.
+
