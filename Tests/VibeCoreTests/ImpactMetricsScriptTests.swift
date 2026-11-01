@@ -81,7 +81,8 @@ struct ImpactMetricsScriptTests {
         #expect(value(out, "worker hours") == "3.5 h (4 tasks ended with a receipt)")
         #expect(value(out, "estimated cost per task") == "$2.33 ($7.00 over 3 receipts with a known cost)")
         #expect(value(out, "usage-limit stops")?.hasPrefix("n/a") == true)
-        // Freezes on the day: 05:00, 10:00:30 (a .txt and a .log: one), 10:30, 20:00; 12:00 the day after isn't.
+        // Freezes on the day: 05:00, 10:00:30 (a .txt and a .log: one), 10:30, 20:00; 23:00 the day before and 12:00 the day
+        // after aren't (the one before also shows no report of the day was pruned).
         #expect(value(out, "freezes/h") == "0.17 (4 hang reports in 24.0 h)")
         // Samples: 10:00–10:59 at load 30, 20:00–21:59 at load 50; 05:00 has none within 2 minutes.
         #expect(out.contains("    24-36      2.00  (2 / 1.0 h)"), "\(out)")
@@ -97,6 +98,21 @@ struct ImpactMetricsScriptTests {
         #expect(value(run.output, "merges/h") == "0.67 (2 merges in 3.0 h; 0.67 per active hour, 3 h with lead activity)")
         // Freezes at 10:00:30 and 10:30.
         #expect(value(run.output, "freezes/h") == "0.67 (2 hang reports in 3.0 h)")
+    }
+
+    /// The app prunes hang reports (a week, at most 500 MB): hours before the oldest report left aren't counted as
+    /// freeze-free. The fixtures' oldest report is 2026-10-19 23:00.
+    @Test func hoursWhoseHangReportsWerePrunedArentCounted() throws {
+        let (project, home) = try layout()
+        // From 23:00 to 12:00: 13 h covered, with the freezes at 23:00, 05:00, 10:00:30 and 10:30.
+        let partial = try metrics(["2026-10-19T12:00..2026-10-20T12:00", "--project", project.path, "--home", home.path])
+        #expect(partial.status == 0, "\(partial.output)")
+        #expect(value(partial.output, "freezes/h")
+            == "0.31 (4 hang reports in 13.0 h; partial: reports before 2026-10-19 23:00 were pruned by the app, which keeps a week, at most 500 MB)")
+        // A day before every report left: no number at all, for freezes or their load buckets.
+        let pruned = try metrics(["2026-10-18..2026-10-18", "--project", project.path, "--home", home.path])
+        #expect(pruned.status == 0, "\(pruned.output)")
+        #expect(value(pruned.output, "freezes/h")?.hasPrefix("n/a (reports before 2026-10-19 23:00 were pruned") == true, "\(pruned.output)")
     }
 
     @Test func missingSourcesAreNotApplicableNeverGuessed() throws {

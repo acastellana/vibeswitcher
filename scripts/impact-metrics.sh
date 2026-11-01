@@ -128,15 +128,26 @@ samples, recorded_merges = recorder("load"), recorder("merges")
 if samples is not None:
     samples = sorted((s for s in samples if s.get("load")), key=lambda s: s["_at"])
 
-hangs = None
+# The app prunes hang reports (HangWatchdog.prune: a week, at most 500 MB, oldest first; before 2026-10-28 12:10 only
+# the 10 newest), so a stretch before the oldest report left has lost its freezes: those hours aren't counted, never
+# read as freeze-free. With no report at all, the last week is covered.
+hangs, covered_from = None, None
 if os.path.isdir(debug):
-    hangs = set()
+    hangs, stamps = set(), []
     for name in os.listdir(debug):
         m = re.fullmatch(r"hang-(\d{8}-\d{6})\.(txt|log)", name)
         if m:  # a freeze writes a .txt and a .log under one stamp: count it once
             at = local_epoch(m.group(1), "%Y%m%d-%H%M%S")
+            stamps.append(at)
             if within(at):
                 hangs.add(at)
+    covered_from = min(stamps) if stamps else time.time() - 7 * 86_400
+covered_start = max(t0, covered_from) if covered_from is not None else t0
+covered_hours = max(0.0, min(t1, time.time()) - covered_start) / 3600
+pruned_note = ""
+if covered_from is not None and covered_start > t0:
+    pruned_note = (f"reports before {dt.datetime.fromtimestamp(covered_start).strftime('%Y-%m-%d %H:%M')} were pruned"
+                   " by the app, which keeps a week, at most 500 MB")
 
 EDGES = [0, 12, 24, 36, 48, 72, 100, 150]  # as scripts/load-report.sh buckets the 1-minute load
 NAMES = [f"{l}-{h}" for l, h in zip(EDGES, EDGES[1:])] + [f"{EDGES[-1]}+"]
@@ -313,13 +324,19 @@ for root in roots:
 print(f"Mac-wide ({home})")
 if hangs is None:
     line("freezes/h", "n/a", "no debug folder")
+elif covered_hours <= 0:
+    line("freezes/h", "n/a", pruned_note)
 else:
-    line("freezes/h", ratio(len(hangs), hours), f"{len(hangs)} hang reports in {hours:.1f} h")
+    line("freezes/h", ratio(len(hangs), covered_hours), f"{len(hangs)} hang reports in {covered_hours:.1f} h"
+         + (f"; partial: {pruned_note}" if pruned_note else ""))
+covered = [s for s in samples or [] if s["_at"] >= covered_start]
 if samples is None or not samples:
     line("freezes/h by load bucket", "n/a", "no load recorder load-<day>.jsonl in the range")
+elif hangs is None or covered_hours <= 0 or not covered:
+    line("freezes/h by load bucket", "n/a", "no debug folder" if hangs is None else pruned_note or "no load sample in the covered hours")
 else:
     rows = {b: [0, 0] for b in NAMES}  # minutes sampled, freezes
-    for s in samples:
+    for s in covered:
         rows[bucket(s["load"][0])][0] += 1
     unsampled = 0
     for at in sorted(hangs or []):
@@ -328,7 +345,7 @@ else:
             unsampled += 1
         else:
             rows[bucket(s["load"][0])][1] += 1
-    print("  freezes/h by load bucket (1-min load: freezes / hours sampled):")
+    print("  freezes/h by load bucket (1-min load: freezes / hours sampled)" + (f", partial: {pruned_note}" if pruned_note else "") + ":")
     for b in NAMES:
         minutes, freezes = rows[b]
         if minutes or freezes:
