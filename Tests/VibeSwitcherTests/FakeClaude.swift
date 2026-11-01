@@ -94,12 +94,14 @@ state = {
     "voiceStarts": 0,        # recordings started
     "voiceCancels": 0,       # recordings cancelled (Esc)
     "voiceInserts": 0,       # transcripts written into the box
+    "strayed": 0,            # spaces typed by held chains that broke before recording (a stall past "gap"): they stay
     "killed": 0,             # ⌃U taken
 }
 # "awaiting": a transcript went in and a second push of the key would send it (2.1.312's awaitingVoiceSubmitDoubleTap);
-# "push": when the first push came; "submitAt": when an armed send fires (120 ms after the second push).
+# "push": when the first push came; "submitAt": when an armed send fires (120 ms after the second push); "typed": the
+# spaces the chain going now typed (its first two presses).
 VOICE = {"before": "", "last": 0.0, "repeats": 0, "awaiting": False, "push": 0.0, "submitAt": None,
-         "until": 0.0, "box": "", "processed": 0}
+         "until": 0.0, "box": "", "processed": 0, "typed": 0}
 METER = ESC + "[38;2;215;119;87m" + "▃" + ESC + "[39m"   # its recording-level cursor: a coloured bar, not dim
 QUIET = ESC + "[38;2;128;128;128m" + "▁" + ESC + "[39m"  # the same below a low level: grey
 CARET = ESC + "[7m" + " " + ESC + "[27m"                  # a focused terminal's caret at the box's end
@@ -374,6 +376,10 @@ def voice_space():
     if t - VOICE["last"] <= state["gap"] and state["recording"] in ("", "warming") and VOICE["repeats"] >= 0:
         VOICE["repeats"] += 1
     else:
+        # A new chain. The spaces the last one typed stay in the box if it broke before recording (a stall past `gap`
+        # between two repeats, as on a loaded Mac): a recording takes out only its own chain's.
+        state["strayed"] += VOICE["typed"]
+        VOICE["typed"] = 0
         VOICE["repeats"] = 0
         VOICE["before"] = state["input"]
     VOICE["last"] = t
@@ -385,6 +391,7 @@ def voice_space():
             return False
         # The warmup's spaces go; it records.
         state["input"] = VOICE["before"]
+        VOICE["typed"] = 0
         state["recording"] = "listening"
         VOICE["awaiting"] = False
         VOICE["submitAt"] = None
@@ -394,7 +401,10 @@ def voice_space():
     if VOICE["repeats"] >= 1:
         state["recording"] = "warming"
     # Its first two presses are typed; the later repeats are swallowed.
-    return VOICE["repeats"] >= 2
+    if VOICE["repeats"] < 2:
+        VOICE["typed"] += 1
+        return False
+    return True
 
 
 def finish_recording(submit=False):
@@ -758,6 +768,9 @@ def key(name):
             state["recording"] = ""
             state["voiceCancels"] += 1
             return
+        if name != "space":
+            # Another key: a chain's spaces typed before it aren't a held Space's strays.
+            VOICE["typed"] = 0
         if name == "space" and voice_space():
             return
         if name not in ("up", "down"):

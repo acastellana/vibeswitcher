@@ -416,9 +416,13 @@ struct ClaudeDictationTests {
 
         controller.press(h.key, agent: .claude) { "" }
         try await h.waitFor { controller.listening }
-        #expect(h.agent["recording"] as? String == "listening")
-        // The warmup's spaces are gone: what it hears is dim, not typed.
-        #expect(input(h) == "")
+        let heard = h.agent
+        #expect(heard["recording"] as? String == "listening")
+        // The warmup's spaces are gone: what it hears is dim, not typed. A chain that broke before it recorded (a stall
+        // past Claude's 120 ms between two Spaces, the app's or Claude's, on a loaded Mac) leaves the spaces it typed, as
+        // Claude's does: those alone may be there, and they never reach the composer nor stay in the box (below).
+        let strayed = heard["strayed"] as? Int ?? 0
+        #expect(heard["input"] as? String == String(repeating: " ", count: strayed), "strayed \(strayed)")
         controller.release()
         try await h.waitFor { controller.phase == .idle }
 
