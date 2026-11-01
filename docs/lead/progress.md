@@ -2815,3 +2815,4 @@
 - 2026-11-01 18:30 Automatically (auto_advance): Cleaned up codex-s-tui-renders (freed 1.2 GB of build output and temporary folders). It stays done.
 - 2026-11-01 18:30 Automatically (auto_advance): Cleaned up wallet-e2e-sh-the; ended pid 44766 (Worker: wallet-e2e.sh: the real-testnet case no longer waits for Proposed before the sign POST (the Wallet Manager sends it with the POST now)) (freed 1.2 GB of build output and temporary folders). It stays done.
 - 2026-11-01 18:31 Update: Codex workers work (after your next install) — What changed: a task can now run on Codex instead of Claude (add_task or update_task with agent: codex), always with a Claude audit before it merges, to spread usage across accounts. Codex workers are…
+- 2026-11-01 18:36 Workflow: heavy_slots = `2`
