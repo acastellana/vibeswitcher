@@ -39,8 +39,9 @@ public enum WorkingPolicy {
     public static let heavyJobs = "- Long or many-core jobs (full suites, release builds, mutation testing, fuzzing, VMs, load, "
         + "simulation and perf runs) run under `vs-heavy` (`vs-heavy --timeout 2h <command>` for one over an hour), never bare: "
         + "it holds one of the Mac-wide slots every project's work shares. Size the job to the slot's share of the cores, "
-        + "which it exports as `$VS_HEAVY_CORES`: `swift build -j $VS_HEAVY_CORES` (and `swift test -j`), "
-        + "`node --test --test-concurrency=$VS_HEAVY_CORES`, `make -j $VS_HEAVY_CORES`, a test runner's worker count."
+        + "which it exports as `$VS_HEAVY_CORES`: `node --test --test-concurrency=$VS_HEAVY_CORES`, `make -j $VS_HEAVY_CORES`, "
+        + "a test runner's worker count; SwiftPM's `-j N` runs N modules with N compiles each, so "
+        + "`swift build -j 2 -Xswiftc -j$(( (VS_HEAVY_CORES + 1) / 2 ))` (swift test too)."
 
     /// The policy as each role's prompt has it.
     public static func section(_ text: String) -> String {

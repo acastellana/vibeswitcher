@@ -642,8 +642,8 @@ struct TestLockTests {
         #expect(!lines(a.output).joined().contains("waiting for"))
     }
 
-    /// swift build and swift test build on the slot's share of the cores (`-j`, from vs-heavy's VS_HEAVY_CORES): 4 on a
-    /// 12-core Mac with 3 slots, not all 12.
+    /// swift build and swift test build on the slot's share of the cores (from vs-heavy's VS_HEAVY_CORES: 4 on a 12-core
+    /// Mac with 3 slots): two modules at once, two frontends each, not all 12 cores.
     @Test func theScriptBuildsAndTestsOnItsSlotsShareOfTheCores() throws {
         let (bin, log) = try fakes()
         let run = try start("A", sleep: 0, bin: bin, arguments: ["--filter", "X"],
@@ -652,12 +652,12 @@ struct TestLockTests {
         #expect(run.process.terminationStatus == 0, "\(lines(run.output))")
         // In a worktree the lead made, scripts/lib/module-cache.sh puts its cache's path first.
         let said = lines(log + ".args").map { $0.replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression) }
-        #expect(said == ["A build -j 4", "A test -j 4 --filter X"], "\(lines(log + ".args"))")
+        #expect(said == ["A build -j 2 -Xswiftc -j2", "A test -j 2 -Xswiftc -j2 --filter X"], "\(lines(log + ".args"))")
     }
 
-    /// heavy_swift (scripts/lib/swift-jobs.sh, which test.sh and build-app.sh run swift through): `-j N` with
-    /// VS_HEAVY_CORES a whole number above 0, else swift as before, on every core; build-app.sh's release build goes
-    /// through it under vs-heavy.
+    /// heavy_swift (scripts/lib/swift-jobs.sh, which test.sh and build-app.sh run swift through): with VS_HEAVY_CORES a
+    /// whole number N above 0, two modules at once with N ÷ 2 (rounded up) frontends each, else swift as before, on every
+    /// core; build-app.sh's release build goes through it under vs-heavy.
     @Test func heavySwiftBoundsTheJobsOnlyWhenGivenAShare() throws {
         let (bin, log) = try fakes()
         func run(_ cores: String?) throws -> String {
@@ -680,7 +680,9 @@ struct TestLockTests {
         #expect(try run("") == " build -c release")
         #expect(try run("x") == "x build -c release")
         #expect(try run("0") == "0 build -c release")
-        #expect(try run("4") == "4 build -j 4 -c release")
+        #expect(try run("4") == "4 build -j 2 -Xswiftc -j2 -c release")
+        #expect(try run("5") == "5 build -j 2 -Xswiftc -j3 -c release")
+        #expect(try run("1") == "1 build -j 2 -Xswiftc -j1 -c release")
         let buildApp = try String(contentsOf: Self.repo.appendingPathComponent("scripts/build-app.sh"), encoding: .utf8)
         #expect(buildApp.contains("source scripts/lib/swift-jobs.sh"))
         #expect(buildApp.contains("Resources/bin/vs-heavy --as scripts/build-app.sh bash -c 'heavy_swift build -c release'"))
