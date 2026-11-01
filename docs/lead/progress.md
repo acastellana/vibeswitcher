@@ -2804,3 +2804,7 @@
 - 2026-11-01 17:46 Planned theloginshellrunsinasess: theLoginShellRunsInASessionOfItsOwn: flakes under load and leaves its fake shell looping forever when it fails
 - 2026-11-01 17:50 Raised test-under-load-sh-2 to audit (the risk check, at ea955926): it changes test or build infrastructure the suite relies on (scripts/test-under-load.sh)
 - 2026-11-01 17:50 Automatically (auto_advance): test-under-load-sh-2 is audited, not merged: it changes test or build infrastructure the suite relies on (scripts/test-under-load.sh) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-01 17:56 Started a worker on theloginshellrunsinasess
+- 2026-11-01 17:56 Automatically (auto_advance): Started a worker on theloginshellrunsinasess (theLoginShellRunsInASessionOfItsOwn: flakes under load and leaves its fake shell looping forever when it fails).
+- 2026-11-01 17:56 Automatically (auto_advance): Started the audit of boost-release-6-7 at 56334f18 (Its review is audit).
+- 2026-11-01 18:07 Merged codex-s-tui-renders: Codex's TUI renders blank and never starts its MCP server under the session host: find why, then enable Codex workers
