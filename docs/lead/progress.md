@@ -2722,3 +2722,13 @@
 - 2026-11-01 13:10 Automatically (auto_advance): Merged wallet-path-robustness (Wallet path robustness: no typed path is ever run, polls coalesce, records are bounded and read safely) into main at 4e1b5212, on its passing audit and the full test run.
 - 2026-11-01 13:15 Planned heavy-jobs-fit-their: Heavy jobs fit their slot: vs-heavy gives each job a core budget, and our builds and tests honour it (review audit)
 - 2026-11-01 13:22 Merged leadauditreleasetests: LeadAuditReleaseTests: the wait for the message has no overall time limit (line 139) (no audit: review none)
+- 2026-11-01 13:22 Automatically (auto_advance): Merged leadauditreleasetests (LeadAuditReleaseTests: the wait for the message has no overall time limit (line 139)) into main at 43fcb510, review none: on its worker's done report on 0704019f and the full test run.
+- 2026-11-01 13:22 Automatically (auto_advance): Cleaned up wallet-path-robustness (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-01 13:22 Automatically (auto_advance): Cleaned up leadauditreleasetests; ended pid 4007 (Worker: LeadAuditReleaseTests: the wait for the message has no overall time limit (line 139)) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 13:23 Update: Wallet requests: VibeSwitcher's production-readiness pass is complete — **All four hardening tasks merged:**
+- 2026-11-01 13:23 Started a worker on wallet-requests-know
+- 2026-11-01 13:23 Automatically (auto_advance): Started a worker on wallet-requests-know (Wallet requests know Ethereum, Base and their testnets (names, explorer links, browser-wallet chain switch)), its after tasks done (wallet-path-robustness).
+- 2026-11-01 13:24 Started a worker on heavy-jobs-fit-their
+- 2026-11-01 13:24 Automatically (auto_advance): Started a worker on heavy-jobs-fit-their (Heavy jobs fit their slot: vs-heavy gives each job a core budget, and our builds and tests honour it).
+- 2026-11-01 13:24 Automatically (auto_advance): Started the audit of read-only-git-parser at 51a7e8a0 (Its review is audit).
+- 2026-11-01 13:25 Audit of read-only-git-parser: complete, clean, round 2: 1 Important closed, 1 Nit closed
