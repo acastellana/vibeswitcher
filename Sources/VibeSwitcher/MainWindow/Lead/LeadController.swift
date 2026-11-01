@@ -189,7 +189,7 @@ struct TeamReading {
                      observer: LeadObserver) -> TeamReading {
         var team = TeamReading(hosted: hosted, sessions: sessions)
         let workers = Set(board.tasks.compactMap(\.worker))
-        for id in board.tasks.flatMap({ [$0.worker, $0.verifier] }).compactMap({ $0 }) where team.watched[id] == nil {
+        for id in board.tasks.flatMap(\.members) where team.watched[id] == nil {
             guard let info = hosted[id], info.isLive, let session = sessions[id] else { continue }
             team.watched[id] = observer.watching(info, agentPid: session.pid)
             if workers.contains(id) {
@@ -203,7 +203,7 @@ struct TeamReading {
         team.workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
         team.advancing = team.workflow.autoAdvance && board.tasks.contains { $0.status == .review } && LeadAdvance.running(BoardStore(root: root))
         // The table is read only when the scan lacks a member's agent (rare), here off the main thread.
-        let unseen = board.tasks.flatMap { [$0.worker, $0.verifier] }.compactMap { $0 }.compactMap { id in
+        let unseen = board.tasks.flatMap(\.members).compactMap { id in
             hosted[id].flatMap { $0.isLive && sessions[id] == nil ? (id: id, session: $0) : nil }
         }
         if !unseen.isEmpty, let table = ProcessTable.trySnapshot() {
@@ -1470,7 +1470,7 @@ final class LeadController: ObservableObject {
         var seen: [String: LeadWitness.Seen] = [:]
         let now = Date()
         let workers = Set(board.tasks.compactMap(\.worker))
-        for id in board.tasks.flatMap({ [$0.worker, $0.verifier] }).compactMap({ $0 }) {
+        for id in board.tasks.flatMap(\.members) {
             guard let info = hosted[id] else { continue }
             let session = team.sessions[id]
             // A turn that ended on an API error reads as finished or waiting; its transcript says which it was. One that

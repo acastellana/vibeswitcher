@@ -115,3 +115,66 @@ struct StuckVerifierPromptTests {
         #expect(!transcript.contains("\"ran " + command), "a Yes went in: \(transcript.suffix(400))")
     }
 }
+
+/// With several finders the verifier is only the first (`LeadTask.panel`): the witness read finders 2..N not at all, so
+/// a finder waiting on a prompt was never declined (the blind check's, 2026-11-01). Each finder's transcript is read
+/// (`TeamReading.read`, over `LeadTask.members`), and the one waiting on a prompt is stuck after the wait.
+struct StuckFinderPromptTests {
+    let temp = Scratch()
+
+    @Test func aSecondFinderWaitingOnAPromptIsReadAndStuckAfterTheWait() throws {
+        let home = temp.url("finders").path
+        let states = (home as NSString).appendingPathComponent("state")
+        let projects = (home as NSString).appendingPathComponent(".claude/projects/-r")
+        try FileManager.default.createDirectory(atPath: states, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: projects, withIntermediateDirectories: true)
+        let observer = LeadObserver(home: home, stateFile: { URL(fileURLWithPath: (states as NSString).appendingPathComponent("\($0).json")) })
+        let started = ISO8601DateFormatter().date(from: "2026-11-01T00:20:00Z")!
+        let command = "git ls-files -s x; ls"
+        let asking = """
+        {"isSidechain":false,"type":"user","timestamp":"2026-11-01T00:30:00Z","message":{"role":"user","content":"Audit it."}}
+        {"isSidechain":false,"type":"assistant","timestamp":"2026-11-01T00:31:00Z","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"\(command)"}}]}}
+
+        """
+        var hosted: [String: HostSession] = [:]
+        var sessions: [String: Session] = [:]
+        var ids: [String] = []
+        for (index, tty) in ["ttys951", "ttys952", "ttys953"].enumerated() {
+            let id = UUID()
+            ids.append(id.uuidString)
+            hosted[id.uuidString] = HostSession(id: id, tty: tty, childPID: 1, cwd: "/r", command: "claude", label: "Verifier: audit-me",
+                                                agent: "claude", title: "", startedAt: started, cols: 120, rows: 40, exit: nil)
+            let transcript = (projects as NSString).appendingPathComponent("\(id.uuidString.lowercased()).jsonl")
+            try (index == 1 ? asking : "").write(toFile: transcript, atomically: true, encoding: .utf8)
+            var hook = HookState(agent: .claude, tty: tty, lastEvent: "PreToolUse", lastEventAt: started.timeIntervalSince1970)
+            hook.agentPid = 7200 + Int32(index)
+            hook.transcriptPath = transcript
+            try hook.save(to: observer.stateFile(tty))
+            var session = Session(tty: tty, agent: .claude, pid: 7200 + Int32(index), startedAt: started, cwd: "/r", project: "r", task: nil,
+                                  status: index == 1 ? .needsInput : .working, statusSince: started, detail: nil, hasHooks: true,
+                                  inTerminalApp: false)
+            session.hostID = id
+            sessions[id.uuidString] = session
+        }
+        var task = LeadTask(slug: "audit-me", title: "audit-me", contract: LeadContract(goal: "", acceptance: [], boundaries: [], context: ""),
+                            status: .review)
+        task.verifier = ids[0]
+        task.panel = LeadAuditPanel(focuses: ["contract and acceptance", "bugs and regressions", "tests and edge cases"], sessions: ids, reported: [],
+                                    commit: "c1", logs: [], run: "the test command passed")
+        #expect(task.members == ids)
+        var board = LeadBoard()
+        board.tasks = [task]
+
+        let team = TeamReading.read(root: home, board: board, hosted: hosted, sessions: sessions, observer: observer)
+        let pending = try #require(team.watched[ids[1]]?.tail?.pending, "finder 2 wasn't read")
+        #expect(pending.text == "Run: " + command)
+        // As the witness builds its view of finder 2: waiting, with what it waits on.
+        let since = Date(timeIntervalSince1970: pending.since ?? 0)
+        let seen = [ids[1]: LeadWitness.Seen(live: true, status: .needsInput, since: since, pending: pending,
+                                             started: started.timeIntervalSince1970, boundAt: started.timeIntervalSince1970,
+                                             toolsAt: started.timeIntervalSince1970 + 2)]
+        #expect(LeadWitness.stuckPrompts(board: board, seen: seen, now: since.addingTimeInterval(60)).isEmpty)
+        let stuck = LeadWitness.stuckPrompts(board: board, seen: seen, now: since.addingTimeInterval(LeadWitness.promptWait + 1))
+        #expect(stuck.map(\.session) == [ids[1]] && stuck.first?.prompt.text == "Run: " + command, "\(stuck)")
+    }
+}

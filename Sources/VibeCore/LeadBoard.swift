@@ -711,6 +711,15 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// Notes kept per task, the newest: an approval is rarely more than a few dozen messages back.
     public static let keptNotes = 100
 
+    /// The sessions the witness watches for the task: its worker, its verifier and, with several finders, each finder
+    /// (`panel.sessions`: the verifier is only the first). A finder 2 left out was never seen waiting on a prompt, so no
+    /// one declined it (`LeadWitness.stuckPrompts`), and its audit hung as in the incident of 2026-11-01.
+    public var members: [String] {
+        var ids = [worker, verifier].compactMap { $0 }
+        for id in panel?.sessions ?? [] where !ids.contains(id) { ids.append(id) }
+        return ids
+    }
+
     /// The verifiers whose word the task waits on: with several finders, those that haven't submitted yet (one that
     /// has may end while the others work); else its verifier.
     public var awaitedVerifiers: [String] {
