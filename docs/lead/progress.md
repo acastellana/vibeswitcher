@@ -2808,3 +2808,6 @@
 - 2026-11-01 17:56 Automatically (auto_advance): Started a worker on theloginshellrunsinasess (theLoginShellRunsInASessionOfItsOwn: flakes under load and leaves its fake shell looping forever when it fails).
 - 2026-11-01 17:56 Automatically (auto_advance): Started the audit of boost-release-6-7 at 56334f18 (Its review is audit).
 - 2026-11-01 18:07 Merged codex-s-tui-renders: Codex's TUI renders blank and never starts its MCP server under the session host: find why, then enable Codex workers
+- 2026-11-01 18:07 Automatically (auto_advance): Merged codex-s-tui-renders (Codex's TUI renders blank and never starts its MCP server under the session host: find why, then enable Codex workers) into main at 8f44a65c, on its passing audit and the full test run.
+- 2026-11-01 18:07 Audit of boost-release-6-7: incomplete, clean, round 1: 3 Important open, 3 Nit open
+- 2026-11-01 18:30 Merged wallet-e2e-sh-the: wallet-e2e.sh: the real-testnet case no longer waits for Proposed before the sign POST (the Wallet Manager sends it with the POST now) (no audit: review none)

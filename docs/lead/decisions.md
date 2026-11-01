@@ -215,3 +215,7 @@ The user wants to track which features help and why, to self-improve recursively
 
 With three full suites at once, the load reached 50–120 even with each job capped at 4 cores (VS_HEAVY_CORES). Each suite starts thousands of short processes, which the core cap doesn't reach. The recorder data of both VibeSwitcher's and the Wallet Manager's leads agree. Batched merges (merged, off by default) is the other lever: it means fewer full runs.
 
+## 2026-11-01 18:08:55 Correction to "heavy slots go from 3 to 2": there was no Settings value for heavy slots. The count came from VIBESWITCHER_HEAVY_SLOTS or cores ÷ 4 (3 here). boost-release-6-7 adds it to Settings › Project lead and mac-limits.json, default cores ÷ 6 (2 here), with the lead's lock and vs-heavy reading one count.
+
+The lead asked the user to change a setting that didn't exist, so the load stayed at three heavy jobs. The worker found this while fixing F6. Lesson: verify a setting exists before asking the user to change it.
+
