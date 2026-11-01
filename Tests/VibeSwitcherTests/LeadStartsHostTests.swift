@@ -31,12 +31,7 @@ import Testing
         func stop() {
             let started = (try? String(contentsOfFile: dir + "/starts", encoding: .utf8)) ?? ""
             for pid in started.split(separator: "\n").compactMap({ pid_t($0) }) {
-                kill(-pid, SIGKILL)
-                kill(pid, SIGKILL)
-                _ = BenchHostTests.waitForExit(of: pid, timeout: hangGuard)
-                // This process's child (the client started it): reaped here, as the client that would have is gone.
-                var status: Int32 = 0
-                while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+                endClientHost(pid)
             }
         }
 

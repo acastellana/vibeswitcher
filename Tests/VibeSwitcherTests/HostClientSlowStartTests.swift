@@ -47,7 +47,7 @@ import Testing
         // The real host, 5 s late: past the 3 s the client used to give it.
         let client = try client(dir) { "sleep 5\nexec '\($0)' \"$@\"" }
         // The host, and its sleep should it still be in it (its own process group: the client starts it in a session).
-        defer { if let host = pid(dir) { kill(-host, SIGKILL); kill(host, SIGKILL); _ = BenchHostTests.waitForExit(of: host, timeout: hangGuard) } }
+        defer { if let host = pid(dir) { endClientHost(host) } }
         var answer: String??
         client.ensureHost { answer = .some($0) }
         #expect(await until { answer != nil })
@@ -66,7 +66,7 @@ import Testing
         let theirs = try client(dir + "/other", shared: dir) { "exec '\($0)' \"$@\"" }
         defer {
             for folder in [dir, dir + "/other"] {
-                if let host = pid(folder) { kill(-host, SIGKILL); kill(host, SIGKILL); _ = BenchHostTests.waitForExit(of: host, timeout: hangGuard) }
+                if let host = pid(folder) { endClientHost(host) }
             }
         }
         var answer: String??

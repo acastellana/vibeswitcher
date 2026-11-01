@@ -22,7 +22,7 @@ struct HostStopReapsTests {
     /// reaps its program as it goes.
     @Test(hostTestLimit) func aSessionToldToEndAndClosedReapsItsProgram() throws {
         let probe = SessionProbe()
-        let request = SpawnRequest(cwd: "/tmp", command: "echo up; \(keepRunning)", env: [:], cols: 80, rows: 24,
+        let request = SpawnRequest(cwd: scratchRoot.path, command: "echo up; \(keepRunning)", env: [:], cols: 80, rows: 24,
                                    keepShell: false, label: "T", agent: nil)
         let session = try probe.queue.sync {
             let session = try HostedSession.spawn(request, shell: "/bin/sh", launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin"],
