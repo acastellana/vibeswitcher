@@ -137,6 +137,21 @@ struct LoadRecorderTests {
         #expect(sample.heavy.held.map(\.project) == ["proj"])
     }
 
+    /// A heavy slot held from a folder in no repository: its note's "project" line (vs-heavy's, the folder's own
+    /// name) isn't recorded either, as a process group's folder isn't.
+    @Test func aSlotHeldOutsideARepositoryNamesNoFolder() throws {
+        let home = "/Users/me"
+        let outside = TestLock.Holder(slot: 1, note: "pid 7, ./build.sh in \(home)/Documents/acme-acquisition, since 10:00",
+                                      since: Date(), project: "acme-acquisition")
+        let inside = TestLock.Holder(slot: 2, note: "pid 8, scripts/test.sh in \(home)/dev/proj, since 10:00", since: Date(), project: "proj")
+        let recorder = LoadRecorder(folder: temp.url("stats"), sources: sources(
+            load: 3, project: { LoadStats.project(ofFolder: $0, home: home, isRepository: { $0 == "\(home)/dev/proj" }) },
+            holders: [outside, inside]))
+        let sample = try recorder.write(census: [], at: Date())
+        #expect(sample.heavy.held.map(\.project) == [nil, "proj"], "\(sample.heavy.held)")
+        #expect(!(try LoadStats.line(sample)).contains("acme"))
+    }
+
     @Test func overLoad48TheBusiestGroupsAreNamedByCommandAndProject() {
         // Over 60 s: a compiler group (leader bash) at 3 cores, a second one in the same project merged with it, a
         // test group in another project, and an idle one under 5 %.
