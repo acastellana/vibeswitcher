@@ -2140,15 +2140,20 @@ extension Driver {
             // Too few hours for a line (a slow Mac, a short run): said all the same.
             run.note("RESULT soak-simulated-hour-growth-mb n/a (\(run.hours.count) simulated hours: a line needs 3)")
         }
-        // Each real-shaped worker's footprint once it ended and was removed, after the first two, as a line: MB a worker.
-        let workers = Array(run.workers.map(\.footprint).enumerated().dropFirst(2))
-        if workers.count >= 3 {
-            let meanX = workers.map { Double($0.offset) }.reduce(0, +) / Double(workers.count)
-            let meanY = workers.map(\.element).reduce(0, +) / Double(workers.count)
-            let spread = workers.reduce(0.0) { $0 + pow(Double($1.offset) - meanX, 2) }
-            let slope = workers.reduce(0.0) { $0 + (Double($1.offset) - meanX) * ($1.element - meanY) } / spread
-            run.note(String(format: "RESULT soak-worker-growth-mb %.2f (each worker's footprint once ended, workers 3-%d: %.1f → %.1f MB)", slope,
-                            run.workers.count, workers.first?.element ?? 0, workers.last?.element ?? 0))
+        // Each real-shaped worker's footprint once it ended and was removed, after the first two, as a line: MB a worker;
+        // and malloc's bytes in use the same way (what's live), so freed pages kept for reuse read apart from live growth.
+        func slope(_ values: [Double]) -> Double {
+            let points = Array(values.enumerated().dropFirst(2))
+            let meanX = points.map { Double($0.offset) }.reduce(0, +) / Double(points.count)
+            let meanY = points.map(\.element).reduce(0, +) / Double(points.count)
+            let spread = points.reduce(0.0) { $0 + pow(Double($1.offset) - meanX, 2) }
+            return points.reduce(0.0) { $0 + (Double($1.offset) - meanX) * ($1.element - meanY) } / spread
+        }
+        if run.workers.count >= 5 {
+            let footprints = run.workers.map(\.footprint), live = run.workers.map(\.malloc)
+            run.note(String(format: "RESULT soak-worker-growth-mb %.2f (each worker's footprint once ended, workers 3-%d: %.1f → %.1f MB, the highest %.1f; "
+                            + "malloc in use %+.2f MB a worker: %.1f → %.1f MB)", slope(footprints), run.workers.count, footprints[2],
+                            footprints.last ?? 0, footprints.max() ?? 0, slope(live), live[2], live.last ?? 0))
         } else if !run.without.contains("workers") {
             run.note("RESULT soak-worker-growth-mb n/a (\(run.workers.count) workers ended: a line needs 5)")
         }
