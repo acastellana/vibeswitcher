@@ -19,7 +19,7 @@
 # swift build and swift test, --perf's too, run under vs-heavy (Resources/bin/vs-heavy, the Mac-wide lock for heavy
 # work that every project's sessions have on PATH): while another run holds it (another worker's suite in any project,
 # a build-app.sh, a merge's tests), this one waits, saying for whom. The web tests and the leftover check run after
-# it's let go.
+# it's let go. Both build on the slot's share of the cores, `-j $VS_HEAVY_CORES` (scripts/lib/swift-jobs.sh).
 #
 # The phone's web tests run after swift test, in the same scratch home and TMPDIR: each Tests/Web/*.test.mjs with
 # node, a failing one named, then one line saying how many passed. Without node on PATH the run stops before the
@@ -147,6 +147,7 @@ fi
 
 source scripts/lib/scratch.sh
 source scripts/lib/module-cache.sh
+source scripts/lib/swift-jobs.sh
 
 scratch_tmpdir vs-test
 mkdir -p "$tool_scratch/home" || exit 1
@@ -223,7 +224,8 @@ else
     defaults_before=$(build_defaults)
     # A failed build leaves a mark, so what needs its products is skipped rather than failed (or run on an older build).
     export VS_BUILD_FAILED_MARK=$tool_scratch/build-failed
-    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; swift test "$@"' scripts/test.sh "$@"
+    # Both on the slot's share of the cores, VS_HEAVY_CORES (scripts/lib/swift-jobs.sh).
+    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
     status=$?
     check_preferences "$preferences_before" "$defaults_before" || status=1
     # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf.

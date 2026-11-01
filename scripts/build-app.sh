@@ -11,6 +11,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
+source scripts/lib/swift-jobs.sh
 
 # --- The keychain search list (this block is the same in setup-signing.sh and build-app.sh; test-signing.sh checks) ---
 LOGIN_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
@@ -94,8 +95,9 @@ fi
 
 scratch_tmpdir vs-build
 # One build or test run at a time on this Mac, every project's included (Resources/bin/vs-heavy): the build waits while
-# another holds the lock, saying for whom.
-Resources/bin/vs-heavy --as scripts/build-app.sh swift build -c release
+# another holds the lock, saying for whom, and builds on its slot's share of the cores, `-j $VS_HEAVY_CORES`
+# (scripts/lib/swift-jobs.sh).
+Resources/bin/vs-heavy --as scripts/build-app.sh bash -c 'heavy_swift build -c release'
 BIN="$(swift build -c release --show-bin-path)"
 APP="build/VibeSwitcher.app"
 

@@ -39,6 +39,16 @@ public struct TestLock: Sendable {
     public static let sampleVariable = "VIBESWITCHER_HEAVY_SAMPLE"
     /// How many slots, when set (a whole number above 0); else `defaultSlots`.
     public static let slotsVariable = "VIBESWITCHER_HEAVY_SLOTS"
+    /// A slot's share of the Mac's cores, as its holder's command gets it (`coreBudget`): `vs-heavy` gives its own, merge
+    /// and an audit's shared run give their test command theirs, and builds and test runners take it as their
+    /// parallelism (`swift build -j`, `node --test --test-concurrency`, `make -j`).
+    public static let coresVariable = "VS_HEAVY_CORES"
+    /// The cores ÷ `slots`, rounded up, at least 2: 4 on a 12-core Mac with 3 slots (vs-heavy's sum too). A slot is one
+    /// job's room: on 2026-11-01 one merge's build ran 9 swift-frontends at ~900 % CPU beside two other slots' jobs.
+    public static func coreBudget(slots: Int, cores: Int = ProcessInfo.processInfo.processorCount) -> Int {
+        let slots = max(1, slots)
+        return max(2, (max(1, cores) + slots - 1) / slots)
+    }
     /// How long `vs-heavy` lets its command run before it ends its group, when set ("90", "90m", "30s", "2h"); else 60
     /// min. The lead gives its sessions the project's test_timeout_min, when the workflow sets one of its own.
     public static let timeoutVariable = "VIBESWITCHER_HEAVY_TIMEOUT"

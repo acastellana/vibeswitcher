@@ -11,6 +11,16 @@
 # session it starts (the app bundle's Contents/Resources/bin); merge and an audit's shared run take a slot around their
 # test command too (`TestLock` in VibeCore).
 #
+# COMMAND gets VS_HEAVY_CORES, its share of the Mac: the cores ÷ the slots, rounded up, at least 2 (4 on a 12-core Mac
+# with 3 slots). A slot is one job's room, not a whole Mac: on 2026-11-01 a merge's swift-frontend ran 9 processes at
+# ~900 % CPU and two node --test runs about 9 cores each, all inside the slots, and the load reached 62–84. Builds and
+# test runners take it as their parallelism (`swift build -j $VS_HEAVY_CORES`, `node --test
+# --test-concurrency=$VS_HEAVY_CORES`, `make -j $VS_HEAVY_CORES`); scripts/test.sh and scripts/build-app.sh do. It's the
+# share whether or not the other slots are held: a job sized to a calm Mac when it starts can't shrink when two more
+# start beside it. Under a holder (below) a VS_HEAVY_CORES already set is kept, else it's worked out the same way
+# (merge and audits give their test command theirs, `TestLock.coreBudget`). VIBESWITCHER_HEAVY_NCPU stands in for the
+# Mac's core count (tests).
+#
 # Slot 1 is a flock on $VIBESWITCHER_TEST_LOCK_DIR/test-build.lock (default /private/tmp/vibeswitcher-<uid>/), slot k
 # on test-build-k.lock beside it (an older vs-heavy, with only test-build.lock, contends for slot 1). The slot taken is
 # held on this script's fd 9 and its supervisor's (below): the kernel lets go of it once both have exited, so a run that
@@ -73,14 +83,25 @@ lock_dir=${VIBESWITCHER_TEST_LOCK_DIR:-/private/tmp/vibeswitcher-$(id -u)}
 # As TestLock names it (no trailing slash), so a run under a holder of the Swift side's slot knows it.
 while [[ $lock_dir == */ && $lock_dir != / ]]; do lock_dir=${lock_dir%/}; done
 
-# Under a holder of one of these very slots: it's ours already.
-held=${VIBESWITCHER_TEST_LOCK:-}
-[[ $held == "$lock_dir/test-build.lock" || $held == "$lock_dir"/test-build-[0-9]*.lock ]] && exec "$@"
-
+ncpu=${VIBESWITCHER_HEAVY_NCPU:-}
+[[ $ncpu =~ ^[0-9]+$ ]] && (( 10#$ncpu >= 1 )) || ncpu=$(sysctl -n hw.ncpu 2>/dev/null)
+[[ $ncpu =~ ^[0-9]+$ ]] && (( 10#$ncpu >= 1 )) || ncpu=4
+ncpu=$(( 10#$ncpu ))
 slots=${VIBESWITCHER_HEAVY_SLOTS:-}
-if ! [[ $slots =~ ^[0-9]+$ ]] || (( slots < 1 )); then
-    slots=$(( $(sysctl -n hw.ncpu 2>/dev/null || echo 4) / 4 ))
+if ! [[ $slots =~ ^[0-9]+$ ]] || (( 10#$slots < 1 )); then
+    slots=$(( ncpu / 4 ))
     (( slots >= 1 )) || slots=1
+fi
+slots=$(( 10#$slots ))
+# A slot's share of the cores: ÷ slots, rounded up, at least 2.
+cores=$(( (ncpu + slots - 1) / slots ))
+(( cores >= 2 )) || cores=2
+
+# Under a holder of one of these very slots: it's ours already, and so is its share (its own, when it gave one).
+held=${VIBESWITCHER_TEST_LOCK:-}
+if [[ $held == "$lock_dir/test-build.lock" || $held == "$lock_dir"/test-build-[0-9]*.lock ]]; then
+    [[ ${VS_HEAVY_CORES:-} =~ ^[0-9]+$ ]] && (( 10#$VS_HEAVY_CORES >= 1 )) || export VS_HEAVY_CORES=$cores
+    exec "$@"
 fi
 
 mkdir -p -m 700 "$lock_dir" || { echo "vs-heavy: can't make $lock_dir for the heavy-work slots" >&2; exit 1; }
@@ -250,6 +271,7 @@ echo "pid $$" > "$lock_file.active"
 trap '[[ $(head -n 1 "$lock_file.holder" 2>/dev/null) == "pid $$, "* ]] && rm -f "$lock_file.holder"
       [[ $(head -n 1 "$lock_file.active" 2>/dev/null) == "pid $$" ]] && rm -f "$lock_file.active"' EXIT
 export VIBESWITCHER_TEST_LOCK=$lock_file
+export VS_HEAVY_CORES=$cores
 
 # TERM, INT and HUP go to the supervisor (one that came before it started, once it has).
 supervisor="" stopping=""

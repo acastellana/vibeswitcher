@@ -1067,7 +1067,10 @@ public enum Worktrees {
             let script = "export HOME=\(RecentProjects.shellQuote(home))\n" + command
             // All of it, in order: what failed may be anywhere in it, and its tail is often a build's warnings.
             var env = ["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"]
-            if let held { env[TestLock.heldVariable] = held.path }
+            if let held, let lock {
+                env[TestLock.heldVariable] = held.path
+                env[TestLock.coresVariable] = String(TestLock.coreBudget(slots: lock.slots))
+            }
             let started = Date()
             let stop = progress?.heartbeat { "Running the \(name) (\(duration(Date().timeIntervalSince(started))) so far)." }
             // The branch's code (its build, its tests): never the lead to the session host (see `BranchCode`).
