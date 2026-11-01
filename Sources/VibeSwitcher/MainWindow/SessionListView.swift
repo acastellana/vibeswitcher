@@ -109,7 +109,7 @@ struct SessionListView: View {
     private func rowView(_ row: WindowRow, arranged: LeadTeams.Arranged, showProject: Bool? = nil) -> some View {
         WindowRowView(row: row, showProject: showProject ?? (model.grouping == .attention), role: model.role(of: row),
                       team: arranged.teams[row.id], teamSummary: teamSummary(row, team: arranged.teams[row.id]),
-                      questions: model.role(of: row) == .lead ? leads.lead(for: row).map { ($0.board.openQuestions.count, $0.board.blockingQuestions) } : nil,
+                      questions: model.role(of: row) == .lead ? leads.questions(for: row) : nil,
                       allDone: model.role(of: row) == .lead && leads.lead(for: row)?.board.hasUnseenAllDone == true,
                       label: model.label(of:), replaced: model.replaced(row), nested: arranged.nested.contains(row.id),
                       teamOpen: model.expandedTeams.contains(row.id)) { model.toggleTeam(row.id) }

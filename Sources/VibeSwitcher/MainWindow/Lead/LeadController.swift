@@ -293,7 +293,15 @@ struct LeadNames {
 /// being their witness (telling a lead when one of its workers needs input, stops without reporting, or dies).
 final class LeadController: ObservableObject {
     /// Each running lead's board, by repository root.
-    @Published private(set) var boards: [String: LeadBoard] = [:]
+    @Published private(set) var boards: [String: LeadBoard] = [:] {
+        didSet { countQuestions(was: oldValue) }
+    }
+    /// Each running lead's open questions for you and how many of them block, by repository root: counted when its
+    /// board's questions change, not as the sidebar draws its row (hang-20261101-034453: `LeadBoard.blockingQuestions`
+    /// on every update).
+    private(set) var questionCounts: [String: (open: Int, blocking: Int)] = [:]
+    /// How many times a board's questions were counted (for tests).
+    private(set) var questionsCounted = 0
     /// Each running lead's decisions (`BoardStore.decisions`), by repository root.
     @Published private(set) var decisions: [String: [LeadDecision]] = [:]
     /// Where each running lead's records are kept (`BoardStore.recordsDir`, nil: in .vibeswitcher), by repository
@@ -545,6 +553,26 @@ final class LeadController: ObservableObject {
     /// The roots with a live lead in the window (no board read: which of two leads it is doesn't matter here).
     private var leadRoots: Set<String> {
         Set(host.sessions.filter { $0.isLive && LeadTeams.role(label: $0.label) == .lead }.map { ($0.cwd as NSString).standardizingPath })
+    }
+
+    /// A lead row's open questions for you and how many of them block (as `LeadBoard.openQuestions` and
+    /// `blockingQuestions` count them); nil if the row isn't a lead with a board.
+    func questions(for row: WindowRow) -> (open: Int, blocking: Int)? {
+        lead(for: row).flatMap { questionCounts[$0.root] }
+    }
+
+    /// Counts the questions of each board whose questions changed since `old`.
+    private func countQuestions(was old: [String: LeadBoard]) {
+        questionCounts = questionCounts.filter { boards[$0.key] != nil }
+        for (root, board) in boards where questionCounts[root] == nil || old[root]?.questions != board.questions {
+            questionsCounted += 1
+            var open = 0, blocking = 0
+            for question in board.questions where question.isOpen {
+                open += 1
+                if question.rank == .blocking { blocking += 1 }
+            }
+            questionCounts[root] = (open, blocking)
+        }
     }
 
     /// The lead a row is, if it is one: its root (the folder its window session started in, wherever its agent has
