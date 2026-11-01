@@ -94,6 +94,10 @@ struct ReadOnlyGitFormsTests {
             "git grep x HEAD -- inner", "git grep -n x -- linkdir/seal", "git grep -f inner HEAD", "git check-ignore inner",
             "git ls-tree HEAD linkdir/seal", "git log --stat -- inner", "git diff main...other --stat -- linkdir",
             "git show HEAD --cc -- inner",
+            // A short flag's value attached (the blind check's): `-finner` reads the link's target as -f's file, and git
+            // prints a line of it in a regex error. Every program's short flags, ahead of their values too.
+            "git grep -E -finner", "git grep -P -finner HEAD", "git grep -nfinner HEAD", "git diff-tree -Oinner -p HEAD",
+            "git log -Oinner -p", "git diff -Oinner main other", "grep -finner a", "grep -f.. a", "rg -finner a",
             // Everything else stash and apply do.
             "git stash", "git stash pop", "git stash list -p", "git stash show",
         ]

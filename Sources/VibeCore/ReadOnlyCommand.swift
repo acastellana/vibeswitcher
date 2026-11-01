@@ -53,13 +53,18 @@ public enum ReadOnlyCommand {
 
     /// Whether `word` (quotes and escapes taken off) could name a path outside the worktree: the hook mustn't open a
     /// way to read private files (~/.vibeswitcher/lead, the steer folder) without a prompt. "$HOME" anywhere; a short
-    /// flag with a value attached that holds a "/" (`-f/etc/x`); and each piece of it (split at "=", ":" and ",", as in
+    /// flag with a value attached that holds a "/" (`-f/etc/x`), or whose value, after any of its letters, is outside
+    /// (`-finner`, a link out); and each piece of it (split at "=", ":" and ",", as in
     /// `--file=x`, `HEAD:x`) that starts with "~" or, as a path from the shell's folder, lands outside the worktree
     /// (`confined`; without one, by its text: absolute, or climbing above where it starts, `..`, `a/../..`). A pattern
     /// that looks like one still prompts: fail closed.
     static func reachesOutside(_ word: String, _ confined: Confined? = nil) -> Bool {
         if word.contains("$HOME") || word.contains("${HOME") { return true }
         if word.hasPrefix("-"), !word.hasPrefix("--"), word.contains("/") { return true }
+        // A short flag's value attached after any of its letters (`-finner`, `-nfinner`, `-O..`), whichever letter takes
+        // one: each rest of the word is a path the program may open, a link committed in the branch included.
+        if word.hasPrefix("-"), !word.hasPrefix("--"), word.count > 2,
+           (2..<word.count).contains(where: { reachesOutside(String(word.dropFirst($0)), confined) }) { return true }
         return word.split(omittingEmptySubsequences: false, whereSeparator: { "=:,".contains($0) }).contains { piece in
             if piece.hasPrefix("~") { return true }
             if let confined { return !piece.isEmpty && !confined.resolvesInside(String(piece)) }
