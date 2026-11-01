@@ -2717,3 +2717,5 @@
 - 2026-11-01 13:00 Audit of read-only-git-parser: incomplete, clean, round 1: 1 Important open, 1 Nit open
 - 2026-11-01 13:00 Automatically (auto_advance): Sent read-only-git-parser's worker the open Important findings read-only-git-parser:F1 from its audit at f8dcd45d.
 - 2026-11-01 13:00 Audit of wallet-path-robustness: complete, clean, round 1: 3 Nit open
+- 2026-11-01 13:04 The worker on read-only-git-parser answered findings: read-only-git-parser:F1 fixed at 51a7e8a0: 51a7e8a removes -f from git grep's flags (valuedLetters now "CBAme"). So -f <file>, -f<file>, -nf<file> and -f - (stdin, the lead's F2) prompt in every spelling. I checked the other commands newly allowed on this branch for arguments git resolves from the top of the work tree. ls-tree's --full-tree takes its paths from the top, so it's removed too. On git 2.39.5, run from a subfolder: diff, log and diff-tree open -O's orderfile from the shell's folder (…
+- 2026-11-01 13:10 Merged wallet-path-robustness: Wallet path robustness: no typed path is ever run, polls coalesce, records are bounded and read safely
