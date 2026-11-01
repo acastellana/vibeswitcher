@@ -42,6 +42,8 @@ final class FakeRuntime: LeadRuntime {
     var statuses: [String: String] = [:]
     /// The prompt each session waits on, as the host's reading of it says.
     var waiting: [String: PendingPrompt] = [:]
+    /// The account's usage limit each session's turn ended on, as the host's reading of its transcript says.
+    var usageLimits: [String: UsageLimit] = [:]
 
     /// Calls from the lead's automatic passes (`LeadAdvance`, on a thread of their own) and the test's own, one at a time.
     let calls = NSRecursiveLock()
@@ -111,7 +113,7 @@ final class FakeRuntime: LeadRuntime {
         return listing
     }
     private var listing: [LeadSessionInfo] {
-        spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: statuses[$0.id] ?? "working", tty: nil, pid: pids[$0.id] ?? getpid(), waiting: waiting[$0.id]) } + others
+        spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: statuses[$0.id] ?? "working", tty: nil, pid: pids[$0.id] ?? getpid(), waiting: waiting[$0.id], usageLimit: usageLimits[$0.id]) } + others
     }
     /// As the host counts them: what it lists and what it doesn't (`HostCensus.count`).
     func census() throws -> [HostCensus]? {
@@ -216,8 +218,13 @@ extension LeadTeamFixture {
         // The Mac-wide cap these tests' scenes were written for, and refusals kept in the vault's folder (removed with it).
         lead.macLimits = { MacLimits(maxSessions: 6) }
         lead.roomWaits = roomWaits
+        // The account's usage kept in the vault's folder (removed with it), never the Mac's.
+        lead.usageStore = usageStore
         return lead
     }
+
+    /// Where this fixture's leads keep the account's usage (see `AccountUsage`).
+    var usageStore: AccountUsageStore { AccountUsageStore(file: vault.folder.appendingPathComponent("account-usage.json")) }
 
     /// Where this fixture's leads keep the refusals the app's witness wakes them for.
     var roomWaits: LeadWitness.RoomWaits { LeadWitness.RoomWaits(folder: vault.folder.appendingPathComponent("room-waits")) }
