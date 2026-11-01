@@ -2816,3 +2816,6 @@
 - 2026-11-01 18:30 Automatically (auto_advance): Cleaned up wallet-e2e-sh-the; ended pid 44766 (Worker: wallet-e2e.sh: the real-testnet case no longer waits for Proposed before the sign POST (the Wallet Manager sends it with the POST now)) (freed 1.2 GB of build output and temporary folders). It stays done.
 - 2026-11-01 18:31 Update: Codex workers work (after your next install) — What changed: a task can now run on Codex instead of Claude (add_task or update_task with agent: codex), always with a Claude audit before it merges, to spread usage across accounts. Codex workers are…
 - 2026-11-01 18:36 Workflow: heavy_slots = `2`
+- 2026-11-01 18:51 Automatically (auto_advance): Started the audit of test-under-load-sh-2 at ea955926 (Its review is audit. (audited: it changes test or build infrastructure the suite relies on (scripts/test-under-load.sh), as the risk check found.)).
+- 2026-11-01 19:06 Merged theloginshellrunsinasess: theLoginShellRunsInASessionOfItsOwn: flakes under load and leaves its fake shell looping forever when it fails (no audit: review none)
+- 2026-11-01 19:06 Flaky in theloginshellrunsinasess's merge: aClaudeSessionDictatesThroughClaudeAndOthersThroughOpenAI() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
