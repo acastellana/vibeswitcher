@@ -2513,3 +2513,4 @@
 - 2026-11-01 03:44 Started a worker on wallet-card-truth-the
 - 2026-11-01 03:44 Automatically (auto_advance): Sent wallet-card-truth-the's worker the open Important findings wallet-card-truth-the:F1 from its audit at 78fcb1f7 (in a new worker: its last one had ended).
 - 2026-11-01 03:48 The worker on wallet-card-truth-the answered findings: wallet-card-truth-the:F1 fixed at 4a16de46: 4a16de4: outstandingRequestsSurviveARestartAsPrivateFiles expected the restored record without sentAt, which this branch now stores at send (check 4). The test now takes sentAt from the first courier's record and expects the record after the restart to equal Record(request:, state: .sent, sentAt: sentAt), so it also checks that sentAt survives a restart. PassageLinkTests: 17 tests passed; under load: all 3 runs passed and left nothing behind (97 tests …
+- 2026-11-01 03:55 Planned app-memory-steps-up: App memory steps up 17–20 MB after a real worker session ends: reproduce and fix
