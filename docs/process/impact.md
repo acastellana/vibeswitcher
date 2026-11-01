@@ -19,6 +19,11 @@ tool, and not before.
    Set status to `done`, or to `measuring` again with a new check date if the window was extended.
 4. Turn a `tune` or `revert` verdict into a task the same day.
 
+Freeze numbers don't keep. The app deletes hang reports after a week, and sooner once they pass 500 MB (about
+0.75 MB each, so a 10-an-hour night fills that in under three days). Read freezes/h within days of the window and paste
+the numbers into the entry. The script counts only the hours whose reports are still there, and says `partial` (or
+`n/a`) when some were deleted.
+
 ```sh
 scripts/impact-metrics.sh 2026-10-25..2026-10-31                    # whole local days, TO included
 scripts/impact-metrics.sh 2026-11-01T02:49..2026-11-08T02:49         # from a merge's minute
@@ -64,7 +69,7 @@ Copy this block under [Entries](#entries), newest first:
 | incidents | incidents.md entries dated in the range | incidents.md |
 | flaky-merge rate | merges that passed only on the merge's rerun ÷ merges with a receipt; plus the flake ledger's counts | board receipts, flake ledger |
 | median full-suite duration | median `duration_s` of the project's merge test runs that ran | load recorder merges files |
-| freezes/h (by load bucket) | hang reports ÷ hours; with load samples, per 1-minute-load bucket (0-12, 12-24, 24-36, …) | hang reports, load recorder |
+| freezes/h (by load bucket) | hang reports ÷ the hours whose reports the app still keeps; with load samples, per 1-minute-load bucket (0-12, 12-24, 24-36, …) | hang reports, load recorder |
 | worker hours, estimated cost per task | receipts of tasks ended in the range: worked hours; mean worker + verifier cost (only receipts whose cost is known) | board receipts |
 | usage-limit stops | no source records them yet: `n/a` until the usage watch writes one | (none yet) |
 
@@ -111,7 +116,9 @@ Unless an entry says otherwise, baselines come from vibeswitcher's week **2026-1
 - 0 reverts; 8 incidents
 - flaky-merge rate 27% (26 of 98 merges with a receipt)
 - 46.3 worker hours over 112 tasks ended; estimated cost per task $11.63
-- freezes 1.51/h (255 hang reports). Over the last 3 days (2026-10-29..2026-10-31) it was 2.40/h.
+- freezes 2.92/h over 2026-10-28T12:10..2026-10-31 (245 hang reports in 83.8 h). That is the part of the week whose
+  reports the app still keeps: older ones were deleted, and before 2026-10-28 12:10 it kept only the 10 newest. Over
+  2026-10-29..2026-10-31 it was 2.40/h.
 
 The script reads no source yet for some metrics. For these, the baselines come from the load study (2026-11-01): Mac
 load bends at 24, and throughput peaks around 36–48. About 20% of merges flake on the first run. The full suite takes
@@ -201,7 +208,7 @@ cost, the receipts of the 2026-10-31 batch give 8 tasks, 2.9 h and ~$86.
   jobs that cause them move under vs-heavy and take turns.
 - **Metric:** freezes/h; once the recorder runs, its minutes above load 48 and freezes/h in those buckets. Guard: no
   report about vs-heavy jobs or VibeSwitcher's own merges and audits (false alarms: 0).
-- **Baseline:** freezes 1.51/h over the week, 2.40/h over 2026-10-29..2026-10-31. Load study: the load bends at 24,
+- **Baseline:** freezes 2.92/h over 2026-10-28T12:10..2026-10-31, 2.40/h over 2026-10-29..2026-10-31. Load study: the load bends at 24,
   and throughput peaks around 36–48. Minutes above 48: none recorded yet, so use the recorder's days before this
   merges.
 - **Check:** 2026-11-09, provisional: 7 days after it merges (move it if that's later).
@@ -218,7 +225,7 @@ cost, the receipts of the 2026-10-31 batch give 8 tasks, 2.9 h and ~$86.
   With it, the script gives freezes/h by load bucket and the median full-suite duration, which are `n/a` today.
 - **Metric:** sampled minutes ÷ elapsed minutes while the app runs; the script's two `n/a` metrics get numbers.
   Guard: freezes/h doesn't rise (the sampler runs off the main thread).
-- **Baseline:** freezes/h by load bucket and median full-suite duration are `n/a`; freezes 1.51/h.
+- **Baseline:** freezes/h by load bucket and median full-suite duration are `n/a`; freezes 2.92/h.
 - **Check:** 2026-11-09, provisional: 7 days after it merges (move it if that's later).
 - **Status:** measuring
 - **Result:** (pending)
@@ -294,16 +301,17 @@ cost, the receipts of the 2026-10-31 batch give 8 tasks, 2.9 h and ~$86.
 
 - **Change:** HostConnection writes on a queue of its own, never its caller's, so SessionStore.refresh no longer
   blocks the main thread on the host's socket. Merged 2026-10-31 19:52.
-- **Hypothesis:** freezes/h drop by at least a third from the 2.11/h before the fix, because the main thread no longer
+- **Hypothesis:** freezes/h drop by at least a third from the 2.31/h before the fix, because the main thread no longer
   waits on a busy host's socket. With the load recorder, the drop must hold within the same load bucket.
 - **Metric:** freezes/h (by load bucket once the recorder runs). Guard: no new incident of lost or reordered input
   to sessions, since writes are now asynchronous.
-- **Baseline:** 2.11 freezes/h over 2026-10-28T00:00..2026-10-31T19:50 (194 hang reports in 91.8 h). An early read
-  over 2026-10-31T19:52..2026-11-01T09:00 gave 11.04/h (145 in 13.1 h). That is five times higher, during a heavily
+- **Baseline:** 2.31 freezes/h over 2026-10-28T12:10..2026-10-31T19:50 (184 hang reports in 79.7 h, all still
+  kept). An early read over 2026-10-31T19:52..2026-11-01T09:00 gave 11.04/h (145 in 13.1 h). That is five times higher, during a heavily
   loaded night. Without load buckets, the load can't be told apart from the change. If the rise holds within load
   buckets, open a task to find what the freezes are.
-- **Check:** 2026-11-08, window 2026-10-31T19:52..2026-11-07T19:52, by load bucket if the recorder has merged by
-  then.
+- **Check:** 2026-11-07, window 2026-10-31T19:52..2026-11-07T19:52, by load bucket if the recorder has merged by
+  then. The night's reports start being deleted on 2026-11-07, and sooner if they pass 500 MB. While freezes run
+  above 5/h, read the script every two days and paste each read here; the check combines them.
 - **Status:** measuring
 - **Result:** (pending)
 - **Verdict:** (pending)
