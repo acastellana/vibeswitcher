@@ -2497,3 +2497,6 @@
 - 2026-11-01 03:20 Automatically (auto_advance): Started the audit of workers-and-verifiers-2 at 12db3a69 (Its review is audit).
 - 2026-11-01 03:20 The worker on turn-this-incident-into-8 answered findings: turn-this-incident-into-8:F1 fixed at ae855000: Commits 8b6c567 and ae85500. Checked against the 2.1.316 bundle (.build/cc/strings.txt): the No row is an input only while noInputMode (rejectInputMode, false at first), which the Select's handleKeyDown flips on key==='tab' through onInputModeToggle. Its keybindings map j/k to select:next/previous. The Bash prompt sets inlineDescriptions:!0, which the Select passes each row as showLabel, so the open field draws as 'No, and tell Claude what to do di…
 - 2026-11-01 03:21 Automatically (auto_advance): Started the audit of turn-this-incident-into-8 at ae855000 (Its review is audit).
+- 2026-11-01 03:24 Automatically (auto_advance): Started the audit of turn-this-incident-into-8 at adc4b0c2 (Its review is audit).
+- 2026-11-01 03:25 Audit of strict-paths-an: complete, clean, round 2: 1 Important closed, 2 Nit closed, 2 Pre-existing open
+- 2026-11-01 03:32 Merged strict-paths-an: Strict paths: an Important finding on configured paths blocks auto-merge, even unconfirmed, until the lead rules
