@@ -137,6 +137,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private var visibilityTimer: Heartbeat.Subscription?
     private var hiddenReadings = 0
     private var notificationTimer: Heartbeat.Subscription?
+    /// The Mac's load, memory, team sessions and heavy slots, once a minute, to ~/.vibeswitcher/stats (`LoadRecorder`).
+    private let loadRecorder = LoadRecorder()
+    private var loadTimer: Heartbeat.Subscription?
     /// Gives malloc's free pages back as the footprint grows (see `FootprintRelief`).
     private let footprintRelief = FootprintRelief()
     private var terminationSignal: DispatchSourceSignal?
@@ -348,6 +351,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .store(in: &cancellables)
         visibilityTimer = Heartbeat.shared.every(2) { [weak self] in self?.updateFloatingPanel() }
         notificationTimer = Heartbeat.shared.every(15) { [weak self] in self?.notifier?.refreshAuthorization() }
+        // The census on the main thread (the host's list is the main thread's: a few dozen string looks), the rest on
+        // the recorder's queue.
+        loadTimer = Heartbeat.shared.every(60) { [weak self] in
+            guard let self else { return }
+            loadRecorder.record(census: HostCensus.count(hostClient.sessions.map { ($0.label, $0.cwd, $0.isLive) }))
+        }
         footprintRelief.start()
 
         store.$sessions

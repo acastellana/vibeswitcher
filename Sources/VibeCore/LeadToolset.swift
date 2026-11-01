@@ -196,6 +196,8 @@ public final class LeadToolset: MCPToolset {
     /// many): the tool server sets the Mac-wide ones, every project's merges sharing them with `vs-heavy`; nil (tests
     /// that don't give scratch ones): none.
     public var testLock: TestLock?
+    /// Where merge appends its line of the Mac's merge stats (`MergeSample`, merges-<day>.jsonl); nil: none.
+    public var mergeStats: URL? = VibePaths.statsDir
 
     /// `testLock` with the workflow's heavy_slots, when set.
     func heavyLock(_ workflow: LeadWorkflow) -> TestLock? {
@@ -2254,13 +2256,25 @@ public final class LeadToolset: MCPToolset {
         var flaked: (plan: MergeRerun.Plan, failed: String, log: String?)?
         // The passing run's test count, for its receipt.
         var testCount: Int?
-        switch Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
-                                       scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
-                                       timeout: workflow.testTimeout, lock: heavyLock(workflow), records: workflow.recordsDir,
-                                       rerun: { output in
-                                           rerun = MergeRerun.plan(after: output, workflow: workflow)
-                                           return rerun?.command
-                                       }, tested: { testCount = LeadReceipt.testCount($0) }) {
+        // When its commands started (the slot taken) and the load then, for the merge stats line.
+        let called = Date()
+        var begun: (at: Date, load: [Double])?
+        let checked = Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
+                                              scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
+                                              timeout: workflow.testTimeout, lock: heavyLock(workflow), records: workflow.recordsDir,
+                                              rerun: { output in
+                                                  rerun = MergeRerun.plan(after: output, workflow: workflow)
+                                                  return rerun?.command
+                                              }, tested: { testCount = LeadReceipt.testCount($0) },
+                                              begun: { begun = ($0, LoadRecorder.averages() ?? []) })
+        if let folder = mergeStats {
+            let start = begun?.at ?? called
+            let sample = MergeSample(check: checked, rerun: rerun, project: (root as NSString).lastPathComponent, task: slug,
+                                     started: start, load: begun?.load ?? LoadRecorder.averages() ?? [], waited: waited?.after ?? 0,
+                                     slotWait: begun.map { $0.at.timeIntervalSince(called) }, ended: Date())
+            try? sample.append(in: folder, at: start)
+        }
+        switch checked {
         case .passed(let commit): tested = commit
         case .passedOnRerun(let commit, let failed, let again):
             guard let plan = rerun else { throw Problem(text: "Not merged: \(slug)'s tests passed on a rerun nobody planned.") }

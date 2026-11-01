@@ -751,7 +751,7 @@ public enum Worktrees {
     public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
                                      scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout,
                                      lock: TestLock?, records: String? = nil, rerun: ((String) -> String?)? = nil,
-                                     tested output: ((String) -> Void)? = nil) -> Check {
+                                     tested output: ((String) -> Void)? = nil, begun: ((Date) -> Void)? = nil) -> Check {
         let path = scratch.path
         let home = (home ?? scratch.deletingLastPathComponent().appendingPathComponent(scratch.lastPathComponent + "-home")).path
         let cancel = ShellCancel.current
@@ -798,7 +798,7 @@ public enum Worktrees {
         guard cancel?.isCancelled != true else { return .cancelled }
         let tested = Git.run(["rev-parse", "HEAD"], in: path).output
         let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
-                                           as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root, rerun: rerun)
+                                           as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root, rerun: rerun, begun: begun)
         if let stopped { return stopped }
         if let last = outputs.last, last.name != "init_command" { output?(last.output) }
         if let again = outputs.last, again.name == "rerun", let first = outputs.dropLast().last {
@@ -911,10 +911,11 @@ public enum Worktrees {
     /// run, every its `every`: a merge's tool call never goes silent.
     /// When the test command fails, `rerun` is given its output and may return a command to run once more in its place
     /// (`MergeRerun`: the failing tests again), in the same worktree and home, holding the same slot: its output,
-    /// named "rerun", decides. It's never asked again, whatever the rerun does.
+    /// named "rerun", decides. It's never asked again, whatever the rerun does. `begun` hears when the commands start
+    /// (the slot taken): the merge's stats line times the run from there (`MergeSample`).
     static func runChecks(setup: String?, test: String?, in path: String, home: String, timeout: TimeInterval,
                           lock: TestLock? = nil, as holder: String = "VibeSwitcher's test run", place: String? = nil,
-                          rerun: ((String) -> String?)? = nil)
+                          rerun: ((String) -> String?)? = nil, begun: ((Date) -> Void)? = nil)
         -> (stopped: Check?, outputs: [(name: String, output: String)]) {
         let cancel = ShellCancel.current
         let tmp = home + "/tmp"
@@ -951,6 +952,7 @@ public enum Worktrees {
                 return (.error(text + " Nothing was tested."), [])
             }
         }
+        begun?(Date())
         var outputs: [(name: String, output: String)] = []
         var steps = [("init_command", setup), ("test command", test)][...]
         while let (name, command) = steps.popFirst() {
