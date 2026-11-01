@@ -2560,3 +2560,7 @@
 - 2026-11-01 07:57 Automatically (auto_advance): Didn't start wallet-e2e-real-testnet: wallet-e2e-real-testnet's worker is still running. Send it what to do with message, or stop_worker first.
 - 2026-11-01 08:04 Audit of wallet-card-can-t: incomplete, clean, round 1: 2 Important open, 3 Nit open
 - 2026-11-01 08:04 Automatically (auto_advance): Sent wallet-card-can-t's worker the open Important findings wallet-card-can-t:F1, wallet-card-can-t:F2 from its audit at 125a3180.
+- 2026-11-01 08:07 Update: First real payment through the whole wallet chain: passed on GenLayer testnet — **What happened:** `scripts/e2e/wallet-e2e.sh --real-testnet` sent one real transaction end to end on this Mac. A fake agent filed a request in the VibeSwitcher sandbox, Send was clicked, the loop Pas…
+- 2026-11-01 08:08 Planned wallet-e2e-reads-the: wallet-e2e reads the Wallet Manager's stable hooks (signing-page data attributes, networks --json) instead of its markup and source
+- 2026-11-01 08:11 Audit of workers-and-verifiers-2: complete, clean, round 2: 4 Important closed, 7 Nit (3 open)
+- 2026-11-01 08:11 Planned terminal-drawing-froze: Terminal drawing froze the window for 15 s in SwiftTerm's buildAttributedString (String.UnicodeScalarView.distance per run)
