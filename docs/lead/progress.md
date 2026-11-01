@@ -2451,3 +2451,15 @@
 - 2026-11-01 02:00 Automatically (auto_advance): Cleaned up fix-the-flaky-test-13; ended pid 22986 (Worker: Fix the flaky test theExitSourceReapsAtOnce()) (freed 1.1 GB of build output and temporary folders). It stays done.
 - 2026-11-01 02:00 Raised the-app-s-host to audit (the risk check, at e675a98d): headless Claude said raise: The branch changes HostClient.swift, which spawns and reaps host processes over waitpid, and the review rules flag a one-shot WNOHANG wait on a host socket path as a real risk; the owner's review…
 - 2026-11-01 02:00 Automatically (auto_advance): the-app-s-host is audited, not merged: headless Claude said raise: The branch changes HostClient.swift, which spawns and reaps host processes over waitpid, and the review rules flag a one-shot WNOHANG wait on a host socket path as a real risk; the owner's review… (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-01 02:11 Started a worker on wallet-e2e-real-testnet
+- 2026-11-01 02:11 Automatically (auto_advance): Started a worker on wallet-e2e-real-testnet (wallet-e2e --real-testnet: one real GenLayer testnet payment through the whole chain on this Mac).
+- 2026-11-01 02:11 Ended verifiers-don-t-run's worker (idle since its done report on 7da47511) to make room on the Mac for its audit
+- 2026-11-01 02:11 Automatically (auto_advance): Started the audit of verifiers-don-t-run at 7da47511 (Its review is audit).
+- 2026-11-01 02:12 Ended turn-this-incident-into-8's worker (idle since its done report on 83bbb1d7) to make room on the Mac for its audit
+- 2026-11-01 02:12 Automatically (auto_advance): Started the audit of turn-this-incident-into-8 at 83bbb1d7 (Its review is audit).
+- 2026-11-01 02:12 Ended the-app-s-host's worker (idle since its done report on e675a98d) to make room on the Mac for its audit
+- 2026-11-01 02:12 Automatically (auto_advance): Started the audit of the-app-s-host at e675a98d (Its review is audit. (audited: headless Claude said raise: The branch changes HostClient.swift, which spawns and reaps host processes over waitpid, and the review rules flag a one-shot WNOHANG wait on a host socket path as a real risk; the owner's review…, as the risk check found.)).
+- 2026-11-01 02:12 Ended strict-paths-an's worker (idle since its done report on d3e1becb) to make room on the Mac for its audit
+- 2026-11-01 02:12 Automatically (auto_advance): Started the audit of strict-paths-an at d3e1becb (Its review is audit).
+- 2026-11-01 02:12 Started a worker on spec-an-unparseable
+- 2026-11-01 02:12 Automatically (auto_advance): Started a worker on spec-an-unparseable (Spec: an unparseable request gets `rejected` (format check) when its file name's id is valid and it came from the configured peer).
