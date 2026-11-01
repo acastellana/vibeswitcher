@@ -2828,3 +2828,7 @@
 - 2026-11-01 19:32 Automatically (auto_advance): Started the audit of boost-release-6-7 at 124033a4 (Its review is audit).
 - 2026-11-01 19:39 Audit of boost-release-6-7: complete, clean, round 2: 3 Important closed, 3 Nit closed
 - 2026-11-01 19:42 Merged test-under-load-sh-2: test-under-load.sh builds through heavy_swift too (its bare swift build ignores the core budget)
+- 2026-11-01 19:42 Automatically (auto_advance): Merged test-under-load-sh-2 (test-under-load.sh builds through heavy_swift too (its bare swift build ignores the core budget)) into main at 9aad9145, on its passing audit and the full test run.
+- 2026-11-01 19:42 Automatically (auto_advance): Cleaned up test-under-load-sh-2; ended pid 44261 (Worker: test-under-load.sh builds through heavy_swift too (its bare swift build ignores the core budget)) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 19:52 Merged boost-release-6-7: Boost release 6/7: Boost mode: higher Mac-wide limits on demand, or automatically when the user is away and on AC power
+- 2026-11-01 19:52 Flaky in boost-release-6-7's merge: claudeCodeStoppingTheStatusLineStopsYourCommandToo() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
