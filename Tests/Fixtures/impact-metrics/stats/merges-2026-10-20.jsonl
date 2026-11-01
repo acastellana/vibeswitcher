@@ -1,0 +1,5 @@
+{"t": "2026-10-20T09:00:00+00:00", "project": "proj", "task": "t0", "load": [20.0, 20.0, 20.0], "waited_s": 0, "slot_wait_s": 1, "duration_s": 200, "result": "passed", "first_run": "passed"}
+{"t": "2026-10-20T10:00:00+00:00", "project": "proj", "task": "t1", "load": [20.0, 20.0, 20.0], "waited_s": 0, "slot_wait_s": 1, "duration_s": 240, "result": "passed_on_rerun", "first_run": "failed"}
+{"t": "2026-10-20T11:00:00+00:00", "project": "proj", "task": "t2", "load": [20.0, 20.0, 20.0], "waited_s": 0, "slot_wait_s": 1, "duration_s": 300, "result": "passed", "first_run": "passed"}
+{"t": "2026-10-20T12:00:00+00:00", "project": "proj", "task": "t3", "load": [20.0, 20.0, 20.0], "waited_s": 0, "slot_wait_s": 1, "duration_s": 5, "result": "conflict"}
+{"t": "2026-10-20T13:00:00+00:00", "project": "other", "task": "t4", "load": [20.0, 20.0, 20.0], "waited_s": 0, "slot_wait_s": 1, "duration_s": 999, "result": "passed", "first_run": "passed"}
