@@ -224,6 +224,8 @@ struct WitnessWork {
     var endedForAdvance: [String] = []
     /// The messages not told yet as of the look (`LeadWitness.unbuiltMessages`), their texts built where they're posted.
     var messages: [(keys: [String], text: @Sendable () -> String)] = []
+    /// The verifiers waiting on a prompt past its wait, not told yet (`LeadWitness.stuckPrompts`): declined, then told.
+    var stuckPrompts: [LeadWitness.StuckPrompt] = []
     /// The running tasks' workers at work (`LeadBudget.working`), and whether the board's counts change for it.
     var working: Set<String> = []
     var notesWork = false
@@ -247,6 +249,8 @@ struct WitnessWork {
         }
         step?("unbuiltMessages")
         messages = LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, told: told)
+        step?("stuckPrompts")
+        stuckPrompts = LeadWitness.stuckPrompts(board: board, seen: seen, now: now, advanced: advanced).filter { !told($0.key) }
         step?("working")
         working = LeadBudget.working(board: board, seen: seen)
         notesWork = board.notesWork(working, defaultMinutes: budgetMinutes, now: now.timeIntervalSince1970)
@@ -1541,6 +1545,19 @@ final class LeadController: ObservableObject {
         for message in work.messages where !message.keys.allSatisfy({ told.contains("\(root)|\($0)") }) {
             message.keys.forEach { told.insert("\(root)|\($0)") }
             deliver(built: message.text, from: .system("witness"), root: root)
+        }
+        // A verifier waiting on a prompt no one answers: declined with a reason it can act on, and the lead told once
+        // what was asked (or that it couldn't be declined), instead of the audit hanging until it's started again.
+        for stuck in work.stuckPrompts where told.insert("\(root)|\(stuck.key)").inserted {
+            guard let id = UUID(uuidString: stuck.session) else { continue }
+            Breadcrumbs.shared.note("witness: declining the prompt verifier \(stuck.session.prefix(8)) on \(stuck.slug) waits on")
+            PromptDecline.decline(id, host: host) { [weak self] declined in
+                DispatchQueue.main.async {
+                    // Built where it's posted: it quotes what was asked (`LeadWitness.Notice`).
+                    self?.deliver(built: { declined ? LeadWitness.declinedText(stuck) : LeadWitness.undeclinedText(stuck) },
+                                  from: .system("witness"), root: root)
+                }
+            }
         }
         // Low disk space, once per episode; what takes it is sized off the main thread.
         var disk = disks[root] ?? LeadWitness.Disk(free: freeSpace, file: DiskWatch.file)

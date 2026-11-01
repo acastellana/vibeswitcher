@@ -280,6 +280,8 @@ def draw_permission():
     lines = ["⏺ Bash(" + p["command"] + ")", "╭" + "─" * 58 + "╮", "│ Bash command", "│", "│   " + p["command"], "│",
              "│ Do you want to proceed?"]
     for index, label in enumerate(p["options"]):
+        if index == 2 and p["feedback"]:
+            label = "No, " + p["feedback"]
         lines.append("│ " + ("❯ " if p["focus"] == index else "  ") + "%d. %s" % (index + 1, label))
     lines.append("╰" + "─" * 58 + "╯")
     lines.append("Esc to cancel")
@@ -632,7 +634,7 @@ def open_permission(command):
     tool = "toolu_" + uuid.uuid4().hex[:20]
     record({"type": "assistant", "message": {"role": "assistant", "content": [
         {"type": "tool_use", "id": tool, "name": "Bash", "input": {"command": command}}]}})
-    permission = {"command": command, "tool": tool, "focus": 0,
+    permission = {"command": command, "tool": tool, "focus": 0, "feedback": "",
                   "options": ["Yes", "Yes, and don't ask again for this command", "No, and tell Claude what to do differently (esc)"]}
     state["mode"] = "permission"
 
@@ -641,6 +643,11 @@ def permission_key(key):
     global permission
     p = permission
     choice = None
+    # The No row takes text while the cursor is on it, as Claude Code 2.1.316's does (an input option, placeholder "and
+    # tell Claude what to do differently"): every key but the arrows, Enter and Esc is typed there.
+    if p["focus"] == 2 and (len(key) == 1 or key in ("backspace", "space")):
+        p["feedback"] = p["feedback"][:-1] if key == "backspace" else p["feedback"] + (" " if key == "space" else key)
+        return
     if key in ("up", "k"):
         p["focus"] = max(0, p["focus"] - 1)
     elif key in ("down", "j"):
@@ -653,7 +660,15 @@ def permission_key(key):
         choice = 2
     if choice is None:
         return
-    if choice == 2:
+    if choice == 2 and p["feedback"] and key == "enter":
+        # Declined with a reason: the turn goes on with it.
+        record({"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": p["tool"], "is_error": True,
+             "content": "The user doesn't want to proceed with this tool use. The tool use was rejected. To tell you how to proceed, the user said:\n" + p["feedback"]}]}})
+        state["mode"] = "working"
+        state["reply"] = "Denied: " + p["feedback"]
+        state["declined"] = p["feedback"]
+    elif choice == 2:
         record({"type": "user", "message": {"role": "user", "content": [
             {"type": "tool_result", "tool_use_id": p["tool"], "is_error": True,
              "content": "The user doesn't want to proceed with this tool use. The tool use was rejected."}]}})

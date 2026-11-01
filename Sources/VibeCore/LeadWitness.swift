@@ -265,6 +265,9 @@ public enum LeadWitness {
                     add("\(verifier)|api-error-\(Int(info.apiErrorAt ?? 0))", "The verifier on \(task.slug) stopped mid-audit: its turn ended on an API error (\(error)). Tell the user, or audit again.")
                 } else if !info.live || info.agentQuit {
                     add("\(verifier)|ended", "The verifier on \(task.slug) ended without a verdict (\(verifierEnding(info))). read_session(\(task.slug), who: verifier) to see why, then audit again.")
+                } else if info.status == .needsInput {
+                    // Waiting on a prompt: told once it's waited `promptWait`, with what VibeSwitcher did about it
+                    // (`stuckPrompts`). Told now, the lead could only start the audit again, the finders' work lost.
                 } else if let event = waiting(info, session: verifier, now: now,
                                               input: waitingText("The verifier on \(task.slug)", info, now: now, advice: "Tell the user if it's theirs, or audit again."),
                                               stopped: "The verifier on \(task.slug) stopped without calling submit_audit. read_session(\(task.slug), who: verifier) to see why, then audit again.") {
@@ -273,6 +276,76 @@ public enum LeadWitness {
             }
         }
         return events
+    }
+
+    /// A verifier (or a finder) waiting on a prompt no one answers (see `stuckPrompts`).
+    public struct StuckPrompt: Equatable, Sendable {
+        /// The event key it's told by, once: the one its waiting notice had ("<session>|input-<since>").
+        public var key: String
+        public var session: String
+        public var slug: String
+        public var prompt: PendingPrompt
+    }
+
+    /// How long a verifier waits on a prompt before VibeSwitcher declines it: time for a user who's watching to answer.
+    public static let promptWait: TimeInterval = 120
+
+    /// What a declined verifier prompt tells the verifier (typed as the prompt's "No" reason): what it can do instead.
+    public static let declineReason = "No one answers verifier prompts: use only read-only commands, or report what you couldn't check."
+
+    /// The awaited verifiers (and finders) that have waited on a prompt for `promptWait` or longer. No one answers
+    /// one (the user doesn't see its session; the lead can't answer it), and on 2026-10-31 and 2026-11-01 two audits
+    /// hung so until the lead started them again, the finders' work lost. The app declines each permission prompt with
+    /// `declineReason` (`declineKeys`) and tells the lead once what was asked (`declinedText`), or that it couldn't
+    /// (`undeclinedText`); `events` tells nothing of them meanwhile.
+    public static func stuckPrompts(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = []) -> [StuckPrompt] {
+        var stuck: [StuckPrompt] = []
+        for task in board.tasks where task.status == .review && task.evidence == nil {
+            let noTools = noToolsSessions(task, seen: seen, now: now)
+            for verifier in task.awaitedVerifiers {
+                guard !noTools.contains(verifier), !advanced.contains(verifier), let info = seen[verifier], !gaveVerdict(info, on: task),
+                      info.live, !info.agentQuit, info.usageLimit == nil, info.apiError == nil, info.status == .needsInput,
+                      let since = info.since, now.timeIntervalSince(since) >= promptWait else { continue }
+                stuck.append(StuckPrompt(key: "\(verifier)|input-\(Int(since.timeIntervalSince1970))", session: verifier,
+                                         slug: task.slug, prompt: info.prompt))
+            }
+        }
+        return stuck
+    }
+
+    /// The keys that decline the permission prompt on `screen` with `declineReason`: down to its "No" row (Claude Code
+    /// 2.1.316's takes text: "No" with "and tell Claude what to do differently" its placeholder), the reason, Enter.
+    /// Nil when the screen shows no permission prompt ("Do you want to …?" over Yes … No): a question isn't answered.
+    public static func declineKeys(screen: String) -> [HostInput.Write]? {
+        guard let menu = ScreenMenu.parse(screen.components(separatedBy: "\n")), !menu.picker, !menu.commands, menu.tabs.isEmpty,
+              !menu.multiSelect, menu.question.contains("Do you want to"), menu.options.first?.hasPrefix("Yes") == true,
+              let no = menu.options.lastIndex(where: { $0 == "No" || $0.hasPrefix("No,") || $0.hasPrefix("No ") }) else { return nil }
+        return menu.keys(toChoose: no, typing: declineReason)
+    }
+
+    /// "The verifier on a waited 2 min on a permission prompt no one answers: “Run: git config …”. VibeSwitcher
+    /// declined it, telling it …", for the lead.
+    public static func declinedText(_ stuck: StuckPrompt, now: Date = Date()) -> String {
+        "The verifier on \(stuck.slug) waited \(waitedText(stuck, now: now)) on a permission prompt no one answers\(asked(stuck.prompt)) "
+            + "VibeSwitcher declined it, telling it: “\(declineReason)” Its audit goes on; its report says what it couldn't check. "
+            + "If that command is one verifiers need, tell the user."
+    }
+
+    /// For a prompt VibeSwitcher couldn't decline (no permission prompt on its screen: a question, or the screen
+    /// unread), for the lead: what it waits on.
+    public static func undeclinedText(_ stuck: StuckPrompt, now: Date = Date()) -> String {
+        "The verifier on \(stuck.slug) has waited \(waitedText(stuck, now: now)) for input no one answers\(asked(stuck.prompt)) "
+            + "VibeSwitcher couldn't decline it (no permission prompt on its screen). Tell the user if it's theirs, or audit again."
+    }
+
+    private static func waitedText(_ stuck: StuckPrompt, now: Date) -> String {
+        LeadToolset.age(now.timeIntervalSince1970 - (stuck.prompt.since ?? now.timeIntervalSince1970))
+    }
+
+    /// ": “Run: ls”." inline, or ". It waited on:" and a fenced block for a long one (`PendingPrompt.quoted`).
+    private static func asked(_ prompt: PendingPrompt) -> String {
+        let quoted = prompt.quoted
+        return quoted.hasPrefix("“") ? ": \(quoted)." : ". It waited on:\n\(quoted)\n"
     }
 
     /// A usage-limit stop is told once: by its session and when the line was written.

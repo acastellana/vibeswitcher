@@ -128,6 +128,18 @@ public enum LeadLaunch {
         return rules
     }
 
+    /// The hooks a role's own settings add: a verifier's (an audit's finders too) `PermissionRequest` hook lets a
+    /// command line that only reads run without a prompt (`ReadOnlyCommand`), chained or not: no one answers a
+    /// verifier's prompts, and two audits hung on prompts for read-only git and grep (2026-10-31, 2026-11-01). Claude
+    /// Code asks it only about what the deny rules let through; anything it doesn't allow prompts as before (and the
+    /// witness declines that when no one answers: `LeadWitness.stuckPrompts`). The lead's and workers' rules stay as
+    /// they are. Loaded from `--settings` whatever `--setting-sources` says.
+    static func hooks(_ role: Role, server: String) -> [String: Any]? {
+        guard role == .verifier else { return nil }
+        let command = "\(RecentProjects.shellQuote(server)) \(ReadOnlyCommand.hookArgument)"
+        return ["PermissionRequest": [["matcher": "Bash", "hooks": [["type": "command", "command": command, "timeout": 10]]]]]
+    }
+
     /// The environment a role's session (and every command it runs) starts with. A worker's git never opens an
     /// editor: `git rebase --continue`, `git merge --continue` and the `git commit` that ends a merge keep their
     /// message as it is, so the bare commands its rules allow are all it needs (a `GIT_EDITOR=true git ...` prefix
@@ -164,6 +176,7 @@ public enum LeadLaunch {
                                    to: URL(fileURLWithPath: mcpFile))
         var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch), "deny": deny(role, base: branch, records: records)]]
         if !environment(role).isEmpty { settings["env"] = environment(role) }
+        if let hooks = hooks(role, server: server) { settings["hooks"] = hooks }
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: settingsFile))
         let quote = RecentProjects.shellQuote

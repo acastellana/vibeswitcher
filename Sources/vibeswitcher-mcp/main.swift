@@ -25,6 +25,16 @@ if let at = CommandLine.arguments.dropFirst().firstIndex(of: MCPKeeper.flag) {
     exit(MCPKeeper.run(executable: executable, arguments: arguments))
 }
 
+// `vibeswitcher-mcp --read-only-permission`, as a verifier's `PermissionRequest` hook (see `LeadLaunch.prepare`): the
+// event's JSON on stdin; prints the allow for a command line that only reads (`ReadOnlyCommand`), nothing otherwise
+// (the prompt shows). First, so a hook runs none of the server's code.
+if CommandLine.arguments.count == 2, CommandLine.arguments[1] == ReadOnlyCommand.hookArgument {
+    if let answer = ReadOnlyCommand.hookAnswer(FileHandle.standardInput.readDataToEndOfFile()) {
+        FileHandle.standardOutput.write(answer)
+    }
+    exit(0)
+}
+
 // `vibeswitcher-mcp --test-failures FILE`, for scripts/test-under-load.sh: the failing tests in a saved `swift test`
 // output, as the lead's tools report them; nothing printed when it shows none.
 if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--test-failures" {
