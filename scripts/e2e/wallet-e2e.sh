@@ -335,7 +335,7 @@ if [[ -n $real ]]; then
     nonce_before=$(decimal "$(jget "$answer" "")")
     answer=$(rpc eth_getTransactionCount "[\"$THROWAWAY\",\"pending\"]") || die "the testnet RPC didn't answer eth_getTransactionCount"
     [[ $(decimal "$(jget "$answer" "")") == "$nonce_before" ]] || refuse "a transaction from the throwaway wallet is still pending: wait for it to be mined"
-    say "testnet RPC $TESTNET_RPC: chain $TESTNET_CHAIN; the throwaway wallet holds $balance wei, nonce $nonce_before"
+    say "testnet RPC $TESTNET_RPC: chain $TESTNET_CHAIN, block 0 the pinned genesis $TESTNET_GENESIS; the throwaway wallet holds $balance wei, nonce $nonce_before"
 fi
 
 # The run's scratch folder, resolved: the Wallet Manager refuses an inbox reached through a link (/tmp is one).
