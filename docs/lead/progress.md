@@ -2735,3 +2735,8 @@
 - 2026-11-01 13:29 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-11-01 13:36 Planned codex-s-tui-renders: Codex's TUI renders blank and never starts its MCP server under the session host: find why, then enable Codex workers (review audit)
 - 2026-11-01 13:58 Planned the-test-suite-leaves: The test suite leaves hundreds of zombie processes (a test helper had 431 unreaped children)
+- 2026-11-01 14:09 Started a worker on the-test-suite-leaves
+- 2026-11-01 14:09 Automatically (auto_advance): Started a worker on the-test-suite-leaves (The test suite leaves hundreds of zombie processes (a test helper had 431 unreaped children)).
+- 2026-11-01 14:18 Merged wallet-requests-know: Wallet requests know Ethereum, Base and their testnets (names, explorer links, browser-wallet chain switch) (no audit: review none)
+- 2026-11-01 14:18 Flaky in wallet-requests-know's merge: theLoginShellRunsInASessionOfItsOwn(), itCountsWhileOtherThreadsAllocate(), aReadBehindAHungOneWaitsNoLongerThanItsTimeout() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 14:18 Planned fix-the-flaky-test-16: itCountsWhileOtherThreadsAllocate() flaked 3 times within 7 days
