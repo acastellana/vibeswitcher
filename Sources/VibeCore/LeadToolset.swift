@@ -31,9 +31,12 @@ public struct LeadSessionInfo: Equatable, Sendable {
     public var pid: Int32?
     /// The prompt it waits on (a permission, a question), in full, and since when; nil when it waits on none.
     public var waiting: PendingPrompt?
+    /// Its turn ended on the account's usage limit, by its transcript (`LeadActivity.usageLimit`): which limit, as
+    /// Claude said it. The lead's tools keep it as the account's usage (see `AccountUsage.fromRefusal`).
+    public var usageLimit: UsageLimit?
 
     public init(id: String, cwd: String, label: String, live: Bool, status: String?, tty: String?, pid: Int32? = nil,
-                waiting: PendingPrompt? = nil) {
+                waiting: PendingPrompt? = nil, usageLimit: UsageLimit? = nil) {
         self.id = id
         self.cwd = cwd
         self.label = label
@@ -42,6 +45,7 @@ public struct LeadSessionInfo: Equatable, Sendable {
         self.tty = tty
         self.pid = pid
         self.waiting = waiting
+        self.usageLimit = usageLimit
     }
 
     /// What it's doing, in a few words, for sessions and status: "waiting for input (6 min): “Run: ls …”" while it
@@ -160,6 +164,9 @@ public final class LeadToolset: MCPToolset {
     /// The home whose `.claude/projects` holds its workers' and verifiers' transcripts, read for receipts (see
     /// `LeadReceipts`). A scratch one in tests.
     var claudeHome = VibePaths.home
+    /// Where the account's usage is kept (see `AccountUsage`): start_worker and audit back off near a limit. A scratch
+    /// one in tests.
+    public var usageStore = AccountUsageStore()
     /// How often merge reads the load again while it waits for it to drop below load_threshold.
     var loadPoll: TimeInterval = 15
     /// The Mac-wide limits as set in Settings (see `MacLimits`), read at each call. Faked in tests.
@@ -441,7 +448,7 @@ public final class LeadToolset: MCPToolset {
                                          "context": P(type: "string", description: "What a fresh worker needs to know"),
                                          "from_finding": P(type: "string", description: "A finding as status and board name it, <task>:<id> (e.g. add-b:F2)"),
                                          "review": Self.reviewProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
-                                         "budget_min": Self.budgetProperty]),
+                                         "budget_min": Self.budgetProperty, "model": Self.modelProperty]),
                 MCPToolInfo(name: "dismiss_finding", description: "Close one of a task's open audit findings with a reason (it isn't a problem, it's out of scope, the user accepted it): it no longer holds the merge back, and no verifier raises it again.",
                             properties: ["task": task, "id": P(type: "string", description: "The finding's id (F2), or <task>:<id>"),
                                          "reason": P(type: "string", description: "Why, in one line (it's kept with the finding)")],
@@ -456,12 +463,13 @@ public final class LeadToolset: MCPToolset {
                                          "reason": P(type: "string", description: "With status kept: what holds it back (a decision, the user's word); merge names it when it refuses. With abandoned: why nothing will carry it. With removed: why it was a mistake (optional)"),
                                          "into": P(type: "string", description: "With status folded: the task (its slug) that carries this one's work"),
                                          "review": Self.reviewProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
-                                         "budget_min": Self.budgetProperty,
+                                         "budget_min": Self.budgetProperty, "model": Self.modelProperty,
                                          "reroll": P(type: "boolean", description: "Re-roll it after audit rounds that didn't land: its worker and verifier stop, its branch is kept as archive/<slug>-<n>, its worktree goes, and a fresh worker starts from the base on a new agent/<slug>, its context given a summary of the findings and the worker's answers so far. Contract changes in the same call apply first; not with status")],
                             required: ["task"]),
                 MCPToolInfo(name: "start_worker", description: "Start a worker on a task: a fresh Claude session in its own worktree on branch agent/<slug>, given the contract. A worktree stopped partway through a rebase or merge is described, not started; recover aborts it first. One left on another branch or a detached HEAD is put back on agent/<slug>, its uncommitted files carried along.",
                             properties: ["task": task,
-                                         "recover": P(type: "boolean", description: "When its worktree stopped partway through a rebase or merge: abort it (back on agent/<slug> at the same commit, the branch's commits kept; what's staged in the middle of it is dropped), then start")],
+                                         "recover": P(type: "boolean", description: "When its worktree stopped partway through a rebase or merge: abort it (back on agent/<slug> at the same commit, the branch's commits kept; what's staged in the middle of it is dropped), then start"),
+                                         "override_usage": Self.overrideUsageProperty],
                             required: ["task"]),
                 MCPToolInfo(name: "stop_worker", description: "End a task's worker (the worktree stays).", properties: ["task": task], required: ["task"]),
                 MCPToolInfo(name: "message", description: "Tell a task's worker something: while it works (or waits on a prompt) it gets it at its next step without stopping; between turns it's typed in as its next prompt.",
@@ -472,7 +480,8 @@ public final class LeadToolset: MCPToolset {
                             properties: ["task": task, "who": P(type: "string", description: "worker (default) or verifier", options: ["worker", "verifier"])],
                             required: ["task"]),
                 MCPToolInfo(name: "audit", description: "Start the read-only verifier on a task's branch. Its report, not the worker's, decides. A worktree left on another branch or a detached HEAD is put back on agent/<slug> first (refused, and its worker told what to run, when it holds uncommitted files or commits the branch lacks). A verifier already auditing the branch's head is left alone (the reply says since when and on which commit); a new commit, or a verifier that has ended, starts a new one in its place.",
-                            properties: ["task": task, "restart": P(type: "boolean", description: "End the verifier already auditing the branch's head and start a new one on the same commit (its work is thrown away)")],
+                            properties: ["task": task, "restart": P(type: "boolean", description: "End the verifier already auditing the branch's head and start a new one on the same commit (its work is thrown away)"),
+                                         "override_usage": Self.overrideUsageProperty],
                             required: ["task"]),
                 MCPToolInfo(name: "merge", description: "Merge a task: rebase onto the lead's branch (squashed when the worker merged it in), run the test command, fast-forward that branch. An audit task (or one whose branch touches sensitive_paths) needs its passing audit; a review none task needs only its worker's done report on the branch's head and the test command passing.",
                             properties: ["task": task], required: ["task"]),
@@ -559,11 +568,13 @@ public final class LeadToolset: MCPToolset {
             case "add_task": return try addTask(arguments)
             case "dismiss_finding": return try dismissFinding(arguments)
             case "update_task": return try updateTask(arguments)
-            case "start_worker": return withGitNotice(try startWorker(try taskSlug(arguments), recover: arguments["recover"] as? Bool ?? false))
+            case "start_worker": return withGitNotice(try startWorker(try taskSlug(arguments), recover: arguments["recover"] as? Bool ?? false,
+                                                                      overrideUsage: arguments["override_usage"] as? Bool ?? false))
             case "stop_worker": return try stopWorker(try taskSlug(arguments))
             case "message": return try message(try taskSlug(arguments), arguments)
             case "read_session": return try readSession(try taskSlug(arguments), who: arguments["who"] as? String ?? "worker")
-            case "audit": return try audit(try taskSlug(arguments), restart: arguments["restart"] as? Bool ?? false)
+            case "audit": return try audit(try taskSlug(arguments), restart: arguments["restart"] as? Bool ?? false,
+                                           overrideUsage: arguments["override_usage"] as? Bool ?? false)
             case "merge":
                 let merged = try merge(try taskSlug(arguments))
                 records.flush(base: base)
@@ -672,6 +683,30 @@ public final class LeadToolset: MCPToolset {
         MCPToolInfo.Property(type: "integer", description: "Its time budget, in minutes of its worker's working time (waiting on you or the user, and audits, don't count): at it the worker is told to stop and report over_budget. 0: none. Not given: workflow.md's task_budget_min. Changing it clears an over-budget state, and the next stop comes at the new budget")
     }
 
+    /// add_task's and update_task's model for the task's worker.
+    static var modelProperty: MCPToolInfo.Property {
+        MCPToolInfo.Property(type: "string", description: "The model its worker runs on, as claude --model takes it (sonnet for a mechanical task, say; fable, opus). Not given: the project's Claude command's, as for every task. Empty (update_task): back to that")
+    }
+
+    /// start_worker's and audit's way past the account's usage back-off.
+    static var overrideUsageProperty: MCPToolInfo.Property {
+        MCPToolInfo.Property(type: "boolean", description: "Start even though the account's usage is at \(Int(AccountUsage.threshold))% or more of a limit on its model (status shows it): only when the user wants the rest of that limit spent; a session that reaches the limit stops mid-task until it resets")
+    }
+
+    /// The `model` passed to add_task or update_task: nil when none was, "" to clear it. One word of letters, digits
+    /// and `.-_[]:` (it goes on the worker's command line), at most 100 characters.
+    private func modelArgument(_ arguments: [String: Any]) throws -> String? {
+        guard let given = arguments["model"], !(given is NSNull) else { return nil }
+        guard let text = (given as? String)?.trimmingCharacters(in: .whitespaces) else {
+            throw Problem(text: "model is a model's name as claude --model takes it (sonnet, opus, fable, claude-sonnet-5-5), not \(given). Nothing was changed.")
+        }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-_[]:"))
+        guard text.count <= 100, text.unicodeScalars.allSatisfy({ $0.isASCII && allowed.contains($0) }) else {
+            throw Problem(text: "model is one word, a model's name as claude --model takes it (sonnet, opus, fable, claude-sonnet-5-5), not “\(Self.clip(text, 60))”. Nothing was changed.")
+        }
+        return text
+    }
+
     /// The `budget_min` passed to add_task or update_task; nil when none was.
     private func budgetArgument(_ arguments: [String: Any]) throws -> Int? {
         guard let given = arguments["budget_min"], !(given is NSNull), !((given as? String)?.isEmpty ?? false) else { return nil }
@@ -715,12 +750,14 @@ public final class LeadToolset: MCPToolset {
         let review = try reviewArgument(arguments)
         let auto = try autoArgument(arguments)
         let budget = try budgetArgument(arguments)
+        let model = try modelArgument(arguments).flatMap { $0.isEmpty ? nil : $0 }
         let task = try store.update { board -> LeadTask in
             var task = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title, contract: contract)
             task.review = review
             if arguments["after"] != nil { task.after = try Self.afterList(strings(arguments["after"]), on: store.withArchive(board), for: task.slug) }
             task.autoAdvance = auto == false ? false : nil
             task.budgetMin = budget
+            task.model = model
             board.tasks.append(task)
             return task
         }
@@ -743,7 +780,8 @@ public final class LeadToolset: MCPToolset {
                 closed = " \(origin.slug):\(origin.finding.id) couldn't be closed on \(origin.slug) (\(error)): dismiss_finding it."
             }
         }
-        return MCPToolResult(text: "Added task \(task.slug) (\(title)), review \(task.reviewLevel.rawValue).\(closed)\(recorded) " + startHint(task))
+        let runsOn = model.map { " Its worker runs on \($0)." } ?? ""
+        return MCPToolResult(text: "Added task \(task.slug) (\(title)), review \(task.reviewLevel.rawValue).\(runsOn)\(closed)\(recorded) " + startHint(task))
     }
 
     /// The review level passed as `review`; nil when none was passed. Anything but none or audit is refused.
@@ -960,7 +998,7 @@ public final class LeadToolset: MCPToolset {
         + "by its id: fixed, open (still), or dismissed with a reason. id: leave it out for a new finding. Empty or left out: you found nothing."
 
     static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason", "into", "review", "reroll",
-                                          "after", "auto_advance", "budget_min"]
+                                          "after", "auto_advance", "budget_min", "model"]
 
     private func updateTask(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
@@ -1005,6 +1043,7 @@ public final class LeadToolset: MCPToolset {
         let review = try reviewArgument(arguments)
         let auto = try autoArgument(arguments)
         let budget = try budgetArgument(arguments)
+        let model = try modelArgument(arguments)
         let defaultBudget = workflow.taskBudgetMinutes
         var budgetCleared = false
         let appended = (arguments["append_context"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -1068,6 +1107,10 @@ public final class LeadToolset: MCPToolset {
                 } else {
                     changed.append(budget == 0 ? "budget_min 0 (no budget)" : "budget_min \(budget)")
                 }
+            }
+            if let model {
+                board.tasks[index].model = model.isEmpty ? nil : model
+                changed.append(model.isEmpty ? "model cleared (its next worker runs on the project's Claude command's)" : "model \(model) (from its next worker)")
             }
             if !appended.isEmpty {
                 let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1291,8 +1334,59 @@ public final class LeadToolset: MCPToolset {
     /// One start at a time, in this server and any other: each counts the workers running and starts its own before
     /// the next counts, so calls at once can't go past max_workers (or start two workers on one task).
     /// `when` (an automatic start, see `LeadAdvance`): whether the task is still due, asked in that one-at-a-time lock.
-    private func startWorker(_ slug: String, recover: Bool = false, when: ((LeadTask) -> Bool)? = nil) throws -> MCPToolResult {
-        try exclusively("start-worker") { try startWorkerAlone(slug, recover: recover, when: when) }
+    private func startWorker(_ slug: String, recover: Bool = false, overrideUsage: Bool = false, when: ((LeadTask) -> Bool)? = nil) throws -> MCPToolResult {
+        try exclusively("start-worker") { try startWorkerAlone(slug, recover: recover, overrideUsage: overrideUsage, when: when) }
+    }
+
+    // MARK: The account's usage (see `AccountUsage`)
+
+    /// The model a task's worker runs on: its own (add_task's `model`), else the project's Claude command's.
+    func workerModel(for task: LeadTask) -> String? { task.model ?? runtime.workerModel(root: root) }
+
+    /// The model a session of the team runs on, by the board: a task's worker its task's, a verifier or finder the
+    /// audits'; nil for one the board doesn't name.
+    private func sessionModel(_ session: String, _ board: LeadBoard) -> String?? {
+        if let task = board.tasks.first(where: { $0.worker == session }) { return .some(workerModel(for: task)) }
+        if board.tasks.contains(where: { $0.members.contains(session) }) { return .some(auditModel(workflow)) }
+        return nil
+    }
+
+    /// The account's usage as known now: what's kept (`usageStore`), with the limits the team's `sessions` stopped at
+    /// kept first (a session whose turn ended on a refusal: `LeadSessionInfo.usageLimit`). A model-only refusal from a
+    /// session the board doesn't name (its model unknown) isn't kept: unknown usage is no back-off.
+    func accountUsage(sessions: [LeadSessionInfo]?, now: Date = Date()) -> AccountUsage {
+        if let sessions {
+            let board = store.load()
+            let refusals = sessions.compactMap { info -> AccountUsage.Limit? in
+                guard info.live, let limit = info.usageLimit else { return nil }
+                let model = sessionModel(info.id, board)
+                let kept = AccountUsage.fromRefusal(limit, model: model ?? nil, now: now)
+                return kept.model == nil && model == nil && limit.apiError == "model_requires_usage_credits" ? nil : kept
+            }
+            usageStore.record(refusals, now: now)
+        }
+        return usageStore.load().current(now: now)
+    }
+
+    /// The limit that holds back a session on `model` now, if any (see `AccountUsage.hold`).
+    func usageHold(model: String?, sessions: [LeadSessionInfo]?) -> AccountUsage.Limit? {
+        accountUsage(sessions: sessions).hold(model: model)
+    }
+
+    /// Why `what` isn't started on `model`: the account's usage is at `AccountUsage.threshold` or more of a limit on it;
+    /// nil when it isn't (or isn't known). `instead`: what else the lead can do when the limit is the model's only.
+    func usageRefusal(model: String?, sessions: [LeadSessionInfo]?, not: String, what: String, instead: String) -> String? {
+        guard let limit = usageHold(model: model, sessions: sessions) else { return nil }
+        return "\(not): the account's usage is near a limit, \(limit.text). " + Self.usageBackoff(limit, model: model)
+            + (limit.model == nil ? " Wait for the reset" : " Wait for the reset, or \(instead)")
+            + ", or call \(what) with override_usage: true if the user wants the rest of the limit spent."
+    }
+
+    /// What VibeSwitcher does at a limit, in words.
+    static func usageBackoff(_ limit: AccountUsage.Limit, model: String?) -> String {
+        "At \(Int(AccountUsage.threshold))% of a limit VibeSwitcher starts no workers or audits on "
+            + (limit.model.map { "\($0)" } ?? "any model") + (limit.model == nil ? "" : model.map { " (this one runs \($0))" } ?? "")
+            + ", so the limit doesn't stop one mid-task; sessions already running go on."
     }
 
     /// Runs `body` holding the lock `run/<name>.lock` in the project's folder, waiting for it while another thread or
@@ -1311,7 +1405,7 @@ public final class LeadToolset: MCPToolset {
         return try body()
     }
 
-    private func startWorkerAlone(_ slug: String, recover: Bool, when: ((LeadTask) -> Bool)?) throws -> MCPToolResult {
+    private func startWorkerAlone(_ slug: String, recover: Bool, overrideUsage: Bool, when: ((LeadTask) -> Bool)?) throws -> MCPToolResult {
         let board = try store.read()
         guard let task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
         // Held, or no longer due, since the automatic step looked: not started, and nothing said.
@@ -1339,6 +1433,12 @@ public final class LeadToolset: MCPToolset {
         let mac = try macLoad(sessions, load: runtime.steadyLoad(), except: Worktrees.path(root: root, slug: slug),
                               refused: "whether the Mac has room for \(slug)'s worker isn't known; no worker was started")
         if let refusal = macRefusal(mac, not: "Not started", what: "start_worker(\(slug))", need: 1) { throw Problem(text: refusal) }
+        // Near one of the account's usage limits on its model: a worker started now would stop mid-task at it.
+        let model = workerModel(for: task)
+        if !overrideUsage, let refusal = usageRefusal(model: model, sessions: sessions, not: "Not started", what: "start_worker(\(slug))",
+                                                      instead: "run it on another model (update_task(\(slug), model: sonnet) for a mechanical task)") {
+            throw Problem(text: refusal)
+        }
         // A worker on a full disk fails, and takes every other session with it (none can write its output).
         if let free = freeSpace(worktreesFolder), free < workflow.diskFloor {
             throw Problem(text: "Not started: only \(DiskSpace.text(free)) free on the volume holding the worktrees, under disk_floor_gb (\(Self.gb(workflow.diskFloorGB)) GB in workflow.md). A worker started now would fail once the disk fills. Free space first: cleanup finished tasks (status lists the biggest task folders), or tell the user.")
@@ -1398,7 +1498,8 @@ public final class LeadToolset: MCPToolset {
         let noTools = noToolsBefore(task, .worker, sessions: sessions)
         let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(task.title)", trust: true,
                                  prompt: LeadPrompts.worker(task: task, root: root, workflow: workflow),
-                                 start: "Start on your task (it's in your instructions)." + finish + " Call progress at each milestone. When done, call report.", branch: base)
+                                 start: "Start on your task (it's in your instructions)." + finish + " Call progress at each milestone. When done, call report.",
+                                 model: task.model, branch: base)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             // A failed task started again is a new round of work; its setback stays to say why.
@@ -1419,7 +1520,8 @@ public final class LeadToolset: MCPToolset {
         try? store.appendProgress("Started a worker on \(slug)")
         let recovered = merging.map { "Its worktree is in the middle of a merge, which the worker was told to finish (start_worker with recover: true aborts it instead): \($0) " }
             ?? stuck.map { "Aborted the \($0.kind.rawValue) its worktree was stuck in; it's back on \($0.branch) at \($0.head.prefix(8)). " } ?? ""
-        return MCPToolResult(text: noTools + offSaid + recovered + locked + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)). You'll get a message when it reports, needs input or stalls.")
+        let runsOn = task.model.map { ", on \($0)" } ?? ""
+        return MCPToolResult(text: noTools + offSaid + recovered + locked + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)\(runsOn)). You'll get a message when it reports, needs input or stalls.")
     }
 
     private func stopWorker(_ slug: String) throws -> MCPToolResult {
@@ -1630,7 +1732,7 @@ public final class LeadToolset: MCPToolset {
         }
     }
 
-    private func audit(_ slug: String, restart: Bool = false) throws -> MCPToolResult {
+    private func audit(_ slug: String, restart: Bool = false, overrideUsage: Bool = false) throws -> MCPToolResult {
         if let task = store.load().task(slug), Self.settledStates.contains(task.status) { throw Self.settledRefusal(task, "Not audited") }
         // A verifier already at work on the branch's head is left to it: another would end it and throw its work away
         // (2026-10-27: audit(land-pr-1-host) ended the one auto_advance had started on that very head).
@@ -1669,6 +1771,11 @@ public final class LeadToolset: MCPToolset {
         }
         let finders = workflow.auditFinders
         if let refusal = macRefusal(mac, not: "No verifier started", what: "audit(\(slug))", need: finders) { throw Problem(text: refusal) }
+        // Near one of the account's usage limits on the audits' model: a verifier started now would stop mid-audit at it.
+        if !overrideUsage, let refusal = usageRefusal(model: auditModel(workflow), sessions: sessions, not: "Not audited, no verifier started",
+                                                      what: "audit(\(slug))", instead: "audit on another model (configure verifier_model, e.g. opus)") {
+            throw Problem(text: refusal)
+        }
         // Each finder is a session of its own: the Mac must have room for all of them.
         let limits = macLimits()
         if finders > 1, mac.sessions + finders > limits.maxSessions {
@@ -4014,6 +4121,7 @@ public final class LeadToolset: MCPToolset {
             }
         }
         if let line = heavyLockLine(board) { lines.append(line) }
+        if let line = accountUsage(sessions: listing).statusText() { lines.append(line) }
         if sessions == nil {
             lines.append("The session host can't be read right now: what the workers are doing isn't known; the states below are the board's.")
         }

@@ -682,6 +682,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// Its time budget in minutes as the lead set it (add_task's and update_task's budget_min; 0: none); nil: the
     /// workflow's task_budget_min (see `LeadBudget`).
     public var budgetMin: Int?
+    /// The model its worker runs on, as `claude --model` takes it (add_task's and update_task's `model`: sonnet for a
+    /// mechanical task, say); nil: the project's Claude command's, as before.
+    public var model: String?
     /// How long its workers have worked on it, in seconds, as the witness counted (see `LeadBudget.counts`): waiting
     /// on a prompt, the lead or the user, and its audits, don't count.
     public var worked: Double?

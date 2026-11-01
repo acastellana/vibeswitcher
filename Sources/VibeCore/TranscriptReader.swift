@@ -805,11 +805,18 @@ public struct UsageLimit: Equatable, Sendable {
     public var resetsAt: Double?
     /// When the line was written.
     public var at: Double?
+    /// Which limit refused it, as Claude names it (`rateLimitType`: seven_day, five_hour, seven_day_opus,
+    /// seven_day_overage_included…), when the line says.
+    public var kind: String?
+    /// Claude's code for the error (`apiError`: usage_limit_reached, model_requires_usage_credits), when the line says.
+    public var apiError: String?
 
-    public init(said: String, resetsAt: Double? = nil, at: Double? = nil) {
+    public init(said: String, resetsAt: Double? = nil, at: Double? = nil, kind: String? = nil, apiError: String? = nil) {
         self.said = said
         self.resetsAt = resetsAt
         self.at = at
+        self.kind = kind
+        self.apiError = apiError
     }
 
     /// From an API-error line of a transcript (`isApiErrorMessage`) with its text: a usage limit when Claude marks it
@@ -831,12 +838,17 @@ public struct UsageLimit: Equatable, Sendable {
             words = String(text[..<bar])
         }
         let at = ChatReader.date(line["timestamp"])?.timeIntervalSince1970
-        return UsageLimit(said: words.isEmpty ? "Usage limit reached" : String(words.prefix(300)), resetsAt: resetsAt, at: at)
+        let kind = (quota?["rateLimitType"] as? String) ?? (info?["rateLimitType"] as? String)
+        return UsageLimit(said: words.isEmpty ? "Usage limit reached" : String(words.prefix(300)), resetsAt: resetsAt, at: at,
+                          kind: kind, apiError: line["apiError"] as? String)
     }
 
     /// When it resets, in words: "Nov 3, 01:00" (this Mac's time), nil when not known.
-    public var resetText: String? {
-        resetsAt.map { Self.resetFormatter.string(from: Date(timeIntervalSince1970: $0)) }
+    public var resetText: String? { resetsAt.map(Self.resetText) }
+
+    /// A reset time in words: "Nov 3, 01:00" (this Mac's time).
+    public static func resetText(_ at: Double) -> String {
+        resetFormatter.string(from: Date(timeIntervalSince1970: at))
     }
 
     private static let resetFormatter: DateFormatter = {

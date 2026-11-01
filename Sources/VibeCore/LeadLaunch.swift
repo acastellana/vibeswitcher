@@ -213,6 +213,9 @@ public enum LeadLaunch {
         // Where it's started (the task's worktree, else `root`): the hook's paths stay in it.
         let cwd = cwd ?? task.map { Worktrees.path(root: root, slug: $0) } ?? root
         settings["hooks"] = hooks(role, server: server, root: cwd)
+        // The account's usage windows reach VibeSwitcher only through a status line's input: its own records them and
+        // shows yours (see `UsageStatusLine`).
+        settings["statusLine"] = UsageStatusLine.settings(server: server)
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: settingsFile))
         let quote = RecentProjects.shellQuote

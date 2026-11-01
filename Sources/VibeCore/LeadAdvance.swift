@@ -385,6 +385,7 @@ public final class LeadAdvance: @unchecked Sendable {
                 }
                 return roomWait("audit(\(slug))", need: finders)
             }
+            if usageHeld(model: lead.auditModel(lead.workflow)) { return }
             step("audit|\(slug)|\(head)") {
                 guard due(slug, [.review]) != nil else { throw NotDue() }
                 _ = try lead.advanceAudit(slug)
@@ -422,6 +423,7 @@ public final class LeadAdvance: @unchecked Sendable {
         }
         let finders = lead.workflow.auditFinders
         guard !busy, hasRoom(slug, need: finders) else { return roomWait("audit(\(slug))", need: finders) }
+        if usageHeld(model: lead.auditModel(lead.workflow)) { return }
         step("audit|\(slug)|\(head)|again") {
             guard let task = due(slug, [.review]), task.evidence == nil, endedVerifier(task)?.session == ended.session else { throw NotDue() }
             _ = try lead.advanceAudit(slug)
@@ -602,6 +604,8 @@ public final class LeadAdvance: @unchecked Sendable {
             guard running < workflow.maxWorkers else { return }
             // The Mac's room as start_worker counts it; a refusal for it waits for the app's nudge.
             guard hasRoom(task.slug, need: 1) else { return roomWait("start_worker(\(task.slug))", need: 1) }
+            // Near a usage limit on its model: another task on another model may still start.
+            if usageHeld(model: lead.workerModel(for: task)) { continue }
             let after = (task.after ?? []).joined(separator: ", ")
             step("start|\(task.slug)") {
                 // Asked again in start_worker's lock: a hold set while the room was counted stands.
@@ -629,6 +633,17 @@ public final class LeadAdvance: @unchecked Sendable {
             if other.status != .done { left.append(slug) }
         }
         return left
+    }
+
+    /// The account's usage is at `AccountUsage.threshold` or more of a limit on `model` (see `AccountUsage`): nothing
+    /// starts on it by itself, and the lead is told once per limit and reset, with the reset time.
+    private func usageHeld(model: String?) -> Bool {
+        guard let limit = lead.usageHold(model: model, sessions: try? lead.advanceSessions()) else { return false }
+        once("usage|\(limit.key)|\(Int(limit.resetsAt ?? limit.at))",
+             "The account's usage is near a limit: \(limit.text). " + LeadToolset.usageBackoff(limit, model: model)
+                + " Tell the user. Nothing on it starts by itself until the reset; start_worker or audit with override_usage: true starts one anyway"
+                + (limit.model == nil ? "." : ", and a task can run on another model (update_task model, configure verifier_model)."))
+        return true
     }
 
     /// The Mac has no room (or too much load) for `what`: the app nudges once it has.

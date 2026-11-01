@@ -37,6 +37,13 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == ReadOnlyCommand
     exit(0)
 }
 
+// A role session's status line (see `UsageStatusLine`): keeps the account's usage, prints your own status line's output.
+if CommandLine.arguments.count == 2, CommandLine.arguments[1] == UsageStatusLine.argument {
+    let input = FileHandle.standardInput.readDataToEndOfFile()
+    FileHandle.standardOutput.write(Data(UsageStatusLine.run(input: input).utf8))
+    exit(0)
+}
+
 // `vibeswitcher-mcp --test-failures FILE`, for scripts/test-under-load.sh: the failing tests in a saved `swift test`
 // output, as the lead's tools report them; nothing printed when it shows none.
 if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--test-failures" {
@@ -299,7 +306,8 @@ final class HostRuntime: LeadRuntime {
         try HostCall.sessions(socket: socket).map { session in
             let reading = session.isLive ? waiting(session, agent: Self.agentPid(on: session.tty)) : nil
             return LeadSessionInfo(id: session.id.uuidString, cwd: session.cwd, label: session.label, live: session.isLive,
-                                   status: reading?.activity.text, tty: session.tty, pid: session.childPID, waiting: reading?.waiting)
+                                   status: reading?.activity.text, tty: session.tty, pid: session.childPID, waiting: reading?.waiting,
+                                   usageLimit: reading.flatMap { if case .usageLimit(let limit) = $0.activity { return limit } else { return nil } })
         }
     }
 
