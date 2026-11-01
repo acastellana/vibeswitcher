@@ -2641,3 +2641,7 @@
 - 2026-11-01 10:30 Ended wallet-e2e-reads-the's worker (idle since its done report on b6b15f6e) to make room on the Mac for its audit
 - 2026-11-01 10:30 Automatically (auto_advance): Started the audit of wallet-e2e-reads-the at b6b15f6e (Its review is audit. (audited: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$err"), as the risk check found.)).
 - 2026-11-01 10:30 Ended boost-release-3-7's worker (idle since its done report on a8414196) to make room on the Mac for its audit
+- 2026-11-01 10:37 Audit of boost-release-3-7 at a8414196 tested its merged result 0faaab62 onto main: test command failed
+- 2026-11-01 10:37 Automatically (auto_advance): Started the audit of boost-release-3-7 at a8414196 (Its review is audit).
+- 2026-11-01 10:40 Audit of wallet-outcomes-always: incomplete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-11-01 10:40 Automatically (auto_advance): Sent wallet-outcomes-always's worker the open Important findings wallet-outcomes-always:F1 from its audit at 7e98bce2.
