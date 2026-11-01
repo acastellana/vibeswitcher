@@ -34,7 +34,9 @@ The lead turns what you ask for into tasks on its board. Each task has a contrac
 - **context**: what the worker needs to know.
 
 A task can also have a review level (below), an `after` list (tasks that must be done first), its own time budget
-(`budget_min`) and `auto_advance: false` to keep it out of automatic moves. The lead changes a task with
+(`budget_min`), a `model` for its worker (as `claude --model` takes it: `sonnet` for a mechanical task; left out, the
+worker runs on the project's Claude command's model, as before) and `auto_advance: false` to keep it out of automatic
+moves. The lead changes a task with
 `update_task`. A task's state (`LeadBoard.swift:549`) is planned, running, review (reported done, being checked), done
 (merged), failed, blocked, kept, folded, abandoned or reverted. A task made by
 mistake that never ran can be removed.
@@ -173,6 +175,32 @@ project's `workflow.md` lines for these two are ignored.
 every project on the Mac. There are `heavy_slots` of them: `VIBESWITCHER_HEAVY_SLOTS`, else the Mac's cores ÷ 4 (3 on a
 12-core Mac). A run that finds every slot held waits, naming who holds each.
 
+## The account's usage limits
+
+Workers and verifiers spend the Claude account's usage, and a session that reaches a limit stops mid-task until it
+resets. VibeSwitcher reads what Claude Code exposes (`AccountUsage.swift`), best effort:
+
+- **The status line's input.** For a Claude.ai subscriber, after a session's first reply, Claude Code hands the status
+  line `rate_limits`: `five_hour` and `seven_day`, each with `used_percentage` (0–100) and `resets_at` (epoch seconds),
+  and `spend_limit` behind a gateway. These are the whole account's. The sessions VibeSwitcher starts (lead, workers,
+  verifiers) get its status line, which keeps them in `~/.vibeswitcher/account-usage.json` and then runs your own
+  status line (`statusLine` in `~/.claude/settings.json`) with the same input, so it reads as yours. Your own sessions
+  are untouched. There's no per-model percentage there.
+- **Transcripts** say nothing about usage until a request is refused. Then the API-error line carries `apiError`
+  (`usage_limit_reached`, or `model_requires_usage_credits` when only that model is out, as Fable was on 2026-11-01),
+  `rateLimitType` (`five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, `seven_day_overage_included`) and
+  `resetsAt`. A refusal counts as that limit at 100 % until its reset, for the session's model alone when the type
+  names a model or the model needs usage credits, else for every model.
+- Claude Code also reads per-window use from the API's response headers and shows `/usage` on its own screen, but
+  writes neither to a file. The OAuth usage endpoint would need the account's token from the Keychain, which
+  VibeSwitcher doesn't touch.
+
+At 80 % of a limit, `start_worker` and `audit` start nothing on the models that limit holds back (every model for the
+weekly and 5-hour limits) unless the lead passes `override_usage: true`. Sessions already running carry on.
+auto_advance skips those starts and audits and tells the lead once per limit, with the reset time. `status` shows each
+known limit, how much is used and when it resets. What isn't known (an API key, no status line run yet, a reading past
+its reset) means no back-off, never a stop.
+
 ## The battery hold
 
 On battery, below a set charge, lead work pauses: `start_worker`, `audit`, `merge` and `revert` refuse, and work
@@ -290,6 +318,7 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 | `heavy_slots` | `VIBESWITCHER_HEAVY_SLOTS`, else cores ÷ 4 | `TestLock.swift:85-89` |
 | `vs-heavy` timeout | 60 min | `Resources/bin/vs-heavy` |
 | Battery hold | below 50 % on battery | `PowerSource.swift:74` |
+| Usage back-off | 80 % of a limit on the model | `AccountUsage.swift` |
 | Stall: silent, idle, compacted | 15, 10, 5 min | `LeadStall.swift:44-46` |
 | Verifier ends after its verdict | 20 s | `Sources/VibeHost/HostServer.swift:83` |
 | Records commit | after each merge, at most every 5 min | `LeadRecords.swift:65` |

@@ -146,6 +146,8 @@ public struct AccountUsageStore: Sendable {
     public init(file: URL = AccountUsageStore.standardFile) { self.file = file }
 
     public static var standardFile: URL { VibePaths.root.appendingPathComponent("account-usage.json") }
+    /// How old a reading must be before the same one read again replaces it.
+    static let refresh: Double = 300
 
     private struct Stored: Codable { var limits: [AccountUsage.Limit] }
 
@@ -161,7 +163,13 @@ public struct AccountUsageStore: Sendable {
         guard !limits.isEmpty else { return }
         let before = load().limits
         var kept = Dictionary(before.map { ($0.key, $0) }, uniquingKeysWith: { $0.at >= $1.at ? $0 : $1 })
-        for limit in limits where kept[limit.key].map({ $0.at <= limit.at }) ?? true { kept[limit.key] = limit }
+        for limit in limits {
+            guard let old = kept[limit.key] else { kept[limit.key] = limit; continue }
+            // Newer only; the same reading again (a status line runs at every change of the session's screen) is
+            // rewritten only once it's `refresh` old, so the file isn't written each time.
+            let same = old.usedPercent == limit.usedPercent && old.resetsAt == limit.resetsAt && old.model == limit.model && old.reached == limit.reached
+            if old.at <= limit.at, !same || limit.at - old.at >= Self.refresh { kept[limit.key] = limit }
+        }
         let after = kept.values.filter { $0.current(at: now.timeIntervalSince1970) }.sorted { $0.key < $1.key }
         guard after != before.sorted(by: { $0.key < $1.key }) else { return }
         let encoder = JSONEncoder()
