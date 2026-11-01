@@ -413,6 +413,7 @@ public struct LeadWake: Equatable, Sendable {
         let text = report.text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
         let said: [(String, String)] = [
             ("says it's done", "done"), ("is blocked", "blocked"), ("is stalled", "stalled"), ("asks", "asks"), ("is waiting for input", "waits for input"),
+            ("has waited", "waits for input"), ("waited", "had a prompt declined"),
             ("stopped mid-", "stopped on an API error"), ("stopped without", "stopped"), ("ended", "ended"),
         ]
         for role in ["worker", "verifier"] {

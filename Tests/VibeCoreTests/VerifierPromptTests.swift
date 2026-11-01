@@ -8,6 +8,7 @@ import Testing
 /// lost. (a) Read-only command lines run without a prompt (`ReadOnlyCommand`, the verifier's `PermissionRequest`
 /// hook); (b) a prompt still waited on after `LeadWitness.promptWait` is declined, the lead told once.
 struct VerifierPromptTests {
+    let temp = Scratch()
     // MARK: (a) What runs without a prompt
 
     /// The command lines that run without a prompt.
@@ -76,11 +77,11 @@ struct VerifierPromptTests {
     /// The verifier's settings carry the hook (by the tool server, which answers it); the lead's and workers' don't,
     /// and the verifier's deny rules are as they were (Claude Code asks the hook only about what they let through).
     @Test func onlyTheVerifiersSettingsCarryTheHook() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("verifier-hook-\(UUID().uuidString)").path
-        defer { try? FileManager.default.removeItem(atPath: root) }
+        let root = temp.url("verifier-hook").path
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "x", base: "claude", prompt: "p",
-                                                start: "Go.", server: "/opt/vibe switcher/vibeswitcher-mcp", name: "\(role)-x")
+                                                start: "Go.", server: "/opt/vibe switcher/vibeswitcher-mcp", name: "\(role)-x",
+                                                temporary: temp.url("session-tmp"))
             let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
             let hooks = settings["hooks"] as? [String: Any]
             guard role == .verifier else {

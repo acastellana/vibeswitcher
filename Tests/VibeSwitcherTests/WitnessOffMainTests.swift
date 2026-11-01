@@ -186,7 +186,7 @@ struct WitnessOffMainTests {
         #expect(wall.allSatisfy { $0 < 50 })
 
         // Every computation ran, off the main thread; the looks are applied on it.
-        let look = ["withoutTools", "endedForAdvance", "leftToAdvance", "unbuiltMessages", "working", "stalls"]
+        let look = ["withoutTools", "endedForAdvance", "leftToAdvance", "unbuiltMessages", "stuckPrompts", "working", "stalls"]
         #expect(steps.all.filter { $0.step != "applied" }.map(\.step) == look + look + look)
         #expect(steps.all.allSatisfy { $0.main == ($0.step == "applied") })
         // The stall is on the board, and told to the lead once.

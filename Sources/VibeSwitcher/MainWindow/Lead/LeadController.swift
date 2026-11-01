@@ -1549,15 +1549,8 @@ final class LeadController: ObservableObject {
         // A verifier waiting on a prompt no one answers: declined with a reason it can act on, and the lead told once
         // what was asked (or that it couldn't be declined), instead of the audit hanging until it's started again.
         for stuck in work.stuckPrompts where told.insert("\(root)|\(stuck.key)").inserted {
-            guard let id = UUID(uuidString: stuck.session) else { continue }
             Breadcrumbs.shared.note("witness: declining the prompt verifier \(stuck.session.prefix(8)) on \(stuck.slug) waits on")
-            PromptDecline.decline(id, host: host) { [weak self] declined in
-                DispatchQueue.main.async {
-                    // Built where it's posted: it quotes what was asked (`LeadWitness.Notice`).
-                    self?.deliver(built: { declined ? LeadWitness.declinedText(stuck) : LeadWitness.undeclinedText(stuck) },
-                                  from: .system("witness"), root: root)
-                }
-            }
+            PromptDecline.handle(stuck, host: host) { [weak self] text in self?.deliver(built: text, from: .system("witness"), root: root) }
         }
         // Low disk space, once per episode; what takes it is sized off the main thread.
         var disk = disks[root] ?? LeadWitness.Disk(free: freeSpace, file: DiskWatch.file)
