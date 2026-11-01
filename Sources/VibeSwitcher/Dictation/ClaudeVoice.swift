@@ -578,10 +578,11 @@ final class ClaudeVoiceRun {
     private func beginRepeats() {
         guard !repeating, stage == .holding, !released, !cancelled else { return }
         repeating = true
-        // The first repeat `repeatEvery` after the first Space, not after this call: from the `firstRepeatWithin`
-        // timer (a first read slower than that) it would go 145 ms after the first Space, past Claude's 120 ms chain,
-        // which then breaks and keeps the first Space typed in its box.
-        repeatSoon(after: max(0, Self.repeatEvery - now().timeIntervalSince(lastSpaceAt)))
+        // The first repeat `repeatEvery` after this call (the first read: time for it to catch tap mode), but never
+        // later than `firstRepeatWithin` after the first Space: from that timer (a slow first read), `repeatEvery` on
+        // was 145 ms, past Claude's 120 ms chain, which then broke and kept the first Space typed in its box.
+        let left = Self.firstRepeatWithin - now().timeIntervalSince(lastSpaceAt)
+        repeatSoon(after: min(Self.repeatEvery, max(0, left)))
     }
 
     /// The repeats, every `repeatEvery` while held (the first `after`), until a read or the release stops them
