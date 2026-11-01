@@ -386,7 +386,11 @@ final class WalletDesk: ObservableObject {
         }
         // The one it replaces stops its `passage listen` on a thread of its own: that may take seconds, and `work`
         // carries on meanwhile.
-        if let replaced = courier { DispatchQueue.global(qos: .utility).async { replaced.close() } }
+        // What it still takes meanwhile isn't told again: only the new one's results reach the cards and the agents.
+        if let replaced = courier {
+            replaced.onTaken(nil)
+            DispatchQueue.global(qos: .utility).async { replaced.close() }
+        }
         let made = WalletCourier(link: link, store: store, log: log, now: now)
         made.onTaken { [weak self] results in self?.work.async { self?.taken(results) } }
         courier = made

@@ -232,7 +232,7 @@ The whole result passes [Key material](#key-material).
 **VibeSwitcher's records.** A record file is opened without following a link, only as a regular file, and only up to
 64 KiB (its size checked before it's read); anything else under a record's name is kept aside, and a result that would
 take a record past 64 KiB is ignored. A request whose `createdAt` is more than 5 minutes ahead of the Mac's clock is
-refused (filed or sent); one more than 7 days old gets no card and its record isn't loaded. At most 30 cards show at
+refused (filed or sent); one more than 7 days old, its results window over, gets no card and its record isn't loaded. At most 30 cards show at
 once (past that the oldest finished ones give way first). One `passage inbox` runs at a time: a `passage listen` line
 that comes while it runs asks for one more listing once it's done.
 

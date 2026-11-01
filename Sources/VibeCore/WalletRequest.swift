@@ -216,13 +216,15 @@ public struct WalletRequest: Equatable, Sendable {
     public static let maxAheadOfClock: TimeInterval = 5 * 60
     public static let maxAge: TimeInterval = 7 * 24 * 3600
 
-    /// Why its `createdAt` isn't believable now: more than `maxAheadOfClock` in the future, or older than `maxAge`.
-    /// Nil when it is. Such a request is refused when filed or sent, and its record isn't loaded.
+    /// Why its `createdAt` isn't believable now: more than `maxAheadOfClock` in the future, or older than `maxAge`
+    /// with its results window (`expiresAt` + `WalletCourier.resultGrace`) over too, so a 7-day request still takes
+    /// a result in its last hour. Nil when it is. Such a request is refused when filed or sent, and its record isn't
+    /// loaded.
     public func implausibleTime(now: Date) -> String? {
         if createdAt.timeIntervalSince(now) > Self.maxAheadOfClock {
             return "its createdAt \(WalletRequestFormat.string(createdAt)) is more than 5 minutes ahead of this Mac's clock"
         }
-        if now.timeIntervalSince(createdAt) > Self.maxAge { return "its createdAt \(WalletRequestFormat.string(createdAt)) is more than 7 days ago" }
+        if now.timeIntervalSince(createdAt) > Self.maxAge, now >= expiresAt.addingTimeInterval(WalletCourier.resultGrace) { return "its createdAt \(WalletRequestFormat.string(createdAt)) is more than 7 days ago" }
         return nil
     }
 }

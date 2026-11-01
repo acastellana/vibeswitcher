@@ -113,6 +113,11 @@ struct WalletRobustnessTests {
         #expect(request.implausibleTime(now: now.addingTimeInterval(-301))?.contains("more than 5 minutes ahead") == true)
         #expect(request.implausibleTime(now: now.addingTimeInterval(7 * 86_400)) == nil)
         #expect(request.implausibleTime(now: now.addingTimeInterval(7 * 86_400 + 1))?.contains("more than 7 days ago") == true)
+        // A 7-day request in its results window's last hour is still believed: a final result then still lands.
+        var week = request
+        week.expiresAt = week.createdAt.addingTimeInterval(WalletRequest.maxLifetime)
+        #expect(week.implausibleTime(now: now.addingTimeInterval(7 * 86_400 + 1800)) == nil)
+        #expect(week.implausibleTime(now: week.expiresAt.addingTimeInterval(WalletCourier.resultGrace)) != nil)
         // Sent from a clock 10 minutes ahead: refused, nothing run.
         request.createdAt = PassageLinkTests.created.addingTimeInterval(30 + 600)
         request.expiresAt = request.createdAt.addingTimeInterval(3600)
