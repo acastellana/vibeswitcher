@@ -2468,3 +2468,18 @@
 - 2026-11-01 02:28 Planned app-memory-grows-17: App memory grows ~17 MB an hour again (297 → 347 MB in 3 h at a steady session count)
 - 2026-11-01 02:30 Audit of strict-paths-an: complete, clean, round 1: 1 Important open, 2 Nit open, 2 Pre-existing open
 - 2026-11-01 02:30 Automatically (auto_advance): Couldn't send strict-paths-an's worker its open Important findings (strict-paths-an:F1): Not started: the Mac is shared by every project's team, and its load (the greater of its 1- and 5-minute averages) is above load_threshold. Now: load 37.2 (load_threshold 24, twice the 12 cores), 12 team sessions across 3 projects (this one 3, 2 others 9) (mac_max_sessions 15). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, …
+- 2026-11-01 02:37 Audit of turn-this-incident-into-8: complete, clean, round 1: 1 Important open, 3 Nit open, 1 Pre-existing open
+- 2026-11-01 02:37 Automatically (auto_advance): Couldn't send turn-this-incident-into-8's worker its open Important findings (turn-this-incident-into-8:F1): Not started: the Mac is shared by every project's team, and its load (the greater of its 1- and 5-minute averages) is above load_threshold. Now: load 30.8 (load_threshold 24, twice the 12 cores), 11 team sessions across 3 projects (this one 2, 2 others 9) (mac_max_sessions 15). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, …
+- 2026-11-01 02:37 Planned workers-and-verifiers-2: Workers and verifiers can read the lead's private files through `git diff --no-index` (Bash(git diff:*) bypasses the Read deny) (review audit)
+- 2026-11-01 02:39 Started a worker on turn-this-incident-into-8
+- 2026-11-01 02:39 Automatically (auto_advance): Sent turn-this-incident-into-8's worker the open Important findings turn-this-incident-into-8:F1 from its audit at 83bbb1d7 (in a new worker: its last one had ended).
+- 2026-11-01 02:39 Started a worker on strict-paths-an
+- 2026-11-01 02:39 Automatically (auto_advance): Sent strict-paths-an's worker the open Important findings strict-paths-an:F1 from its audit at d3e1becb (in a new worker: its last one had ended).
+- 2026-11-01 02:39 Started a worker on wallet-card-truth-the
+- 2026-11-01 02:39 Automatically (auto_advance): Started a worker on wallet-card-truth-the (Wallet card truth: the record decides the state, and the browser path keeps what was signed).
+- 2026-11-01 02:39 Started a worker on app-memory-grows-17
+- 2026-11-01 02:39 Automatically (auto_advance): Started a worker on app-memory-grows-17 (App memory grows ~17 MB an hour again (297 → 347 MB in 3 h at a steady session count)).
+- 2026-11-01 02:39 Started a worker on workers-and-verifiers-2
+- 2026-11-01 02:39 Automatically (auto_advance): Started a worker on workers-and-verifiers-2 (Workers and verifiers can read the lead's private files through `git diff --no-index` (Bash(git diff:*) bypasses the Read deny)).
+- 2026-11-01 02:49 Merged verifiers-don-t-run: Verifiers don't run a full suite of their own: the merge's run is the one full suite
+- 2026-11-01 02:49 Flaky in verifiers-don-t-run's merge: aReadBehindAHungOneWaitsNoLongerThanItsTimeout(), theScreenRouteReadsATerminalTabOffTheMainThread() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
