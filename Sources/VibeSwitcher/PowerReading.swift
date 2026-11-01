@@ -26,9 +26,13 @@ extension SystemPower {
 
     /// Whether the Mac runs on AC power now, as the power daemon says (it can take seconds: only `PowerSourceCache`
     /// calls it, off the main thread). No power source information: taken as power (a desktop Mac says AC anyway).
-    static func providingAC() -> Bool {
+    static func providingAC() -> Bool { providingACIfKnown() ?? true }
+
+    /// As `providingAC`, but nil when the system doesn't say: what's taken in its place depends on the reader (Boost
+    /// takes it as battery, see `PowerSourceCache.Reading.knownAC`).
+    static func providingACIfKnown() -> Bool? {
         guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let type = IOPSGetProvidingPowerSourceType(snapshot)?.takeUnretainedValue() else { return true }
+              let type = IOPSGetProvidingPowerSourceType(snapshot)?.takeUnretainedValue() else { return nil }
         return (type as String) != kIOPMBatteryPowerKey && (type as String) != kIOPMUPSPowerKey
     }
 }
@@ -44,6 +48,9 @@ final class PowerSourceCache: @unchecked Sendable {
     struct Reading: Equatable {
         var onACPower: Bool
         var state: PowerState?
+        /// AC power as the system said it; nil when it didn't (`onACPower` then takes it as power). Boost goes by
+        /// this, so an unreadable power source never boosts.
+        var knownAC: Bool? = nil
     }
 
     /// The app's: read from the system, and again at each change it posts.
@@ -51,7 +58,8 @@ final class PowerSourceCache: @unchecked Sendable {
 
     /// The system's power source, now (it can take seconds).
     static func system() -> Reading {
-        Reading(onACPower: SystemPower.providingAC(), state: SystemPower.state())
+        let ac = SystemPower.providingACIfKnown()
+        return Reading(onACPower: ac ?? true, state: SystemPower.state(), knownAC: ac)
     }
 
     private let read: () -> Reading

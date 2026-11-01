@@ -147,6 +147,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     /// The Mac's load, memory, team sessions and heavy slots, once a minute, to ~/.vibeswitcher/stats (`LoadRecorder`).
     private let loadRecorder = LoadRecorder()
     private var loadTimer: Heartbeat.Subscription?
+    /// Decides Boost mode for every project's leads (Settings › Project lead, see `BoostWatch`).
+    private(set) lazy var boostWatch = BoostWatch(preferences: preferences)
     /// Gives malloc's free pages back as the footprint grows (see `FootprintRelief`).
     private let footprintRelief = FootprintRelief()
     private var terminationSignal: DispatchSourceSignal?
@@ -366,19 +368,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             loadRecorder.record(census: HostCensus.count(hostClient.sessions.map { ($0.label, $0.cwd, $0.isLive) }))
         }
         footprintRelief.start()
+        boostWatch.currentFolder = { [weak self] in self?.store.sessions.first(where: \.isCurrent)?.cwd }
+        // Turned on: leads refused for room may start now; turned off: nothing to tell (running work finishes).
+        boostWatch.changed = { [weak self] state in if state.on { self?.leadController.lookAtRoom() } }
+        boostWatch.start()
 
-        store.$sessions
+        store.$sessions.combineLatest(boostWatch.$state)
             .receiveLatest(on: RunLoop.main)
-            .sink { [weak self] sessions in
+            .sink { [weak self] sessions, boost in
                 guard let self else { return }
                 // The dots are your own sessions: a lead's workers and verifiers are under it in the list.
                 let own = SessionTeams.split(sessions).own
+                let boosting = boost?.on == true ? boost : nil
                 let signature = own.map { "\($0.status.rawValue):\($0.isCurrent):\($0.isPaused)" }.joined(separator: ",")
+                    + "|" + (boosting?.why ?? "")
                 if signature != self.iconSignature {
                     self.iconSignature = signature
-                    self.statusItem.button?.image = StatusIcon.image(for: own)
+                    self.statusItem.button?.image = StatusIcon.image(for: own, boost: boosting)
                     // VoiceOver: "VibeSwitcher: 2 need you, 3 working".
-                    self.statusItem.button?.setAccessibilityLabel(StatusSummary.spoken(own))
+                    self.statusItem.button?.setAccessibilityLabel(StatusSummary.spoken(own) + (boosting.map { "; \($0.text)" } ?? ""))
                     DispatchQueue.main.async { self.updateDotToolTips() }
                 }
                 self.popoverState.selectedIndex = min(self.popoverState.selectedIndex, max(0, sessions.count - 1))
@@ -522,16 +530,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         return MenuBarDots.index(at: imagePoint(point, in: button, imageRect: rect, image: image), count: store.split.own.count)
     }
 
-    /// One tooltip region per dot, naming that session.
+    /// The boost mark's tooltip region's tag (a dot's is its number).
+    private static let boostToolTip = 1_000_000
+
+    /// One tooltip region per dot, naming that session, and the boost mark's.
     private func updateDotToolTips() {
         guard let button = statusItem.button else { return }
         button.removeAllToolTips()
         let own = store.split.own
+        let boost = boostWatch.menuText
         guard let rect = dotsImageRect(in: button), let image = button.image else {
-            button.toolTip = Self.tooltip(for: own)
+            button.toolTip = Self.tooltip(for: own) + (boost.map { "\n\($0)" } ?? "")
             return
         }
         button.toolTip = nil
+        if boost != nil {
+            // The boost mark, right of the dots.
+            let sx = rect.width / image.size.width
+            let markX = MenuBarDots.width(count: own.count)
+            button.addToolTip(NSRect(x: rect.minX + markX * sx, y: rect.minY, width: rect.maxX - (rect.minX + markX * sx), height: rect.height),
+                              owner: self, userData: UnsafeMutableRawPointer(bitPattern: Self.boostToolTip))
+        }
         let sx = rect.width / image.size.width, sy = rect.height / image.size.height
         for index in own.indices {
             let hit = MenuBarDots.hitRect(at: index, count: own.count)
@@ -543,6 +562,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
 
     func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
               userData data: UnsafeMutableRawPointer?) -> String {
+        if Int(bitPattern: data) == Self.boostToolTip { return boostWatch.menuText.map { "\($0)\nSettings › General › Project lead: Boost" } ?? "" }
         let index = Int(bitPattern: data) - 1
         let own = store.split.own
         guard own.indices.contains(index) else { return "" }
@@ -640,7 +660,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 recentProjects: { [weak self] in self?.popoverState.recentProjects.map(\.path) ?? [] },
                 showWelcome: { [weak self] in self?.showWelcome(firstRun: false) }, host: hostClient, briefing: briefing,
                 dictation: dictation, policy: WorkingPolicyEditor(saved: { [weak self] in self?.leadController.lookAtPolicy() }),
-                walletPeers: walletPeers)
+                boost: boostWatch, walletPeers: walletPeers)
         }
         loadRecentProjects()
         settingsWindow?.show(tab: tab)

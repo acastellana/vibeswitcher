@@ -3,7 +3,10 @@
 # full test suite, a release build), so that every project's workers, merges and audits run at most N at a time on this
 # Mac. Two suites side by side starved each other and the benches (3–4 min each at load 30–50, measured 2026-10-21); one
 # slot, though, let a 38-minute pytest hold up every project's builds, suites and merges (2026-10-22). N is
-# VIBESWITCHER_HEAVY_SLOTS, else the Mac's cores ÷ 4 (at least 1): 3 on a 12-core Mac. While every slot is held, this
+# VIBESWITCHER_HEAVY_SLOTS (a project's heavy_slots gives its sessions that), else Settings' Mac-wide count
+# (~/.vibeswitcher/mac-limits.json's heavySlots: 1 to the cores, the cores ÷ 6 while unset, 2 on a 12-core Mac); while
+# Boost mode is on (boost.json says so and was written in the last 150 s) it's raised to boost's heavySlots (1 to the
+# cores): the same count the leads' merges and audits take (`MacLimits.heavySlotsInForce`). While every slot is held, this
 # run waits in line (first come, first served, with merges and audits too), saying its place ("2nd in line, behind merge
 # of x (vibeswitcher)") and who holds each slot (pid, what, where, which project, how long: "long" past 30 min, and
 # "idle 40 min" once its work has used almost no CPU for 10 min or more: only said, never acted on), again each time
@@ -87,9 +90,31 @@ ncpu=${VIBESWITCHER_HEAVY_NCPU:-}
 [[ $ncpu =~ ^[0-9]+$ ]] && (( 10#$ncpu >= 1 )) || ncpu=$(sysctl -n hw.ncpu 2>/dev/null)
 [[ $ncpu =~ ^[0-9]+$ ]] && (( 10#$ncpu >= 1 )) || ncpu=4
 ncpu=$(( 10#$ncpu ))
-slots=${VIBESWITCHER_HEAVY_SLOTS:-}
+own=${VIBESWITCHER_HEAVY_SLOTS:-}
+[[ $own =~ ^[0-9]+$ ]] && (( 10#$own >= 1 )) && own=$(( 10#$own )) || own=""
+# VibeSwitcher's folder, as VibePaths.root finds it: VIBESWITCHER_HOME, else .vibeswitcher in the home.
+vs_root=${VIBESWITCHER_HOME:-}
+[[ $vs_root == /* ]] || { vs_home=${CFFIXED_USER_HOME:-}; [[ $vs_home == /* ]] || vs_home=${HOME:-}; vs_root=$vs_home/.vibeswitcher; }
+# Settings' count and boost's, read as MacLimits.current and BoostState.load read them (clamped, a stale boost.json off).
+slots=$(/usr/bin/perl -MJSON::PP -e '
+    my ($root, $ncpu, $own) = @ARGV;
+    sub json { open(my $h, "<", shift) or return undef; local $/; my $j = eval { JSON::PP->new->decode(scalar <$h>) }; ref $j eq "HASH" ? $j : undef }
+    sub count { my ($v, $default) = @_; return $default unless defined $v && !ref $v && $v =~ /^-?[0-9]+$/; $v < 1 ? 1 : $v > $ncpu ? $ncpu : $v + 0 }
+    my $default = int($ncpu / 6) || 1;
+    my $limits = json("$root/mac-limits.json");
+    my $slots = $own ne "" ? $own : count($limits ? $limits->{heavySlots} : undef, $default);
+    my $boost = json("$root/boost.json");
+    # As Swift decodes it: on a JSON true, why, limits an object and at a number, else no boost.
+    if ($boost && JSON::PP::is_bool($boost->{on}) && $boost->{on} && defined $boost->{why} && !ref $boost->{why}
+        && ref $boost->{limits} eq "HASH" && defined $boost->{at} && $boost->{at} =~ /^[0-9]+(\.[0-9]+)?$/
+        && time - $boost->{at} <= 150 && $boost->{at} <= time + 150) {
+        my $raised = count($boost->{limits}{heavySlots}, 3);
+        $slots = $raised if $raised > $slots;
+    }
+    print $slots;
+' "$vs_root" "$ncpu" "$own" 2>/dev/null)
 if ! [[ $slots =~ ^[0-9]+$ ]] || (( 10#$slots < 1 )); then
-    slots=$(( ncpu / 4 ))
+    slots=${own:-$(( ncpu / 6 ))}
     (( slots >= 1 )) || slots=1
 fi
 slots=$(( 10#$slots ))

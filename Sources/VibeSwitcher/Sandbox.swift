@@ -248,6 +248,16 @@ private final class Driver: NSObject, NSApplicationDelegate {
     let host: HostClient
     let model = WindowModel()
     let preferences = Preferences()
+    /// Boost mode with the power source, your presence and the usage made up (`boost STATE`): never the Mac's.
+    var boostSignals = (onAC: true, away: false, usage: AccountUsage())
+    lazy var boostWatch: BoostWatch = {
+        let watch = BoostWatch(preferences: preferences)
+        watch.onAC = { [weak self] in self?.boostSignals.onAC }
+        watch.away = { [weak self] in self?.boostSignals.away ?? false }
+        watch.usage = { [weak self] in self?.boostSignals.usage ?? AccountUsage() }
+        watch.currentFolder = { [weak self] in self?.store.sessions.first(where: \.isCurrent)?.cwd }
+        return watch
+    }()
     lazy var leads: LeadController = {
         // A lead `startlead` starts runs a fake Claude, never a real one (its arguments after the fake's own are ignored).
         let controller = LeadController(host: host, store: store) { [weak self] folder in self?.leadCommand(folder) ?? "exec /bin/cat" }
@@ -912,7 +922,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settings = SettingsWindowController(
                 preferences: preferences, setup: SetupModel(preferences: preferences, system: .fixed(hooks: [.claude: true, .codex: false], terminal: .notAsked, notifications: .off)),
                 phoneAccess: PhoneAccess(store: store), recentProjects: { [] }, showWelcome: { [weak self] in self?.refuse("the welcome window") },
-                host: host, briefing: briefing, dictation: dictation, policy: WorkingPolicyEditor(),
+                host: host, briefing: briefing, dictation: dictation, policy: WorkingPolicyEditor(), boost: boostWatch,
                 // Its own fake passage's peers, whatever the path setting says: never the real passage.
                 walletPeers: WalletPeerList(load: { [passage = PassageCommand(executable: walletPassage.appendingPathComponent("passage").path)] _ in
                     WalletPeerList.Read(passage: passage, peers: WalletPeerChoice.list(passage: passage))
@@ -940,7 +950,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),
         ("scroll top|middle|bottom", "scrolls the shown chat"),
-        ("scroll settings top|middle|bottom", "scrolls the shown Settings tab"),
+        ("scroll settings top|middle|bottom|FRACTION", "scrolls the shown Settings tab (FRACTION: that far down, e.g. 0.4)"),
         ("size WxH", "resizes the main window's content (e.g. 1728x1015)"),
         ("board [N]", "adds N finished tasks (default 250) to the fake lead's board (start the lead first)"),
         ("churn [N]", "changes the fake lead's board N times (default 40), 0.15 s apart, each read and shown as a real change is"),
@@ -968,6 +978,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("wallet [STATE]", "shows a made-up wallet request card as the sheet, in STATE: " + Driver.walletCards.map(\.state).joined(separator: ", ") + " (all: every state, one under another); settings wallet shows its Settings tab"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
+        ("boost off|on|away|present|battery|veto", "Boost mode in a made-up state (the power source, your presence and the usage made up): off; On on AC; Automatic away on AC (boosted), at the Mac, away on battery, or away on AC with the usage watch's veto. Settings and the menu-bar sheet show it"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
         ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", ")),
         ("close settings|sheet", "closes Settings or the sheet"),
@@ -985,6 +996,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }),
         // The lead's results as the Lead view lists them: an update whose screenshot post_update kept (its worktree
         // since removed), and an older one whose path into a cleaned-up worktree is gone.
+        // The menu bar icon as the app draws it for the fake sessions, with the boost mark while `boost` has it on, on a
+        // strip of the bar's colour (the sandbox has no menu bar of its own).
+        ("menu-bar", { driver in AnyView(MenuBarStrip(sessions: SessionTeams.split(driver.store.sessions).own, watch: driver.boostWatch)) }),
         ("results", { driver in AnyView(ResultsList(updates: Driver.results(home: driver.home)).frame(width: 460).padding(12)) }),
         // A lead's Team tab: a task at work, two blocked (one after it, one with no word why), one whose verifier ended
         // twice, merged ones of which
@@ -1530,7 +1544,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             let to = rest.dropFirst("settings".count).trimmingCharacters(in: .whitespaces)
             let height = document.frame.height - scroll.contentSize.height
-            let y = to == "top" ? 0 : to == "middle" ? height / 2 : height
+            // A fraction (0.4) scrolls that far down.
+            let y: CGFloat = Double(to).map { height * CGFloat(min(1, max(0, $0))) } ?? (to == "top" ? 0 : to == "middle" ? height / 2 : height)
             scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, y)))
             scroll.reflectScrolledClipView(scroll.contentView)
             settle { reply(true, "scrolled settings to \(Int(y)) of \(Int(height))") }
@@ -1651,6 +1666,20 @@ private final class Driver: NSObject, NSApplicationDelegate {
             showSettings(tab)
             settle { reply(true, "settings shown on \(tab.rawValue)") }
         case "sheet": showSheet(rest, reply)
+        case "boost":
+            let now = Date().timeIntervalSince1970
+            switch rest {
+            case "off": preferences.boostMode = .off
+            case "on": (preferences.boostMode, boostSignals) = (.on, (true, false, AccountUsage()))
+            case "away": (preferences.boostMode, boostSignals) = (.automatic, (true, true, AccountUsage()))
+            case "present": (preferences.boostMode, boostSignals) = (.automatic, (true, false, AccountUsage()))
+            case "battery": (preferences.boostMode, boostSignals) = (.automatic, (false, true, AccountUsage()))
+            case "veto":
+                let limit = AccountUsage.Limit(name: "five_hour", usedPercent: 84, resetsAt: now + 7200, at: now)
+                (preferences.boostMode, boostSignals) = (.automatic, (true, true, AccountUsage(limits: [limit])))
+            default: return reply(false, "boost off|on|away|present|battery|veto")
+            }
+            boostWatch.look { [weak self] in self?.settle { reply(true, self?.boostWatch.state?.text ?? "not decided") } }
         case "wallet-ask": walletAsk(Array(words.dropFirst()), reply)
         case "wallet-card": let (ok, text) = walletCardText(); reply(ok, text)
         case "wallet-later":
@@ -2649,4 +2678,27 @@ final class WalletPageLoad: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { done(nil) }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { done("\(error)") }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { done("\(error)") }
+}
+
+
+/// The `menu-bar` sheet: the menu bar icon on a strip of the bar's material, its tooltip's words under it.
+private struct MenuBarStrip: View {
+    let sessions: [Session]
+    @ObservedObject var watch: BoostWatch
+
+    var body: some View {
+        let boost = watch.state?.on == true ? watch.state : nil
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Spacer()
+                Image(nsImage: StatusIcon.image(for: sessions, boost: boost))
+                Image(systemName: "wifi").foregroundStyle(.primary).accessibilityHidden(true)
+                Text("Sun 12:52").font(.system(size: 13)).foregroundStyle(.primary)
+            }
+            .padding(.horizontal, 10).frame(height: 24)
+            .background(.bar)
+            Text(watch.menuText ?? (watch.state?.text ?? "boost not decided")).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(width: 360).padding(12)
+    }
 }

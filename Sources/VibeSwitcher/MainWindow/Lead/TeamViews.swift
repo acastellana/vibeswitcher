@@ -632,7 +632,7 @@ struct LeadTeamPane: View, Equatable {
             asked += 1
             let number = asked
             run { [self] in
-                if reread || read == nil { read = (MacLoad.steady(), MacLimits.load()) }
+                if reread || read == nil { read = (MacLoad.steady(), MacLimits.current()) }
                 let read = read!
                 let line = MacLine.make(listed: hosted, load: read.load, limits: read.limits)
                 DispatchQueue.main.async { if number == self.asked { then(line) } }

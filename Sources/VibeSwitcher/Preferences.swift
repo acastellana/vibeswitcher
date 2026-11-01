@@ -70,6 +70,19 @@ final class Preferences: ObservableObject {
         if !up && limit <= range.lowerBound { return 0 }
         return PowerWatch.clamp(limit + (up ? 5 : -5))
     }
+    /// Boost mode (Settings › Project lead): higher Mac-wide limits On, or Automatic while away and on AC power; never
+    /// on battery (see `BoostWatch`, `Boost.decide`).
+    @Published var boostMode: BoostMode { didSet { defaults.set(boostMode.rawValue, forKey: "boostMode") } }
+    /// The limits boost raises to (`BoostLimits`, kept as JSON); out-of-range values are kept as their nearest.
+    @Published var boostLimits: BoostLimits {
+        didSet {
+            let kept = BoostLimits(loadThreshold: boostLimits.loadThreshold, maxSessions: boostLimits.maxSessions,
+                                   maxWorkers: boostLimits.maxWorkers, heavySlots: boostLimits.heavySlots)
+            // Setting it here doesn't run didSet again.
+            if kept != boostLimits { boostLimits = kept }
+            defaults.set(try? JSONEncoder().encode(kept), forKey: "boostLimits")
+        }
+    }
     /// Where Home's New Project… makes projects, as a tilde path ("~/dev").
     @Published var projectsFolder: String { didSet { defaults.set(projectsFolder, forKey: "projectsFolder") } }
     /// Projects made with New Project…, by when: Home lists them before an agent has run in them.
@@ -128,6 +141,8 @@ final class Preferences: ObservableObject {
         projectsFolder = defaults.string(forKey: "projectsFolder") ?? ProjectCreation.defaultLocation
         walletPeerID = defaults.string(forKey: "walletPeerID") ?? ""
         walletPassagePath = defaults.string(forKey: "walletPassagePath") ?? ""
+        boostMode = BoostMode(rawValue: defaults.string(forKey: "boostMode") ?? "") ?? .off
+        boostLimits = defaults.data(forKey: "boostLimits").flatMap { try? JSONDecoder().decode(BoostLimits.self, from: $0) } ?? BoostLimits()
     }
 
     /// The keys `walletPeerID` and `walletPassagePath` had while the feature was called vault requests (until

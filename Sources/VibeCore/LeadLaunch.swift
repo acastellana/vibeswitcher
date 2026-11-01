@@ -69,9 +69,11 @@ public enum LeadLaunch {
     }
 
     /// The user's own settings for every project, edited in Settings › Project lead (the app writes them; no role's
-    /// session does): the Mac-wide limits on sessions and load (`MacLimits`) and the working policy (`WorkingPolicy`).
-    /// They aren't among the vault's guarded settings, so a worker that wrote them could raise its own cap.
+    /// session does): the Mac-wide limits on sessions and load (`MacLimits`), the boost the app decided (`BoostState`,
+    /// which raises them) and the working policy (`WorkingPolicy`). They aren't among the vault's guarded settings, so
+    /// a worker that wrote them could raise its own cap.
     static let userSettings = ["Edit(~/.vibeswitcher/mac-limits.json)", "Write(~/.vibeswitcher/mac-limits.json)",
+                               "Edit(~/.vibeswitcher/boost.json)", "Write(~/.vibeswitcher/boost.json)",
                                "Edit(~/.vibeswitcher/policy.md)", "Write(~/.vibeswitcher/policy.md)"]
 
     /// Killing by name. Its pattern matches every command line it's in, other sessions' too: on 2026-10-17 a worker's

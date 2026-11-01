@@ -220,17 +220,36 @@ These are set once for the Mac, not per project, in Settings › General › Pro
 - **Team sessions** (`mac_max_sessions`): the most workers and verifiers of all projects together, 10 by default.
 - **Load** (`load_threshold`): the load above which leads start nothing, the greater of the 1- and 5-minute averages
   (so a dip of the 1-minute after a spike isn't room); empty means twice the cores.
+- **Test and build slots** (`heavySlots` in the file): the builds and full test runs at once, below. The cores ÷ 6,
+  rounded down, by default (2 on a 12-core Mac, the user's choice on 2026-11-01).
 
 The session host counts the live workers and verifiers of every project (the **census**), so every lead sees the same
 total. `start_worker` and `audit` refuse at either limit, and the lead gets one message once there's room again. A
 project's `workflow.md` lines for these two are ignored.
 
 **Heavy work.** Full test suites, release builds, merges and audits' test runs take a slot from `vs-heavy`, shared by
-every project on the Mac. There are `heavy_slots` of them: `VIBESWITCHER_HEAVY_SLOTS`, else the Mac's cores ÷ 4 (3 on a
-12-core Mac). A run that finds every slot held waits, naming who holds each. Each slot's command gets `VS_HEAVY_CORES`,
-its share of the cores (the cores ÷ the slots, rounded up, at least 2), and sizes its parallelism to it:
-`node --test --test-concurrency=$VS_HEAVY_CORES`, `make -j $VS_HEAVY_CORES`, and for SwiftPM
-`swift build -j 2 -Xswiftc -j$(( (VS_HEAVY_CORES + 1) / 2 ))` (see [Development](development.md)). The working policy's `vs-heavy` line tells every role so.
+every project on the Mac. How many is one count, read the same way by `vs-heavy` and by the leads' merges and audits:
+`VIBESWITCHER_HEAVY_SLOTS` (a project's `heavy_slots` in workflow.md gives its sessions that), else the Settings value
+above (2 on a 12-core Mac); while Boost mode is on, raised to boost's (3), never lowered. A run that finds every slot
+held waits, naming who holds each. A slot assumes a job of about the cores ÷
+the slots, so each slot's command gets `VS_HEAVY_CORES`, its share of the cores (the cores ÷ the slots, rounded up, at
+least 2), and caps its own parallelism to it: `node --test --test-concurrency=$VS_HEAVY_CORES`, `make -j $VS_HEAVY_CORES`,
+and for SwiftPM `swift build -j 2 -Xswiftc -j$(( (VS_HEAVY_CORES + 1) / 2 ))` (see [Development](development.md)). The
+working policy's `vs-heavy` line tells every role so. Uncapped, a `node --test` run on ~9 cores and a Swift build beside
+it held the Mac at load 62 inside the lock (2026-11-01).
+
+**Boost.** Settings › Project lead › Boost is Off, On or Automatic (`Boost.swift`, `BoostWatch.swift`). While on, the
+Mac-wide limits are raised to the boost values, each editable: `load_threshold` 36, `mac_max_sessions` 18,
+`max_workers` 7 per project (a project's own when higher), test and build slots 3 (from Settings' 2 on a 12-core Mac,
+so `VS_HEAVY_CORES` goes from 6 to 4; for `vs-heavy` and the leads' merges and audits alike); projects whose `merge_batching` is `boost` batch their merges. Automatic boosts only while the Mac is on AC power and
+you're away (screen locked or no input for 5 minutes, as the notifications judge it) and drops back within one 10-second
+look when either changes: new starts stop above the normal limits and running work finishes. Never on battery, whatever
+the mode. The usage watch keeps it off at 70 % of an every-model account limit, and says so. The app keeps its decision
+in `~/.vibeswitcher/boost.json` (rewritten at least every minute; older than 150 s reads as off, so a quit app leaves
+the normal limits), and each lead's `status` says it: `boost: on (automatic: away, on AC): load_threshold 36, …`. While
+boosted, room freed on the Mac goes first to the project you last worked in: the witness wakes its refused starts first,
+and other projects' starts are held while the room left wouldn't fit it. A menu bar bolt shows while boost is on; its
+tooltip says why.
 
 ## The account's usage limits
 
@@ -376,7 +395,7 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 | Board archive age | 24 h; at most hourly | `LeadBoardArchive.swift:43`, `:45` |
 | `mac_max_sessions` | 10 | `MacLoad.swift:112` |
 | `load_threshold` | 2 × cores | `MacLoad.swift:119-133` |
-| `heavy_slots` | `VIBESWITCHER_HEAVY_SLOTS`, else cores ÷ 4 | `TestLock.swift:85-89` |
+| `heavy_slots` | `VIBESWITCHER_HEAVY_SLOTS`, else Settings' (cores ÷ 6 unset); raised to boost's while on | `TestLock.slotCount`, `MacLimits.heavySlotsInForce` |
 | `vs-heavy` timeout | 60 min | `Resources/bin/vs-heavy` |
 | Battery hold | below 50 % on battery | `PowerSource.swift:74` |
 | Usage back-off | 80 % of a limit on the model | `AccountUsage.swift` |

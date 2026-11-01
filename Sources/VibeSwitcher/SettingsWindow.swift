@@ -22,6 +22,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     init(preferences: Preferences, setup: SetupModel, phoneAccess: PhoneAccess,
          recentProjects: @escaping () -> [String], showWelcome: @escaping () -> Void, host: HostClient? = nil,
          briefing: BriefingModel? = nil, dictation: DictationController? = nil, policy: WorkingPolicyEditor? = nil,
+         boost: BoostWatch? = nil,
          walletPeers: WalletPeerList = WalletPeerList(load: { _ in WalletPeerList.Read(passage: nil, peers: []) })) {
         self.setup = setup
         self.briefing = briefing
@@ -35,7 +36,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.contentView = NSHostingView(rootView: SettingsView(preferences: preferences, setup: setup, phoneAccess: phoneAccess,
                                                                   selection: selection, recentProjects: recentProjects,
                                                                   showWelcome: showWelcome, host: host, briefing: briefing,
-                                                                  dictation: dictation, policy: policy, walletPeers: walletPeers))
+                                                                  dictation: dictation, policy: policy, boost: boost, walletPeers: walletPeers))
         window.center()
     }
 
@@ -78,12 +79,13 @@ struct SettingsView: View {
     var briefing: BriefingModel? = nil
     var dictation: DictationController? = nil
     var policy: WorkingPolicyEditor? = nil
+    var boost: BoostWatch? = nil
     var walletPeers = WalletPeerList(load: { _ in WalletPeerList.Read(passage: nil, peers: []) })
 
     var body: some View {
         TabView(selection: $selection.tab) {
             GeneralSettings(preferences: preferences, setup: setup, showWelcome: showWelcome, host: host, briefing: briefing,
-                            dictation: dictation, policy: policy)
+                            dictation: dictation, policy: policy, boost: boost)
                 .tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
             AgentsSettings(setup: setup)
                 .tabItem { Label("Agents", systemImage: "waveform.path.ecg") }.tag(SettingsTab.agents)
@@ -133,6 +135,7 @@ struct GeneralSettings: View {
     var briefing: BriefingModel? = nil
     var dictation: DictationController? = nil
     var policy: WorkingPolicyEditor? = nil
+    var boost: BoostWatch? = nil
 
     var body: some View {
         Form {
@@ -192,6 +195,7 @@ struct GeneralSettings: View {
                 SettingsFooter("The Team tab says in plain words what each task's agent is doing and what long decisions mean, written by a small Claude model (claude -p with haiku, no tools) from the task's title, checkpoints and last steps: at most every 3 minutes per task, while the tab is open. Off, it shows the latest checkpoint or activity. While a worker, verifier or merge runs, the Mac doesn't go to sleep on its own (the display still does); on battery only if set to Always. On battery, the lead starts no workers or audits and merges nothing only while the charge is under the level set here (work in flight finishes); above it, it works as on power. 0 never pauses.")
             }
             MacLimitsSection()
+            BoostSection(preferences: preferences, watch: boost)
             if let policy { WorkingPolicySection(editor: policy) }
             if let briefing { BriefingSettings(preferences: preferences, briefing: briefing) }
             if let dictation { DictationSettings(dictation: dictation) }

@@ -45,7 +45,8 @@ after the tests (a scratch host, a parser, a bench's app) is ended and named, an
 file the run added to `~/Library/Preferences`.
 
 `swift build` and `swift test` run under `vs-heavy`, the Mac-wide slots for heavy work, so suites and builds from every
-project's workers take turns. The count is `VIBESWITCHER_HEAVY_SLOTS`, else the cores ÷ 4. A run that finds every slot
+project's workers take turns. The count is `VIBESWITCHER_HEAVY_SLOTS`, else Settings › Project lead's test and build
+slots (the cores ÷ 6 while unset), raised to boost's while Boost mode is on. A run that finds every slot
 held waits, saying who holds each. Run a full suite or a release build in a session as `vs-heavy <command>`; it gives
 up after 60 minutes unless you pass `--timeout`.
 

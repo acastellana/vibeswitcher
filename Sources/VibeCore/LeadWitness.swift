@@ -780,14 +780,37 @@ extension LeadWitness {
         /// sessions within mac_max_sessions). Those told are removed; the rest stay until there's room for them too.
         /// A project whose automatic steps were refused is nudged (`LeadAdvance.nudge`) instead: its lead's tool server
         /// tries them again, and only the lead's own refusals are told.
+        /// While boosted, the room is shared out in turn instead (`Self.inTurn`): the project the user last worked in
+        /// (`BoostState.favored`) first, then the rest by when they were refused, each wait only while the sessions
+        /// woken before it leave room for it.
         public func look(mac: MacLoad, limits: MacLimits, now: Date = Date()) -> [(root: String, text: String)] {
             var due: [String: [Wait]] = [:]
+            var kept: [(file: URL, wait: Wait)] = []
             for (file, wait) in waits() {
                 if now.timeIntervalSince1970 - wait.at > Self.expiry {
                     try? FileManager.default.removeItem(at: file)
                     continue
                 }
-                guard Self.hasRoom(for: wait, mac: mac, limits: limits) else { continue }
+                kept.append((file, wait))
+            }
+            let favored = limits.boost?.favored
+            if favored != nil { kept = Self.inTurn(kept, favored: favored) }
+            // The sessions the waits woken so far will start, and the room kept for the favored project's first wait
+            // when it doesn't fit yet (as `heldFor` keeps it from start_worker and audit).
+            var woken = 0
+            var keptFor = false
+            for (file, wait) in kept {
+                var room = mac
+                if favored != nil, woken > 0 { room.holders.append(Holder(project: "", sessions: woken)) }
+                guard Self.hasRoom(for: wait, mac: room, limits: limits) else {
+                    if favored != nil, !keptFor, wait.need > 0, Self.isProject(wait.root, favored) {
+                        keptFor = true
+                        woken += wait.need
+                    }
+                    continue
+                }
+                if favored != nil, Self.isProject(wait.root, favored), wait.need > 0 { keptFor = true }
+                woken += wait.need
                 try? FileManager.default.removeItem(at: file)
                 due[wait.root, default: []].append(wait)
             }
@@ -805,6 +828,36 @@ extension LeadWitness {
             guard !mac.isBusy(threshold: limits.loadLimit) else { return false }
             return wait.need == 0 || mac.sessions + wait.need <= limits.maxSessions
         }
+
+        private typealias Holder = MacLoad.Holder
+
+        /// `waits` with the project `favored`'s first, each part by when it was refused.
+        static func inTurn(_ waits: [(file: URL, wait: Wait)], favored: String?) -> [(file: URL, wait: Wait)] {
+            waits.sorted { a, b in
+                let first = (Self.isProject(a.wait.root, favored), Self.isProject(b.wait.root, favored))
+                return first.0 != first.1 ? first.0 : a.wait.at < b.wait.at
+            }
+        }
+
+        /// The folder `path` is the project `root` or inside it (its worktrees are).
+        static func isProject(_ path: String, _ root: String?) -> Bool {
+            guard let root else { return false }
+            let folder = (path as NSString).standardizingPath, project = (root as NSString).standardizingPath
+            return folder == project || folder.hasPrefix(project + "/")
+        }
+
+        /// While boosted, the wait of the project the user last worked in (`BoostState.favored`) that `need` more
+        /// sessions for the project `root` would take the room of: a refused start or audit of the favored project,
+        /// still waiting, which wouldn't fit beside them. Nil when not boosted, `root` is the favored project, it
+        /// waits on nothing, or there's room for both. Fairness: freed room goes to where the user works first.
+        public func heldFor(root: String, need: Int, mac: MacLoad, limits: MacLimits, now: Date = Date()) -> Wait? {
+            guard let favored = limits.boost?.favored, !Self.isProject(root, favored) else { return nil }
+            let theirs = waits().map(\.wait).filter {
+                Self.isProject($0.root, favored) && $0.need > 0 && now.timeIntervalSince1970 - $0.at <= Self.expiry
+            }.sorted { $0.at < $1.at }
+            guard let first = theirs.first else { return nil }
+            return mac.sessions + need + first.need > limits.maxSessions ? first : nil
+        }
     }
 
     /// "The Mac has room again for what was refused: start_worker(one), audit(two). Now: load 3.0 (load_threshold 24,
@@ -812,7 +865,7 @@ extension LeadWitness {
     /// still wanted." Naming no project but the lead's `root`'s: the lead may copy it into its repo's records.
     public static func roomText(_ whats: [String], mac: MacLoad, limits: MacLimits, root: String) -> String {
         "The Mac has room again for what was refused: \(whats.joined(separator: ", ")). Now: load \(mac.loadText) "
-            + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessions)). "
+            + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessionsText)). "
             + "Retry what's still wanted; other projects' leads may take the room too."
     }
 }

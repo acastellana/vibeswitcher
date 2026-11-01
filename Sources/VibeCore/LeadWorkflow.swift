@@ -31,7 +31,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The Mac-wide keys (`macKeys`) set in this file: ignored, the Mac's are set once in Settings (see `MacLimits`).
     public var ignoredKeys: [String] = []
     /// How many test and build slots merge and an audit's shared run share with every project's `vs-heavy`
-    /// (`heavy_slots:`, see `TestLock`); nil: VIBESWITCHER_HEAVY_SLOTS, else the Mac's cores ÷ 4.
+    /// (`heavy_slots:`, see `TestLock`); nil: VIBESWITCHER_HEAVY_SLOTS, else Settings' (`MacLimits.heavySlots`).
     public var heavySlots: Int?
     /// How many finders an audit runs (`audit_finders:`, 1 to `maxFinders`): 1 is one verifier, as before; 2 or 3
     /// run that many with different focuses on one shared build and test run, and a vote keeps what most of them found.
@@ -527,7 +527,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     # to extend it (update_task budget_min), re-plan or abandon. Nothing is stopped. 0: no budget. Empty: 120.
     task_budget_min: 120
     # How many builds and full test runs (vs-heavy's, merge's, audits') may run at once across all projects on this
-    # Mac; one more waits, saying who holds each slot. Empty: the Mac's cores ÷ 4 (VIBESWITCHER_HEAVY_SLOTS when set).
+    # Mac; one more waits, saying who holds each slot. Empty: VibeSwitcher's Settings value (VIBESWITCHER_HEAVY_SLOTS when set).
     heavy_slots:
     # How many finders an audit runs: 1 is one verifier. 2 or 3 run that many with different focuses (contract and
     # acceptance; bugs and regressions; security when sensitive_paths are touched, else tests), on one build and test
@@ -1020,6 +1020,8 @@ public enum LeadPrompts {
         fails timing-sensitive tests. start_worker and audit refuse while its load (the greater of its 1- and 5-minute averages, so a dip after a spike \
         doesn't count as room) is above load_threshold (\(limit)) or the workers and verifiers of all projects together are at mac_max_sessions \
         (\(limits.maxSessions)); both are set once for the Mac by the user in VibeSwitcher's Settings, not in workflow.md. \
+        The user's Boost mode may raise them, and max_workers, for a while (when they're away on AC power, or on demand) and drop them \
+        back at once: status says which limits hold now ("boost: on (…)"). \
         After such a refusal VibeSwitcher sends you one message once there's room again. merge waits up to test_timeout_min (\(MacLoad.number(workflow.testTimeoutMinutes)) min) for \
         the load to drop before its tests, then refuses. status shows the Mac's load and every project's team \
         sessions: plan around them. When it's busy, start fewer workers, merge and cleanup finished tasks first \

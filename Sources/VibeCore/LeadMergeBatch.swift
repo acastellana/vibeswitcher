@@ -55,7 +55,7 @@ extension LeadToolset {
         switch workflow.mergeBatching {
         case .off: return false
         case .always: return true
-        case .boost: return boosting()
+        case .boost: return isBoosting
         }
     }
 

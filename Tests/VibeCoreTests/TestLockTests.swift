@@ -170,10 +170,11 @@ struct TestLockTests {
         #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.heldVariable: "/l/test-build-3.lock"]) == nil)
         #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.heldVariable: "/l/test-build-x.lock"]) != nil)
         #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.heldVariable: "/m/test-build-2.lock"]) != nil)
-        // The count: the variable, else the cores ÷ 4, at least 1.
-        #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.slotsVariable: "2"])?.slots == 2)
-        #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.slotsVariable: "0"])?.slots == TestLock.defaultSlots)
-        #expect(TestLock.standard([TestLock.directoryVariable: "/l"])?.slots == max(1, ProcessInfo.processInfo.processorCount / 4))
+        // The count: the variable, else Settings' (unset in a scratch VibeSwitcher folder: the cores ÷ 6, at least 1).
+        let scratch = [TestLock.directoryVariable: "/l", "VIBESWITCHER_HOME": url("no-settings").path]
+        #expect(TestLock.standard(scratch.merging([TestLock.slotsVariable: "2"]) { $1 })?.slots == 2)
+        #expect(TestLock.standard(scratch.merging([TestLock.slotsVariable: "0"]) { $1 })?.slots == TestLock.defaultSlots)
+        #expect(TestLock.standard(scratch)?.slots == max(1, ProcessInfo.processInfo.processorCount / 6))
     }
 
     // MARK: vs-heavy (any project's heavy work)
@@ -551,6 +552,57 @@ struct TestLockTests {
         let held = TestLock(directory: locks).path
         #expect(try given("held-given", cores: "12", slots: "3", extra: [TestLock.heldVariable: held, TestLock.coresVariable: "5"]) == "cores=5")
         #expect(try given("held-bare", cores: "12", slots: "3", extra: [TestLock.heldVariable: held, TestLock.coresVariable: ""]) == "cores=4")
+    }
+
+    /// F6 (boost release 6/7): one heavy-slot count for vs-heavy and the Swift side (`TestLock.slotCount`, which the
+    /// leads' merges and audits take): Settings' Mac-wide count (mac-limits.json's heavySlots, the cores ÷ 6 unset),
+    /// raised to boost's while boost.json says on and is fresh; a stale or forged boost.json doesn't raise it past the
+    /// cores. VS_HEAVY_CORES follows.
+    @Test func vsHeavyAndTheLeadsTakeOneSlotCountWithBoost() throws {
+        let locks = url("heavy-locks").path
+        let home = url("vs-home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let environment = ["VIBESWITCHER_HOME": home.path, "VIBESWITCHER_HEAVY_NCPU": "12", TestLock.slotsVariable: ""]
+        func cores(_ name: String) throws -> String {
+            let output = url("\(name).out").path
+            let run = try Self.runVsHeavy(["/bin/sh", "-c", "echo \"cores=$\(TestLock.coresVariable)\""], lockDirectory: locks, output: output,
+                                          environment: environment)
+            run.waitUntilExit()
+            #expect(run.terminationStatus == 0, "\(lines(output))")
+            return lines(output).last ?? ""
+        }
+        func boost(on: Bool, slots: Int, age: TimeInterval) throws {
+            try BoostState(on: on, why: "w", limits: BoostLimits(heavySlots: slots), at: Date().timeIntervalSince1970 - age)
+                .save(to: home.appendingPathComponent("boost.json"))
+        }
+        let swiftSide = { TestLock.slotCount(environment) }
+        // Nothing set: the cores ÷ 6 (2 on 12 cores, 6 cores a slot).
+        #expect(swiftSide() == MacLimits.defaultHeavySlots)
+        if MacLoad.processors == 12 {
+            #expect(try cores("unset") == "cores=6")
+        }
+        // Settings' 2, then boost's 3: 6 cores a slot, then 4.
+        try MacLimits(heavySlots: 2).save(to: home.appendingPathComponent("mac-limits.json"))
+        #expect(try cores("settings") == "cores=6")
+        #expect(swiftSide() == 2)
+        try boost(on: true, slots: 3, age: 0)
+        #expect(try cores("boosted") == "cores=4")
+        #expect(swiftSide() == 3)
+        // Off, or stale (the app quit): Settings' again.
+        try boost(on: false, slots: 3, age: 0)
+        #expect(try cores("off") == "cores=6")
+        #expect(swiftSide() == 2)
+        try boost(on: true, slots: 3, age: BoostState.staleAfter + 30)
+        #expect(try cores("stale") == "cores=6")
+        #expect(swiftSide() == 2)
+        // Forged past the cores: no more than a slot per core.
+        let forged = #"{"on": true, "why": "w", "at": \#(Date().timeIntervalSince1970), "limits": {"heavySlots": 64}}"#
+        try Data(forged.utf8).write(to: home.appendingPathComponent("boost.json"))
+        #expect(try cores("forged") == "cores=2")
+        #expect(swiftSide() == MacLoad.processors)
+        // A project's heavy_slots (given to its sessions as VIBESWITCHER_HEAVY_SLOTS) is its base, raised the same way.
+        try boost(on: true, slots: 3, age: 0)
+        #expect(TestLock.slotCount(environment.merging([TestLock.slotsVariable: "1"]) { $1 }) == 3)
     }
 
     // MARK: scripts/test.sh

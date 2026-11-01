@@ -1488,7 +1488,7 @@ final class LeadController: ObservableObject {
 
     /// The Mac has room again: one message to each lead that was refused for it, as the witness, against every
     /// project's team sessions the host lists and the Mac-wide limits in Settings.
-    func lookAtRoom(limits: MacLimits = MacLimits.load()) {
+    func lookAtRoom(limits: MacLimits = MacLimits.current()) {
         guard let roomWaits else { return }
         let mac = MacLoad.count(host.sessions.map { ($0.label, $0.cwd, $0.isLive) }, load: macLoad())
         for (root, text) in roomWaits.look(mac: mac, limits: limits) { deliver(text, from: .system("witness"), root: root) }

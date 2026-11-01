@@ -419,6 +419,7 @@ let toolset = MCPHostedToolset(attempt: {
     toolset.toolsWait = roleWait
     // Merges and audits hold the Mac-wide test and build lock around their tests, as `vs-heavy` does.
     toolset.testLock = TestLock.standard()
+    toolset.slotsFromSettings = true
     // The risk check's model pass (see `LeadRisk`): headless Claude, as the all-done summary's, from the diff's stat,
     // the contract and REVIEW.md only.
     toolset.riskModel = ClaudeHeadless.risk
@@ -434,6 +435,7 @@ let toolset = MCPHostedToolset(attempt: {
 }, giveUp: {
     let toolset = LeadToolset(arguments: arguments, runtime: runtime)
     toolset.testLock = TestLock.standard()
+    toolset.slotsFromSettings = true
     return toolset
 })
 // This binary as it is now: when an app update replaces it, the server switches to the new one between requests,

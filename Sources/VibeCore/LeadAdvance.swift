@@ -721,6 +721,7 @@ public final class LeadAdvance: @unchecked Sendable {
               let mac = try? lead.macLoad(sessions, load: lead.runtime.steadyLoad(), except: Worktrees.path(root: lead.root, slug: slug)) else { return false }
         let limits = lead.macLimits()
         return !mac.isBusy(threshold: limits.loadLimit) && mac.sessions + need <= limits.maxSessions
+            && lead.roomWaits.heldFor(root: lead.root, need: need, mac: mac, limits: limits) == nil
     }
 
     /// A merged task (a reverted one too: its work is out of the base, and it stays reverted) whose worktree or
@@ -747,7 +748,7 @@ public final class LeadAdvance: @unchecked Sendable {
             }
             guard waits.isEmpty else { continue }
             let running = board.tasks.filter { $0.status == .running }.count
-            guard running < workflow.maxWorkers else { return }
+            guard running < lead.maxWorkers(workflow) else { return }
             // The Mac's room as start_worker counts it; a refusal for it waits for the app's nudge.
             guard hasRoom(task.slug, need: 1) else { return roomWait("start_worker(\(task.slug))", need: 1) }
             // Near a usage limit on its model: another task on another model may still start.

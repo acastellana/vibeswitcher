@@ -160,16 +160,38 @@ public struct MacLimits: Codable, Equatable, Sendable {
     /// The load (the greater of the 1- and 5-minute averages, `MacLoad.Averages.steady`) above which start_worker and
     /// audit refuse, and merge waits before its tests; nil: twice the cores (`loadLimit`).
     public var loadThreshold: Double?
+    /// The heavy-work slots (builds and full test runs at once, Mac-wide: `vs-heavy`'s, merges', audits'; see
+    /// `TestLock`), 1 to the cores. The user chose 2 on a 12-core Mac (2026-11-01): the default is the cores ÷ 6.
+    /// VIBESWITCHER_HEAVY_SLOTS, or a project's heavy_slots, sets it instead; boost raises it (`heavySlotsInForce`).
+    public var heavySlots: Int
+    /// The boost these were raised by (`boosted(by:)`), and the limits as set before it; nil: not boosted. Not saved.
+    public internal(set) var boost: BoostState?
+    var normal: Normal?
 
-    public init(maxSessions: Int = MacLimits.defaultMaxSessions, loadThreshold: Double? = nil) {
+    /// The limits as set, kept beside boosted ones for what a lead is told.
+    struct Normal: Equatable, Sendable {
+        var maxSessions: Int
+        var loadLimitText: String
+    }
+
+    enum CodingKeys: String, CodingKey { case maxSessions, loadThreshold, heavySlots }
+
+    /// The cores ÷ 6, rounded down, at least 1: 2 on a 12-core Mac.
+    public static var defaultHeavySlots: Int { max(1, MacLoad.processors / 6) }
+    /// The most heavy slots: one per core.
+    public static var heavySlotsCeiling: Int { max(1, MacLoad.processors) }
+
+    public init(maxSessions: Int = MacLimits.defaultMaxSessions, loadThreshold: Double? = nil, heavySlots: Int = MacLimits.defaultHeavySlots) {
         self.maxSessions = max(1, maxSessions)
         self.loadThreshold = loadThreshold.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        self.heavySlots = min(max(1, heavySlots), Self.heavySlotsCeiling)
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(maxSessions: (try? container.decodeIfPresent(Int.self, forKey: .maxSessions)) ?? Self.defaultMaxSessions,
-                  loadThreshold: try? container.decodeIfPresent(Double.self, forKey: .loadThreshold))
+                  loadThreshold: try? container.decodeIfPresent(Double.self, forKey: .loadThreshold),
+                  heavySlots: (try? container.decodeIfPresent(Int.self, forKey: .heavySlots)) ?? Self.defaultHeavySlots)
     }
 
     /// The load threshold in force: the one set, else twice the Mac's cores.
@@ -177,7 +199,8 @@ public struct MacLimits: Codable, Equatable, Sendable {
 
     /// load_threshold as said to a lead: "30 in Settings", or "24, twice the 12 cores" when it isn't set.
     public var loadLimitText: String {
-        MacLoad.number(loadLimit) + (loadThreshold == nil ? ", twice the \(MacLoad.processors) cores" : " in Settings")
+        if let normal, boost != nil { return MacLoad.number(loadLimit) + " while boosted (normally \(normal.loadLimitText))" }
+        return MacLoad.number(loadLimit) + (loadThreshold == nil ? ", twice the \(MacLoad.processors) cores" : " in Settings")
     }
 
     public static var file: URL { VibePaths.root.appendingPathComponent("mac-limits.json") }

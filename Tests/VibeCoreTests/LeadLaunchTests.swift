@@ -102,6 +102,7 @@ struct LeadLaunchTests {
     @Test func noRoleMayWriteTheUsersMacWideSettings() throws {
         let root = try root()
         let rules = ["Edit(~/.vibeswitcher/mac-limits.json)", "Write(~/.vibeswitcher/mac-limits.json)",
+                     "Edit(~/.vibeswitcher/boost.json)", "Write(~/.vibeswitcher/boost.json)",
                      "Edit(~/.vibeswitcher/policy.md)", "Write(~/.vibeswitcher/policy.md)"]
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "fix", base: "claude",
@@ -109,7 +110,7 @@ struct LeadLaunchTests {
             let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
             let deny = (settings?["permissions"] as? [String: Any])?["deny"] as? [String] ?? []
             for rule in rules { #expect(deny.contains(rule), "\(role): \(rule)") }
-            #expect(!((settings?["permissions"] as? [String: Any])?["allow"] as? [String] ?? []).contains { $0.contains("mac-limits") || $0.contains("policy.md") })
+            #expect(!((settings?["permissions"] as? [String: Any])?["allow"] as? [String] ?? []).contains { $0.contains("mac-limits") || $0.contains("boost.json") || $0.contains("policy.md") })
         }
         // The app's own writes (Settings' save) go through, as before.
         let file = URL(fileURLWithPath: root).appendingPathComponent("home/mac-limits.json")
