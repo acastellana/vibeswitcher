@@ -285,6 +285,13 @@ public enum LeadWitness {
         public var session: String
         public var slug: String
         public var prompt: PendingPrompt
+
+        public init(key: String, session: String, slug: String, prompt: PendingPrompt) {
+            self.key = key
+            self.session = session
+            self.slug = slug
+            self.prompt = prompt
+        }
     }
 
     /// How long a verifier waits on a prompt before VibeSwitcher declines it: time for a user who's watching to answer.
@@ -296,7 +303,7 @@ public enum LeadWitness {
     /// The awaited verifiers (and finders) that have waited on a prompt for `promptWait` or longer. No one answers
     /// one (the user doesn't see its session; the lead can't answer it), and on 2026-10-31 and 2026-11-01 two audits
     /// hung so until the lead started them again, the finders' work lost. The app declines each permission prompt with
-    /// `declineReason` (`declineKeys`) and tells the lead once what was asked (`declinedText`), or that it couldn't
+    /// `declineReason` (`declinePlan`) and tells the lead once what was asked (`declinedText`), or that it couldn't
     /// (`undeclinedText`); `events` tells nothing of them meanwhile.
     public static func stuckPrompts(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = []) -> [StuckPrompt] {
         var stuck: [StuckPrompt] = []
@@ -313,14 +320,73 @@ public enum LeadWitness {
         return stuck
     }
 
-    /// The keys that decline the permission prompt on `screen` with `declineReason`: down to its "No" row (Claude Code
-    /// 2.1.316's takes text: "No" with "and tell Claude what to do differently" its placeholder), the reason, Enter.
-    /// Nil when the screen shows no permission prompt ("Do you want to …?" over Yes … No): a question isn't answered.
-    public static func declineKeys(screen: String) -> [HostInput.Write]? {
-        guard let menu = ScreenMenu.parse(screen.components(separatedBy: "\n")), !menu.picker, !menu.commands, menu.tabs.isEmpty,
-              !menu.multiSelect, menu.question.contains("Do you want to"), menu.options.first?.hasPrefix("Yes") == true,
+    /// How the app declines a stuck prompt (`declinePlan`): the menu as it was read, its No row, the stuck command as
+    /// the screen must show it, and the keys (arrows to No, the reason, Enter), each checked against the screen before
+    /// it goes (`declineMayGo`).
+    public struct DeclinePlan: Equatable, Sendable {
+        public var menu: ScreenMenu
+        public var no: Int
+        /// The stuck prompt's command, squashed (`squashed`): the screen shows that prompt only while it holds it.
+        public var command: String
+        public var writes: [HostInput.Write]
+        /// Esc, when the No row took no reason: it rejects the prompt (never approves), whichever row the cursor is on.
+        public static let escape = HostInput.Write(bytes: [27], delay: 0)
+    }
+
+    /// The plan for declining `prompt` (a stuck Bash prompt's "Run: <command>") on `screen`, with `declineReason`.
+    /// Nil unless the screen shows that command over a permission prompt ("Do you want to …?" over Yes … No): a
+    /// question isn't answered, and a prompt opened since (the one waited on was answered meanwhile) isn't declined.
+    public static func declinePlan(screen: String, prompt: PendingPrompt) -> DeclinePlan? {
+        guard let command = commandKey(prompt), squashed(screen).contains(command), let menu = permissionMenu(screen),
               let no = menu.options.lastIndex(where: { $0 == "No" || $0.hasPrefix("No,") || $0.hasPrefix("No ") }) else { return nil }
-        return menu.keys(toChoose: no, typing: declineReason)
+        let arrow: [UInt8] = no > menu.selected ? [27, 91, 66] : [27, 91, 65]
+        var writes = (0..<abs(no - menu.selected)).map { HostInput.Write(bytes: arrow, delay: $0 == 0 ? 0 : 0.03) }
+        writes.append(HostInput.Write(bytes: Array(declineReason.utf8), delay: 0.08))
+        writes.append(HostInput.Write(bytes: [13], delay: 0.08))
+        return DeclinePlan(menu: menu, no: no, command: command, writes: writes)
+    }
+
+    /// Whether the plan's write `step` may go, by the screen now: the same prompt (its command, question and rows),
+    /// and the cursor where the keys so far put it. Enter goes only on the No row showing the reason typed in: a No
+    /// row that takes no text (Claude Code 2.1.304's plain "No"), or keys it took as moves, never end on a Yes row.
+    public static func declineMayGo(_ plan: DeclinePlan, step: Int, screen: String) -> Bool {
+        guard squashed(screen).contains(plan.command), let menu = permissionMenu(screen), menu.question == plan.menu.question,
+              menu.options.count == plan.menu.options.count,
+              menu.options.indices.allSatisfy({ $0 == plan.no || menu.options[$0] == plan.menu.options[$0] }) else { return false }
+        let arrows = abs(plan.no - plan.menu.selected)
+        if step < arrows {
+            return menu.selected == plan.menu.selected + (plan.no > plan.menu.selected ? step : -step)
+                && menu.options[plan.no] == plan.menu.options[plan.no]
+        }
+        if step == arrows { return menu.selected == plan.no }
+        return menu.selected == plan.no && squashed(menu.options[plan.no]).contains(squashed(String(declineReason.prefix(24))))
+    }
+
+    /// Whether Esc may go after a decline stopped short: the stuck command's prompt still shows.
+    public static func escapeMayGo(_ plan: DeclinePlan, screen: String) -> Bool {
+        squashed(screen).contains(plan.command) && permissionMenu(screen)?.question == plan.menu.question
+    }
+
+    /// The permission prompt on `screen`: "Do you want to …?" over a single choice that starts with Yes.
+    static func permissionMenu(_ screen: String) -> ScreenMenu? {
+        guard let menu = ScreenMenu.parse(screen.components(separatedBy: "\n")), !menu.picker, !menu.commands, menu.tabs.isEmpty,
+              !menu.multiSelect, menu.question.contains("Do you want to"), menu.options.first?.hasPrefix("Yes") == true else { return nil }
+        return menu
+    }
+
+    /// A stuck Bash prompt's command as the screen shows it: its first line, squashed, at most 48 characters (a long
+    /// one wraps or is cut on screen). Nil for anything else: only a shell command's prompt is declined.
+    static func commandKey(_ prompt: PendingPrompt) -> String? {
+        guard prompt.text.hasPrefix("Run: ") else { return nil }
+        let first = prompt.text.dropFirst(5).split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
+        let key = String(squashed(first).prefix(48))
+        return key.isEmpty ? nil : key
+    }
+
+    /// `text` without spaces, line breaks and box drawing: a wrapped line reads as one.
+    static func squashed(_ text: String) -> String {
+        String(text.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) && !(0x2500...0x257F).contains($0.value) }
+            .map(Character.init))
     }
 
     /// "The verifier on a waited 2 min on a permission prompt no one answers: “Run: git config …”. VibeSwitcher
@@ -331,11 +397,19 @@ public enum LeadWitness {
             + "If that command is one verifiers need, tell the user."
     }
 
+    /// For a prompt VibeSwitcher declined with Esc (its No row took no reason), for the lead.
+    public static func escapedText(_ stuck: StuckPrompt, now: Date = Date()) -> String {
+        "The verifier on \(stuck.slug) waited \(waitedText(stuck, now: now)) on a permission prompt no one answers\(asked(stuck.prompt)) "
+            + "VibeSwitcher declined it with Esc (its No row took no reason), so the verifier's turn stopped there. "
+            + "Audit again if it doesn't go on; if that command is one verifiers need, tell the user."
+    }
+
     /// For a prompt VibeSwitcher couldn't decline (no permission prompt on its screen: a question, or the screen
     /// unread), for the lead: what it waits on.
     public static func undeclinedText(_ stuck: StuckPrompt, now: Date = Date()) -> String {
         "The verifier on \(stuck.slug) has waited \(waitedText(stuck, now: now)) for input no one answers\(asked(stuck.prompt)) "
-            + "VibeSwitcher couldn't decline it (no permission prompt on its screen). Tell the user if it's theirs, or audit again."
+            + "VibeSwitcher couldn't decline it (that prompt isn't on its screen, or it changed while the keys went in). "
+            + "Tell the user if it's theirs, or audit again."
     }
 
     private static func waitedText(_ stuck: StuckPrompt, now: Date) -> String {

@@ -103,9 +103,10 @@ public enum ReadOnlyCommand {
                 }
                 guard target == "/dev/null" else { return nil }
                 continue
-            case "$", "`", "(", ")", "<", "#", "!", "*", "?", "[":
-                // Expansions, substitutions, subshells, input redirection and here-docs, comments, negation, and globs
-                // (a file the branch names `--output=x` would be an argument: quote a pattern for grep or rg).
+            case "$", "`", "(", ")", "<", "#", "!", "*", "?", "[", "{", "}":
+                // Expansions, substitutions, subshells, input redirection and here-docs, comments, negation, globs (a
+                // file the branch names `--output=x` would be an argument: quote a pattern for grep or rg) and braces
+                // (`--{output=f,stat}` is `--output=f --stat` once the shell expands it).
                 return nil
             default:
                 guard !c.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return nil }
@@ -132,8 +133,9 @@ public enum ReadOnlyCommand {
         case "grep": return true
         case "wc", "head": return true
         case "rg":
-            // `--pre` runs a program on each file; `-z` runs decompressors.
-            return !args.contains { long($0, ["--pre", "--pre-glob", "--search-zip"]) || shortFlags($0).contains("z") }
+            // Only flags known to read: others run programs (`--pre`, `--hostname-bin`, `-z`'s decompressors), and
+            // ripgrep gains flags.
+            return args.allSatisfy(allowsRipgrepArgument)
         case "tail":
             // Follows forever: a verifier's turn would never end.
             return !args.contains { long($0, ["--follow", "--retry"]) || shortFlags($0).contains { $0 == "f" || $0 == "F" } }
@@ -152,6 +154,26 @@ public enum ReadOnlyCommand {
         let name = arg.split(separator: "=", maxSplits: 1).first.map(String.init) ?? arg
         guard name.count > 2 else { return false }
         return names.contains { $0.hasPrefix(name) || name.hasPrefix($0) }
+    }
+
+    /// ripgrep's flags that only read (it takes no abbreviations), its short ones as letters (`-C3`, `-uu` too);
+    /// any word that isn't a flag (a pattern, a path, a flag's value) is taken.
+    static let ripgrepLong: Set<String> = [
+        "--line-number", "--no-line-number", "--ignore-case", "--smart-case", "--case-sensitive", "--fixed-strings",
+        "--word-regexp", "--line-regexp", "--files-with-matches", "--files-without-match", "--count", "--count-matches",
+        "--hidden", "--no-ignore", "--no-ignore-vcs", "--no-ignore-parent", "--glob", "--iglob", "--type", "--type-not",
+        "--files", "--context", "--before-context", "--after-context", "--max-count", "--max-depth", "--multiline",
+        "--json", "--heading", "--no-heading", "--with-filename", "--no-filename", "--only-matching", "--invert-match",
+        "--regexp", "--sort", "--sortr", "--color", "--column", "--vimgrep", "--trim", "--max-columns", "--null", "--stats",
+        "--follow", "--type-list", "--no-messages", "--quiet", "--unrestricted", "--text", "--replace", "--passthru",
+        "--max-filesize", "--engine", "--pcre2", "--crlf", "--null-data", "--byte-offset", "--no-config", "--",
+    ]
+    static let ripgrepShort = Set("niSsFwxlcuUgtTABCmdeovHINqLaRrj0123456789")
+
+    static func allowsRipgrepArgument(_ arg: String) -> Bool {
+        guard arg.hasPrefix("-"), arg != "-" else { return true }
+        if arg.hasPrefix("--") { return ripgrepLong.contains(arg.split(separator: "=", maxSplits: 1).first.map(String.init) ?? arg) }
+        return shortFlags(arg).allSatisfy(ripgrepShort.contains)
     }
 
     /// The letters of a short-flag word (`-rv` → "rv"); empty for anything else.

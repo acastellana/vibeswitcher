@@ -629,12 +629,12 @@ def question_key(key):
                 answer_single(label)
 
 
-def open_permission(command):
+def open_permission(command, plain_no=False):
     global permission
     tool = "toolu_" + uuid.uuid4().hex[:20]
     record({"type": "assistant", "message": {"role": "assistant", "content": [
         {"type": "tool_use", "id": tool, "name": "Bash", "input": {"command": command}}]}})
-    permission = {"command": command, "tool": tool, "focus": 0, "feedback": "",
+    permission = {"command": command, "tool": tool, "focus": 0, "feedback": "", "plainNo": plain_no,
                   "options": ["Yes", "Yes, and don't ask again for this command", "No, and tell Claude what to do differently (esc)"]}
     state["mode"] = "permission"
 
@@ -645,7 +645,8 @@ def permission_key(key):
     choice = None
     # The No row takes text while the cursor is on it, as Claude Code 2.1.316's does (an input option, placeholder "and
     # tell Claude what to do differently"): every key but the arrows, Enter and Esc is typed there.
-    if p["focus"] == 2 and (len(key) == 1 or key in ("backspace", "space")):
+    # With "plainNo" (as 2.1.304's plain "No"), it takes none: j and k move the cursor, other letters do nothing.
+    if p["focus"] == 2 and not p["plainNo"] and (len(key) == 1 or key in ("backspace", "space")):
         p["feedback"] = p["feedback"][:-1] if key == "backspace" else p["feedback"] + (" " if key == "space" else key)
         return
     if key in ("up", "k"):
@@ -900,7 +901,7 @@ def control():
         if op == "ask":
             open_question(command["questions"])
         elif op == "permission":
-            open_permission(command["command"])
+            open_permission(command["command"], command.get("plainNo", False))
         elif op == "work":
             state["mode"] = "working"
         elif op == "take":

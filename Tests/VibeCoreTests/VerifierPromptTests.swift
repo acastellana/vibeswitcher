@@ -19,10 +19,10 @@ struct VerifierPromptTests {
         "git status --short", "git rev-parse HEAD", "git merge-base main HEAD", "git cat-file -p HEAD", "git blame -L 1,9 a.swift",
         "git remote", "git remote -v", "git branch -a", "git branch -r", "git branch -av", "git branch --show-current",
         "git branch --list 'agent/*'", "git branch --merged main", "git branch -r --contains HEAD", "git branch --sort=-committerdate",
-        "grep -rn 'foo bar' Sources", "rg -n \"func allows\" Sources", "head -50 a.txt", "tail -n 20 a.log", "wc -l a b",
+        "grep -rn 'foo bar' Sources", "rg -n \"func allows\" Sources", "rg -C3 -i --glob '*.swift' --hidden TODO", "rg -uu --files", "rg -n -- -x a", "head -50 a.txt", "tail -n 20 a.log", "wc -l a b",
         "sort -u names.txt", "git log | head -3", "git diff --stat && git status", "git log -1 || git status",
         "grep -c x a.txt 2>/dev/null", "git log 2>&1 | tail -5", "git show HEAD > /dev/null", "rg x >/dev/null 2>&1",
-        "git log --format='%h %s' -3", "git log @{u}..HEAD", "git status\ngit log -1", "grep 'a;b|c' x.txt", "grep a\\;b x",
+        "git log --format='%h %s' -3", "git status\ngit log -1", "grep 'a;b|c' x.txt", "grep a\\;b x",
     ]
 
     /// The ones that still prompt: anything that writes, runs something else, isn't on the list, or doesn't parse.
@@ -51,6 +51,11 @@ struct VerifierPromptTests {
         "sort -o out.txt a", "sort -uo out a", "sort --output=x a", "sort --out=x a", "sort --compress-program=sh a",
         "rg --pre ./x foo", "rg --pre=./x foo", "rg -z foo", "rg --search-zip foo", "tail -f a.log", "tail -F a.log",
         "tail --follow a.log", "tail --fol a.log", "/usr/bin/grep x a", "./grep x a",
+        // Brace expansion turns a word the checks pass into the flags they refuse (the blind check's).
+        "git diff --{output=out.txt,stat}", "git diff --{ext-diff,stat}", "git cat-file --{filters,batch-check} HEAD:a",
+        "rg --{pre=./x,hidden} foo", "sort --{output=f,unique} a", "tail --{follow,lines=5} a.log", "git log @{u}..HEAD",
+        // ripgrep flags that run programs, or that it may gain: only the known reading ones are taken.
+        "rg --hostname-bin=./x --hyperlink-format=default foo", "rg --hostname-bin ./x foo", "rg --some-new-flag foo",
     ]
 
     @Test func readOnlyLinesRunWithoutAPromptAndEverythingElseStillPrompts() {
@@ -166,14 +171,78 @@ struct VerifierPromptTests {
     Esc to cancel · Tab to amend
     """
 
+    static let prompt = PendingPrompt(text: "Run: " + command)
+
     /// The keys: down to the No row, the reason typed there, Enter. A question on screen isn't a permission prompt.
     @Test func theDeclineGoesToTheNoRowWithTheReason() throws {
-        let keys = try #require(LeadWitness.declineKeys(screen: Self.permissionScreen))
+        let plan = try #require(LeadWitness.declinePlan(screen: Self.permissionScreen, prompt: Self.prompt))
         let down: [UInt8] = [27, 91, 66]
-        #expect(keys.map(\.bytes) == [down, down, Array(LeadWitness.declineReason.utf8), [13]])
+        #expect(plan.writes.map(\.bytes) == [down, down, Array(LeadWitness.declineReason.utf8), [13]])
+        #expect(plan.no == 2)
         let question = " ☐ Color\nWhich color do you prefer?\n❯ 1. Yes\n  2. No\n  3. Type something.\n\nEnter to select · ↑/↓ to navigate · Esc to cancel"
-        #expect(LeadWitness.declineKeys(screen: question) == nil)
-        #expect(LeadWitness.declineKeys(screen: "> \n? for shortcuts") == nil)
+        #expect(LeadWitness.declinePlan(screen: question, prompt: Self.prompt) == nil)
+        #expect(LeadWitness.declinePlan(screen: "> \n? for shortcuts", prompt: Self.prompt) == nil)
+        // Only a shell command's prompt, found on screen.
+        #expect(LeadWitness.declinePlan(screen: Self.permissionScreen, prompt: PendingPrompt(text: "Allow: WebFetch x")) == nil)
+    }
+
+    /// Claude Code 2.1.304's layout, captured (Tests/VibeHostTests/Fixtures/claude-2.1.304-status-rows-110x40.json): the
+    /// command between rules above "Do you want to proceed?", and four rows, the third switching to auto mode.
+    static let realScreen = """
+    ──────────────────────────────────────────────────────────────────────────────────────
+     Bash command
+     Tip: auto mode handles these prompts for you — choose "switch to auto mode" below
+     Probe the remote
+    ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+     git ls-files -s x; git config --get remote.origin.url
+    ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+     Do you want to proceed?
+     ❯ 1. Yes
+       2. Yes, and always allow access to /Users/x/repo from this project
+       3. Yes, and switch to auto mode · auto mode handles these prompts for you
+       4. No
+
+     Esc to cancel · Tab to amend
+    """
+
+    func moved(_ screen: String, to row: Int, no: String = "No") -> String {
+        var lines = screen.components(separatedBy: "\n").map { line -> String in
+            guard let dot = line.range(of: #"[❯ ] ?\d\. "#, options: .regularExpression), line.contains(". ") else { return line }
+            let number = line[dot].filter(\.isNumber)
+            let rest = line[dot.upperBound...]
+            let indent = line[..<dot.lowerBound]
+            return indent + (Int(String(number)) == row ? "❯ " : "  ") + number + ". " + rest
+        }
+        if no != "No" { lines = lines.map { $0.hasSuffix("4. No") ? $0.replacingOccurrences(of: "4. No", with: "4. " + no) : $0 } }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Each key goes only while the screen shows the stuck prompt with the cursor where the keys so far put it, and
+    /// Enter only on the No row showing the reason: a No row that takes no text, keys taken as moves, a prompt
+    /// answered meanwhile or another one opened since stop it (and never land Enter on a Yes row).
+    @Test func eachKeyGoesOnlyWhereThePlanExpectsIt() throws {
+        let plan = try #require(LeadWitness.declinePlan(screen: Self.realScreen, prompt: Self.prompt))
+        #expect(plan.no == 3 && plan.writes.count == 5)
+        #expect(LeadWitness.declineMayGo(plan, step: 0, screen: Self.realScreen))
+        #expect(LeadWitness.declineMayGo(plan, step: 1, screen: moved(Self.realScreen, to: 2)))
+        #expect(LeadWitness.declineMayGo(plan, step: 2, screen: moved(Self.realScreen, to: 3)))
+        #expect(LeadWitness.declineMayGo(plan, step: 3, screen: moved(Self.realScreen, to: 4)))
+        #expect(LeadWitness.declineMayGo(plan, step: 4, screen: moved(Self.realScreen, to: 4, no: "No, " + LeadWitness.declineReason)))
+        // The arrow's redraw not shown yet: wait (the app reads again).
+        #expect(!LeadWitness.declineMayGo(plan, step: 1, screen: Self.realScreen))
+        // The reason didn't go in (a plain No), or a "k" in it moved the cursor up: no Enter.
+        #expect(!LeadWitness.declineMayGo(plan, step: 4, screen: moved(Self.realScreen, to: 4)))
+        #expect(!LeadWitness.declineMayGo(plan, step: 4, screen: moved(Self.realScreen, to: 3)))
+        #expect(LeadWitness.escapeMayGo(plan, screen: moved(Self.realScreen, to: 3)))
+        // Another prompt (the stuck one answered, the verifier on to its next command): nothing goes, not even Esc.
+        let other = Self.realScreen.replacingOccurrences(of: "git ls-files -s x; git config --get remote.origin.url", with: "touch probe.txt")
+        #expect(LeadWitness.declinePlan(screen: other, prompt: Self.prompt) == nil)
+        for step in 0..<5 { #expect(!LeadWitness.declineMayGo(plan, step: step, screen: moved(other, to: step + 1))) }
+        #expect(!LeadWitness.escapeMayGo(plan, screen: other))
+        // The same command with other rows (three, the cursor's moves meant for four): no key.
+        let threeRows = Self.permissionScreen
+        #expect(!LeadWitness.declineMayGo(plan, step: 2, screen: threeRows))
+        #expect(!LeadWitness.declineMayGo(plan, step: 0, screen: "> \n? for shortcuts"))
     }
 
     @Test func theLeadIsToldWhatWasAskedAndWhatTheVerifierWasTold() {
@@ -185,5 +254,7 @@ struct VerifierPromptTests {
         #expect(told.contains(LeadWitness.declineReason))
         let couldnt = LeadWitness.undeclinedText(stuck, now: t0 + 180)
         #expect(couldnt.contains("Run: \(Self.command)") && couldnt.contains("couldn't decline"), "\(couldnt)")
+        let escaped = LeadWitness.escapedText(stuck, now: t0 + 180)
+        #expect(escaped.contains("Run: \(Self.command)") && escaped.contains("with Esc"), "\(escaped)")
     }
 }

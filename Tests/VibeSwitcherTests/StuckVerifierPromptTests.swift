@@ -70,4 +70,25 @@ struct StuckVerifierPromptTests {
         }
         #expect(reports.count == 1)
     }
+
+    /// A No row that takes no text (Claude Code 2.1.304's plain "No"), where the reason's letters are keys: the "k" in
+    /// "check" moves the cursor up. Enter never goes on a Yes row; Esc declines it instead, and the lead is told so.
+    @Test func aNoRowThatTakesNoReasonIsDeclinedWithEscNeverApproved() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        let command = "bash scripts/probe.sh --deep"
+        h.tell(["op": "permission", "command": command, "plainNo": true])
+        try await h.paneShows { $0.contains("Do you want to proceed?") && $0.contains("probe.sh") }
+        let since = Date().addingTimeInterval(-LeadWitness.promptWait - 1)
+        let stuck = LeadWitness.StuckPrompt(key: "\(h.session.id.uuidString)|input-1", session: h.session.id.uuidString, slug: "audit-me",
+                                            prompt: PendingPrompt(text: "Run: " + command, since: since.timeIntervalSince1970))
+        var reports: [String] = []
+        PromptDecline.handle(stuck, host: h.host) { text in reports.append(text()) }
+        try await h.waitFor { !reports.isEmpty }
+        #expect(reports.count == 1 && reports.first?.contains("with Esc") == true && reports.first?.contains(command) == true, "\(reports)")
+        try await h.waitFor { h.agent["mode"] as? String == "idle" }
+        #expect(h.agent["reply"] as? String == "Denied.", "\(h.agent)")
+        let transcript = try String(contentsOf: h.transcript, encoding: .utf8)
+        #expect(!transcript.contains("\"ran " + command), "a Yes went in: \(transcript.suffix(400))")
+    }
 }
