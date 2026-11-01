@@ -149,8 +149,10 @@ struct LeadLaunchTests {
 struct LeadLaunchOutsideReadsTests {
     let temp = Scratch()
 
+    func run(_ command: String, in folder: String) throws -> String { try Self.shell(command, in: folder) }
+
     /// Runs `command` with sh in `folder` (no hooks, no global git config) and returns what it printed, errors included.
-    func run(_ command: String, in folder: String) throws -> String {
+    static func shell(_ command: String, in folder: String) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", command]

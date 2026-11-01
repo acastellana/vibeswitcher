@@ -309,7 +309,8 @@ public enum ReadOnlyCommand {
 
     /// The git commands that only read, with what each may take (`allowsGit`).
     static let gitReads: Set<String> = ["ls-files", "log", "show", "diff", "status", "rev-parse", "merge-base", "cat-file",
-                                        "blame", "remote", "branch"]
+                                        "blame", "remote", "branch", "grep", "merge-tree", "ls-tree", "rev-list", "diff-tree",
+                                        "check-ignore", "stash"]
 
     /// The words of `words` (a command) that the path check reads, when the command is on the list for `scope`: all
     /// its arguments, but a commit's message (text, not a path); nil when it isn't on the list.
@@ -419,8 +420,9 @@ public enum ReadOnlyCommand {
         return String(word.dropFirst())
     }
 
-    /// The words of a git command line (after `git`) for the path check, when it's on the list: a read in `gitReads`, or
-    /// for a worker (`writes`) `add`, `rm`, `commit` and `apply` of a patch on its input; nil otherwise. Nothing before
+    /// The words of a git command line (after `git`) for the path check, when it's on the list: a read in `gitReads`
+    /// (`merge-tree`'s trial merges among them), or for a worker (`writes`) `add`, `rm`, `commit` and `apply` of a patch
+    /// on its input; nil otherwise. Nothing before
     /// the command (`-C`, `-c`, `--git-dir`, `-P`, `--no-pager`, `--literal-pathspecs`): global options change what git
     /// reads or runs. Each command takes only the flags its `GitOptions` know, spelled out: git takes any unambiguous
     /// start of a long option (`--no-ind`), so an abbreviation, like any flag not listed (`--no-index`, `--stdin`,
@@ -434,11 +436,18 @@ public enum ReadOnlyCommand {
             return rest.isEmpty || rest == ["-v"] || rest == ["--verbose"] ? rest : nil
         case "branch":
             return allowsBranch(rest) ? rest : nil
+        case "merge-tree":
+            return allowsMergeTree(rest) ? rest : nil
+        case "stash":
+            // Listing only: every other `git stash` changes the worktree or the stash.
+            return rest == ["list"] ? rest : nil
         case "commit" where writes:
             return GitOptions.commit.messages(rest, message: ("--message", "m")).map { messages in rest.indices.filter { !messages.contains($0) }.map { rest[$0] } }
         case "apply" where writes:
-            // `git diff <commit> HEAD -- <files> | git apply -R`: the patch from git on its input, into the worktree.
-            return rest.isEmpty || rest == ["-R"] ? rest : nil
+            // `git diff <commit> HEAD -- <files> | git apply -R`: the patch from git on its input, into the worktree (git
+            // apply refuses a path outside it, or beyond a symlink, without `--unsafe-paths`); `--check` only tries it.
+            // No patch file, `--directory`, `--include`/`--exclude` or any other flag.
+            return Set(rest).count == rest.count && rest.allSatisfy({ $0 == "-R" || $0 == "--check" }) ? rest : nil
         case "add" where writes, "rm" where writes:
             return GitOptions.writes[command]!.allows(rest) ? rest : nil
         default:
@@ -539,7 +548,7 @@ public enum ReadOnlyCommand {
                    "--extended-regexp", "--fixed-strings", "--perl-regexp", "--all-match", "--invert-grep", "--no-walk",
                    "--do-walk", "--root", "--parents", "--children", "--show-pulls", "--no-expand-tabs", "--branches",
                    "--tags", "--remotes", "--use-mailmap", "--no-prefix", "--name-rev", "--no-abbrev", "--remerge-diff",
-                   "--dense", "--sparse", "--simplify-by-decoration", "--show-linear-break", "--walk-reflogs"],
+                   "--dense", "--sparse", "--simplify-by-decoration", "--show-linear-break", "--walk-reflogs", "--not"],
             valued: ["--format", "--pretty", "--date", "--since", "--after", "--until", "--before", "--author", "--committer",
                      "--grep", "--max-count", "--skip", "--diff-filter", "--word-diff-regex", "--diff-algorithm",
                      "--inter-hunk-context", "--stat-width", "--stat-name-width", "--stat-count", "--min-parents",
@@ -550,8 +559,32 @@ public enum ReadOnlyCommand {
                        "--branches", "--tags", "--remotes", "--glob", "--notes", "--show-notes"],
             letters: "puszwbRaWDiEFmctrg", valuedLetters: "nSGLO", optionalLetters: "MCBUl", counts: true)
 
+        /// `history` and one flag more: rev-list's `--count`, diff-tree's `--no-commit-id`.
+        func with(_ flag: String) -> GitOptions {
+            var options = self
+            options.long.insert(flag)
+            return options
+        }
+
         static let reads: [String: GitOptions] = [
             "log": history, "show": history, "diff": history,
+            "rev-list": history.with("--count"), "diff-tree": history.with("--no-commit-id"),
+            // Its search flags: no `--open-files-in-pager` (`-O`, which runs a pager), `--no-index` or `--untracked`
+            // (files git doesn't track), `--textconv` (a program), `--recurse-submodules` or `--threads`. A pattern is
+            // a word like any other, so the path check reads it: one that looks like a path outside still prompts.
+            "grep": GitOptions(
+                long: ["--cached", "--exclude-standard", "--invert-match", "--ignore-case", "--word-regexp", "--text",
+                       "--recursive", "--extended-regexp", "--basic-regexp", "--fixed-strings", "--perl-regexp",
+                       "--line-number", "--column", "--full-name", "--files-with-matches", "--name-only",
+                       "--files-without-match", "--null", "--only-matching", "--count", "--no-color", "--break", "--heading",
+                       "--show-function", "--function-context", "--and", "--or", "--not", "--quiet", "--all-match"],
+                valued: ["--max-depth", "--context", "--before-context", "--after-context", "--max-count"],
+                optional: ["--color"],
+                letters: "viwaIrEGFPnhHlLzocpWq", valuedLetters: "CBAmef", counts: true),
+            "ls-tree": GitOptions(
+                long: ["--long", "--name-only", "--name-status", "--object-only", "--full-name", "--full-tree"],
+                valued: ["--format"], optional: ["--abbrev"], letters: "drtlz"),
+            "check-ignore": GitOptions(long: ["--quiet", "--verbose", "--non-matching"], letters: "qvnz"),
             "status": GitOptions(
                 long: ["--short", "--branch", "--porcelain", "--long", "--verbose", "--show-stash", "--ahead-behind",
                        "--no-ahead-behind", "--renames", "--no-renames", "--no-column"],
@@ -592,6 +625,28 @@ public enum ReadOnlyCommand {
         static let commit = GitOptions(long: ["--all", "--quiet", "--allow-empty", "--allow-empty-message", "--no-edit",
                                               "--signoff", "--no-verify", "--verbose"],
                                        letters: "aqsnv")
+    }
+
+    /// `git merge-tree`'s two trial merges, which move no ref and touch no file: `--write-tree` (the default with two
+    /// commits) writes the merged tree's objects, unreferenced, and prints its id and any conflicts; `--trivial-merge`
+    /// (the default with three) only prints. Their flags only, spelled out; no `--stdin` (a merge per line of input),
+    /// no strategy options, and exactly the commits each form takes.
+    static func allowsMergeTree(_ args: [String]) -> Bool {
+        let realFlags: Set<String> = ["--messages", "--no-messages", "--name-only", "--allow-unrelated-histories", "-z"]
+        var commits = 0
+        var write = false, trivial = false, realOnly = false
+        for arg in args {
+            switch arg {
+            case "--write-tree": write = true
+            case "--trivial-merge": trivial = true
+            case _ where realFlags.contains(arg): realOnly = true
+            case _ where arg.hasPrefix("--merge-base=") && arg.count > "--merge-base=".count: realOnly = true
+            case _ where arg.hasPrefix("-"): return false  // `--stdin`, `-X`, an abbreviation, `--`, a bundle
+            default: commits += 1
+            }
+        }
+        if trivial || (!write && !realOnly && commits == 3) { return !write && !realOnly && commits == 3 }
+        return commits == 2
     }
 
     /// `git branch` listing only: its listing flags, and names only after `--list` or as the value of a filter
