@@ -2769,3 +2769,8 @@
 - 2026-11-01 15:30 Automatically (auto_advance): Merged fix-the-flaky-test-17 (Fix the flaky test aSlowPowerDaemonDoesntHoldUpALeadRefresh()) into main at b9f49220, review none: on its worker's done report on c96f0511 and the full test run.
 - 2026-11-01 15:30 Automatically (auto_advance): Cleaned up boost-release-3b-codex (freed 1.6 GB of build output and temporary folders). It stays done.
 - 2026-11-01 15:30 Automatically (auto_advance): Cleaned up fix-the-flaky-test-17; ended pid 1695 (Worker: Fix the flaky test aSlowPowerDaemonDoesntHoldUpALeadRefresh()) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 15:55 Planned wallet-e2e-sh-the: wallet-e2e.sh: the real-testnet case no longer waits for Proposed before the sign POST (the Wallet Manager sends it with the POST now)
+- 2026-11-01 15:56 Started a worker on codex-s-tui-renders
+- 2026-11-01 15:56 Automatically (auto_advance): Started a worker on codex-s-tui-renders (Codex's TUI renders blank and never starts its MCP server under the session host: find why, then enable Codex workers), its after tasks done (boost-release-3b-codex).
+- 2026-11-01 16:09 Merged boost-release-5-7: Boost release 5/7: batched merges: test several passed tasks together, split automatically on failure
+- 2026-11-01 16:09 Flaky in boost-release-5-7's merge: claudeCodeStoppingTheStatusLineStopsYourCommandToo(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
