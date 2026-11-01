@@ -2579,3 +2579,24 @@
 - 2026-11-01 08:40 The worker on wallet-card-can-t answered findings: wallet-card-can-t:F1 fixed at 6e23edfa: 6723558, dde68ff, 8ed12ec. The session on a card no longer comes from VIBESWITCHER_SESSION or the host's welcome list. vs-wallet asks the host's vault (.walletSession) which session the calling process runs in; the host tells from that process. It then asks for .sealWalletRequest over the request's SHA-256, and the vault refuses unless the caller is in exactly that session and the host says it's the user's (userOpened: opened by the app, not started by ano…
 - 2026-11-01 08:41 Automatically (auto_advance): Started the audit of wallet-e2e-real-testnet at ce174d1f (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
 - 2026-11-01 08:41 Automatically (auto_advance): Started the audit of wallet-card-can-t at 6e23edfa (Its review is audit).
+- 2026-11-01 08:47 Audit of wallet-e2e-real-testnet: complete, clean, round 1: 2 Nit open
+- 2026-11-01 08:48 Audit of wallet-card-can-t: complete, clean, round 2: 2 Important closed, 3 Nit closed
+- 2026-11-01 08:49 Planned boost-release-1-7: Boost release 1/7: a once-a-minute load recorder (load, memory, sessions, heavy slots, merges)
+- 2026-11-01 08:49 Planned boost-release-2-7: Boost release 2/7: heavy jobs outside the Mac-wide lock are noticed and their lead is told
+- 2026-11-01 08:49 Planned boost-release-3-7: Boost release 3/7: watch the account's usage limits and back off before hitting them (review audit)
+- 2026-11-01 08:49 Planned boost-release-4-7: Boost release 4/7: a task's idle worker is released while its audit runs, and restarted only if findings come back (review audit)
+- 2026-11-01 08:49 Planned boost-release-5-7: Boost release 5/7: batched merges: test several passed tasks together, split automatically on failure (review audit)
+- 2026-11-01 08:49 Started a worker on boost-release-1-7
+- 2026-11-01 08:49 Automatically (auto_advance): Started a worker on boost-release-1-7 (Boost release 1/7: a once-a-minute load recorder (load, memory, sessions, heavy slots, merges)).
+- 2026-11-01 08:49 Started a worker on boost-release-2-7
+- 2026-11-01 08:49 Automatically (auto_advance): Started a worker on boost-release-2-7 (Boost release 2/7: heavy jobs outside the Mac-wide lock are noticed and their lead is told).
+- 2026-11-01 08:50 Planned boost-release-6-7: Boost release 6/7: Boost mode: higher Mac-wide limits on demand, or automatically when the user is away and on AC power (review audit)
+- 2026-11-01 08:50 Started a worker on boost-release-3-7
+- 2026-11-01 08:50 Automatically (auto_advance): Started a worker on boost-release-3-7 (Boost release 3/7: watch the account's usage limits and back off before hitting them).
+- 2026-11-01 08:50 Planned boost-release-7-7: Boost release 7/7: release check: tune boost from the recorder's data, notes, and one install
+- 2026-11-01 08:50 Started a worker on boost-release-4-7
+- 2026-11-01 08:50 Automatically (auto_advance): Started a worker on boost-release-4-7 (Boost release 4/7: a task's idle worker is released while its audit runs, and restarted only if findings come back).
+- 2026-11-01 08:52 Planned boost-release-3b-codex: Boost release 3b: Codex workers for bounded tasks (spread usage across accounts), always audited by Claude (review audit)
+- 2026-11-01 08:54 Planned feature-impact-ledger: Feature impact ledger + metrics script: track which changes help, and why
+- 2026-11-01 08:58 Merged wallet-e2e-real-testnet: wallet-e2e --real-testnet: one real GenLayer testnet payment through the whole chain on this Mac
+- 2026-11-01 08:58 Flaky in wallet-e2e-real-testnet's merge: aSlowPowerDaemonDoesntHoldUpALeadRefresh() failed the first test run and passed its rerun (the failing tests only); merged on the rerun

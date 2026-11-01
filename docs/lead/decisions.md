@@ -203,3 +203,11 @@ User's answer to 19AF8BCD. The account hit its Fable usage limit, and the wallet
 
 2026-11-01: the lead planned terminal-drawing-froze from a report saying '100% of its sample inside the stall' under SwiftTerm.buildAttributedString. 0 of 2092 main-thread samples were actually in terminal drawing. The worker checked before building and the task was abandoned, but it cost a worker start. Third-party code (SwiftTerm, a pinned dependency) was also assumed to be vendored.
 
+## 2026-11-01 08:50:10 The boost release (2026-11-01), approved by the user in full, ships as 7 tasks in waves. Wave 1, in parallel: the load recorder, heavy jobs outside vs-heavy reported to their lead, and the usage-limit watch. Wave 2: release idle workers during audits, then batched merges (merge_batching off|boost|always, default off). Wave 3: Boost mode (Off/On/Automatic), with load_threshold 36, mac_max_sessions 18, max_workers 7 and heavy_slots 3; Automatic only when away AND on AC power, never on battery; fairness to the most recently active project, and a usage-watch veto. Then a release check tuned on the recorder's data. Always-on regardless of boost: the recorder, the heavy-job reports, releasing idle workers and the usage watch.
+
+The user wants more throughput when away. A 4-day load study found freezes and suite time bend at 24, throughput peaks around 36–48 and falls past 48, the worst spikes come from heavy jobs outside the lock, and two account limits stopped work on 2026-10-31/11-01. The user chose AC-only for automatic boost.
+
+## 2026-11-01 08:54:47 From 2026-11-01, every feature or process change the lead plans gets an entry in docs/process/impact.md, written when it's planned: hypothesis, metric, baseline, check date and window. Each retrospective reviews the entries that are due with scripts/impact-metrics.sh, records the result and a verdict (keep/tune/revert/inconclusive) with the why, and each verdict becomes a task or a recorded decision. It starts manual; a lead tool replaces it only once the routine has proved useful.
+
+The user wants to track which features help and why, to self-improve recursively. Today's changes (one suite per task, strict paths, the boost release) were all made on reasoned guesses; the ledger turns them into checked results.
+
