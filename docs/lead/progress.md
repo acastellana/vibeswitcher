@@ -2835,3 +2835,6 @@
 - 2026-11-01 19:52 Automatically (auto_advance): Merged boost-release-6-7 (Boost release 6/7: Boost mode: higher Mac-wide limits on demand, or automatically when the user is away and on AC power) into main at 3705ab93, on its passing audit and the full test run. (Its first test run failed on claudeCodeStoppingTheStatusLineStopsYourCommandToo() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/boost-release-6-7/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.….)
 - 2026-11-01 19:52 Automatically (auto_advance): Cleaned up boost-release-6-7; ended pid 38574 (Worker: Boost release 6/7: Boost mode: higher Mac-wide limits on demand, or automatically when the user is away and on AC power) (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-01 19:52 Update: Boost mode is ready: please install — What changed (main at 3705ab93):
+- 2026-11-01 20:03 Workflow: cleared heavy_slots
+- 2026-11-01 20:03 Workflow: merge_batching = `boost`
+- 2026-11-01 20:03 Update: Today: boost, Codex workers, a calmer Mac (2026-11-01) — Landed (installed at 20:03):
