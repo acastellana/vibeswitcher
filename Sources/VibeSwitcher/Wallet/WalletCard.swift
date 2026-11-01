@@ -329,7 +329,8 @@ struct WalletCard: View {
 }
 
 /// The wallet requests the selected session's agent filed, pinned under its conversation: each a `WalletCard` whose
-/// buttons go to the desk (nothing is sent until Send to Wallet Manager is pressed). Empty: nothing shown.
+/// buttons go to the desk (nothing is sent until Send to Wallet Manager is pressed). Empty: nothing shown. Lazy: only
+/// the cards scrolled into its 380 points are drawn (each costs its views and their memory), however many are live.
 struct WalletRequestStrip: View {
     @ObservedObject var desk: WalletDesk
     let session: UUID
@@ -338,7 +339,7 @@ struct WalletRequestStrip: View {
         let cards = desk.cards(for: session)
         if !cards.isEmpty {
             ScrollView {
-                VStack(spacing: 10) {
+                LazyVStack(spacing: 10) {
                     ForEach(cards) { card in
                         WalletCard(card: card) { action in desk.act(action, on: card.id) }
                     }

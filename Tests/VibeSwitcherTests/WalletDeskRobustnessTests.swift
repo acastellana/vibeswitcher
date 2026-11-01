@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 import VibeCore
 @testable import VibeSwitcher
@@ -188,5 +190,51 @@ struct WalletDeskRobustnessTests {
         desk.start(interval: 3600)
         #expect(await until { !FileManager.default.fileExists(atPath: store.file(request.id).path) })
         #expect(!FileManager.default.fileExists(atPath: WalletCourier.ListenRecord.file(in: store.folder).path))
+    }
+
+    // MARK: The strip
+
+    /// The views under `view`, itself included.
+    static func viewCount(_ view: NSView) -> Int { 1 + view.subviews.reduce(0) { $0 + viewCount($1) } }
+
+    /// The strip draws only the cards in its 380 points: its views (and the memory they hold) stay about those of the
+    /// first few cards whether 3 or the cap are live. Drawn eagerly, 30 cards made about ten times 3's.
+    @Test func theStripDrawsOnlyTheCardsInView() async throws {
+        func hostedViews(_ count: Int) async throws -> Int {
+            let scratch = Scratch()
+            let fake = try WalletFakePassage(scratch)
+            let asked = scratch.url("asked")
+            let desk = WalletDesk(folder: asked, store: WalletRequestStore(folder: scratch.url("requests")), inbox: fake.inbox,
+                                  config: { WalletDesk.Config(passage: fake.executable, peer: WalletFakePassage.peer) },
+                                  now: { WalletDeskTests.created.addingTimeInterval(30) }, log: { _ in })
+            desk.sessionNames = { WalletDeskTests.names() }
+            desk.verifyStamps = WalletTestStamps.verify
+            desk.sealMessage = WalletTestStamps.sealMessage
+            desk.verifyMessages = WalletTestStamps.verifyMessages
+            defer { desk.close() }
+            for number in 1...count { try WalletAsk.file(WalletDeskTests.request(number), in: asked) }
+            await refreshed(desk)
+            #expect(desk.cards(for: WalletDeskTests.session).count == count)
+            let window = NSWindow(contentRect: NSRect(x: -30_000, y: -30_000, width: 640, height: 600), styleMask: [.borderless],
+                                  backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            defer { window.close() }
+            let host = NSHostingView(rootView: WalletRequestStrip(desk: desk, session: WalletDeskTests.session).frame(width: 640, height: 600))
+            window.contentView = host
+            window.orderFrontRegardless()
+            var views = 0
+            // Settled: the same count twice running once laid out.
+            _ = await until {
+                host.layoutSubtreeIfNeeded()
+                window.displayIfNeeded()
+                let now = Self.viewCount(host)
+                defer { views = now }
+                return now == views && now > 1
+            }
+            return views
+        }
+        let few = try await hostedViews(3)
+        let many = try await hostedViews(WalletDesk.maxCards)
+        #expect(many <= few + few / 2, "\(WalletDesk.maxCards) cards made \(many) views, 3 made \(few)")
     }
 }
