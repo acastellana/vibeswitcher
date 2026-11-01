@@ -46,6 +46,7 @@ struct WalletCard: View {
         VStack(alignment: .leading, spacing: 10) {
             header(tint)
             request
+            if card.fileChanged { fileChanged }
             Text(card.detail)
                 .font(.system(size: 12)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -104,6 +105,14 @@ struct WalletCard: View {
             row("Reason", card.reason)
         }
         .textSelection(.enabled)
+    }
+
+    /// The filed request changed after it went to the browser wallet: the card shows what the page was made from.
+    private var fileChanged: some View {
+        Label(WalletCardModel.fileChangedNote, systemImage: "exclamationmark.triangle.fill")
+            .font(.system(size: 12, weight: .medium)).foregroundStyle(SessionStatus.needsInput.color)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel("Warning: \(WalletCardModel.fileChangedNote)")
     }
 
     private func label(_ text: String) -> some View {

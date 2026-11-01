@@ -331,6 +331,138 @@ struct WalletBrowserDeskTests {
         #expect(s.base.fake.sends.isEmpty)
     }
 
+    /// wallet-request-fallback:F3: an answer the page posts in the same instant as the cutoff (taken by the page, which
+    /// told it so, while the desk was stopping it) isn't dropped: its hash is recorded and the session hears it.
+    @Test func anAnswerAtTheCutoffIsntDropped() async throws {
+        let clock = WalletDeskTests.Clock()
+        let s = try setup(clock: clock)
+        defer { s.desk.close() }
+        let request = Self.request()
+        let url = try await open(s, request)
+        clock.now = clock.now.addingTimeInterval(WalletBrowser.pageLifetime)
+        // The desk's look at the cutoff starts, and waits there while the page's answer is taken.
+        clock.hold()
+        var looked = false
+        s.desk.refresh { looked = true }
+        #expect(await until { clock.held })
+        let posted = await Self.fetch(Self.result(url), method: "POST", body: #"{"txHash":"\#(Self.hash)"}"#, origin: Self.origin(url))
+        #expect(posted?.status == 204)
+        clock.release()
+        #expect(await until { looked })
+        // The answer was queued behind that look: the next look comes after it.
+        await refreshed(s.desk)
+        let hash = Self.hash.lowercased()
+        #expect(s.base.told.messages.contains { $0.text.contains(hash) })
+        #expect(s.desk.cards.first?.state == .sentFromBrowser(txHash: hash, explorerURL: URL(string: "https://scan.chain.genlayer.com/tx/" + hash)))
+        #expect(WalletBrowser.mark(request.id, in: s.base.asked)?.txHash == hash)
+    }
+
+    /// Blind check: a filed request deleted while its page is open, whose answer comes in the same instant as the cutoff:
+    /// the hash is still told, and the mark goes.
+    @Test func anAnswerAtTheCutoffForADeletedRequestIsntDropped() async throws {
+        let clock = WalletDeskTests.Clock()
+        let s = try setup(clock: clock)
+        defer { s.desk.close() }
+        let request = Self.request()
+        let url = try await open(s, request)
+        try FileManager.default.removeItem(at: s.base.asked.appendingPathComponent("\(request.id).json"))
+        clock.now = clock.now.addingTimeInterval(WalletBrowser.pageLifetime)
+        clock.hold()
+        var looked = false
+        s.desk.refresh { looked = true }
+        #expect(await until { clock.held })
+        let posted = await Self.fetch(Self.result(url), method: "POST", body: #"{"txHash":"\#(Self.hash)"}"#, origin: Self.origin(url))
+        #expect(posted?.status == 204)
+        clock.release()
+        #expect(await until { looked })
+        await refreshed(s.desk)
+        let hash = Self.hash.lowercased()
+        #expect(s.base.told.messages.contains { $0.text.contains(hash) && $0.text.contains(request.id) })
+        #expect(WalletBrowser.mark(request.id, in: s.base.asked) == nil)
+    }
+
+    /// Review finding 3: the page and the card come from the request as it was at the click. A filed request rewritten
+    /// since shows the copy, with a warning, and the session hears what was signed, not the rewrite.
+    @Test func aRequestRewrittenAfterTheClickShowsWhatWasSignedAndSaysSo() async throws {
+        let s = try setup()
+        defer { s.desk.close() }
+        let request = Self.request()
+        let url = try await open(s, request)
+        #expect(WalletBrowser.mark(request.id, in: s.base.asked)?.request == request)
+        #expect(s.desk.cards.first?.fileChanged == false)
+        var rewritten = request
+        rewritten.amount = "9000000000000000000"
+        rewritten.to = "0x00000000000000000000000000000000000000ff"
+        try WalletAsk.file(rewritten, in: s.base.asked)
+        await refreshed(s.desk)
+        let card = try #require(s.desk.cards.first)
+        #expect(card.state == .inBrowser)
+        #expect(card.amount == "1.25" && card.to == request.to)
+        #expect(card.fileChanged)
+        #expect(card.text.contains(WalletCardModel.fileChangedNote))
+        let posted = await Self.fetch(Self.result(url), method: "POST", body: #"{"txHash":"\#(Self.hash)"}"#, origin: Self.origin(url))
+        #expect(posted?.status == 204)
+        // The page hands its answer to the desk before it replies: a look after the reply comes after the answer.
+        await refreshed(s.desk)
+        let told = try #require(s.base.told.messages.first).text
+        #expect(told.contains("1.25 GEN to \(request.to)") && !told.contains(rewritten.to))
+        #expect(told.contains("changed after the user opened it"))
+        #expect(s.desk.cards.first?.state != .inBrowser)
+        #expect(s.desk.cards.first?.amount == "1.25" && s.desk.cards.first?.fileChanged == true)
+        // Discard on a rewritten card still waiting for the browser wallet goes: the button acts on the copy it shows.
+        let other = Self.request(2)
+        try WalletAsk.file(other, in: s.base.asked)
+        await refreshed(s.desk)
+        await acted(s.desk, .browser, other.id)
+        #expect(await until { s.opened.urls.count == 2 })
+        var otherRewritten = other
+        otherRewritten.amount = "7"
+        try WalletAsk.file(otherRewritten, in: s.base.asked)
+        await refreshed(s.desk)
+        #expect(s.desk.cards.last?.fileChanged == true && s.desk.cards.last?.actions == [.discard])
+        await acted(s.desk, .discard, other.id)
+        #expect(s.desk.cards.map(\.id) == [request.id])
+    }
+
+    /// Review finding 3: a filed request deleted after the click: the page's answer still reaches the session with its
+    /// hash, the page stops and the mark goes. With no answer, its page still stops at its time and the mark goes.
+    @Test func aRequestDeletedAfterTheClickKeepsTheHashStopsThePageAndClearsTheMark() async throws {
+        let clock = WalletDeskTests.Clock()
+        let s = try setup(clock: clock)
+        defer { s.desk.close() }
+        let request = Self.request()
+        let url = try await open(s, request)
+        try FileManager.default.removeItem(at: s.base.asked.appendingPathComponent("\(request.id).json"))
+        await refreshed(s.desk)
+        #expect(s.desk.cards.isEmpty)
+        let posted = await Self.fetch(Self.result(url), method: "POST", body: #"{"txHash":"\#(Self.hash)"}"#, origin: Self.origin(url))
+        #expect(posted?.status == 204)
+        let hash = Self.hash.lowercased()
+        await refreshed(s.desk)
+        let told = try #require(s.base.told.messages.first).text
+        #expect(told.contains(hash) && told.contains(request.id))
+        #expect(WalletBrowser.mark(request.id, in: s.base.asked) == nil)
+        let after = await Self.fetch(url)
+        #expect(after == nil || after?.status == 410)
+
+        // No answer: the page stops at its time, the session hears it, and the mark goes.
+        let other = Self.request(2)
+        try WalletAsk.file(other, in: s.base.asked)
+        await refreshed(s.desk)
+        await acted(s.desk, .browser, other.id)
+        #expect(await until { s.opened.urls.count == 2 })
+        let page = s.opened.urls[1]
+        try FileManager.default.removeItem(at: s.base.asked.appendingPathComponent("\(other.id).json"))
+        clock.now = clock.now.addingTimeInterval(WalletBrowser.pageLifetime)
+        await refreshed(s.desk)
+        #expect(s.base.told.messages.count == 2)
+        let noAnswer = s.base.told.messages.last?.text ?? ""
+        #expect(noAnswer.contains(other.id) && noAnswer.contains("no answer came back"))
+        #expect(WalletBrowser.mark(other.id, in: s.base.asked) == nil)
+        let late = await Self.fetch(page)
+        #expect(late == nil || late?.status == 410)
+    }
+
     /// No Wallet Manager peer chosen: the card shows, offers the browser wallet and Open Settings, never Send; once a
     /// peer is chosen, a card still waiting offers Send again.
     @Test func withNoPeerTheCardOffersTheBrowserAndSendComesBackOnceOneIsChosen() async throws {

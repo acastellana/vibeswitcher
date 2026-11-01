@@ -441,6 +441,7 @@ struct PassageLinkTests {
         let log = Log()
         let first = courier(fake, log: log, store: store)
         #expect(first.send(request) == .passage(.sent))
+        let sentAt = try #require(first.record(request.id)?.sentAt)
         first.close()
 
         var info = stat()
@@ -453,7 +454,8 @@ struct PassageLinkTests {
         let second = courier(fake, log: log, store: WalletRequestStore())
         defer { second.close() }
         #expect(second.outstanding.contains(request))
-        #expect(second.record(request.id) == WalletRequestStore.Record(request: request, state: .sent))
+        // The record comes back as it was, with when it was sent ("not picked up" counts from there).
+        #expect(second.record(request.id) == WalletRequestStore.Record(request: request, state: .sent, sentAt: sentAt))
         // Still outstanding, so it listens again.
         #expect(second.listenerPID != nil)
         try fake.receive(Self.result(request, .received, sequence: 1))

@@ -94,16 +94,62 @@ struct WalletDeskTests {
         let told: Told
     }
 
+    /// The desk's clock. `hold()` makes the next reading of it (on the desk's queue) wait until `release()`, so a test
+    /// can line something up behind what the desk is doing at that instant.
     final class Clock: @unchecked Sendable {
-        var now = WalletDeskTests.created.addingTimeInterval(30)
+        private let lock = NSLock()
+        private var time = WalletDeskTests.created.addingTimeInterval(30)
+        private var gate: DispatchSemaphore?
+        /// The gate a reading waits on now.
+        private var holding: DispatchSemaphore?
+
+        var now: Date {
+            get {
+                lock.lock()
+                let (gate, time) = (self.gate, self.time)
+                if gate != nil {
+                    self.gate = nil
+                    holding = gate
+                }
+                lock.unlock()
+                gate?.wait()
+                return time
+            }
+            set {
+                lock.lock()
+                time = newValue
+                lock.unlock()
+            }
+        }
+
+        func hold() {
+            lock.lock()
+            gate = DispatchSemaphore(value: 0)
+            lock.unlock()
+        }
+
+        /// The desk is waiting on a reading `hold` armed.
+        var held: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return holding != nil
+        }
+
+        func release() {
+            lock.lock()
+            let gate = holding
+            holding = nil
+            lock.unlock()
+            gate?.signal()
+        }
     }
 
-    func setup(peer: String = WalletFakePassage.peer, clock: Clock = Clock()) throws -> Setup {
+    func setup(peer: String = WalletFakePassage.peer, clock: Clock = Clock(), peers: WalletBrowserDeskTests.Peer? = nil) throws -> Setup {
         let fake = try WalletFakePassage(temp)
         let asked = temp.url("asked")
         let store = WalletRequestStore(folder: temp.url("requests"))
         let desk = WalletDesk(folder: asked, store: store, inbox: fake.inbox,
-                             config: { WalletDesk.Config(passage: fake.executable, peer: peer) }, now: { clock.now }, log: { _ in })
+                             config: { WalletDesk.Config(passage: fake.executable, peer: peers?.id ?? peer) }, now: { clock.now }, log: { _ in })
         desk.findPassage = { nil }
         let told = Told()
         desk.deliver = { session, text in told.messages.append((session, text)) }
@@ -507,6 +553,75 @@ struct WalletDeskTests {
         await acted(s.desk, .retry, request.id)
         #expect(s.fake.sends.count == 1)
         #expect(s.desk.cards.first?.state == .sent)
+    }
+
+    /// Review finding 1: Retry on an unsure card after the request expired doesn't pin Expired over its record: the
+    /// Wallet Manager's answer to the earlier send, arriving later, still shows (submitted, with its hash).
+    @Test func aRetryAfterExpiryLeavesTheRecordToDecide() async throws {
+        let clock = Clock()
+        let s = try setup(clock: clock)
+        defer { s.desk.close() }
+        let request = Self.request()
+        try WalletAsk.file(request, in: s.asked)
+        await refreshed(s.desk)
+        try s.fake.setSendExit(1)
+        await acted(s.desk, .send, request.id)
+        #expect(s.desk.cards.first?.state == .unsure(message: "passage: fake exit 1"))
+        clock.now = request.expiresAt.addingTimeInterval(1)
+        await acted(s.desk, .retry, request.id)
+        #expect(s.fake.sends.count == 1)
+        #expect(s.desk.cards.first?.state == .unsure(message: "passage: fake exit 1"))
+        try s.fake.receive(Self.result(request, .submitted, sequence: 1), second: 1)
+        await polled(s.desk)
+        let hash = "0x" + String(repeating: "ab", count: 32)
+        #expect(await until { s.desk.cards.first?.state == .signed(txHash: hash, explorerURL: URL(string: "https://explorer.example/tx/" + hash)) })
+        #expect(s.told.messages.count == 1)
+    }
+
+    /// Review finding 1: Retry on an unsure card when no courier can be made (the peer was cleared in Settings since
+    /// the card was drawn) doesn't pin Not reachable over its record: the answer that arrives later still shows.
+    @Test func aRetryWithNoCourierLeavesTheRecordToDecide() async throws {
+        let peers = WalletBrowserDeskTests.Peer()
+        let s = try setup(peers: peers)
+        defer { s.desk.close() }
+        let request = Self.request()
+        try WalletAsk.file(request, in: s.asked)
+        await refreshed(s.desk)
+        try s.fake.setSendExit(1)
+        await acted(s.desk, .send, request.id)
+        #expect(s.desk.cards.first?.actions == [.retry, .discard])
+        peers.id = ""
+        await acted(s.desk, .retry, request.id)
+        #expect(s.fake.sends.count == 1)
+        #expect(s.desk.cards.first?.state == .unsure(message: "passage: fake exit 1"))
+        peers.id = WalletFakePassage.peer
+        try s.fake.receive(Self.result(request, .submitted, sequence: 1), second: 1)
+        await polled(s.desk)
+        let hash = "0x" + String(repeating: "ab", count: 32)
+        #expect(await until { s.desk.cards.first?.state == .signed(txHash: hash, explorerURL: URL(string: "https://explorer.example/tx/" + hash)) })
+        #expect(s.told.messages.count == 1)
+    }
+
+    /// wallet-request-fallback:F2: the "not picked up" hint counts from the send the record keeps, so a restart doesn't
+    /// start its 5 minutes again.
+    @Test func notPickedUpSurvivesARestart() async throws {
+        let clock = Clock()
+        let s = try setup(clock: clock)
+        let request = Self.request()
+        try WalletAsk.file(request, in: s.asked)
+        await refreshed(s.desk)
+        await acted(s.desk, .send, request.id)
+        #expect(s.desk.cards.first?.state == .sent && s.desk.cards.first?.notPickedUp == false)
+        s.desk.close()
+        // The app restarts 5 minutes later.
+        clock.now = clock.now.addingTimeInterval(WalletCardModel.notPickedUpAfter)
+        let later = WalletDesk(folder: s.asked, store: s.store, inbox: s.fake.inbox,
+                               config: { WalletDesk.Config(passage: s.fake.executable, peer: WalletFakePassage.peer) },
+                               now: { clock.now }, log: { _ in })
+        defer { later.close() }
+        await refreshed(later)
+        #expect(later.cards.first?.state == .sent)
+        #expect(later.cards.first?.notPickedUp == true)
     }
 
     // MARK: Requests and results on the card

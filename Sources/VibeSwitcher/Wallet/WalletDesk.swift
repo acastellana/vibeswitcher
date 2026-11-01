@@ -124,8 +124,9 @@ final class WalletDesk: ObservableObject {
         }
         let config = self.config()
         work.async { [self] in
-            // The request as recorded once sent, else as filed; only if it's still the one the card showed.
-            guard let request = courier?.record(id)?.request ?? storedRecord(id)?.request ?? requests.first(where: { $0.id == id }),
+            // The request as recorded once sent, or as opened in the browser wallet, else as filed; only if it's still the
+            // one the card showed.
+            guard let request = record(id)?.request ?? marks[id]?.request ?? requests.first(where: { $0.id == id }),
                   request == shown else {
                 log("\(action.rawValue) on \(id) not done: the request changed since its card was drawn")
                 return publish(then: then)
@@ -202,11 +203,21 @@ final class WalletDesk: ObservableObject {
         for request in filed where marks[request.id] == nil {
             marks[request.id] = WalletBrowser.mark(request.id, in: folder)
         }
-        // A page past its time, or one an earlier run opened (its page stopped with it): no answer came back.
-        for request in filed where marks[request.id]?.state == .opened && pages[request.id].map({ time >= $0.until }) ?? true {
-            pages.removeValue(forKey: request.id)?.server.stop()
-            log("\(request.id): no answer from the browser wallet")
-            settle(request, WalletBrowser.Mark(state: .noAnswer, at: time))
+        // A page past its time, or one an earlier run opened (its page stopped with it): no answer came back. Told from
+        // the copy the page was made from, also when the filed request is gone since (its mark then goes too).
+        for (id, mark) in marks.sorted(by: { $0.key < $1.key }) where mark.state == .opened && pages[id].map({ time >= $0.until }) ?? true {
+            let page = pages.removeValue(forKey: id)
+            page?.server.stop()
+            log("\(id): no answer from the browser wallet")
+            let isFiled = filed.contains { $0.id == id }
+            if let request = mark.request ?? filed.first(where: { $0.id == id }) {
+                settle(request, WalletBrowser.Mark(state: .noAnswer, at: time))
+            }
+            // Its files go; a page of this run keeps the copy in memory, so an answer it took in this same instant is
+            // still told (`heard`).
+            if !isFiled {
+                if page == nil { forgetMark(id) } else { WalletAsk.remove(id, in: folder) }
+            }
         }
         // Expired with nothing sent (no record of a send, nor a send under way, nor the browser wallet): the asking agent
         // hears it, once. Before the card goes below, so an app that wasn't running at the time still tells it.
@@ -268,13 +279,18 @@ final class WalletDesk: ObservableObject {
     private func send(_ request: WalletRequest, config: Config) {
         let id = request.id
         let courier: WalletCourier
+        // A record that stayed (an earlier send was unsure) decides the card: a Retry that can't go leaves it as it is,
+        // so the Wallet Manager's answers to the earlier send still show.
+        let recorded = record(id) != nil
         do {
             courier = try self.courier(config)
         } catch {
+            if recorded { return log("retry on \(id) not done: \(error)") }
             local[id] = .unreachable(message: "\(error)")
             return
         }
         guard !request.isExpired(now: now()) else {
+            if recorded { return log("retry on \(id) not done: it expired") }
             local[id] = .expired
             return
         }
@@ -326,12 +342,12 @@ final class WalletDesk: ObservableObject {
         let url: URL
         do {
             url = try server.start { [weak self] outcome in self?.work.async { self?.heard(outcome, for: id) } }
-            try WalletBrowser.setMark(.init(state: .opened, at: time), for: id, in: folder)
+            try WalletBrowser.setMark(.init(state: .opened, at: time, request: request), for: id, in: folder)
         } catch {
             server.stop()
             return log("browser on \(id) not done: \(error)")
         }
-        marks[id] = WalletBrowser.Mark(state: .opened, at: time)
+        marks[id] = WalletBrowser.Mark(state: .opened, at: time, request: request)
         pages[id] = (server, min(time.addingTimeInterval(WalletBrowser.pageLifetime), request.expiresAt))
         local[id] = nil
         unsureWhy[id] = nil
@@ -339,25 +355,47 @@ final class WalletDesk: ObservableObject {
         DispatchQueue.main.async { [weak self] in self?.openBrowser(url) }
     }
 
-    /// What the page posted back: the card shows it and the asking session hears it.
+    /// What the page posted back: the card shows it and the asking session hears it, drawn from the copy the page was
+    /// made from. Taken also when it came in the same instant as the page's cutoff (the mark already says no answer: the
+    /// page was told it was taken), and when the filed request is gone since (the session hears it, then the mark goes).
     private func heard(_ outcome: WalletBrowser.Outcome, for id: String) {
-        guard let page = pages.removeValue(forKey: id) else { return }
-        page.server.stop()
-        guard let request = requests.first(where: { $0.id == id }) else { return }
+        pages.removeValue(forKey: id)?.server.stop()
+        guard let mark = marks[id], mark.state == .opened || mark.state == .noAnswer,
+              let request = mark.request ?? requests.first(where: { $0.id == id }) else {
+            return log("\(id) from the browser wallet, with no open page for it: \(outcome)")
+        }
         let time = now()
         switch outcome {
         case .sent(let hash): settle(request, WalletBrowser.Mark(state: .sent, txHash: hash, at: time))
         case .rejected: settle(request, WalletBrowser.Mark(state: .rejected, at: time))
         }
         log("\(id) from the browser wallet: \(outcome)")
+        if !FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(id).json").path) {
+            log("\(id): its filed request is gone; its browser mark goes too")
+            forgetMark(id)
+        }
         publish()
     }
 
+    /// A mark whose filed request is gone: nothing shows it any more.
+    private func forgetMark(_ id: String) {
+        marks[id] = nil
+        WalletAsk.remove(id, in: folder)
+        requests.removeAll { $0.id == id }
+    }
+
     /// How it ended in the browser: recorded, and told to the asking session.
+    /// `request`: what the page was made from (the mark's copy), never a version filed since.
     private func settle(_ request: WalletRequest, _ mark: WalletBrowser.Mark) {
+        var mark = mark
+        mark.request = mark.request ?? marks[request.id]?.request
         marks[request.id] = mark
         do { try WalletBrowser.setMark(mark, for: request.id, in: folder) } catch { log("couldn't record \(request.id)'s browser answer: \(error)") }
-        tell(request, WalletBrowser.message(mark, request: request, summary: WalletCardModel.summary(request)))
+        var text = WalletBrowser.message(mark, request: request, summary: WalletCardModel.summary(request))
+        if let filed = requests.first(where: { $0.id == request.id }), filed != request {
+            text += " Its filed request was changed after the user opened it in the browser wallet: the above is what the browser wallet was given."
+        }
+        tell(request, text)
     }
 
     private func discard(_ request: WalletRequest) {
@@ -386,6 +424,8 @@ final class WalletDesk: ObservableObject {
     /// New results the courier took: each goes to the asking session as a message.
     private func taken(_ results: [WalletResult]) {
         for result in results {
+            // The record and its results decide the card now.
+            local[result.id] = nil
             guard let request = courier?.record(result.id)?.request ?? requests.first(where: { $0.id == result.id }) else { continue }
             tell(request, WalletCardModel.message(for: result, request: request))
         }
@@ -404,25 +444,31 @@ final class WalletDesk: ObservableObject {
         var drawn: [String: WalletRequest] = [:]
         for filed in requests {
             // Once sent, the card shows what was sent, whatever the file says now.
-            let record = courier?.record(filed.id) ?? storedRecord(filed.id)
-            let request = record?.request ?? filed
+            // Opened in the browser wallet, the card shows the copy the page was made from.
+            let record = self.record(filed.id)
+            let mark = marks[filed.id]
+            let request = record?.request ?? mark?.request ?? filed
             drawn[request.id] = request
             let by = request.requestedBy
             let name = by.label.isEmpty ? "an agent in \(by.project)" : by.label
-            if let mark = marks[request.id] {
-                cards.append(WalletCardModel(request: request, requestedBy: name, state: WalletCardModel.state(mark, chainId: request.chainId)))
-            } else if let state = local[request.id] {
-                cards.append(WalletCardModel(request: request, requestedBy: name, state: state))
-            } else if let record {
+            if let mark {
+                var card = WalletCardModel(request: request, requestedBy: name, state: WalletCardModel.state(mark, chainId: request.chainId))
+                card.fileChanged = request != filed
+                cards.append(card)
+            } else if let record, local[request.id] != .sent {
+                // A stored record (and its results) decides the card over any state of this run, but for a send under way.
                 let (state, checks, wallet) = WalletCardModel.state(of: record, unsure: unsureWhy[request.id], now: time)
                 var card = WalletCardModel(request: request, requestedBy: name, state: state, checks: checks, wallet: wallet)
-                // Delivered, and not a word from the Wallet Manager since: after 5 minutes the card asks if it's running.
+                // Delivered, and not a word from the Wallet Manager since: after 5 minutes the card asks if it's running,
+                // counted from the send the record keeps (so a restart doesn't start it again).
                 if state == .sent, record.state == .sent {
-                    let since = sentSince[request.id] ?? time
+                    let since = record.sentAt ?? sentSince[request.id] ?? time
                     sentSince[request.id] = since
                     card.notPickedUp = time.timeIntervalSince(since) >= WalletCardModel.notPickedUpAfter
                 }
                 cards.append(card)
+            } else if let state = local[request.id] {
+                cards.append(WalletCardModel(request: request, requestedBy: name, state: state))
             } else {
                 cards.append(WalletCardModel(request: request, requestedBy: name, state: request.isExpired(now: time) ? .expired : .waiting))
             }
@@ -436,6 +482,9 @@ final class WalletDesk: ObservableObject {
             then()
         }
     }
+
+    /// The record of a send: the courier's, else one an earlier run stored.
+    private func record(_ id: String) -> WalletRequestStore.Record? { courier?.record(id) ?? storedRecord(id) }
 
     /// A record from an earlier run while no courier is made yet (no peer chosen now).
     private func storedRecord(_ id: String) -> WalletRequestStore.Record? {

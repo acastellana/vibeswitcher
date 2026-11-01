@@ -94,6 +94,18 @@ struct WalletCardModelTests {
         #expect(card.text.contains("Workspace: example"))
     }
 
+    /// Only a Safe waits for other owners: a hot or hardware wallet's proposal (or one from a wallet not known to be a
+    /// Safe, as a card is until a Safe transaction hash says so) waits for the person at the Wallet Manager's Mac.
+    @Test func onlyASafesProposalWaitsForOtherSignatures() {
+        let proposed = WalletCardModel.State.proposed(safeTxHash: nil)
+        for wallet in [WalletCardModel.Wallet.hot, .hardware, nil] {
+            let detail = WalletCardModel.detail(proposed, wallet: wallet)
+            #expect(detail == "Proposed: waiting for the person at the Wallet Manager's Mac to sign it.", "\(String(describing: wallet))")
+            #expect(!detail.contains("other") && !detail.contains("Safe"), "\(String(describing: wallet))")
+        }
+        #expect(WalletCardModel.detail(proposed, wallet: .safe) == "Proposed to the Safe: waiting for the other owners' signatures.")
+    }
+
     @Test func settingsKeepThePeerAndPathAndSayWhatRequestsDoWithoutOne() throws {
         let temp = Scratch()
         let defaults = temp.defaults("wallet-settings")

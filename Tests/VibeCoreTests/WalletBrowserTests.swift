@@ -95,6 +95,35 @@ struct WalletBrowserTests {
         #expect(WalletBrowser.mark(request.id, in: folder) == nil)
     }
 
+    /// The mark keeps the request as it was when the page was made from it; a mark from before it was kept still reads.
+    @Test func theMarkKeepsTheRequestThePageWasMadeFrom() throws {
+        let folder = scratch.url("asked")
+        let request = Self.request()
+        let at = Self.created.addingTimeInterval(60)
+        try WalletBrowser.setMark(.init(state: .opened, at: at, request: request), for: request.id, in: folder)
+        #expect(WalletBrowser.mark(request.id, in: folder) == .init(state: .opened, at: at, request: request))
+        // As large as a request may be (its longest calldata and reason), the mark still reads whole.
+        var large = Self.request(action: .call, data: "0x" + String(repeating: "ab", count: WalletRequest.maxDataBytes))
+        large.reason = String(repeating: "pay ", count: 250)
+        _ = try large.encoded()
+        try WalletBrowser.setMark(.init(state: .opened, at: at, request: large), for: request.id, in: folder)
+        #expect(WalletBrowser.mark(request.id, in: folder)?.request == large)
+        try Data(#"{"state":"opened","at":"2026-10-31T12:01:00Z"}"#.utf8).write(to: WalletBrowser.markFile(request.id, in: folder))
+        #expect(WalletBrowser.mark(request.id, in: folder) == .init(state: .opened, at: at))
+    }
+
+    /// The record keeps when passage said it was delivered, so the "not picked up" hint outlives a restart; a record
+    /// from before it was kept still reads.
+    @Test func theRecordKeepsWhenItWasSent() throws {
+        let store = WalletRequestStore(folder: scratch.url("requests"))
+        let request = Self.request()
+        let sentAt = Self.created.addingTimeInterval(90.6)
+        try store.save(.init(request: request, state: .sent, sentAt: sentAt))
+        #expect(store.load().first?.sentAt == Date(timeIntervalSince1970: floor(sentAt.timeIntervalSince1970)))
+        try store.save(.init(request: request, state: .sent))
+        #expect(store.load().count == 1 && store.load().first?.sentAt == nil)
+    }
+
     @Test func theAskingSessionHearsHowItEnded() {
         let request = Self.request()
         let hash = "0x" + String(repeating: "ab", count: 32)

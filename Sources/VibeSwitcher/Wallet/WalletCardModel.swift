@@ -37,6 +37,9 @@ struct WalletCardModel: Equatable, Identifiable {
     /// The Wallet Manager isn't set up in Settings › Wallet (no peer chosen, no Passage found): the line that says so,
     /// shown with Open Settings where Send or Retry would be. Nil when it is.
     var setupNeeded: String? = nil
+    /// The filed request was rewritten (or is gone) since it was opened in the browser wallet: the card shows what the
+    /// page was made from, and says so (`fileChangedNote`).
+    var fileChanged = false
 
     /// `setupNeeded`'s line for each way the Wallet Manager isn't set up.
     static let noPeerNote = "No Wallet Manager chosen: choose its Mac in Settings › Wallet"
@@ -75,8 +78,8 @@ struct WalletCardModel: Equatable, Identifiable {
         case notSent(reason: String)
         /// The Wallet Manager has it and is checking it.
         case received
-        /// The Wallet Manager proposed it to the Safe, where it waits for the other owners' signatures (its Safe transaction
-        /// hash, when it said).
+        /// The Wallet Manager built it and shows it for signing: to a Safe, it waits for the other owners' signatures (its
+        /// Safe transaction hash, when it said); any other wallet waits for the person at the Wallet Manager's Mac.
         case proposed(safeTxHash: String?)
         /// Signed on the Wallet Manager's Mac, not yet submitted to the chain.
         case signedNotSubmitted
@@ -122,6 +125,8 @@ struct WalletCardModel: Equatable, Identifiable {
     /// Added to a Sent card's line after `notPickedUpAfter` with no word from the Wallet Manager.
     static let notPickedUpNote = "Delivered to the Wallet Manager's Mac, but it hasn't picked it up yet. Is the Wallet Manager running?"
     static let notPickedUpAfter: TimeInterval = 5 * 60
+    /// The warning on a card whose filed request changed after it was opened in the browser wallet (`fileChanged`).
+    static let fileChangedNote = "The filed request was changed after you opened it in the browser wallet. This card shows what the browser wallet was given; the new version isn't shown or sent."
 
     /// The buttons the card shows in `state`, the main one first. Send only while waiting: once a request has left,
     /// nothing on this card sends it again but Retry, after Passage said it couldn't reach the Wallet Manager.
@@ -227,8 +232,9 @@ struct WalletCardModel: Equatable, Identifiable {
             case .safe: return "The Wallet Manager has it and is checking it. Sign it there to propose it to the Safe."
             }
         case .proposed:
+            // Only a Safe has other owners; any other wallet (or one not known to be a Safe) waits for the person there.
             return wallet == .safe ? "Proposed to the Safe: waiting for the other owners' signatures."
-                : "Proposed: waiting for the other signatures."
+                : "Proposed: waiting for the person at the Wallet Manager's Mac to sign it."
         case .signed: return wallet == .safe ? "Signed by the Safe's owners and submitted." : "Signed on the Wallet Manager's Mac and submitted."
         case .rejected(let reason): return "The Wallet Manager refused it: \(reason)"
         case .failed(let message): return "The Wallet Manager couldn't finish it: \(message)"
@@ -262,6 +268,7 @@ struct WalletCardModel: Equatable, Identifiable {
         if let calldataBytes { lines.append("Contract call: \(calldataBytes) bytes of calldata") }
         lines += [
                      detail]
+        if fileChanged { lines.append("⚠ " + Self.fileChangedNote) }
         if let setupNeeded, actions.contains(.settings) { lines.append(setupNeeded) }
         switch state {
         case .signed(let hash, let url), .sentFromBrowser(let hash, let url):

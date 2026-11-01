@@ -132,6 +132,7 @@ public final class WalletCourier: @unchecked Sendable {
             // A resend that didn't go leaves the first send's doubt as it was.
             if arrived || resend || (written && outcome.mayHaveArrived) {
                 record.state = arrived ? .sent : .unsure
+                if outcome == .sent, record.sentAt == nil { record.sentAt = Date(timeIntervalSince1970: floor(now().timeIntervalSince1970)) }
                 records[request.id] = record
                 do { try store.save(record) } catch { log("couldn't record request \(request.id) as \(record.state.rawValue): \(error)") }
             } else {

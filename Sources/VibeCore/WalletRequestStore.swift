@@ -21,12 +21,16 @@ public final class WalletRequestStore: @unchecked Sendable {
         public var results: [WalletResult]
         /// The inbox files they came from (`passage inbox`'s paths), never read again.
         public var inboxFiles: [String]
+        /// When `passage send` first said it was delivered (whole seconds), so "not picked up" outlives a restart. Nil
+        /// before that, and in a record from before it was kept.
+        public var sentAt: Date?
 
-        public init(request: WalletRequest, state: State, results: [WalletResult] = [], inboxFiles: [String] = []) {
+        public init(request: WalletRequest, state: State, results: [WalletResult] = [], inboxFiles: [String] = [], sentAt: Date? = nil) {
             self.request = request
             self.state = state
             self.results = results
             self.inboxFiles = inboxFiles
+            self.sentAt = sentAt.map { Date(timeIntervalSince1970: floor($0.timeIntervalSince1970)) }
         }
 
         /// The Wallet Manager's last word was final: nothing more is taken for it.
@@ -138,16 +142,18 @@ public final class WalletRequestStore: @unchecked Sendable {
     // MARK: The file
 
     static func encode(_ record: Record) -> Data {
-        WalletRequestFormat.Value.object([
+        var members: [WalletRequestFormat.Value.Member] = [
             .init("request", record.request.value), .init("state", .string(record.state.rawValue)),
             .init("results", .array(record.results.map(\.value))), .init("inboxFiles", .array(record.inboxFiles.map { .string($0) })),
-        ]).encoded()
+        ]
+        if let sentAt = record.sentAt { members.append(.init("sentAt", .string(WalletRequestFormat.string(sentAt)))) }
+        return WalletRequestFormat.Value.object(members).encoded()
     }
 
     func read(_ url: URL) throws -> Record {
         let data = try Data(contentsOf: url)
         guard data.count <= Self.maxRecordBytes else { throw WalletRequestFormat.Failure.tooLarge(data.count) }
-        let fields = try WalletRequestFormat.Fields(WalletRequestFormat.Value.parse(data), path: "", allowed: ["request", "state", "results", "inboxFiles"])
+        let fields = try WalletRequestFormat.Fields(WalletRequestFormat.Value.parse(data), path: "", allowed: ["request", "state", "results", "inboxFiles", "sentAt"])
         let request = try WalletRequest.read(fields.value("request"), path: "request")
         guard let state = State(rawValue: try fields.string("state")) else { throw WalletRequestFormat.Failure.invalid("state", "sending, sent or unsure") }
         let results = try fields.array("results").enumerated().map { try WalletResult.read($0.element, path: "results[\($0.offset)]") }
@@ -155,6 +161,7 @@ public final class WalletRequestStore: @unchecked Sendable {
             guard case let .string(path) = value else { throw WalletRequestFormat.Failure.wrongType("inboxFiles", "strings") }
             return path
         }
-        return Record(request: request, state: state, results: results, inboxFiles: files)
+        let sentAt = try fields.optionalString("sentAt").map { try WalletRequestFormat.date($0, field: "sentAt") }
+        return Record(request: request, state: state, results: results, inboxFiles: files, sentAt: sentAt)
     }
 }
