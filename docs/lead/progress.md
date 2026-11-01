@@ -2536,3 +2536,5 @@
 - 2026-11-01 04:34 Started a worker on fix-the-flaky-test-14
 - 2026-11-01 04:34 Automatically (auto_advance): Started a worker on fix-the-flaky-test-14 (Fix the flaky test theScreenRouteReadsATerminalTabOffTheMainThread()).
 - 2026-11-01 04:47 Audit of app-memory-grows-17: complete, clean, round 1: 5 Nit open
+- 2026-11-01 05:01 Merged app-memory-grows-17: App memory grows ~17 MB an hour again (297 → 347 MB in 3 h at a steady session count)
+- 2026-11-01 05:01 Flaky in app-memory-grows-17's merge: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
