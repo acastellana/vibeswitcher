@@ -1977,6 +1977,8 @@ final class SoakRun {
     /// removed (MB), and the size of each one's transcript (MB, `worker-mb`).
     var workers: [(footprint: Double, malloc: Double)] = []
     var workerMB = 4.0
+    /// The app's memory by VM tag when the last worker ended (`SoakMemory.byTag`).
+    var workerTags: [(tag: UInt32, mb: Double)]?
     /// The worker step's role sweep (made on its first use, with the host it ends sessions on).
     private var roleSweep: RoleSweep?
 
@@ -2290,6 +2292,107 @@ extension Driver {
     }
 }
 
+// MARK: Soak: where the footprint is
+
+/// The app's own memory by kind, read in-process (its own task_info, malloc's zones, a walk of its own VM regions):
+/// never another process, never a tool that inspects one.
+enum SoakMemory {
+    /// task_vm_info's footprint and the ledgers in it (MB): graphics (IOSurfaces, Metal), IOKit-mapped, compressed.
+    static func ledgers() -> String {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let ok = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
+        } == KERN_SUCCESS
+        guard ok else { return "task_info failed" }
+        let mb = { (bytes: UInt64) in String(format: "%.1f", Double(bytes) / 1_048_576) }
+        var stats = malloc_statistics_t()
+        malloc_zone_statistics(nil, &stats)
+        return "internal \(mb(info.internal)) compressed \(mb(info.compressed)) graphics \(mb(UInt64(max(0, info.ledger_tag_graphics_footprint)))) "
+            + "malloc allocated \(mb(UInt64(stats.size_allocated))) in use \(mb(UInt64(stats.size_in_use)))"
+    }
+
+    /// The app's private dirty and swapped memory by VM tag (MB), largest first: what vmmap's summary would say of it,
+    /// from its own regions.
+    static func byTag() -> [(tag: UInt32, mb: Double)] {
+        var totals: [UInt32: UInt64] = [:]
+        var address: mach_vm_address_t = 0
+        var depth: natural_t = 0
+        let page = UInt64(vm_kernel_page_size)
+        while true {
+            var size: mach_vm_size_t = 0
+            var info = vm_region_submap_info_data_64_t()
+            var count = mach_msg_type_number_t(MemoryLayout<vm_region_submap_info_data_64_t>.size / MemoryLayout<natural_t>.size)
+            let result = withUnsafeMutablePointer(to: &info) { pointer in
+                pointer.withMemoryRebound(to: Int32.self, capacity: Int(count)) {
+                    mach_vm_region_recurse(mach_task_self_, &address, &size, &depth, $0, &count)
+                }
+            }
+            guard result == KERN_SUCCESS else { break }
+            if info.is_submap != 0 {
+                depth += 1
+                continue
+            }
+            if [UInt8(SM_PRIVATE), UInt8(SM_COW), UInt8(SM_PRIVATE_ALIASED)].contains(info.share_mode) {
+                totals[info.user_tag, default: 0] += (UInt64(info.pages_dirtied) + UInt64(info.pages_swapped_out)) * page
+            }
+            address += size
+        }
+        return totals.map { ($0.key, Double($0.value) / 1_048_576) }.sorted { $0.mb > $1.mb }
+    }
+
+    /// The VM tags' names (mach/vm_statistics.h) for the ones a Mac app's footprint is made of.
+    static func name(_ tag: UInt32) -> String {
+        switch Int32(tag) {
+        case VM_MEMORY_MALLOC: "malloc"
+        case VM_MEMORY_MALLOC_SMALL: "malloc small"
+        case VM_MEMORY_MALLOC_LARGE: "malloc large"
+        case VM_MEMORY_MALLOC_HUGE: "malloc huge"
+        case VM_MEMORY_MALLOC_TINY: "malloc tiny"
+        case VM_MEMORY_MALLOC_NANO: "malloc nano"
+        case VM_MEMORY_MALLOC_MEDIUM: "malloc medium"
+        case VM_MEMORY_MALLOC_LARGE_REUSABLE: "malloc large reusable"
+        case VM_MEMORY_IOKIT: "IOKit"
+        case VM_MEMORY_COREGRAPHICS: "CoreGraphics"
+        case VM_MEMORY_COREGRAPHICS_DATA: "CG data"
+        case VM_MEMORY_COREGRAPHICS_SHARED: "CG shared"
+        case VM_MEMORY_COREGRAPHICS_BACKINGSTORES: "CG backing stores"
+        case VM_MEMORY_COREGRAPHICS_FRAMEBUFFERS: "CG framebuffers"
+        case VM_MEMORY_APPKIT: "AppKit"
+        case VM_MEMORY_COREUI: "CoreUI"
+        case VM_MEMORY_COREIMAGE: "CoreImage"
+        case VM_MEMORY_IOSURFACE: "IOSurface"
+        case VM_MEMORY_IMAGEIO: "ImageIO"
+        case VM_MEMORY_FOUNDATION: "Foundation"
+        case VM_MEMORY_COREDATA: "CoreData"
+        case VM_MEMORY_STACK: "stack"
+        case VM_MEMORY_DYLD: "dyld"
+        case VM_MEMORY_DYLD_MALLOC: "dyld malloc"
+        case VM_MEMORY_SQLITE: "SQLite"
+        case VM_MEMORY_JAVASCRIPT_CORE: "JavaScriptCore"
+        case VM_MEMORY_JAVASCRIPT_JIT_EXECUTABLE_ALLOCATOR, VM_MEMORY_JAVASCRIPT_JIT_REGISTER_FILE: "JS JIT"
+        case VM_MEMORY_LAYERKIT: "LayerKit"
+        case VM_MEMORY_CGIMAGE: "CGImage"
+        case VM_MEMORY_OS_ALLOC_ONCE: "OS alloc once"
+        case VM_MEMORY_LIBDISPATCH: "dispatch"
+        case VM_MEMORY_ACCELERATE: "Accelerate"
+        case VM_MEMORY_SWIFT_RUNTIME: "Swift runtime"
+        case VM_MEMORY_SWIFT_METADATA: "Swift metadata"
+        case 0: "untagged (mmap)"
+        default: "tag \(tag)"
+        }
+    }
+
+    /// The tags whose memory changed most between two walks: "name +X.X MB", the largest changes first.
+    static func change(from before: [(tag: UInt32, mb: Double)], to after: [(tag: UInt32, mb: Double)], top: Int = 5) -> String {
+        let old = Dictionary(before.map { ($0.tag, $0.mb) }, uniquingKeysWith: +)
+        let new = Dictionary(after.map { ($0.tag, $0.mb) }, uniquingKeysWith: +)
+        return Set(old.keys).union(new.keys).map { ($0, (new[$0] ?? 0) - (old[$0] ?? 0)) }
+            .sorted { abs($0.1) > abs($1.1) }.prefix(top)
+            .map { String(format: "%@ %+.1f", name($0.0), $0.1) }.joined(separator: ", ")
+    }
+}
+
 // MARK: Soak: a real-shaped worker
 
 extension Driver {
@@ -2363,9 +2466,13 @@ extension Driver {
                 malloc_zone_statistics(nil, &stats)
                 let footprint = AppHealthWatcher.ownFootprint()?.now ?? 0, malloc = Double(stats.size_in_use) / 1_048_576
                 run.workers.append((footprint, malloc))
-                run.note(String(format: "worker %3d ended (%@): footprint %6.1f MB  malloc in use %6.1f MB  chats %@  terminal views %@",
+                let tags = SoakMemory.byTag()
+                let changed = run.workerTags.map { SoakMemory.change(from: $0, to: tags) } ?? "the first"
+                run.workerTags = tags
+                run.note(String(format: "worker %3d ended (%@): footprint %6.1f MB  malloc in use %6.1f MB  chats %@  terminal views %@  ",
                                 run.workers.count, slug, footprint, malloc, IdleBench.Live.chats.map(String.init) ?? "n/a",
-                                IdleBench.Live.views.map(String.init) ?? "n/a"))
+                                IdleBench.Live.views.map(String.init) ?? "n/a")
+                         + SoakMemory.ledgers() + "  since the last worker: " + changed)
                 done(true, "")
             }
             if removed { return measure() }
