@@ -2608,3 +2608,6 @@
 - 2026-11-01 09:14 Automatically (auto_advance): Started the audit of boost-release-2-7 at 65a7704b (It touches sensitive_paths (AGENTS.md, Sources/VibeCore/TestLock.swift), so it's treated as audit whatever its review says).
 - 2026-11-01 09:14 Automatically (auto_advance): Didn't audit boost-release-4-7: No verifier started: the Mac is shared by every project's team, and the team sessions of all its projects are at mac_max_sessions. Now: load 23.3 (load_threshold 24, twice the 12 cores), 15 team sessions across 3 projects (this one 6, 2 others 9) (mac_max_sessions 15). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, the user, or a VibeSwitcher message). Meanwhile merge and cleanup finished tasks (cleanup ends their sessions…
 - 2026-11-01 09:21 Audit of boost-release-2-7: complete, clean, round 1: 1 Nit open
+- 2026-11-01 09:25 Automatically (auto_advance): Started the audit of wallet-card-can-t at b169a564 (Its review is audit).
+- 2026-11-01 09:30 Audit of wallet-card-can-t: complete, clean, round 3: 2 Important closed, 3 Nit closed
+- 2026-11-01 09:33 Merged boost-release-2-7: Boost release 2/7: heavy jobs outside the Mac-wide lock are noticed and their lead is told
