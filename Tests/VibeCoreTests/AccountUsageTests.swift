@@ -105,8 +105,9 @@ struct AccountUsageTests: LeadTeamFixture {
         let settings = #"{"statusLine":{"type":"command","command":"grep -o '\"seven_day\"' | head -1; echo mine"}}"#
         try settings.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
         let resets = Date().timeIntervalSince1970 + 86_400
-        let shown = UsageStatusLine.run(input: Data(Self.statusLine(weekly: 42, resets: resets).utf8), store: usageStore, home: home)
-        #expect(shown == "\"seven_day\"\nmine\n", "\(shown)")
+        // Waits for it to exit (a loaded Mac can take seconds to start a shell): its own patience is for Claude's sake.
+        let shown = UsageStatusLine.run(input: Data(Self.statusLine(weekly: 42, resets: resets).utf8), store: usageStore, home: home, patience: 120)
+        #expect(shown.split(separator: "\n") == ["\"seven_day\"", "mine"], "\(shown.debugDescription)")
         #expect(usageStore.load().limits.first { $0.name == "seven_day" }?.usedPercent == 42)
         // None of yours: the usage, in a few words.
         let plain = UsageStatusLine.run(input: Data(Self.statusLine(weekly: 43, resets: resets).utf8), store: usageStore, home: temp.url("bare").path)

@@ -192,7 +192,7 @@ public struct AccountUsageStore: Sendable {
 public enum UsageStatusLine {
     public static let argument = "--status-line"
     /// How long your own status line may take before it's stopped (Claude Code gives up on a slow one too).
-    static let patience: TimeInterval = 5
+    public static let patience: TimeInterval = 5
 
     /// The status line's settings entry for a role's `--settings`: this tool server run with `argument`.
     public static func settings(server: String) -> [String: Any] {
@@ -201,11 +201,12 @@ public enum UsageStatusLine {
 
     /// Keeps the usage `input` carries, then returns what to print: your own status line's output, else the usage
     /// in a few words. Never fails: input that isn't JSON keeps nothing.
-    public static func run(input: Data, store: AccountUsageStore = AccountUsageStore(), home: String = VibePaths.home, now: Date = Date()) -> String {
+    public static func run(input: Data, store: AccountUsageStore = AccountUsageStore(), home: String = VibePaths.home, now: Date = Date(),
+                           patience: TimeInterval = UsageStatusLine.patience) -> String {
         let object = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any]
         let limits = object.map { AccountUsage.fromStatusLine($0, now: now) } ?? []
         store.record(limits, now: now)
-        if let command = userCommand(home: home) { return runCommand(command, input: input) ?? "" }
+        if let command = userCommand(home: home) { return runCommand(command, input: input, patience: patience) ?? "" }
         return limits.map { limit in
             let name = limit.name == "seven_day" ? "weekly" : limit.name == "five_hour" ? "5h" : limit.name.replacingOccurrences(of: "_", with: " ")
             return "\(name) \(Int(limit.usedPercent.rounded()))%"
@@ -223,7 +224,7 @@ public enum UsageStatusLine {
     }
 
     /// `command` run by the shell with `input`, its output; nil when it can't start or takes past `patience` (then stopped).
-    static func runCommand(_ command: String, input: Data) -> String? {
+    static func runCommand(_ command: String, input: Data, patience: TimeInterval) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", command]
