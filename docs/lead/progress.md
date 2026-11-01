@@ -2531,3 +2531,7 @@
 - 2026-11-01 04:28 Planned fix-the-flaky-test-14: theScreenRouteReadsATerminalTabOffTheMainThread() flaked 3 times within 7 days
 - 2026-11-01 04:28 Automatically (auto_advance): Merged wallet-card-truth-the (Wallet card truth: the record decides the state, and the browser path keeps what was signed) into main at 87ca2909, on its passing audit and the full test run. (Its first test run failed on theScreenRouteReadsATerminalTabOffTheMainThread() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/wallet-card-truth-the/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/….)
 - 2026-11-01 04:28 Automatically (auto_advance): Cleaned up wallet-card-truth-the; ended pid 88014 (Worker: Wallet card truth: the record decides the state, and the browser path keeps what was signed) (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-01 04:34 Started a worker on wallet-card-can-t
+- 2026-11-01 04:34 Automatically (auto_advance): Started a worker on wallet-card-can-t (Wallet card can't be made misleading: who asked, the reason field, and contract calls that move tokens), its after tasks done (wallet-card-truth-the).
+- 2026-11-01 04:34 Started a worker on fix-the-flaky-test-14
+- 2026-11-01 04:34 Automatically (auto_advance): Started a worker on fix-the-flaky-test-14 (Fix the flaky test theScreenRouteReadsATerminalTabOffTheMainThread()).
