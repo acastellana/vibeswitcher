@@ -104,7 +104,12 @@ checks it instead:
 
 Review a Codex worker's output critically: it's the audit's job, and the start_worker reply says so.
 
-Not yet: a message to a Codex worker that sits idle (findings sent back after its report, the lead's message, a
+Not yet: a real Codex worker doesn't start through the session host. Under the host, with no view attached, Codex
+0.160's TUI draws only blank frames and starts no MCP server, so its tools never connect and start_worker ends it
+after 45 s (reproduced by the on-demand `CodexWorkerHostRunTests`; `codex exec` with the same configuration works, see
+`CodexRealRunTests`). Until that's solved, don't give tasks `agent: codex`.
+
+Not yet either: a message to a Codex worker that sits idle (findings sent back after its report, the lead's message, a
 catch-up notice) waits in its inbox, because delivery types into an idle agent only when it sees Claude Code's input
 box. Until Codex's is recognised too, message such a worker again once it works, or start_worker it afresh.
 

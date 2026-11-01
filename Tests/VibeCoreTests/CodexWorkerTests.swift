@@ -110,6 +110,9 @@ struct CodexWorkerTests: LeadTeamFixture {
         #expect(config["sandbox_workspace_write.network_access"] == "false")
         // Its tools pre-approved: under approval never Codex refuses a tool call needing approval (the real run's lesson).
         #expect(config["mcp_servers.vibeswitcher.default_tools_approval_mode"] == "\"approve\"")
+        // Where VibeSwitcher's folder is goes along to its tool server (Codex hands an MCP server only a few variables).
+        let variables: [String] = try json(config["mcp_servers.vibeswitcher.env_vars"])
+        #expect(variables.contains("VIBESWITCHER_HOME") && variables.contains("HOME"))
         #expect(config["projects.\"\(worktree)\".trust_level"] == "\"trusted\"")
         // The worker's environment, as a Claude worker's.
         #expect(runtime.environments[spawn.id]?["GIT_EDITOR"] == "true" && runtime.environments[spawn.id]?[SessionNote.roleVariable] == "worker")

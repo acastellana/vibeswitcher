@@ -290,6 +290,10 @@ public enum LeadLaunch {
         return roots.map { URL(fileURLWithPath: $0).standardizedFileURL.path }.filter { seen.insert($0).inserted }
     }
 
+    /// The variables a Codex worker's tool server is handed from its session's environment (Codex hands an MCP server
+    /// only a few of its own): what `VibePaths` finds VibeSwitcher's folder, home and tools by.
+    static let mcpVariables = ["VIBESWITCHER_HOME", "CFFIXED_USER_HOME", "HOME", "PATH", "TMPDIR"]
+
     /// A TOML string for Codex's `-c key=value` (the value is parsed as TOML): JSON's escapes are TOML's, slashes left.
     static func toml(_ text: String) -> String {
         let data = (try? JSONSerialization.data(withJSONObject: text, options: [.fragmentsAllowed, .withoutEscapingSlashes])) ?? Data("\"\"".utf8)
@@ -331,6 +335,10 @@ public enum LeadLaunch {
             // Its tools need no approval: under approval never, Codex refuses a tool call that needs one ("MCP tool call
             // requires approval, but approval policy is never", the real run of 2026-11-01), and no worker could report.
             ("mcp_servers.vibeswitcher.default_tools_approval_mode", toml("approve")),
+            // Codex starts an MCP server with a few of its variables only (HOME, PATH, …): where VibeSwitcher's folder
+            // and home are, when set (a scratch home's), go along, or the tool server looks for the session host in
+            // the wrong place and never gets its role (the host run of 2026-11-01).
+            ("mcp_servers.vibeswitcher.env_vars", toml(mcpVariables)),
         ]
         let record: [String: Any] = ["config": config.map { ["key": $0.key, "value": $0.value] }, "writableRoots": writable,
                                      "mcpServer": ["command": server, "args": args],
