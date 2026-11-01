@@ -1152,8 +1152,15 @@ public final class LeadToolset: MCPToolset {
                 }
             }
             if let agent, agent != board.tasks[index].workerAgent {
+                let before = board.tasks[index].workerAgent
                 board.tasks[index].agent = agent == .codex ? .codex : nil
                 changed.append(agent == .codex ? "agent codex (from its next worker; review audit, by a Claude verifier)" : "agent claude (from its next worker)")
+                // A model is one agent's (sonnet is Claude's, gpt-5.5 Codex's): the other's CLI would refuse it at its
+                // first request. Cleared, unless this call gives one.
+                if model == nil, let old = board.tasks[index].model {
+                    board.tasks[index].model = nil
+                    changed.append("model \(old) cleared (it was for \(before.name); give model with agent to set one for \(agent.name))")
+                }
             }
             if let model {
                 board.tasks[index].model = model.isEmpty ? nil : model

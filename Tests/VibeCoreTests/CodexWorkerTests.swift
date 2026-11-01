@@ -189,6 +189,18 @@ struct CodexWorkerTests: LeadTeamFixture {
         #expect(!Git.run(["show", "main:b.txt"], in: root).ok)
     }
 
+    /// The blind check's finding: a Claude model kept on a task switched to Codex started `codex --model sonnet`.
+    @Test func switchingTheAgentClearsTheOtherAgentsModelUnlessOneIsGiven() throws {
+        let root = try repo()
+        let lead = try lead(root, FakeRuntime())
+        _ = lead.call("add_task", ["title": "Swap", "goal": "g", "acceptance": ["a"], "model": "sonnet"])
+        let switched = lead.call("update_task", ["task": "swap", "agent": "codex"])
+        #expect(switched.text.contains("model sonnet cleared"), "\(switched.text)")
+        #expect(task("swap", root)?.model == nil && task("swap", root)?.agent == .codex)
+        _ = lead.call("update_task", ["task": "swap", "agent": "claude", "model": "opus"])
+        #expect(task("swap", root)?.model == "opus" && task("swap", root)?.agent == nil)
+    }
+
     @Test func statusAndBoardNameEachTasksAgentAndTheMacsLimitCountsCodexWorkers() throws {
         let root = try repo()
         let runtime = FakeRuntime()
