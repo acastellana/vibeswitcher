@@ -320,10 +320,25 @@ final class HostClient: ObservableObject {
     /// A test's look at a host this client started being reaped (by its exit event or `stillRuns`).
     var onHostReaped: ((pid_t) -> Void)?
 
-    /// The exit source's event for `pid`, a host this client started: it ended.
-    func hostExited(_ pid: pid_t) {
+    /// The looks again at a host whose exit event came before it could be reaped (see `hostExited`): soon, then less
+    /// often, the last repeated until it's reaped.
+    static let hostReapDelays: [TimeInterval] = [0.05, 0.2, 1, 5]
+
+    /// The exit source's event for `pid`, a host this client started: it ended. The kernel posts the event a moment
+    /// before the process can be reaped, and under load `waitpid` can find it still exiting (as HostedSession's
+    /// `exitEvent` finds its program): then it's looked at again (`hostReapDelays`), its source kept, rather than let go
+    /// of as a zombie for the app's life. The source doesn't fire again: an exit is posted once.
+    func hostExited(_ pid: pid_t, looks: Int = 0) {
+        // Reaped already: by `stillRuns`, or an earlier look (the event and a look can both be on their way).
+        guard hostProcesses[pid] != nil else { return }
         var status: Int32 = 0
-        if waitpid(pid, &status, WNOHANG) == pid { onHostReaped?(pid) }
+        let reaped = waitpid(pid, &status, WNOHANG)
+        if reaped == 0 || (reaped < 0 && errno == EINTR) {
+            let delay = Self.hostReapDelays[min(looks, Self.hostReapDelays.count - 1)]
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.hostExited(pid, looks: looks + 1) }
+            return
+        }
+        if reaped == pid { onHostReaped?(pid) }
         hostProcesses.removeValue(forKey: pid)?.cancel()
     }
 
