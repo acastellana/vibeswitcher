@@ -28,7 +28,7 @@ struct VerifierPromptTests {
     /// The ones that still prompt: anything that writes, runs something else, isn't on the list, or doesn't parse.
     static let refused = [
         "", "   ", "ls", "cat a.txt", "git", "git config user.name x", "git config --list", "git push", "git fetch", "git checkout main",
-        "git -C /tmp log", "git -c core.pager=x log", "git --git-dir=/x log", "GIT_PAGER=x git log", "env git log",
+        "git -C ../other log", "git -c core.pager=x log", "git --git-dir=/x log", "GIT_PAGER=x git log", "env git log",
         // git branch that changes something.
         "git branch foo", "git branch -D foo", "git branch -d foo", "git branch -m a b", "git branch -M a", "git branch -f a HEAD",
         "git branch --force a", "git branch -u origin/x", "git branch --set-upstream-to=origin/x", "git branch -c a b",
@@ -70,7 +70,7 @@ struct VerifierPromptTests {
         #expect(output["hookEventName"] as? String == "PermissionRequest")
         #expect((output["decision"] as? [String: Any])?["behavior"] as? String == "allow")
         #expect(ReadOnlyCommand.hookAnswer(try event("Bash", ["command": "git config user.name x"])) == nil)
-        #expect(ReadOnlyCommand.hookAnswer(try event("Write", ["file_path": "/tmp/x", "content": "git log"])) == nil)
+        #expect(ReadOnlyCommand.hookAnswer(try event("Write", ["file_path": "notes.txt", "content": "git log"])) == nil)
         #expect(ReadOnlyCommand.hookAnswer(Data("not json".utf8)) == nil)
     }
 

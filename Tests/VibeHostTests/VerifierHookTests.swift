@@ -60,7 +60,7 @@ import VibeCore
 
     /// Runs `hook` as Claude Code does for a Bash call of `line`, and reads its answer.
     func hookAllows(_ hook: String, _ line: String) throws -> Bool {
-        let event: [String: Any] = ["session_id": "s", "hook_event_name": "PermissionRequest", "cwd": "/tmp", "permission_mode": "default",
+        let event: [String: Any] = ["session_id": "s", "hook_event_name": "PermissionRequest", "cwd": "/Users/x/repo", "permission_mode": "default",
                                     "tool_name": "Bash", "tool_input": ["command": line, "description": "probe"]]
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
