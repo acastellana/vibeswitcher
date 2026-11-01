@@ -362,8 +362,10 @@ public final class LoadRecorder: @unchecked Sendable {
             t: LoadStats.stamp(date), load: averages.map { ($0 * 100).rounded() / 100 }, cores: MacLoad.processors,
             memory: sources.memory(), sessions: Self.sessions(census),
             heavy: LoadSample.Heavy(slots: heavy.slots, held: heavy.holders.map { holder in
-                // Its folder's project (a run in a subfolder is the repository's), else what its note says.
-                LoadSample.Heavy.Holder(slot: holder.slot, project: holder.directory.flatMap(sources.project) ?? holder.recordedProject,
+                // Its folder's project (a run in a subfolder is the repository's); none when its folder is in no
+                // repository, or its note names no folder: the note's own "project" line is that folder's name, whatever
+                // folder it is (vs-heavy run in ~/Documents/<anything>).
+                LoadSample.Heavy.Holder(slot: holder.slot, project: holder.directory.flatMap(sources.project),
                                         task: holder.task,
                                         minutes: holder.since.map { _ in Int(holder.held(now: date) / 60) })
             }),
