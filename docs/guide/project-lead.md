@@ -92,8 +92,16 @@ summary of the findings and answers so far.
 
 **Several finders.** With `audit_finders: 2` or `3`, an audit runs that many verifiers, each with its own focus
 (contract and acceptance; bugs and regressions; security or the tests). The audit builds and tests the commit once and
-hands every finder the logs. Findings most finders raised stay open; the rest show as **unconfirmed** and never block.
+hands every finder the logs. Findings most finders raised stay open; the rest show as **unconfirmed** and don't block
+unless `strict_paths` holds them (below).
 New Nits past `audit_nit_cap` (5) are left out and counted. Each finder counts against the Mac-wide session limit.
+
+**Strict paths.** `strict_paths` (globs, comma-separated, e.g. `src/signing/**, src/hardware/**`; set with
+`configure`; empty by default) makes every Important finding count on a branch that touches one: an unconfirmed one
+holds `merge` and auto_advance as an open one does, and goes back to the worker with the open ones. It holds until the
+lead dismisses it (`dismiss_finding`), makes it a task (`add_task(from_finding:)`), or a re-audit closes it, judging the
+worker's answer. The merge refusal, the audit's report, `status` and `board(task)` name each held finding and say
+`strict_paths` holds it. A branch that touches no strict path is as before.
 
 A verifier ends itself 20 seconds after it submits its verdict. The app ends every worker and verifier session of a
 task that merged, was folded, abandoned or cleaned up.
@@ -240,7 +248,7 @@ not edit that folder.
 
 `workflow.md` (in `.vibeswitcher/`, git-ignored) holds the limits and commands below. The lead changes it with its
 `configure` tool, which keeps your comments. The guard rails (the test and setup commands, `merge_policy`,
-`sensitive_paths`, `records_dir`, `max_workers`, `heavy_slots`, `audit_finders`, `audit_nit_cap`, `auto_advance`,
+`sensitive_paths`, `strict_paths`, `records_dir`, `max_workers`, `heavy_slots`, `audit_finders`, `audit_nit_cap`, `auto_advance`,
 `risk_lines`, `risk_model`; `Sources/VibeCore/LeadVaultGuarded.swift:11`)
 count only as the lead last set them: when the file says anything else, `merge` and `start_worker` refuse until the
 lead sets them again.
@@ -261,20 +269,21 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 | `max_workers` | 3 | `LeadWorkflow.swift:5` |
 | `task_budget_min` | 120 min (0: no budget) | `LeadBudget.swift:10` |
 | `test_timeout_min` | 45 min | `Worktrees.swift:1052` |
-| `audit_finders` | 1 (at most 3) | `LeadWorkflow.swift:38`, `:137` |
+| `audit_finders` | 1 (at most 3) | `LeadWorkflow.swift:38`, `:142` |
 | `audit_nit_cap` | 5 | `LeadWorkflow.swift:40` |
 | `risk_lines` | 400 | `LeadRisk.swift:23` |
-| `risk_model` | true (a model pass may also raise a task to audit) | `LeadWorkflow.swift:57` |
-| `auto_advance` | true | `LeadWorkflow.swift:52` |
+| `risk_model` | true (a model pass may also raise a task to audit) | `LeadWorkflow.swift:61` |
+| `auto_advance` | true | `LeadWorkflow.swift:56` |
 | `merge_policy` | unset: handled as `ask_sensitive` | `LeadWorkflow.swift:41-42` |
-| `sensitive_paths` | the list above | `LeadWorkflow.swift:189` |
-| `records_dir` | `docs/lead` | `LeadWorkflow.swift:134` |
+| `sensitive_paths` | the list above | `LeadWorkflow.swift:194` |
+| `strict_paths` | none | `LeadWorkflow.swift:49` |
+| `records_dir` | `docs/lead` | `LeadWorkflow.swift:139` |
 | `disk_warning_gb`, `disk_floor_gb` | 10 GB, 3 GB | `LeadWorkflow.swift:23-24` |
-| `watch_app_logs` | false | `LeadWorkflow.swift:60` |
+| `watch_app_logs` | false | `LeadWorkflow.swift:64` |
 | Audit round cap | 2 rounds | `LeadBoard.swift:300` |
-| Flake limit | 3 flakes of one test in 7 days | `LeadBoard.swift:1065-1066` |
+| Flake limit | 3 flakes of one test in 7 days | `LeadBoard.swift:1072-1073` |
 | Merge reruns | once, up to 20 named tests | `MergeRerun.swift` |
-| Question timer (`decide_in`) | 10 min | `LeadBoard.swift:770` |
+| Question timer (`decide_in`) | 10 min | `LeadBoard.swift:777` |
 | Board archive age | 24 h; at most hourly | `LeadBoardArchive.swift:43`, `:45` |
 | `mac_max_sessions` | 10 | `MacLoad.swift:112` |
 | `load_threshold` | 2 × cores | `MacLoad.swift:119-133` |

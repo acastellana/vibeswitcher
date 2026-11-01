@@ -8,7 +8,7 @@ import Foundation
 /// each as the lead last set it with configure, and merge and start_worker refuse, naming the setting, when the file
 /// says something else.
 extension LeadVault {
-    public static let guardedKeys = ["test_command", "regression_command", "init_command", "merge_policy", "sensitive_paths", "records_dir",
+    public static let guardedKeys = ["test_command", "regression_command", "init_command", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
                                      "max_workers", "heavy_slots", "audit_finders", "audit_nit_cap", "auto_advance",
                                      "risk_lines", "risk_model"]
 
@@ -21,6 +21,7 @@ extension LeadVault {
         case "regression_command": return workflow.regressionCommand ?? ""
         case "merge_policy": return workflow.mergePolicy?.rawValue ?? ""
         case "sensitive_paths": return workflow.sensitivePaths?.joined(separator: ", ") ?? ""
+        case "strict_paths": return workflow.strictPaths?.joined(separator: ", ") ?? ""
         case "max_workers": return String(workflow.maxWorkers)
         case "heavy_slots": return workflow.heavySlots.map(String.init) ?? ""
         case "audit_finders": return String(workflow.auditFinders)

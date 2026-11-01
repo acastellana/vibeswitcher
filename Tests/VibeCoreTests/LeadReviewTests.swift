@@ -208,6 +208,28 @@ struct LeadReviewTests: LeadTeamFixture {
         #expect(BoardStore(root: root).load().task("add-b")?.status != .done)
     }
 
+    /// A file moved out of a sensitive path changes it: git's rename detection would list only its new path.
+    @Test func aBranchMovingAFileOutOfSensitivePathsIsAudited() throws {
+        let root = try repo()
+        try commit(".github/workflows/ci.yml", "on: push\n", in: root)
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        #expect(!lead.call("configure", ["merge_policy": "auto", "test_command": "true"]).isError)
+        #expect(!lead.call("add_task", ["title": "Move ci", "goal": "ci.yml at the top", "acceptance": ["test -f ci.yml"]]).isError)
+        #expect(!lead.call("start_worker", ["task": "move-ci"]).isError)
+        let worktree = Worktrees.path(root: root, slug: "move-ci")
+        #expect(Git.run(["mv", ".github/workflows/ci.yml", "ci.yml"], in: worktree).ok)
+        Git.run(["commit", "-q", "-m", "move ci"], in: worktree)
+        #expect(LeadToolset.sensitiveChanges(root: root, head: "agent/move-ci", workflow: LeadWorkflow.load(from: root + "/.vibeswitcher/workflow.md"))
+                == [".github/workflows/ci.yml"])
+        let report = try seat("worker-move-ci", runtime).call("report", doneReport("moved"))
+        #expect(!report.isError, "\(report.text)")
+        let refused = lead.call("merge", ["task": "move-ci"])
+        #expect(refused.isError, "\(refused.text)")
+        #expect(refused.text.contains("touches sensitive_paths (.github/workflows/ci.yml), so it's treated as audit"), "\(refused.text)")
+        #expect(BoardStore(root: root).load().task("move-ci")?.status != .done)
+    }
+
     @Test func onceAnAuditStartsItsVerdictDecides() throws {
         let (root, runtime, lead) = try team()
         try reported(lead, runtime, root: root)

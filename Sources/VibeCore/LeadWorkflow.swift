@@ -43,6 +43,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     public var mergePolicy: MergePolicy?
     /// The globs ask_sensitive holds back (`sensitive_paths:`, comma-separated); nil: `defaultSensitivePaths`.
     public var sensitivePaths: [String]?
+    /// The globs whose changes make every Important finding hold the merge (`strict_paths:`, comma-separated; nil:
+    /// none): on a branch touching one, an Important finding the finders' vote left unconfirmed holds it too, until
+    /// the lead dismisses it, makes it a task (add_task from_finding) or a re-audit closes it.
+    public var strictPaths: [String]?
     /// Where the lead's decision log and progress log are kept and committed to the base branch, relative to the
     /// repository (`records_dir:`); nil (an empty value) keeps them in `.vibeswitcher/`, uncommitted, as before.
     public var recordsDir: String? = LeadWorkflow.defaultRecordsDir
@@ -115,6 +119,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 // One it can't read asks for everything rather than merging what the owner meant to see.
                 case "merge_policy": workflow.mergePolicy = present.map { MergePolicy(text: $0) ?? .askAll }
                 case "sensitive_paths": workflow.sensitivePaths = globs(value)
+                case "strict_paths": workflow.strictPaths = globs(value)
                 case "records_dir": workflow.recordsDir = recordsFolder(value)
                 case "auto_advance": workflow.autoAdvance = flag(value) ?? true
                 case "risk_lines": workflow.riskLines = Int(value).map { max(0, $0) } ?? LeadRisk.defaultLines
@@ -195,6 +200,13 @@ public struct LeadWorkflow: Equatable, Sendable {
     static func globs(_ value: String) -> [String]? {
         let list = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         return list.isEmpty ? nil : list
+    }
+
+    /// The changed files in `strict_paths`: on a branch that touches any, an unconfirmed Important finding holds the
+    /// merge too. Empty when strict_paths names none.
+    public func strictTouched(_ changed: [String]) -> [String] {
+        guard let strictPaths else { return [] }
+        return changed.filter { path in strictPaths.contains { Self.matches(path, glob: $0) } }
     }
 
     /// The changed files a merge needs the user's approval for under the policy (an unset one counts as
@@ -352,7 +364,7 @@ public struct LeadWorkflow: Equatable, Sendable {
 
     public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "verifier_model", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "task_budget_min",
-                                      "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "records_dir",
+                                      "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
                                       "auto_advance", "risk_lines", "risk_model", "watch_app_logs"]
 
     /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
@@ -501,6 +513,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     # The globs ask_sensitive holds back, comma-separated (as in .gitignore). Empty: Claude's settings and
     # instructions, .github, .env files, entitlements and keys.
     sensitive_paths:
+    # The globs where every Important finding holds the merge, comma-separated (as in .gitignore), e.g. src/signing/**:
+    # on a branch touching one, an Important finding the finders' vote left unconfirmed holds it (and auto_advance) too,
+    # until the lead dismisses it, makes it a task, or a re-audit closes it. Empty: none.
+    strict_paths:
     # Where the lead's decisions.md, progress.md and incidents.md are kept, committed to the base branch by VibeSwitcher
     # (only those files, in small commits of their own), so the plan's reasoning travels with the repository. Empty: kept in
     # .vibeswitcher, uncommitted. The board stays local either way.
@@ -887,7 +903,8 @@ public enum LeadPrompts {
         of the findings and answers so far. Or re-plan it (status planned) or ask the user. With audit_finders 2 or 3, audit \
         first builds and tests the commit once (it takes as long as the suite) and starts that many finders on its \
         logs, each with a focus; the verdict arrives once all have submitted, voted: a finding most of them raised is \
-        open, the rest unconfirmed (shown, never blocking: dismiss_finding or add_task(from_finding:) one that's a real Important problem). \
+        open, the rest unconfirmed (shown, never blocking: dismiss_finding or add_task(from_finding:) one that's a real Important problem; \
+        but on a branch touching strict_paths, an unconfirmed Important one holds the merge as an open one does, until you rule on it). \
         Each finder counts against mac_max_sessions; when audit says there's no room, lower audit_finders or retry \
         it when you're next woken.
         7. Keep the board, the progress log and decisions (record_decision) current. They are your memory: when your \
@@ -1173,6 +1190,9 @@ public enum LeadPrompts {
         /// The sensitive paths the branch touches.
         public var sensitive: [String]
         public var nitCap: Int
+        /// The strict paths the branch touches (see `LeadWorkflow.strictTouched`): an unconfirmed Important finding
+        /// holds the merge then.
+        public var strict: [String] = []
     }
 
     /// A branch behind the base in files it changes too, whose trial merge onto the base is clean: the audit tests
@@ -1234,9 +1254,16 @@ public enum LeadPrompts {
         the logs are that run. Run only focused tests (one test or a filter) for what you need to see yourself.
         The other finders check the same branch with other focuses, and a vote decides: a finding most finders raise \
         (the same file, severity and line, give or take \(LeadAuditVote.lineTolerance)) stays open; one fewer raise is \
-        kept as unconfirmed, which doesn't hold the merge back. So give each finding its exact file and line. At most \
-        \(finder.nitCap) new Nits are kept in all: give only the ones that matter.
+        kept as unconfirmed, which doesn't hold the merge back\(strictHold(finder.strict)). So give each finding its exact \
+        file and line. At most \(finder.nitCap) new Nits are kept in all: give only the ones that matter.
         """
+    }
+
+    /// " unless strict_paths holds it: …" for a branch touching `strict` paths, or "" for none (the prompt as before).
+    static func strictHold(_ strict: [String]) -> String {
+        guard !strict.isEmpty else { return "" }
+        return " unless strict_paths holds it: this branch touches " + strict.prefix(8).joined(separator: ", ") + (strict.count > 8 ? ", …" : "")
+            + ", so an unconfirmed Important finding holds the merge as an open one does"
     }
 
     /// The lead's notes on a task (see `LeadNote`) as its verifier gets them: those sealed as the lead's for this task,
@@ -1476,7 +1503,7 @@ public enum LeadPrompts {
         }
         if !reaudit.open.isEmpty {
             text += "\n\nOpen findings:\n" + reaudit.open.map { finding in
-                var line = "- \(finding.id) [\(finding.severity.rawValue)] \(finding.place): \(finding.evidence)"
+                var line = "- \(finding.id) [\(finding.severity.rawValue)\(finding.status == .unconfirmed ? ", unconfirmed by the last vote; strict_paths holds the merge on it" : "")] \(finding.place): \(finding.evidence)"
                 if let scenario = finding.failureScenario { line += "\n  Fails when: \(scenario)" }
                 if let answer = reaudit.answers[finding.id.uppercased()] { line += "\n  The worker's answer: \(answer.text)" }
                 return line

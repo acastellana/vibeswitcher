@@ -304,6 +304,13 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
     public var open: [LeadFinding] { findings.filter(\.isOpen) }
     /// Open Important findings: merge refuses while there are any.
     public var blocking: [LeadFinding] { findings.filter(\.blocks) }
+    /// The findings that hold the merge back: the open Important ones, and on a branch that touches strict_paths
+    /// (`strict`) the Important ones a vote left unconfirmed too.
+    public func holding(strict: Bool) -> [LeadFinding] {
+        strict ? findings.filter { $0.isLive && $0.severity == .important } : blocking
+    }
+    /// Important findings a vote left unconfirmed: only on a branch touching strict_paths do they hold the merge.
+    public var unconfirmedImportant: [LeadFinding] { findings.filter { $0.status == .unconfirmed && $0.severity == .important } }
     /// The open findings a re-audit must say fixed or still open about (an open Pre-existing one isn't the branch's).
     public var toRecheck: [LeadFinding] { open.filter { $0.severity != .preExisting } }
     /// A re-audit: an earlier one is recorded, so new findings come from the diff since its commit only.

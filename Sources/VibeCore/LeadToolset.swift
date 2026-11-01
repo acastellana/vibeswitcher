@@ -536,6 +536,7 @@ public final class LeadToolset: MCPToolset {
                                          "merge_policy": P(type: "string", description: "How merges are handled, as the owner chose once: auto (work merges once its review passes: its audit, or for review none its worker's done report and the merge's test run; the user gets an update afterwards), ask_sensitive (a commit touching sensitive_paths waits for the user's approval of that exact commit), ask_all (every merge waits)",
                                                            options: LeadWorkflow.MergePolicy.allCases.map(\.rawValue)),
                                          "sensitive_paths": P(type: "string", description: "The globs ask_sensitive holds back, comma-separated, as in .gitignore (empty: Claude's settings and instructions, .github, .env files, entitlements, keys)"),
+                                         "strict_paths": P(type: "string", description: "Globs, comma-separated, as in .gitignore (e.g. src/signing/**): on a branch touching one, every Important finding holds merge and auto_advance, an unconfirmed one too, until you dismiss_finding it, add_task(from_finding:) it, or a re-audit closes it (empty: none)"),
                                          "auto_advance": P(type: "boolean", description: "Whether VibeSwitcher moves finished work on by itself (default true): a task reported done is merged (review none) or audited, a clean audit merged, open Important findings sent back to its worker, a merged task cleaned up, and a planned task started once its after tasks are done; you get one report of what it did. false: you do each"),
                                          "risk_lines": P(type: "integer", description: "The risk check's size trigger: a review none task whose branch changes more lines than this (added and removed) is audited instead of merged when it reports done (default 400; 0: no size trigger)"),
                                          "risk_model": P(type: "boolean", description: "Whether the risk check also asks headless Claude, from the diff's stat, the contract and the base branch's REVIEW.md (no code), to raise a review none task to audit (default true); it only raises, and a timeout or error leaves the deterministic triggers' result"),
@@ -724,7 +725,11 @@ public final class LeadToolset: MCPToolset {
         try? store.appendProgress("Planned \(task.slug): \(title)" + (review == .audit ? " (review audit)" : ""))
         let recorded = review.map { recordReview($0, slug: task.slug) } ?? ""
         var closed = ""
-        if let origin, origin.finding.isOpen {
+        // An unconfirmed one strict_paths holds is closed too: making it a task is the lead's ruling on it.
+        let held = origin.map { origin in
+            origin.finding.status == .unconfirmed && hold(origin.slug, vault.audits(root: root, task: origin.slug)).held.contains { $0.id == origin.finding.id }
+        } ?? false
+        if let origin, origin.finding.isOpen || held {
             // It's the new task's now: closed on the one it came from, so it neither holds that one's merge back nor
             // comes up in its re-audits.
             do {
@@ -838,9 +843,57 @@ public final class LeadToolset: MCPToolset {
         do { ledger = try vault.dismissFinding(root: root, task: slug, id: id, reason: reason) } catch { throw Problem(text: "\(error)") }
         mirror(ledger, on: slug)
         try? store.appendProgress("Dismissed \(slug):\(id): \(reason)")
-        let left = ledger?.blocking ?? []
+        let hold = self.hold(slug, ledger)
+        let left = hold.findings
         let mergeable = backToReview(slug, ledger).map { " No Important finding is open now and \($0): \(slug) is back in review; merge(\(slug)) when you're ready." } ?? ""
-        return MCPToolResult(text: "Dismissed \(slug):\(id).\(left.isEmpty ? "" : " Still open and holding the merge back: \(left.map(\.label).joined(separator: ", ")).")\(mergeable)")
+        return MCPToolResult(text: "Dismissed \(slug):\(id).\(left.isEmpty ? "" : " Still open and holding the merge back: \(left.map(\.label).joined(separator: ", "))\(hold.why.isEmpty ? "" : " (\(hold.why))").")\(mergeable)")
+    }
+
+    /// What holds a task's merge back: its open Important findings, and on a branch that touches strict_paths, the
+    /// Important ones its audit's vote left unconfirmed too, until the lead dismisses one (dismiss_finding), makes it a
+    /// task (add_task from_finding) or a re-audit closes it.
+    struct Hold: Equatable {
+        var findings: [LeadFinding] = []
+        /// The strict paths the branch touches, when an unconfirmed finding is among `findings`.
+        var strict: [String] = []
+        /// The branch's changes couldn't be read, so its unconfirmed Important findings are held all the same.
+        var unread: String?
+
+        var isEmpty: Bool { findings.isEmpty }
+        /// The unconfirmed ones, held by strict_paths alone.
+        var held: [LeadFinding] { findings.filter { $0.status == .unconfirmed } }
+
+        /// Why the unconfirmed ones hold the merge ("" when none does): "F3 is unconfirmed by the finders' vote, and
+        /// strict_paths holds it: the branch touches src/signing/key.swift".
+        var why: String {
+            let held = self.held
+            guard !held.isEmpty else { return "" }
+            let ids = held.map(\.id), one = held.count == 1
+            let names = ids.count == 1 ? ids[0] : ids.dropLast().joined(separator: ", ") + " and " + ids[ids.count - 1]
+            let touches = unread.map { "the branch's changed files couldn't be read (\($0)), so they're taken as touching it" }
+                ?? "the branch touches " + LeadRisk.list(strict)
+            return "\(names) \(one ? "is" : "are") unconfirmed by the finders' vote, and strict_paths holds \(one ? "it" : "them"): \(touches)"
+        }
+
+        /// The findings, named <task>:<id> with what each is, and why the unconfirmed ones hold it.
+        func list(_ slug: String, clip: Int = 200) -> String {
+            findings.map { "\(slug):" + LeadToolset.clip($0.line1, clip) }.joined(separator: "; ") + (why.isEmpty ? "" : " (\(why))")
+        }
+    }
+
+    /// The `Hold` on `slug`'s merge, from its audits' ledger and its branch at `head` (its branch's tip when nil). The
+    /// branch's files are read only when strict_paths is set and an unconfirmed Important finding is live.
+    func hold(_ slug: String, _ ledger: LeadAuditLedger?, head: String? = nil) -> Hold {
+        guard let ledger else { return Hold() }
+        let workflow = self.workflow
+        guard workflow.strictPaths != nil, !ledger.unconfirmedImportant.isEmpty else { return Hold(findings: ledger.blocking) }
+        let diff = Self.changedFiles("\(workflow.base)...\(head ?? Worktrees.branch(slug))", root: root)
+        guard diff.ok else {
+            let error = diff.error.trimmingCharacters(in: .whitespacesAndNewlines)
+            return Hold(findings: ledger.holding(strict: true), unread: Self.clip(error.isEmpty ? "git diff failed" : error, 120))
+        }
+        let strict = workflow.strictTouched(diff.output.split(whereSeparator: \.isNewline).map(String.init))
+        return strict.isEmpty ? Hold(findings: ledger.blocking) : Hold(findings: ledger.holding(strict: true), strict: strict)
     }
 
     /// A pass that only its open Important findings left failed goes back to review once the last one is closed,
@@ -848,8 +901,8 @@ public final class LeadToolset: MCPToolset {
     /// tests passed once the lead has dismissed every Important finding that failed it (see `Verdict.dismissed`).
     /// Says why it went back (nil: it didn't).
     private func backToReview(_ slug: String, _ ledger: LeadAuditLedger?) -> String? {
-        guard let ledger, ledger.blocking.isEmpty, let verdict = vault.verdict(root: root, task: slug),
-              verdict.commit == ledger.commit, verdict.commit == branchHead(Worktrees.branch(slug)) else { return nil }
+        guard let ledger, let verdict = vault.verdict(root: root, task: slug), verdict.commit == ledger.commit,
+              verdict.commit == branchHead(Worktrees.branch(slug)), hold(slug, ledger, head: verdict.commit).isEmpty else { return nil }
         let why: String
         if ledger.passed == true && verdict.passes {
             why = "its audit passed"
@@ -1592,7 +1645,7 @@ public final class LeadToolset: MCPToolset {
         // again, for Nits at most (the working policy: no audit rounds without a concrete open concern; 2026-10-21, text
         // selection took four rounds and the picker card four tasks).
         if let verdict = vault.verdict(root: root, task: slug), verdict.passes, verdict.commit == head,
-           vault.audits(root: root, task: slug)?.blocking.isEmpty ?? true {
+           hold(slug, vault.audits(root: root, task: slug), head: head).isEmpty {
             throw Problem(text: "Not audited: \(slug)'s audit at \(head.prefix(8)) passed (complete, clean) with no Important finding open, and its branch "
                           + "hasn't moved since, so another audit would check the same commit again. merge(\(slug)) when nothing holds it back; "
                           + "Nits don't need a round. A concrete problem it missed: have the worker fix it and commit, then audit the new commit.")
@@ -1751,9 +1804,16 @@ public final class LeadToolset: MCPToolset {
         })
     }
 
+    /// `git diff --name-only` of `range` in `root` with both sides of each rename: git's rename detection (on by
+    /// default, or by diff.renames) lists only a moved file's new path, so a file moved out of a strict or sensitive
+    /// path would seem untouched.
+    static func changedFiles(_ range: String, root: String) -> Git.Result {
+        Git.run(["diff", "--name-only", "--no-renames", range], in: root)
+    }
+
     /// The sensitive paths the branch changes from `base` to `head`.
     static func sensitiveChanges(root: String, head: String, workflow: LeadWorkflow) -> [String] {
-        let changed = Git.run(["diff", "--name-only", "\(workflow.base)...\(head)"], in: root).output.split(whereSeparator: \.isNewline).map(String.init)
+        let changed = changedFiles("\(workflow.base)...\(head)", root: root).output.split(whereSeparator: \.isNewline).map(String.init)
         return changed.filter { path in workflow.sensitiveGlobs.contains { LeadWorkflow.matches(path, glob: $0) } }
     }
 
@@ -1788,6 +1848,8 @@ public final class LeadToolset: MCPToolset {
         let run = try auditRun(slug, commit: tested, workflow: workflow, not: "no finder started")
         let sensitive = Self.sensitiveChanges(root: root, head: head, workflow: workflow)
         let focuses = LeadPrompts.Focus.panel(count, sensitive: !sensitive.isEmpty)
+        let strict = workflow.strictPaths == nil ? [] : workflow.strictTouched(
+            Self.changedFiles("\(workflow.base)...\(head)", root: root).output.split(whereSeparator: \.isNewline).map(String.init))
         let notes = leadNotes(task), report = doneReport(task, head: head), guide = LeadRisk.reviewGuide(root: root, base: workflow.base)
         let security = Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised, sensitive: sensitive)
         let earlier = try endEarlierVerifiers(task, not: "Not audited, no finder started")
@@ -1796,7 +1858,7 @@ public final class LeadToolset: MCPToolset {
         for (offset, focus) in focuses.enumerated() {
             let index = offset + 1
             let finder = LeadPrompts.Finder(index: index, size: count, focus: focus, commit: tested, logs: run.logs, run: run.outcome.text,
-                                            sensitive: sensitive, nitCap: workflow.auditNitCap)
+                                            sensitive: sensitive, nitCap: workflow.auditNitCap, strict: strict)
             do {
                 sessions.append(try launch(.verifier, task: slug, name: index == 1 ? "verify-\(slug)" : "finder\(index)-\(slug)",
                                            in: Worktrees.path(root: root, slug: slug), label: "Verifier: \(task.title) (finder \(index)/\(count): \(focus.rawValue))",
@@ -1901,8 +1963,11 @@ public final class LeadToolset: MCPToolset {
         let stat = range.map { Git.run(["diff", "--stat"] + $0, in: root) }
         let diff = range.map { Git.run(["diff"] + $0, in: root) }
         let task = store.load().task(slug)
-        return LeadPrompts.Reaudit(round: ledger.rounds + 1, since: since, head: head, open: ledger.toRecheck,
-                                   known: ledger.findings.filter { !$0.isOpen || $0.severity == .preExisting },
+        // On a branch touching strict_paths, the unconfirmed Important findings that hold it are rechecked too (the
+        // worker's answers to them judged), so a re-audit can close them.
+        let held = Set(hold(slug, ledger, head: head).held.map(\.id))
+        return LeadPrompts.Reaudit(round: ledger.rounds + 1, since: since, head: head, open: ledger.toRecheck + ledger.findings.filter { held.contains($0.id) },
+                                   known: ledger.findings.filter { (!$0.isOpen && !held.contains($0.id)) || $0.severity == .preExisting },
                                    stat: stat.map { $0.ok ? $0.output : "(git diff --stat failed: \($0.error))" } ?? "",
                                    diff: diff.flatMap { $0.ok && $0.output.count <= LeadPrompts.Reaudit.diffLimit ? $0.output : nil },
                                    base: base, scope: scope, answers: task?.currentAnswers(ledger) ?? [:], reroll: task?.pendingReroll(ledger))
@@ -2150,9 +2215,12 @@ public final class LeadToolset: MCPToolset {
             audited = false
         }
         // Every Important finding is resolved (fixed in a later round, or dismissed with a reason) before it merges.
-        if let blocking = vault.audits(root: root, task: slug)?.blocking, !blocking.isEmpty {
-            throw Problem(text: "Not merged: \(slug) has \(blocking.count) open Important finding\(blocking.count == 1 ? "" : "s"): "
-                + blocking.map { "\(slug):" + Self.clip($0.line1, 200) }.joined(separator: "; ")
+        // On a branch touching strict_paths, an unconfirmed Important one too, until the lead rules on it.
+        let hold = self.hold(slug, vault.audits(root: root, task: slug), head: commit)
+        if !hold.isEmpty {
+            let blocking = hold.findings
+            throw Problem(text: "Not merged: \(slug) has \(blocking.count) \(hold.held.isEmpty ? "open " : "")Important finding\(blocking.count == 1 ? "" : "s")"
+                + (hold.held.isEmpty ? ": " : " holding it back: ") + hold.list(slug)
                 + ". Have the worker fix \(blocking.count == 1 ? "it" : "them") and audit again, or dismiss_finding with a reason, or add_task(from_finding: …) to move one to a task of its own.")
         }
         try checkMergePolicy(task, commit: commit)
@@ -2531,7 +2599,7 @@ public final class LeadToolset: MCPToolset {
         if vault.current(.verifier, root: root, task: slug) != nil { return "An audit was started on it: its verdict decides." }
         guard let commit else { return "Its branch \(Worktrees.branch(slug)) isn't there." }
         let workflow = self.workflow
-        let diff = Git.run(["diff", "--name-only", "\(workflow.base)...\(commit)"], in: root)
+        let diff = Self.changedFiles("\(workflow.base)...\(commit)", root: root)
         guard diff.ok else { return "Which files it changes can't be told (\(diff.error)), so it's audited." }
         let sensitive = diff.output.split(whereSeparator: \.isNewline).map(String.init).filter { path in
             workflow.sensitiveGlobs.contains { LeadWorkflow.matches(path, glob: $0) }
@@ -2629,7 +2697,7 @@ public final class LeadToolset: MCPToolset {
         // The policy as the lead set it, not as a worker rewrote it.
         try checkSettings(workflow, not: "Not merged")
         guard workflow.mergePolicy != .auto else { return }
-        let diff = Git.run(["diff", "--name-only", "\(workflow.base)...\(commit)"], in: root)
+        let diff = Self.changedFiles("\(workflow.base)...\(commit)", root: root)
         guard diff.ok else { throw Problem(text: "Not merged: can't tell which files \(task.slug) changes (\(diff.error)), so the merge policy can't be checked.") }
         let changed = diff.output.split(whereSeparator: \.isNewline).map(String.init)
         guard let files = workflow.filesNeedingApproval(changed) else { return }
@@ -3219,7 +3287,7 @@ public final class LeadToolset: MCPToolset {
         for key in LeadWorkflow.configurable {
             guard let given = arguments[key], !(given is NSNull) else { continue }
             var value: String
-            if key == "sensitive_paths", let list = given as? [Any] { value = list.compactMap { $0 as? String }.joined(separator: ", ") }
+            if key == "sensitive_paths" || key == "strict_paths", let list = given as? [Any] { value = list.compactMap { $0 as? String }.joined(separator: ", ") }
             else if let text = given as? String { value = text.trimmingCharacters(in: .whitespaces) }
             else if let number = given as? NSNumber { value = number.stringValue }
             else { throw Problem(text: "\(key) must be a string.") }
@@ -3263,7 +3331,7 @@ public final class LeadToolset: MCPToolset {
                     throw Problem(text: "merge_policy is one of \(LeadWorkflow.MergePolicy.allCases.map(\.rawValue).joined(separator: ", ")).")
                 }
                 value = policy.rawValue
-            case "sensitive_paths":
+            case "sensitive_paths", "strict_paths":
                 value = LeadWorkflow.globs(value)?.joined(separator: ", ") ?? ""
             case "records_dir" where !value.isEmpty:
                 guard let folder = LeadWorkflow.recordsFolder(value) else {
@@ -3303,6 +3371,7 @@ public final class LeadToolset: MCPToolset {
                                           "heavy_slots": after.heavySlots.map(String.init) ?? "",
                                           "audit_finders": String(after.auditFinders), "audit_nit_cap": String(after.auditNitCap),
                                           "merge_policy": after.mergePolicy?.rawValue ?? "", "sensitive_paths": after.sensitivePaths?.joined(separator: ", ") ?? "",
+                                          "strict_paths": after.strictPaths?.joined(separator: ", ") ?? "",
                                           "records_dir": after.recordsDir ?? "", "auto_advance": String(after.autoAdvance),
                                           "risk_lines": String(after.riskLines), "risk_model": String(after.riskModel),
                                           "watch_app_logs": String(after.watchAppLogs)]
@@ -3424,7 +3493,8 @@ public final class LeadToolset: MCPToolset {
         // Where merge reads the worker's "done" for a task with no audit: the board's copy is anyone's to write.
         let recorded = Result { try vault.reportDone(root: root, task: slug, commit: done ? head : nil, evidence: evidence) }
         // A pass that left Important findings open still isn't mergeable.
-        let blocking = standing == nil ? [] : vault.audits(root: root, task: slug)?.blocking ?? []
+        let hold = standing == nil ? Hold() : self.hold(slug, vault.audits(root: root, task: slug), head: head)
+        let blocking = hold.findings
         // Why it's audited; with neither that nor a standing verdict, the merge's own test run is its check.
         let needed = standing == nil && done ? reviewNeeded(slug, commit: head) : nil
         try store.update { board in
@@ -3454,7 +3524,7 @@ public final class LeadToolset: MCPToolset {
                 + (verdict.passes ? "passed: that verdict stands" : "didn't pass (\(verdict.completion.rawValue), \(verdict.integrity.rawValue)): that verdict stands")
                 + (!done ? "." : !verdict.passes ? "; audit(\(slug)) to have it checked again."
                     : blocking.isEmpty ? ". merge(\(slug)) when you're ready."
-                    : ", with Important findings open (\(blocking.map { "\(slug):\($0.id)" }.joined(separator: ", "))) that merge refuses: dismiss_finding them, or have the worker fix them and commit, then audit(\(slug)).")
+                    : ", with Important findings open (\(blocking.map { "\(slug):\($0.id)" }.joined(separator: ", "))\(hold.why.isEmpty ? "" : "; \(hold.why)")) that merge refuses: dismiss_finding them, or have the worker fix them and commit, then audit(\(slug)).")
         }
         // No audit asked for: the merge's own test run is the check.
         let unaudited = standing == nil && needed == nil
@@ -3600,7 +3670,7 @@ public final class LeadToolset: MCPToolset {
         let told = try tellLead("The worker on \(slug) answered findings: \(said)\nThe re-audit judges these answers (audit(\(slug)) once it reports done); dismiss_finding one you accept yourself.",
                                 about: "worker \(slug)")
         let current = store.load().task(slug)?.currentAnswers(ledger) ?? [:]
-        let open = ledger.blocking.filter { current[$0.id.uppercased()] == nil }
+        let open = hold(slug, ledger).findings.filter { current[$0.id.uppercased()] == nil }
         return MCPToolResult(text: "Answered \(answers.map(\.id).joined(separator: ", ")); the lead sees them in board(\(slug)) and the re-audit judges them."
                              + (open.isEmpty ? "" : " Still unanswered Important findings: \(open.map(\.id).joined(separator: ", ")).")
                              + " When everything is committed, report done." + (told ? "" : Self.noLead))
@@ -3653,7 +3723,9 @@ public final class LeadToolset: MCPToolset {
         let ledger = vault.audits(root: root, task: slug)
         let audited = verdict.commit
         let evidence = LeadEvidence(completion: verdict.completion, integrity: verdict.integrity, summary: verdict.summary, commit: audited)
-        let blocking = ledger?.blocking ?? []
+        // On a branch touching strict_paths, the unconfirmed Important ones hold it too.
+        let hold = self.hold(slug, ledger, head: audited)
+        let blocking = hold.findings
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].evidence = evidence
@@ -3666,7 +3738,8 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].setback = LeadSetback(stage: .review, reason: evidence.summary.isEmpty ? "The audit didn't pass (\(evidence.completion.rawValue), \(evidence.integrity.rawValue))." : evidence.summary,
                                                          evidence: evidence)
             } else if !blocking.isEmpty {
-                board.tasks[index].setback = LeadSetback(stage: .review, reason: "Important findings open: " + blocking.map(\.line1).joined(separator: "; "), evidence: evidence)
+                board.tasks[index].setback = LeadSetback(stage: .review, reason: "Important findings open: " + blocking.map(\.line1).joined(separator: "; ")
+                                                             + (hold.why.isEmpty ? "" : " (\(hold.why))"), evidence: evidence)
             }
         }
         try? store.appendProgress("Audit of \(slug): \(evidence.completion.rawValue), \(evidence.integrity.rawValue)"
@@ -3678,7 +3751,10 @@ public final class LeadToolset: MCPToolset {
             ? "The audit of \(slug) passed (complete, clean): \(evidence.summary)\n" + (blocking.isEmpty ? "merge(\(slug)) when you're ready.\(moved)" : "")
             : "The audit of \(slug) did not pass (\(evidence.completion.rawValue), \(evidence.integrity.rawValue)): \(evidence.summary)\n"
         if let vote = ledger?.vote {
-            text += (text.hasSuffix("\n") ? "" : "\n") + vote.text + (vote.unconfirmed > 0 ? " (unconfirmed ones don't hold the merge back; dismiss_finding them, or add_task(from_finding: …) one that's a real Important problem)" : "") + ".\n"
+            let unconfirmed = hold.held.isEmpty
+                ? " (unconfirmed ones don't hold the merge back; dismiss_finding them, or add_task(from_finding: …) one that's a real Important problem)"
+                : " (\(hold.why), as an open one would)"
+            text += (text.hasSuffix("\n") ? "" : "\n") + vote.text + (vote.unconfirmed > 0 ? unconfirmed : "") + ".\n"
         }
         if let ledger, !ledger.findings.isEmpty {
             text += (text.hasSuffix("\n") ? "" : "\n") + Self.findingsText(ledger, of: slug) + "\n"
@@ -3686,7 +3762,8 @@ public final class LeadToolset: MCPToolset {
         if let ledger, ledger.reconsider {
             text += Self.reconsiderText(ledger, of: slug)
         } else if !blocking.isEmpty {
-            text += "merge refuses while an Important finding is open: send the worker the open ones (message, with their ids; it answers each with answer_findings, fixed or disagree with a reason, and the re-audit judges the answers), or dismiss_finding one with a reason, or add_task(from_finding: …) to move it to a task of its own."
+            text += (hold.held.isEmpty ? "" : "Held by strict_paths: \(hold.held.map { "\(slug):\($0.id)" }.joined(separator: ", ")). ")
+                + "merge refuses while an Important finding is open: send the worker the open ones (message, with their ids; it answers each with answer_findings, fixed or disagree with a reason, and the re-audit judges the answers), or dismiss_finding one with a reason, or add_task(from_finding: …) to move it to a task of its own."
         } else if !evidence.passes {
             text += "Send the worker the findings with message, or re-plan the task."
         } else if ledger?.open.isEmpty == false {
@@ -4122,10 +4199,15 @@ public final class LeadToolset: MCPToolset {
         if let audits = task.audits, audits.reconsider, ![.done, .reverted].contains(task.status) {
             line += " — reconsider the approach (\(audits.reconsiderCause))"
         }
-        if let audits = task.audits, !audits.open.isEmpty, ![.done, .reverted].contains(task.status) {
-            let blocking = audits.blocking
-            line += " — findings: " + (blocking.isEmpty ? "" : "Important open \(blocking.prefix(3).map { "\($0.id) \($0.place)" }.joined(separator: ", "))\(blocking.count > 3 ? ", …" : ""); ")
-                + Self.findingsTally(audits)
+        if let audits = task.audits, ![.done, .reverted].contains(task.status) {
+            // A settled task's branch may be gone: nothing of it waits on a merge.
+            let hold = Self.settledStates.contains(task.status) ? Hold(findings: audits.blocking) : self.hold(task.slug, audits)
+            if !audits.open.isEmpty || !hold.isEmpty {
+                let blocking = audits.blocking, held = hold.held
+                line += " — findings: " + (blocking.isEmpty ? "" : "Important open \(blocking.prefix(3).map { "\($0.id) \($0.place)" }.joined(separator: ", "))\(blocking.count > 3 ? ", …" : ""); ")
+                    + (held.isEmpty ? "" : "held by strict_paths \(held.prefix(3).map { "\($0.id) \($0.place)" }.joined(separator: ", "))\(held.count > 3 ? ", …" : "") (unconfirmed Important; the branch touches \(hold.unread == nil ? LeadRisk.list(hold.strict) : "files it couldn't read")); ")
+                    + Self.findingsTally(audits)
+            }
         }
         if let worker = task.worker, let info = sessions?[worker] {
             line += " — worker \(info.live ? info.state(prompt: 40) : task.stopped == worker ? "stopped" : "ended")"
@@ -4338,6 +4420,9 @@ public final class LeadToolset: MCPToolset {
         let policy = workflow.mergePolicy.map { "\($0.rawValue) (\($0.meaning))" } ?? "not set: ask the owner once; until then merges are handled as ask_sensitive"
         lines.append("- merge_policy: \(policy)")
         lines.append("- sensitive_paths: \(workflow.sensitiveGlobs.joined(separator: ", "))\(workflow.sensitivePaths == nil ? " (the defaults)" : "")")
+        if let strict = workflow.strictPaths {
+            lines.append("- strict_paths: \(strict.joined(separator: ", ")) (on a branch touching one, an Important finding the vote left unconfirmed holds the merge too, until you rule on it)")
+        }
         lines.append("- auto_advance: " + (workflow.autoAdvance ? "true (finished work moves on by itself: merged, audited, sent back, cleaned up; planned tasks start once their after tasks are done)"
             : "false (you start, audit, merge and clean up each task yourself)"))
         lines.append("- risk_lines: " + (workflow.riskLines > 0 ? "\(workflow.riskLines) (a review none task changing more lines is audited instead of merged)" : "0 (no size trigger)"))
@@ -4380,6 +4465,11 @@ public final class LeadToolset: MCPToolset {
             }
             if let audits = task.audits, !audits.findings.isEmpty || audits.reconsider {
                 lines.append("\n" + Self.findingsText(audits, of: task.slug, answers: task.currentAnswers(audits)))
+                let hold = ![.done, .reverted].contains(task.status) && !Self.settledStates.contains(task.status) ? self.hold(task.slug, audits) : Hold()
+                if !hold.held.isEmpty {
+                    lines.append("Held by strict_paths: \(hold.why). merge and auto_advance wait until you dismiss_finding \(hold.held.count == 1 ? "it" : "each"), "
+                                 + "add_task(from_finding: …) \(hold.held.count == 1 ? "it" : "one"), or a re-audit closes \(hold.held.count == 1 ? "it" : "them") (the worker's answer accepted).")
+                }
                 if audits.reconsider, ![.done, .reverted].contains(task.status) { lines.append(Self.reconsiderText(audits, of: task.slug)) }
             }
             let reports = (board.reports ?? []).filter { $0.task == task.slug }

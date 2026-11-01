@@ -368,7 +368,8 @@ public final class LeadAdvance: @unchecked Sendable {
         if let verdict = vault.verdict(root: root, task: slug) {
             guard verdict.commit == head else { return }
             let ledger = vault.audits(root: root, task: slug)
-            guard ledger?.blocking.isEmpty ?? true, verdict.passes || verdict.dismissed(in: ledger) != nil else { return }
+            // Nothing Important open, nor an unconfirmed one held by strict_paths (`LeadToolset.hold`).
+            guard lead.hold(slug, ledger, head: head).isEmpty, verdict.passes || verdict.dismissed(in: ledger) != nil else { return }
             merge(slug, head: head, busy: busy, audited: true)
             return
         }
@@ -498,11 +499,15 @@ public final class LeadAdvance: @unchecked Sendable {
         guard let task = due(slug, [.failed, .running]), task.setback?.stage == .review,
               let head = lead.advanceHead(slug), task.autoSentBack != head,
               let verdict = vault.verdict(root: root, task: slug), verdict.commit == head, verdict.integrity == .clean,
-              let ledger = vault.audits(root: root, task: slug), !ledger.reconsider, !ledger.blocking.isEmpty else { return }
-        let open = ledger.blocking
+              let ledger = vault.audits(root: root, task: slug), !ledger.reconsider else { return }
+        let hold = lead.hold(slug, ledger, head: head)
+        guard !hold.isEmpty else { return }
+        let open = hold.findings
         let ids = open.map { "\(slug):\($0.id)" }.joined(separator: ", ")
+        let why: String = hold.why.isEmpty ? "" : "\n(\(hold.why).)"
+        let listed: String = open.map { "- \($0.id): " + LeadToolset.clip($0.line1, 400) }.joined(separator: "\n") + why
         let text = "Your branch's audit (at \(head.prefix(8))) left \(open.count) Important finding\(open.count == 1 ? "" : "s") open, which hold its merge back:\n"
-            + open.map { "- \($0.id): " + LeadToolset.clip($0.line1, 400) }.joined(separator: "\n")
+            + listed
             + "\nFix \(open.count == 1 ? "it" : "each") on your branch and commit, or disagree with a reason; answer each by id with answer_findings "
             + "(fixed or disagree), run the affected tests, then report done again: it's audited again then (a re-audit checks these findings' concerns and judges your answers)."
         let live = workerRuns(task)

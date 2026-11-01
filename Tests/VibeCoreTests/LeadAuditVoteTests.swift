@@ -218,8 +218,9 @@ struct LeadAuditFindersTests: LeadTeamFixture {
 
     func call(_ tools: LeadToolset, _ name: String, _ arguments: [String: Any] = [:]) -> MCPToolResult { tools.call(name, arguments) }
 
-    /// A lead with `finders` finders and a test command that says where it ran, and a task worked on and reported.
-    func ready(_ runtime: FakeRuntime, finders: Int = 3) throws -> (root: String, lead: LeadToolset) {
+    /// A lead with `finders` finders and a test command that says where it ran, and a task worked on and reported
+    /// (`edit`, when given, changes more in the worktree before its commit).
+    func ready(_ runtime: FakeRuntime, finders: Int = 3, edit: ((String) throws -> Void)? = nil) throws -> (root: String, lead: LeadToolset) {
         let root = try repo()
         let lead = try lead(root, runtime)
         let test = "test -f b.txt && echo \"shared run of $(git rev-parse --short HEAD) in home $HOME\" && echo \"$HOME\" >> \(runs)"
@@ -230,6 +231,7 @@ struct LeadAuditFindersTests: LeadTeamFixture {
         let worktree = Worktrees.path(root: root, slug: "add-b")
         try "bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
         Git.run(["add", "b.txt"], in: worktree)
+        try edit?(worktree)
         Git.run(["commit", "-q", "-m", "add b"], in: worktree)
         #expect(!call(try seat("worker-add-b", runtime), "report", doneReport("added b")).isError)
         return (root, lead)
