@@ -623,6 +623,11 @@ public final class LeadAdvance: @unchecked Sendable {
         for task in lead.store.load().tasks where task.status == .planned && task.autoAdvance != false {
             let board = lead.store.load()
             guard let task = board.task(task.slug), isDue(task, [.planned]), let waits = waiting(task, board) else { continue }
+            // Not startable yet (see `LeadLaunch.codexWorkersUsable`): said once, never tried.
+            if task.workerAgent == .codex, !lead.codexWorkers {
+                once("codex|\(task.slug)", "\(task.slug) won't start by itself: \(LeadLaunch.codexUnusable) update_task(\(task.slug), agent: claude) to run it on Claude.")
+                continue
+            }
             guard waits.isEmpty else { continue }
             let running = board.tasks.filter { $0.status == .running }.count
             guard running < workflow.maxWorkers else { return }
@@ -678,7 +683,7 @@ public final class LeadAdvance: @unchecked Sendable {
              "The account's usage is near a limit: \(limit.text). " + LeadToolset.usageBackoff(limit, model: model)
                 + " Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway"
                 + (limit.model == nil ? "." : ", and a task can run on another model (update_task model, configure verifier_model).")
-                + " A bounded, mechanical task with a tight contract can run on Codex instead (update_task(<task>, agent: codex): the Codex account's usage, always audited by a Claude verifier); you decide.")
+                + (lead.codexWorkers ? " A bounded, mechanical task with a tight contract can run on Codex instead (update_task(<task>, agent: codex): the Codex account's usage, always audited by a Claude verifier); you decide." : ""))
         return true
     }
 

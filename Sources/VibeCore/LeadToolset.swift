@@ -179,6 +179,8 @@ public final class LeadToolset: MCPToolset {
     var usageWake: (Date, @escaping @Sendable () -> Void) -> Void = { date, body in
         DispatchQueue.global().asyncAfter(wallDeadline: .now() + max(0, date.timeIntervalSinceNow), execute: body)
     }
+    /// Codex workers can be started (see `LeadLaunch.codexWorkersUsable`); tests of the Codex launch set it.
+    var codexWorkers = LeadLaunch.codexWorkersUsable
     /// How often merge reads the load again while it waits for it to drop below load_threshold.
     var loadPoll: TimeInterval = 15
     /// The Mac-wide limits as set in Settings (see `MacLimits`), read at each call. Faked in tests.
@@ -704,7 +706,7 @@ public final class LeadToolset: MCPToolset {
 
     /// add_task's and update_task's agent for the task's worker.
     static var agentProperty: MCPToolInfo.Property {
-        MCPToolInfo.Property(type: "string", description: "Who runs its worker: claude (the default) or codex. Codex only for a bounded, mechanical task with a tight contract (it spreads usage to the Codex account when Claude's limits run low); its work is always audited by a Claude verifier (review audit, which can't be lowered while it's Codex's), and Codex never plans, reviews or audits. From its next worker",
+        MCPToolInfo.Property(type: "string", description: "Who runs its worker: claude (the default) or codex. Codex only for a bounded, mechanical task with a tight contract (it spreads usage to the Codex account when Claude's limits run low); its work is always audited by a Claude verifier (review audit, which can't be lowered while it's Codex's), and Codex never plans, reviews or audits. From its next worker" + (LeadLaunch.codexWorkersUsable ? "" : ". " + LeadLaunch.codexUnusable + " start_worker refuses a codex task until then"),
                              options: LeadTask.WorkerAgent.allCases.map(\.rawValue))
     }
 
@@ -1431,7 +1433,7 @@ public final class LeadToolset: MCPToolset {
     func usageRefusal(model: String?, sessions: [LeadSessionInfo]?, not: String, what: String, instead: String, codex: String? = nil) -> String? {
         guard let limit = usageHold(model: model, sessions: sessions) else { return nil }
         return "\(not): the account's usage is near a limit, \(limit.text). " + Self.usageBackoff(limit, model: model)
-            + (limit.model == nil ? " Wait for the reset" + (codex.map { ", or " + Self.codexInstead($0) } ?? "") : " Wait for the reset, or \(instead)")
+            + (limit.model == nil ? " Wait for the reset" + (codex.flatMap { codexWorkers ? ", or " + Self.codexInstead($0) : nil } ?? "") : " Wait for the reset, or \(instead)")
             + ", or call \(what) with override_usage: true if the user wants the rest of the limit spent."
     }
 
@@ -1453,6 +1455,9 @@ public final class LeadToolset: MCPToolset {
 
     /// What a usage refusal offers instead of waiting for a start: another model, or Codex for a bounded mechanical
     /// task (another account's limits; always audited by a Claude verifier). The lead decides.
+    /// The same without Codex, while Codex workers can't be started.
+    static func modelInstead(_ slug: String) -> String { "run it on another model (update_task(\(slug), model: sonnet) for a mechanical task)" }
+
     static func usageInstead(_ slug: String) -> String {
         "run it on another model (update_task(\(slug), model: sonnet) for a mechanical task), or " + codexInstead(slug)
     }
@@ -1496,6 +1501,9 @@ public final class LeadToolset: MCPToolset {
         // Held, or no longer due, since the automatic step looked: not started, and nothing said.
         if let when, !when(task) { throw LeadAdvance.NotDue() }
         if Self.settledStates.contains(task.status) { throw Self.settledRefusal(task, "No worker started") }
+        if task.workerAgent == .codex, !codexWorkers {
+            throw Problem(text: "Not started: \(LeadLaunch.codexUnusable) Run it on Claude (update_task(\(slug), agent: claude)) or keep it planned.")
+        }
         // One worker per worktree: two sessions editing the same files would undo each other.
         let sessions = try hostSessions("whether \(slug)'s worker still runs isn't known; no worker was started")
         if let worker = task.worker, sessions.contains(where: { $0.id == worker && $0.live }) {
@@ -1523,7 +1531,7 @@ public final class LeadToolset: MCPToolset {
         let codex = task.workerAgent == .codex
         let model = codex ? task.model : workerModel(for: task)
         if !codex, !overrideUsage, let refusal = usageRefusal(model: model, sessions: sessions, not: "Not started", what: "start_worker(\(slug))",
-                                                              instead: Self.usageInstead(slug), codex: slug) {
+                                                              instead: codexWorkers ? Self.usageInstead(slug) : Self.modelInstead(slug), codex: slug) {
             throw Problem(text: refusal)
         }
         // A worker on a full disk fails, and takes every other session with it (none can write its output).

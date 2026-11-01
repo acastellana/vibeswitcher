@@ -57,6 +57,7 @@ struct CodexWorkerTests: LeadTeamFixture {
         let log = temp.url("codex-args").path
         runtime.codex = try fakeCodex(log: log) + " --yolo -s danger-full-access --model o3 -c model_reasoning_effort=high"
         let lead = try lead(root, runtime)
+        lead.codexWorkers = true
         let added = lead.call("add_task", ["title": "Rename x", "goal": "x is y", "acceptance": ["grep -q y a.txt"], "agent": "codex",
                                            "model": "gpt-5.5"])
         #expect(!added.isError && added.text.contains("review audit") && added.text.contains("Its worker is Codex"), "\(added.text)")
@@ -123,6 +124,7 @@ struct CodexWorkerTests: LeadTeamFixture {
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         lead.power = { nil }
+        lead.codexWorkers = true
         #expect(!lead.call("configure", ["merge_policy": "auto", "test_command": "true"]).isError)
         let advancing = LeadAdvanceTests.Advancing(lead)
         defer { advancing.stop() }
@@ -163,6 +165,7 @@ struct CodexWorkerTests: LeadTeamFixture {
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         lead.power = { nil }
+        lead.codexWorkers = true
         #expect(!lead.call("configure", ["test_command": "true"]).isError)
         // Review none isn't taken for a Codex task.
         let refused = lead.call("add_task", ["title": "Add b", "goal": "g", "acceptance": ["a"], "agent": "codex", "review": "none"])
@@ -208,6 +211,7 @@ struct CodexWorkerTests: LeadTeamFixture {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
+        lead.codexWorkers = true
         _ = lead.call("add_task", ["title": "By codex", "goal": "g", "acceptance": ["a"], "agent": "codex"])
         _ = lead.call("add_task", ["title": "By claude", "goal": "g", "acceptance": ["a"]])
         let status = lead.call("status", [:]).text
@@ -233,10 +237,38 @@ struct CodexWorkerTests: LeadTeamFixture {
                             store: usageStore, home: temp.url("no-home").path) { _ in }
         _ = lead.call("add_task", ["title": "On claude", "goal": "g", "acceptance": ["a"]])
         _ = lead.call("add_task", ["title": "On codex", "goal": "g", "acceptance": ["a"], "agent": "codex"])
+        // While Codex workers can't be started, nothing suggests one.
+        let plain = lead.call("start_worker", ["task": "on-claude"])
+        #expect(plain.isError && !plain.text.contains("agent: codex"), "\(plain.text)")
+        lead.codexWorkers = true
         let refused = lead.call("start_worker", ["task": "on-claude"])
         #expect(refused.isError && refused.text.contains("update_task(on-claude, agent: codex)"), "\(refused.text)")
         let started = lead.call("start_worker", ["task": "on-codex"])
         #expect(!started.isError, "\(started.text)")
+    }
+
+    /// Codex's TUI renders blank under the session host (2026-11-01, task codex-tui-under-host): until that's solved,
+    /// start_worker refuses a codex task and auto_advance starts none, so nobody starts one by accident.
+    @Test func codexWorkersArentStartedByHandOrByItselfWhileTheyreUnusable() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.power = { nil }
+        #expect(!lead.codexWorkers && !LeadLaunch.codexWorkersUsable)
+        _ = lead.call("add_task", ["title": "By codex", "goal": "g", "acceptance": ["a"], "agent": "codex"])
+        let refused = lead.call("start_worker", ["task": "by-codex"])
+        #expect(refused.isError && refused.text.contains(LeadLaunch.codexUnusable), "\(refused.text)")
+        #expect(runtime.spawned.isEmpty && task("by-codex", root)?.status == .planned)
+        let advancing = LeadAdvanceTests.Advancing(lead)
+        defer { advancing.stop() }
+        let said = { (try? String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8))?.contains("by-codex won't start by itself") == true }
+        #expect(advancing.until(said))
+        advancing.settle()
+        #expect(runtime.spawned.isEmpty && task("by-codex", root)?.status == .planned)
+        // On Claude, it starts.
+        #expect(!lead.call("update_task", ["task": "by-codex", "agent": "claude"]).isError)
+        #expect(advancing.until { task("by-codex", root)?.status == .running })
+        #expect(runtime.agents.values.allSatisfy { $0 == "claude" })
     }
 
     @Test func aClaudeWorkersBriefHasNoCodexPartAndACodexOnesListsWhatCodexCantEnforce() throws {

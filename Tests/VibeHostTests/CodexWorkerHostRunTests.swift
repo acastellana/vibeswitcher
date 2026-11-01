@@ -36,7 +36,8 @@ import Testing
         let app = try TestClient(host)
         try FileManager.default.createSymbolicLink(atPath: vibe + "/host.sock", withDestinationPath: host.socket)
         try JSONEncoder().encode(MacLimits(maxSessions: 10, loadThreshold: 100_000)).write(to: URL(fileURLWithPath: vibe + "/mac-limits.json"))
-        let env = "HOME='\(home)' CFFIXED_USER_HOME='\(home)' VIBESWITCHER_HOME='\(vibe)'"
+        // Codex workers are refused unless the lead's tool server says otherwise (`LeadLaunch.codexWorkersUsable`).
+        let env = "HOME='\(home)' CFFIXED_USER_HOME='\(home)' VIBESWITCHER_HOME='\(vibe)' VIBESWITCHER_CODEX_WORKERS=1"
 
         // The project's Codex command: the real CLI, with your Codex home (its sign-in) and Homebrew's node on PATH.
         let codex = dir + "/codex"

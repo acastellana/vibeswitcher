@@ -65,7 +65,8 @@ deny it. A worker brings its branch up to date by merging the base in.
 
 A task can name its worker's agent: `add_task` or `update_task` with `agent: codex` (`claude` is the default). It's
 meant for bounded, mechanical tasks with a tight contract, to spread usage onto the Codex account when Claude's limits
-run low; near a Claude limit, start_worker's refusal and auto_advance's hold suggest it, and the lead decides. Codex
+run low; near a Claude limit, start_worker's refusal and auto_advance's hold suggest it (once Codex workers are usable:
+see "Not yet" below), and the lead decides. Codex
 only implements: the lead, verifiers and the risk check stay Claude.
 
 A Codex worker is the project's Codex command (its Codex launch preset) started in the task's worktree with:
@@ -107,7 +108,10 @@ Review a Codex worker's output critically: it's the audit's job, and the start_w
 Not yet: a real Codex worker doesn't start through the session host. Under the host, with no view attached, Codex
 0.160's TUI draws only blank frames and starts no MCP server, so its tools never connect and start_worker ends it
 after 45 s (reproduced by the on-demand `CodexWorkerHostRunTests`; `codex exec` with the same configuration works, see
-`CodexRealRunTests`). Until that's solved, don't give tasks `agent: codex`.
+`CodexRealRunTests`; the investigation is the task codex-tui-under-host). Until it's solved, start_worker refuses a
+codex task ("Codex workers aren't usable yet"), auto_advance starts none (it tells the lead once), and the usage watch
+doesn't suggest Codex. `VIBESWITCHER_CODEX_WORKERS=1` in the lead's tool server's environment lifts that, for the
+investigation only.
 
 Not yet either: a message to a Codex worker that sits idle (findings sent back after its report, the lead's message, a
 catch-up notice) waits in its inbox, because delivery types into an idle agent only when it sees Claude Code's input

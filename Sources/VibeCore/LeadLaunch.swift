@@ -243,6 +243,16 @@ public enum LeadLaunch {
 
     // MARK: Codex workers
 
+    /// Whether a Codex worker can be started: not yet. Under the session host, with no view attached, Codex 0.160's TUI
+    /// draws only blank frames and starts no MCP server, so its tools never connect (2026-11-01, the on-demand
+    /// `CodexWorkerHostRunTests`; the investigation is task codex-tui-under-host). Until it can, start_worker refuses
+    /// codex tasks, auto_advance starts none, and the usage watch suggests none. `VIBESWITCHER_CODEX_WORKERS=1` in the
+    /// lead's tool server's environment lets them start, for that investigation only.
+    public static let codexWorkersUsable = ProcessInfo.processInfo.environment["VIBESWITCHER_CODEX_WORKERS"] == "1"
+
+    /// Why a codex task's worker isn't started, while `codexWorkersUsable` is false.
+    public static let codexUnusable = "Codex workers aren't usable yet: the Codex TUI renders blank under the session host (see codex-tui-under-host)."
+
     /// The guard rails a Claude worker's rules hold that Codex can't be made to hold, each with what checks it instead.
     /// Codex has no per-session deny rules: its command rules (`.rules` files) load only from its own home, the
     /// project's `.codex` folder or managed requirements, none of which a session's command line names, and its
