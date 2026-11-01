@@ -106,6 +106,8 @@ struct CodexWorkerTests: LeadTeamFixture {
                 && writable.contains(common + "/refs/heads/agent") && writable.contains("/" + tmp), "\(writable)")
         #expect(!writable.contains(common) && !writable.contains(common + "/refs/heads") && !writable.contains(root), "\(writable)")
         #expect(config["sandbox_workspace_write.network_access"] == "false")
+        // Its tools pre-approved: under approval never Codex refuses a tool call needing approval (the real run's lesson).
+        #expect(config["mcp_servers.vibeswitcher.default_tools_approval_mode"] == "\"approve\"")
         #expect(config["projects.\"\(worktree)\".trust_level"] == "\"trusted\"")
         // The worker's environment, as a Claude worker's.
         #expect(runtime.environments[spawn.id]?["GIT_EDITOR"] == "true" && runtime.environments[spawn.id]?[SessionNote.roleVariable] == "worker")

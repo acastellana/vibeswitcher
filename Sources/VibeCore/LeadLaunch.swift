@@ -255,6 +255,8 @@ public enum LeadLaunch {
          "merge takes the base's copy of the lead's records whatever the branch did to them (`Worktrees.takeBaseRecords`), and the Claude audit's integrity check reads the rest of the diff"),
         ("no reads of VibeSwitcher's private files (~/.vibeswitcher/lead, ~/.vibeswitcher/steer)",
          "its brief, and the session host's checks: it tells callers apart by their process, never by what they've read"),
+        ("your own Codex rules (~/.codex/rules) stay in force: a command prefix you approved there runs outside the sandbox",
+         "Codex's TUI loads them whatever a session says (only `codex exec --ignore-rules` skips them); keep them narrow, and the Claude audit reads what the branch did"),
         ("pkill, killall and debuggers refused by rule",
          "its brief, and its sandbox: a sandboxed command signals only its own processes"),
     ]
@@ -326,6 +328,9 @@ public enum LeadLaunch {
             ("mcp_servers.vibeswitcher.command", toml(server)),
             ("mcp_servers.vibeswitcher.args", toml(args)),
             ("mcp_servers.vibeswitcher.startup_timeout_sec", "60"),
+            // Its tools need no approval: under approval never, Codex refuses a tool call that needs one ("MCP tool call
+            // requires approval, but approval policy is never", the real run of 2026-11-01), and no worker could report.
+            ("mcp_servers.vibeswitcher.default_tools_approval_mode", toml("approve")),
         ]
         let record: [String: Any] = ["config": config.map { ["key": $0.key, "value": $0.value] }, "writableRoots": writable,
                                      "mcpServer": ["command": server, "args": args],

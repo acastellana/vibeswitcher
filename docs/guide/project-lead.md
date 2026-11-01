@@ -72,7 +72,8 @@ A Codex worker is the project's Codex command (its Codex launch preset) started 
 
 - the same brief as a Claude worker's (as Codex's `developer_instructions`), plus a part on its sandbox and the rules
   below;
-- the VibeSwitcher tool server as its one MCP server, scoped to the repository, the task and the worker role, so
+- the VibeSwitcher tool server as its one MCP server, its tools pre-approved (under approval never Codex refuses an MCP
+  call that needs approval), scoped to the repository, the task and the worker role, so
   `progress`, `report`, `ask_lead` and `answer_findings` work as for any worker, and auto_advance moves its work on the
   same way. `--no-daemon` keeps that server under the session's own process, which is how the session host tells which
   session asks;
@@ -98,6 +99,7 @@ checks it instead:
 | The refused git commands that stay on its own branch or another `agent/` one (amend, reset --hard, checkout or branch -D of another task's branch) | The sandbox holds the ones that write elsewhere (`main`, tags, config, the remote); the Claude audit's integrity check reads the branch's history |
 | No edits to the records folder (`docs/lead`) | Merge takes the base's copy of the lead's records whatever the branch did to them; the audit reads the rest of the diff |
 | No reads of `~/.vibeswitcher/lead` and `~/.vibeswitcher/steer` | Its brief; the session host tells callers apart by their process, never by what they've read |
+| (none: Codex's own) | Your Codex rules (`~/.codex/rules`) stay in force: a command prefix you approved there runs outside the sandbox. The TUI loads them whatever a session says (only `codex exec --ignore-rules` skips them), so keep them narrow; the audit reads what the branch did |
 | pkill, killall and debuggers refused by rule | Its brief; a sandboxed command signals only its own processes |
 
 Review a Codex worker's output critically: it's the audit's job, and the start_worker reply says so.
