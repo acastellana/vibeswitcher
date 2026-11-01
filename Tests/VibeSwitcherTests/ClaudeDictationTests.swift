@@ -360,6 +360,56 @@ struct ClaudeDictationTests {
         #expect(ended?.contains("cancelled by a message sent over it") == true, "\(String(describing: ended))")
     }
 
+    /// Timers on a clock the test moves on: what's due fires in order as it passes.
+    @MainActor final class Timers {
+        var now = Date(timeIntervalSinceReferenceDate: 0)
+        private var due: [(at: Date, id: Int, work: () -> Void)] = []
+        private var made = 0
+
+        func schedule(_ delay: TimeInterval, _ work: @escaping () -> Void) -> () -> Void {
+            made += 1
+            let id = made
+            due.append((now.addingTimeInterval(delay), id, work))
+            return { [weak self] in self?.due.removeAll { $0.id == id } }
+        }
+
+        func advance(by seconds: TimeInterval) {
+            let end = now.addingTimeInterval(seconds)
+            while let next = due.filter({ $0.at <= end }).min(by: { ($0.at, $0.id) < ($1.at, $1.id) }) {
+                due.removeAll { $0.id == next.id }
+                now = max(now, next.at)
+                next.work()
+            }
+            now = end
+        }
+    }
+
+    /// A hold's first read slower than `firstRepeatWithin` (a loaded Mac): its second Space still goes within Claude's
+    /// 120 ms of the first, at that timer, and every repeat after within it too. Late, Claude's repeat chain broke and
+    /// the first Space stayed typed in its box before the recording.
+    @Test func aSlowFirstReadDoesntBreakClaudesRepeatChain() {
+        let timers = Timers()
+        var spaces: [Date] = []
+        var reads = 0
+        let session = ClaudeVoiceSession(keys: { keys in
+            if keys == [ClaudeVoiceRun.space] { spaces.append(timers.now) }
+            return true
+        }, screen: { done in
+            reads += 1
+            // The box check answers; the hold's reads are held back.
+            if reads == 1 { done(ClaudeDictationTests.screen()) }
+        }, command: { _ in true })
+        let run = ClaudeVoiceRun(session: session, schedule: timers.schedule, now: { timers.now }) { _ in }
+        run.start()
+        #expect(spaces.count == 1)
+        timers.advance(by: 0.3)
+        #expect(reads == 2, "the hold's first read is still out")
+        #expect(spaces.count >= 4, "\(spaces.count) Spaces")
+        let gaps = zip(spaces, spaces.dropFirst()).map { $1.timeIntervalSince($0) }
+        #expect(gaps.allSatisfy { $0 < 0.12 }, "gaps between Spaces: \(gaps)")
+        run.cancel(.button)
+    }
+
     // MARK: - Against FakeClaude's /voice
 
     /// The harness's session, as the window gives it to dictation, a message sent over a dictation cancelling it as the
@@ -403,6 +453,11 @@ struct ClaudeDictationTests {
 
     var input: (Harness) -> String { { $0.agent["input"] as? String ?? "?" } }
 
+    /// What Claude's box may hold once it listens: none of its warmup's spaces, only those of a chain that broke before
+    /// it recorded (a stall past its 120 ms between two Spaces on a loaded Mac, the app's or Claude's), as Claude's
+    /// does. They never reach the composer, and the box is cleared after.
+    func strays(_ agent: [String: Any]) -> String { String(repeating: " ", count: agent["strayed"] as? Int ?? 0) }
+
     @Test func heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
@@ -418,11 +473,8 @@ struct ClaudeDictationTests {
         try await h.waitFor { controller.listening }
         let heard = h.agent
         #expect(heard["recording"] as? String == "listening")
-        // The warmup's spaces are gone: what it hears is dim, not typed. A chain that broke before it recorded (a stall
-        // past Claude's 120 ms between two Spaces, the app's or Claude's, on a loaded Mac) leaves the spaces it typed, as
-        // Claude's does: those alone may be there, and they never reach the composer nor stay in the box (below).
-        let strayed = heard["strayed"] as? Int ?? 0
-        #expect(heard["input"] as? String == String(repeating: " ", count: strayed), "strayed \(strayed)")
+        // The warmup's spaces are gone: what it hears is dim, not typed.
+        #expect(heard["input"] as? String == strays(heard))
         controller.release()
         try await h.waitFor { controller.phase == .idle }
 
@@ -1042,8 +1094,9 @@ struct ClaudeDictationTests {
 
         controller.press(h.key, agent: .claude) { "" }
         try await h.waitFor { controller.listening }
-        #expect(h.agent["recording"] as? String == "listening")
-        #expect(input(h) == "")
+        let heard = h.agent
+        #expect(heard["recording"] as? String == "listening")
+        #expect(heard["input"] as? String == strays(heard))
         controller.release()
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
