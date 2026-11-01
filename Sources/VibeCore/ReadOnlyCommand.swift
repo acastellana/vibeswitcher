@@ -18,7 +18,26 @@ public enum ReadOnlyCommand {
     /// Whether `line` runs without a prompt.
     public static func allows(_ line: String) -> Bool {
         guard let parts = parts(of: line), !parts.isEmpty else { return false }
-        return parts.allSatisfy(allowsPart)
+        return parts.allSatisfy { allowsPart($0) && !$0.dropFirst().contains(where: reachesOutside) }
+    }
+
+    /// Whether `word` (quotes and escapes taken off) could name a path outside the worktree the verifier runs in:
+    /// the hook mustn't open a new way to read private files (~/.vibeswitcher/lead, the steer folder) without a prompt.
+    /// Each piece of it (split at "=", ":" and ",", as in `--file=x`, `HEAD:x`) that's absolute, starts with "~", or
+    /// climbs above where it starts (`..`, `../x`, `a/../..`, `./..`); "$HOME" anywhere; and a short flag with a
+    /// value attached that holds a "/" (`-f/etc/x`). A pattern that looks like one still prompts: fail closed.
+    static func reachesOutside(_ word: String) -> Bool {
+        if word.contains("$HOME") || word.contains("${HOME") { return true }
+        if word.hasPrefix("-"), !word.hasPrefix("--"), word.contains("/") { return true }
+        return word.split(omittingEmptySubsequences: false, whereSeparator: { "=:,".contains($0) }).contains { piece in
+            if piece.hasPrefix("/") || piece.hasPrefix("~") { return true }
+            var depth = 0
+            for component in piece.split(separator: "/") where component != "." {
+                depth += component == ".." ? -1 : 1
+                if depth < 0 { return true }
+            }
+            return false
+        }
     }
 
     /// The hook's answer to Claude Code's `PermissionRequest` event (its JSON on stdin): allow a Bash call `allows`
@@ -232,11 +251,17 @@ public enum ReadOnlyCommand {
         // Options before the command (`-C`, `-c`, `--git-dir`) aren't taken: they change what git reads or runs.
         guard let command = args.first, gitReads.contains(command) else { return false }
         let rest = Array(args.dropFirst())
-        // Writes a file, or runs a program the repository's config names.
-        if rest.contains(where: { long($0, ["--output", "--ext-diff", "--textconv", "--filters", "--exec", "--open-files-in-pager"]) }) {
+        // Writes a file, or runs a program the repository's config names; or reads a file named elsewhere (stdin,
+        // a list file) or outside the repository (`diff --no-index`), which the path check doesn't see.
+        if rest.contains(where: { long($0, ["--output", "--ext-diff", "--textconv", "--filters", "--exec", "--open-files-in-pager",
+                                            "--no-index", "--stdin", "--pathspec-from-file"]) }) {
             return false
         }
         switch command {
+        case "blame":
+            // `--contents FILE`, `--ignore-revs-file FILE` and `-S FILE` read the file they name (outside the
+            // repository as well).
+            return !rest.contains { long($0, ["--contents", "--ignore-revs-file"]) || shortFlags($0).contains("S") }
         case "remote":
             return rest.isEmpty || rest == ["-v"] || rest == ["--verbose"]
         case "branch":

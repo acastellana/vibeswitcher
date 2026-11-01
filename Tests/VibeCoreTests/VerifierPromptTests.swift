@@ -24,6 +24,9 @@ struct VerifierPromptTests {
         "sort --sort=version -- -T", "git log | head -3", "git diff --stat && git status", "git log -1 || git status",
         "grep -c x a.txt 2>/dev/null", "git log 2>&1 | tail -5", "git show HEAD > /dev/null", "rg x >/dev/null 2>&1",
         "git log --format='%h %s' -3", "git status\ngit log -1", "grep 'a;b|c' x.txt", "grep a\\;b x",
+        // Paths inside the worktree, revisions with ~ and .., and git log's pickaxe (-S is blame's file only).
+        "grep -rn x ./Sources", "rg x Sources/../Tests", "head a/b/../c.txt", "git log HEAD~3..HEAD", "git diff main..HEAD~1 -- .",
+        "git show HEAD~2:Sources/a.swift", "git log -Sfoo --oneline", "git blame -L 1,9 -w a.swift", "grep -f patterns.txt a",
     ]
 
     /// The ones that still prompt: anything that writes, runs something else, isn't on the list, or doesn't parse.
@@ -60,6 +63,18 @@ struct VerifierPromptTests {
         // Brace expansion turns a word the checks pass into the flags they refuse (the blind check's).
         "git diff --{output=out.txt,stat}", "git diff --{ext-diff,stat}", "git cat-file --{filters,batch-check} HEAD:a",
         "rg --{pre=./x,hidden} foo", "sort --{output=f,unique} a", "tail --{follow,lines=5} a.log", "git log @{u}..HEAD",
+        // Paths outside the worktree (the lead's private folders): absolute, ~, $HOME, climbing out, quoted or escaped.
+        "grep x /Users/x/.vibeswitcher/lead/board.json", "head /etc/passwd", "rg x ~/.vibeswitcher", "tail ~/a.log", "wc -l ~x/a",
+        "grep x '$HOME/.vibeswitcher/lead'", "grep x '${HOME}/a'", "wc ../x", "head ../main/a", "grep -r x ..", "rg x a/../..",
+        "rg x ./..", "grep x Sources/../../steer/a", "grep x '../a'", "grep x \"../a\"", "grep x .\\./a", "head '/etc/hosts'",
+        "head \\/etc/hosts", "grep --file=/etc/x a", "grep --file=../x a", "grep -f/etc/x a", "grep -f ../x a", "rg -g/x foo",
+        "sort -k2 /etc/x", "git show HEAD:../x", "git diff -- /etc/hosts", "git log -- ../other", "git blame ../x",
+        "git log ~/x", "git diff --stat ..", "grep x a ; head /etc/x", "git status && grep x ~/.ssh/config",
+        // git that reads a file named elsewhere or outside the repository.
+        "git diff --no-index a b", "git diff --no-ind a b", "git blame --contents x a.swift", "git blame --contents=x a.swift",
+        "git blame --ignore-revs-file x a", "git blame --ignore-revs-file=x a", "git blame -S revs a", "git blame -wS revs a",
+        "git log --stdin", "git show --stdin", "git log --pathspec-from-file=list", "git diff --pathspec-from-file list",
+        "git ls-files --pathspec-from-file=list",
         // ripgrep flags that run programs, or that it may gain: only the known reading ones are taken.
         "rg --hostname-bin=./x --hyperlink-format=default foo", "rg --hostname-bin ./x foo", "rg --some-new-flag foo",
     ]
