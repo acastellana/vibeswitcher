@@ -114,7 +114,10 @@ struct CodexWorkerTests: LeadTeamFixture {
         // Where VibeSwitcher's folder is goes along to its tool server (Codex hands an MCP server only a few variables).
         let variables: [String] = try json(config["mcp_servers.vibeswitcher.env_vars"])
         #expect(variables.contains("VIBESWITCHER_HOME") && variables.contains("HOME"))
-        #expect(config["projects.\"\(worktree)\".trust_level"] == "\"trusted\"")
+        // Trusted as the whole `projects` table: Codex splits a -c key on every dot, so `projects."<path>".trust_level` never applies.
+        #expect(config["projects"] == "{\"\(worktree)\" = {trust_level = \"trusted\"}}")
+        #expect(!config.keys.contains { $0.hasPrefix("projects.") })
+        #expect(config["check_for_update_on_startup"] == "false")
         // The worker's environment, as a Claude worker's.
         #expect(runtime.environments[spawn.id]?["GIT_EDITOR"] == "true" && runtime.environments[spawn.id]?[SessionNote.roleVariable] == "worker")
     }
@@ -237,24 +240,28 @@ struct CodexWorkerTests: LeadTeamFixture {
                             store: usageStore, home: temp.url("no-home").path) { _ in }
         _ = lead.call("add_task", ["title": "On claude", "goal": "g", "acceptance": ["a"]])
         _ = lead.call("add_task", ["title": "On codex", "goal": "g", "acceptance": ["a"], "agent": "codex"])
-        // While Codex workers can't be started, nothing suggests one.
+        // By default the refusal suggests Codex.
+        #expect(lead.codexWorkers)
+        let refused = lead.call("start_worker", ["task": "on-claude"])
+        #expect(refused.isError && refused.text.contains("update_task(on-claude, agent: codex)"), "\(refused.text)")
+        // Switched off (VIBESWITCHER_CODEX_WORKERS=0), nothing suggests one.
+        lead.codexWorkers = false
         let plain = lead.call("start_worker", ["task": "on-claude"])
         #expect(plain.isError && !plain.text.contains("agent: codex"), "\(plain.text)")
         lead.codexWorkers = true
-        let refused = lead.call("start_worker", ["task": "on-claude"])
-        #expect(refused.isError && refused.text.contains("update_task(on-claude, agent: codex)"), "\(refused.text)")
         let started = lead.call("start_worker", ["task": "on-codex"])
         #expect(!started.isError, "\(started.text)")
     }
 
-    /// Codex's TUI renders blank under the session host (2026-11-01, task codex-tui-under-host): until that's solved,
+    /// Codex workers start by default (task codex-s-tui-renders); switched off (`VIBESWITCHER_CODEX_WORKERS=0`),
     /// start_worker refuses a codex task and auto_advance starts none, so nobody starts one by accident.
-    @Test func codexWorkersArentStartedByHandOrByItselfWhileTheyreUnusable() throws {
+    @Test func codexWorkersStartByDefaultAndArentStartedWhileSwitchedOff() throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         lead.power = { nil }
-        #expect(!lead.codexWorkers && !LeadLaunch.codexWorkersUsable)
+        #expect(LeadLaunch.codexWorkersUsable && lead.codexWorkers)
+        lead.codexWorkers = false
         _ = lead.call("add_task", ["title": "By codex", "goal": "g", "acceptance": ["a"], "agent": "codex"])
         let refused = lead.call("start_worker", ["task": "by-codex"])
         #expect(refused.isError && refused.text.contains(LeadLaunch.codexUnusable), "\(refused.text)")

@@ -65,8 +65,7 @@ deny it. A worker brings its branch up to date by merging the base in.
 
 A task can name its worker's agent: `add_task` or `update_task` with `agent: codex` (`claude` is the default). It's
 meant for bounded, mechanical tasks with a tight contract, to spread usage onto the Codex account when Claude's limits
-run low; near a Claude limit, start_worker's refusal and auto_advance's hold suggest it (once Codex workers are usable:
-see "Not yet" below), and the lead decides. Codex
+run low; near a Claude limit, start_worker's refusal and auto_advance's hold suggest it, and the lead decides. Codex
 only implements: the lead, verifiers and the risk check stay Claude.
 
 A Codex worker is the project's Codex command (its Codex launch preset) started in the task's worktree with:
@@ -105,17 +104,16 @@ checks it instead:
 
 Review a Codex worker's output critically: it's the audit's job, and the start_worker reply says so.
 
-Not yet: a real Codex worker doesn't start through the session host. Under the host, with no view attached, Codex
-0.160's TUI draws only blank frames and starts no MCP server, so its tools never connect and start_worker ends it
-after 45 s (reproduced by the on-demand `CodexWorkerHostRunTests`; `codex exec` with the same configuration works, see
-`CodexRealRunTests`; the investigation is the task codex-tui-under-host). Until it's solved, start_worker refuses a
-codex task ("Codex workers aren't usable yet"), auto_advance starts none (it tells the lead once), and the usage watch
-doesn't suggest Codex. `VIBESWITCHER_CODEX_WORKERS=1` in the lead's tool server's environment lifts that, for the
-investigation only.
-
-Not yet either: a message to a Codex worker that sits idle (findings sent back after its report, the lead's message, a
-catch-up notice) waits in its inbox, because delivery types into an idle agent only when it sees Claude Code's input
-box. Until Codex's is recognised too, message such a worker again once it works, or start_worker it afresh.
+A Codex worker starts through the session host as a Claude worker does: its TUI draws, its tools connect, it calls
+progress and report, and between turns it takes a message (the lead's, a verifier's findings that auto_advance sends
+back, what waited in its inbox) typed in as its next prompt. Its hooks (VibeSwitcher's Codex hooks, in your Codex home)
+tell when its turn is over, and its composer is read as Claude's box is (`LeadDelivery.codexBox`). The on-demand
+`CodexWorkerHostRunTests` runs a real one through all of that. Until 2026-11-01 none of it did (task
+codex-s-tui-renders): every hosted session started on a 0×0 terminal, where Codex 0.160's TUI draws only blank frames;
+the worktree's trust key never applied, so Codex sat on its trust prompt and started no MCP server; and its composer
+wasn't recognised. Should a Codex release break it again, `VIBESWITCHER_CODEX_WORKERS=0` in the lead's tool server's
+environment switches Codex workers off: start_worker refuses a codex task, auto_advance starts none (it tells the lead
+once), and the usage watch doesn't suggest Codex.
 
 ## Review levels and audits
 

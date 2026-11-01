@@ -89,10 +89,10 @@ extension LeadDelivery {
         let lines = screen.replacingOccurrences(of: "\u{0}", with: " ").components(separatedBy: "\n")
         let rules = lines.indices.filter { lines[$0].filter { $0 == "─" }.count >= 20 }
         let shown = { lines.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.suffix(6).joined(separator: " / ") }
-        guard rules.count >= 2 else { return .dialog(shown()) }
+        guard rules.count >= 2 else { return codexBox(lines, runs: runs) ?? .dialog(shown()) }
         let (top, bottom) = (rules[rules.count - 2], rules[rules.count - 1])
         guard top + 1 < bottom, lines[top + 1].trimmingCharacters(in: .whitespaces).hasPrefix("❯"),
-              let marker = lines[top + 1].firstIndex(of: "❯") else { return .dialog(shown()) }
+              let marker = lines[top + 1].firstIndex(of: "❯") else { return codexBox(lines, runs: runs) ?? .dialog(shown()) }
         let rows = ((top + 1)..<bottom).map { row -> String in
             let line = Array(lines[row])
             let from = row == top + 1 ? lines[row].distance(from: lines[row].startIndex, to: marker) + 1 : 0
@@ -107,6 +107,39 @@ extension LeadDelivery {
     }
 
     public static func box(in screen: Screen) -> Box { box(in: screen.text, runs: screen.runs) }
+
+    /// What Codex's placeholder says when it isn't an example prompt (the only one told without `runs`).
+    static let codexPlaceholder = "Ask Codex to do anything"
+
+    /// Codex's composer (CLI 0.160, captured under the session host: `CodexWorkerHostRunTests`), at the bottom of its
+    /// screen: a blank row, the `›` row and the rows its text wraps onto, a blank row, then at most three footer rows
+    /// (its model and folder, `? for shortcuts`). What it draws faint there is its placeholder, never typed text. A
+    /// notice above it in the transcript ("Press a number to choose · esc to dismiss · type to continue") doesn't take
+    /// the keys: a paste and Enter go to the composer. nil when the bottom isn't that shape, or its `›` row starts a
+    /// numbered choice (`› 1. Yes, proceed`): a selection Codex shows in place of its composer, which is a dialog.
+    static func codexBox(_ lines: [String], runs: [ScreenRun]?) -> Box? {
+        let blank = { (row: Int) in lines[row].trimmingCharacters(in: .whitespaces).isEmpty }
+        var end = lines.count
+        while end > 0, blank(end - 1) { end -= 1 }
+        // Up past the footer (1 to 3 rows) to the blank row under the composer.
+        var gap = end - 1
+        while gap >= 0, !blank(gap), end - gap <= 3 { gap -= 1 }
+        guard gap > 0, gap < end - 1, blank(gap) else { return nil }
+        // Up through the composer's rows to its `›` row; the row above it is blank.
+        var start = gap - 1
+        while start >= 0, !blank(start), !lines[start].hasPrefix("›"), gap - start <= 8 { start -= 1 }
+        guard start > 0, lines[start].hasPrefix("›"), blank(start - 1) else { return nil }
+        let rows = (start..<gap).map { row -> String in
+            let line = Array(lines[row])
+            let from = row == start ? 1 : 0
+            let dim = runs.map { dimColumns(row: row, runs: $0) } ?? []
+            return String(line.indices.filter { $0 >= from && !dim.contains($0) }.map { line[$0] }).trimmingCharacters(in: .whitespaces)
+        }
+        let typed = rows.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        if typed.range(of: #"^\d+\. "#, options: .regularExpression) != nil { return nil }
+        if typed.isEmpty || (runs == nil && typed == codexPlaceholder) { return .empty }
+        return .draft(typed)
+    }
 
     /// What the input box shows dim (Claude's placeholder, its suggestion, the words its dictation hears before they're
     /// final), its rows joined by spaces; nil when there's no box or the host doesn't say what's dim.

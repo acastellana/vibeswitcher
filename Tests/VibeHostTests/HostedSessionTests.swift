@@ -73,6 +73,17 @@ struct HostedSessionTests {
         #expect(env.contains { $0.hasPrefix("LANG=") })
     }
 
+    /// The program starts with the window size it was asked for, before any view attaches or resizes it. macOS clears
+    /// a terminal's size when its last slave descriptor closes, so the host holds its own until the program has opened
+    /// the terminal: a 0×0 terminal made Codex's TUI draw nothing at all (task codex-s-tui-renders).
+    @Test func theProgramStartsWithTheAskedWindowSize() throws {
+        let probe = SessionProbe()
+        let session = try start("stty size; exit 0", probe: probe)
+        #expect(eventually { probe.lastChange?.exit != nil }, "\(probe.diagnosis(session))")
+        #expect(probe.text.contains("24 80"), "\(probe.diagnosis(session))")
+        probe.queue.sync { session.close() }
+    }
+
     @Test func runsTheCommandInThePTYAndRecordsTheExit() throws {
         let probe = SessionProbe()
         let session = try start("echo out:$PROBE; tty; exit 3", probe: probe)

@@ -46,8 +46,13 @@ public enum HookOwner {
         return agents.isEmpty ? .none : lineage(of: agents)
     }
 
+    /// Only the agents on the nearest one's terminal: an agent further up on another terminal started a new session
+    /// above it (a session host it runs under, a test's), not this one, so it isn't an outer session. A Codex worker
+    /// in a test's session host under Claude Code was taken for nested and its hooks wrote nothing (task
+    /// codex-s-tui-renders); `codex exec` run by Claude shares Claude's terminal and is still nested.
     private static func lineage(of agents: [ProcInfo]) -> Lineage {
-        guard agents.count == 1, let tty = agents[0].tty else { return .nested }
+        guard let tty = agents.first?.tty else { return .nested }
+        guard agents.filter({ $0.tty == tty }).count == 1 else { return .nested }
         return .agent(pid: agents[0].pid, tty: tty)
     }
 

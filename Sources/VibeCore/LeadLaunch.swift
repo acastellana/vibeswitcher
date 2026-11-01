@@ -243,15 +243,16 @@ public enum LeadLaunch {
 
     // MARK: Codex workers
 
-    /// Whether a Codex worker can be started: not yet. Under the session host, with no view attached, Codex 0.160's TUI
-    /// draws only blank frames and starts no MCP server, so its tools never connect (2026-11-01, the on-demand
-    /// `CodexWorkerHostRunTests`; the investigation is task codex-tui-under-host). Until it can, start_worker refuses
-    /// codex tasks, auto_advance starts none, and the usage watch suggests none. `VIBESWITCHER_CODEX_WORKERS=1` in the
-    /// lead's tool server's environment lets them start, for that investigation only.
-    public static let codexWorkersUsable = ProcessInfo.processInfo.environment["VIBESWITCHER_CODEX_WORKERS"] == "1"
+    /// Whether a Codex worker can be started: yes, unless `VIBESWITCHER_CODEX_WORKERS=0` is in the lead's tool server's
+    /// environment (an off switch, should a Codex release stop working under the host again). Off from 2026-11-01 until
+    /// task codex-s-tui-renders made it work: every hosted session started on a 0×0 terminal (`PTYSpawn.spawn`), the
+    /// worktree's trust key never applied (`prepareCodex`), and an idle Codex worker couldn't be messaged (its composer
+    /// is `LeadDelivery.codexBox`; its hooks say its turn is over). While it's off, start_worker refuses codex tasks,
+    /// auto_advance starts none, and the usage watch suggests none.
+    public static let codexWorkersUsable = ProcessInfo.processInfo.environment["VIBESWITCHER_CODEX_WORKERS"] != "0"
 
     /// Why a codex task's worker isn't started, while `codexWorkersUsable` is false.
-    public static let codexUnusable = "Codex workers aren't usable yet: the Codex TUI renders blank under the session host (see codex-tui-under-host)."
+    public static let codexUnusable = "Codex workers are switched off (VIBESWITCHER_CODEX_WORKERS=0 in the lead's tool server's environment)."
 
     /// The guard rails a Claude worker's rules hold that Codex can't be made to hold, each with what checks it instead.
     /// Codex has no per-session deny rules: its command rules (`.rules` files) load only from its own home, the
@@ -337,7 +338,13 @@ public enum LeadLaunch {
         let config: [(key: String, value: String)] = [
             ("sandbox_workspace_write.writable_roots", toml(writable)),
             ("sandbox_workspace_write.network_access", "false"),
-            ("projects.\(toml(cwd)).trust_level", toml("trusted")),
+            // The worktree trusted, as the whole `projects` table (for this session only: the file isn't changed). Not as
+            // `projects."<cwd>".trust_level`: Codex splits a -c key on every dot and keeps its quotes, so that key never
+            // matched the folder, and an untrusted folder's TUI opens a trust prompt before it starts any MCP server
+            // (Codex 0.160, task codex-s-tui-renders).
+            ("projects", "{\(toml(cwd)) = {trust_level = \"trusted\"}}"),
+            // No "Update available" prompt at start: no one answers it, and it holds the TUI before the first turn.
+            ("check_for_update_on_startup", "false"),
             ("developer_instructions", toml(prompt)),
             ("mcp_servers.vibeswitcher.command", toml(server)),
             ("mcp_servers.vibeswitcher.args", toml(args)),
