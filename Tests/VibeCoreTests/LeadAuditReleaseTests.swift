@@ -135,10 +135,14 @@ extension LeadAdvanceTests {
         }
         runtime.calls.unlock()
         try work("add-b", file: "b.txt", root: root, runtime)
+        // One deadline for the whole wait: a spurious wakeup waits again, but only until then.
+        let deadline = Date().addingTimeInterval(hangGuard)
         sent.lock()
-        while message == nil { #expect(sent.wait(until: Date().addingTimeInterval(60))) }
+        while message == nil, sent.wait(until: deadline) {}
+        let reply = message
         sent.unlock()
-        #expect(message?.isError == false, "\(message?.text ?? "")")
+        let result = try #require(reply, "the lead's message never went in: the release's look at the sessions never came")
+        #expect(!result.isError, "\(result.text)")
         #expect(advancing.until { reports(runtime).contains { $0.contains("Started the audit of add-b") } })
         advancing.settle()
         #expect(!killed(worker, runtime) && task("add-b", root)?.released == nil)
