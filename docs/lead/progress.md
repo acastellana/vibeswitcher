@@ -2558,3 +2558,5 @@
 - 2026-11-01 07:13 Automatically (auto_advance): Cleaned up the-sidebar-recomputes; ended pid 66562 (Worker: The sidebar recomputes its team arrangement and each lead's blocking questions on every redraw) (freed 1.4 GB of build output and temporary folders). It stays done.
 - 2026-11-01 07:55 Workflow: verifier_model = `opus`
 - 2026-11-01 07:57 Automatically (auto_advance): Didn't start wallet-e2e-real-testnet: wallet-e2e-real-testnet's worker is still running. Send it what to do with message, or stop_worker first.
+- 2026-11-01 08:04 Audit of wallet-card-can-t: incomplete, clean, round 1: 2 Important open, 3 Nit open
+- 2026-11-01 08:04 Automatically (auto_advance): Sent wallet-card-can-t's worker the open Important findings wallet-card-can-t:F1, wallet-card-can-t:F2 from its audit at 125a3180.
