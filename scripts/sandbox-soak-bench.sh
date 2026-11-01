@@ -7,19 +7,21 @@
 # log: each simulated hour's least footprint, malloc in use and the debug counters, a census of what grew, and
 # `RESULT soak-simulated-hour-growth-mb` (a line through each simulated hour's least footprint after the first).
 #
-# scripts/sandbox-soak-bench.sh [--binary PATH] [--dir DIR] [--without LIST] HOURS [CYCLES]
+# scripts/sandbox-soak-bench.sh [--binary PATH] [--dir DIR] [--without LIST] [--max-minutes M] HOURS [CYCLES]
 #   --binary: the build (default: scripts/sandbox-app.sh builds this checkout's).  --dir: the sandbox's folder
-#   (default .build/sandbox-soak).  CYCLES: cycles in a simulated hour (default 20).
+#   (default .build/sandbox-soak).  --max-minutes: real minutes at most (default 15): the soak stops then with the
+#   simulated hours done so far.  CYCLES: cycles in a simulated hour (default 20).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
 
-binary=() dir=.build/sandbox-soak without=""
+binary=() dir=.build/sandbox-soak without="" max_minutes=15
 while [[ $# -gt 0 ]]; do
     case $1 in
         --binary) binary=(--binary "$2"); shift 2 ;;
         --dir) dir=$2; shift 2 ;;
         --without) without=$2; shift 2 ;;
+        --max-minutes) max_minutes=$2; shift 2 ;;
         --*) echo "unknown option $1"; exit 64 ;;
         *) break ;;
     esac
@@ -31,6 +33,8 @@ cycles=${2:-20}
 
 # Room for slow cycles on a loaded Mac: 15 s a cycle at most, and the soak's own minutes as an upper bound.
 minutes=$(( (hours * cycles * 15 + 59) / 60 + 1 ))
+[[ $max_minutes =~ ^[0-9]+$ && $max_minutes -ge 1 ]] || { echo "--max-minutes $max_minutes: a whole number of minutes"; exit 64; }
+((minutes > max_minutes)) && minutes=$max_minutes
 sandbox=(bash scripts/sandbox-app.sh --dir "$dir")
 on_exit "${sandbox[*]} quit >/dev/null 2>&1 < /dev/null"
 "${sandbox[@]}" "${binary[@]}" --minutes $((minutes + 5)) run >/dev/null

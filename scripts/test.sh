@@ -118,7 +118,7 @@ perf_tests=(
     BoardBenchTests/aBigBoardRefreshedBlocksTheMainThreadUnder50ms
     AccessibilityTreeBenchTests
     HostingViewDepthTests
-    SandboxSoakBenchTests/theFootprintIsFlatOverThreeSimulatedHours
+    SandboxSoakBenchTests/theFootprintIsFlatOverFiveSimulatedHours
 )
 
 if [[ ${1:-} == --leftovers ]]; then
