@@ -9,6 +9,7 @@
 # scripts/e2e/wallet-e2e.sh --real-testnet [--dry-run|--check-guards] [--amount WEI] [--from 0x…] [--to 0x…] [--chain N]
 #                           [--wallet-manager DIR] [--binary PATH] [--keep]
 # scripts/e2e/wallet-e2e.sh --judge-case-1 SEEN RECORD
+# scripts/e2e/wallet-e2e.sh --judge-sign-page PAGE [--amount WEI]
 #   --wallet-manager DIR  the Wallet Manager's checkout (~/dev/wallet-manager). Nothing is written there but its
 #                         git-ignored node_modules: when node_modules/.package-lock.json is missing or older than its
 #                         package-lock.json, the run first says so and runs `npm ci --ignore-scripts` in it.
@@ -18,26 +19,32 @@
 #                         writes them, "waiting → sent → received"; RECORD, the Wallet Manager's record as `record`
 #                         prints it, "pending true 1 wallet:ok,recipient-known:failed", or "" for none), prints its
 #                         lines and exits 0 on a pass, 1 on a failure.
+#   --judge-sign-page PAGE  runs nothing: judges a recorded signing page (PAGE, its HTML) as --real-testnet does before
+#                         its POST, for the self-transfer of --amount (1000) wei; prints its line and exits 0 when the
+#                         page signs exactly that, with no warnings, else 2 (refused).
 #
 # --real-testnet: one real GenLayer testnet payment through the same chain, instead of the cases below. Never part of
 # scripts/test.sh, a merge or an audit: it broadcasts a real transaction, so it runs only when asked for by name. It
 # refuses (exit 2, before any network or scratch folder) unless the chain is 4221, `from` is the Wallet Manager
 # project's throwaway testnet wallet (0x4c50…ab99, the address its keystore names) and the transfer is a self-transfer
-# (`to` = `from`) of 1 to 1000 wei, and the Wallet Manager's own NETWORKS.testnet (src/networks.ts, read through node)
-# is chain 4221 at GenLayer's testnet RPC; the explorer link it prints is that entry's. The throwaway keystore and passphrase are read only from
+# (`to` = `from`) of 1 to 1000 wei, and the Wallet Manager's own testnet (`node src/networks.ts --json`, its stable
+# command: docs/protocol/sign-page.md) is chain 4221 at GenLayer's testnet RPC with a pinned genesis hash, which the RPC's
+# block 0 must match before anything starts; the explorer link it prints is that entry's. The throwaway keystore and passphrase are read only from
 # ~/.config/wallet-manager-testnet/ (keystore.json, passphrase: yours, regular files, 0600, in a 0700 folder), copied
 # 0600 into the run's scratch vault, never printed or logged, and removed with it however the run ends (--keep keeps
 # the logs, never those two). The Wallet Manager runs on that vault with no --rpc, so it uses GenLayer's testnet RPC;
 # the sandbox files the request and clicks Send; the run signs on the Wallet Manager's /sign page over HTTP exactly as
 # its docs/running.md, "Signing over HTTP (headless)", has it (GET the page, read its csrf, token and hash, POST the
-# confirmation with the passphrase on stdin): one POST, never retried. It passes when the card shows Signed (the
+# confirmation with the passphrase on stdin): one POST, never retried, and only when the page's machine-readable fields
+# (data-sign-field / data-value, as docs/protocol/sign-page.md has them) say chain 4221, from and to the throwaway
+# wallet, the amount and no call, exactly, and its data-sign-warnings lists none. It passes when the card shows Signed (the
 # result `submitted`) with the transaction, and the RPC's eth_getTransactionReceipt says status 1 for that
 # self-transfer; it prints the explorer link.
 #   --amount WEI (1000), --from 0x… and --to 0x… (the throwaway wallet), --chain N (4221): checked, not chosen freely
 #   --dry-run             everything up to the sign POST (the page fetched and read, the card Proposed), then stops:
 #                         nothing is signed or sent
 #   --check-guards        runs only the refusals above and says they pass: no network, no Wallet Manager or sandbox
-#                         started (the checkout's NETWORKS.testnet is read through node: 4221 at GenLayer's testnet RPC)
+#                         started (the checkout's `node src/networks.ts --json`: 4221 at GenLayer's testnet RPC)
 #
 # Cases, each with the card's final state and a light shot in .build/sandbox-shots/e2e/:
 #   1 a valid testnet transfer from a known wallet: waiting → sent → received (or proposed), not rejected. A check
@@ -61,6 +68,7 @@ wm=$HOME/dev/wallet-manager
 binary=""
 keep=""
 judge=""
+judge_page=""
 real=""
 dry_run=""
 check_guards=""
@@ -89,6 +97,7 @@ while [[ $# -gt 0 ]]; do
         --real-testnet) real=1; shift ;;
         --dry-run) dry_run=1; real_options+=" $1"; shift ;;
         --check-guards) check_guards=1; real_options+=" $1"; shift ;;
+        --judge-sign-page) [[ $# -ge 2 ]] || { echo "--judge-sign-page PAGE"; exit 64; }; judge_page=$2; shift 2 ;;
         --judge-case-1) [[ $# -ge 3 ]] || { echo "--judge-case-1 SEEN RECORD"; exit 64; }; judge_seen=$2; judge_record=$3; judge=1; shift 3 ;;
         -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
         *) echo "unknown option $1 (--help)"; exit 64 ;;
@@ -140,6 +149,54 @@ report_case_1() {
         report "$number" "$title" fail "$why; $seen; record: ${rec:-none}${card:+; card: $(tr '\n' ';' <<<"$card")}" "$shot"
     fi
 }
+# sign_page_refusal PAGE CHAIN FROM TO VALUE: nothing when the signing page (its HTML, in the file PAGE) signs exactly
+# that transfer (no call) and shows no warning; else why not, and fails. Read only through the page's stable hooks
+# (the Wallet Manager's docs/protocol/sign-page.md): exactly one element with data-sign-warnings, its list empty and no
+# element marked data-sign-warning; elements with data-sign-field, each once with a data-value, exactly chain, from, to,
+# value and call (a field it doesn't expect, such as a token's or a Safe's, refuses). Tags, order and text don't count.
+# Comments and script, style, template and textarea contents are not the page's elements. Nothing is unescaped: the
+# values' formats need none, so an escaped one doesn't match.
+sign_page_refusal() {
+    node -e 'const [file, ...want] = process.argv.slice(1);
+        const [chain, from, to, value] = want, expected = { chain, from, to, value, call: "none" };
+        let html; try { html = require("fs").readFileSync(file, "utf8") } catch { console.log("the signing page can'"'"'t be read"); process.exit(1) }
+        html = html.replace(/<!--[\s\S]*?-->/g, "").replace(/<(script|style|template|textarea)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "");
+        const elements = [];
+        for (const [, rest] of html.matchAll(/<[A-Za-z][A-Za-z0-9-]*(\s[^>]*)?>/g)) {
+            const attributes = new Map();
+            for (const m of (rest ?? "").matchAll(/([^\s"'"'"'>\/=]+)(?:\s*=\s*(?:"([^"]*)"|'"'"'([^'"'"']*)'"'"'|([^\s"'"'"'=<>`]+)))?/g)) {
+                const name = m[1].toLowerCase();
+                if (!attributes.has(name)) attributes.set(name, m[2] ?? m[3] ?? m[4] ?? "");
+            }
+            elements.push(attributes);
+        }
+        const refuse = (why) => { console.log(why); process.exit(1) };
+        const lists = elements.filter((a) => a.has("data-sign-warnings"));
+        if (lists.length !== 1) refuse(lists.length === 0 ? "the page has no data-sign-warnings element: it isn'"'"'t a page that can sign" : `the page has ${lists.length} data-sign-warnings elements, not one`);
+        const warnings = [...new Set([...lists[0].get("data-sign-warnings").split(/\s+/), ...elements.filter((a) => a.has("data-sign-warning")).map((a) => a.get("data-sign-warning") || "(unnamed)")])].filter(Boolean);
+        if (warnings.length > 0) refuse(`the page shows warnings: ${warnings.join(" ")}`);
+        const fields = new Map();
+        for (const a of elements.filter((a) => a.has("data-sign-field"))) {
+            const name = a.get("data-sign-field");
+            if (!Object.hasOwn(expected, name)) refuse(`the page signs a field this run doesn'"'"'t expect: ${name || "(unnamed)"}`);
+            if (fields.has(name)) refuse(`the page names its ${name} twice`);
+            if (!a.has("data-value")) refuse(`the page'"'"'s ${name} has no data-value`);
+            fields.set(name, a.get("data-value"));
+        }
+        const wrong = Object.keys(expected).filter((k) => fields.get(k) !== expected[k]);
+        if (wrong.length > 0) refuse(`the page doesn'"'"'t sign what was asked: ${wrong.map((k) => `${k} ${fields.has(k) ? fields.get(k) : "missing"}, not ${expected[k]}`).join("; ")}`);' \
+        "$@" </dev/null
+}
+if [[ -n $judge_page ]]; then
+    [[ -z $judge ]] && [[ $real_options == "" || $real_options == " --amount" ]] && [[ -z $real ]] || { say "wallet-e2e: --judge-sign-page takes only --amount"; exit 64; }
+    command -v node >/dev/null || { say "wallet-e2e: node isn't on the PATH"; exit 1; }
+    if why=$(sign_page_refusal "$judge_page" "$TESTNET_CHAIN" "$THROWAWAY" "$THROWAWAY" "$amount"); then
+        say "wallet-e2e: the signing page signs a self-transfer of $amount wei on $TESTNET_CHAIN from $THROWAWAY, with no warnings"
+        exit 0
+    fi
+    say "wallet-e2e: refused before the sign POST: ${why:-the page could not be judged}"
+    exit 2
+fi
 if [[ -n $judge ]]; then
     report_case_1 1 "valid testnet transfer from a known wallet" "$judge_seen" "$judge_record" ""
     exit $((failures == 0 ? 0 : 1))
@@ -184,24 +241,40 @@ real_testnet_guards() {
     [[ $(printf '%s\n' "$addresses" | grep -c .) == 1 ]] || refuse "the throwaway keystore doesn't name exactly one address"
     [[ $(lower "$addresses") == "$(lower "${THROWAWAY#0x}")" ]] || refuse "the throwaway keystore isn't the throwaway wallet's ($THROWAWAY)"
 }
-# testnet_network: the Wallet Manager's own testnet, NETWORKS.testnet from its src/networks.ts read through node (not
-# matched as text, so its layout doesn't matter): chain 4221 at GenLayer's testnet RPC, with an https explorer, else a
-# refusal. Sets TESTNET_EXPLORER, the explorer the run prints. Reads the checkout only: no network.
+# testnet_network: the Wallet Manager's own testnet, as its stable command prints it (docs/protocol/sign-page.md, "The
+# networks"): `node src/networks.ts --json`, one JSON line and exit 0. Fail-closed: a non-zero exit, anything on stderr,
+# anything on stdout but that one line, or a testnet without its chainId, rpcUrl, explorerUrl and genesisHash refuses.
+# It must be chain 4221 at GenLayer's testnet RPC, with an https explorer and a pinned genesis hash. Sets
+# TESTNET_EXPLORER (the explorer the run prints) and TESTNET_GENESIS (block 0's hash, which the RPC must answer before
+# the payment). Reads the checkout only: no network.
 TESTNET_RPC=https://rpc.testnet-chain.genlayer.com
 TESTNET_EXPLORER=""
+TESTNET_GENESIS=""
 testnet_network() {
-    local checkout fields chain_id rpc_url explorer
+    local checkout out err status fields chain_id rpc_url explorer genesis
     command -v node >/dev/null || refuse "node isn't on the PATH, so the Wallet Manager's testnet can't be read"
     { checkout=$(cd "$wm" 2>/dev/null && pwd -P) && [[ -f $checkout/src/networks.ts ]]; } || refuse "no src/networks.ts in a Wallet Manager checkout at $wm"
-    fields=$(cd "$checkout" && node --input-type=module -e 'import { NETWORKS } from "./src/networks.ts";
-        const t = NETWORKS?.testnet ?? {}, text = (v) => (typeof v === "string" && v !== "" && !/\s/.test(v) ? v : "-");
-        process.stdout.write([typeof t.chainId === "number" ? String(t.chainId) : "-", text(t.rpcUrl), text(t.explorerUrl)].join(" "))' 2>/dev/null </dev/null) \
-        || refuse "the Wallet Manager's src/networks.ts couldn't be read through node"
-    read -r chain_id rpc_url explorer <<<"$fields"
+    err=$(mktemp "${TMPDIR:-/tmp}/wallet-e2e-networks.XXXXXX") || refuse "can't make a file for \`node src/networks.ts --json\`'s errors"
+    # Its exit status after an x, which also keeps the output's trailing newlines from $( ) (the one-line check sees them).
+    out=$(cd "$checkout" && node src/networks.ts --json 2>"$err" </dev/null; printf 'x%s' "$?")
+    status=${out##*x}
+    out=${out%x*}
+    [[ -s $err ]] && status=stderr
+    rm -f "$err"
+    [[ $status == 0 ]] || refuse "the Wallet Manager's \`node src/networks.ts --json\` failed (${status/stderr/it wrote to stderr})"
+    fields=$(node -e 'const out = process.argv[1];
+        let all; try { if (!/^[^\n]+\n?$/.test(out)) throw 0; all = JSON.parse(out) } catch { process.exit(3) }
+        const t = all?.testnet ?? {}, text = (v) => (typeof v === "string" && v !== "" && !/\s/.test(v) ? v : "-");
+        process.stdout.write([typeof t.chainId === "number" ? String(t.chainId) : "-", text(t.rpcUrl), text(t.explorerUrl),
+            typeof t.genesisHash === "string" && /^0x[0-9a-f]{64}$/.test(t.genesisHash) ? t.genesisHash : "-"].join(" "))' "$out" 2>/dev/null </dev/null) \
+        || refuse "the Wallet Manager's \`node src/networks.ts --json\` didn't print one JSON line, and only that"
+    read -r chain_id rpc_url explorer genesis <<<"$fields"
     [[ $chain_id == "$TESTNET_CHAIN" && $rpc_url == "$TESTNET_RPC" ]] \
-        || refuse "the Wallet Manager's NETWORKS.testnet is chain ${chain_id:--} at ${rpc_url:--}, not $TESTNET_CHAIN at $TESTNET_RPC"
-    [[ $explorer =~ ^https://[A-Za-z0-9.-]+$ ]] || refuse "the Wallet Manager's NETWORKS.testnet has no https explorer (${explorer:--})"
+        || refuse "the Wallet Manager's testnet is chain ${chain_id:--} at ${rpc_url:--}, not $TESTNET_CHAIN at $TESTNET_RPC"
+    [[ $explorer =~ ^https://[A-Za-z0-9.-]+$ ]] || refuse "the Wallet Manager's testnet has no https explorer (${explorer:--})"
+    [[ $genesis != - ]] || refuse "the Wallet Manager's testnet has no genesisHash (0x and 64 lower-case hex digits)"
     TESTNET_EXPLORER=$explorer
+    TESTNET_GENESIS=$genesis
 }
 if [[ -z $real ]]; then
     [[ -z $real_options ]] || { say "wallet-e2e:$real_options only with --real-testnet"; exit 64; }
@@ -210,7 +283,7 @@ else
     real_testnet_guards
     testnet_network
     if [[ -n $check_guards ]]; then
-        say "wallet-e2e --real-testnet: guards pass: chain $chain, a self-transfer of $amount wei from the throwaway wallet $THROWAWAY, its keystore and passphrase private in $testnet_config; the Wallet Manager's testnet: $TESTNET_CHAIN at $TESTNET_RPC, explorer $TESTNET_EXPLORER"
+        say "wallet-e2e --real-testnet: guards pass: chain $chain, a self-transfer of $amount wei from the throwaway wallet $THROWAWAY, its keystore and passphrase private in $testnet_config; the Wallet Manager's testnet: $TESTNET_CHAIN at $TESTNET_RPC, explorer $TESTNET_EXPLORER, genesis $TESTNET_GENESIS"
         exit 0
     fi
 fi
@@ -253,6 +326,9 @@ if [[ -n $real ]]; then
     command -v curl >/dev/null || die "curl isn't on the PATH"
     answer=$(rpc eth_chainId '[]') || die "the testnet RPC ($TESTNET_RPC) didn't answer eth_chainId"
     [[ $(jget "$answer" "") == "$(printf '0x%x' "$TESTNET_CHAIN")" ]] || refuse "$TESTNET_RPC says it's chain $(jget "$answer" ""), not $TESTNET_CHAIN"
+    # Block 0 is the one the Wallet Manager pins (its --json genesisHash): the same chain, not another one on 4221.
+    answer=$(rpc eth_getBlockByNumber '["0x0",false]') || die "the testnet RPC didn't answer eth_getBlockByNumber for block 0"
+    [[ $(jget "$answer" hash) == "$TESTNET_GENESIS" ]] || refuse "$TESTNET_RPC's block 0 is $(jget "$answer" hash), not the Wallet Manager's pinned genesis $TESTNET_GENESIS"
     answer=$(rpc eth_getBalance "[\"$THROWAWAY\",\"latest\"]") || die "the testnet RPC didn't answer eth_getBalance"
     balance=$(decimal "$(jget "$answer" "")")
     answer=$(rpc eth_getTransactionCount "[\"$THROWAWAY\",\"latest\"]") || die "the testnet RPC didn't answer eth_getTransactionCount"
@@ -465,25 +541,12 @@ real_payment() {
     HASH=$(sed -n 's/.*name="hash" value="\([^"]*\)".*/\1/p' "$sign_dir/page.html")
     [[ $CSRF =~ ^[A-Za-z0-9_-]+$ && $TOKEN =~ ^[A-Za-z0-9_-]{43}$ && $HASH =~ ^0x[0-9a-f]{64}$ ]] \
         || { real_fail "the signing page has no csrf, token and hash as the doc describes them"; return; }
-    # A fresh request with no calldata: the page asks for neither the stale box nor the blind-call phrase. Either
-    # shown means something else is to be signed, and this run never sends them.
-    if grep -q 'name="stillWanted"' "$sign_dir/page.html" || grep -q 'name="acknowledgement"' "$sign_dir/page.html"; then
-        real_fail "the signing page asks for a stale or blind-call acknowledgement: this run signs only a fresh self-transfer"; return
-    fi
-    # What the page says will be signed (from the transaction's own bytes): chain 4221, from and to the throwaway
-    # wallet, the amount. The run stops before the POST unless all of it matches.
-    local row_chain row_from row_to row_send
-    row() { sed -nE "s|^(<dl>)?<dt>$1</dt><dd>(.*)</dd>(</dl>)?\$|\\2|p" "$sign_dir/page.html" | head -1; }   # one row a line, <dl> before the first
-    row_chain=$(row Chain); row_from=$(row From); row_to=$(row To); row_send=$(row Send)
-    local grouped
-    grouped=$amount   # as the page groups digits (1,000): the amount has at most 4
-    ((${#amount} > 3)) && grouped="${amount:0:${#amount}-3},${amount:${#amount}-3}"
-    # Read as text, the markup taken out (the page wraps addresses as it likes): To is the address and nothing else.
-    untag() { sed -e 's/<br>/ /g' -e 's/<[^>]*>//g' <<<"$1"; }
-    if [[ $(untag "$row_chain") != *"($TESTNET_CHAIN)" || $(lower "$(untag "$row_from")") != *" $(lower "$THROWAWAY")" \
-          || $(lower "$(untag "$row_to")") != "$(lower "$THROWAWAY")" || $(untag "$row_send") != *" $grouped base units" ]]; then
-        real_fail "the signing page doesn't show a self-transfer of $amount wei on $TESTNET_CHAIN from the throwaway wallet (chain: $row_chain; to: $row_to; send: $row_send)"; return
-    fi
+    # What the page says will be signed, from its machine-readable fields (taken from the built, verified transaction,
+    # not the request): chain 4221, from and to the throwaway wallet, the amount, no call; and no warning (a stale or
+    # blind-call one would ask for an acknowledgement this run never sends). The run stops before the POST otherwise.
+    local why
+    why=$(sign_page_refusal "$sign_dir/page.html" "$TESTNET_CHAIN" "$THROWAWAY" "$THROWAWAY" "$amount") \
+        || { real_fail "refused before the sign POST: ${why:-the signing page could not be judged}"; return; }
     final=$(await_card Proposed) || { real_fail "the card didn't show Proposed after the page: $(tr '\n' ';' <<<"$final")"; return; }
     states+=" → proposed"
     if [[ -n $dry_run ]]; then
