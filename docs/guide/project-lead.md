@@ -61,6 +61,47 @@ proposal. Nothing is stopped; the lead extends the budget, re-plans or abandons 
 Workers can't push, move refs, rebase other branches, or check out the lead's branch: Claude Code's permission rules
 deny it. A worker brings its branch up to date by merging the base in.
 
+### Codex workers
+
+A task can name its worker's agent: `add_task` or `update_task` with `agent: codex` (`claude` is the default). It's
+meant for bounded, mechanical tasks with a tight contract, to spread usage onto the Codex account when Claude's limits
+run low; near a Claude limit, start_worker's refusal and auto_advance's hold suggest it, and the lead decides. Codex
+only implements: the lead, verifiers and the risk check stay Claude.
+
+A Codex worker is the project's Codex command (its Codex launch preset) started in the task's worktree with:
+
+- the same brief as a Claude worker's (as Codex's `developer_instructions`), plus a part on its sandbox and the rules
+  below;
+- the VibeSwitcher tool server as its one MCP server, scoped to the repository, the task and the worker role, so
+  `progress`, `report`, `ask_lead` and `answer_findings` work as for any worker, and auto_advance moves its work on the
+  same way. `--no-daemon` keeps that server under the session's own process, which is how the session host tells which
+  session asks;
+- `--sandbox workspace-write` with network off and `--ask-for-approval never` (no one answers approvals; a refused
+  command just fails). It writes only in its worktree, its TMPDIR and /tmp, and the git folders its commits need: its
+  worktree's own git folder, the object store and the `agent/` branches' refs. Never `main`'s ref, tags, the git config
+  or another checkout; no push or fetch;
+- the worktree trusted for that session only (nothing is written to `~/.codex`). Flags in the Codex command that
+  would loosen that (`--yolo`, `--dangerously-bypass-approvals-and-sandbox`, `--full-auto`, `-s`, `-a`, `-C`,
+  `--add-dir`, `-p`) are dropped; a task's `model` replaces its `-m`.
+
+A Codex task is always audited by a Claude verifier: its review is audit and can't be lowered while its worker is
+Codex, or once a Codex worker worked on it; merge refuses it without a passing audit whatever the board or the vault
+says. Status and board say `worker: Codex` on it (and `worker: Claude` on the other open tasks beside it), and the
+Mac-wide session limit counts it like any worker.
+
+What Codex can't be made to refuse (it has no per-session deny rules: its `.rules` files load only from its own home,
+the project's `.codex` folder or managed requirements, and its sandbox draws no line inside the worktree), and what
+checks it instead:
+
+| Claude worker's rule | Instead, for Codex |
+| --- | --- |
+| The refused git commands that stay on its own branch or another `agent/` one (amend, reset --hard, checkout or branch -D of another task's branch) | The sandbox holds the ones that write elsewhere (`main`, tags, config, the remote); the Claude audit's integrity check reads the branch's history |
+| No edits to the records folder (`docs/lead`) | Merge takes the base's copy of the lead's records whatever the branch did to them; the audit reads the rest of the diff |
+| No reads of `~/.vibeswitcher/lead` and `~/.vibeswitcher/steer` | Its brief; the session host tells callers apart by their process, never by what they've read |
+| pkill, killall and debuggers refused by rule | Its brief; a sandboxed command signals only its own processes |
+
+Review a Codex worker's output critically: it's the audit's job, and the start_worker reply says so.
+
 ## Review levels and audits
 
 Each task has a review level:
