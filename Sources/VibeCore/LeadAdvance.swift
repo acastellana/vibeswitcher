@@ -432,10 +432,17 @@ public final class LeadAdvance: @unchecked Sendable {
     /// them has waited `LeadToolset.batchWindow`, they merge as one batch (`LeadToolset.mergeBatch`; a lone one, as merge merges it). Until
     /// then a look again is armed for the window's end: nothing else may change in the folder meanwhile.
     private func mergeReady(busy: Bool) {
-        let found = ready
+        let everyReady = ready
         ready = []
-        let keys = Set(found.map(\.key))
+        let keys = Set(everyReady.map(\.key))
         readySince = readySince.filter { keys.contains($0.key) }
+        // Only the ones merge would take now count and go in a batch: one its own checks refuse (waiting on the user's
+        // approval, say) is said once and left out, so it never holds back a batch of the ones behind it.
+        let found = everyReady.filter { task in
+            guard let refusal = lead.advanceGate(task.slug) else { return true }
+            once("merge|\(task.slug)|\(task.head)|\(refusal.prefix(60))", "Didn't merge \(task.slug): \(LeadToolset.clip(refusal, 600))")
+            return false
+        }
         guard !found.isEmpty else { return }
         let (window, size) = (lead.batchWindow, lead.batchSize)
         let now = lead.batchClock()

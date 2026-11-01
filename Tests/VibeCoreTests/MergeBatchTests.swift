@@ -209,6 +209,22 @@ struct MergeBatchTests: LeadTeamFixture {
         #expect(board(root).task("add-x")?.merged?.batch == nil)
     }
 
+    /// Tasks merge refuses (waiting on the user's approval) don't take a batch's places: the one behind them merges.
+    @Test func tasksRefusedAtTheGateDontHoldBackTheOnesBehindThem() throws {
+        let (root, runtime, lead) = try team(["merge_batching": "always", "merge_policy": "ask_sensitive"])
+        lead.batchSize = 2
+        // No wait: what's ready merges at once (all three, before the fix: a batch of the two refused, and nothing ran).
+        lead.batchWindow = 0
+        try audited(lead, runtime, root: root, "rules", ["AGENTS.md": "rules\n"])
+        try audited(lead, runtime, root: root, "more-rules", ["CLAUDE.md": "more\n"])
+        try audited(lead, runtime, root: root, "add-z", ["z.txt": "zed\n"])
+        let advancing = LeadAdvanceTests.Advancing(lead)
+        defer { advancing.stop() }
+        #expect(advancing.until { board(root).task("add-z")?.status == .done })
+        #expect(board(root).task("rules")?.status == .review && board(root).task("more-rules")?.status == .review)
+        #expect(advancing.until { reports(runtime).contains { $0.contains("Didn't merge rules: Not merged yet: the merge policy is ask_sensitive") } }, "\(reports(runtime))")
+    }
+
     // MARK: Split on failure
 
     /// One task of four breaks the suite: the split finds it in log2(4) = 2 more runs, the two before it land, it goes

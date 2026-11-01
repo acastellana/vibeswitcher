@@ -4922,6 +4922,10 @@ extension LeadToolset {
         return merged
     }
     func advanceCleanup(_ slug: String) throws -> MCPToolResult { try cleanup(slug, force: false) }
+    /// Merge's own checks of `slug` before its tests (`mergeGate`): nil when it may merge now, else the refusal.
+    func advanceGate(_ slug: String) -> String? {
+        do { _ = try mergeGate(slug); return nil } catch let problem as Problem { return problem.text } catch { return "\(error)" }
+    }
     func advanceMessage(_ slug: String, _ text: String, clearDraft: Bool) throws -> (delivered: LeadDelivery.Delivered, result: MCPToolResult) {
         try sent(slug, ["text": text, "clear_draft": clearDraft])
     }
