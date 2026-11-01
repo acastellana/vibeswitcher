@@ -78,8 +78,8 @@ struct StatusLineBinaryTests {
         var pid: pid_t = 0
         #expect(eventually { pid = (try? String(contentsOf: started, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0; return pid > 0 })
         try #require(pid > 0)
-        // Claude Code gives up on it: TERM.
-        process.terminate()
+        // Claude Code gives up on it: TERM, to its process alone (as Node's child.kill sends it).
+        kill(process.processIdentifier, SIGTERM)
         process.waitUntilExit()
         #expect(process.terminationReason == .exit && process.terminationStatus == 0, "\(process.terminationReason) \(process.terminationStatus)")
         // Your command (its shell) and its whole process group are gone, not left running.
