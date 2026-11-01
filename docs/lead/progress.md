@@ -2800,3 +2800,7 @@
 - 2026-11-01 17:27 Automatically (auto_advance): Didn't audit boost-release-6-7: Not audited, no verifier started: a trial merge of agent/boost-release-6-7 (40fed0d6) onto main (git merge-tree) conflicts, so it can't land as it is. Files: docs/guide/project-lead.md. main's commits that touched them since agent/boost-release-6-7 last took it in (at ec9c3ba9): 9a39119 heavy_swift: two modules at once with half the share of compiles each (SwiftPM's -j N alone ran N×N: 12 frontends at -j 4); policy and docs give that SwiftPM line (docs/guide/project-lead.md); 86b5e25 Working pol…
 - 2026-11-01 17:37 Audit of codex-s-tui-renders at b01cdf8e tested its merged result 3a2c0a77 onto main: test command failed
 - 2026-11-01 17:37 Automatically (auto_advance): Started the audit of codex-s-tui-renders at b01cdf8e (Its review is audit).
+- 2026-11-01 17:46 Audit of codex-s-tui-renders: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
+- 2026-11-01 17:46 Planned theloginshellrunsinasess: theLoginShellRunsInASessionOfItsOwn: flakes under load and leaves its fake shell looping forever when it fails
+- 2026-11-01 17:50 Raised test-under-load-sh-2 to audit (the risk check, at ea955926): it changes test or build infrastructure the suite relies on (scripts/test-under-load.sh)
+- 2026-11-01 17:50 Automatically (auto_advance): test-under-load-sh-2 is audited, not merged: it changes test or build infrastructure the suite relies on (scripts/test-under-load.sh) (the risk check raised it from review none). Its audit starts once the Mac has room.
