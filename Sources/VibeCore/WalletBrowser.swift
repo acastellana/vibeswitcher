@@ -25,7 +25,7 @@ public enum WalletBrowser {
         42_424_242: Chain(id: 42_424_242, name: "GenLayer", rpc: "https://rpc.chain.genlayer.com",
                           explorer: "https://scan.chain.genlayer.com", symbol: "GEN", decimals: 18),
         4221: Chain(id: 4221, name: "GenLayer Testnet", rpc: "https://rpc.testnet-chain.genlayer.com",
-                    explorer: "https://explorer.testnet-chain.genlayer.com", symbol: "GEN", decimals: 18),
+                    explorer: "https://scan.testnet-chain.genlayer.com", symbol: "GEN", decimals: 18),
     ]
 
     /// Where a transaction on `chainId` can be seen: GenLayer's explorers and Etherscan; nil for other chains.
