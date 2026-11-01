@@ -2510,3 +2510,5 @@
 - 2026-11-01 03:41 Audit of wallet-card-truth-the: incomplete, clean, round 1: 1 Important open, 3 Nit open
 - 2026-11-01 03:41 Audit of turn-this-incident-into-8: complete, clean, round 2: 1 Important closed, 3 Nit (1 open), 1 Pre-existing closed
 - 2026-11-01 03:41 Automatically (auto_advance): Couldn't send wallet-card-truth-the's worker its open Important findings (wallet-card-truth-the:F1): Not started: the Mac is shared by every project's team, and its load (the greater of its 1- and 5-minute averages) is above load_threshold. Now: load 31.3 (load_threshold 24, twice the 12 cores), 12 team sessions across 3 projects (this one 4, 2 others 8) (mac_max_sessions 15). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, …
+- 2026-11-01 03:44 Started a worker on wallet-card-truth-the
+- 2026-11-01 03:44 Automatically (auto_advance): Sent wallet-card-truth-the's worker the open Important findings wallet-card-truth-the:F1 from its audit at 78fcb1f7 (in a new worker: its last one had ended).
