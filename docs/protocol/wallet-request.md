@@ -130,7 +130,7 @@ Sent by VibeSwitcher to the Wallet Manager. All fields are required unless marke
 | `requestedBy.label` | string | line(200), 0–200: a label for people (may be empty). |
 | `workspace` | string | A name: which of the Wallet Manager's workspaces to use. Opaque to VibeSwitcher; the Wallet Manager has several. |
 | `from` | string | The wallet to send from, in that workspace: its wallet id there (a name that doesn't start with `0x`), or its address. A value that starts with `0x` or `0X` MUST be an address. |
-| `chainId` | number | 1 to 2⁵³−1 (9 007 199 254 740 991). Any chain id is taken by the format; the Wallet Manager refuses chains it doesn't know. Known now: Ethereum mainnet (`1`), GenLayer mainnet (`42424242`), GenLayer testnet (`4221`). |
+| `chainId` | number | 1 to 2⁵³−1 (9 007 199 254 740 991). Any chain id is taken by the format; the Wallet Manager refuses chains it doesn't know. Known now: Ethereum mainnet (`1`), Sepolia (`11155111`), Base (`8453`), Base Sepolia (`84532`), GenLayer mainnet (`42424242`), GenLayer testnet (`4221`). |
 | `action` | string | `"transfer"` or `"call"`. |
 | `to` | string | An address: the recipient (`transfer`) or the contract called (`call`). |
 | `asset` | string | `"native"` (the chain's own coin) or a token contract's address (an ERC-20 transfer). |
@@ -407,6 +407,9 @@ are updated together.
 
 ### History
 
+- 2026-11-01: still version 1. `chainId`'s informational "Known now" list also names Sepolia (`11155111`), Base
+  (`8453`) and Base Sepolia (`84532`), the chains the Wallet Manager adds beside Ethereum and GenLayer's two. No field,
+  rule or vector changes: the format already took any chain id.
 - 2026-11-01: still version 1. `reason` is stricter: at most 8 lines, no more than 2 combining marks on one base
   character, and none of a list of blank lookalikes (U+115F, U+1160, U+17B4, U+17B5, U+2028, U+2029, U+2800, U+3164,
   U+FFA0, U+FFFC), so that an agent's reason can't stack into, blank out or line-break past the rows around it where
