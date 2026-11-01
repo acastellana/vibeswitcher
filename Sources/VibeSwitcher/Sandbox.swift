@@ -944,7 +944,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
         ("soak [MINUTES [every SECONDS] [hour CYCLES] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet. With no MINUTES: the log so far"),
-        ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh)"),
+        ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh)"),
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint and the Wallet Manager's checks"),
         ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
         ("wallet-click send|retry|discard|browser|settings", "presses that button on the newest wallet request card in the selected chat (send goes to the sandbox's fake passage, never the real one; browser serves the local page but never opens a browser: wallet-page shows it; settings opens Settings › Wallet)"),
@@ -1060,16 +1060,17 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
         let address = words.first == "address"
         var values = ["--workspace": "example", "--from": address ? "0x0000000000000000000000000000000000000001" : "example-hardware",
-                      "--chain": "42424242", "--to": "0x0000000000000000000000000000000000000002", "--amount": "12500000000000000000"]
+                      "--chain": "42424242", "--to": "0x0000000000000000000000000000000000000002", "--amount": "12500000000000000000",
+                      "--expires-in": "24h"]
         var rest = words.dropFirst(address ? 1 : 0)
         while let option = rest.first {
             guard values[option] != nil, rest.count >= 2 else {
-                return reply(false, "wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI]: not \(option)")
+                return reply(false, "wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m]: not \(option)")
             }
             values[option] = rest.dropFirst().first!
             rest = rest.dropFirst(2)
         }
-        let arguments = ["request"] + ["--workspace", "--from", "--chain", "--to", "--amount"].flatMap { [$0, values[$0]!] }
+        let arguments = ["request"] + ["--workspace", "--from", "--chain", "--to", "--amount", "--expires-in"].flatMap { [$0, values[$0]!] }
             + ["--reason", "Pay the example invoice for the test deployment.", "--label", fake.label]
         let ran = WalletAsk.run(arguments, environment: ["VIBESWITCHER_SESSION": id.uuidString], cwd: fake.cwd,
                                walletManager: walletPeer.isEmpty ? .noPeer : .ready, folder: walletDesk.folder, now: walletClock.now())
@@ -2175,12 +2176,15 @@ extension Driver {
             if !off.contains("reports"), leadUp { steps.append(command("churn", "3")) }
         }
         if !off.contains("wallet") {
-            // The selected chat's agent files a request; it's sent, the Wallet Manager answers twice, and the desk's
-            // clock moves the cycle's share of the hour with its 15 s refreshes in between. Every third one is left
-            // unsent: it expires, its agent hears it, and its card goes an hour later as the others' do.
-            steps.append(command("wallet-ask"))
-            if cycle % 3 != 0 {
-                steps += [command("wallet-click", "send"), command("wallet-answer", "received"), command("wallet-answer", "submitted")]
+            // The selected chat's agent files a request, and the desk's clock moves the cycle's share of the hour with
+            // its 15 s refreshes in between. Every third one is sent and the Wallet Manager answers twice; it stands a
+            // minute, so its card goes an hour later (`resultGrace`); the others are discarded. The cards alive stay
+            // few, so what grows is what's left behind, not cards still shown.
+            if cycle % 3 == 0 {
+                steps += [command("wallet-ask", "--expires-in", "1m"), command("wallet-click", "send"),
+                          command("wallet-answer", "received"), command("wallet-answer", "submitted")]
+            } else {
+                steps += [command("wallet-ask"), command("wallet-click", "discard")]
             }
             let minutes = 60 / Double(run.hour)
             steps.append(("wallet refreshes", { [weak self] done in
