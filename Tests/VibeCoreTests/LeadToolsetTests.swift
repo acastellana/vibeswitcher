@@ -47,6 +47,8 @@ final class FakeRuntime: LeadRuntime {
 
     /// Calls from the lead's automatic passes (`LeadAdvance`, on a thread of their own) and the test's own, one at a time.
     let calls = NSRecursiveLock()
+    /// Called as each session is killed, with the labels of the sessions spawned by then (under `calls`).
+    var onKill: ((String, [String]) -> Void)?
 
     let server = "/App/vibeswitcher-mcp"
     /// The project's Claude command, flags included.
@@ -85,6 +87,7 @@ final class FakeRuntime: LeadRuntime {
         defer { calls.unlock() }
         if let refusal = refusals[session] { throw BoardError(text: refusal) }
         killed.append(session)
+        onKill?(session, spawned.map(\.label))
     }
     func forget(_ session: String) {
         calls.lock()

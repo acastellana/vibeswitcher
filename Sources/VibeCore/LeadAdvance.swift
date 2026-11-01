@@ -355,6 +355,8 @@ public final class LeadAdvance: @unchecked Sendable {
             // findings) puts it back to work before this pass may come to it, a merge's test run ahead of it.
             case .failed, .running: sendBack(task.slug, onHold: onHold)
             case .done, .reverted: cleanup(task.slug)
+            // Its audit under way: its worker, idle since its done report, frees its Mac slot (before the starts).
+            case .review: release(task.slug)
             default: break
             }
         }
@@ -389,15 +391,29 @@ public final class LeadAdvance: @unchecked Sendable {
             }
             if usageHeld(model: lead.auditModel(lead.workflow)) { return }
             step("audit|\(slug)|\(head)") {
-                guard due(slug, [.review]) != nil else { throw NotDue() }
+                guard let before = due(slug, [.review]) else { throw NotDue() }
                 _ = try lead.advanceAudit(slug)
-                return "Started the audit of \(slug) at \(head.prefix(8)) (\(needed.trimmingCharacters(in: CharacterSet(charactersIn: "."))))."
+                return "Started the audit of \(slug) at \(head.prefix(8)) (\(needed.trimmingCharacters(in: CharacterSet(charactersIn: "."))))." + releasedText(slug, worker: before.worker)
             }
             return
         }
         // review none: on its worker's done report on this head (one on an older commit waits for its next report).
         guard (try? vault.unaudited(root: root, task: slug))?.reported == head else { return }
         merge(slug, head: head, busy: busy, audited: false)
+    }
+
+    /// " Its worker … was released …" when the audit just started released `worker` (see `LeadToolset.releaseWorker`).
+    private func releasedText(_ slug: String, worker: String?) -> String {
+        guard let worker, lead.store.load().task(slug)?.released == worker else { return "" }
+        return " Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay."
+    }
+
+    /// A task in review whose audit is under way: its worker, idle since its done report, is released
+    /// (`LeadToolset.releaseWorker`): by the audit's start when it was idle then, else here once its turn ends (the
+    /// app nudges the loop, `LeadWitness.releasableForAdvance`). A host that won't end it is told once.
+    private func release(_ slug: String) {
+        guard let task = due(slug, [.review]), let release = lead.releaseWorker(slug) else { return }
+        if release.released { did(release.text) } else { once("release|\(slug)|\(task.worker ?? "")", release.text) }
     }
 
     /// The audit under way on `head` lost its verifier without a verdict (its session ended, or its agent quit and left
@@ -515,11 +531,17 @@ public final class LeadAdvance: @unchecked Sendable {
             + "\nFix \(open.count == 1 ? "it" : "each") on your branch and commit, or disagree with a reason; answer each by id with answer_findings "
             + "(fixed or disagree), run the affected tests, then report done again: it's audited again then (a re-audit checks these findings' concerns and judges your answers)."
         let live = workerRuns(task)
-        // Its worker ended (made room for the audit, say): a new one in its worktree gets them, not on a battery hold,
-        // and not for a running one (the witness tells the lead its worker ended).
+        // Its worker ended (released during the audit, say): a new one in its worktree gets them, not on a battery
+        // hold, and not for a running one (the witness tells the lead its worker ended).
         if !live, onHold || task.status == .running { return }
+        let released = task.worker != nil && task.released == task.worker
+        // A new worker knows only its contract: where its branch stands, and what the one before it reported.
+        let fresh = live ? "" : "You're a new worker on this task, started in its worktree to answer its audit: the worker before you "
+            + (released ? "was released while the audit ran (to free its Mac slot)" : "had ended")
+            + ". Its commits are on your branch, agent/\(slug), at \(head.prefix(8)): `git log \(lead.base)..HEAD` and `git diff \(lead.base)...HEAD` show its work; build on them."
+            + (task.report.map { " Its done report: " + LeadToolset.clip($0, 1500) } ?? "") + "\n\n"
         let unsent: String?
-        do { unsent = try sendToWorker(slug, text, states: [task.status]) } catch let stuck as NotSubmitted {
+        do { unsent = try sendToWorker(slug, fresh + text, states: [task.status]) } catch let stuck as NotSubmitted {
             // Typed, but its box kept it, cleared and typed again too: not typed a third time at each pass. Said once.
             markSentBack(slug, head)
             once("sendback|\(slug)|\(head)", "Couldn't send \(slug)'s worker its open Important findings (\(ids)): \(stuck.text)")
@@ -530,7 +552,7 @@ public final class LeadAdvance: @unchecked Sendable {
             return
         }
         markSentBack(slug, head)
-        did("Sent \(slug)'s worker the open Important findings \(ids) from its audit at \(head.prefix(8))" + (live ? "." : " (in a new worker: its last one had ended)."))
+        did("Sent \(slug)'s worker the open Important findings \(ids) from its audit at \(head.prefix(8))" + (live ? "." : released ? " (in a new worker: its last one was released during the audit)." : " (in a new worker: its last one had ended)."))
     }
 
     private func markSentBack(_ slug: String, _ head: String) {

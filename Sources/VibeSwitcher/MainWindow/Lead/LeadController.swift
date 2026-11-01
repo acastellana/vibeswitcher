@@ -265,6 +265,8 @@ struct WitnessWork {
     var withoutTools: [String] = []
     /// The verifiers that ended without a verdict for auto_advance (`LeadWitness.endedForAdvance`), when it runs.
     var endedForAdvance: [String] = []
+    /// The workers auto_advance releases while their audits run, between turns now (`LeadWitness.releasableForAdvance`).
+    var releasableForAdvance: [String] = []
     /// The messages not told yet as of the look (`LeadWitness.unbuiltMessages`), their texts built where they're posted.
     var messages: [(keys: [String], text: @Sendable () -> String)] = []
     /// The verifiers waiting on a prompt past its wait, not told yet (`LeadWitness.stuckPrompts`): declined, then told.
@@ -289,6 +291,8 @@ struct WitnessWork {
             let first = Dictionary(endedForAdvance.map { ($0, firstSeen($0) ?? now) }, uniquingKeysWith: { first, _ in first })
             step?("leftToAdvance")
             advanced = LeadWitness.leftToAdvance(board: board, seen: seen, now: now, firstSeen: first)
+            step?("releasableForAdvance")
+            releasableForAdvance = LeadWitness.releasableForAdvance(board: board, seen: seen)
         }
         step?("unbuiltMessages")
         messages = LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, told: told)
@@ -1646,6 +1650,15 @@ final class LeadController: ObservableObject {
         // past `LeadWitness.advanceGrace` with no retry, from here as ever.
         for verifier in work.endedForAdvance {
             let key = "\(root)|\(verifier)"
+            if advanceSeen[key] == nil {
+                advanceSeen[key] = now
+                LeadAdvance.nudge(root: root)
+            }
+        }
+        // A worker whose turn ended after its audit started (it had only just reported): its loop looks now and releases
+        // it, freeing its Mac slot (its turn's end writes nothing in the project's folder). Once per worker.
+        for worker in work.releasableForAdvance {
+            let key = "\(root)|release|\(worker)"
             if advanceSeen[key] == nil {
                 advanceSeen[key] = now
                 LeadAdvance.nudge(root: root)

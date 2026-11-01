@@ -1519,6 +1519,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].worker = session
             board.tasks[index].launched([session], on: model)
             board.tasks[index].stopped = nil
+            board.tasks[index].released = nil
             board.tasks[index].branch = Worktrees.branch(slug)
             board.tasks[index].worktree = worktree
             board.tasks[index].evidence = nil
@@ -1571,11 +1572,53 @@ public final class LeadToolset: MCPToolset {
         try? store.update { board in
             guard let index = board.taskIndex(task.slug) else { return }
             board.tasks[index].stopped = worker
+            board.tasks[index].released = worker
         }
         try? store.appendProgress("Ended \(task.slug)'s worker (idle since its done report on \(head.prefix(8))) to make room on the Mac for its audit")
         return "Ended \(task.slug)'s worker, idle since its done report on \(head.prefix(8)), to make room: beside it the audit would take the Mac's team sessions past "
             + "mac_max_sessions (\(others.sessions + 1 + need) with it, \(limits.maxSessions) at most), and the audit takes its slot (\(ending.said)). "
             + "Its worktree and commits stay; start_worker continues there if there's rework. "
+    }
+
+    /// What `releaseWorker` did: ended the worker (`released`), or the host wouldn't end it.
+    struct Release {
+        var released: Bool
+        var text: String
+    }
+
+    /// A task whose audit is under way frees its worker's Mac slot (mac_max_sessions) and memory (~450 MB) while the
+    /// verdict is out, minutes to an hour: its worker, idle since its done report on the branch's head, is ended as
+    /// stop_worker ends one, its worktree and branch kept (`LeadTask.released`, and `stopped`: its end is no news).
+    /// Only once the audit's verifier is up on that head, and only for a task auto_advance moves (`advances`): a
+    /// verdict that sends findings back starts a fresh worker there with them (`LeadAdvance.sendBack`), a clean one
+    /// merges with none. Never another task's worker, nor one mid-turn, waiting on a prompt or on its background task,
+    /// or whose last report wasn't done on the head: the loop looks again once its turn ends (the app nudges it,
+    /// `LeadWitness.releasableForAdvance`). nil when nothing was ended or tried.
+    func releaseWorker(_ slug: String) -> Release? {
+        guard advances(slug), let task = store.load().task(slug), task.status == .review, task.evidence == nil,
+              let worker = task.worker, worker != task.stopped, let head = branchHead(Worktrees.branch(slug)) else { return nil }
+        // The audit's verifiers are up, on the head (the panel's commit, or the verifier's grant's).
+        let grant = vault.current(.verifier, root: root, task: slug)
+        guard !task.awaitedVerifiers.isEmpty,
+              (task.panel?.commit ?? (grant?.session == task.verifier ? grant?.auditing : nil)) == head else { return nil }
+        let refused = "\(slug)'s worker wasn't released during its audit"
+        guard let sessions = try? hostSessions(refused),
+              let info = sessions.first(where: { $0.id == worker && $0.live }),
+              info.waiting == nil, info.status == LeadActivity.idle(background: nil).text,
+              (try? vault.unaudited(root: root, task: slug))?.reported == head else { return nil }
+        guard let ending = try? end([info], refused: refused).first else { return nil }
+        if ending.failure != nil {
+            return Release(released: false, text: "\(slug)'s worker, idle since its done report, wasn't released during its audit (\(ending.said)): it stays beside the verifier.")
+        }
+        try? store.update { board in
+            guard let index = board.taskIndex(slug), board.tasks[index].worker == worker else { return }
+            board.tasks[index].stopped = worker
+            board.tasks[index].released = worker
+        }
+        try? store.appendProgress("Released \(slug)'s worker (idle since its done report on \(head.prefix(8))) while its audit runs")
+        return Release(released: true, text: "Released \(slug)'s worker, idle since its done report on \(head.prefix(8)), while its audit runs (\(ending.said)): "
+                       + "its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, "
+                       + "and a clean verdict merges with none.")
     }
 
     private func message(_ slug: String, _ arguments: [String: Any]) throws -> MCPToolResult {
@@ -1840,6 +1883,8 @@ public final class LeadToolset: MCPToolset {
             if ![.kept, .folded, .abandoned, .reverted].contains(board.tasks[index].status) { board.tasks[index].status = .review }
             board.tasks[index].evidence = nil
         }
+        // The verifier is up: its worker, idle since its done report, needn't hold a Mac slot through the audit.
+        let released = releaseWorker(slug).map { " " + $0.text } ?? ""
         let flagged: String
         if !committed.isEmpty {
             flagged = " The branch changes Claude's settings or instructions (\(config.prefix(5).joined(separator: ", "))\(config.count > 5 ? ", …" : "")): the verifier runs with project settings off, and VibeSwitcher didn't answer its trust question; tell the user it waits for them to decide, and have the verifier look hard at those files."
@@ -1862,9 +1907,9 @@ public final class LeadToolset: MCPToolset {
         if let panel {
             return MCPToolResult(text: noTools + putBack + behind + room + earlier + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8))): " + Self.focusesText(panel.focuses) + ". "
                                  + "One build and test run\(merged.map { " of its merged result \($0.commit.prefix(8))" } ?? "") came first, and every finder reads its logs (\(panel.run)): \(panel.logs.joined(separator: ", ")). "
-                                 + "Their findings are voted into one verdict, which arrives as a message once all \(panel.size) have submitted.\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
+                                 + "Their findings are voted into one verdict, which arrives as a message once all \(panel.size) have submitted.\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)" + released)
         }
-        return MCPToolResult(text: noTools + putBack + behind + room + earlier + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(tested)\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
+        return MCPToolResult(text: noTools + putBack + behind + room + earlier + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(tested)\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)" + released)
     }
 
     /// What audit's reply says of the task's audit still at work on its branch's head: the verifiers it waits on
@@ -4338,7 +4383,9 @@ public final class LeadToolset: MCPToolset {
                     + Self.findingsTally(audits)
             }
         }
-        if let worker = task.worker, let info = sessions?[worker] {
+        if let released = Self.releasedText(task, sessions) {
+            line += " — " + released
+        } else if let worker = task.worker, let info = sessions?[worker] {
             line += " — worker \(info.live ? info.state(prompt: 40) : task.stopped == worker ? "stopped" : "ended")"
         }
         if let evidence = task.evidence ?? task.outdatedEvidence { line += " — " + auditText(evidence, of: task) }
@@ -4362,6 +4409,13 @@ public final class LeadToolset: MCPToolset {
         guard task.status != .done else { return text }
         guard let head = branchHead(Worktrees.branch(task.slug)) else { return text + ", branch gone" }
         return head == commit ? text : text + ", branch now at \(head.prefix(8))"
+    }
+
+    /// "worker released during audit" while the task's worker is the one VibeSwitcher released for its audit
+    /// (`LeadTask.released`) and isn't seen live: ended on purpose, its worktree and branch kept, never "worker ended".
+    static func releasedText(_ task: LeadTask, _ sessions: [String: LeadSessionInfo]?) -> String? {
+        guard let worker = task.worker, task.released == worker, sessions?[worker]?.live != true else { return nil }
+        return "worker released during audit"
     }
 
     /// Who of a running or reviewed task's team ended without a word, and what to do: its worker gone from the host
@@ -4587,6 +4641,9 @@ public final class LeadToolset: MCPToolset {
                 + (task.riskRaised.map { " (audited: \($0.reason), raised by the risk check at \($0.commit.prefix(8)))" } ?? ""))
             if let receipt = task.receipt { lines.append("\n" + receipt.line) }
             if let sessions, let ended = Self.endedMember(task, sessions) { lines.append("\nNow: \(ended)") }
+            if let released = Self.releasedText(task, sessions) {
+                lines.append("\nNow: \(released): its worktree and branch stay; findings its verdict sends back go to a fresh worker there (auto_advance), a clean verdict merges with none.")
+            }
             // From the vault, where only the task's own worker records it with its done (the board's copy is anyone's).
             if let kept = try? vault.unaudited(root: root, task: task.slug), let commit = kept.reported, let evidence = kept.evidence {
                 lines.append("\nIts worker's evidence with its done on \(commit.prefix(8)):")

@@ -609,6 +609,11 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var verifier: String?
     /// The worker session the lead itself stopped (stop_worker): its end is no news to the lead.
     public var stopped: String?
+    /// The worker session VibeSwitcher released while the task's audit ran (`LeadToolset.releaseWorker`, or audit
+    /// making room for its verifier): ended once idle after its done report, its worktree and branch kept, its Mac slot
+    /// and memory freed. It's `stopped` too, so its end is no news; findings the verdict sends back go to a fresh worker
+    /// there (`LeadAdvance.sendBack`). Status and board say "worker released during audit", not "ended".
+    public var released: String?
     public var branch: String?
     public var worktree: String?
     /// The verdict on the commit its branch is at, as long as it's there: a report on that commit keeps it; a new

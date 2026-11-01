@@ -200,6 +200,20 @@ public enum LeadWitness {
         }
     }
 
+    /// The workers auto_advance releases while their task's audit runs (see `LeadToolset.releaseWorker`), seen between
+    /// turns now: a task that moves by itself, in review with its verifiers at work, whose worker (not stopped or
+    /// released already) is live, finished its turn, and waits on nothing. A worker mid-turn when its audit started
+    /// (it had only just reported) writes nothing in the project's folder when its turn ends: the app nudges the loop
+    /// at the first sight of each, and the loop's own checks decide.
+    public static func releasableForAdvance(board: LeadBoard, seen: [String: Seen]) -> [String] {
+        board.tasks.compactMap { task in
+            guard task.status == .review, task.evidence == nil, task.autoAdvance != false, !task.awaitedVerifiers.isEmpty,
+                  let worker = task.worker, worker != task.stopped, let info = seen[worker], info.live, !info.agentQuit,
+                  info.pending == nil, info.activity == .idle(background: nil) else { return nil }
+            return worker
+        }
+    }
+
     /// Of `endedForAdvance`, those `events` leaves to the loop while it runs (the app's `firstSeen`: when it first saw
     /// each so): its report told of it already (the retry's verifier, which ended too), or it was seen less than
     /// `advanceGrace` ago. Past that with no retry (the verifier still awaited), the lead is told as ever.
