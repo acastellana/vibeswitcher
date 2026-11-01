@@ -2785,3 +2785,6 @@
 - 2026-11-01 16:46 Audit of heavy-jobs-fit-their at 11d1fb3d tested its merged result fa1d5050 onto main: the test command passed
 - 2026-11-01 16:46 Automatically (auto_advance): Started the audit of heavy-jobs-fit-their at 11d1fb3d (Its review is audit).
 - 2026-11-01 16:48 Automatically (auto_advance): Started the audit of the-test-suite-leaves at e1181513 (It touches sensitive_paths (Sources/VibeHost/HostedSession.swift), so it's treated as audit whatever its review says).
+- 2026-11-01 16:52 Audit of heavy-jobs-fit-their: complete, clean, round 1: 3 Nit open
+- 2026-11-01 16:57 Audit of the-test-suite-leaves: complete, clean, round 1: 1 Nit open
+- 2026-11-01 17:05 Merged heavy-jobs-fit-their: Heavy jobs fit their slot: vs-heavy gives each job a core budget, and our builds and tests honour it
