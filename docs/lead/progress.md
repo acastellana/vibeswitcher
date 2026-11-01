@@ -2535,3 +2535,4 @@
 - 2026-11-01 04:34 Automatically (auto_advance): Started a worker on wallet-card-can-t (Wallet card can't be made misleading: who asked, the reason field, and contract calls that move tokens), its after tasks done (wallet-card-truth-the).
 - 2026-11-01 04:34 Started a worker on fix-the-flaky-test-14
 - 2026-11-01 04:34 Automatically (auto_advance): Started a worker on fix-the-flaky-test-14 (Fix the flaky test theScreenRouteReadsATerminalTabOffTheMainThread()).
+- 2026-11-01 04:47 Audit of app-memory-grows-17: complete, clean, round 1: 5 Nit open
