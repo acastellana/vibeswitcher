@@ -82,8 +82,9 @@ struct StatusLineBinaryTests {
         process.terminate()
         process.waitUntilExit()
         #expect(process.terminationReason == .exit && process.terminationStatus == 0, "\(process.terminationReason) \(process.terminationStatus)")
-        // Your command's whole process group is gone, not left running.
-        #expect(eventually { kill(-pid, 0) == -1 && errno == ESRCH })
+        // Your command (its shell) and its whole process group are gone, not left running.
+        func gone(_ target: pid_t) -> Bool { kill(target, 0) == -1 && errno == ESRCH }
+        #expect(eventually { gone(pid) && gone(-pid) })
         #expect(AccountUsageStore(file: URL(fileURLWithPath: home + "/.vibeswitcher/account-usage.json")).load().limits.map(\.usedPercent) == [55])
     }
 
