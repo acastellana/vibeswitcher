@@ -2637,3 +2637,7 @@
 - 2026-11-01 10:22 Automatically (auto_advance): fix-the-flaky-test-15 is audited, not merged: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift) (the risk check raised it from review none). Its audit starts once the Mac has room.
 - 2026-11-01 10:23 Raised wallet-e2e-reads-the to audit (the risk check, at b6b15f6e): it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$err")
 - 2026-11-01 10:23 Automatically (auto_advance): wallet-e2e-reads-the is audited, not merged: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$err") (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-01 10:30 Automatically (auto_advance): Started the audit of wallet-outcomes-always at 7e98bce2 (Its review is audit).
+- 2026-11-01 10:30 Ended wallet-e2e-reads-the's worker (idle since its done report on b6b15f6e) to make room on the Mac for its audit
+- 2026-11-01 10:30 Automatically (auto_advance): Started the audit of wallet-e2e-reads-the at b6b15f6e (Its review is audit. (audited: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$err"), as the risk check found.)).
+- 2026-11-01 10:30 Ended boost-release-3-7's worker (idle since its done report on a8414196) to make room on the Mac for its audit
