@@ -20,7 +20,8 @@ struct VerifierPromptTests {
         "git remote", "git remote -v", "git branch -a", "git branch -r", "git branch -av", "git branch --show-current",
         "git branch --list 'agent/*'", "git branch --merged main", "git branch -r --contains HEAD", "git branch --sort=-committerdate",
         "grep -rn 'foo bar' Sources", "rg -n \"func allows\" Sources", "rg -C3 -i --glob '*.swift' --hidden TODO", "rg -uu --files", "rg -n -- -x a", "head -50 a.txt", "tail -n 20 a.log", "wc -l a b",
-        "sort -u names.txt", "git log | head -3", "git diff --stat && git status", "git log -1 || git status",
+        "sort -u names.txt", "sort -rn -k2,2 a", "sort -t : -k 3 a", "sort -t, -nk2 a", "sort --key=2 --field-separator=: a",
+        "sort --sort=version -- -T", "git log | head -3", "git diff --stat && git status", "git log -1 || git status",
         "grep -c x a.txt 2>/dev/null", "git log 2>&1 | tail -5", "git show HEAD > /dev/null", "rg x >/dev/null 2>&1",
         "git log --format='%h %s' -3", "git status\ngit log -1", "grep 'a;b|c' x.txt", "grep a\\;b x",
     ]
@@ -49,6 +50,11 @@ struct VerifierPromptTests {
         "grep 'x a", "grep \"x a", "grep \"a\\\"b\" x",
         // Options of the listed programs that write, run something, or never end.
         "sort -o out.txt a", "sort -uo out a", "sort --output=x a", "sort --out=x a", "sort --compress-program=sh a",
+        // sort's temporary directory (the round 1 audit's F3), its other writers, and flags not known to only read.
+        "sort -T /var/x a", "sort -T/var/x a", "sort -uT /var/x a", "sort --temporary-directory=/var/x a",
+        "sort --temporary-directory /var/x a", "sort --tem=/var/x a", "sort -S 1G -T x a", "sort --files0-from=list",
+        "sort --random-source=x a", "sort --parallel=2 a", "sort --uniq a", "sort -k2 -o out a", "sort -t, -o out a",
+        "sort -t -T a", "sort -k -o out", "sort --key -T", "sort -k",
         "rg --pre ./x foo", "rg --pre=./x foo", "rg -z foo", "rg --search-zip foo", "tail -f a.log", "tail -F a.log",
         "tail --follow a.log", "tail --fol a.log", "/usr/bin/grep x a", "./grep x a",
         // Brace expansion turns a word the checks pass into the flags they refuse (the blind check's).

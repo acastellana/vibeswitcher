@@ -140,8 +140,9 @@ public enum ReadOnlyCommand {
             // Follows forever: a verifier's turn would never end.
             return !args.contains { long($0, ["--follow", "--retry"]) || shortFlags($0).contains { $0 == "f" || $0 == "F" } }
         case "sort":
-            // `-o` writes a file; `--compress-program` runs one.
-            return !args.contains { long($0, ["--output", "--compress-program", "--random-source"]) || shortFlags($0).contains("o") }
+            // Only flags known to read: `-o` writes a file, `-T` (`--temporary-directory`) writes into a directory,
+            // `--compress-program` runs a program, and getopt takes abbreviations (`--tem=x`).
+            return allowsSort(args)
         default: return false
         }
     }
@@ -174,6 +175,49 @@ public enum ReadOnlyCommand {
         guard arg.hasPrefix("-"), arg != "-" else { return true }
         if arg.hasPrefix("--") { return ripgrepLong.contains(arg.split(separator: "=", maxSplits: 1).first.map(String.init) ?? arg) }
         return shortFlags(arg).allSatisfy(ripgrepShort.contains)
+    }
+
+    /// sort's flags that only read, taken exactly (an abbreviation still prompts); `-k` and `-t` (`--key`,
+    /// `--field-separator`) take a value, the rest of their word or the next one, as getopt does: a next word that
+    /// starts with "-" still prompts (getopt takes it as the value; a sort that didn't would take it as a flag).
+    static let sortLong: Set<String> = [
+        "--ignore-leading-blanks", "--dictionary-order", "--ignore-case", "--general-numeric-sort", "--ignore-nonprinting",
+        "--month-sort", "--human-numeric-sort", "--numeric-sort", "--random-sort", "--reverse", "--version-sort", "--check",
+        "--merge", "--stable", "--unique", "--zero-terminated",
+    ]
+    static let sortValuedLong: Set<String> = ["--key", "--field-separator"]
+    static let sortShort = Set("bdfgiMhnRrVcCmsuz")
+    static let sortValuedShort = Set("kt")
+
+    static func allowsSort(_ args: [String]) -> Bool {
+        var index = 0
+        while index < args.count {
+            let arg = args[index]
+            index += 1
+            if arg == "--" { return true }  // files only after it
+            guard arg.hasPrefix("-"), arg != "-" else { continue }  // a file, or stdin
+            if arg.hasPrefix("--") {
+                let name = arg.split(separator: "=", maxSplits: 1).first.map(String.init) ?? arg
+                if sortLong.contains(arg) || (name == "--sort" && arg.hasPrefix("--sort=")) { continue }
+                guard sortValuedLong.contains(name) else { return false }
+                if name == arg {  // its value is the next word
+                    guard index < args.count, !args[index].hasPrefix("-") else { return false }
+                    index += 1
+                }
+                continue
+            }
+            for (offset, letter) in arg.dropFirst().enumerated() {
+                if sortValuedShort.contains(letter) {
+                    if offset == arg.count - 2 {  // nothing after it in this word: the next word
+                        guard index < args.count, !args[index].hasPrefix("-") else { return false }
+                        index += 1
+                    }
+                    break
+                }
+                guard sortShort.contains(letter) else { return false }
+            }
+        }
+        return true
     }
 
     /// The letters of a short-flag word (`-rv` → "rv"); empty for anything else.
