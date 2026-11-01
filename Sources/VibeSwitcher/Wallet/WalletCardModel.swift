@@ -108,6 +108,14 @@ struct WalletCardModel: Equatable, Identifiable {
         case rejectedInWallet
         /// Opened in the browser's wallet, and no answer came back before the page stopped.
         case browserNoAnswer
+
+        /// Nothing more will happen to it: it didn't go, or the Wallet Manager or the browser wallet had the last word.
+        var isFinished: Bool {
+            switch self {
+            case .notSent, .signed, .rejected, .failed, .expired, .sentFromBrowser, .rejectedInWallet, .browserNoAnswer: return true
+            case .waiting, .sent, .unreachable, .unsure, .received, .proposed, .signedNotSubmitted, .inBrowser: return false
+            }
+        }
     }
 
     /// What you can do on the card.

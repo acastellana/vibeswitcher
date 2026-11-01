@@ -110,4 +110,83 @@ struct WalletDeskRobustnessTests {
         #expect(WalletSettingsTab.using(nil, read: true, path: path) == WalletSettingsTab.notRunnableNote)
         #expect(WalletSettingsTab.using(nil, read: true, path: "relative/passage") == "This path isn't absolute.")
     }
+
+    // MARK: Times and the cap
+
+    func plainDesk(now: Date = WalletDeskTests.created.addingTimeInterval(30)) throws -> (fake: WalletFakePassage, desk: WalletDesk, asked: URL, store: WalletRequestStore) {
+        let fake = try WalletFakePassage(temp)
+        let asked = temp.url("asked")
+        let store = WalletRequestStore(folder: temp.url("requests"))
+        let desk = WalletDesk(folder: asked, store: store, inbox: fake.inbox,
+                              config: { WalletDesk.Config(passage: fake.executable, peer: WalletFakePassage.peer) }, now: { now }, log: { _ in })
+        desk.sessionNames = { WalletDeskTests.names() }
+        desk.verifyStamps = WalletTestStamps.verify
+        desk.sealMessage = WalletTestStamps.sealMessage
+        desk.verifyMessages = WalletTestStamps.verifyMessages
+        desk.findPassage = { nil }
+        return (fake, desk, asked, store)
+    }
+
+    /// A filed request whose createdAt is more than 5 minutes ahead of this Mac's clock is refused and removed; one a
+    /// few minutes ahead (a clock a little off) shows.
+    @Test func aFiledRequestFromTheFutureIsRefused() async throws {
+        let (fake, desk, asked, _) = try plainDesk()
+        defer { desk.close() }
+        var ahead = WalletDeskTests.request(1)
+        ahead.createdAt = WalletDeskTests.created.addingTimeInterval(30 + 301)
+        ahead.expiresAt = ahead.createdAt.addingTimeInterval(3600)
+        var slightly = WalletDeskTests.request(2)
+        slightly.createdAt = WalletDeskTests.created.addingTimeInterval(30 + 240)
+        slightly.expiresAt = slightly.createdAt.addingTimeInterval(3600)
+        try WalletAsk.file(ahead, in: asked)
+        try WalletAsk.file(slightly, in: asked)
+        await refreshed(desk)
+        #expect(desk.cards.map(\.id) == [slightly.id])
+        #expect(!FileManager.default.fileExists(atPath: asked.appendingPathComponent("\(ahead.id).json").path))
+        #expect(!FileManager.default.fileExists(atPath: WalletAsk.stampFile(ahead.id, in: asked).path))
+        #expect(fake.calls.isEmpty)
+    }
+
+    /// Past `maxCards` the oldest finished cards give way first, then the oldest of any; the order stays.
+    @Test func theCardsAreCappedOldestFinishedFirst() {
+        func card(_ number: Int, _ state: WalletCardModel.State) -> WalletCardModel {
+            WalletCardModel(request: WalletDeskTests.request(number), requestedBy: "Example session", label: "Example agent", state: state)
+        }
+        let cards = [card(1, .waiting), card(2, .expired), card(3, .sent), card(4, .rejected(reason: "no")), card(5, .waiting)]
+        #expect(WalletDesk.capped(cards, limit: 5).map(\.id) == cards.map(\.id))
+        #expect(WalletDesk.capped(cards, limit: 4).map(\.id) == [1, 3, 4, 5].map { WalletDeskTests.request($0).id })
+        #expect(WalletDesk.capped(cards, limit: 3).map(\.id) == [1, 3, 5].map { WalletDeskTests.request($0).id })
+        #expect(WalletDesk.capped(cards, limit: 2).map(\.id) == [3, 5].map { WalletDeskTests.request($0).id })
+    }
+
+    /// Many requests filed: at most `maxCards` cards, the newest ones; the rest keep their files.
+    @Test func manyFiledRequestsShowAtMostTheCap() async throws {
+        let (_, desk, asked, _) = try plainDesk()
+        defer { desk.close() }
+        let count = WalletDesk.maxCards + 5
+        for number in 1...count {
+            var request = WalletDeskTests.request(number)
+            request.createdAt = WalletDeskTests.created.addingTimeInterval(TimeInterval(number - count))
+            try WalletAsk.file(request, in: asked)
+        }
+        await refreshed(desk)
+        #expect(desk.cards.count == WalletDesk.maxCards)
+        #expect(desk.cards.first?.id == WalletDeskTests.request(6).id && desk.cards.last?.id == WalletDeskTests.request(count).id)
+        #expect(desk.sessions.count == WalletDesk.maxCards)
+        #expect(FileManager.default.fileExists(atPath: asked.appendingPathComponent("\(WalletDeskTests.request(1).id).json").path))
+    }
+
+    /// At launch (`start`) records past their results window by 30 days go, and a stale listener record is cleared.
+    @Test func startPrunesOldRecordsAndClearsAStaleListenerRecord() async throws {
+        let request = WalletDeskTests.request(1)
+        let now = request.expiresAt.addingTimeInterval(WalletCourier.resultGrace + WalletRequestStore.keptAfterWindow)
+        let (_, desk, _, store) = try plainDesk(now: now)
+        defer { desk.close() }
+        try store.save(.init(request: request, state: .sent))
+        // A pid record whose process is long gone (pid 1's start time isn't this).
+        try VibePaths.writePrivate(Data("1 1 1\n/opt/example/bin/passage\n".utf8), to: WalletCourier.ListenRecord.file(in: store.folder))
+        desk.start(interval: 3600)
+        #expect(await until { !FileManager.default.fileExists(atPath: store.file(request.id).path) })
+        #expect(!FileManager.default.fileExists(atPath: WalletCourier.ListenRecord.file(in: store.folder).path))
+    }
 }

@@ -148,7 +148,10 @@ public enum WalletAsk {
         var info = stat()
         guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { throw Refusal("\(file.lastPathComponent) isn't a regular file") }
         guard info.st_size <= WalletRequestFormat.maxFileBytes else { throw WalletRequestFormat.Failure.tooLarge(Int(info.st_size)) }
-        return try handle.read(upToCount: WalletRequestFormat.maxFileBytes + 1) ?? Data()
+        let data = try handle.read(upToCount: WalletRequestFormat.maxFileBytes + 1) ?? Data()
+        // Grown since it was looked at: still no more than the limit.
+        guard data.count <= WalletRequestFormat.maxFileBytes else { throw WalletRequestFormat.Failure.tooLarge(data.count) }
+        return data
     }
 
     /// Removes a filed request (sent, discarded, or refused), its expiry note's marker and its browser wallet mark.

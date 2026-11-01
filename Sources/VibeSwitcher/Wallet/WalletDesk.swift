@@ -114,6 +114,8 @@ final class WalletDesk: ObservableObject {
     private var trusted: Set<String> = []
     /// Whether the host couldn't be asked about the outbox's seals last time (logged once until it can).
     private var outboxUnasked = false
+    /// The cards not shown last time, over `maxCards` (logged when that changes).
+    private var overCap: Set<String> = []
 
     init(folder: URL = WalletAsk.folder, store: WalletRequestStore = WalletRequestStore(), inbox: URL = PassageLink.defaultInbox,
          config: @escaping () -> Config, now: @escaping @Sendable () -> Date = { Date() },
@@ -248,6 +250,12 @@ final class WalletDesk: ObservableObject {
     /// Wallet's changes, and the Wallet Manager's results while one is outstanding (Passage asked at most once a minute this way).
     func start(interval: TimeInterval = 15) {
         guard watch == nil else { return }
+        // At launch, before any courier: the `passage listen` a crash left is ended, and records long past their
+        // results window go.
+        work.async { [self] in
+            WalletCourier.ListenRecord.endOrphan(in: store.folder, log: log)
+            store.prune(now: now(), log: log)
+        }
         try? VibePaths.ensurePrivate(folder)
         let descriptor = open(folder.path, O_EVTONLY)
         if descriptor >= 0 {
@@ -274,8 +282,16 @@ final class WalletDesk: ObservableObject {
             try? FileManager.default.removeItem(at: file)
             try? FileManager.default.removeItem(at: WalletAsk.stampFile(file.deletingPathExtension().lastPathComponent, in: folder))
         }
-        let filed = confirmed(all, stamps)
         let time = now()
+        // A createdAt more than 5 minutes ahead of this Mac's clock: refused, as one that doesn't parse. One over 7 days
+        // ago gets no card (below); its expiry is still told, and it goes with its results window.
+        let timely = all.filter { request in
+            guard request.createdAt.timeIntervalSince(time) > WalletRequest.maxAheadOfClock, let why = request.implausibleTime(now: time) else { return true }
+            log("refused filed request \(request.id).json: \(why)")
+            WalletAsk.remove(request.id, in: folder)
+            return false
+        }
+        let filed = confirmed(timely, stamps)
         for request in filed where marks[request.id] == nil {
             marks[request.id] = WalletBrowser.mark(request.id, in: folder)
         }
@@ -312,7 +328,7 @@ final class WalletDesk: ObservableObject {
             marks[request.id] = nil
             sentSince[request.id] = nil
         }
-        requests = filed.filter { time < $0.expiresAt.addingTimeInterval(WalletCourier.resultGrace) }
+        requests = filed.filter { time < $0.expiresAt.addingTimeInterval(WalletCourier.resultGrace) && $0.implausibleTime(now: time) == nil }
     }
 
     /// The requests of `filed` whose stamp the session host confirms (asked only about the ones not confirmed yet). One
@@ -739,12 +755,44 @@ final class WalletDesk: ObservableObject {
             cards[cards.count - 1].agentMissed = undelivered?[request.id]?.contains { $0.ended && isTrusted($0, of: request.id) } ?? false
             sessions[request.id] = by.session.lowercased()
         }
+        // At most `maxCards`: past that the oldest finished ones give way first, then the oldest. Their files stay; a
+        // card shows again once others go.
+        let shown = Self.capped(cards)
+        if shown.count < cards.count {
+            let hidden = Set(cards.map(\.id)).subtracting(shown.map(\.id))
+            if !hidden.isSubset(of: overCap) { log("\(hidden.count) card(s) not shown: over \(Self.maxCards)") }
+            overCap = hidden
+            cards = shown
+            sessions = sessions.filter { !hidden.contains($0.key) }
+            drawn = drawn.filter { !hidden.contains($0.key) }
+        } else {
+            overCap = []
+        }
         DispatchQueue.main.async { [weak self] in
             if self?.cards != cards { self?.cards = cards }
             if self?.sessions != sessions { self?.sessions = sessions }
             self?.drawn = drawn
             then()
         }
+    }
+
+    /// The most cards shown at once, across sessions.
+    static let maxCards = 30
+
+    /// `cards` (oldest first) cut to `limit`: the oldest finished ones go first, then the oldest; the order kept.
+    static func capped(_ cards: [WalletCardModel], limit: Int = maxCards) -> [WalletCardModel] {
+        guard cards.count > limit else { return cards }
+        var excess = cards.count - limit
+        var dropped = Set<String>()
+        for card in cards where excess > 0 && card.state.isFinished {
+            dropped.insert(card.id)
+            excess -= 1
+        }
+        for card in cards where excess > 0 && !dropped.contains(card.id) {
+            dropped.insert(card.id)
+            excess -= 1
+        }
+        return cards.filter { !dropped.contains($0.id) }
     }
 
     /// The record of a send: the courier's, else one an earlier run stored.

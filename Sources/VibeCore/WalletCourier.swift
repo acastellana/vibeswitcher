@@ -43,7 +43,7 @@ public final class WalletCourier: @unchecked Sendable {
         self.store = store
         self.log = log
         self.now = now
-        for var record in store.load(log: log) {
+        for var record in store.load(now: now(), log: log) {
             // Left `sending` by a run that stopped mid-send: it may have gone, and no send of this run is under way, so
             // it's `unsure` (outstanding, and it may be sent again under its id).
             if record.state == .sending {
@@ -68,7 +68,18 @@ public final class WalletCourier: @unchecked Sendable {
     public var outstanding: [WalletRequest] {
         lock.lock()
         defer { lock.unlock() }
-        return outstandingLocked(at: now()).map(\.request)
+        let time = now()
+        dropPastWindowLocked(at: time)
+        return outstandingLocked(at: time).map(\.request)
+    }
+
+    /// Forgets, in memory only, the records whose results window is over (`expiresAt` + `resultGrace`): nothing more
+    /// is taken for them, and their cards are gone. Their files stay until the store prunes them; their inbox paths
+    /// stay looked at while the inbox lists them (`poll`).
+    private func dropPastWindowLocked(at time: Date) {
+        for (id, record) in records where time >= record.request.expiresAt.addingTimeInterval(Self.resultGrace) {
+            records[id] = nil
+        }
     }
 
     public func record(_ id: String) -> WalletRequestStore.Record? {
@@ -98,6 +109,7 @@ public final class WalletCourier: @unchecked Sendable {
             return .refused("\(error)")
         }
         guard !request.isExpired(now: now()) else { return .refused("the request expired at \(WalletRequestFormat.string(request.expiresAt))") }
+        if let why = request.implausibleTime(now: now()) { return .refused(why) }
         lock.lock()
         let resend = records[request.id] != nil
         if let known = records[request.id] {
@@ -244,6 +256,9 @@ public final class WalletCourier: @unchecked Sendable {
         }
         lock.lock()
         let time = now()
+        dropPastWindowLocked(at: time)
+        // Only the paths the inbox still lists are remembered: what it no longer has can't come back to be looked at.
+        handled.formIntersection(entries.map(\.path))
         var candidates: [(entry: PassageLink.InboxEntry, result: WalletResult)] = []
         for entry in entries where !handled.contains(entry.path) {
             func ignore(_ why: String) {
@@ -279,8 +294,15 @@ public final class WalletCourier: @unchecked Sendable {
             }
             record.results.append(result)
             record.inboxFiles.append(entry.path)
+            do {
+                try store.save(record)
+            } catch WalletRequestFormat.Failure.tooLarge(let bytes) {
+                log("ignored \(entry.path): with it, request \(result.id)'s record would be \(bytes) bytes, over the \(WalletRequestFormat.maxFileBytes)-byte limit")
+                continue
+            } catch {
+                log("couldn't record result \(result.sequence) for \(result.id): \(error)")
+            }
             records[result.id] = record
-            do { try store.save(record) } catch { log("couldn't record result \(result.sequence) for \(result.id): \(error)") }
             log("result \(result.sequence) for request \(result.id): \(result.status.rawValue)")
             taken.append(result)
         }
@@ -305,6 +327,7 @@ public final class WalletCourier: @unchecked Sendable {
     public func syncListener() {
         lock.lock()
         let time = now()
+        dropPastWindowLocked(at: time)
         let wanted = !outstandingLocked(at: time).isEmpty
         var stopping: PassageListener?
         if let running = listener, !running.isRunning {
@@ -317,6 +340,8 @@ public final class WalletCourier: @unchecked Sendable {
                 listener = try link.listen { [weak self] in self?.heardListenLine() }
                 listenerStarted = time
                 endNoted = false
+                // Its pid and start time, so a crash that orphans it doesn't leave it running past the next launch.
+                ListenRecord.save(pid: listener!.pid, executable: link.executable, in: store.folder, log: log)
                 log("passage listen started (pid \(listener!.pid)): \(outstandingLocked(at: time).count) request(s) outstanding")
             } catch {
                 listenerStarted = time
@@ -330,6 +355,7 @@ public final class WalletCourier: @unchecked Sendable {
         lock.unlock()
         if let stopping {
             stopping.stop()
+            ListenRecord.clear(pid: stopping.pid, in: store.folder)
             log("passage listen (pid \(stopping.pid)) stopped: no request outstanding")
         }
     }
@@ -342,5 +368,92 @@ public final class WalletCourier: @unchecked Sendable {
         listenerStarted = nil
         lock.unlock()
         running?.stop()
+        if let running { ListenRecord.clear(pid: running.pid, in: store.folder) }
+    }
+
+    // MARK: A listener a crash left
+
+    /// The running `passage listen`'s pid, start time and program, kept in `passage-listen.pid` beside the records
+    /// while it runs. The app ending without `close` (a crash, a kill) leaves it running, a child of no one; at the
+    /// next launch `endOrphan` ends it, by its pid, once the process with that pid has that start time and is
+    /// `<program> … listen` (a pid used again since is never touched).
+    public enum ListenRecord {
+        public static let fileName = "passage-listen.pid"
+
+        struct Saved: Equatable {
+            var pid: Int32
+            var start: Start
+            var executable: String
+        }
+
+        /// A process's start time as the kernel keeps it (seconds and microseconds).
+        struct Start: Equatable {
+            var seconds: UInt64
+            var microseconds: UInt64
+        }
+
+        public static func file(in folder: URL) -> URL { folder.appendingPathComponent(fileName) }
+
+        /// The process's start time, unless it's gone or a zombie.
+        static func start(of pid: Int32) -> Start? {
+            var info = proc_bsdinfo()
+            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+            guard pid > 0, proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_status != SZOMB else { return nil }
+            return Start(seconds: info.pbi_start_tvsec, microseconds: info.pbi_start_tvusec)
+        }
+
+        static func save(pid: Int32, executable: String, in folder: URL, log: (String) -> Void) {
+            guard let start = start(of: pid) else { return }
+            do {
+                try VibePaths.ensurePrivate(folder)
+                try VibePaths.writePrivate(Data("\(pid) \(start.seconds) \(start.microseconds)\n\(executable)\n".utf8), to: file(in: folder))
+            } catch {
+                log("couldn't keep passage listen's pid \(pid): \(error)")
+            }
+        }
+
+        static func read(in folder: URL) -> Saved? {
+            guard let data = try? WalletAsk.read(file(in: folder)), let text = String(data: data, encoding: .utf8) else { return nil }
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            guard lines.count >= 2 else { return nil }
+            let numbers = lines[0].split(separator: " ")
+            guard numbers.count == 3, let pid = Int32(numbers[0]), pid > 1, let seconds = UInt64(numbers[1]), let micro = UInt64(numbers[2]),
+                  lines[1].hasPrefix("/") else { return nil }
+            return Saved(pid: pid, start: Start(seconds: seconds, microseconds: micro), executable: String(lines[1]))
+        }
+
+        /// Removes the record if it's `pid`'s (a courier made since may have written its own).
+        static func clear(pid: Int32, in folder: URL) {
+            guard read(in: folder)?.pid == pid else { return }
+            try? FileManager.default.removeItem(at: file(in: folder))
+        }
+
+        /// Whether `arguments` (a process's argv) are `executable`'s `listen`: the program itself, or a script's
+        /// interpreter given it, with `listen` last.
+        static func isListen(_ arguments: [String], executable: String) -> Bool {
+            arguments.last == "listen" && arguments.dropLast().contains(executable)
+        }
+
+        /// At launch, before any courier listens: ends the `passage listen` an earlier run left (SIGTERM to its pid,
+        /// SIGKILL after `grace` if that very process still runs), only when the pid's process has the start time and
+        /// the command line recorded. The record goes either way. True when it signalled one.
+        @discardableResult
+        public static func endOrphan(in folder: URL, grace: TimeInterval = 5, log: @escaping @Sendable (String) -> Void) -> Bool {
+            guard let saved = read(in: folder) else {
+                try? FileManager.default.removeItem(at: file(in: folder))
+                return false
+            }
+            try? FileManager.default.removeItem(at: file(in: folder))
+            guard saved.pid != getpid(), start(of: saved.pid) == saved.start,
+                  isListen(ProcessTable.commandLine(pid: saved.pid), executable: saved.executable) else { return false }
+            kill(saved.pid, SIGTERM)
+            log("ended passage listen (pid \(saved.pid)) an earlier run left running")
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + grace) {
+                guard start(of: saved.pid) == saved.start, isListen(ProcessTable.commandLine(pid: saved.pid), executable: saved.executable) else { return }
+                kill(saved.pid, SIGKILL)
+                log("killed passage listen (pid \(saved.pid)): it didn't end on SIGTERM")
+            }
+            return true
+        }
     }
 }

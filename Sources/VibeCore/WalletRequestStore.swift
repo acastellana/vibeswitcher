@@ -38,8 +38,12 @@ public final class WalletRequestStore: @unchecked Sendable {
         public var lastSequence: Int64 { results.last?.sequence ?? 0 }
     }
 
-    /// The most a record file may hold: results are small, and a request gets at most `WalletResult.maxSequence`.
-    static let maxRecordBytes = 4 * 1024 * 1024
+    /// The most a record file may hold, as for the request and result files themselves: a request and its results
+    /// are small. A record that would be larger isn't written (`save` throws), and a file larger isn't read.
+    static let maxRecordBytes = WalletRequestFormat.maxFileBytes
+    /// How long a record is kept after its request's results window (`expiresAt` + `WalletCourier.resultGrace`):
+    /// `prune` removes it then.
+    public static let keptAfterWindow: TimeInterval = 30 * 24 * 3600
 
     public let folder: URL
 
@@ -49,17 +53,20 @@ public final class WalletRequestStore: @unchecked Sendable {
 
     public func file(_ id: String) -> URL { folder.appendingPathComponent("\(id).json") }
 
-    /// Every record in the folder, oldest request first. A file that isn't a record (unreadable, not the format, a
-    /// name that isn't `<id>.json` of its own request) is left where it is and named to `log`.
-    public func load(log: (String) -> Void = { _ in }) -> [Record] {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+    /// Every record in the folder, oldest request first. A file that isn't a record (a link, not a regular file, over
+    /// 64 KiB, unreadable, not the format, a name that isn't `<id>.json` of its own request) is left where it is and
+    /// named to `log`. With `now`, a record whose request's `createdAt` isn't believable then
+    /// (`WalletRequest.implausibleTime`) is left out too, and named.
+    public func load(now: Date? = nil, log: (String) -> Void = { _ in }) -> [Record] {
         var records: [Record] = []
-        for name in names.sorted() where name.hasSuffix(".json") {
-            let id = String(name.dropLast(".json".count))
-            guard WalletRequestFormat.isID(id) else { continue }
+        for (name, id) in recordFiles() {
             do {
                 let record = try read(file(id))
                 guard record.request.id == id else { throw WalletRequestFormat.Failure.invalid("request.id", "isn't the file's name") }
+                if let now, let why = record.request.implausibleTime(now: now) {
+                    log("left \(name) out: \(why)")
+                    continue
+                }
                 records.append(record)
             } catch {
                 log("kept \(name) aside: it isn't a request record (\(error))")
@@ -68,9 +75,38 @@ public final class WalletRequestStore: @unchecked Sendable {
         return records.sorted { ($0.request.createdAt, $0.request.id) < ($1.request.createdAt, $1.request.id) }
     }
 
+    /// The `<id>.json` files in the folder, by name, with their ids.
+    private func recordFiles() -> [(name: String, id: String)] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        return names.sorted().compactMap { name in
+            guard name.hasSuffix(".json") else { return nil }
+            let id = String(name.dropLast(".json".count))
+            return WalletRequestFormat.isID(id) ? (name, id) : nil
+        }
+    }
+
+    /// Removes the records past their request's results window by `keptAfterWindow` (at launch), and returns their
+    /// ids. A file that isn't a record is left as it is.
+    @discardableResult
+    public func prune(now: Date, log: (String) -> Void = { _ in }) -> [String] {
+        var removed: [String] = []
+        for (name, id) in recordFiles() {
+            guard let record = try? read(file(id)), record.request.id == id else { continue }
+            let end = record.request.expiresAt.addingTimeInterval(WalletCourier.resultGrace + Self.keptAfterWindow)
+            guard now >= end else { continue }
+            remove(id)
+            removed.append(id)
+            log("removed \(name): its results window ended over 30 days ago")
+        }
+        return removed
+    }
+
+    /// Writes the record (0600, in the 0700 folder). Throws, writing nothing, when it would be over 64 KiB.
     public func save(_ record: Record) throws {
+        let data = Self.encode(record)
+        guard data.count <= Self.maxRecordBytes else { throw WalletRequestFormat.Failure.tooLarge(data.count) }
         try VibePaths.ensurePrivate(folder)
-        try VibePaths.writePrivate(Self.encode(record), to: file(record.request.id))
+        try VibePaths.writePrivate(data, to: file(record.request.id))
     }
 
     public func remove(_ id: String) {
@@ -150,9 +186,10 @@ public final class WalletRequestStore: @unchecked Sendable {
         return WalletRequestFormat.Value.object(members).encoded()
     }
 
+    /// A record file: opened without following a link (O_NOFOLLOW), only a regular file, its size checked before
+    /// anything is read (64 KiB at most), then the strict parser.
     func read(_ url: URL) throws -> Record {
-        let data = try Data(contentsOf: url)
-        guard data.count <= Self.maxRecordBytes else { throw WalletRequestFormat.Failure.tooLarge(data.count) }
+        let data = try WalletAsk.read(url)
         let fields = try WalletRequestFormat.Fields(WalletRequestFormat.Value.parse(data), path: "", allowed: ["request", "state", "results", "inboxFiles", "sentAt"])
         let request = try WalletRequest.read(fields.value("request"), path: "request")
         guard let state = State(rawValue: try fields.string("state")) else { throw WalletRequestFormat.Failure.invalid("state", "sending, sent or unsure") }
