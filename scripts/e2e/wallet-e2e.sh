@@ -6,6 +6,8 @@
 # is stood in for. Run on demand (never part of scripts/test.sh): it needs the Wallet Manager's checkout.
 #
 # scripts/e2e/wallet-e2e.sh [--wallet-manager DIR] [--binary PATH] [--keep]
+# scripts/e2e/wallet-e2e.sh --real-testnet [--dry-run|--check-guards] [--amount WEI] [--from 0x…] [--to 0x…] [--chain N]
+#                           [--wallet-manager DIR] [--binary PATH] [--keep]
 # scripts/e2e/wallet-e2e.sh --judge-case-1 SEEN RECORD
 #   --wallet-manager DIR  the Wallet Manager's checkout (~/dev/wallet-manager). Nothing is written there but its
 #                         git-ignored node_modules: when node_modules/.package-lock.json is missing or older than its
@@ -16,6 +18,26 @@
 #                         writes them, "waiting → sent → received"; RECORD, the Wallet Manager's record as `record`
 #                         prints it, "pending true 1 wallet:ok,recipient-known:failed", or "" for none), prints its
 #                         lines and exits 0 on a pass, 1 on a failure.
+#
+# --real-testnet: one real GenLayer testnet payment through the same chain, instead of the cases below. Never part of
+# scripts/test.sh, a merge or an audit: it broadcasts a real transaction, so it runs only when asked for by name. It
+# refuses (exit 2, before any network or scratch folder) unless the chain is 4221, `from` is the Wallet Manager
+# project's throwaway testnet wallet (0x4c50…ab99, the address its keystore names) and the transfer is a self-transfer
+# (`to` = `from`) of 1 to 1000 wei, and the Wallet Manager's own NETWORKS.testnet (src/networks.ts, read through node)
+# is chain 4221 at GenLayer's testnet RPC; the explorer link it prints is that entry's. The throwaway keystore and passphrase are read only from
+# ~/.config/wallet-manager-testnet/ (keystore.json, passphrase: yours, regular files, 0600, in a 0700 folder), copied
+# 0600 into the run's scratch vault, never printed or logged, and removed with it however the run ends (--keep keeps
+# the logs, never those two). The Wallet Manager runs on that vault with no --rpc, so it uses GenLayer's testnet RPC;
+# the sandbox files the request and clicks Send; the run signs on the Wallet Manager's /sign page over HTTP exactly as
+# its docs/running.md, "Signing over HTTP (headless)", has it (GET the page, read its csrf, token and hash, POST the
+# confirmation with the passphrase on stdin): one POST, never retried. It passes when the card shows Signed (the
+# result `submitted`) with the transaction, and the RPC's eth_getTransactionReceipt says status 1 for that
+# self-transfer; it prints the explorer link.
+#   --amount WEI (1000), --from 0x… and --to 0x… (the throwaway wallet), --chain N (4221): checked, not chosen freely
+#   --dry-run             everything up to the sign POST (the page fetched and read, the card Proposed), then stops:
+#                         nothing is signed or sent
+#   --check-guards        runs only the refusals above and says they pass: no network, no Wallet Manager or sandbox
+#                         started (the checkout's NETWORKS.testnet is read through node: 4221 at GenLayer's testnet RPC)
 #
 # Cases, each with the card's final state and a light shot in .build/sandbox-shots/e2e/:
 #   1 a valid testnet transfer from a known wallet: waiting → sent → received (or proposed), not rejected. A check
@@ -39,11 +61,34 @@ wm=$HOME/dev/wallet-manager
 binary=""
 keep=""
 judge=""
+real=""
+dry_run=""
+check_guards=""
+real_options=""
+THROWAWAY=0x4c50c0Ae2b75B8C17d999CA2e11118A27867ab99   # the Wallet Manager project's throwaway testnet hot wallet
+TESTNET_CHAIN=4221
+MAX_WEI=1000
+chain=$TESTNET_CHAIN
+from=$THROWAWAY
+to=$THROWAWAY
+amount=$MAX_WEI
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --wallet-manager) wm=$2; shift 2 ;;
-        --binary) binary=$2; shift 2 ;;
+        --wallet-manager|--binary|--amount|--from|--to|--chain)
+            [[ $# -ge 2 ]] || { echo "$1 needs a value"; exit 64; }
+            case $1 in
+                --wallet-manager) wm=$2 ;;
+                --binary) binary=$2 ;;
+                --amount) amount=$2; real_options+=" $1" ;;
+                --from) from=$2; real_options+=" $1" ;;
+                --to) to=$2; real_options+=" $1" ;;
+                --chain) chain=$2; real_options+=" $1" ;;
+            esac
+            shift 2 ;;
         --keep) keep=1; shift ;;
+        --real-testnet) real=1; shift ;;
+        --dry-run) dry_run=1; real_options+=" $1"; shift ;;
+        --check-guards) check_guards=1; real_options+=" $1"; shift ;;
         --judge-case-1) [[ $# -ge 3 ]] || { echo "--judge-case-1 SEEN RECORD"; exit 64; }; judge_seen=$2; judge_record=$3; judge=1; shift 3 ;;
         -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
         *) echo "unknown option $1 (--help)"; exit 64 ;;
@@ -100,6 +145,76 @@ if [[ -n $judge ]]; then
     exit $((failures == 0 ? 0 : 1))
 fi
 
+# --real-testnet's refusals, all before any network, scratch folder, Wallet Manager or sandbox. They read the config
+# folder's metadata and the keystore's address, never print a value from either file.
+testnet_config=$HOME/.config/wallet-manager-testnet
+refuse() { say "wallet-e2e --real-testnet: refused: $*"; exit 2; }
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+# private PATH WHAT: yours, not a link, nobody else may read or write it (no group or other bits).
+private() {
+    local path=$1 what=$2 mode
+    [[ ! -L $path ]] || refuse "$what ($path) is a link: it must be the file itself"
+    [[ -e $path ]] || refuse "$what ($path) is missing"
+    [[ $(stat -f %u "$path") == "$(id -u)" ]] || refuse "$what ($path) isn't yours"
+    mode=$(stat -f %Lp "$path")
+    (( (8#$mode & 8#077) == 0 )) || refuse "$what ($path) has mode $mode: others may reach it (0600 for a file, 0700 for the folder)"
+}
+# private_file PATH WHAT MAX_BYTES: as private, a regular file of 1 to MAX_BYTES bytes.
+private_file() {
+    local size
+    private "$1" "$2"
+    [[ -f $1 ]] || refuse "$2 ($1) isn't a regular file"
+    size=$(stat -f %z "$1")
+    ((size > 0 && size <= $3)) || refuse "$2 ($1) is $size bytes: expected 1 to $3"
+}
+real_testnet_guards() {
+    [[ $chain == "$TESTNET_CHAIN" ]] || refuse "chain $chain: only GenLayer testnet, $TESTNET_CHAIN"
+    [[ $(lower "$from") == "$(lower "$THROWAWAY")" ]] || refuse "from $from: only the throwaway testnet wallet $THROWAWAY"
+    [[ $(lower "$to") == "$(lower "$from")" ]] || refuse "to $to: only a self-transfer, to the throwaway wallet itself"
+    { [[ $amount =~ ^[1-9][0-9]{0,3}$ ]] && ((amount <= MAX_WEI)); } || refuse "amount $amount: 1 to $MAX_WEI wei"
+    private "$testnet_config" "the throwaway wallet's folder"
+    [[ -d $testnet_config ]] || refuse "$testnet_config isn't a folder"
+    private_file "$testnet_config/keystore.json" "the throwaway keystore" 65536
+    private_file "$testnet_config/passphrase" "the throwaway passphrase" 1024
+    [[ -n $(tr -d '\r\n' <"$testnet_config/passphrase") ]] || refuse "the throwaway passphrase file holds no passphrase"
+    # A v3 keystore naming exactly one address, the throwaway wallet's (lower-case hex, no 0x, as the format has it).
+    local keystore=$testnet_config/keystore.json addresses
+    grep -Eq '"version"[[:space:]]*:[[:space:]]*3[[:space:]]*[,}]' "$keystore" || refuse "the throwaway keystore isn't a version 3 keystore"
+    addresses=$(grep -Eo '"address"[[:space:]]*:[[:space:]]*"[^"]*"' "$keystore" | sed -E 's/.*"([^"]*)"$/\1/')
+    [[ $(printf '%s\n' "$addresses" | grep -c .) == 1 ]] || refuse "the throwaway keystore doesn't name exactly one address"
+    [[ $(lower "$addresses") == "$(lower "${THROWAWAY#0x}")" ]] || refuse "the throwaway keystore isn't the throwaway wallet's ($THROWAWAY)"
+}
+# testnet_network: the Wallet Manager's own testnet, NETWORKS.testnet from its src/networks.ts read through node (not
+# matched as text, so its layout doesn't matter): chain 4221 at GenLayer's testnet RPC, with an https explorer, else a
+# refusal. Sets TESTNET_EXPLORER, the explorer the run prints. Reads the checkout only: no network.
+TESTNET_RPC=https://rpc.testnet-chain.genlayer.com
+TESTNET_EXPLORER=""
+testnet_network() {
+    local checkout fields chain_id rpc_url explorer
+    command -v node >/dev/null || refuse "node isn't on the PATH, so the Wallet Manager's testnet can't be read"
+    { checkout=$(cd "$wm" 2>/dev/null && pwd -P) && [[ -f $checkout/src/networks.ts ]]; } || refuse "no src/networks.ts in a Wallet Manager checkout at $wm"
+    fields=$(cd "$checkout" && node --input-type=module -e 'import { NETWORKS } from "./src/networks.ts";
+        const t = NETWORKS?.testnet ?? {}, text = (v) => (typeof v === "string" && v !== "" && !/\s/.test(v) ? v : "-");
+        process.stdout.write([typeof t.chainId === "number" ? String(t.chainId) : "-", text(t.rpcUrl), text(t.explorerUrl)].join(" "))' 2>/dev/null </dev/null) \
+        || refuse "the Wallet Manager's src/networks.ts couldn't be read through node"
+    read -r chain_id rpc_url explorer <<<"$fields"
+    [[ $chain_id == "$TESTNET_CHAIN" && $rpc_url == "$TESTNET_RPC" ]] \
+        || refuse "the Wallet Manager's NETWORKS.testnet is chain ${chain_id:--} at ${rpc_url:--}, not $TESTNET_CHAIN at $TESTNET_RPC"
+    [[ $explorer =~ ^https://[A-Za-z0-9.-]+$ ]] || refuse "the Wallet Manager's NETWORKS.testnet has no https explorer (${explorer:--})"
+    TESTNET_EXPLORER=$explorer
+}
+if [[ -z $real ]]; then
+    [[ -z $real_options ]] || { say "wallet-e2e:$real_options only with --real-testnet"; exit 64; }
+else
+    [[ -z $dry_run || -z $check_guards ]] || { say "wallet-e2e: --dry-run or --check-guards, not both"; exit 64; }
+    real_testnet_guards
+    testnet_network
+    if [[ -n $check_guards ]]; then
+        say "wallet-e2e --real-testnet: guards pass: chain $chain, a self-transfer of $amount wei from the throwaway wallet $THROWAWAY, its keystore and passphrase private in $testnet_config; the Wallet Manager's testnet: $TESTNET_CHAIN at $TESTNET_RPC, explorer $TESTNET_EXPLORER"
+        exit 0
+    fi
+fi
+
 command -v node >/dev/null || die "node isn't on the PATH"
 wm=$(cd "$wm" 2>/dev/null && pwd -P) || die "no Wallet Manager checkout at $wm (--wallet-manager DIR)"
 [[ -f $wm/src/server/main.ts && -f $wm/src/dev/fake-chain-cli.ts ]] || die "$wm isn't the Wallet Manager's checkout (no src/server/main.ts)"
@@ -117,6 +232,36 @@ if [[ ! -f $installed || $wm/package-lock.json -nt $installed ]]; then
     rm -f "$npm_log"
 fi
 
+# --real-testnet's look at the chain before anything starts: GenLayer's testnet RPC (the Wallet Manager's, checked by
+# testnet_network) says it's 4221, and nothing from the wallet is pending. Nothing is sent but these reads.
+# jget JSON PATH: the value at a dotted PATH ("" for the whole), a string as is, else as JSON; "" when absent.
+jget() {
+    node -e 'let v = JSON.parse(process.argv[1]); for (const k of process.argv[2] ? process.argv[2].split(".") : []) v = v == null ? v : v[k];
+        process.stdout.write(v == null ? "" : typeof v === "string" ? v : JSON.stringify(v))' "$1" "$2"
+}
+# rpc METHOD PARAMS: the testnet RPC's result as JSON, or fails saying its error.
+rpc() {
+    local reply
+    reply=$(curl -sS --max-time 30 -H 'Content-Type: application/json' \
+        --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":$2}" "$TESTNET_RPC") || return 1
+    node -e 'let r; try { r = JSON.parse(process.argv[1]) } catch { r = {} }
+        if (r.error !== undefined || !("result" in r)) { process.stderr.write(`the RPC answered ${process.argv[2]} with ${JSON.stringify(r.error ?? r).slice(0, 300)}\n`); process.exit(1) }
+        process.stdout.write(JSON.stringify(r.result))' "$reply" "$1"
+}
+decimal() { node -e 'process.stdout.write(BigInt(process.argv[1]).toString())' "$1"; }
+if [[ -n $real ]]; then
+    command -v curl >/dev/null || die "curl isn't on the PATH"
+    answer=$(rpc eth_chainId '[]') || die "the testnet RPC ($TESTNET_RPC) didn't answer eth_chainId"
+    [[ $(jget "$answer" "") == "$(printf '0x%x' "$TESTNET_CHAIN")" ]] || refuse "$TESTNET_RPC says it's chain $(jget "$answer" ""), not $TESTNET_CHAIN"
+    answer=$(rpc eth_getBalance "[\"$THROWAWAY\",\"latest\"]") || die "the testnet RPC didn't answer eth_getBalance"
+    balance=$(decimal "$(jget "$answer" "")")
+    answer=$(rpc eth_getTransactionCount "[\"$THROWAWAY\",\"latest\"]") || die "the testnet RPC didn't answer eth_getTransactionCount"
+    nonce_before=$(decimal "$(jget "$answer" "")")
+    answer=$(rpc eth_getTransactionCount "[\"$THROWAWAY\",\"pending\"]") || die "the testnet RPC didn't answer eth_getTransactionCount"
+    [[ $(decimal "$(jget "$answer" "")") == "$nonce_before" ]] || refuse "a transaction from the throwaway wallet is still pending: wait for it to be mined"
+    say "testnet RPC $TESTNET_RPC: chain $TESTNET_CHAIN; the throwaway wallet holds $balance wei, nonce $nonce_before"
+fi
+
 # The run's scratch folder, resolved: the Wallet Manager refuses an inbox reached through a link (/tmp is one).
 run=$(mktemp -d "${TMPDIR:-/tmp}/wallet-e2e.XXXXXX") || die "can't make a scratch folder"
 run=$(cd "$run" && pwd -P)
@@ -130,8 +275,15 @@ dev_root=$loop
 pids=()          # what this run started, stopped by pid at the end
 wm_pid=""
 sandbox_started=""
+secrets=()       # --real-testnet: the copies of the throwaway keystore and passphrase, removed first, always
 cleanup() {
     local pid
+    if (( ${#secrets[@]} > 0 )); then
+        local file
+        rm -f "${secrets[@]}" </dev/null
+        for file in "${secrets[@]}"; do [[ ! -e $file ]] || say "couldn't remove $file: remove it now"; done
+        say "removed the scratch copies of the throwaway keystore and passphrase"
+    fi
     [[ -n $sandbox_started ]] && bash scripts/sandbox-app.sh --dir "$sandbox_dir" quit >/dev/null 2>&1
     # Any `passage listen` still marked in the loop (the sandbox's, if it didn't stop its own): its pid is the marker's
     # name, and its command line doesn't name the run's folder, so pgrep below wouldn't see it.
@@ -163,8 +315,26 @@ for side in dev vault; do
     chmod 755 "$loop/$side/bin/passage"
 done
 
-# The synthetic vault: one made-up workspace with one testnet hot wallet, no keys.
 write() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" >"$1"; }
+REAL_WORKSPACE=testnet
+REAL_WALLET=throwaway
+if [[ -n $real ]]; then
+    # The real vault: one workspace with the throwaway hot wallet and a 0600 copy of its keystore; the passphrase's
+    # 0600 copy beside the vault, read by the sign POST on stdin. Both go first when the run ends (cleanup).
+    keystore_copy=$vault/workspaces/$REAL_WORKSPACE/hot/$REAL_WALLET.keystore.json
+    passphrase_copy=$run/passphrase
+    write "$vault/vault.json" '{ "format": "wallet-manager-vault", "version": "1.0" }'
+    write "$vault/workspaces/$REAL_WORKSPACE/workspace.json" "{ \"name\": \"$REAL_WORKSPACE\", \"label\": \"Throwaway testnet (end-to-end)\" }"
+    write "$vault/workspaces/$REAL_WORKSPACE/hot/$REAL_WALLET.json" "{ \"address\": \"$THROWAWAY\", \"label\": \"Throwaway testnet hot wallet\", \"network\": \"testnet\", \"chainIds\": [$TESTNET_CHAIN] }"
+    write "$vault/requests/config.json" "{\"vibeswitcherPeer\":\"$DEV_PEER\"}"
+    secrets=("$keystore_copy" "$passphrase_copy")
+    (umask 077 && cp "$testnet_config/keystore.json" "$keystore_copy" && cp "$testnet_config/passphrase" "$passphrase_copy") </dev/null \
+        || die "couldn't copy the throwaway keystore and passphrase into the scratch vault"
+    chmod 600 "$keystore_copy" "$passphrase_copy" || die "couldn't make the scratch copies 0600"
+    [[ $(stat -f %Lp "$keystore_copy") == 600 && $(stat -f %Lp "$passphrase_copy") == 600 ]] || die "the scratch copies aren't 0600"
+    (cd "$wm" && node src/cli/check-vault.ts "$vault") >"$run/check-vault.log" 2>&1 || { cat "$run/check-vault.log"; die "the Wallet Manager's checker refused the throwaway vault"; }
+else
+# The synthetic vault: one made-up workspace with one testnet hot wallet, no keys.
 write "$vault/vault.json" '{ "format": "wallet-manager-vault", "version": "1.0" }'
 write "$vault/workspaces/e2e/workspace.json" '{ "name": "e2e", "label": "End-to-end (made up)" }'
 write "$vault/workspaces/e2e/hot/$WALLET.json" "{ \"address\": \"$WALLET_ADDRESS\", \"label\": \"Made-up testnet hot wallet\", \"network\": \"testnet\", \"chainIds\": [4221] }"
@@ -173,6 +343,7 @@ write "$vault/requests/config.json" "{\"vibeswitcherPeer\":\"$DEV_PEER\"}"
 # Its fake chains: the wallet holds 10 GEN on testnet; mainnet only answers its chain id.
 write "$run/testnet.json" "{ \"chainId\": 4221, \"balances\": { \"$WALLET_ADDRESS\": \"10000000000000000000\" } }"
 write "$run/mainnet.json" '{ "chainId": 42424242 }'
+fi
 
 # Waits for a ready file ($1) naming pid $2, then prints its url.
 await_ready() {
@@ -189,6 +360,8 @@ await_ready() {
     return 1
 }
 
+rpc_args=()      # none for --real-testnet: the Wallet Manager uses GenLayer's testnet RPC throughout
+if [[ -z $real ]]; then
 # The Wallet Manager's harness lines (its docs/running.md, "Local end-to-end run"): node itself, so $! is its pid.
 (cd "$wm" && exec node src/dev/fake-chain-cli.ts --port 0 --state "$run/testnet.json" --ready-file "$run/testnet-ready.json") >"$run/testnet.log" 2>&1 &
 testnet_pid=$!; pids+=("$testnet_pid")
@@ -196,6 +369,8 @@ testnet_pid=$!; pids+=("$testnet_pid")
 mainnet_pid=$!; pids+=("$mainnet_pid")
 testnet_url=$(await_ready "$run/testnet-ready.json" "$testnet_pid" testnet) || die "the testnet fake chain didn't start"
 mainnet_url=$(await_ready "$run/mainnet-ready.json" "$mainnet_pid" mainnet) || die "the mainnet fake chain didn't start"
+rpc_args=(--rpc "testnet=$testnet_url" --rpc "mainnet=$mainnet_url")
+fi
 
 # The vault Mac's `passage listen`, as a person leaves it running there.
 "$loop/vault/bin/passage" listen >"$run/vault-listen.log" 2>&1 &
@@ -203,7 +378,7 @@ pids+=("$!")
 
 start_wallet_manager() {
     (cd "$wm" && PATH="$loop/vault/bin:$PATH" exec node src/server/main.ts "$vault" --port 0 --inbox "$loop/vault/inbox" --peer "$DEV_PEER" \
-        --rpc "testnet=$testnet_url" --rpc "mainnet=$mainnet_url" --ready-file "$run/app-ready.json") >>"$run/wallet-manager.log" 2>&1 &
+        ${rpc_args[@]+"${rpc_args[@]}"} --ready-file "$run/app-ready.json") >>"$run/wallet-manager.log" 2>&1 &
     wm_pid=$!; pids+=("$wm_pid")
     wm_url=$(await_ready "$run/app-ready.json" "$wm_pid" wallet-manager) || die "the Wallet Manager didn't start (see above)"
 }
@@ -214,7 +389,8 @@ stop_wallet_manager() {
 }
 start_wallet_manager
 grep -q "Test mode: overridden" "$run/wallet-manager.log" || die "the Wallet Manager didn't say it's in test mode"
-say "Wallet Manager (pid $wm_pid) at $wm_url on the synthetic vault, fake chains at $testnet_url and $mainnet_url"
+if [[ -n $real ]]; then say "Wallet Manager (pid $wm_pid) at $wm_url on the throwaway vault, GenLayer's testnet RPC"
+else say "Wallet Manager (pid $wm_pid) at $wm_url on the synthetic vault, fake chains at $testnet_url and $mainnet_url"; fi
 # Opening /requests reads the inbox and sends what's waiting now (else it looks every 15 s).
 wm_poll() { curl -s --max-time 30 -o /dev/null "${wm_url}requests"; }
 
@@ -227,10 +403,11 @@ session() { sb new "$1" >/dev/null && sb chat "$1" >/dev/null || die "couldn't s
 
 # The newest card's field ($1: state, id, not-picked-up…), from `wallet-card`.
 card() { sb wallet-card | sed -n "s/^$1 //p" | head -1; }
-# Waits for the newest card's state to be $1, or one of them ("Received|Proposed"), up to 60 s; prints the card.
+# Waits for the newest card's state to be $1, or one of them ("Received|Proposed"), up to 60 s (or $2 looks, 0.2 s
+# apart); prints the card.
 await_card() {
     local text state
-    for _ in $(seq 1 300); do
+    for _ in $(seq 1 "${2:-300}"); do
         text=$(sb wallet-card)
         state=$(sed -n 's/^state //p' <<<"$text")
         [[ -n $state && "|$1|" == *"|$state|"* ]] && { printf '%s\n' "$text"; return 0; }
@@ -252,6 +429,138 @@ results_in_dev_inbox() { ls "$loop/dev/inbox/0a1b2c3d" 2>/dev/null | grep -c -- 
 requests_in_vault_inbox() { ls "$loop/vault/inbox/$DEV_PEER" 2>/dev/null | grep -c -- "-wallet-request-$1.json$"; }
 
 shot() { sb scroll bottom >/dev/null; sb shot "$1" >/dev/null || say "  (couldn't take shot $1)"; }
+
+# --real-testnet: one real payment. The sandbox's fake agent asks for the self-transfer and Send is clicked; the
+# Wallet Manager checks it against GenLayer's testnet; then the /sign page is driven over HTTP exactly as its
+# docs/running.md, "Signing over HTTP (headless)", has it; the card ends Signed (the result `submitted`) and the RPC's
+# receipt says status 1.
+real_payment() {
+    local id states final rec url sign_dir answer
+    session "Testnet agent"
+    sb wallet-ask --workspace "$REAL_WORKSPACE" --from "$REAL_WALLET" --chain "$chain" --to "$to" --amount "$amount" >/dev/null \
+        && await_card "Waiting for you" >/dev/null || { real_fail "the fake agent's request didn't show as a card"; return; }
+    send send
+    id=$(card id)
+    states="waiting → $(card state | tr '[:upper:]' '[:lower:]')"
+    [[ $id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { real_fail "the card has no request id ($id)"; return; }
+
+    # 0. A pending request, its checks done; GET /requests reads the inbox now; its card links to /sign/<id>.
+    wm_poll
+    final=$(await_card "Received|Proposed|Rejected") || { real_fail "no answer from the Wallet Manager on the card: $(tr '\n' ';' <<<"$final")"; return; }
+    states+=" → $(sed -n 's/^state //p' <<<"$final" | tr '[:upper:]' '[:lower:]')"
+    rec=$(record "$id")
+    [[ $rec == "pending true "* ]] || { real_fail "the Wallet Manager's record isn't pending with its checks done: ${rec:-none}; card: $(tr '\n' ';' <<<"$final")"; return; }
+    sign_dir=$run/sign
+    mkdir -p "$sign_dir"
+    url=${wm_url%/}
+    curl -fsS --max-time 30 -o "$sign_dir/requests.html" "$url/requests" && grep -qF "href=\"/sign/$id\"" "$sign_dir/requests.html" \
+        || { real_fail "the request's card on /requests doesn't link to /sign/$id (record: $rec)"; return; }
+
+    # 1. The page, read as the doc's block reads it (from its scratch folder, where it writes page.html).
+    local ID=$id URL=$url CSRF TOKEN HASH
+    local ACKS=()
+    (cd "$sign_dir" && curl -fsS -o page.html -H 'Sec-Fetch-Site: same-origin' "$URL/sign/$ID") || { real_fail "GET /sign/$ID didn't answer 200"; return; }
+    CSRF=$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' "$sign_dir/page.html")
+    TOKEN=$(sed -n 's/.*name="token" value="\([^"]*\)".*/\1/p' "$sign_dir/page.html")
+    HASH=$(sed -n 's/.*name="hash" value="\([^"]*\)".*/\1/p' "$sign_dir/page.html")
+    [[ $CSRF =~ ^[A-Za-z0-9_-]+$ && $TOKEN =~ ^[A-Za-z0-9_-]{43}$ && $HASH =~ ^0x[0-9a-f]{64}$ ]] \
+        || { real_fail "the signing page has no csrf, token and hash as the doc describes them"; return; }
+    # A fresh request with no calldata: the page asks for neither the stale box nor the blind-call phrase. Either
+    # shown means something else is to be signed, and this run never sends them.
+    if grep -q 'name="stillWanted"' "$sign_dir/page.html" || grep -q 'name="acknowledgement"' "$sign_dir/page.html"; then
+        real_fail "the signing page asks for a stale or blind-call acknowledgement: this run signs only a fresh self-transfer"; return
+    fi
+    # What the page says will be signed (from the transaction's own bytes): chain 4221, from and to the throwaway
+    # wallet, the amount. The run stops before the POST unless all of it matches.
+    local row_chain row_from row_to row_send
+    row() { sed -nE "s|^(<dl>)?<dt>$1</dt><dd>(.*)</dd>(</dl>)?\$|\\2|p" "$sign_dir/page.html" | head -1; }   # one row a line, <dl> before the first
+    row_chain=$(row Chain); row_from=$(row From); row_to=$(row To); row_send=$(row Send)
+    local grouped
+    grouped=$amount   # as the page groups digits (1,000): the amount has at most 4
+    ((${#amount} > 3)) && grouped="${amount:0:${#amount}-3},${amount:${#amount}-3}"
+    # Read as text, the markup taken out (the page wraps addresses as it likes): To is the address and nothing else.
+    untag() { sed -e 's/<br>/ /g' -e 's/<[^>]*>//g' <<<"$1"; }
+    if [[ $(untag "$row_chain") != *"($TESTNET_CHAIN)" || $(lower "$(untag "$row_from")") != *" $(lower "$THROWAWAY")" \
+          || $(lower "$(untag "$row_to")") != "$(lower "$THROWAWAY")" || $(untag "$row_send") != *" $grouped base units" ]]; then
+        real_fail "the signing page doesn't show a self-transfer of $amount wei on $TESTNET_CHAIN from the throwaway wallet (chain: $row_chain; to: $row_to; send: $row_send)"; return
+    fi
+    final=$(await_card Proposed) || { real_fail "the card didn't show Proposed after the page: $(tr '\n' ';' <<<"$final")"; return; }
+    states+=" → proposed"
+    if [[ -n $dry_run ]]; then
+        shot e2e-real-testnet-dry-run
+        report real "testnet payment, dry run (stopped before the sign POST)" pass \
+            "$states; the page shows a self-transfer of $amount wei on $TESTNET_CHAIN from $THROWAWAY, signing hash $HASH; nothing signed or sent" e2e-real-testnet-dry-run
+        return
+    fi
+
+    # 2. The confirmation: the doc's POST, the passphrase on stdin from its 0600 scratch copy. Once: never retried.
+    local PASSPHRASE_FILE=$passphrase_copy posted
+    posted=$(cd "$sign_dir" && tr -d '\r\n' < "$PASSPHRASE_FILE" | curl -sS -o reply.html -w '%{http_code} %{redirect_url}\n' \
+      -H "Origin: $URL" \
+      -H 'Sec-Fetch-Site: same-origin' \
+      -H 'Content-Type: application/x-www-form-urlencoded' \
+      --data-urlencode "csrf=$CSRF" \
+      --data-urlencode "token=$TOKEN" \
+      --data-urlencode "hash=$HASH" \
+      --data-urlencode "passphrase@-" \
+      ${ACKS[@]+"${ACKS[@]}"} \
+      "$URL/sign/$ID")
+    if [[ $posted != "303 $URL/requests#req-$ID" ]]; then
+        local why
+        why=$(sed -n 's/.*<p class="error"[^>]*>\(.*\)<\/p>.*/\1/p' "$sign_dir/reply.html" | head -1)
+        [[ -n $why ]] || why=$(head -c 300 "$sign_dir/reply.html" | tr '\n' ' ')
+        real_fail "the sign POST answered ${posted:-nothing}, not 303 to /requests#req-$ID: $why (not retried)"; return
+    fi
+    states+=" → signed (303)"
+
+    # 4. Until submitted: the signing pass looks for the receipt every 15 s; the result comes back to the card.
+    final=$(await_card "Signed|Failed" 3000) || { real_fail "no submitted result on the card in 10 minutes: $(tr '\n' ';' <<<"$final")"; return; }
+    states+=" → $(sed -n 's/^state //p' <<<"$final" | tr '[:upper:]' '[:lower:]')"
+    shot e2e-real-testnet
+    local tx card_hash card_url result result_hash signed_hash
+    tx=$(sed -n 's/^tx //p' <<<"$final")
+    card_hash=${tx%% *}; card_url=""; [[ $tx == *" "* ]] && card_url=${tx#* }
+    [[ $(sed -n 's/^state //p' <<<"$final") == Signed && $card_hash =~ ^0x[0-9a-f]{64}$ ]] \
+        || { real_fail "the card ended $(sed -n 's/^state //p' <<<"$final"), not Signed with a transaction: $(tr '\n' ';' <<<"$final")"; return; }
+    # The result the card took: `submitted` with that txHash, in the dev side's inbox; the vault's signed.json agrees.
+    result=$(node -e 'const fs = require("fs"), dir = process.argv[1], id = process.argv[2];
+        const all = fs.readdirSync(dir).filter((f) => f.endsWith(`-wallet-result-${id}.json`)).map((f) => JSON.parse(fs.readFileSync(`${dir}/${f}`, "utf8")));
+        const s = all.filter((r) => r.status === "submitted");
+        process.stdout.write(s.length === 1 ? `${s[0].txHash} ${s[0].explorerURL ?? ""}` : `${s.length} submitted results`)' "$loop/dev/inbox/0a1b2c3d" "$id" 2>&1)
+    result_hash=${result%% *}
+    signed_hash=$(jget "$(cat "$vault/requests/$id/signed.json" 2>/dev/null || echo '{}')" txHash)
+    [[ $result_hash == "$card_hash" && $signed_hash == "$card_hash" ]] \
+        || { real_fail "the transaction differs: card $card_hash, submitted result $result, vault signed.json ${signed_hash:-none}"; return; }
+
+    # The chain's own word: the receipt, status 1, for a self-transfer of the amount from the throwaway wallet on 4221.
+    local receipt="" transaction status block explorer=$TESTNET_EXPLORER/tx/$card_hash
+    for _ in $(seq 1 30); do
+        receipt=$(rpc eth_getTransactionReceipt "[\"$card_hash\"]") && [[ -n $(jget "$receipt" "") ]] && break
+        sleep 2
+    done
+    [[ -n $receipt && -n $(jget "$receipt" "") ]] || { real_fail "the RPC has no receipt for $card_hash; explorer: $explorer"; return; }
+    transaction=$(rpc eth_getTransactionByHash "[\"$card_hash\"]") || { real_fail "the RPC didn't answer eth_getTransactionByHash for $card_hash"; return; }
+    status=$(jget "$receipt" status)
+    block=$(decimal "$(jget "$receipt" blockNumber)")
+    answer=$(rpc eth_getTransactionCount "[\"$THROWAWAY\",\"latest\"]") && nonce_after=$(decimal "$(jget "$answer" "")") || nonce_after="?"
+    say "txHash: $card_hash"
+    say "explorer: $explorer"
+    say "receipt: status $status, block $block, gas used $(decimal "$(jget "$receipt" gasUsed)"); the throwaway wallet's nonce $nonce_before → $nonce_after"
+    if [[ $status == 0x1 && $(lower "$(jget "$receipt" from)") == "$(lower "$THROWAWAY")" && $(lower "$(jget "$receipt" to)") == "$(lower "$THROWAWAY")" \
+          && $(decimal "$(jget "$transaction" value)") == "$amount" && $(jget "$transaction" chainId) == "$(printf '0x%x' "$TESTNET_CHAIN")" \
+          && $card_url == "$explorer" ]]; then
+        report real "testnet payment, $amount wei from the throwaway wallet to itself" pass \
+            "$states; result submitted, txHash $card_hash; eth_getTransactionReceipt status 1 in block $block" e2e-real-testnet
+    else
+        real_fail "$states; receipt status $status, from $(jget "$receipt" from) to $(jget "$receipt" to), value $(jget "$transaction" value), chain $(jget "$transaction" chainId); card's link ${card_url:-none}, expected $explorer"
+    fi
+}
+real_fail() { report real "testnet payment" fail "$1"; }
+if [[ -n $real ]]; then
+    real_payment
+    if ((failures == 0)); then say "wallet-e2e --real-testnet: passed"; else say "wallet-e2e --real-testnet: failed (logs: --keep keeps $run, without the keystore or passphrase)"; fi
+    exit $((failures == 0 ? 0 : 1))
+fi
 
 # 1. A valid testnet transfer: waiting → sent → received. Its answer is held back until the card has shown Sent.
 # Its recipient isn't in the vault: a Wallet Manager with an address book warns recipient-known, without rejecting.
