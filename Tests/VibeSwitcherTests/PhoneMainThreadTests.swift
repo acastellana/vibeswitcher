@@ -124,39 +124,42 @@ struct PhoneMainThreadTests {
         var lateness: [TimeInterval]
     }
 
-    /// Sends `request` with the Terminal read replaced by one that takes `readTime`; main-queue blocks are timed every
-    /// 0.1 s from just before it goes out.
+    /// Sends `request` with the Terminal read replaced by one that takes `readTime`; once the read starts, it times
+    /// main-queue blocks every 0.1 s up to its last 0.15 s.
     ///
-    /// Each block due during the read is noted with how late it ran. A read done on the main thread, or one the main
-    /// thread waits for, holds every one of them until the read is over: at least 0.15 s late, as the read's last
-    /// 0.15 s aren't counted. Off the main thread they run on time, unless other tests running at once (the suite is
-    /// parallel) keep the main thread busy, and that can't hold all of them.
+    /// Each block is noted with how late it ran. A read done on the main thread, or one the main thread waits for,
+    /// holds every one of them until the read is over: at least 0.15 s late. Off the main thread they run on time,
+    /// unless other tests running at once (the suite is parallel) keep the main thread busy.
+    ///
+    /// The blocks are timed from the read's own start, not from when the request goes out: the read queue may get to
+    /// it late on a loaded Mac, and blocks due before it started would prove nothing. And it waits for the answer and
+    /// every block with the hang guard, not a window: both need the main thread, which other suites in the run can
+    /// hold for longer than any window (in three merges' runs a 15 s one ran out with the read done and the answer, one
+    /// main-queue hop away, not yet delivered).
     private func whileReading(_ access: PhoneAccess, _ request: HTTPRequest) async throws -> Waited {
         let started = Box<Date?>(nil), finished = Box<Date?>(nil), onMain = Box(false)
+        let ran = Box<[(due: Date, at: Date)]>([])
+        let steps = Int(((Self.readTime - 0.15) * 10).rounded(.down))
         access.readTerminalScreen = { tty in
             if Thread.isMainThread { onMain.value = true }
-            started.value = Date()
+            let origin = Date()
+            started.value = origin
+            for step in 1...steps {
+                let delay = 0.1 * Double(step)
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { ran.value.append((origin + delay, Date())) }
+            }
             Thread.sleep(forTimeInterval: Self.readTime)
             finished.value = Date()
             return tty == Self.tty ? Self.menuScreen : nil
         }
         var answer: Answer?
-        // Timed before the request goes out: a read done on the main thread would hold them all until it's over.
-        var ran: [(due: Date, at: Date)] = []
-        let origin = Date(), steps = Int(Self.readTime * 10)
-        for step in 1...steps {
-            let delay = 0.1 * Double(step)
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { ran.append((origin + delay, Date())) }
-        }
         access.handleForTests(request) { answer = Answer(status: $0.status, body: $0.body) }
-        #expect(await until(timeout: 15) { answer != nil && ran.count == steps })
+        // Every block is in before the read ends, so before the answer; with no read there are none to wait for.
+        #expect(await until { answer != nil && ran.value.count == (started.value == nil ? 0 : steps) })
         let start = try #require(started.value), end = try #require(finished.value)
         #expect(end.timeIntervalSince(start) >= Self.readTime - 0.05)
-        // Only the blocks due while the read went on count (a read that ended early would prove nothing): most are.
-        let during = ran.filter { $0.due > start && $0.due < end - 0.15 }
-        #expect(during.count >= steps / 2, "only \(during.count) blocks were due during the read")
         return Waited(answer: try #require(answer), readOnMain: onMain.value,
-                      lateness: during.map { $0.at.timeIntervalSince($0.due) })
+                      lateness: ran.value.map { $0.at.timeIntervalSince($0.due) })
     }
 
     /// `whileReading`, up to `attempts` times until a main-queue block due during the read ran on time (< 0.1 s late).
