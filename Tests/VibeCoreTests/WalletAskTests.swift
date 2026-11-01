@@ -161,7 +161,9 @@ struct WalletAskTests {
         #expect(Manager.from(peer: "0a1b2c3d", passagePath: "", path: "/nowhere:" + bin.path, apps: none) == .ready)
         #expect(Manager.from(peer: "0a1b2c3d", passagePath: "", path: "/nowhere", apps: none) == .noPassage)
         #expect(Manager.from(peer: "0a1b2c3d", passagePath: "", path: nil, apps: none) == .noPassage)
-        #expect(Manager.from(peer: "0a1b2c3d", passagePath: "/opt/example/passage", path: nil, apps: none) == .ready)
+        #expect(Manager.from(peer: "0a1b2c3d", passagePath: passage.path, path: nil, apps: none) == .ready)
+        // A path set that names nothing that can run: the app wouldn't run it either.
+        #expect(Manager.from(peer: "0a1b2c3d", passagePath: "/opt/example/passage", path: nil, apps: none) == .noPassage)
         #expect(Manager.from(peer: "0a1b2c3d", passagePath: "passage", path: bin.path, apps: none) == .noPassage)
         // A folder named passage on the PATH isn't it.
         let dirs = scratch.url("dirs")

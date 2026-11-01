@@ -14,7 +14,7 @@ struct PassageLinkTests {
     /// A folder holding the fake `passage`, its inbox, and what each call left: `calls` (one line of arguments per
     /// run), `sent-<name>` (the file `send` was given), `listen.pid` and `listen.stopped`. `send-exit` sets send's exit
     /// code, `send-signal` a signal it ends by instead; with `send-hold`, send makes `send-started` and waits for
-    /// `send-go`. `inbox.jsonl` is what `inbox` prints.
+    /// `send-go` (`inbox-hold`, `inbox-started` and `inbox-go` the same for inbox). `inbox.jsonl` is what `inbox` prints.
     struct FakePassage {
         let folder: URL
         /// `passage` in `folder`, or with `app`, the binary of a fake `Passage.app` there.
@@ -53,6 +53,10 @@ struct PassageLinkTests {
                     fi
                     exit "$code" ;;
                 inbox)
+                    if [ -e "$here/inbox-hold" ]; then
+                        touch "$here/inbox-started"
+                        for _ in $(seq 1 15000); do [ -e "$here/inbox-go" ] && break; /bin/sleep 0.02; done
+                    fi
                     cat "$here/inbox.jsonl" 2>/dev/null
                     exit 0 ;;
                 listen)

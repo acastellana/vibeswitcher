@@ -29,6 +29,11 @@ public final class WalletCourier: @unchecked Sendable {
     private var listenerStarted: Date?
     private var endNoted = false
     private var hearTaken: (@Sendable ([WalletResult]) -> Void)?
+    /// One poll at a time (`poll`): the asks made, the asks a finished run covered, and whether one runs.
+    private let polls = NSCondition()
+    private var pollsAsked = 0
+    private var pollsDone = 0
+    private var polling = false
 
     /// Loads the records `store` holds, and starts `passage listen` if any is outstanding.
     public init(link: PassageLink, store: WalletRequestStore = WalletRequestStore(),
@@ -178,8 +183,58 @@ public final class WalletCourier: @unchecked Sendable {
     /// them. Everything else it finds is ignored and logged once: a file from another peer, one that isn't a result,
     /// a result for an id that isn't outstanding (unknown, finished, expired), one that doesn't parse or whose id isn't
     /// its name's, and a result that isn't after the last one taken (a repeat, or one after a final result).
+    ///
+    /// One `passage inbox` runs at a time: asked while one runs (a listen line, the desk's look), it waits for the run
+    /// that covers its ask (the one under way says "poll again" and runs once more, however many asked meanwhile) and
+    /// returns nothing (what that run took went to `onTaken`).
     @discardableResult
     public func poll() -> [WalletResult] {
+        polls.lock()
+        pollsAsked += 1
+        let mine = pollsAsked
+        if polling {
+            while pollsDone < mine { polls.wait() }
+            polls.unlock()
+            return []
+        }
+        polling = true
+        polls.unlock()
+        return drainPolls()
+    }
+
+    /// Polls asked for and not yet covered by a finished run (a test's view).
+    var pollsPending: Int { polls.withLock { pollsAsked - pollsDone } }
+
+    /// A line `passage listen` printed: a poll, started on a thread of its own unless one runs, which then polls again
+    /// once it's done (however many lines came meanwhile).
+    func heardListenLine() {
+        polls.lock()
+        pollsAsked += 1
+        let start = !polling
+        polling = true
+        polls.unlock()
+        guard start else { return }
+        DispatchQueue.global(qos: .utility).async { [self] in _ = drainPolls() }
+    }
+
+    /// Polls until every ask made so far is covered; `polling` is set by the caller.
+    private func drainPolls() -> [WalletResult] {
+        var taken: [WalletResult] = []
+        polls.lock()
+        while pollsDone < pollsAsked {
+            let covered = pollsAsked
+            polls.unlock()
+            taken += pollOnce()
+            polls.lock()
+            pollsDone = covered
+            polls.broadcast()
+        }
+        polling = false
+        polls.unlock()
+        return taken
+    }
+
+    private func pollOnce() -> [WalletResult] {
         let entries: [PassageLink.InboxEntry]
         switch link.inbox() {
         case let .success(list): entries = list
@@ -259,9 +314,7 @@ public final class WalletCourier: @unchecked Sendable {
         }
         if wanted, listener?.isRunning != true, listenerStarted.map({ time.timeIntervalSince($0) >= Self.restartDelay }) ?? true {
             do {
-                listener = try link.listen { [weak self] in
-                    DispatchQueue.global(qos: .utility).async { self?.poll() }
-                }
+                listener = try link.listen { [weak self] in self?.heardListenLine() }
                 listenerStarted = time
                 endNoted = false
                 log("passage listen started (pid \(listener!.pid)): \(outstandingLocked(at: time).count) request(s) outstanding")
