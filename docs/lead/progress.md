@@ -2519,3 +2519,9 @@
 - 2026-11-01 04:03 Audit of turn-this-incident-into-8: complete, clean, round 3: 1 Important closed, 3 Nit (1 open), 1 Pre-existing closed
 - 2026-11-01 04:06 Automatically (auto_advance): Didn't start app-memory-grows-17: app-memory-grows-17's worker is still running. Send it what to do with message, or stop_worker first.
 - 2026-11-01 04:14 Merged turn-this-incident-into-8: Turn this incident into a check: A verifier's session waits indefinitely on a permission prom…
+- 2026-11-01 04:14 Automatically (auto_advance): Merged turn-this-incident-into-8 (Turn this incident into a check: A verifier's session waits indefinitely on a permission prom…) into main at d886431f, on its passing audit and the full test run.
+- 2026-11-01 04:14 Automatically (auto_advance): Cleaned up turn-this-incident-into-8; ended pid 71765 (Worker: Turn this incident into a check: A verifier's session waits indefinitely on a permission prom…) (freed 4.7 GB of build output and temporary folders). It stays done.
+- 2026-11-01 04:16 Started a worker on workers-and-verifiers-2
+- 2026-11-01 04:16 Automatically (auto_advance): Started a worker on workers-and-verifiers-2 (Workers and verifiers can read the lead's private files through `git diff --no-index` (Bash(git diff:*) bypasses the Read deny)), its after tasks done (turn-this-incident-into-8).
+- 2026-11-01 04:16 Automatically (auto_advance): Started the audit of wallet-card-truth-the at 4a16de46 (Its review is audit).
+- 2026-11-01 04:16 Automatically (auto_advance): Started the audit of app-memory-grows-17 at 1f8f57a1 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
