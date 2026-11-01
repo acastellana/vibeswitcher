@@ -131,9 +131,11 @@ struct WalletBrowserDeskTests {
                               config: { WalletDesk.Config(passage: fake.executable, peer: peer.id) }, now: { clock.now }, log: { _ in })
         desk.sessionNames = { WalletDeskTests.names() }
         desk.verifyStamps = WalletTestStamps.verify
+        desk.sealMessage = WalletTestStamps.sealMessage
+        desk.verifyMessages = WalletTestStamps.verifyMessages
         desk.findPassage = { nil }
         let told = WalletDeskTests.Told()
-        desk.deliver = { session, text in told.messages.append((session, text)) }
+        desk.deliver = { session, text, then in told.messages.append((session, text)); then(.delivered) }
         let opened = Opened()
         desk.openBrowser = { opened.urls.append($0) }
         return Setup(base: .init(fake: fake, desk: desk, asked: asked, store: store, told: told), opened: opened)
@@ -579,9 +581,11 @@ struct WalletBrowserDeskTests {
                                now: { clock.now }, log: { _ in })
         later.sessionNames = { WalletDeskTests.names() }
         later.verifyStamps = WalletTestStamps.verify
+        later.sealMessage = WalletTestStamps.sealMessage
+        later.verifyMessages = WalletTestStamps.verifyMessages
         defer { later.close() }
         let told = WalletDeskTests.Told()
-        later.deliver = { told.messages.append(($0, $1)) }
+        later.deliver = { told.messages.append(($0, $1)); $2(.delivered) }
         await refreshed(later)
         #expect(later.cards.first?.state == .browserNoAnswer)
         #expect(!told.messages.contains { $0.text.contains("without being sent") })
@@ -715,9 +719,11 @@ struct WalletBrowserDeliveryTests {
                               now: { WalletDeskTests.created.addingTimeInterval(30) }, log: { _ in })
         desk.sessionNames = { WalletDeskTests.names(h.session.id) }
         desk.verifyStamps = WalletTestStamps.verify
+        desk.sealMessage = WalletTestStamps.sealMessage
+        desk.verifyMessages = WalletTestStamps.verifyMessages
         defer { desk.close() }
-        desk.deliver = { session, text in
-            controller.tell(text, from: .system("from the Wallet Manager"), session: UUID(uuidString: session)!)
+        desk.deliver = { session, text, then in
+            controller.tell(text, from: .system("from the Wallet Manager"), session: UUID(uuidString: session)!, then: then)
         }
         var opened: URL?
         desk.openBrowser = { opened = $0 }

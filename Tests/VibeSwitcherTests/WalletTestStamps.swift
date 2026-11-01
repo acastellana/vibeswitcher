@@ -16,6 +16,18 @@ enum WalletTestStamps {
         return WalletStamp(session: session, digest: digest, seal: seal)
     }
 
+    /// The vault's seal on a desk's outbox entry, as the app asks for it (a desk's `sealMessage`).
+    static func sealMessage(_ message: SteerMessage) throws -> String {
+        guard case .seal(let seal) = book.answer(.seal(message), from: .app) else { throw Refused() }
+        return seal
+    }
+
+    /// Which of these outbox entries carry the vault's seal (a desk's `verifyMessages`).
+    static func verifyMessages(_ messages: [SteerMessage]) throws -> [Bool] {
+        guard case .verified(let valid) = book.answer(.verify(messages), from: .app) else { throw Refused() }
+        return valid
+    }
+
     /// Which of `stamps` carry the vault's seal (a desk's `verifyStamps`).
     static func verify(_ stamps: [WalletStamp]) throws -> [Bool] {
         guard case .verified(let valid) = book.answer(.verifyWalletRequests(stamps), from: .app) else { throw Refused() }

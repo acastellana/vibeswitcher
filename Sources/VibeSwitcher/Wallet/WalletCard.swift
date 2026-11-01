@@ -52,6 +52,7 @@ struct WalletCard: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
             outcome
+            if card.agentMissed { agentMissed }
             if !card.checks.isEmpty { checks }
             if !card.actions.isEmpty { buttons }
         }
@@ -195,6 +196,14 @@ struct WalletCard: View {
             .font(.system(size: 12, weight: .medium)).foregroundStyle(SessionStatus.needsInput.color)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityLabel("Warning: \(WalletCardModel.fileChangedNote)")
+    }
+
+    /// The outcome never reached the asking agent: its session ended.
+    private var agentMissed: some View {
+        Label(WalletCardModel.agentMissedNote, systemImage: "bubble.left.and.exclamationmark.bubble.right")
+            .font(.system(size: 12, weight: .medium)).foregroundStyle(SessionStatus.needsInput.color)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel("Warning: \(WalletCardModel.agentMissedNote)")
     }
 
     private func label(_ text: String) -> some View {

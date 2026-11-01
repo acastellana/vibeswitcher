@@ -45,6 +45,9 @@ struct WalletCardModel: Equatable, Identifiable {
     /// The filed request was rewritten (or is gone) since it was opened in the browser wallet: the card shows what the
     /// page was made from, and says so (`fileChangedNote`).
     var fileChanged = false
+    /// A message about this request (its outcome) couldn't reach the asking agent: its session ended. Said on the card
+    /// (`agentMissedNote`) until the request's results window is over.
+    var agentMissed = false
 
     /// `setupNeeded`'s line for each way the Wallet Manager isn't set up.
     static let noPeerNote = "No Wallet Manager chosen: choose its Mac in Settings › Wallet"
@@ -131,6 +134,8 @@ struct WalletCardModel: Equatable, Identifiable {
     static let notPickedUpNote = "Delivered to the Wallet Manager's Mac, but it hasn't picked it up yet. Is the Wallet Manager running?"
     static let notPickedUpAfter: TimeInterval = 5 * 60
     /// The warning on a card whose filed request changed after it was opened in the browser wallet (`fileChanged`).
+    /// The line on a card whose outcome the asking agent never got (`agentMissed`).
+    static let agentMissedNote = "The agent didn't get this: its session ended."
     static let fileChangedNote = "The filed request was changed after you opened it in the browser wallet. This card shows what the browser wallet was given; the new version isn't shown or sent."
 
     /// The buttons the card shows in `state`, the main one first. Send only while waiting: once a request has left,
@@ -286,6 +291,7 @@ struct WalletCardModel: Equatable, Identifiable {
         }
         lines += ["Chain: \(chainText)", "Requested by: \(requestedByText)", "\(Self.reasonTitle): “\(reason)”", detail]
         if fileChanged { lines.append("⚠ " + Self.fileChangedNote) }
+        if agentMissed { lines.append("⚠ " + Self.agentMissedNote) }
         if let setupNeeded, actions.contains(.settings) { lines.append(setupNeeded) }
         switch state {
         case .signed(let hash, let url), .sentFromBrowser(let hash, let url):

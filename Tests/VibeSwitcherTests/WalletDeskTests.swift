@@ -161,9 +161,11 @@ struct WalletDeskTests {
                              config: { WalletDesk.Config(passage: fake.executable, peer: peers?.id ?? peer) }, now: { clock.now }, log: { _ in })
         desk.sessionNames = { WalletDeskTests.names() }
         desk.verifyStamps = WalletTestStamps.verify
+        desk.sealMessage = WalletTestStamps.sealMessage
+        desk.verifyMessages = WalletTestStamps.verifyMessages
         desk.findPassage = { nil }
         let told = Told()
-        desk.deliver = { session, text in told.messages.append((session, text)) }
+        desk.deliver = { session, text, then in told.messages.append((session, text)); then(.delivered) }
         return Setup(fake: fake, desk: desk, asked: asked, store: store, told: told)
     }
 
@@ -513,8 +515,10 @@ struct WalletDeskTests {
                               now: { clock.now }, log: { _ in })
         again.sessionNames = { WalletDeskTests.names() }
         again.verifyStamps = WalletTestStamps.verify
+        again.sealMessage = WalletTestStamps.sealMessage
+        again.verifyMessages = WalletTestStamps.verifyMessages
         again.findPassage = { nil }
-        again.deliver = { session, text in s.told.messages.append((session, text)) }
+        again.deliver = { session, text, then in s.told.messages.append((session, text)); then(.delivered) }
         await refreshed(again)
         again.close()
         #expect(s.told.messages.count == 1)
@@ -712,6 +716,8 @@ struct WalletDeskTests {
                                now: { clock.now }, log: { _ in })
         later.sessionNames = { WalletDeskTests.names() }
         later.verifyStamps = WalletTestStamps.verify
+        later.sealMessage = WalletTestStamps.sealMessage
+        later.verifyMessages = WalletTestStamps.verifyMessages
         defer { later.close() }
         await refreshed(later)
         #expect(later.cards.first?.state == .sent)
@@ -794,6 +800,8 @@ struct WalletDeskTests {
                              now: { WalletDeskTests.created.addingTimeInterval(30) }, log: { _ in })
         desk.sessionNames = { WalletDeskTests.names() }
         desk.verifyStamps = WalletTestStamps.verify
+        desk.sealMessage = WalletTestStamps.sealMessage
+        desk.verifyMessages = WalletTestStamps.verifyMessages
         // No passage on the PATH; Passage.app where /Applications would be (one missing before it, as ~/Applications may be).
         desk.findPassage = { PassageCommand.resolve(setting: "", onPath: { nil }, apps: [self.temp.url("missing/Passage.app"), fake.app]) }
         return (fake, desk, asked)
@@ -935,9 +943,11 @@ struct WalletDeliveryTests {
                              now: { WalletDeskTests.created.addingTimeInterval(30) }, log: { _ in })
         desk.sessionNames = { WalletDeskTests.names(h.session.id) }
         desk.verifyStamps = WalletTestStamps.verify
+        desk.sealMessage = WalletTestStamps.sealMessage
+        desk.verifyMessages = WalletTestStamps.verifyMessages
         defer { desk.close() }
-        desk.deliver = { session, text in
-            controller.tell(text, from: .system("from the Wallet Manager"), session: UUID(uuidString: session)!)
+        desk.deliver = { session, text, then in
+            controller.tell(text, from: .system("from the Wallet Manager"), session: UUID(uuidString: session)!, then: then)
         }
         let request = WalletDeskTests.request(session: h.session.id)
         try WalletAsk.file(request, in: asked)
@@ -985,9 +995,11 @@ struct WalletDeliveryTests {
                              now: { request.expiresAt.addingTimeInterval(1) }, log: { _ in })
         desk.sessionNames = { WalletDeskTests.names(h.session.id) }
         desk.verifyStamps = WalletTestStamps.verify
+        desk.sealMessage = WalletTestStamps.sealMessage
+        desk.verifyMessages = WalletTestStamps.verifyMessages
         defer { desk.close() }
-        desk.deliver = { session, text in
-            controller.tell(text, from: .system("from the Wallet Manager"), session: UUID(uuidString: session)!)
+        desk.deliver = { session, text, then in
+            controller.tell(text, from: .system("from the Wallet Manager"), session: UUID(uuidString: session)!, then: then)
         }
         try WalletAsk.file(request, in: asked)
         var done = false

@@ -309,13 +309,16 @@ private final class Driver: NSObject, NSApplicationDelegate {
         // Only a request its vault stamped (`wallet-ask` files through it, as the host's for the selected fake session).
         let book = walletVault
         desk.verifyStamps = { [folder = state] stamps in try book.vault(folder: folder.appendingPathComponent("wallet/vault"), as: { .app }).verifyWallet(stamps) }
+        desk.sealMessage = { [folder = state] message in try book.vault(folder: folder.appendingPathComponent("wallet/vault"), as: { .app }).seal(message) }
+        desk.verifyMessages = { [folder = state] messages in try book.vault(folder: folder.appendingPathComponent("wallet/vault"), as: { .app }).verify(messages) }
         // Sign in browser wallet: never the user's browser. The page's address is kept for `wallet-page`, which renders
         // it in a web view of the sandbox's own (no wallet extension there).
         desk.openBrowser = { [weak self] url in self?.walletPageURL = url }
         // The answer goes to the fake session's agent the way it would to a real one: its steer inbox, typed in between turns.
-        desk.deliver = { [weak self] session, text in
-            guard let id = UUID(uuidString: session) else { return }
-            self?.leads.tell(text, from: .system("from the Wallet Manager"), session: id)
+        desk.deliver = { [weak self] session, text, then in
+            guard let id = UUID(uuidString: session) else { return then(.ended) }
+            guard let self else { return then(.notYet) }
+            leads.tell(text, from: .system("from the Wallet Manager"), session: id, then: then)
         }
         if preferences.walletPeerID.isEmpty { preferences.walletPeerID = Driver.walletPeers[0].peerID }
         return desk
@@ -1029,6 +1032,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
             ("failed", with(.failed(message: "the hardware wallet was disconnected"))),
             ("expired", with(.expired)),
             ("sent-not-picked-up", { var card = with(.sent); card.notPickedUp = true; return card }()),
+            ("signed-agent-missed", {
+                var card = with(.signed(txHash: hash, explorerURL: URL(string: "https://explorer.example/tx/" + hash)))
+                card.agentMissed = true
+                return card
+            }()),
             ("in-browser", with(.inBrowser)),
             ("sent-from-browser", with(.sentFromBrowser(txHash: hash, explorerURL: URL(string: "https://scan.chain.genlayer.com/tx/" + hash)))),
             ("rejected-in-wallet", with(.rejectedInWallet)),

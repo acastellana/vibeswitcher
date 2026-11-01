@@ -10,6 +10,11 @@ import VibeCore
 /// session as a message (`deliver`), as does a request that expires before the user sent it. VibeSwitcher never signs
 /// or judges: the card shows what the Wallet Manager said.
 ///
+/// Every such message is kept on disk (`WalletOutbox`) until it reached the agent: one told while its session isn't
+/// live, or before the session host's welcome (at launch), goes at a later look; one whose session ended for good says
+/// so on its card, and goes with the request's results window. What marks a message as told (an expiry's, a browser
+/// page's no answer) is written only once it went.
+///
 /// The fallback, while a request has never reached the Wallet Manager: Sign in browser wallet (`act(.browser)`) serves
 /// the request on a local page (`WalletSignServer`) and opens it in the browser, whose wallet extension shows and signs
 /// it; what it did comes back to the card and the asking session. A mark beside the filed request (`WalletBrowser.Mark`)
@@ -38,13 +43,16 @@ final class WalletDesk: ObservableObject {
     let folder: URL
     let store: WalletRequestStore
     let inbox: URL
+    /// The messages not delivered yet: `undelivered/` beside the store's records.
+    let outbox: WalletOutbox
     /// Settings › Wallet, read on the main thread.
     var config: () -> Config
     /// Passage found when no path is set (off the main thread): `passage` on the login shell's PATH, else Passage.app
     /// in /Applications or ~/Applications; nil when there's none.
     var findPassage: () -> PassageCommand? = { PassageCommand.resolve(setting: "", onPath: WalletPeerChoice.findPassage) }
-    /// Hands a message to the asking session's agent (its id, lower case), on the main thread.
-    var deliver: (_ session: String, _ text: String) -> Void = { _, _ in }
+    /// Hands a message to the asking session's agent (its id, lower case), on the main thread; `then` says whether it
+    /// reached it (any thread). Until it says `.delivered`, the message stays in the outbox and is tried again.
+    var deliver: (_ session: String, _ text: String, _ then: @escaping (SessionDelivery) -> Void) -> Void = { _, _, then in then(.notYet) }
     /// The sessions the session host runs, each id (lower case) with its name as the window shows it, read on the main
     /// thread. A filed request whose `requestedBy.session` isn't among them gets no card, so nothing can be sent from
     /// it: the folder is a file anyone's shell can write, and a card names its asker as VibeSwitcher knows it, never
@@ -55,6 +63,13 @@ final class WalletDesk: ObservableObject {
     /// one the filing process ran in. One it says no to is refused and removed; while it can't be asked, none gets a
     /// card. Fail closed: none until set.
     var verifyStamps: ([WalletStamp]) throws -> [Bool] = { $0.map { _ in false } }
+    /// The session host's seal on an outbox entry (`WalletOutbox.Entry.sealed`, VibeSwitcher's own message: `LeadVault.seal`),
+    /// on `work`. Throws while the host can't be asked: the entry is kept in memory and sealed at a later look.
+    var sealMessage: (SteerMessage) throws -> String = { _ in throw WalletAsk.Refusal("no session host to seal it") }
+    /// Which of these outbox entries carry the host's seal (`LeadVault.verify`), on `work`. An entry read from disk is
+    /// handed over only once the host says so; one it says no to is removed. Throws while it can't be asked: nothing
+    /// read from disk goes, and nothing is removed. Fail closed: it can't be asked until set.
+    var verifyMessages: ([SteerMessage]) throws -> [Bool] = { _ in throw WalletAsk.Refusal("no session host to check it") }
     /// Opens Settings › Wallet (a card's Open Settings), on the main thread.
     var openSettings: () -> Void = {}
     /// Opens the local page in the browser, on the main thread (a test catches it instead: never the user's browser).
@@ -90,6 +105,15 @@ final class WalletDesk: ObservableObject {
     /// What Settings › Wallet lacks for the Wallet Manager, as the cards say it (`WalletCardModel.setupNeeded`), from the
     /// last time a courier was asked for; nil when it has a peer and a Passage.
     private var setupNeeded: String?
+    /// The outbox as on disk, by request id (read at the first look, written through).
+    private var undelivered: [String: [WalletOutbox.Entry]]?
+    /// The messages handed to `deliver` whose answer hasn't come back yet ("<id>|<key>"): not handed again meanwhile.
+    private var handing: Set<String> = []
+    /// The outbox entries that may be handed over ("<id>|<key>"): told in this run (made here, in memory), or read from
+    /// disk with a seal the host confirmed. Anything else on disk is someone else's writing until the host says so.
+    private var trusted: Set<String> = []
+    /// Whether the host couldn't be asked about the outbox's seals last time (logged once until it can).
+    private var outboxUnasked = false
 
     init(folder: URL = WalletAsk.folder, store: WalletRequestStore = WalletRequestStore(), inbox: URL = PassageLink.defaultInbox,
          config: @escaping () -> Config, now: @escaping @Sendable () -> Date = { Date() },
@@ -97,6 +121,7 @@ final class WalletDesk: ObservableObject {
         self.folder = folder
         self.store = store
         self.inbox = inbox
+        self.outbox = WalletOutbox(folder: store.folder.appendingPathComponent("undelivered", isDirectory: true))
         self.config = config
         self.now = now
         self.log = log
@@ -121,7 +146,7 @@ final class WalletDesk: ObservableObject {
         return work.sync {
             let kept = courier?.kept
             return shown + " requests \(requests.count) local \(local.count) unsure \(unsureWhy.count) marks \(marks.count) "
-                + "pages \(pages.count) sent-since \(sentSince.count) records \(kept?.records ?? 0) handled \(kept?.handled ?? 0)"
+                + "pages \(pages.count) sent-since \(sentSince.count) undelivered \(undelivered?.values.joined().count ?? 0) trusted \(trusted.count) records \(kept?.records ?? 0) handled \(kept?.handled ?? 0)"
         }
     }
     #endif
@@ -140,6 +165,7 @@ final class WalletDesk: ObservableObject {
         work.async { [self] in
             self.names = names
             reload()
+            redeliver()
             if (try? courier(config)) != nil, polling, !(courier?.outstanding.isEmpty ?? true),
                polledAt.map({ now().timeIntervalSince($0) >= 60 }) ?? true {
                 polledAt = now()
@@ -261,7 +287,8 @@ final class WalletDesk: ObservableObject {
             log("\(id): no answer from the browser wallet")
             let isFiled = filed.contains { $0.id == id }
             if let request = mark.request ?? filed.first(where: { $0.id == id }) {
-                settle(request, WalletBrowser.Mark(state: .noAnswer, at: time))
+                // Kept as opened on disk until the agent heard it (`delivered`): a restart before then tells it again.
+                settle(request, WalletBrowser.Mark(state: .noAnswer, at: time), recordNow: false)
             }
             // Its files go; a page of this run keeps the copy in memory, so an answer it took in this same instant is
             // still told (`heard`).
@@ -274,12 +301,8 @@ final class WalletDesk: ObservableObject {
         for request in filed where request.isExpired(now: time) && local[request.id] != .sent && marks[request.id] == nil
             && !WalletAsk.toldExpired(request.id, in: folder)
             && courier?.record(request.id) == nil && !FileManager.default.fileExists(atPath: store.file(request.id).path) {
-            guard WalletAsk.markToldExpired(request.id, in: folder) else {
-                log("couldn't record that \(request.id) expired unsent; its agent hears it at the next look")
-                continue
-            }
-            log("\(request.id) expired unsent: telling its session")
-            tell(request, WalletAsk.expiredUnsent(request))
+            // Marked told once it reached the agent (`delivered`); noticed again before then, it's the one queued.
+            tell(request, WalletAsk.expiredUnsent(request), key: "expired", marker: .toldExpired)
         }
         // Past the time any answer can come: its card goes (the record of what was sent stays in the store).
         for request in filed where time >= request.expiresAt.addingTimeInterval(WalletCourier.resultGrace) {
@@ -466,17 +489,20 @@ final class WalletDesk: ObservableObject {
     }
 
     /// How it ended in the browser: recorded, and told to the asking session.
-    /// `request`: what the page was made from (the mark's copy), never a version filed since.
-    private func settle(_ request: WalletRequest, _ mark: WalletBrowser.Mark) {
+    /// `request`: what the page was made from (the mark's copy), never a version filed since. `recordNow` false (no
+    /// answer came back): the mark on disk is written once the agent heard it.
+    private func settle(_ request: WalletRequest, _ mark: WalletBrowser.Mark, recordNow: Bool = true) {
         var mark = mark
         mark.request = mark.request ?? marks[request.id]?.request
         marks[request.id] = mark
-        do { try WalletBrowser.setMark(mark, for: request.id, in: folder) } catch { log("couldn't record \(request.id)'s browser answer: \(error)") }
+        if recordNow {
+            do { try WalletBrowser.setMark(mark, for: request.id, in: folder) } catch { log("couldn't record \(request.id)'s browser answer: \(error)") }
+        }
         var text = WalletBrowser.message(mark, request: request, summary: WalletCardModel.summary(request))
         if let filed = requests.first(where: { $0.id == request.id }), filed != request {
             text += " Its filed request was changed after the user opened it in the browser wallet: the above is what the browser wallet was given."
         }
-        tell(request, text)
+        tell(request, text, key: "browser-\(mark.state.rawValue)", marker: recordNow ? nil : .noAnswer)
     }
 
     private func discard(_ request: WalletRequest) {
@@ -499,7 +525,7 @@ final class WalletDesk: ObservableObject {
                : browser != nil ? "It had been opened in their browser wallet and no answer came back: it may or may not have been sent from there."
                : wasSent ? "VibeSwitcher stopped waiting for its answer; it may have reached the Wallet Manager, which may still act on it."
                : "It was not sent to the Wallet Manager.")
-        tell(request, text)
+        tell(request, text, key: "discarded")
     }
 
     /// New results the courier took: each goes to the asking session as a message.
@@ -508,14 +534,159 @@ final class WalletDesk: ObservableObject {
             // The record and its results decide the card now.
             local[result.id] = nil
             guard let request = courier?.record(result.id)?.request ?? requests.first(where: { $0.id == result.id }) else { continue }
-            tell(request, WalletCardModel.message(for: result, request: request))
+            tell(request, WalletCardModel.message(for: result, request: request), key: "result-\(result.sequence)")
         }
         publish()
     }
 
-    private func tell(_ request: WalletRequest, _ text: String) {
-        let session = request.requestedBy.session.lowercased()
-        DispatchQueue.main.async { [weak self] in self?.deliver(session, text) }
+    /// Tells the asking session: kept in the outbox first, sealed by the session host (a message with this `key` told
+    /// already is the one that goes), then handed over. `marker` is recorded once it reached the agent.
+    private func tell(_ request: WalletRequest, _ text: String, key: String, marker: WalletOutbox.Marker? = nil) {
+        // What's on disk is checked first: an entry planted under this key mustn't stand in for this message.
+        verifyRead()
+        var entries = queued(request.id)
+        guard !entries.contains(where: { $0.key == key && isTrusted($0, of: request.id) }) else { return }
+        entries.removeAll { $0.key == key }
+        var entry = WalletOutbox.Entry(key: key, session: request.requestedBy.session.lowercased(), text: text,
+                                       until: request.expiresAt.addingTimeInterval(WalletCourier.resultGrace), marker: marker)
+        // Sealed now if the host can be asked (before its welcome it can't: sealed at a later look, from memory).
+        entry.seal = try? sealMessage(entry.sealed(for: request.id))
+        trusted.insert("\(request.id)|\(key)")
+        entries.append(entry)
+        keep(entries, for: request.id)
+        // The request's older messages still kept go first, in order (`hand` skips one already on its way): a result
+        // taken just after the host's welcome doesn't overtake one held from before it.
+        for queued in entries { hand(queued, of: request.id) }
+    }
+
+    /// A request's messages in the outbox (read from disk the first time).
+    private func queued(_ id: String) -> [WalletOutbox.Entry] {
+        if undelivered == nil { undelivered = outbox.load(log: log) }
+        return undelivered?[id] ?? []
+    }
+
+    private func isTrusted(_ entry: WalletOutbox.Entry, of id: String) -> Bool { trusted.contains("\(id)|\(entry.key)") }
+
+    private func keep(_ entries: [WalletOutbox.Entry], for id: String) {
+        undelivered?[id] = entries.isEmpty ? nil : entries
+        do { try outbox.save(entries, for: id) } catch { log("couldn't keep \(id)'s undelivered messages on disk: \(error)") }
+    }
+
+    /// The outbox entries read from disk that aren't trusted yet: the host is asked about their seals. One it confirms
+    /// may go; one with no seal, or a seal it says no to (planted, or changed since it was sealed), is removed and
+    /// logged. While it can't be asked, they stay as they are, and none goes.
+    private func verifyRead() {
+        _ = queued("")
+        let unchecked = (undelivered ?? [:]).sorted { $0.key < $1.key }.flatMap { id, entries in
+            entries.filter { !isTrusted($0, of: id) }.map { (id: id, entry: $0) }
+        }
+        guard !unchecked.isEmpty else { return }
+        // All of them, unsealed ones too (the host says no to those): while it can't be asked, nothing is removed.
+        let valid: [Bool]
+        do {
+            valid = try verifyMessages(unchecked.map { item in
+                var message = item.entry.sealed(for: item.id)
+                message.seal = item.entry.seal
+                return message
+            })
+            guard valid.count == unchecked.count else { throw WalletAsk.Refusal("it answered for \(valid.count) of \(unchecked.count)") }
+        } catch {
+            if !outboxUnasked { log("couldn't ask the session host about \(unchecked.count) undelivered message(s) on disk (\(error)): none goes until it answers") }
+            outboxUnasked = true
+            return
+        }
+        outboxUnasked = false
+        var refused: [String: Set<String>] = [:]
+        for (item, ok) in zip(unchecked, valid) {
+            if ok { trusted.insert("\(item.id)|\(item.entry.key)") } else { refused[item.id, default: []].insert(item.entry.key) }
+        }
+        for (id, keys) in refused.sorted(by: { $0.key < $1.key }) {
+            log("removed \(id)'s undelivered message(s) \(keys.sorted().joined(separator: ", ")) from disk: not sealed by the session host")
+            keep(queued(id).filter { !keys.contains($0.key) || isTrusted($0, of: id) }, for: id)
+        }
+    }
+
+    /// The entries told in this run that the host couldn't seal then (before its welcome): sealed now, from memory.
+    private func sealTold() {
+        for (id, entries) in (undelivered ?? [:]).sorted(by: { $0.key < $1.key }) where entries.contains(where: { $0.seal == nil }) {
+            var sealed = entries
+            for index in sealed.indices where sealed[index].seal == nil && isTrusted(sealed[index], of: id) {
+                guard let seal = try? sealMessage(sealed[index].sealed(for: id)) else { return }
+                sealed[index].seal = seal
+            }
+            if sealed != entries { keep(sealed, for: id) }
+        }
+    }
+
+    private func hand(_ entry: WalletOutbox.Entry, of id: String) {
+        guard isTrusted(entry, of: id), handing.insert("\(id)|\(entry.key)").inserted else { return }
+        let (session, text) = (entry.session, entry.text)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.deliver(session, text) { [weak self] outcome in self?.work.async { self?.handed(entry.key, of: id, outcome) } }
+        }
+    }
+
+    /// What became of a message handed over: gone from the outbox once it reached the agent (and its marker recorded
+    /// then), else kept for the next look, noting whether its session ended (its card says so).
+    private func handed(_ key: String, of id: String, _ outcome: SessionDelivery) {
+        handing.remove("\(id)|\(key)")
+        var entries = queued(id)
+        guard let index = entries.firstIndex(where: { $0.key == key }), isTrusted(entries[index], of: id) else { return }
+        let entry = entries[index]
+        switch outcome {
+        case .delivered:
+            entries.remove(at: index)
+            trusted.remove("\(id)|\(key)")
+            keep(entries, for: id)
+            log("told \(id)'s session (\(key))")
+            if let marker = entry.marker { record(marker, for: id) }
+        case .notYet, .ended:
+            let ended = outcome == .ended
+            if !entry.tried || entry.ended != ended {
+                if !entry.tried || ended { log("\(id)'s message (\(key)) not delivered: " + (ended ? "its session ended" : "its session isn't live; kept for later")) }
+                entries[index].tried = true
+                entries[index].ended = ended
+                keep(entries, for: id)
+                publish()
+            }
+        }
+    }
+
+    /// Records that the agent heard what `marker` stands for, where the request still has its files (a request gone
+    /// since, past its window or discarded, gets none back).
+    private func record(_ marker: WalletOutbox.Marker, for id: String) {
+        guard FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(id).json").path) else { return }
+        switch marker {
+        case .toldExpired:
+            if !WalletAsk.markToldExpired(id, in: folder) { log("couldn't record that \(id)'s expiry was told") }
+        case .noAnswer:
+            // Only over the opened mark it stands in for: an answer recorded since stays.
+            guard let disk = WalletBrowser.mark(id, in: folder), disk.state == .opened else { return }
+            var mark = marks[id]?.state == .noAnswer ? marks[id]! : WalletBrowser.Mark(state: .noAnswer, at: now())
+            mark.request = mark.request ?? disk.request
+            do { try WalletBrowser.setMark(mark, for: id, in: folder) } catch { log("couldn't record \(id)'s browser answer: \(error)") }
+        }
+    }
+
+    /// Each look: the outbox's messages are handed over again (oldest first), but those whose session ended for good
+    /// (their last try said so) past their request's results window, which are dropped. One that couldn't go yet (no
+    /// welcome from the host, not live) stays until it goes or its session is found ended, past its window too: an
+    /// expiry told an hour late, before the welcome, still reaches the agent.
+    private func redeliver() {
+        verifyRead()
+        sealTold()
+        let time = now()
+        for (id, entries) in (undelivered ?? [:]).sorted(by: { $0.key < $1.key }) {
+            // Only a trusted entry is dropped this way: one the host hasn't confirmed yet waits for it (removed if it says no).
+            let kept = entries.filter { !$0.ended || time < $0.until || handing.contains("\(id)|\($0.key)") || !isTrusted($0, of: id) }
+            for gone in entries where !kept.contains(gone) {
+                trusted.remove("\(id)|\(gone.key)")
+                log("dropped \(id)'s undelivered message (\(gone.key)): its results window is over" + (gone.ended ? ", its session ended" : ""))
+            }
+            if kept != entries { keep(kept, for: id) }
+            for entry in kept { hand(entry, of: id) }
+        }
     }
 
     private func publish(then: @escaping () -> Void = {}) {
@@ -561,6 +732,7 @@ final class WalletDesk: ObservableObject {
                 cards.append(WalletCardModel(request: request, requestedBy: name, label: by.label, state: request.isExpired(now: time) ? .expired : .waiting))
             }
             cards[cards.count - 1].setupNeeded = setupNeeded
+            cards[cards.count - 1].agentMissed = undelivered?[request.id]?.contains { $0.ended && isTrusted($0, of: request.id) } ?? false
             sessions[request.id] = by.session.lowercased()
         }
         DispatchQueue.main.async { [weak self] in

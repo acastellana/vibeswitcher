@@ -20,9 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         let desk = WalletDesk(config: { [weak self] in
             WalletDesk.Config(passage: self?.preferences.walletPassagePath ?? "", peer: self?.preferences.walletPeerID ?? "")
         })
-        desk.deliver = { [weak self] session, text in
-            guard let id = UUID(uuidString: session) else { return }
-            self?.leadController.tell(text, from: .system("from the Wallet Manager"), session: id)
+        // What doesn't reach the agent now (not live, or the host's welcome not in yet at launch) the desk keeps and
+        // hands over again.
+        desk.deliver = { [weak self] session, text, then in
+            guard let id = UUID(uuidString: session) else { return then(.ended) }
+            guard let self else { return then(.notYet) }
+            leadController.tell(text, from: .system("from the Wallet Manager"), session: id, then: then)
         }
         desk.openSettings = { [weak self] in self?.showSettings(tab: .wallet) }
         // Cards name their session as the window does, and only sessions the host runs get one.
@@ -32,6 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         }
         // And only a request the host stamped for the session it names (see `WalletStamp`).
         desk.verifyStamps = { try LeadVault.standard.verifyWallet($0) }
+        // Its undelivered messages on disk are sealed by the host too, and go only once it confirms the seal.
+        desk.sealMessage = { try LeadVault.standard.seal($0) }
+        desk.verifyMessages = { try LeadVault.standard.verify($0) }
         return desk
     }()
     /// Settings › Wallet's peers: `passage peers --no-discovery --json`, read off the main thread each time the tab shows

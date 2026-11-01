@@ -1723,11 +1723,21 @@ final class LeadController: ObservableObject {
     /// A message from VibeSwitcher itself for the agent of window session `id` (a wallet request's answer, see
     /// `WalletDesk`): posted into its steer inbox, which its hook hands over at its next step, and typed in once it's
     /// between turns with an empty box (`flush`), as a time budget's stop is. `then` hears on the main thread whether
-    /// it reached the inbox (false: no live session with an agent).
-    func tell(_ text: String, from sender: SteerMessage.Sender, session id: UUID, then: @escaping (Bool) -> Void = { _ in }) {
-        guard let hosted = host.sessions.first(where: { $0.id == id && $0.isLive }) else {
-            Breadcrumbs.shared.note("message for session \(id) not delivered: it isn't live")
-            return then(false)
+    /// it reached the inbox, and if not, whether trying again later can (`SessionDelivery`): nothing is kept here, the
+    /// caller keeps what didn't go (the wallet desk's outbox).
+    func tell(_ text: String, from sender: SteerMessage.Sender, session id: UUID, then: @escaping (SessionDelivery) -> Void = { _ in }) {
+        // Before the host's welcome (the app just launched, a reconnect), or while it's gone, its list says nothing
+        // about who runs: sessions it lost are marked ended here though they may still run.
+        let welcomed: Bool
+        switch host.state {
+        case .connected, .outdated: welcomed = true
+        case .notRunning, .connecting, .failed: welcomed = false
+        }
+        guard let hosted = host.sessions.first(where: { $0.id == id && $0.isLive }), welcomed else {
+            let listed = host.sessions.contains { $0.id == id }
+            Breadcrumbs.shared.note("message for session \(id) not delivered: "
+                + (!welcomed ? "the session host hasn't welcomed this app yet" : listed ? "its session ended" : "the session host doesn't run it"))
+            return then(welcomed ? .ended : .notYet)
         }
         let pid = store.sessions.first { $0.hostID == id && $0.tty == hosted.tty }?.pid ?? hosted.childPID
         let agent = LeadAgent(pid: pid, tty: hosted.tty, session: id.uuidString)
@@ -1737,7 +1747,7 @@ final class LeadController: ObservableObject {
                                        inputIsEmpty: nil, typeInto: nil, root: inbox)) != nil
         }) { [weak self] went in
             if went { self?.flush(agent) }
-            then(went)
+            then(went ? .delivered : .notYet)
         }
     }
 
@@ -1808,4 +1818,14 @@ final class LeadController: ObservableObject {
         NSApp.activate()
         return alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
     }
+}
+
+/// What became of a message for a window session's agent (`LeadController.tell`).
+enum SessionDelivery: Equatable {
+    /// In its steer inbox: its hook hands it over at the agent's next step.
+    case delivered
+    /// Not now, but it may go later: the session host hasn't welcomed the app yet (or is gone), or the post failed.
+    case notYet
+    /// The session host, welcomed, says its session ended or doesn't run it: no agent there will read it.
+    case ended
 }
