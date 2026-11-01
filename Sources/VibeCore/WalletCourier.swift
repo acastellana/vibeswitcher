@@ -54,6 +54,9 @@ public final class WalletCourier: @unchecked Sendable {
 
     deinit { listener?.stop() }
 
+    /// The records it keeps and the inbox paths it has looked at (the soak bench's counters).
+    public var kept: (records: Int, handled: Int) { lock.withLock { (records.count, handled.count) } }
+
     // MARK: Requests
 
     /// Waiting on the Wallet Manager: sent (or being sent), with no final result, and not past `expiresAt` + `resultGrace`.

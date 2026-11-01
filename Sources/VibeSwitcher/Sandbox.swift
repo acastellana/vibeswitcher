@@ -943,7 +943,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
-        ("soak [MINUTES [every SECONDS] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. LIST leaves out sessions, stream, dictation, team, ax, reports. With no MINUTES: the log so far"),
+        ("soak [MINUTES [every SECONDS] [hour CYCLES] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet. With no MINUTES: the log so far"),
         ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh)"),
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint and the Wallet Manager's checks"),
         ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
@@ -1072,7 +1072,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let arguments = ["request"] + ["--workspace", "--from", "--chain", "--to", "--amount"].flatMap { [$0, values[$0]!] }
             + ["--reason", "Pay the example invoice for the test deployment.", "--label", fake.label]
         let ran = WalletAsk.run(arguments, environment: ["VIBESWITCHER_SESSION": id.uuidString], cwd: fake.cwd,
-                               walletManager: walletPeer.isEmpty ? .noPeer : .ready, folder: walletDesk.folder)
+                               walletManager: walletPeer.isEmpty ? .noPeer : .ready, folder: walletDesk.folder, now: walletClock.now())
         guard ran.status == 0 else { return reply(false, ran.error) }
         walletDesk.refresh { [weak self] in self?.settle { reply(true, ran.output) } }
     }
@@ -1956,6 +1956,8 @@ final class SoakRun {
     let minutes: Double
     let every: Double
     let without: Set<String>
+    /// Cycles in a simulated hour of the working day (`hour CYCLES`): each cycle stands for 60/CYCLES minutes of it.
+    let hour: Int
     let log: URL
     let started = Date()
     let relief = FootprintRelief()
@@ -1967,11 +1969,15 @@ final class SoakRun {
     var running = true
     /// Each minute's least footprint (MB).
     var floors: [Double] = []
+    /// The least footprint read in the simulated hour under way, and each simulated hour's (MB).
+    var hourLeast = Double.infinity
+    var hours: [Double] = []
 
-    init(minutes: Double, every: Double, without: Set<String>, log: URL) {
+    init(minutes: Double, every: Double, without: Set<String>, hour: Int = 30, log: URL) {
         self.minutes = minutes
         self.every = every
         self.without = without
+        self.hour = max(1, hour)
         self.log = log
     }
 
@@ -2001,15 +2007,18 @@ extension Driver {
             return reply(false, soakRun == nil ? "soak MINUTES [every SECONDS] [without LIST]" : "a soak is running (soak stop)")
         }
         func value(_ flag: String) -> String? { words.firstIndex(of: flag).flatMap { words.indices.contains($0 + 1) ? words[$0 + 1] : nil } }
-        let run = SoakRun(minutes: minutes, every: max(5, value("every").flatMap(Double.init) ?? 20),
-                          without: Set((value("without") ?? "").split(separator: ",").map(String.init)), log: log)
+        let run = SoakRun(minutes: minutes, every: max(1, value("every").flatMap(Double.init) ?? 20),
+                          without: Set((value("without") ?? "").split(separator: ",").map(String.init)),
+                          hour: value("hour").flatMap(Int.init) ?? 30, log: log)
         soakRun = run
-        run.note("soak: \(minutes) minutes, a cycle every \(run.every) s" + (run.without.isEmpty ? "" : ", without \(run.without.sorted().joined(separator: ", "))"))
+        run.note("soak: \(minutes) minutes, a cycle every \(run.every) s, \(run.hour) cycles a simulated hour"
+                 + (run.without.isEmpty ? "" : ", without \(run.without.sorted().joined(separator: ", "))"))
         // As the app runs it: malloc's free pages given back once the footprint grew 24 MB (the sandbox is never frontmost).
         run.relief.start()
         run.timers.append(Heartbeat.shared.every(5) { [weak run] in
             guard let run, let now = AppHealthWatcher.ownFootprint()?.now else { return }
             run.least = min(run.least, now)
+            run.hourLeast = min(run.hourLeast, now)
         })
         run.timers.append(Heartbeat.shared.every(60) { [weak self] in self?.soakMinute() })
         soakCycle()
@@ -2033,9 +2042,35 @@ extension Driver {
                  + "cycles \(run.cycles)  fakes \(fakeList.count)  host sessions \(host.sessions.count)  rows \(store.sessions.count)  "
                  + "chats \(IdleBench.Live.chats.map(String.init) ?? "n/a")  terminal views \(IdleBench.Live.views.map(String.init) ?? "n/a")  "
                  + "dictation runs \(dictation.runs.count) notices \(dictation.notices.count) deliveries \(dictation.deliveries.count) "
-                 + "turning on \(dictation.turningOn.count)  reliefs \(reliefs.reliefs)")
-        if run.minute == 2 || run.minute % 30 == 0 { soakCensus(run) }
+                 + "turning on \(dictation.turningOn.count)  reliefs \(reliefs.reliefs)  " + soakCounters())
+        if run.minute == 2 { soakCensus(run) }
         if Double(run.minute) >= run.minutes { soakFinish() }
+    }
+
+    /// The live objects the debug counters see: the wallet desk's cards and records, the heartbeat's timers, the
+    /// Combine sinks the app keeps, the lead controller's leads.
+    private func soakCounters() -> String {
+        #if DEBUG
+        let wallet = walletDesk.census
+        #else
+        let wallet = "n/a"
+        #endif
+        return "wallet \(wallet)  timers \(Heartbeat.shared.clientCount)  boards \(leads.boards.count)"
+    }
+
+    /// A simulated hour's line: its least footprint, malloc's bytes in use, the counters.
+    private func soakHour(_ run: SoakRun) {
+        var stats = malloc_statistics_t()
+        malloc_zone_statistics(nil, &stats)
+        let now = AppHealthWatcher.ownFootprint()?.now ?? 0
+        let least = min(run.hourLeast, now)
+        run.hourLeast = .infinity
+        run.hours.append(least)
+        run.note(String(format: "simulated hour %2d  footprint %6.1f MB (least %6.1f)  malloc in use %6.1f MB  cycles %d  ", run.hours.count,
+                        now, least, Double(stats.size_in_use) / 1_048_576, run.cycles)
+                 + "terminal views \(IdleBench.Live.views.map(String.init) ?? "n/a")  chats \(IdleBench.Live.chats.map(String.init) ?? "n/a")  "
+                 + soakCounters())
+        soakCensus(run)
     }
 
     private func soakCensus(_ run: SoakRun) {
@@ -2047,7 +2082,10 @@ extension Driver {
                     return run.note(String(format: "census: %ld blocks, %.1f MB (the baseline)", census.total.blocks, Double(census.total.bytes) / 1_048_576))
                 }
                 run.note(String(format: "census: %ld blocks, %.1f MB; grew since minute 2:", census.total.blocks, Double(census.total.bytes) / 1_048_576))
-                for row in HeapCensus.growth(from: baseline, to: census, top: 25) {
+                let views = HeapCensus.growth(from: baseline, to: census, top: .max)
+                    .filter { $0.name.contains("View") || $0.name.contains("Hosting") || $0.name.contains("Model") || $0.name.contains("Wallet") }
+                    .prefix(10)
+                for row in HeapCensus.growth(from: baseline, to: census, top: 12) + views {
                     run.note(String(format: "  %-70@ %+8.2f MB %+8ld blocks (%ld → %ld)", String(row.name.prefix(70)) as NSString,
                                     Double(row.after.bytes - row.before.bytes) / 1_048_576, row.after.blocks - row.before.blocks,
                                     row.before.blocks, row.after.blocks))
@@ -2071,6 +2109,16 @@ extension Driver {
             let slope = points.reduce(0.0) { $0 + (Double($1.offset) - meanX) * ($1.element - meanY) } / spread
             run.note(String(format: "RESULT soak-growth-mb-per-hour %.1f (each minute's least, minutes 11-%d; %.1f → %.1f MB)", slope * 60,
                             run.floors.count, points.first?.element ?? 0, points.last?.element ?? 0))
+        }
+        // Each simulated hour's least footprint after the first (the caches filling), as a line through them.
+        let hours = Array(run.hours.enumerated().dropFirst())
+        if hours.count >= 2 {
+            let meanX = hours.map { Double($0.offset) }.reduce(0, +) / Double(hours.count)
+            let meanY = hours.map(\.element).reduce(0, +) / Double(hours.count)
+            let spread = hours.reduce(0.0) { $0 + pow(Double($1.offset) - meanX, 2) }
+            let slope = hours.reduce(0.0) { $0 + (Double($1.offset) - meanX) * ($1.element - meanY) } / spread
+            run.note(String(format: "RESULT soak-simulated-hour-growth-mb %.1f (each simulated hour's least, hours 2-%d: ", slope, run.hours.count)
+                     + run.hours.map { String(format: "%.1f", $0) }.joined(separator: " ") + " MB)")
         }
         run.note("soak: done after \(run.cycles) cycles")
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
@@ -2126,6 +2174,26 @@ extension Driver {
             }
             if !off.contains("reports"), leadUp { steps.append(command("churn", "3")) }
         }
+        if !off.contains("wallet") {
+            // The selected chat's agent files a request; it's sent, the Wallet Manager answers twice, and the desk's
+            // clock moves the cycle's share of the hour with its 15 s refreshes in between. Every third one is left
+            // unsent: it expires, its agent hears it, and its card goes an hour later as the others' do.
+            steps.append(command("wallet-ask"))
+            if cycle % 3 != 0 {
+                steps += [command("wallet-click", "send"), command("wallet-answer", "received"), command("wallet-answer", "submitted")]
+            }
+            let minutes = 60 / Double(run.hour)
+            steps.append(("wallet refreshes", { [weak self] done in
+                guard let self else { return done(true, "") }
+                let ticks = max(1, Int(minutes * 4))
+                func tick(_ index: Int) {
+                    guard index < ticks else { return done(true, "") }
+                    self.walletClock.advance(15)
+                    self.walletDesk.refresh { tick(index + 1) }
+                }
+                tick(0)
+            }))
+        }
         if !off.contains("ax") {
             steps.append(("ax", { [weak self] done in
                 guard let window = self?.window?.window else { return done(false, "no window") }
@@ -2143,6 +2211,7 @@ extension Driver {
         func next(_ rest: ArraySlice<Step>) {
             guard let run = soakRun, run.running else { return }
             guard let step = rest.first else {
+                if cycle % run.hour == 0 { soakHour(run) }
                 let wait = max(0.5, run.every - Date().timeIntervalSince(began))
                 DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in self?.soakCycle() }
                 return

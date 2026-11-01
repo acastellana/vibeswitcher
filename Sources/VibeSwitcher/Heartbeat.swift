@@ -32,6 +32,8 @@ final class Heartbeat {
     private var timer: Timer?
     /// How many times the clock woke (for tests).
     private(set) var wakes = 0
+    /// Its clients now (the soak bench's timers counter).
+    var clientCount: Int { clients.count }
 
     /// Runs `action` every `seconds` (at least 1) whole seconds, until the subscription is cancelled or released.
     func every(_ seconds: Int, _ action: @escaping () -> Void) -> Subscription {

@@ -84,6 +84,18 @@ final class WalletDesk: ObservableObject {
         self.log = log
     }
 
+    #if DEBUG
+    /// Debug aid (the sandbox's soak): how many of each thing it keeps, as one line. Waits for `work`.
+    var census: String {
+        let shown = "cards \(cards.count) drawn \(drawn.count)"
+        return work.sync {
+            let kept = courier?.kept
+            return shown + " requests \(requests.count) local \(local.count) unsure \(unsureWhy.count) marks \(marks.count) "
+                + "pages \(pages.count) sent-since \(sentSince.count) records \(kept?.records ?? 0) handled \(kept?.handled ?? 0)"
+        }
+    }
+    #endif
+
     /// The cards of one session's requests.
     func cards(for session: UUID) -> [WalletCardModel] {
         let id = session.uuidString.lowercased()
