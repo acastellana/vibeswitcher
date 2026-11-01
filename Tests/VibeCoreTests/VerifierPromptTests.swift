@@ -173,12 +173,17 @@ struct VerifierPromptTests {
 
     static let prompt = PendingPrompt(text: "Run: " + command)
 
-    /// The keys: down to the No row, the reason typed there, Enter. A question on screen isn't a permission prompt.
+    /// The keys: down to the No row, Tab to open its text field (Claude Code 2.1.316's plain "No" takes text only
+    /// after Tab), the reason typed there, Enter. A No row that reads otherwise gets no Tab. A question on screen
+    /// isn't a permission prompt.
     @Test func theDeclineGoesToTheNoRowWithTheReason() throws {
         let plan = try #require(LeadWitness.declinePlan(screen: Self.permissionScreen, prompt: Self.prompt))
         let down: [UInt8] = [27, 91, 66]
-        #expect(plan.writes.map(\.bytes) == [down, down, Array(LeadWitness.declineReason.utf8), [13]])
-        #expect(plan.no == 2)
+        #expect(plan.writes.map(\.bytes) == [down, down, [9], Array(LeadWitness.declineReason.utf8), [13]])
+        #expect(plan.no == 2 && plan.amend)
+        let older = Self.permissionScreen.replacingOccurrences(of: "3. No  ", with: "3. No, and tell Claude what to do differently (esc)")
+        let olderPlan = try #require(LeadWitness.declinePlan(screen: older, prompt: Self.prompt))
+        #expect(olderPlan.writes.map(\.bytes) == [down, down, Array(LeadWitness.declineReason.utf8), [13]] && !olderPlan.amend)
         let question = " ☐ Color\nWhich color do you prefer?\n❯ 1. Yes\n  2. No\n  3. Type something.\n\nEnter to select · ↑/↓ to navigate · Esc to cancel"
         #expect(LeadWitness.declinePlan(screen: question, prompt: Self.prompt) == nil)
         #expect(LeadWitness.declinePlan(screen: "> \n? for shortcuts", prompt: Self.prompt) == nil)
@@ -217,27 +222,36 @@ struct VerifierPromptTests {
         return lines.joined(separator: "\n")
     }
 
-    /// Each key goes only while the screen shows the stuck prompt with the cursor where the keys so far put it, and
-    /// Enter only on the No row showing the reason: a No row that takes no text, keys taken as moves, a prompt
-    /// answered meanwhile or another one opened since stop it (and never land Enter on a Yes row).
+    /// Each key goes only while the screen shows the stuck prompt with the cursor where the keys so far put it: Tab
+    /// on the plain No row, the reason once Tab opened its text field (its placeholder showing), Enter only on the No
+    /// row showing the reason. A No row Tab didn't open, keys taken as moves, a prompt answered meanwhile or another
+    /// one opened since stop it (and never land Enter on a Yes row).
     @Test func eachKeyGoesOnlyWhereThePlanExpectsIt() throws {
         let plan = try #require(LeadWitness.declinePlan(screen: Self.realScreen, prompt: Self.prompt))
-        #expect(plan.no == 3 && plan.writes.count == 5)
+        #expect(plan.no == 3 && plan.amend && plan.writes.count == 6)
+        let placeholder = "and tell Claude what to do differently"
         #expect(LeadWitness.declineMayGo(plan, step: 0, screen: Self.realScreen))
         #expect(LeadWitness.declineMayGo(plan, step: 1, screen: moved(Self.realScreen, to: 2)))
         #expect(LeadWitness.declineMayGo(plan, step: 2, screen: moved(Self.realScreen, to: 3)))
         #expect(LeadWitness.declineMayGo(plan, step: 3, screen: moved(Self.realScreen, to: 4)))
-        #expect(LeadWitness.declineMayGo(plan, step: 4, screen: moved(Self.realScreen, to: 4, no: "No, " + LeadWitness.declineReason)))
+        #expect(LeadWitness.declineMayGo(plan, step: 4, screen: moved(Self.realScreen, to: 4, no: placeholder)))
+        #expect(LeadWitness.declineMayGo(plan, step: 5, screen: moved(Self.realScreen, to: 4, no: LeadWitness.declineReason)))
         // The arrow's redraw not shown yet: wait (the app reads again).
         #expect(!LeadWitness.declineMayGo(plan, step: 1, screen: Self.realScreen))
-        // The reason didn't go in (a plain No), or a "k" in it moved the cursor up: no Enter.
+        // Tab didn't open the text field (a No row that takes no reason): the reason's letters, j and k among them,
+        // would be the menu's keys, so they don't go.
         #expect(!LeadWitness.declineMayGo(plan, step: 4, screen: moved(Self.realScreen, to: 4)))
-        #expect(!LeadWitness.declineMayGo(plan, step: 4, screen: moved(Self.realScreen, to: 3)))
+        // Tab only on the plain No row (an open field would close).
+        #expect(!LeadWitness.declineMayGo(plan, step: 3, screen: moved(Self.realScreen, to: 4, no: placeholder)))
+        // The reason didn't show, or the cursor left the row: no Enter.
+        #expect(!LeadWitness.declineMayGo(plan, step: 5, screen: moved(Self.realScreen, to: 4, no: placeholder)))
+        #expect(!LeadWitness.declineMayGo(plan, step: 5, screen: moved(Self.realScreen, to: 4)))
+        #expect(!LeadWitness.declineMayGo(plan, step: 5, screen: moved(Self.realScreen, to: 3)))
         #expect(LeadWitness.escapeMayGo(plan, screen: moved(Self.realScreen, to: 3)))
         // Another prompt (the stuck one answered, the verifier on to its next command): nothing goes, not even Esc.
         let other = Self.realScreen.replacingOccurrences(of: "git ls-files -s x; git config --get remote.origin.url", with: "touch probe.txt")
         #expect(LeadWitness.declinePlan(screen: other, prompt: Self.prompt) == nil)
-        for step in 0..<5 { #expect(!LeadWitness.declineMayGo(plan, step: step, screen: moved(other, to: step + 1))) }
+        for step in 0..<6 { #expect(!LeadWitness.declineMayGo(plan, step: step, screen: moved(other, to: min(step + 1, 4)))) }
         #expect(!LeadWitness.escapeMayGo(plan, screen: other))
         // The same command with other rows (three, the cursor's moves meant for four): no key.
         let threeRows = Self.permissionScreen

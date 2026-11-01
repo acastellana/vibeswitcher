@@ -280,11 +280,13 @@ def draw_permission():
     lines = ["⏺ Bash(" + p["command"] + ")", "╭" + "─" * 58 + "╮", "│ Bash command", "│", "│   " + p["command"], "│",
              "│ Do you want to proceed?"]
     for index, label in enumerate(p["options"]):
-        if index == 2 and p["feedback"]:
-            label = "No, " + p["feedback"]
+        if index == 2 and p["amend"]:
+            # 2.1.316's No row with its text field open: the text typed, or the placeholder while there's none (the
+            # cursor on it); "No, <text>" with the cursor elsewhere.
+            label = (p["feedback"] or "and tell Claude what to do differently") if p["focus"] == 2 else "No, " + p["feedback"]
         lines.append("│ " + ("❯ " if p["focus"] == index else "  ") + "%d. %s" % (index + 1, label))
     lines.append("╰" + "─" * 58 + "╯")
-    lines.append("Esc to cancel")
+    lines.append("Esc to cancel · Tab to amend" if p["v316"] else "Esc to cancel")
     return lines
 
 
@@ -629,13 +631,15 @@ def question_key(key):
                 answer_single(label)
 
 
-def open_permission(command, plain_no=False):
+def open_permission(command, ui=None, plain_no=False):
     global permission
     tool = "toolu_" + uuid.uuid4().hex[:20]
     record({"type": "assistant", "message": {"role": "assistant", "content": [
         {"type": "tool_use", "id": tool, "name": "Bash", "input": {"command": command}}]}})
-    permission = {"command": command, "tool": tool, "focus": 0, "feedback": "", "plainNo": plain_no,
-                  "options": ["Yes", "Yes, and don't ask again for this command", "No, and tell Claude what to do differently (esc)"]}
+    v316 = ui == "2.1.316"
+    permission = {"command": command, "tool": tool, "focus": 0, "feedback": "", "amend": False, "v316": v316, "plainNo": plain_no,
+                  "options": ["Yes", "Yes, and don't ask again for this command",
+                              "No" if v316 else "No, and tell Claude what to do differently (esc)"]}
     state["mode"] = "permission"
 
 
@@ -643,11 +647,22 @@ def permission_key(key):
     global permission
     p = permission
     choice = None
-    # The No row takes text while the cursor is on it, as Claude Code 2.1.316's does (an input option, placeholder "and
-    # tell Claude what to do differently"): every key but the arrows, Enter and Esc is typed there.
-    # With "plainNo" (as 2.1.304's plain "No"), it takes none: j and k move the cursor, other letters do nothing.
-    if p["focus"] == 2 and not p["plainNo"] and (len(key) == 1 or key in ("backspace", "space")):
-        p["feedback"] = p["feedback"][:-1] if key == "backspace" else p["feedback"] + (" " if key == "space" else key)
+    # With ui "2.1.316", the No row as Claude Code 2.1.316 has it: a plain "No" (letters are the menu's keys: j and k
+    # move the cursor) until Tab, with the cursor on it, opens its text field ("amend": an input option, placeholder
+    # "and tell Claude what to do differently"); then every key but the arrows, Tab, Enter and Esc is typed there,
+    # leaving the row with nothing typed closes it again, and Enter declines with the text typed as the reason.
+    # With "plainNo" too, Tab doesn't open it (a No row that takes no reason).
+    if p["amend"] and p["focus"] == 2:
+        if len(key) == 1 or key in ("backspace", "space"):
+            p["feedback"] = p["feedback"][:-1] if key == "backspace" else p["feedback"] + (" " if key == "space" else key)
+            return
+        if key == "tab" or (key in ("up", "down") and not p["feedback"].strip()):
+            p["amend"] = False
+        if key == "tab":
+            return
+    elif key == "tab":
+        if p["v316"] and p["focus"] == 2 and not p["plainNo"]:
+            p["amend"] = True
         return
     if key in ("up", "k"):
         p["focus"] = max(0, p["focus"] - 1)
@@ -901,7 +916,7 @@ def control():
         if op == "ask":
             open_question(command["questions"])
         elif op == "permission":
-            open_permission(command["command"], command.get("plainNo", False))
+            open_permission(command["command"], command.get("ui"), command.get("plainNo", False))
         elif op == "work":
             state["mode"] = "working"
         elif op == "take":

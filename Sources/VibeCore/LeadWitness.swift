@@ -321,13 +321,15 @@ public enum LeadWitness {
     }
 
     /// How the app declines a stuck prompt (`declinePlan`): the menu as it was read, its No row, the stuck command as
-    /// the screen must show it, and the keys (arrows to No, the reason, Enter), each checked against the screen before
-    /// it goes (`declineMayGo`).
+    /// the screen must show it, and the keys (arrows to No, Tab to open its text field, the reason, Enter), each
+    /// checked against the screen before it goes (`declineMayGo`).
     public struct DeclinePlan: Equatable, Sendable {
         public var menu: ScreenMenu
         public var no: Int
         /// The stuck prompt's command, squashed (`squashed`): the screen shows that prompt only while it holds it.
         public var command: String
+        /// Whether a Tab goes before the reason: the No row read a plain "No" (Claude Code 2.1.316's, see `amendKey`).
+        public var amend: Bool
         public var writes: [HostInput.Write]
         /// Esc, when the No row took no reason: it rejects the prompt (never approves), whichever row the cursor is on.
         public static let escape = HostInput.Write(bytes: [27], delay: 0)
@@ -341,14 +343,29 @@ public enum LeadWitness {
               let no = menu.options.lastIndex(where: { $0 == "No" || $0.hasPrefix("No,") || $0.hasPrefix("No ") }) else { return nil }
         let arrow: [UInt8] = no > menu.selected ? [27, 91, 66] : [27, 91, 65]
         var writes = (0..<abs(no - menu.selected)).map { HostInput.Write(bytes: arrow, delay: $0 == 0 ? 0 : 0.03) }
+        let amend = squashed(menu.options[no]) == "No"
+        if amend { writes.append(HostInput.Write(bytes: amendKey, delay: 0.08)) }
         writes.append(HostInput.Write(bytes: Array(declineReason.utf8), delay: 0.08))
         writes.append(HostInput.Write(bytes: [13], delay: 0.08))
-        return DeclinePlan(menu: menu, no: no, command: command, writes: writes)
+        return DeclinePlan(menu: menu, no: no, command: command, amend: amend, writes: writes)
     }
 
+    /// Tab: in Claude Code 2.1.316 the Bash prompt's No row is a plain "No" until Tab ("Tab to amend") turns it into a
+    /// text field (placeholder "and tell Claude what to do differently"). Before that, typed letters are the menu's
+    /// keys: j and k move the cursor (the "k" in "check" goes up a row), so the reason never arrives. In the bundle:
+    /// the permission menu pushes `{type:"input",label:"No",placeholder:"and tell Claude what to do differently"}`
+    /// only while `noInputMode` (the hook's `rejectInputMode`, false at first, flipped by `handleInputModeToggle`), and
+    /// the Select's key handler calls `onInputModeToggle(focused)` on `key === "tab"`; its keybindings map j and k to
+    /// select:next and select:previous.
+    public static let amendKey: [UInt8] = [9]
+
+    /// The placeholder Claude Code 2.1.316's No row shows once Tab opened its text field, squashed.
+    static let amendPlaceholder = squashed("and tell Claude what to do differently")
+
     /// Whether the plan's write `step` may go, by the screen now: the same prompt (its command, question and rows),
-    /// and the cursor where the keys so far put it. Enter goes only on the No row showing the reason typed in: a No
-    /// row that takes no text (Claude Code 2.1.304's plain "No"), or keys it took as moves, never end on a Yes row.
+    /// and the cursor where the keys so far put it. Tab goes only on the No row still a plain "No"; the reason only
+    /// once that row shows its text field (Tab opened it); Enter only on the No row showing the reason typed in. A No
+    /// row Tab didn't open, or keys taken as moves, stop it short (Esc then), and never end on a Yes row.
     public static func declineMayGo(_ plan: DeclinePlan, step: Int, screen: String) -> Bool {
         guard squashed(screen).contains(plan.command), let menu = permissionMenu(screen), menu.question == plan.menu.question,
               menu.options.count == plan.menu.options.count,
@@ -358,8 +375,11 @@ public enum LeadWitness {
             return menu.selected == plan.menu.selected + (plan.no > plan.menu.selected ? step : -step)
                 && menu.options[plan.no] == plan.menu.options[plan.no]
         }
-        if step == arrows { return menu.selected == plan.no }
-        return menu.selected == plan.no && squashed(menu.options[plan.no]).contains(squashed(String(declineReason.prefix(24))))
+        let row = squashed(menu.options[plan.no])
+        if plan.amend && step == arrows { return menu.selected == plan.no && row == "No" }
+        let typing = arrows + (plan.amend ? 1 : 0)
+        if step == typing { return menu.selected == plan.no && (!plan.amend || row.hasPrefix(amendPlaceholder)) }
+        return menu.selected == plan.no && row.contains(squashed(String(declineReason.prefix(24))))
     }
 
     /// Whether Esc may go after a decline stopped short: the stuck command's prompt still shows.
