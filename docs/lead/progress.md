@@ -2681,3 +2681,7 @@
 - 2026-11-01 12:09 Automatically (auto_advance): Merge of boost-release-4-7 failed: Tests fail rebased onto main: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() Sent its worker the output; it's back at work.
 - 2026-11-01 12:09 Automatically (auto_advance): feature-impact-ledger is audited, not merged: it changes 674 lines outside tests, over risk_lines (400) (the risk check raised it from review none). Its audit starts once the Mac has room.
 - 2026-11-01 12:09 Automatically (auto_advance): fix-the-flaky-test-15 is audited, not merged: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-01 12:17 Started a worker on read-only-git-parser
+- 2026-11-01 12:17 Automatically (auto_advance): Started a worker on read-only-git-parser (Read-only git parser: allow the everyday forms other projects' workers and verifiers use (merge-tree, --stat, show --cc, git grep <rev>), and a worker's diff | apply -R proof).
+- 2026-11-01 12:23 Merged boost-release-3-7: Boost release 3/7: watch the account's usage limits and back off before hitting them
+- 2026-11-01 12:23 Flaky in boost-release-3-7's merge: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
