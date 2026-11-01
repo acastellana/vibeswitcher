@@ -53,6 +53,7 @@ struct WalletCardModel: Equatable, Identifiable {
     static let noPeerNote = "No Wallet Manager chosen: choose its Mac in Settings › Wallet"
     static let noPassageNote = "Passage isn't found: set its path in Settings › Wallet"
     static let passageNotAbsoluteNote = "The passage path in Settings › Wallet isn't absolute: set it there"
+    static let passageNotRunnableNote = "Nothing at the passage path in Settings › Wallet can run: set it there"
 
     /// The kinds of wallet a request can come from: it decides what signing it means.
     enum Wallet: String, CaseIterable {

@@ -50,6 +50,28 @@ struct PassageCommandTests {
         #expect(PassageCommand.forPath(other.path) == PassageCommand(executable: other.path, leading: ["cli"]))
     }
 
+    /// A path set runs only once it names something that can run: a half-typed one, a folder (its x bit set), a file
+    /// that isn't executable, or an app bundle without its binary is nil, so a prefix is never run as a program.
+    @Test func aPathSetRunsOnlyWhenItNamesSomethingThatCanRun() throws {
+        let folder = scratch.url("runnable")
+        let binary = folder.appendingPathComponent("Passage.app/Contents/MacOS/Passage")
+        let cli = folder.appendingPathComponent("bin/passage")
+        try file(binary)
+        try file(cli)
+        let plain = folder.appendingPathComponent("bin/notes.txt")
+        try "text\n".write(to: plain, atomically: true, encoding: .utf8)
+        let empty = folder.appendingPathComponent("Empty.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+        #expect(PassageCommand.runnable(cli.path) == PassageCommand(executable: cli.path))
+        #expect(PassageCommand.runnable(folder.appendingPathComponent("Passage.app").path) == PassageCommand(executable: binary.path, leading: ["cli"]))
+        #expect(PassageCommand.runnable(binary.path) == PassageCommand(executable: binary.path, leading: ["cli"]))
+        for half in [String(cli.path.dropLast(2)), folder.appendingPathComponent("Passage.ap").path, folder.appendingPathComponent("bin").path,
+                     folder.appendingPathComponent("Passage.app/Contents").path, plain.path, empty.path, "relative/passage", ""] {
+            #expect(PassageCommand.runnable(half) == nil, "\(half)")
+            #expect(PassageCommand.resolve(setting: half.isEmpty ? " x" : half, onPath: { Issue.record("looked on the PATH"); return nil }, apps: []) == nil)
+        }
+    }
+
     @Test func withNoPathSetPassageOnThePathComesFirstThenTheApps() throws {
         let folder = scratch.url("apps")
         let system = folder.appendingPathComponent("Applications/Passage.app", isDirectory: true)

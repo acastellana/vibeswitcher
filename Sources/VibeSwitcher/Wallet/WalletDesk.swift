@@ -354,19 +354,23 @@ final class WalletDesk: ObservableObject {
         // Only spaces is no path, as Settings reads it.
         let unset = config.passage.trimmingCharacters(in: .whitespaces).isEmpty
         if unset, foundPassage == nil { foundPassage = findPassage() }
-        let passage = unset ? foundPassage : PassageCommand.forPath(config.passage)
+        // A path set runs only when it names an existing executable or Passage.app: never a missing or half-typed one.
+        let passage = unset ? foundPassage : PassageCommand.runnable(config.passage)
         guard let passage else {
-            setupNeeded = unset ? WalletCardModel.noPassageNote : WalletCardModel.passageNotAbsoluteNote
+            let absolute = config.passage.trimmingCharacters(in: .whitespaces).hasPrefix("/")
+            setupNeeded = unset ? WalletCardModel.noPassageNote : absolute ? WalletCardModel.passageNotRunnableNote : WalletCardModel.passageNotAbsoluteNote
             throw WalletAsk.Refusal(unset
                 ? "Passage isn't found (no passage on the PATH, no Passage.app in /Applications or ~/Applications): set its path in Settings › Wallet"
-                : "the passage path in Settings › Wallet isn't absolute")
+                : absolute ? "nothing at the passage path in Settings › Wallet can run" : "the passage path in Settings › Wallet isn't absolute")
         }
         setupNeeded = nil
         if let courier, courierFor?.passage == passage, courierFor?.peer == config.peer { return courier }
         guard let link = PassageLink(command: passage, walletPeer: config.peer, inboxFolder: inbox) else {
             throw WalletAsk.Refusal("the Wallet Manager peer \(config.peer) isn't a Passage peer ID")
         }
-        courier?.close()
+        // The one it replaces stops its `passage listen` on a thread of its own: that may take seconds, and `work`
+        // carries on meanwhile.
+        if let replaced = courier { DispatchQueue.global(qos: .utility).async { replaced.close() } }
         let made = WalletCourier(link: link, store: store, log: log, now: now)
         made.onTaken { [weak self] results in self?.work.async { self?.taken(results) } }
         courier = made

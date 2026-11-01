@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     /// until you press Send to Wallet Manager; the Wallet Manager's answers go back to the asking session as messages.
     private lazy var walletDesk: WalletDesk = {
         let desk = WalletDesk(config: { [weak self] in
-            WalletDesk.Config(passage: self?.preferences.walletPassagePath ?? "", peer: self?.preferences.walletPeerID ?? "")
+            WalletDesk.Config(passage: self?.walletPeers.settledPath ?? "", peer: self?.preferences.walletPeerID ?? "")
         })
         // What doesn't reach the agent now (not live, or the host's welcome not in yet at launch) the desk keeps and
         // hands over again.
@@ -42,7 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     }()
     /// Settings › Wallet's peers: `passage peers --no-discovery --json`, read off the main thread each time the tab shows
     /// and when the passage path changes.
-    private let walletPeers = WalletPeerList()
+    /// Settings › Wallet's peers, and its passage path once typing paused (`settledPath`): what the wallet desk runs.
+    private lazy var walletPeers = WalletPeerList(settledPath: preferences.walletPassagePath)
     /// Hooks, permissions and login item: their live state for the welcome window and Settings.
     private lazy var setup: SetupModel = {
         let model = SetupModel(preferences: preferences, system: .live(notifier: notifier))
@@ -188,8 +189,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         do { try WalletRequestStore.carryOver() } catch { Breadcrumbs.shared.note("wallet: couldn't carry over vault-requests: \(error)") }
         walletDesk.start()
         // A peer or Passage path chosen in Settings › Wallet: the cards redraw now (Send comes back on waiting ones),
-        // not at the next look. After the change lands (@Published sends before it does).
-        preferences.$walletPeerID.combineLatest(preferences.$walletPassagePath)
+        // not at the next look. After the change lands (@Published sends before it does). The path only once typing
+        // paused (`WalletPeerList.typed`): a half-typed one is never run.
+        preferences.$walletPeerID.combineLatest(walletPeers.$settledPath)
             .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.walletDesk.refresh(polling: false) }

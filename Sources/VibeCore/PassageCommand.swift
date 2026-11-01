@@ -44,15 +44,31 @@ public struct PassageCommand: Equatable, Sendable {
         return PassageCommand(executable: path, leading: inApp ? ["cli"] : [])
     }
 
-    /// The command for Settings › Wallet's path: the path set (see `forPath`), or when it's empty `passage` on the
+    /// The command for a path set in Settings, only once it names something that can run (`forPath`, then checked): an
+    /// existing regular file that's executable (a link followed), or an app bundle whose `Contents/MacOS/Passage` is
+    /// one. Nil for a path half typed (`/usr/local/bin/pa`), a folder, a missing file or one that can't run, so a
+    /// prefix of the path is never run as a program. Reads the file system only.
+    public static func runnable(_ setting: String) -> PassageCommand? {
+        guard let command = forPath(setting), isExecutableFile(command.executable) else { return nil }
+        return command
+    }
+
+    /// A regular file (following a link) the user may execute: a folder, which has its x bit too, isn't one.
+    static func isExecutableFile(_ path: String) -> Bool {
+        var info = stat()
+        guard stat(path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return false }
+        return access(path, X_OK) == 0
+    }
+
+    /// The command for Settings › Wallet's path: the path set (see `runnable`), or when it's empty `passage` on the
     /// PATH (`onPath`, an absolute path), else the first of `apps` whose binary is executable, run with `cli`. Nil when
-    /// none is found, or the path set isn't absolute. `onPath` may run a shell: call this off the main thread.
+    /// none is found, or the path set isn't absolute or isn't something that can run. `onPath` may run a shell: call this off the main thread.
     public static func resolve(setting: String, onPath: () -> String?, apps: [URL] = appLocations) -> PassageCommand? {
-        if !setting.trimmingCharacters(in: .whitespaces).isEmpty { return forPath(setting) }
+        if !setting.trimmingCharacters(in: .whitespaces).isEmpty { return runnable(setting) }
         if let found = onPath(), found.hasPrefix("/") { return forPath(found) }
         for app in apps {
             let binary = binary(ofApp: app.path)
-            if FileManager.default.isExecutableFile(atPath: binary) { return PassageCommand(executable: binary, leading: ["cli"]) }
+            if isExecutableFile(binary) { return PassageCommand(executable: binary, leading: ["cli"]) }
         }
         return nil
     }

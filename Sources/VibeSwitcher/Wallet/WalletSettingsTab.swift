@@ -11,7 +11,7 @@ struct WalletPeerChoice: Equatable, Hashable, Identifiable {
 /// Settings › Wallet: which Passage peer is the Wallet Manager's Mac, and which `passage` carries requests there. Until a peer is
 /// chosen, requests still show as cards, and the browser wallet signs those from an 0x address.
 /// Settings › Wallet's peers, read from `passage peers --no-discovery --json` off the main thread: again each time the
-/// tab shows and when the passage path changes; the latest read wins (one for a path typed since is dropped). With
+/// tab shows and when the passage path settles (`typed`); the latest read wins (one for a path typed since is dropped). With
 /// them, which Passage was used.
 final class WalletPeerList: ObservableObject {
     /// One read: the Passage found for the path setting (nil: none, or the path isn't absolute) and the peers it
@@ -26,12 +26,39 @@ final class WalletPeerList: ObservableObject {
     @Published private(set) var passage: PassageCommand?
     /// Whether a read has been shown (until then, nothing is said about which Passage is used).
     @Published private(set) var read = false
+    /// The passage path as typed in Settings, once typing paused `settlePause` (as saved, at launch): what this list
+    /// reads and what the desk's courier runs. Each keystroke only restarts the pause, so a prefix of the path being
+    /// typed (`/bin/sh` on the way to `/bin/shx`) is never run as a program; nor is a settled one that isn't an
+    /// existing executable or Passage.app (`PassageCommand.runnable`).
+    @Published private(set) var settledPath: String
+    /// How long typing must pause before the path is used.
+    static let settlePause: TimeInterval = 1
     /// Passage and its peers for the passage path setting (empty: found by itself).
     let load: (_ passagePath: String) -> Read
+    /// Runs the work after the delay, on the main thread (a test runs it when it chooses).
+    private let schedule: (_ delay: TimeInterval, _ work: @escaping () -> Void) -> Void
     private var generation = 0
+    private var typing = 0
 
-    init(load: @escaping (_ passagePath: String) -> Read = { WalletPeerList.read($0) }) {
+    init(settledPath: String = "", load: @escaping (_ passagePath: String) -> Read = { WalletPeerList.read($0) },
+         schedule: @escaping (_ delay: TimeInterval, _ work: @escaping () -> Void) -> Void = { delay, work in
+             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+         }) {
+        self.settledPath = settledPath
         self.load = load
+        self.schedule = schedule
+    }
+
+    /// The path as it is now in the field (main thread): used once no other keystroke came for `settlePause`, then
+    /// the peers are read again through it. A keystroke meanwhile starts the pause again.
+    func typed(_ path: String) {
+        typing += 1
+        let mine = typing
+        schedule(Self.settlePause) { [weak self] in
+            guard let self, self.typing == mine, self.settledPath != path else { return }
+            self.settledPath = path
+            self.reload(passagePath: path)
+        }
     }
 
     /// Passage for the path setting (`PassageCommand.resolve`), and the peers it lists. Blocks: off the main thread.
@@ -83,14 +110,18 @@ struct WalletSettingsTab: View {
         return "Requests go to \(name) once you press Send to Wallet Manager on their card. Nothing is sent before that."
     }
 
+    static let notRunnableNote = "Nothing at this path can run: give an executable passage, Passage.app or its binary."
+
     /// The line under the passage path: which Passage requests go through, or why there's none. Nil before the first read.
     static func using(_ passage: PassageCommand?, read: Bool, path: String) -> String? {
         guard read else { return nil }
         if let passage { return "Using \(passage.shown)" }
-        if path.trimmingCharacters(in: .whitespaces).isEmpty {
+        let path = path.trimmingCharacters(in: .whitespaces)
+        if path.isEmpty {
             return "Passage not found: no passage on your PATH, no Passage.app in /Applications or ~/Applications."
         }
-        return "This path isn't absolute."
+        guard path.hasPrefix("/") else { return "This path isn't absolute." }
+        return notRunnableNote
     }
 
     var body: some View {
@@ -124,7 +155,7 @@ struct WalletSettingsTab: View {
                         .labelsHidden().accessibilityLabel("Path to the passage command")
                         .font(.system(.body, design: .monospaced))
                 }
-                if let using = Self.using(peerList.passage, read: peerList.read, path: preferences.walletPassagePath) {
+                if let using = Self.using(peerList.passage, read: peerList.read, path: peerList.settledPath) {
                     Text(using)
                         .font(.callout)
                         .foregroundStyle(peerList.passage == nil ? SessionStatus.needsInput.color : .secondary)
@@ -138,8 +169,9 @@ struct WalletSettingsTab: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { peerList.reload(passagePath: preferences.walletPassagePath) }
-        .onChange(of: preferences.walletPassagePath) { _, path in peerList.reload(passagePath: path) }
+        .onAppear { peerList.reload(passagePath: peerList.settledPath) }
+        // Read again only once typing paused (`typed`): a half-typed path is never run.
+        .onChange(of: preferences.walletPassagePath) { _, path in peerList.typed(path) }
     }
 }
 
