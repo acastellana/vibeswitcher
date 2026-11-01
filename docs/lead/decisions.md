@@ -191,3 +191,7 @@ The batch landed (13 tasks, no reverts, 2 incidents turned into checks). But thr
 
 Production readiness: the Wallet Manager's lead and an independent review both asked for one real payment through the whole chain before more features. It broadcasts publicly, which is why it was the user's call.
 
+## 2026-11-01 01:15:26 Wallet production-readiness pass (2026-11-01, user: "make sure this is production ready"). VibeSwitcher's wallet path gets four audited hardening tasks, run in this order because they share files: wallet-card-truth-the, wallet-card-can-t, wallet-outcomes-always, wallet-path-robustness. Alongside: spec-an-unparseable, strict-paths-an, the-app-s-host and wallet-e2e-real-testnet (one real testnet payment, user-approved). The Wallet Manager's lead is fixing its review's five concerns (approvals, audit holds, logs, the real path, local writers). Done means: all of it merged, the real-testnet run passing, and then the two-Mac run when the older MacBook is back.
+
+Independent read-only reviews of both projects found no way to sign or send without the user, but several states that could mislead the user into paying again, a token-approval drain risk on the browser path and the Wallet Manager's signing page, and missing production logs.
+

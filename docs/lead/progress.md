@@ -2437,3 +2437,13 @@
 - 2026-11-01 01:11 Planned strict-paths-an: Strict paths: an Important finding on configured paths blocks auto-merge, even unconfirmed, until the lead rules (review audit)
 - 2026-11-01 01:11 Planned wallet-e2e-real-testnet: wallet-e2e --real-testnet: one real GenLayer testnet payment through the whole chain on this Mac
 - 2026-11-01 01:12 Planned spec-an-unparseable: Spec: an unparseable request gets `rejected` (format check) when its file name's id is valid and it came from the configured peer
+- 2026-11-01 01:14 Planned wallet-card-truth-the: Wallet card truth: the record decides the state, and the browser path keeps what was signed (review audit)
+- 2026-11-01 01:14 Started a worker on the-app-s-host
+- 2026-11-01 01:14 Automatically (auto_advance): Started a worker on the-app-s-host (The app's host exit watcher gives up if the exit event comes before the host can be reaped (HostClient.swift:313-317)).
+- 2026-11-01 01:15 Started a worker on strict-paths-an
+- 2026-11-01 01:15 Automatically (auto_advance): Started a worker on strict-paths-an (Strict paths: an Important finding on configured paths blocks auto-merge, even unconfirmed, until the lead rules).
+- 2026-11-01 01:15 Planned wallet-card-can-t: Wallet card can't be made misleading: who asked, the reason field, and contract calls that move tokens (review audit)
+- 2026-11-01 01:15 Planned wallet-outcomes-always: Wallet outcomes always reach the agent: undelivered messages kept on disk and retried (review audit)
+- 2026-11-01 01:15 Planned wallet-path-robustness: Wallet path robustness: no typed path is ever run, polls coalesce, records are bounded and read safely (review audit)
+- 2026-11-01 02:00 Merged fix-the-flaky-test-13: Fix the flaky test theExitSourceReapsAtOnce()
+- 2026-11-01 02:00 Flaky in fix-the-flaky-test-13's merge: aSlowPowerDaemonDoesntHoldUpALeadRefresh() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
