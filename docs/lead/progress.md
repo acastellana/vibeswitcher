@@ -2759,3 +2759,4 @@
 - 2026-11-01 14:52 Audit of boost-release-5-7: incomplete, clean, round 1: 1 Important open, 3 Nit open
 - 2026-11-01 14:52 Automatically (auto_advance): Sent boost-release-5-7's worker the open Important findings boost-release-5-7:F1 from its audit at 7a3470d8.
 - 2026-11-01 14:54 Audit of boost-release-3b-codex: complete, clean, round 1: 2 Nit open, 2 Pre-existing open
+- 2026-11-01 14:57 The worker on boost-release-5-7 answered findings: boost-release-5-7:F1 fixed at e299ba9e: e299ba9: every round after the first calls mergeGate again on each restacked task, just before that round's run, and checks changedMeanwhile against its last state. Its audit or done report on the head, findings, strict_paths holds, kept and approvals are all read fresh, and a refused task is left out with merge's own text. The fresh gate's commit and task are what gets stacked and compared before landing. Regression test MergeBatchTests.tasksRestackedAfte…
