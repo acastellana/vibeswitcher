@@ -2551,3 +2551,4 @@
 - 2026-11-01 05:55 Planned the-sidebar-recomputes: The sidebar recomputes its team arrangement and each lead's blocking questions on every redraw
 - 2026-11-01 06:03 Started a worker on the-sidebar-recomputes
 - 2026-11-01 06:03 Automatically (auto_advance): Started a worker on the-sidebar-recomputes (The sidebar recomputes its team arrangement and each lead's blocking questions on every redraw).
+- 2026-11-01 06:12 Automatically (auto_advance): Started the audit of app-memory-steps-up at d4f5b800 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
