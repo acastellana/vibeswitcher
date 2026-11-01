@@ -2488,3 +2488,12 @@
 - 2026-11-01 03:11 Merged the-app-s-host: The app's host exit watcher gives up if the exit event comes before the host can be reaped (HostClient.swift:313-317)
 - 2026-11-01 03:11 Automatically (auto_advance): Merged the-app-s-host (The app's host exit watcher gives up if the exit event comes before the host can be reaped (HostClient.swift:313-317)) into main at 2353d4ab, on its passing audit and the full test run.
 - 2026-11-01 03:17 Merged spec-an-unparseable: Spec: an unparseable request gets `rejected` (format check) when its file name's id is valid and it came from the configured peer (no audit: review none)
+- 2026-11-01 03:17 Automatically (auto_advance): Merged spec-an-unparseable (Spec: an unparseable request gets `rejected` (format check) when its file name's id is valid and it came from the configured peer) into main at 3a302d8c, review none: on its worker's done report on 14b679a4 and the full test run.
+- 2026-11-01 03:17 Automatically (auto_advance): Cleaned up verifiers-don-t-run (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 03:17 Automatically (auto_advance): Cleaned up the-app-s-host (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 03:17 Automatically (auto_advance): Cleaned up spec-an-unparseable (freed 1.0 GB of build output and temporary folders). It stays done.
+- 2026-11-01 03:19 Automatically (auto_advance): Started the audit of strict-paths-an at bfb777a7 (Its review is audit).
+- 2026-11-01 03:19 Ended workers-and-verifiers-2's worker (idle since its done report on 12db3a69) to make room on the Mac for its audit
+- 2026-11-01 03:20 Automatically (auto_advance): Started the audit of workers-and-verifiers-2 at 12db3a69 (Its review is audit).
+- 2026-11-01 03:20 The worker on turn-this-incident-into-8 answered findings: turn-this-incident-into-8:F1 fixed at ae855000: Commits 8b6c567 and ae85500. Checked against the 2.1.316 bundle (.build/cc/strings.txt): the No row is an input only while noInputMode (rejectInputMode, false at first), which the Select's handleKeyDown flips on key==='tab' through onInputModeToggle. Its keybindings map j/k to select:next/previous. The Bash prompt sets inlineDescriptions:!0, which the Select passes each row as showLabel, so the open field draws as 'No, and tell Claude what to do di…
+- 2026-11-01 03:21 Automatically (auto_advance): Started the audit of turn-this-incident-into-8 at ae855000 (Its review is audit).
