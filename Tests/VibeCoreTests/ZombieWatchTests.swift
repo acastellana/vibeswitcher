@@ -13,6 +13,7 @@ struct ZombieWatchTests {
         var status: Int32 = 0
         defer { _ = waitpid(pid, &status, WNOHANG) }
         #expect(eventually { ZombieWatch.zombies().contains(pid) })
+        #expect(ZombieWatch.names([pid]) == "true ×1")
         #expect(waitpid(pid, &status, 0) == pid)
         #expect(!ZombieWatch.zombies().contains(pid))
     }

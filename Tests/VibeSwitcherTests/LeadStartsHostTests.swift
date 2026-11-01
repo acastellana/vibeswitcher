@@ -34,6 +34,9 @@ import Testing
                 kill(-pid, SIGKILL)
                 kill(pid, SIGKILL)
                 _ = BenchHostTests.waitForExit(of: pid, timeout: hangGuard)
+                // This process's child (the client started it): reaped here, as the client that would have is gone.
+                var status: Int32 = 0
+                while waitpid(pid, &status, 0) < 0, errno == EINTR {}
             }
         }
 

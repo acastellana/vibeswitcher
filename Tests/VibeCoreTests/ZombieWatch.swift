@@ -40,12 +40,29 @@ struct ZombieWatch {
 
     /// The children of `pid` that ended and haven't been reaped.
     static func zombies(of pid: pid_t = getpid()) -> [pid_t] {
-        SessionStrays.children(of: pid).filter { child in
-            var info = kinfo_proc()
-            var size = MemoryLayout<kinfo_proc>.stride
-            var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, child]
-            return sysctl(&mib, 4, &info, &size, nil, 0) == 0 && size > 0 && info.kp_proc.p_stat == SZOMB
+        SessionStrays.children(of: pid).filter { record(of: $0).map { Int32($0.kp_proc.p_stat) } == SZOMB }
+    }
+
+    /// The program names of `zombies` (the kernel keeps a zombie's, though ps shows none), the commonest first:
+    /// "bash ×12, cat ×3".
+    static func names(_ zombies: [pid_t]) -> String {
+        var counts: [String: Int] = [:]
+        for pid in zombies {
+            let name = record(of: pid).map { info in
+                withUnsafeBytes(of: info.kp_proc.p_comm) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+            }
+            counts[name ?? "?", default: 0] += 1
         }
+        let sorted = counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+        return sorted.map { "\($0.key) ×\($0.value)" }.joined(separator: ", ")
+    }
+
+    private static func record(of pid: pid_t) -> kinfo_proc? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        return info
     }
 
     /// The run's watch: started as the bundle loads, it looks until the runner exits.
@@ -57,7 +74,8 @@ struct ZombieWatch {
         timer.setEventHandler {
             guard let lingering = watch.look(zombies: zombies(), now: Date()) else { return }
             Issue.record(Comment(rawValue: "The test run has \(lingering.count) zombie children (processes that ended over "
-                                 + "\(Int(grace)) s ago, never reaped; pids \(lingering.prefix(20).map(String.init).joined(separator: " "))). "
+                                 + "\(Int(grace)) s ago, never reaped: \(names(lingering)); pids "
+                                 + "\(lingering.prefix(20).map(String.init).joined(separator: " "))). "
                                  + "Whatever starts a process waits for it: waitpid, Process.waitUntilExit, or a reaper "
                                  + "(see ZombieWatch)."))
         }
