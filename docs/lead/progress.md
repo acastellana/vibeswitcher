@@ -2745,3 +2745,12 @@
 - 2026-11-01 14:34 Merged read-only-git-parser: Read-only git parser: allow the everyday forms other projects' workers and verifiers use (merge-tree, --stat, show --cc, git grep <rev>), and a worker's diff | apply -R proof
 - 2026-11-01 14:34 Flaky in read-only-git-parser's merge: aSlowPowerDaemonDoesntHoldUpALeadRefresh() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
 - 2026-11-01 14:34 Planned fix-the-flaky-test-17: aSlowPowerDaemonDoesntHoldUpALeadRefresh() flaked 3 times within 7 days
+- 2026-11-01 14:34 Automatically (auto_advance): Merged read-only-git-parser (Read-only git parser: allow the everyday forms other projects' workers and verifiers use (merge-tree, --stat, show --cc, git grep <rev>), and a worker's diff | apply -R proof) into main at 4be0a3fc, on its passing audit and the full test run. (Its first test run failed on aSlowPowerDaemonDoesntHoldUpALeadRefresh() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/read-only-git-parser/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibeswi….)
+- 2026-11-01 14:34 Automatically (auto_advance): Cleaned up wallet-requests-know (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 14:34 Automatically (auto_advance): Cleaned up read-only-git-parser; ended pid 60357 (Worker: Read-only git parser: allow the everyday forms other projects' workers and verifiers use (merge-tree, --stat, show --cc, git grep <rev>), and a worker's diff | apply -R proof) (freed 1.2 GB of build output and temporary folders). It stays don…
+- 2026-11-01 14:39 Started a worker on fix-the-flaky-test-16
+- 2026-11-01 14:39 Automatically (auto_advance): Started a worker on fix-the-flaky-test-16 (Fix the flaky test itCountsWhileOtherThreadsAllocate()).
+- 2026-11-01 14:39 Started a worker on fix-the-flaky-test-17
+- 2026-11-01 14:39 Automatically (auto_advance): Started a worker on fix-the-flaky-test-17 (Fix the flaky test aSlowPowerDaemonDoesntHoldUpALeadRefresh()).
+- 2026-11-01 14:39 Automatically (auto_advance): Started the audit of boost-release-5-7 at 7a3470d8 (Its review is audit).
+- 2026-11-01 14:39 Ended boost-release-3b-codex's worker (idle since its done report on b08d45b6) to make room on the Mac for its audit
