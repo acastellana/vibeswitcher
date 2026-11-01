@@ -47,6 +47,7 @@ cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
 source scripts/lib/module-cache.sh
 source scripts/lib/developer-dir.sh
+source scripts/lib/swift-jobs.sh
 # Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
 unset VIBESWITCHER_HOME
 
@@ -357,7 +358,9 @@ if [[ ${#command[@]} -eq 0 ]]; then
     fi
 
     echo "building…"
-    swift build --build-tests > /dev/null 2>&1 8>&- || { echo "the build failed: run swift build --build-tests"; exit 1; }
+    # On this run's slot's share of the cores, VS_HEAVY_CORES from the vs-heavy it runs under (scripts/lib/swift-jobs.sh),
+    # as test.sh's and build-app.sh's builds: left to itself SwiftPM compiles on every core, beside the busy loops.
+    heavy_swift build --build-tests > /dev/null 2>&1 8>&- || { echo "the build failed: run swift build --build-tests"; exit 1; }
     bin=$(swift build --show-bin-path 2>/dev/null 8>&-)
     [[ -d $bin ]] || { echo "no build folder at ${bin:-?} (swift build --show-bin-path)"; exit 1; }
     helper="$(dirname "$(xcrun --find swift)")/../libexec/swift/pm/swiftpm-testing-helper"

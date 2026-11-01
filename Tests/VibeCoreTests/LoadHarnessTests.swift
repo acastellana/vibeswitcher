@@ -287,6 +287,45 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: pids.path))
     }
 
+    /// Its build goes through heavy_swift (scripts/lib/swift-jobs.sh), on its slot's share of the cores like test.sh's
+    /// and build-app.sh's: two modules at once, VS_HEAVY_CORES ÷ 2 (rounded up) frontends each; the bare
+    /// `swift build --build-tests` without VS_HEAVY_CORES. A fake swift says what it was asked and fails the build, so
+    /// the run ends there, before any busy loop. Through vs-heavy (12 cores, 3 slots: 4), and run as vs-heavy's inner
+    /// command directly, with VS_HEAVY_CORES 5 and with none.
+    @Test func itsBuildRunsOnItsSlotsShareOfTheCores() throws {
+        let bin = temp.url("fake-swift"), log = temp.url("swift-args")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let swift = bin.appendingPathComponent("swift")
+        try "#!/bin/bash\necho \"$*\" >> '\(log.path)'\nexit 1\n".write(to: swift, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: swift.path)
+        let fake = try fakeMac(temp.url("load"))
+        func build(_ environment: [String: String?]) throws -> String {
+            try? FileManager.default.removeItem(at: log)
+            let process = process(["--load", "2", "--max-time", "300", "-r", "1"], fake: fake, pathFirst: bin)
+            for (name, value) in environment { process.environment?[name] = value }
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            try process.run()
+            let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            process.waitUntilExit()
+            #expect(process.terminationStatus != 0)
+            #expect(output.contains("the build failed"), "\(output)")
+            #expect(!output.contains("busy loops"), "\(output)")
+            // In a worktree the lead made, scripts/lib/module-cache.sh puts its cache's path first.
+            return ((try? String(contentsOf: log, encoding: .utf8)) ?? "")
+                .replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        #expect(try build(["VIBESWITCHER_HEAVY_NCPU": "12", "VIBESWITCHER_HEAVY_SLOTS": "3", "VS_HEAVY_CORES": nil])
+                == "build -j 2 -Xswiftc -j2 --build-tests")
+        // vs-heavy's command itself: the slot held (VIBESWITCHER_TEST_LOCK) and started by this process.
+        let inner: [String: String?] = ["TEST_UNDER_LOAD_INNER": "\(ProcessInfo.processInfo.processIdentifier)",
+                     "VIBESWITCHER_TEST_LOCK": locks.appendingPathComponent("test-build.lock").path]
+        #expect(try build(inner.merging(["VS_HEAVY_CORES": "5"]) { $1 }) == "build -j 2 -Xswiftc -j3 --build-tests")
+        #expect(try build(inner.merging(["VS_HEAVY_CORES": nil]) { $1 }) == "build --build-tests")
+    }
+
     /// The test process's home is the one its environment names. Under the harness (each run on a home of its own),
     /// it says where that was in the file TEST_UNDER_LOAD_HOME_REPORT names, for scripts/test-under-load-selfcheck.sh.
     @Test func aRunsHomeIsTheOneItsEnvironmentNames() throws {
