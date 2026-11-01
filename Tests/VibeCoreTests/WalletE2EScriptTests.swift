@@ -550,7 +550,7 @@ struct WalletE2ERealResultsTests {
     /// Writes each (sequence, status, txHash) as a result for `id` under a made-up name (the names' order deliberately not
     /// the sequence's), runs the judge on the folder: its status and output.
     func judge(_ results: [(Int, String, String?)], id: String = id, extra: [String] = []) throws -> (status: Int32, output: String) {
-        let dir = scratch.url("inbox/0a1b2c3d")
+        let dir = scratch.url("results").appendingPathComponent("inbox/0a1b2c3d")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         for (index, (sequence, status, tx)) in results.enumerated() {
             let txField = tx.map { #","txHash":"\#($0)","explorerURL":"https://explorer-asimov.genlayer.com/tx/\#($0)""# } ?? ""
