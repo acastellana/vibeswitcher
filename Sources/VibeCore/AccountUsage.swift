@@ -121,11 +121,15 @@ public struct AccountUsage: Equatable, Sendable {
 
     /// A refusal at the account's usage limit (`UsageLimit`, from a transcript) in a session running `model`: that
     /// limit at 100 % until its reset; for that model's family only when its type names a model, or the model needs
-    /// usage credits (its weekly allowance is spent: `model_requires_usage_credits`), else for every model.
-    public static func fromRefusal(_ limit: UsageLimit, model: String?, now: Date = Date()) -> Limit {
+    /// usage credits (its weekly allowance is spent: `model_requires_usage_credits`), else for every model. Nil for a
+    /// model-only refusal whose model isn't known (Claude's default, a session no task names): unknown usage holds
+    /// nothing back, and kept for every model it would stop every start.
+    public static func fromRefusal(_ limit: UsageLimit, model: String?, now: Date = Date()) -> Limit? {
         let kind = limit.kind ?? "usage"
         let named = ["fable", "opus", "sonnet", "haiku"].first { kind.lowercased().contains($0) }
-        let scoped = named ?? (limit.apiError == "model_requires_usage_credits" ? family(model) : nil)
+        let modelOnly = limit.apiError == "model_requires_usage_credits"
+        let scoped = named ?? (modelOnly ? family(model) : nil)
+        if modelOnly, scoped == nil { return nil }
         return Limit(name: kind, model: scoped, usedPercent: 100, resetsAt: limit.resetsAt, at: limit.at ?? now.timeIntervalSince1970, reached: true)
     }
 

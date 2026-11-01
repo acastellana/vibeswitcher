@@ -685,6 +685,17 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The model its worker runs on, as `claude --model` takes it (add_task's and update_task's `model`: sonnet for a
     /// mechanical task, say); nil: the project's Claude command's, as before.
     public var model: String?
+    /// The model each of its workers and verifiers was started on, by session (`claude --model`'s name; "" for Claude's
+    /// default), its current members only: which model a session's usage-limit refusal holds back (see
+    /// `AccountUsage.fromRefusal`), whatever the task's model or verifier_model says since.
+    public var launchedModels: [String: String]?
+
+    /// Notes that `sessions` were started on `model` (nil: Claude's default), keeping only its members' entries.
+    public mutating func launched(_ sessions: [String], on model: String?) {
+        var kept = (launchedModels ?? [:]).filter { members.contains($0.key) }
+        for session in sessions { kept[session] = model ?? "" }
+        launchedModels = kept.isEmpty ? nil : kept
+    }
     /// How long its workers have worked on it, in seconds, as the witness counted (see `LeadBudget.counts`): waiting
     /// on a prompt, the lead or the user, and its audits, don't count.
     public var worked: Double?

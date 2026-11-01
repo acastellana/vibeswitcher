@@ -1343,12 +1343,11 @@ public final class LeadToolset: MCPToolset {
     /// The model a task's worker runs on: its own (add_task's `model`), else the project's Claude command's.
     func workerModel(for task: LeadTask) -> String? { task.model ?? runtime.workerModel(root: root) }
 
-    /// The model a session of the team runs on, by the board: a task's worker its task's, a verifier or finder the
-    /// audits'; nil for one the board doesn't name.
-    private func sessionModel(_ session: String, _ board: LeadBoard) -> String?? {
-        if let task = board.tasks.first(where: { $0.worker == session }) { return .some(workerModel(for: task)) }
-        if board.tasks.contains(where: { $0.members.contains(session) }) { return .some(auditModel(workflow)) }
-        return nil
+    /// The model a session of the team was started on, as its task noted at its start (`LeadTask.launchedModels`); nil
+    /// for Claude's default or a session no task names: not known. Never the task's model or verifier_model as they are
+    /// now: a lead that moved audits to opus after a verifier stopped at the Fable limit would hold opus back too.
+    private func sessionModel(_ session: String, _ board: LeadBoard) -> String? {
+        board.tasks.lazy.compactMap { $0.launchedModels?[session] }.first.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// The account's usage as known now: what's kept (`usageStore`), with the limits the team's `sessions` stopped at
@@ -1359,9 +1358,7 @@ public final class LeadToolset: MCPToolset {
             let board = store.load()
             let refusals = sessions.compactMap { info -> AccountUsage.Limit? in
                 guard info.live, let limit = info.usageLimit else { return nil }
-                let model = sessionModel(info.id, board)
-                let kept = AccountUsage.fromRefusal(limit, model: model ?? nil, now: now)
-                return kept.model == nil && model == nil && limit.apiError == "model_requires_usage_credits" ? nil : kept
+                return AccountUsage.fromRefusal(limit, model: sessionModel(info.id, board), now: now)
             }
             usageStore.record(refusals, now: now)
         }
@@ -1512,6 +1509,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].blocker = nil
             board.tasks[index].status = .running
             board.tasks[index].worker = session
+            board.tasks[index].launched([session], on: model)
             board.tasks[index].stopped = nil
             board.tasks[index].branch = Worktrees.branch(slug)
             board.tasks[index].worktree = worktree
@@ -1829,6 +1827,7 @@ public final class LeadToolset: MCPToolset {
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].verifier = session
             board.tasks[index].panel = panel
+            board.tasks[index].launched(panel?.sessions ?? [session], on: auditModel(workflow))
             // A kept task stays kept through a new audit: what holds it back hasn't changed.
             if ![.kept, .folded, .abandoned, .reverted].contains(board.tasks[index].status) { board.tasks[index].status = .review }
             board.tasks[index].evidence = nil
