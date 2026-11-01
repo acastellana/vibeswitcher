@@ -71,7 +71,7 @@ import Testing
             try HostedSession.spawn(request, shell: "/bin/sh", launcher: hostLauncher,
                                     baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], ringCapacity: 1 << 20, queue: probe.queue)
         }
-        defer { probe.queue.sync { session.terminate() } }
+        defer { probe.end(session) }
         let short = session.id.uuidString.prefix(8)
         var now = Date(timeIntervalSinceReferenceDate: 800_000_000)
         var later: [(at: Date, write: () -> Void)] = []
