@@ -819,7 +819,8 @@ public enum Worktrees {
     /// A batch's stack (see `LeadToolset.mergeBatch`): tasks' commits put one on top of another on the base, in one
     /// detached scratch worktree where no agent works, and a test run on any prefix of it. Each commit lands as
     /// `rebaseAndTest` lands one (rebased, or squashed when it holds a merge; the lead's records as the base has them).
-    /// The worktree and the scratch home are removed by `remove`, also after a cancel.
+    /// The worktree and the scratch home are removed by `remove`, also after a cancel. The caller makes their folder
+    /// (private: `LeadVault.ensurePrivate`).
     public final class Stack {
         public let root: String
         let path: String
@@ -845,8 +846,6 @@ public enum Worktrees {
         public func reset(to base: String) -> String? {
             if !made {
                 remove()
-                try? FileManager.default.createDirectory(at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true,
-                                                         attributes: [.posixPermissions: 0o700])
                 let added = Git.run(["worktree", "add", "--detach", "-q", path, base], in: root)
                 guard added.ok else { return added.error.isEmpty ? "Couldn't set up a worktree to stack the batch in on \(base.prefix(8))." : added.error }
                 made = true

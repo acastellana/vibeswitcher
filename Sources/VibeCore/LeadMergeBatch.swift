@@ -128,6 +128,7 @@ extension LeadToolset {
         let waited = try waitForLoad(workflow, slug: names)
 
         let place = vault.scratch(root: root, "merge-batch")
+        try vault.ensurePrivate(place.deletingLastPathComponent())
         let stack = Worktrees.Stack(root: root, scratch: place, home: vault.scratch(root: root, "merge-batch-home"), records: workflow.recordsDir)
         defer { stack.remove() }
         let called = Date()
