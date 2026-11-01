@@ -2734,3 +2734,4 @@
 - 2026-11-01 13:25 Audit of read-only-git-parser: complete, clean, round 2: 1 Important closed, 1 Nit closed
 - 2026-11-01 13:29 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-11-01 13:36 Planned codex-s-tui-renders: Codex's TUI renders blank and never starts its MCP server under the session host: find why, then enable Codex workers (review audit)
+- 2026-11-01 13:58 Planned the-test-suite-leaves: The test suite leaves hundreds of zombie processes (a test helper had 431 unreaped children)
