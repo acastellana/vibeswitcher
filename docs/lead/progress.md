@@ -2657,3 +2657,5 @@
 - 2026-11-01 10:58 The worker on wallet-outcomes-always answered findings: wallet-outcomes-always:F1 fixed at 5b0fde62: Fixed in 3dd848a, 564fcf1 and 5b0fde6. Each outbox entry now carries the session host's seal (`LeadVault.seal`). The seal is made with the vault key that survives restarts, over a .system("wallet outbox") message whose id and text bind the request id, key, session, window end, marker and text. `maySeal` lets only the app seal that sender. An entry read from disk is handed to LeadController.tell only after the host confirms the seal (`LeadVault.verify`…
 - 2026-11-01 11:05 Audit of boost-release-4-7 at 185090f8 tested its merged result a84ac7cd onto main: test command failed
 - 2026-11-01 11:05 Automatically (auto_advance): Started the audit of boost-release-4-7 at 185090f8 (Its review is audit).
+- 2026-11-01 11:07 Audit of boost-release-4-7: incomplete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-11-01 11:07 Automatically (auto_advance): Sent boost-release-4-7's worker the open Important findings boost-release-4-7:F1 from its audit at 185090f8.
