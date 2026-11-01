@@ -2760,3 +2760,7 @@
 - 2026-11-01 14:52 Automatically (auto_advance): Sent boost-release-5-7's worker the open Important findings boost-release-5-7:F1 from its audit at 7a3470d8.
 - 2026-11-01 14:54 Audit of boost-release-3b-codex: complete, clean, round 1: 2 Nit open, 2 Pre-existing open
 - 2026-11-01 14:57 The worker on boost-release-5-7 answered findings: boost-release-5-7:F1 fixed at e299ba9e: e299ba9: every round after the first calls mergeGate again on each restacked task, just before that round's run, and checks changedMeanwhile against its last state. Its audit or done report on the head, findings, strict_paths holds, kept and approvals are all read fresh, and a refused task is left out with merge's own text. The fresh gate's commit and task are what gets stacked and compared before landing. Regression test MergeBatchTests.tasksRestackedAfte…
+- 2026-11-01 15:08 Automatically (auto_advance): Started the audit of boost-release-5-7 at e299ba9e (Its review is audit).
+- 2026-11-01 15:16 Audit of boost-release-5-7: complete, clean, round 2: 1 Important closed, 3 Nit closed
+- 2026-11-01 15:17 Merged boost-release-3b-codex: Boost release 3b: Codex workers for bounded tasks (spread usage across accounts), always audited by Claude
+- 2026-11-01 15:17 Flaky in boost-release-3b-codex's merge: theLoginShellRunsInASessionOfItsOwn(), aSlowPowerDaemonDoesntHoldUpALeadRefresh() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
