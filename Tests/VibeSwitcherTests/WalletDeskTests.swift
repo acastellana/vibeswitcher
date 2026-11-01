@@ -206,6 +206,49 @@ struct WalletDeskTests {
         #expect(s.told.messages.count == 2)
     }
 
+    /// The shared vector for a request that failed the format (docs/protocol/vectors), answered for `request`.
+    static func formatRejection(_ request: WalletRequest) throws -> WalletResult {
+        let vectors = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("docs/protocol/vectors", isDirectory: true)
+        var result = try WalletResult.parse(Data(contentsOf: vectors.appendingPathComponent("result-valid-rejected-format.json")))
+        result.id = request.id
+        return result
+    }
+
+    /// A request the Wallet Manager couldn't parse is answered rejected, its only check `format` (wallet-request.md, "The
+    /// format check"): the card shows it rejected with that check's detail, the session is told once, and a second
+    /// answer for the id is ignored, as after any final result.
+    @Test func aRequestTheWalletManagerCouldntParseShowsRejectedWithTheFormatCheck() async throws {
+        let s = try setup()
+        defer { s.desk.close() }
+        let request = Self.request()
+        try WalletAsk.file(request, in: s.asked)
+        await refreshed(s.desk)
+        await acted(s.desk, .send, request.id)
+        #expect(s.desk.cards.first?.state == .sent)
+        let rejection = try Self.formatRejection(request)
+        let check = try #require(rejection.checks.first)
+        try s.fake.receive(rejection, second: 1)
+        await polled(s.desk)
+        _ = await until { s.told.messages.count == 1 }
+        #expect(s.desk.cards.first?.state == .rejected(reason: rejection.message))
+        #expect(s.desk.cards.first?.checks == [.init(name: "format", ok: false, detail: check.detail)])
+        #expect(s.told.messages.first?.text.contains("Failed checks: format (\(check.detail)).") == true)
+        #expect(s.told.messages.first?.text.contains("This request is finished.") == true)
+
+        // A second answer for the same id (a later sequence, another detail) changes nothing.
+        var second = rejection
+        second.sequence = 2
+        second.checks = [.init(name: "format", ok: false, detail: "notJSON: a second answer")]
+        second.message = "A second answer."
+        try s.fake.receive(second, second: 2)
+        await polled(s.desk)
+        #expect(s.told.messages.count == 1)
+        #expect(s.desk.cards.first?.state == .rejected(reason: rejection.message))
+        #expect(s.desk.cards.first?.checks == [.init(name: "format", ok: false, detail: check.detail)])
+        #expect(s.store.load().first { $0.request.id == request.id }?.results == [rejection])
+    }
+
     @Test func retryResendsAfterPassageCouldntReachTheWalletManager() async throws {
         let s = try setup()
         defer { s.desk.close() }

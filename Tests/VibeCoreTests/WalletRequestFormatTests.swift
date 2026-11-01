@@ -144,6 +144,20 @@ struct WalletRequestFormatTests {
             == WalletResult.parse(Data(contentsOf: Self.vectors.appendingPathComponent("result-valid-submitted.json"))))
     }
 
+    /// The answer to a request that fails the format (the doc's "The format check"): rejected, sequence 1, its only
+    /// check `format`, failed, with a detail of at most 300 characters.
+    @Test func theFormatCheckVectorIsTheAnswerToARequestThatFailsTheFormat() throws {
+        let result = try WalletResult.parse(Data(contentsOf: Self.vectors.appendingPathComponent("result-valid-rejected-format.json")))
+        #expect(result.status == .rejected && result.sequence == 1)
+        #expect(result.txHash == nil && result.safeTxHash == nil && result.explorerURL == nil)
+        #expect(result.checks.count == 1)
+        let check = try #require(result.checks.first)
+        #expect(check.name == "format" && !check.ok)
+        #expect(!check.detail.isEmpty && check.detail.unicodeScalars.count <= 300)
+        let doc = try String(contentsOf: Self.vectors.deletingLastPathComponent().appendingPathComponent("wallet-request.md"), encoding: .utf8)
+        #expect(doc.contains("#### The format check") && doc.contains("at most **300** characters"))
+    }
+
     @Test func theWordlistIsBIP39English() {
         let file = WalletWordlist.text.split(separator: " ").joined(separator: "\n") + "\n"
         let digest = SHA256.hash(data: Data(file.utf8)).map { String(format: "%02x", $0) }.joined()
