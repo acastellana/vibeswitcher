@@ -207,8 +207,12 @@ The whole result passes [Key material](#key-material).
    launch (the app stopped mid-send) is kept as outstanding too, as `unsure`: it may have gone.
 4. **Checked.** The Wallet Manager reads the file from its inbox and checks it ([The Wallet Manager, on a request](#the-wallet-manager-on-a-request)).
    It answers `received` (sequence 1) as soon as the request parses, then `rejected` if a check fails, or
-   `proposed` once it's ready to sign. A request that doesn't parse gets no result (its `id` can't be trusted):
-   VibeSwitcher sees no answer and the request ages out.
+   `proposed` once it's ready to sign. A request from the configured VibeSwitcher peer, named
+   `wallet-request-<id>.json` with `<id>` an id, that doesn't parse or breaks the format (corrupted on the way, say,
+   or written by a VibeSwitcher whose rules differ) is answered once, under the `<id>` in its name, with a single
+   result: `rejected` (sequence 1, no `received` before it) whose `checks` hold only the
+   [format check](#the-format-check). VibeSwitcher shows it on the card as rejected, with that check's detail. A file
+   from another peer, or whose name isn't that, gets no result.
 5. **Signed.** The person signs on the Wallet Manager's Mac: `signed`, then `submitted` with `txHash` once it's on the chain,
    or `failed`. The Wallet Manager resolves what kind of wallet `from` is in the `workspace`:
    - a **hardware wallet**: signed on the device;
@@ -229,8 +233,9 @@ for a Safe, the requester picks a longer `expiresAt` (up to 7 days).
 
 ### Replays
 
-The Wallet Manager MUST act on an `id` at most once. A request file with an `id` it has already seen, whether the same
-request sent again or a different one, is ignored **silently**: no result of any kind, under any sequence. (Results
+The Wallet Manager MUST act on an `id` at most once: the `<id>` in a request file's name, whether or not the file
+parses (answering one with the [format check](#the-format-check) is acting on it). A request file with an `id` it has
+already seen, whether the same request sent again or a different one, is ignored **silently**: no result of any kind, under any sequence. (Results
 are matched to requests by `id` alone, so a `rejected` for the repeat would end the original's tracking on
 VibeSwitcher while the Wallet Manager went on with it.) The Wallet Manager keeps the ids it has seen for at least 7 days past their
 `expiresAt`.
@@ -245,13 +250,17 @@ VibeSwitcher while the Wallet Manager went on with it.) The Wallet Manager keeps
 
 ### The Wallet Manager, on a request
 
-The format, before anything else, and every failure of it is silent (no result):
+Where it came from, before anything else, and every failure of it is silent (no result):
 
-- The file came from the configured VibeSwitcher peer (its inbox folder is that peer ID's), its name is
-  `wallet-request-<id>.json` with `<id>` an id, and it is at most 64 KiB.
+- The file came from the configured VibeSwitcher peer (its inbox folder is that peer ID's), and its name is
+  `wallet-request-<id>.json` with `<id>` an id.
+- That `<id>` is one the Wallet Manager hasn't seen before ([Replays](#replays)).
+
+Then the format, answering `rejected` with the single [format check](#the-format-check) when it fails:
+
+- The file is at most 64 KiB (a larger one is answered without being read).
 - It parses by every rule of [Encoding rules](#encoding-rules-both-formats) and [wallet-request v1](#wallet-request-v1),
   key material included, and its `id` is the `<id>` in its name.
-- Its `id` is one the Wallet Manager hasn't seen before ([Replays](#replays)).
 
 Then, answering `rejected` with the failing checks, at least:
 
@@ -273,6 +282,25 @@ And, without answering `rejected` for it:
 A check that fails in a result that isn't `rejected` (an "unknown calldata" check on a `proposed` result, say) is a
 warning: VibeSwitcher shows it as one, not as a failure.
 
+#### The format check
+
+A request that fails the format is answered with one result for the `<id>` in its file's name: `sequence` 1,
+`status` `"rejected"`, and `checks` holding exactly one entry,
+`{"name": "format", "ok": false, "detail": <why>}`, where `<why>`:
+
+- is at most **300** characters (and, like every result, passes [Key material](#key-material));
+- says which rule failed and, where there is one, the field as this document's tables name it (`reason`,
+  `requestedBy.label`); it SHOULD begin with the refusal's name as the [test vectors](#test-vectors) spell it
+  (`tooLarge`, `notJSON`, `unknownField`, `missingField`, `wrongType`, `invalid`, `keyMaterial`);
+- **never echoes the file's content**: no value from it, no field name that isn't in the tables (an unknown field is
+  named by the object holding it: `unknownField: a field the format doesn't have, at the top level`), and none of
+  the text that holds key material (`keyMaterial: reason holds what looks like key material`).
+
+`message` follows the same rule: it says the request was refused for its format, never what the file held. The
+format check comes before every other check, so it is the only one: no `received` precedes it, and nothing follows
+it (`rejected` is final). The `<id>` counts as seen ([Replays](#replays)): the same file sent again, or any other
+under that name, gets nothing more.
+
 ### VibeSwitcher, on a result
 
 A result is taken only when all of these hold; anything else is ignored and logged once, never acted on:
@@ -284,6 +312,9 @@ A result is taken only when all of these hold; anything else is ignored and logg
 - It parses by every rule of [wallet-result v1](#wallet-result-v1), key material included, and its `id` is `<id>`.
 - Its `sequence` is after the last one taken for the request. Results found together are taken in `sequence` order;
   a repeat, or anything after a final result (a second result for a finished request), is ignored and logged.
+
+A `rejected` result with the [format check](#the-format-check) is taken like any other: the card shows the request as
+rejected, with the check's detail, and the request is finished.
 
 ## Examples
 
@@ -354,7 +385,8 @@ Its last result: submitted, with the checks the Wallet Manager ran.
 
 Each invalid file breaks exactly one rule, so it's refused for that reason whatever order a reader checks in. All
 values are made up. The valid request and result whose names end in `-transfer-native` and `-submitted` are the
-examples above.
+examples above. `result-valid-rejected-format.json` is the answer to a request that fails the format
+([The format check](#the-format-check)).
 
 ## Versions
 
@@ -364,6 +396,13 @@ are updated together.
 
 ### History
 
+- 2026-11-01: still version 1. A request from the configured VibeSwitcher peer, named `wallet-request-<id>.json` with
+  `<id>` an id, that doesn't parse or breaks the format (64 KiB, JSON, fields, key material, its `id` not its name's)
+  is now answered with `rejected` under that `<id>`, its only check `format` with a detail of at most 300 characters
+  that never echoes the file ([The format check](#the-format-check)); before, it got no result and its request hung at
+  sent until it aged out. The file's name and the authenticated Passage peer are enough to answer it. The at-most-once
+  rule now counts the name's `<id>`, checked before the file is parsed. Such a result is an ordinary v1 result (a
+  vector: `result-valid-rejected-format.json`); a v1 reader takes it as it is.
 - 2026-10-31: renamed, still version 1. The formats were vault-request v1 and vault-result v1, their `type`s
   `"vibeswitcher.vault-request"` and `"vibeswitcher.vault-result"`, their files `vault-request-<id>.json` and
   `vault-result-<id>.json`, and this document `docs/protocol/vault-request.md`; they are now `wallet-request` and

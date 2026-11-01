@@ -522,6 +522,12 @@
       "note": "Rejected, with the failing check."
     },
     {
+      "file": "result-valid-rejected-format.json",
+      "kind": "result",
+      "valid": true,
+      "note": "The answer to a request that didn't parse or broke the format: rejected, sequence 1, its only check format, whose detail names the rule and the field, never the file's content."
+    },
+    {
       "file": "result-valid-safe-proposed.json",
       "kind": "result",
       "valid": true,
