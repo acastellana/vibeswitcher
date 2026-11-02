@@ -117,8 +117,15 @@ struct CodexRealRunTests {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: url) }
         let root = url.path
-        let cloned = Git.run(["clone", "-q", "--shared", checkout.path, root], in: checkout.path)
-        try #require(cloned.ok, "\(cloned.output)")
+        // Not Git.run, which allows no transport (a local clone is one).
+        let clone = Process()
+        clone.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        clone.arguments = ["clone", "-q", "--shared", checkout.path, root]
+        clone.standardOutput = FileHandle.nullDevice
+        clone.standardError = FileHandle.nullDevice
+        try clone.run()
+        clone.waitUntilExit()
+        try #require(clone.terminationStatus == 0, "git clone of this checkout failed")
         Git.run(["branch", "-f", "main", "HEAD"], in: root)
         // The worktrees' shared module cache, as the lead's repository has one (a writable root of the worker's).
         try FileManager.default.createDirectory(atPath: root + "/.vibeswitcher/module-cache", withIntermediateDirectories: true)

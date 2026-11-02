@@ -86,6 +86,26 @@ A Codex worker is the project's Codex command (its Codex launch preset) started 
   would loosen that (`--yolo`, `--dangerously-bypass-approvals-and-sandbox`, `--full-auto`, `-s`, `-a`, `-C`,
   `--add-dir`, `-p`) are dropped; a task's `model` replaces its `-m`.
 
+Its checks run as a Claude worker's do, as the brief writes them, with no flags of their own: `bash scripts/test.sh
+--filter X`, the lint filter and `scripts/test-under-load.sh`. Inside Codex's sandbox (its commands have
+`CODEX_SANDBOX` set) the scripts leave SwiftPM's own sandbox out (`--disable-sandbox`: macOS refuses a sandbox-exec
+inside Codex's seatbelt, and SwiftPM compiles the manifest under one); a new worktree takes the main checkout's SwiftPM
+dependencies (`.build/repositories`, `checkouts`, cloned), there being no network to fetch them; and the scripts list
+processes through libproc, since `/bin/ps` is setuid and macOS starts no setuid program in any sandbox, so no launch
+setting could let it through (`scripts/lib/processes.sh`). On 2026-11-02 the first Codex task's `scripts/test.sh`
+failed before compiling, and the lead had to hand its worker `--disable-sandbox`. Still out of a Codex worker's reach:
+
+- tests that open a Unix socket, which its sandbox refuses with the network off: every test that starts a scratch
+  session host (the VibeHostTests target, and app tests such as LeadStartsHostTests) and so the full suite. Its focused suites and the
+  lints run; the audit and the merge's full run cover the rest, so a task about the session host stays Claude's;
+- `scripts/sandbox-app.sh` (the UI check in the real app): a UI task stays Claude's;
+- a change to the package's dependencies (`Package.resolved`): fetching them needs the network;
+- vs-heavy's view of it: there `sysctl` fails, so vs-heavy counts 4 cores (a smaller share for its builds), and its
+  holder note can't read the run's CPU time, so a waiter may see the Codex run as idle. Nothing acts on either.
+
+The on-demand `CodexRealRunTests/theProjectsChecksRunInARealCodexWorkersSandbox` runs these checks in a real Codex
+worker's sandbox.
+
 A Codex task is always audited by a Claude verifier: its review is audit and can't be lowered while its worker is
 Codex, or once a Codex worker worked on it; merge refuses it without a passing audit whatever the board or the vault
 says. Status and board say `worker: Codex` on it (and `worker: Claude` on the other open tasks beside it), and the
