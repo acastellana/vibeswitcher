@@ -191,3 +191,7 @@ Decision 3 (2026-11-02) held auto back until Codex workers could run the checks.
 
 Xcode 27.2 stopped bundling it. Every build, install and test run failed until the 840 MB component was downloaded. The user chose the download over changing the dependency.
 
+## 2026-11-02 13:52:20 GitHub's main merged into this Mac's main on 2026-11-02 at 7ece3ba, run by the user. It brings the other Mac's portability test fixes and the Boost load-ceiling clamp. "This Mac" in the 2026-11-02 10:26 Metal Toolchain entry means the other Mac (the 8-core MacBook on Xcode 27.2), not this one. progress.md kept this Mac's version: GitHub's copy had committed conflict markers. The next merge's full test run (statistics-1-2-a) is the full-suite check on the merged main, so no separate task.
+
+Both Macs' leads write the same lead record. Task lead-records-merge adds merge=union so future merges don't stop on it.
+

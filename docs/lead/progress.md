@@ -2901,3 +2901,9 @@
 - 2026-11-02 13:36 Released statistics-1-2-a's worker (idle since its done report on 1decdbf4) while its audit runs
 - 2026-11-02 13:36 Automatically (auto_advance): Started the audit of statistics-1-2-a at 1decdbf4 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-02 13:38 Audit of statistics-1-2-a: complete, clean, round 1: 2 Nit open
+- 2026-11-02 13:52 accepted 10 commits on main that you ran from VibeSwitcher's window: 7ece3ba Merge remote-tracking branch 'origin/main'; b6a5d07 Lead: decisions and progress; bd01afd Lead: decisions and progress; …
+- 2026-11-02 14:03 Automatically (auto_advance): Didn't merge statistics-1-2-a: Not merged: main is at 7ece3bae, not at 20fa4975 where it was; it moved meanwhile.
+- 2026-11-02 14:03 Started a worker on lead-records-merge (auto → Claude: Claude weekly 12%, 57 points behind pace, not tight; Codex 67%)
+- 2026-11-02 14:03 Automatically (auto_advance): Started a worker on lead-records-merge (Lead records merge without conflicts across Macs); its agent is auto, so it went to Claude: Claude weekly 12%, 57 points behind pace, not tight; Codex 67%.
+- 2026-11-02 14:20 Merged statistics-1-2-a: Statistics 1/2: a stats model of the whole VibeSwitcher setup (VibeCore, read-only)
+- 2026-11-02 14:20 Flaky in statistics-1-2-a's merge: largeFilesAreStreamedWithinATimeBound() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
