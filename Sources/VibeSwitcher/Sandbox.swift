@@ -1013,11 +1013,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
             return AnyView(AllDoneCard(mark: mark, chat: ChatModel(), expanded: [AllDoneCard.key(mark)]).frame(width: 560).padding(16))
         }),
         // The Statistics window's page (`StatisticsView`) on made-up stats for the last 7 days: two projects and one whose
-        // board can't be read, Mac-wide figures with boost hours and Codex tokens not recorded. Shown loading, then filled.
+        // board can't be read, Mac-wide figures with boost hours and Codex tokens not recorded; the quality sections, the
+        // breakdown and the trend. Shown loading, then filled, tall enough that a shot holds the whole page.
         ("statistics", { _ in
             let model = StatisticsModel(load: { _, range in Driver.statistics(range: range) })
             model.reload()
-            return AnyView(StatisticsView(model: model).frame(width: StatisticsWindowController.size.width, height: 820))
+            return AnyView(StatisticsView(model: model).frame(width: StatisticsWindowController.size.width, height: 2500))
         }),
         ("lead-team", { driver in
             let team = Driver.leadTeam()

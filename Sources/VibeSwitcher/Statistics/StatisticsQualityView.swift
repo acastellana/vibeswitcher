@@ -46,7 +46,7 @@ private struct BreakdownTable: View {
             GridRow(alignment: .bottom) {
                 Text("Who").gridColumnAlignment(.leading)
                 ForEach(Array(QualityPage.columns.enumerated()), id: \.offset) { index, column in
-                    Text(column.replacingOccurrences(of: " ", with: "\n")).multilineTextAlignment(.trailing).fixedSize()
+                    Text(column.replacing(" ", with: "\n", maxReplacements: 1)).multilineTextAlignment(.trailing).fixedSize()
                         .help(QualityPage.columnHelp[index])
                 }
             }
