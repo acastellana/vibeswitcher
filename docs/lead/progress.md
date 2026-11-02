@@ -2941,3 +2941,6 @@
 - 2026-11-02 16:30 Audit of wallet-e2e-sh-write: complete, clean, round 1: 1 Nit open
 - 2026-11-02 16:45 Merged wallet-e2e-sh-write: wallet-e2e.sh: write the synthetic vault at the Wallet Manager's own format version
 - 2026-11-02 16:45 Flaky in wallet-e2e-sh-write's merge: aRetryWithNoCourierLeavesTheRecordToDecide() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-02 16:45 Automatically (auto_advance): Merged wallet-e2e-sh-write (wallet-e2e.sh: write the synthetic vault at the Wallet Manager's own format version) into main at b8c5ab80, on its passing audit and the full test run. (Its first test run failed on aRetryWithNoCourierLeavesTheRecordToDecide() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/wallet-e2e-sh-write/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibesw….)
+- 2026-11-02 16:45 Automatically (auto_advance): Cleaned up wallet-e2e-sh-write (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-02 16:46 Update: Today: Codex workers, routing, Boost on battery, Statistics, the GitHub merge — **Landed today (2026-11-02):**
