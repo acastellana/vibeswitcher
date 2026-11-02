@@ -319,7 +319,8 @@ struct WalletE2ERealTestnetGuardTests {
     }
 
     /// Each refusal on the real run (no --check-guards, no --dry-run): exit 2 with its reason, before any network.
-    @Test(arguments: [
+    /// Typed apart from `@Test`: inferred inside the macro, the table timed out the type checker (Xcode 27.2).
+    static let refusals: [([String], String, String)] = [
         (["--chain", "42424242"], "", "chain 42424242: only GenLayer testnet, 4221"),
         (["--chain", "1"], "", "chain 1: only GenLayer testnet"),
         (["--from", "0x00000000000000000000000000000000000E2e01", "--to", "0x00000000000000000000000000000000000E2e01"], "", "only the throwaway testnet wallet"),
@@ -340,7 +341,8 @@ struct WalletE2ERealTestnetGuardTests {
         ([], "keystore-other-address", "the throwaway keystore isn't the throwaway wallet's"),
         ([], "keystore-two-addresses", "doesn't name exactly one address"),
         ([], "keystore-version-1", "isn't a version 3 keystore"),
-    ])
+    ]
+    @Test(arguments: refusals)
     func refusesBeforeAnyNetwork(_ arguments: [String], _ fault: String, _ why: String) throws {
         let setup = try Setup(scratch)
         let fm = FileManager.default
