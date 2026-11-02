@@ -1,0 +1,4 @@
+# The lead's records are append-only logs that two Macs' leads both add to. git's built-in union driver keeps both
+# sides' lines where they overlap, so a merge of main between them never stops on a conflict (2026-10-31, 2026-11-02).
+docs/lead/progress.md merge=union
+docs/lead/decisions.md merge=union
