@@ -4,8 +4,9 @@ import Foundation
 // them), so the app can make one of its own: the sandbox's made-up statistics. They only set the fields.
 
 extension SetupStats {
-    public static func make(range: DateInterval, at: Date, projects: [Project], total: ProjectFigures?, mac: MacWide) -> Self {
-        Self(range: range, at: at, projects: projects, total: total, mac: mac)
+    public static func make(range: DateInterval, at: Date, projects: [Project], total: ProjectFigures?, mac: MacWide,
+                            quality: SetupQuality? = nil) -> Self {
+        Self(range: range, at: at, projects: projects, total: total, mac: mac, quality: quality)
     }
 }
 

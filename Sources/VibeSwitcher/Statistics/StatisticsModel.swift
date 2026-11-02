@@ -104,6 +104,8 @@ struct StatisticsPage: Equatable {
     var projects: [ProjectRow]
     /// Nil when no project's board could be read.
     var total: ProjectRow?
+    /// Quality, autonomy, time and cost, by who did the work, with the trend; nil when no project's board could be read.
+    var quality: QualityPage?
 
     /// One Mac-wide figure: what it is, its value, a line under it, and a bar (usage) when it has one.
     struct Figure: Equatable, Identifiable {
@@ -111,6 +113,8 @@ struct StatisticsPage: Equatable {
         var value: String
         var detail: String?
         var meter: Meter?
+        /// What it is, in one line: shown on hover.
+        var help: String?
         var id: String { label }
         /// What VoiceOver reads for it.
         var spoken: String { [label + ": " + value, detail].compactMap { $0 }.joined(separator: ", ") }
@@ -146,6 +150,7 @@ struct StatisticsPage: Equatable {
             return Self.row(name: project.name, note: note, project.figures, id: project.root)
         }
         total = stats.total.map { Self.row(name: "Total", note: nil, $0, id: "total") }
+        quality = stats.quality.map { QualityPage($0, calendar: calendar) }
     }
 
     // MARK: Mac-wide

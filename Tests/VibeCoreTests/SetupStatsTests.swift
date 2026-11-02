@@ -396,6 +396,222 @@ struct SetupStatsTests {
         #expect(files.map { collector.reads(of: $0) } == before)
     }
 
+    // MARK: Quality, autonomy, time and cost
+
+    /// A merged task as the board keeps it: created 2 h before `at`, started 1 h before, merged at `at`.
+    static func merged(_ slug: String, at: Double, codex: Bool = false, model: String? = nil) -> LeadTask {
+        var task = LeadTask(id: slug.uppercased(), slug: slug, title: slug, contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""),
+                            status: .done)
+        task.createdAt = at - 7200
+        task.startedAt = at - 3600
+        task.worker = "w-\(slug)"
+        task.merged = LeadMergeRecord(commit: "c-\(slug)", tested: true, at: at)
+        if codex {
+            task.codexWorked = true
+            task.launched(["w-\(slug)"], on: "codex")
+        } else if let model {
+            task.launched(["w-\(slug)"], on: model)
+        }
+        return task
+    }
+
+    static func tokens(cost: Double?) -> LeadTokens {
+        var tokens = LeadTokens(input: 10, output: 1, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, sessions: 1, models: ["claude-opus-5-5"])
+        tokens.cost = cost
+        return tokens
+    }
+
+    static func finding(_ id: String, _ severity: LeadFinding.Severity, _ status: LeadFinding.Status, closedBy: String? = nil,
+                        followUp: String? = nil) -> LeadFinding {
+        var finding = LeadFinding(id: id, severity: severity, file: "A.swift", line: id.count, evidence: "e", status: status, reason: nil, raised: 1)
+        finding.closedBy = closedBy
+        finding.followUp = followUp
+        return finding
+    }
+
+    /// A scratch project `name` whose board.json is `board`, encoded as the app writes it.
+    func project(_ name: String, board: LeadBoard, in root: URL) throws -> URL {
+        let folder = root.appendingPathComponent(name).appendingPathComponent(".vibeswitcher")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try JSONEncoder().encode(board).write(to: folder.appendingPathComponent("board.json"))
+        return root.appendingPathComponent(name)
+    }
+
+    /// The hand-built board: on the fixture day, a (Claude on opus: audited, passed first, needed nobody), b (Claude on
+    /// sonnet: two audits, a question, a lead message, a re-roll, a merge rerun, an incident after it) and c (Codex:
+    /// unaudited, reverted, its cost unknown), an abandoned f; d two weeks before (the trend's).
+    func qualityLayout() throws -> (project: URL, home: URL, at: Double) {
+        let root = temp.url("quality")
+        let at = Self.date(2026, 10, 20, 12).timeIntervalSince1970
+        var a = Self.merged("a", at: at, model: "claude-opus-5-5")
+        var ledger = LeadAuditLedger()
+        ledger.rounds = 1
+        ledger.passed = true
+        ledger.findings = [Self.finding("F1", .important, .fixed, closedBy: "verifier"), Self.finding("F2", .nit, .open),
+                           Self.finding("F3", .important, .unconfirmed)]
+        a.audits = ledger
+        a.receipt = LeadReceipt(ending: .merged, startedAt: at - 3600, endedAt: at, worked: 3600, worker: Self.tokens(cost: 2),
+                                verifier: Self.tokens(cost: 1), rounds: 1)
+        var b = Self.merged("b", at: at + 60, model: "sonnet")
+        ledger = LeadAuditLedger()
+        ledger.rounds = 2
+        ledger.passed = true
+        ledger.findings = [Self.finding("F1", .important, .dismissed, closedBy: "verifier"),
+                           Self.finding("F2", .important, .dismissed, closedBy: "lead", followUp: "fix-x"),
+                           Self.finding("F3", .nit, .dismissed, closedBy: "lead")]
+        b.audits = ledger
+        b.answers = [LeadFindingAnswer(id: "f1", kind: .disagree, reason: "not a bug", commit: nil, round: 1, at: at - 1000)]
+        b.rerolls = [LeadReroll(archive: "agent/b-1", commit: nil, round: 1, at: at - 3000)]
+        b.keep(LeadNote(kind: .message, text: "look at X", by: "lead of quality", at: at - 2000))
+        b.receipt = LeadReceipt(ending: .merged, startedAt: at - 3000, endedAt: at + 60, worked: 1800, worker: Self.tokens(cost: 4),
+                                verifier: Self.tokens(cost: 2), rounds: 2, rerolls: 1, mergeReruns: 1)
+        var c = Self.merged("c", at: at + 120, codex: true)
+        c.merged?.audited = false
+        c.merged?.revertedBy = "r1"
+        c.receipt = LeadReceipt(ending: .merged, startedAt: at - 600, endedAt: at + 120, worked: 600, worker: Self.tokens(cost: nil), verifier: nil)
+        var d = Self.merged("d", at: Self.date(2026, 10, 10, 12).timeIntervalSince1970, model: "opus")
+        ledger = LeadAuditLedger()
+        ledger.rounds = 1
+        ledger.passed = true
+        d.audits = ledger
+        d.receipt = LeadReceipt(ending: .merged, startedAt: nil, endedAt: d.merged!.at, worked: 600, worker: Self.tokens(cost: 5), verifier: nil)
+        var f = LeadTask(id: "F", slug: "f", title: "f", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""), status: .abandoned)
+        f.receipt = LeadReceipt(ending: .abandoned, startedAt: at - 1200, endedAt: at + 300, worked: 1200, worker: Self.tokens(cost: 1), verifier: nil)
+        var board = LeadBoard()
+        board.tasks = [a, b, c, d, f]
+        var aboutB = LeadQuestion(id: "q1", text: "?", options: [], at: at - 1000)
+        aboutB.task = "b"
+        aboutB.answer = "yes"
+        aboutB.answeredAt = at - 400
+        var untasked = LeadQuestion(id: "q2", text: "?", options: [], at: at - 900)
+        untasked.answer = "no"
+        untasked.answeredAt = at - 600
+        var before = LeadQuestion(id: "q3", text: "?", options: [], at: at - 20 * 86_400)
+        before.answer = "old"
+        before.answeredAt = before.askedAt + 6000
+        board.questions = [aboutB, untasked, before]
+        let project = try project("quality", board: board, in: root)
+        // The incident about b, after it merged; one about a, before it merged.
+        let lead = project.appendingPathComponent(".vibeswitcher")
+        try ("# Incidents\n\n## 2026-10-20 18:00:00 b broke X\n\nEvidence: e\n\nTask: b\nCheck: task t.\n\n"
+             + "## 2026-10-20 08:00:00 a stalled\n\nEvidence: e\n\nTask: a\n\n").write(to: lead.appendingPathComponent("incidents.md"), atomically: true, encoding: .utf8)
+        // The merges recorder: a passed; b failed, then passed on the rerun; another project's a failed.
+        let home = root.appendingPathComponent("home"), stats = home.appendingPathComponent("stats")
+        try FileManager.default.createDirectory(at: stats, withIntermediateDirectories: true)
+        try [#"{"t":"2026-10-20T11:55:00+00:00","project":"quality","task":"a","firstRun":"passed","result":"passed"}"#,
+             #"{"t":"2026-10-19T10:00:00+00:00","project":"quality","task":"b","firstRun":"failed","result":"failed"}"#,
+             #"{"t":"2026-10-20T11:59:00+00:00","project":"quality","task":"b","firstRun":"failed","result":"passed_on_rerun"}"#,
+             #"{"t":"2026-10-20T09:00:00+00:00","project":"elsewhere","task":"a","firstRun":"failed","result":"failed"}"#]
+            .joined(separator: "\n").write(to: stats.appendingPathComponent("merges-2026-10-20.jsonl"), atomically: true, encoding: .utf8)
+        return (project, home, at)
+    }
+
+    @Test func itWorksOutQualityAutonomyTimeAndCost() async throws {
+        let (project, home, at) = try qualityLayout()
+        let stats = await collector(home: home, now: Self.date(2026, 10, 21)).collect(projects: [project.path], range: Self.fixtureDay)
+        let quality = try #require(stats.quality)
+        let all = quality.all
+        // Quality: a and b audited (1 and 2 rounds), c merged with no audit.
+        #expect(all.merged == 3 && all.audited == 2)
+        #expect(all.firstAuditPassRate == 0.5 && all.meanRoundsToPass == 1.5)
+        #expect(all.importantFindings == 3 && all.importantPerAudited == 1.5)
+        #expect(all.findings == FindingOutcomes(fixed: 1, disagreementAccepted: 1, dismissedByVerifier: 0, dismissedByLead: 1, movedToTask: 1,
+                                                leftOpen: 1, important: 3))
+        #expect(all.findings?.total == 5)
+        // b's first run (the day before) failed; c has no line.
+        #expect(all.mergeFirstTry == MergeFirstTry(counted: 2, firstTry: 1))
+        #expect(all.rerolls == 1 && all.reverts == 1)
+        #expect(all.escapes == 2, "c reverted, b named by an incident after it merged (a's incident came before)")
+        // Autonomy: b's question (10 min) and the untasked one in the range (5 min); the one before the range is not counted.
+        #expect(all.questions == 2 && all.questionsPerMergedTask == 2.0 / 3)
+        #expect(all.userMinutesPerMergedTask == 5)
+        #expect(all.neededNobody == 2 && all.neededNobodyShare == 2.0 / 3)
+        // Time: created 2 h before each merge.
+        #expect(all.createdToMerged == [7200, 7200, 7200])
+        #expect(all.medianCreatedToMerged == 7200 && all.p90CreatedToMerged == 7200)
+        #expect(all.timed == 3 && all.timedSpan == 21_600 && all.timedWorked == 6000 && all.workingShare == 6000.0 / 21_600)
+        #expect(all.auditWaitShare == nil, "not recorded")
+        #expect(all.restShare == 1 - 6000.0 / 21_600)
+        // a, b, c and the abandoned f ended in the range: 2 worker hours over 65 min of wall clock.
+        #expect(all.workerHours == 2 && abs(all.busyHours - 3900.0 / 3600) < 1e-9)
+        #expect(all.parallelism.map { abs($0 - 7200.0 / 3900) < 1e-9 } == true)
+        // Cost: a and b (c's worker cost is unknown).
+        #expect(all.costed == 2 && all.cost == 9 && all.workerCost == 6 && all.verifierCost == 3)
+        #expect(all.costPerMergedTask == 4.5 && all.implementationShare == 6.0 / 9 && all.verificationShare == 3.0 / 9)
+        #expect(all.mergeRerunCost == nil, "not recorded")
+        // The definitions are the scorecard's: the same tasks through LeadScorecard give the same numbers.
+        var board = try JSONDecoder().decode(LeadBoard.self, from: Data(contentsOf: project.appendingPathComponent(".vibeswitcher/board.json")))
+        board.tasks.removeAll { !(at - 1 ... at + 200).contains($0.merged?.at ?? 0) }
+        board.questions.removeAll { $0.id == "q3" }
+        let card = LeadScorecard(board, now: Self.date(2026, 10, 21).timeIntervalSince1970)
+        #expect(card.firstAuditPassRate == all.firstAuditPassRate && card.meanRoundsToPass == all.meanRoundsToPass)
+        #expect(card.userMinutesPerMergedTask == all.userMinutesPerMergedTask && card.reverts == all.reverts)
+    }
+
+    @Test func itSplitsByAgentAndModel() async throws {
+        let (project, home, _) = try qualityLayout()
+        let stats = await collector(home: home, now: Self.date(2026, 10, 21)).collect(projects: [project.path], range: Self.fixtureDay)
+        let quality = try #require(stats.quality)
+        #expect(quality.byAgent.map(\.name) == ["Claude", "Codex"])
+        let claude = quality.byAgent[0].figures, codex = quality.byAgent[1].figures
+        #expect(claude.merged == 2 && claude.firstAuditPassRate == 0.5 && claude.costPerMergedTask == 4.5)
+        // Only b's question: the one about no task is no agent's.
+        #expect(claude.questions == 1 && claude.userMinutesPerMergedTask == 5)
+        #expect(claude.mergeFirstTry == MergeFirstTry(counted: 2, firstTry: 1) && claude.escapes == 1)
+        // a, b and the abandoned f: 6600 s worked over 3900 s.
+        #expect(claude.parallelism.map { abs($0 - 6600.0 / 3900) < 1e-9 } == true)
+        #expect(codex.merged == 1 && codex.audited == 0 && codex.firstAuditPassRate == nil)
+        #expect(codex.costPerMergedTask == nil && codex.costed == 0, "its cost isn't known: not recorded")
+        #expect(codex.mergeFirstTry == nil, "the recorder has no line for c")
+        #expect(codex.findings == nil, "no audits kept for c")
+        #expect(codex.escapes == 1 && codex.reverts == 1 && codex.neededNobody == 1)
+        // Models: Claude's only, by family, in order.
+        #expect(quality.byModel.map(\.name) == ["opus", "sonnet"])
+        #expect(quality.byModel[0].figures.merged == 1 && quality.byModel[0].figures.firstAuditPassRate == 1)
+        #expect(quality.byModel[1].figures.merged == 1 && quality.byModel[1].figures.firstAuditPassRate == 0)
+        #expect(quality.byModel[1].figures.rerolls == 1 && quality.byModel[1].figures.neededNobody == 0)
+    }
+
+    @Test func itKeepsAnEightWeekTrend() async throws {
+        let (project, home, _) = try qualityLayout()
+        let stats = await collector(home: home, now: Self.date(2026, 10, 21)).collect(projects: [project.path], range: Self.fixtureDay)
+        let weeks = try #require(stats.quality?.weeks)
+        #expect(weeks.count == 8)
+        #expect(weeks.last?.end == Self.date(2026, 10, 21) && weeks.first?.start == Self.date(2026, 8, 26))
+        #expect(zip(weeks, weeks.dropFirst()).allSatisfy { $0.end == $1.start })
+        // The last week: a, b and c; the one before: d, alone, passed first, $5.
+        #expect(weeks[7].merged == 3 && weeks[7].firstAuditPassRate == 0.5 && weeks[7].costPerMergedTask == 4.5)
+        #expect(weeks[6].merged == 1 && weeks[6].firstAuditPassRate == 1 && weeks[6].costPerMergedTask == 5)
+        #expect(weeks[0..<6].allSatisfy { $0.merged == 0 && $0.firstAuditPassRate == nil && $0.costPerMergedTask == nil })
+    }
+
+    @Test func qualityFiguresNotKeptAreNotRecordedNeverZero() async throws {
+        let root = temp.url("quality-bare")
+        let at = Self.date(2026, 10, 20, 12).timeIntervalSince1970
+        // A merge as older boards kept it: no audits, no receipt, no launched model, and no merges recorder on the Mac.
+        var board = LeadBoard()
+        board.tasks = [Self.merged("old", at: at)]
+        let project = try project("bare", board: board, in: root)
+        let stats = await collector(home: root.appendingPathComponent("home"), now: Self.date(2026, 10, 21))
+            .collect(projects: [project.path], range: Self.fixtureDay)
+        let all = try #require(stats.quality?.all)
+        #expect(all.merged == 1)
+        #expect(all.findings == nil && all.mergeFirstTry == nil)
+        #expect(all.costPerMergedTask == nil && all.implementationShare == nil && all.mergeRerunCost == nil)
+        #expect(all.workingShare == nil && all.restShare == nil && all.auditWaitShare == nil && all.parallelism == nil)
+        #expect(all.firstAuditPassRate == nil && all.meanRoundsToPass == nil && all.importantPerAudited == nil)
+        #expect(stats.quality?.byModel == [], "no model recorded")
+        // Nothing merged: per-merge figures have nothing to count.
+        let empty = await collector(home: root.appendingPathComponent("home"), now: Self.date(2026, 10, 21))
+            .collect(projects: [project.path], range: DateInterval(start: Self.date(2026, 9, 1), end: Self.date(2026, 9, 2)))
+        let none = try #require(empty.quality?.all)
+        #expect(none.merged == 0 && none.questionsPerMergedTask == nil && none.neededNobodyShare == nil && none.userMinutesPerMergedTask == nil)
+        #expect(none.medianCreatedToMerged == nil && none.p90CreatedToMerged == nil)
+        // No readable board: no quality at all.
+        let nothing = await collector(home: root.appendingPathComponent("home")).collect(projects: [], range: Self.fixtureDay)
+        #expect(nothing.quality == nil)
+    }
+
     @Test func aLineOverTheLimitIsPassedOver() throws {
         let file = temp.url("long")
         try FileManager.default.createDirectory(at: file, withIntermediateDirectories: true)

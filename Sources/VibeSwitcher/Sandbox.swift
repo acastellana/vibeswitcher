@@ -1446,7 +1446,65 @@ private final class Driver: NSObject, NSApplicationDelegate {
                      UsageNow.make(name: "five_hour", model: nil, usedPercent: 18, resetsAt: now + 2 * 3_600, reached: false,
                               pace: UsagePace(used: 18, elapsed: 60))],
             codex: [UsageNow.make(name: "weekly", model: nil, usedPercent: 31, resetsAt: nil, reached: false, pace: UsagePace(used: 31, elapsed: nil))])
-        return SetupStats.make(range: range, at: Date(), projects: projects, total: payouts.adding(site), mac: mac)
+        return SetupStats.make(range: range, at: Date(), projects: projects, total: payouts.adding(site), mac: mac,
+                               quality: statisticsQuality(range: range))
+    }
+
+    /// The `statistics` sheet's quality figures: made up, every figure shown; the audit wait, the merge reruns' cost and
+    /// Codex's cost per task not recorded.
+    static func statisticsQuality(range: DateInterval) -> SetupQuality {
+        func figures(merged: Int, audited: Int, firstPass: Int, rounds: Int, important: Int, firstTry: Int?, rerolls: Int, reverts: Int,
+                     escapes: Int, questions: Int, waitMinutes: Double, nobody: Int, hours: [Double], worked: Double, cost: (Double, Double)?) -> QualityFigures {
+            var f = QualityFigures()
+            f.merged = merged
+            f.audited = audited
+            f.firstAuditPassRate = audited > 0 ? Double(firstPass) / Double(audited) : nil
+            f.meanRoundsToPass = audited > 0 ? Double(rounds) / Double(audited) : nil
+            f.importantFindings = important
+            f.findings = FindingOutcomes(fixed: important + 3, disagreementAccepted: 2, dismissedByVerifier: 1, dismissedByLead: 1,
+                                         movedToTask: 1, leftOpen: 4, important: important)
+            f.mergeFirstTry = firstTry.map { MergeFirstTry(counted: merged, firstTry: $0) }
+            (f.rerolls, f.reverts, f.escapes) = (rerolls, reverts, escapes)
+            f.questions = questions
+            f.userMinutesPerMergedTask = waitMinutes / Double(merged)
+            f.neededNobody = nobody
+            f.createdToMerged = hours.map { $0 * 3600 }
+            f.timed = hours.count
+            f.timedSpan = hours.reduce(0, +) * 3600
+            f.timedWorked = worked * 3600
+            f.workerHours = worked * 1.2
+            f.busyHours = worked * 0.45
+            if let (worker, verifier) = cost {
+                (f.costed, f.workerCost, f.verifierCost, f.cost) = (merged, worker, verifier, worker + verifier)
+            }
+            return f
+        }
+        let claude = figures(merged: 13, audited: 9, firstPass: 6, rounds: 13, important: 7, firstTry: 11, rerolls: 1, reverts: 1, escapes: 1,
+                             questions: 5, waitMinutes: 38, nobody: 8, hours: [1.2, 1.9, 2.4, 3.1, 0.9, 1.5, 6.2, 2.2, 1.1, 2.8, 4.0, 1.7, 2.0],
+                             worked: 11.5, cost: (121.6, 38.9))
+        let codex = figures(merged: 7, audited: 7, firstPass: 3, rounds: 12, important: 6, firstTry: 5, rerolls: 1, reverts: 0, escapes: 1,
+                            questions: 2, waitMinutes: 9, nobody: 4, hours: [1.4, 2.9, 3.3, 1.8, 2.6, 5.1, 2.0], worked: 6.2, cost: nil)
+        let fable = figures(merged: 3, audited: 3, firstPass: 3, rounds: 3, important: 1, firstTry: 3, rerolls: 0, reverts: 0, escapes: 0,
+                            questions: 1, waitMinutes: 6, nobody: 2, hours: [3.1, 4.0, 6.2], worked: 5.0, cost: (61.2, 12.4))
+        let opus = figures(merged: 7, audited: 5, firstPass: 3, rounds: 8, important: 5, firstTry: 6, rerolls: 1, reverts: 1, escapes: 1,
+                           questions: 3, waitMinutes: 25, nobody: 4, hours: [1.2, 1.9, 2.4, 2.2, 2.8, 1.7, 2.0], worked: 5.2, cost: (52.3, 21.5))
+        let sonnet = figures(merged: 3, audited: 1, firstPass: 0, rounds: 2, important: 1, firstTry: 2, rerolls: 0, reverts: 0, escapes: 0,
+                             questions: 1, waitMinutes: 7, nobody: 2, hours: [0.9, 1.5, 1.1], worked: 1.3, cost: (8.1, 5.0))
+        var all = figures(merged: 20, audited: 16, firstPass: 9, rounds: 25, important: 13, firstTry: 16, rerolls: 2, reverts: 1, escapes: 2,
+                          questions: 9, waitMinutes: 52, nobody: 12, hours: claude.createdToMerged.map { $0 / 3600 } + codex.createdToMerged.map { $0 / 3600 },
+                          worked: 17.7, cost: (121.6, 38.9))
+        all.costed = 13
+        let passes: [Double?] = [nil, 0.4, 0.5, 0.45, 0.6, 0.55, 0.62, 0.56]
+        let costs: [Double?] = [nil, 14.2, 12.9, 13.6, 11.4, 12.2, 10.8, 12.4]
+        let weeks = (0..<8).map { index -> QualityWeek in
+            let end = range.end.addingTimeInterval(-Double(7 - index) * 7 * 86_400)
+            return QualityWeek(start: end.addingTimeInterval(-7 * 86_400), end: end, merged: index == 0 ? 0 : 8 + index * 2,
+                               firstAuditPassRate: passes[index], costPerMergedTask: costs[index])
+        }
+        return SetupQuality(all: all, byAgent: [QualityGroup(name: "Claude", figures: claude), QualityGroup(name: "Codex", figures: codex)],
+                            byModel: [QualityGroup(name: "fable", figures: fable), QualityGroup(name: "opus", figures: opus),
+                                      QualityGroup(name: "sonnet", figures: sonnet)],
+                            weeks: weeks)
     }
 
     /// The `all-done` sheet's mark: a batch of four, three merged with receipts and one folded.

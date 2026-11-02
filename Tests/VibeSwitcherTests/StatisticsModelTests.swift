@@ -122,6 +122,150 @@ struct StatisticsModelTests {
         #expect(StatisticsPage.row(name: "costed", note: nil, costed, id: "costed").cells[5] == "$3.00")
     }
 
+    // MARK: Quality, autonomy, time and cost
+
+    /// Claude's 2 merges (one on opus), Codex's 1 with no cost known; an 8-week trend whose first weeks merged nothing.
+    static func quality() -> SetupQuality {
+        var claude = QualityFigures()
+        claude.merged = 2
+        claude.audited = 2
+        claude.firstAuditPassRate = 0.5
+        claude.meanRoundsToPass = 1.5
+        claude.importantFindings = 3
+        claude.findings = FindingOutcomes(fixed: 1, disagreementAccepted: 1, dismissedByVerifier: 0, dismissedByLead: 1, movedToTask: 1, leftOpen: 1,
+                                          important: 3)
+        claude.mergeFirstTry = MergeFirstTry(counted: 2, firstTry: 1)
+        claude.rerolls = 1
+        claude.escapes = 1
+        claude.questions = 1
+        claude.userMinutesPerMergedTask = 5
+        claude.neededNobody = 1
+        claude.createdToMerged = [7200, 7260]
+        (claude.timed, claude.timedSpan, claude.timedWorked) = (2, 14_460, 5400)
+        (claude.workerHours, claude.busyHours) = (1.5, 1)
+        (claude.costed, claude.cost, claude.workerCost, claude.verifierCost) = (2, 9, 6, 3)
+        var codex = QualityFigures()
+        codex.merged = 1
+        codex.reverts = 1
+        codex.escapes = 1
+        codex.neededNobody = 1
+        codex.userMinutesPerMergedTask = 0
+        codex.createdToMerged = [7320]
+        var opus = claude
+        opus.merged = 1
+        opus.firstAuditPassRate = 1
+        var all = claude
+        all.merged = 3
+        all.questions = 2
+        all.reverts = 1
+        all.escapes = 2
+        all.neededNobody = 2
+        all.createdToMerged = [7200, 7260, 7320]
+        let start = Date(timeIntervalSince1970: 1_788_825_600)  // 2026-09-08
+        let passes: [Double?] = [nil, nil, nil, nil, nil, nil, 1, 0.5]
+        let costs: [Double?] = [nil, nil, nil, nil, nil, nil, 5, 4.5]
+        let week: Double = 7 * 86_400
+        let weeks: [QualityWeek] = (0..<8).map { (index: Int) -> QualityWeek in
+            let from = start.addingTimeInterval(Double(index) * week)
+            return QualityWeek(start: from, end: from.addingTimeInterval(week), merged: index < 6 ? 0 : 3,
+                               firstAuditPassRate: passes[index], costPerMergedTask: costs[index])
+        }
+        return SetupQuality(all: all, byAgent: [QualityGroup(name: "Claude", figures: claude), QualityGroup(name: "Codex", figures: codex)],
+                            byModel: [QualityGroup(name: "opus", figures: opus)], weeks: weeks)
+    }
+
+    @Test func thePageShowsQualityAutonomyTimeAndCost() throws {
+        let range = StatisticsRange.week.interval(now: Self.now, calendar: Self.utc)
+        var stats = Self.stats(range: range)
+        stats.quality = Self.quality()
+        let quality = try #require(StatisticsPage(stats, calendar: Self.utc).quality)
+        #expect(quality.sections.map(\.title) == ["Quality", "Autonomy", "Where time goes", "Cost"])
+        func figure(_ label: String) throws -> StatisticsPage.Figure {
+            try #require(quality.sections.flatMap(\.figures).first { $0.label == label })
+        }
+        let pass = try figure("First-audit pass rate")
+        #expect(pass.value == "50%" && pass.detail == "1 of 2 audited merges passed their first audit")
+        #expect(pass.meter == StatisticsPage.Meter(used: 0.5, elapsed: nil, reached: false))
+        #expect(pass.spoken == "First-audit pass rate: 50%, 1 of 2 audited merges passed their first audit")
+        #expect(try figure("Audit rounds to pass").value == "1.5")
+        #expect(try figure("Important findings per audited task").value == "1.5")
+        #expect(try figure("What became of findings").value == "5 findings")
+        #expect(try figure("What became of findings").detail
+            == "1 fixed by the worker · 1 disagreement accepted by the verifier · 1 dismissed by the lead · 1 moved to a task · 1 left open (Nits, Pre-existing)")
+        #expect(try figure("Merge first try").value == "50%")
+        #expect(try figure("Re-rolls").value == "1" && figure("Reverts").value == "1" && figure("Escapes").value == "2")
+        #expect(try figure("Questions to you per merged task").value == "0.67")
+        #expect(try figure("Your wait per merged task").value == "5 min")
+        #expect(try figure("Needed nobody").value == "67%")
+        #expect(try figure("Created → merged").value == "median 2 h · p90 2 h")
+        #expect(try figure("Worker working").value == "37%" && figure("The rest").value == "63%")
+        #expect(try figure("Parallelism").value == "1.5×")
+        #expect(try figure("Cost per merged task").value == "$4.50")
+        #expect(try figure("Implementation (worker)").value == "$6.00 · 67%")
+        #expect(try figure("Verification (verifier)").value == "$3.00 · 33%")
+        // Not kept: said so, never 0.
+        #expect(try figure("Waiting for its audit").value == "Not recorded")
+        #expect(try figure("Merge reruns").value == "Not recorded")
+        // Every figure says what it is on hover, and speaks its label and value.
+        for figure in quality.sections.flatMap(\.figures) {
+            #expect(figure.help?.isEmpty == false, "\(figure.label)")
+            #expect(figure.spoken.hasPrefix("\(figure.label): \(figure.value)"))
+        }
+    }
+
+    @Test func theBreakdownSplitsClaudeCodexAndModels() throws {
+        let range = StatisticsRange.week.interval(now: Self.now, calendar: Self.utc)
+        var stats = Self.stats(range: range)
+        stats.quality = Self.quality()
+        let quality = try #require(StatisticsPage(stats, calendar: Self.utc).quality)
+        #expect(quality.breakdown.map(\.name) == ["Claude", "opus", "Codex"])
+        #expect(quality.breakdown.map(\.model) == [false, true, false])
+        #expect(quality.breakdown[0].cells == ["2", "50%", "1.5", "1.5", "50%", "0.5", "50%", "2 h", "$4.50"])
+        // Codex: no audit ("–"), the recorder saw none of its merges and its cost isn't known (not recorded).
+        #expect(quality.breakdown[2].cells == ["1", "–", "–", "–", "Not recorded", "0", "100%", "2 h", "Not recorded"])
+        #expect(quality.breakdown[2].spoken.hasPrefix("Codex, Merged 1, First audit –"))
+        #expect(quality.modelsNote == nil)
+        #expect(QualityPage.columnHelp.count == QualityPage.columns.count)
+        // No model recorded: said under the table.
+        var none = Self.quality()
+        none.byModel = []
+        #expect(QualityPage(none, calendar: Self.utc).modelsNote == "Models: Not recorded (no merge's worker model is kept)")
+        #expect(QualityPage(none, calendar: Self.utc).breakdown.map(\.name) == ["Claude", "Codex"])
+    }
+
+    @Test func theTrendShowsEightWeeksOfPassRateAndCost() throws {
+        let trend = QualityPage(Self.quality(), calendar: Self.utc).trend
+        #expect(trend.count == 8)
+        #expect(trend.first?.label == "Sep 8" && trend.last?.label == "Oct 27")
+        #expect(trend[0].passRate == "–" && trend[0].passBar == nil && trend[0].cost == "–" && trend[0].costBar == nil)
+        #expect(trend[6].passRate == "100%" && trend[6].passBar == 1 && trend[6].cost == "$5.00" && trend[6].costBar == 1)
+        #expect(trend[7].passRate == "50%" && trend[7].passBar == 0.5 && trend[7].cost == "$4.50" && trend[7].costBar == 0.9)
+        #expect(trend[7].spoken == "Week of Oct 27: 3 merged, first-audit pass rate 50%, cost per merged task $4.50")
+    }
+
+    @Test func nothingMergedReadsAsNothingToCountAndUnkeptAsNotRecorded() throws {
+        let empty = QualityPage(SetupQuality(all: QualityFigures(), byAgent: [], byModel: [], weeks: []), calendar: Self.utc)
+        let figures = empty.sections.flatMap(\.figures)
+        // Nothing merged: per-merge figures have nothing to count; counts are 0.
+        #expect(figures.first { $0.label == "First-audit pass rate" }?.value == "–")
+        #expect(figures.first { $0.label == "Cost per merged task" }?.value == "–")
+        #expect(figures.first { $0.label == "Re-rolls" }?.value == "0")
+        // Merged but nothing kept: not recorded.
+        var old = QualityFigures()
+        old.merged = 2
+        old.createdToMerged = [60, 120]
+        let page = QualityPage(SetupQuality(all: old, byAgent: [], byModel: [], weeks: []), calendar: Self.utc)
+        let kept = page.sections.flatMap(\.figures)
+        for label in ["What became of findings", "Merge first try", "Worker working", "Waiting for its audit", "The rest", "Parallelism",
+                      "Cost per merged task", "Implementation (worker)", "Verification (verifier)", "Merge reruns"] {
+            #expect(kept.first { $0.label == label }?.value == "Not recorded", "\(label)")
+        }
+        #expect(kept.first { $0.label == "First-audit pass rate" }?.detail == "no audited merge")
+        // No board: no quality section at all.
+        #expect(StatisticsPage(SetupStats(range: DateInterval(start: Self.now, duration: 1), at: Self.now, projects: [], total: nil,
+                                          mac: SetupStats.MacWide()), calendar: Self.utc).quality == nil)
+    }
+
     @Test func itShowsLoadingUntilTheStatsAreInThenThem() async throws {
         let gate = Gate()
         let model = StatisticsModel(calendar: Self.utc, now: { Self.now }, projects: { ["/p/alpha"] }, load: { _, range in await gate.load(range) })

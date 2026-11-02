@@ -52,6 +52,7 @@ struct StatisticsPageView: View {
 
     var body: some View {
         Form {
+            if let quality = page.quality { QualitySectionsView(page: quality) }
             Section("This Mac") {
                 ForEach(page.mac) { FigureRow(figure: $0) }
             }
@@ -72,7 +73,7 @@ struct StatisticsPageView: View {
 }
 
 /// One Mac-wide figure: its name, its value on the right, the line under it, and a usage bar when it has one.
-private struct FigureRow: View {
+struct FigureRow: View {
     let figure: StatisticsPage.Figure
 
     var body: some View {
@@ -92,13 +93,15 @@ private struct FigureRow: View {
                 .foregroundStyle(figure.value == StatisticsPage.notRecorded ? .secondaryInk : .primary)
                 .multilineTextAlignment(.trailing)
         }
+        .help(figure.help ?? "")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(figure.spoken)
+        .accessibilityHint(figure.help ?? "")
     }
 }
 
 /// A usage limit's small bar: used, with a mark where the window's time has got to (on pace at the mark).
-private struct UsageMeter: View {
+struct UsageMeter: View {
     let meter: StatisticsPage.Meter
     static let width: CGFloat = 120
 

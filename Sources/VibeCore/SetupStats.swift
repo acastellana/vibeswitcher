@@ -29,6 +29,9 @@ public struct SetupStats: Equatable, Sendable {
     /// Every project's figures summed (medians over all their merges); nil when no project's board could be read.
     public var total: ProjectFigures?
     public var mac: MacWide
+    /// Quality, autonomy, time and cost of every project's merges in the range, by who did the work, with an 8-week
+    /// trend (see `SetupQuality`); nil when no project's board could be read.
+    public var quality: SetupQuality? = nil
 
     public struct Project: Equatable, Sendable {
         /// The repository's folder name, and its path.
@@ -323,20 +326,81 @@ public final class SetupStatsCollector: @unchecked Sendable {
         let range = range ?? Self.defaultRange(now: at, calendar: calendar)
         let window = Window(t0: range.start.timeIntervalSince1970, t1: range.end.timeIntervalSince1970, now: at.timeIntervalSince1970)
         var projects: [SetupStats.Project] = []
+        var sources: [(root: String, source: QualitySource)] = []
         for root in Self.roots(candidates) {
             let folder = (root as NSString).appendingPathComponent(".vibeswitcher")
             let archivePath = (folder as NSString).appendingPathComponent("board-archive.jsonl")
             let archive: [TaskView]? = cached(archivePath) { path in
-                jsonLines(path).map { lines in lines.compactMap { TaskView($0) } }
+                jsonLines(path).map { lines in
+                let decoder = JSONDecoder()
+                return lines.compactMap { TaskView($0, decoder: decoder) }
+            }
             }
             let board: BoardView? = cached((folder as NSString).appendingPathComponent("board.json")) { path in BoardView(path: path) }
             let figures = board.map { Self.figures(board: $0, archive: archive ?? [], window: window) }
-            projects.append(SetupStats.Project(name: (root as NSString).lastPathComponent, root: root, hasArchive: archive != nil, figures: figures))
+            let name = (root as NSString).lastPathComponent
+            projects.append(SetupStats.Project(name: name, root: root, hasArchive: archive != nil, figures: figures))
+            if let board {
+                sources.append((root, QualitySource(name: name, tasks: Self.tasks(board: board, archive: archive ?? []), questions: board.questions,
+                                                   incidents: incidents(root: root))))
+            }
         }
         projects.sort { ($0.name, $0.root) < ($1.name, $1.root) }
         let known = projects.compactMap(\.figures)
         let total = known.isEmpty ? nil : known.dropFirst().reduce(known[0]) { $0.adding($1) }
-        return SetupStats(range: range, at: at, projects: projects, total: total, mac: mac(range: range, window: window, at: at))
+        var stats = SetupStats(range: range, at: at, projects: projects, total: total, mac: mac(range: range, window: window, at: at))
+        if !sources.isEmpty {
+            sources.sort { $0.root < $1.root }
+            stats.quality = SetupQualityMath.quality(sources.map(\.source), window: window, weeks: weeks(ending: range.end),
+                                                     mergeLines: mergeLines(range))
+        }
+        return stats
+    }
+
+    /// The trend's 8 weeks, 7 days each, the last ending at `end`; oldest first.
+    func weeks(ending end: Date) -> [DateInterval] {
+        (0..<8).reversed().map { back in
+            let last = calendar.date(byAdding: .day, value: -7 * back, to: end) ?? end.addingTimeInterval(Double(-7 * back) * 86_400)
+            let first = calendar.date(byAdding: .day, value: -7, to: last) ?? last.addingTimeInterval(-7 * 86_400)
+            return DateInterval(start: first, end: last)
+        }
+    }
+
+    /// The merges recorder's lines from 14 days before `range` to its end (a merge's first test run may come days
+    /// before it lands), by project and task, oldest first; nil when it wrote no file for any of those days.
+    private func mergeLines(_ range: DateInterval) -> [String: [String: [RecorderLine]]]? {
+        let stats = home.appendingPathComponent("stats").path
+        let start = calendar.date(byAdding: .day, value: -14, to: range.start) ?? range.start.addingTimeInterval(-14 * 86_400)
+        let stamps = StampParser(calendar: calendar)
+        var found: [String: [String: [RecorderLine]]] = [:], any = false
+        for day in days(DateInterval(start: start, end: max(start, range.end))) {
+            let lines: [RecorderLine]? = cached((stats as NSString).appendingPathComponent("merges-\(day).jsonl")) { path in
+                jsonLines(path).map { $0.compactMap { RecorderLine($0, stamps: stamps) } }
+            }
+            guard let lines else { continue }
+            any = true
+            for line in lines where line.at < range.end.timeIntervalSince1970 {
+                guard let project = line.project, let task = line.task else { continue }
+                found[project, default: [:]][task, default: []].append(line)
+            }
+        }
+        guard any else { return nil }
+        return found.mapValues { $0.mapValues { $0.sorted { $0.at < $1.at } } }
+    }
+
+    /// The incidents a project's record names tasks in (where its records_dir keeps incidents.md, and the board's
+    /// folder, before a move), by task slug.
+    private func incidents(root: String) -> [String: [Double]] {
+        let store = BoardStore(root: root)
+        let paths = Array(Set([store.recordPath("incidents.md"), (store.folder as NSString).appendingPathComponent("incidents.md")]))
+        var found: [String: [Double]] = [:]
+        for path in paths.sorted() {
+            let parsed: [String: [Double]]? = cached(path) { path in
+                (try? String(contentsOfFile: path, encoding: .utf8)).map(SetupQualityMath.incidents)
+            }
+            for (slug, times) in parsed ?? [:] { found[slug, default: []] += times }
+        }
+        return found
     }
 
     /// The range in epoch seconds, and now.
@@ -378,13 +442,17 @@ public final class SetupStatsCollector: @unchecked Sendable {
 
     // MARK: Per project
 
-    static func figures(board: BoardView, archive: [TaskView], window: Window) -> ProjectFigures {
-        // Each task once: the board's live copy over the archive's last line.
+    /// Each task once: the board's live copy over the archive's last line.
+    static func tasks(board: BoardView, archive: [TaskView]) -> [TaskView] {
         var byID: [String: TaskView] = [:], order: [String] = []
         for task in archive + board.tasks {
             if byID.updateValue(task, forKey: task.id) == nil { order.append(task.id) }
         }
-        let tasks = order.compactMap { byID[$0] }
+        return order.compactMap { byID[$0] }
+    }
+
+    static func figures(board: BoardView, archive: [TaskView], window: Window) -> ProjectFigures {
+        let tasks = tasks(board: board, archive: archive)
         var f = ProjectFigures()
 
         let merged = tasks.filter { window.within($0.mergedAt) }.sorted { $0.mergedAt! < $1.mergedAt! }
@@ -622,6 +690,9 @@ private func object(_ value: Any?) -> [String: Any]? { (value as? [String: Any])
 
 struct TaskView {
     var id: String
+    /// The task as the board's own type, for the scorecard's definitions: only for a task merged or with a receipt
+    /// (nil when it doesn't decode as one).
+    var lead: LeadTask?
     var status: String
     var since: Double?
     var startedAt: Double?
@@ -633,9 +704,15 @@ struct TaskView {
     var receipt: ReceiptView?
     var codex: Bool
 
-    init?(_ task: [String: Any]) {
+    init?(_ task: [String: Any], decoder: JSONDecoder? = nil) {
         guard let id = task["id"] as? String else { return nil }
         self.id = id
+        if let decoder, object(task["merged"]) != nil || object(task["receipt"]) != nil {
+            // A receipt of another shape (hand-edited, older) doesn't lose the task: its cost is read leniently below.
+            lead = [task, task.filter { $0.key != "receipt" }].lazy.compactMap { shape in
+                (try? JSONSerialization.data(withJSONObject: shape)).flatMap { try? decoder.decode(LeadTask.self, from: $0) }
+            }.first
+        }
         status = task["status"] as? String ?? ""
         since = number(task["since"])
         startedAt = given(task["startedAt"])
@@ -692,13 +769,19 @@ struct BoardView {
     var tasks: [TaskView]
     /// The flake ledger; nil when the board keeps none.
     var flakes: [(test: String, task: String, at: Double?)]?
+    /// The lead's questions to the user (those that don't decode left out).
+    var questions: [LeadQuestion]
 
     init?(path: String) {
         var info = stat()
         guard stat(path, &info) == 0, Int64(info.st_size) <= SetupStatsCollector.maxBoard,
               let data = FileManager.default.contents(atPath: path),
               let board = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        tasks = (board["tasks"] as? [Any] ?? []).compactMap { ($0 as? [String: Any]).flatMap(TaskView.init) }
+        let decoder = JSONDecoder()
+        tasks = (board["tasks"] as? [Any] ?? []).compactMap { ($0 as? [String: Any]).flatMap { TaskView($0, decoder: decoder) } }
+        questions = (board["questions"] as? [Any] ?? []).compactMap { question in
+            (try? JSONSerialization.data(withJSONObject: question)).flatMap { try? decoder.decode(LeadQuestion.self, from: $0) }
+        }
         flakes = (board["flakes"] as? [Any]).map { entries in
             entries.compactMap { $0 as? [String: Any] }.map { ($0["test"] as? String ?? "", $0["task"] as? String ?? "", number($0["at"])) }
         }
@@ -711,6 +794,10 @@ struct RecorderLine {
     var load: [Double]
     var cores: Int?
     var result: String?
+    /// A merges line's: the project's folder name, the task's slug, and its first test run ("passed", "failed").
+    var project: String?
+    var task: String?
+    var firstRun: String?
 
     init?(_ line: [String: Any], stamps: StampParser) {
         guard let stamp = line["t"] as? String, let at = stamps.date(stamp) else { return nil }
@@ -718,6 +805,9 @@ struct RecorderLine {
         load = (line["load"] as? [Any] ?? []).compactMap(number)
         cores = whole(line["cores"])
         result = line["result"] as? String
+        project = line["project"] as? String
+        task = line["task"] as? String
+        firstRun = line["firstRun"] as? String
     }
 }
 
