@@ -4,8 +4,10 @@ import Foundation
 /// The load study (2026-10-28 to 11-01) found freezes and suite time bend at load 24, throughput peaking around 36–48
 /// and falling past 48, and going from ~4 to ~10 sessions gave about +50 % merges, mostly model wait rather than builds:
 /// so boost raises load_threshold to 36, mac_max_sessions to 18 and max_workers to 7 per project, and leaves heavy_slots
-/// at 3. Automatic boosts only while the Mac is on AC power and the user is away, so they don't feel the freezes; it's
-/// never on battery, whatever the mode.
+/// at 3. Automatic boosts only while the Mac is on AC power and the user is away, so they don't feel the freezes. On
+/// battery it's off whatever the mode, unless Settings' "Also on battery" is on (2026-11-02, the user's ask): then On
+/// and Automatic work on battery as on AC until the charge drops below `Boost.batteryFloor` (30 %), so a boosted Mac
+/// doesn't drain an unattended battery flat; the usage veto, the away rule and the leads' battery hold still apply.
 ///
 /// The app decides (it has the power source, the user's presence and the usage watch) and keeps what it decided in
 /// `~/.vibeswitcher/boost.json` (`BoostState`), rewritten at each change and at least every `BoostState.refresh`; every
@@ -138,26 +140,47 @@ public enum Boost {
         usage.hold(model: nil, now: now, threshold: vetoPercent)
     }
 
+    /// With "Also on battery" (Settings), boost on battery stops when the charge is below this (in percent), so a
+    /// boosted Mac doesn't drain an unattended battery flat.
+    public static let batteryFloor = 30
+
     /// Whether boost is on, and why: `mode` as set, `onAC` the power source (nil: not read yet, taken as battery),
-    /// `away` the user not at the Mac (see the app's `UserPresence`), `veto` the usage watch's (`veto(_:)`). Never on
-    /// battery; a veto is said only when boost would otherwise be on.
-    public static func decide(mode: BoostMode, onAC: Bool?, away: Bool, veto: AccountUsage.Limit?, now: Date = Date()) -> (on: Bool, why: String) {
-        let ac = onAC == true
-        let power = onAC == nil ? "power source not known yet" : "on battery"
+    /// `away` the user not at the Mac (see the app's `UserPresence`), `veto` the usage watch's (`veto(_:)`),
+    /// `onBattery` Settings' "Also on battery", `percent` the charge (nil: not known). Without `onBattery` never on
+    /// battery; with it, battery at `batteryFloor` % or more counts as AC, and below it (or the charge unknown) boost
+    /// stays off. A veto is said only when boost would otherwise be on.
+    public static func decide(mode: BoostMode, onAC: Bool?, away: Bool, veto: AccountUsage.Limit?,
+                              onBattery: Bool = false, percent: Int? = nil, now: Date = Date()) -> (on: Bool, why: String) {
+        // Power: whether it allows boost, and what to say ("on AC", "on battery (allowed, 86%)", or why not).
+        let power: (ok: Bool, text: String)
+        switch onAC {
+        case true?: power = (true, "on AC")
+        case nil: power = (false, "power source not known yet")
+        case false?:
+            if !onBattery { power = (false, "on battery") }
+            else if let percent, percent >= batteryFloor { power = (true, "on battery (allowed, \(percent)%)") }
+            else {
+                let charge = percent.map { "on battery at \($0)%" } ?? "on battery, charge not known"
+                power = (false, "\(charge): boost on battery stops below \(batteryFloor)%")
+            }
+        }
         switch mode {
         case .off:
             return (false, "off in Settings")
         case .on:
-            guard ac else { return (false, "on in Settings, but \(power): boost never runs on battery") }
+            guard power.ok else {
+                guard onBattery else { return (false, "on in Settings, but \(power.text): boost never runs on battery") }
+                return (false, onAC == nil ? "on in Settings, but \(power.text)" : "on in Settings, \(power.text)")
+            }
             if let veto { return (false, vetoText(veto, now: now)) }
-            return (true, "on in Settings, on AC")
+            return (true, "on in Settings, \(power.text)")
         case .automatic:
             var not: [String] = []
-            if !ac { not.append(power) }
+            if !power.ok { not.append(power.text) }
             if !away { not.append("you're at the Mac") }
             guard !not.isEmpty else {
                 if let veto { return (false, vetoText(veto, now: now)) }
-                return (true, "automatic: away, on AC")
+                return (true, "automatic: away, \(power.text)")
             }
             return (false, "automatic: " + not.joined(separator: ", "))
         }

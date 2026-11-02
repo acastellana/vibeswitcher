@@ -7,7 +7,8 @@ import VibeCore
 /// the Mac (the presence the notifications go by, `UserPresence`) and the usage watch's readings, and keeps the
 /// decision in `~/.vibeswitcher/boost.json`, which the leads' tool servers read at each call. Automatic boosts only on
 /// AC power while you're away and drops back at the first look after either changes: new starts then stop above the
-/// normal limits, and running work finishes.
+/// normal limits, and running work finishes. With Settings' "Also on battery" the battery counts as AC while its charge
+/// is at `Boost.batteryFloor` % or more: each look reads the charge, so boost stops at the first look below it.
 ///
 /// The main thread only reads what it holds (Settings, the session you're on, the power source as last read); the
 /// rest (your presence, the usage file, the project's folder on disk, boost.json's write) runs on a queue of the
@@ -23,6 +24,8 @@ final class BoostWatch: ObservableObject {
     /// The power source: AC (true), battery (false), not read yet or unreadable (nil: boost stays off). Read on the
     /// main thread: it's the cache's last reading, never the power daemon.
     var onAC: () -> Bool?
+    /// The battery's charge (`PowerState.percent`); nil without a battery reading. Read on the main thread, as `onAC`.
+    var percent: () -> Int?
     /// You're away from the Mac: screen locked, or no input for 5 minutes. On the watch's queue.
     var away: () -> Bool = { !UserPresence.isPresent() }
     /// The account's usage as the usage watch keeps it. On the watch's queue.
@@ -50,13 +53,14 @@ final class BoostWatch: ObservableObject {
         self.preferences = preferences
         self.file = file
         onAC = { power.current()?.knownAC }
+        percent = { power.current()?.state?.percent }
     }
 
-    /// Looks now, then every `every` seconds and whenever Settings changes the mode or the limits.
+    /// Looks now, then every `every` seconds and whenever Settings changes the mode, the limits or "Also on battery".
     func start() {
         look()
         timer = Heartbeat.shared.every(Self.every) { [weak self] in self?.look() }
-        settings = preferences.$boostMode.combineLatest(preferences.$boostLimits).dropFirst()
+        settings = preferences.$boostMode.combineLatest(preferences.$boostLimits, preferences.$boostOnBattery).dropFirst()
             .receiveLatest(on: RunLoop.main)
             .sink { [weak self] _ in self?.look() }
     }
@@ -69,12 +73,14 @@ final class BoostWatch: ObservableObject {
         let limits = preferences.boostLimits
         let folder = currentFolder()
         let ac = onAC()
+        let onBattery = preferences.boostOnBattery
+        let charge = percent()
         queue.async { [self] in
             if let folder { favored = projectRoot(folder) }
             // Presence and the usage file only matter when boost could be on.
             let away = mode == .off ? false : self.away()
             let veto = mode == .off ? nil : Boost.veto(usage(), now: now)
-            let decided = Boost.decide(mode: mode, onAC: ac, away: away, veto: veto, now: now)
+            let decided = Boost.decide(mode: mode, onAC: ac, away: away, veto: veto, onBattery: onBattery, percent: charge, now: now)
             let next = BoostState(on: decided.on, why: decided.why, limits: limits, favored: favored, at: now.timeIntervalSince1970)
             var problem: String?? = .none
             if !next.sameAs(written?.state) || written.map({ now.timeIntervalSince($0.at) >= BoostState.refresh }) ?? true {

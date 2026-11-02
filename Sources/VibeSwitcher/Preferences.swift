@@ -70,9 +70,12 @@ final class Preferences: ObservableObject {
         if !up && limit <= range.lowerBound { return 0 }
         return PowerWatch.clamp(limit + (up ? 5 : -5))
     }
-    /// Boost mode (Settings › Project lead): higher Mac-wide limits On, or Automatic while away and on AC power; never
-    /// on battery (see `BoostWatch`, `Boost.decide`).
+    /// Boost mode (Settings › Project lead): higher Mac-wide limits On, or Automatic while away and on AC power; on
+    /// battery only with `boostOnBattery` (see `BoostWatch`, `Boost.decide`).
     @Published var boostMode: BoostMode { didSet { defaults.set(boostMode.rawValue, forKey: "boostMode") } }
+    /// Boost's "Also on battery": On and Automatic work on battery as on AC while the charge is at
+    /// `Boost.batteryFloor` % or more. Off by default.
+    @Published var boostOnBattery: Bool { didSet { defaults.set(boostOnBattery, forKey: "boostOnBattery") } }
     /// The limits boost raises to (`BoostLimits`, kept as JSON); out-of-range values are kept as their nearest.
     @Published var boostLimits: BoostLimits {
         didSet {
@@ -142,6 +145,7 @@ final class Preferences: ObservableObject {
         walletPeerID = defaults.string(forKey: "walletPeerID") ?? ""
         walletPassagePath = defaults.string(forKey: "walletPassagePath") ?? ""
         boostMode = BoostMode(rawValue: defaults.string(forKey: "boostMode") ?? "") ?? .off
+        boostOnBattery = defaults.bool(forKey: "boostOnBattery")
         boostLimits = defaults.data(forKey: "boostLimits").flatMap { try? JSONDecoder().decode(BoostLimits.self, from: $0) } ?? BoostLimits()
     }
 

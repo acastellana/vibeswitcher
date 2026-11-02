@@ -11,6 +11,7 @@ struct BoostWatchTests {
 
     final class Signals {
         var onAC: Bool? = true
+        var percent: Int? = 86
         var away = true
         var usage = AccountUsage()
         var now = Date(timeIntervalSince1970: 1_793_000_000)
@@ -24,6 +25,7 @@ struct BoostWatchTests {
         let file = folder.appendingPathComponent("boost.json")
         let watch = BoostWatch(preferences: preferences, file: file)
         watch.onAC = { signals.onAC }
+        watch.percent = { signals.percent }
         watch.away = { signals.away }
         watch.usage = { signals.usage }
         watch.clock = { signals.now }
@@ -88,6 +90,54 @@ struct BoostWatchTests {
         signals.away = true
         await look(watch)
         #expect(watch.state?.text == "boost: off (off in Settings)")
+    }
+
+    /// "Also on battery": the watch passes the charge, so boost stops at the first look below `Boost.batteryFloor` %
+    /// and comes back above it; turning the option off or on re-decides at once.
+    @Test func alsoOnBatteryFollowsTheChargeAndTheOption() async {
+        let signals = Signals()
+        signals.onAC = false
+        signals.percent = 31
+        let defaults = temp.defaults("boost-defaults")
+        let (watch, preferences, file) = watch(.automatic, signals, defaults: defaults)
+        #expect(preferences.boostOnBattery == false)
+        preferences.boostOnBattery = true
+        #expect(Preferences(defaults: defaults, presetsFile: file.deletingLastPathComponent().appendingPathComponent("presets.json")).boostOnBattery)
+        var turned: [Bool] = []
+        watch.changed = { turned.append($0.on) }
+        await look(watch)
+        #expect(watch.state?.text == "boost: on (automatic: away, on battery (allowed, 31%))")
+        #expect(BoostState.active(from: file, now: signals.now) != nil)
+        // The charge drops below 30%: off at the next look.
+        signals.percent = 29
+        signals.now += TimeInterval(BoostWatch.every)
+        await look(watch)
+        #expect(watch.state?.text == "boost: off (automatic: on battery at 29%: boost on battery stops below 30%)")
+        #expect(BoostState.active(from: file, now: signals.now) == nil)
+        // Charged back to 30%: on again.
+        signals.percent = 30
+        signals.now += TimeInterval(BoostWatch.every)
+        await look(watch)
+        #expect(watch.state?.on == true)
+        // The charge unknown: off.
+        signals.percent = nil
+        await look(watch)
+        #expect(watch.state?.text == "boost: off (automatic: on battery, charge not known: boost on battery stops below 30%)")
+        signals.percent = 86
+        await look(watch)
+        #expect(turned == [true, false, true, false, true])
+        // Settings turns the option off: the started watch re-decides at once, without a heartbeat.
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            var resumed = false
+            watch.changed = { state in
+                guard !state.on, !resumed else { return }
+                resumed = true
+                done.resume()
+            }
+            watch.start()
+            preferences.boostOnBattery = false
+        }
+        #expect(watch.state?.text == "boost: off (automatic: on battery)")
     }
 
     /// The usage watch's veto: near an every-model limit boost stays off, and the menu bar, Settings and the leads say why.

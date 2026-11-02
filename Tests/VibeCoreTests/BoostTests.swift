@@ -34,6 +34,55 @@ struct BoostTests {
         #expect(Boost.decide(mode: .off, onAC: true, away: true, veto: nil) == (false, "off in Settings"))
     }
 
+    /// "Also on battery" (2026-11-02): on battery On and Automatic work as on AC down to `Boost.batteryFloor` % of
+    /// charge; below it, or with the charge unknown, boost stays off and says why. Away and the veto still hold.
+    @Test func alsoOnBatteryBoostsDownToTheFloor() {
+        #expect(Boost.batteryFloor == 30)
+        struct Row { let mode: BoostMode; let onAC: Bool?; let percent: Int?; let away: Bool; let on: Bool; let why: String }
+        let rows: [Row] = [
+            Row(mode: .on, onAC: false, percent: 86, away: false, on: true, why: "on in Settings, on battery (allowed, 86%)"),
+            Row(mode: .on, onAC: false, percent: 30, away: false, on: true, why: "on in Settings, on battery (allowed, 30%)"),
+            Row(mode: .on, onAC: false, percent: 29, away: true, on: false, why: "on in Settings, on battery at 29%: boost on battery stops below 30%"),
+            Row(mode: .on, onAC: false, percent: 24, away: false, on: false, why: "on in Settings, on battery at 24%: boost on battery stops below 30%"),
+            Row(mode: .on, onAC: false, percent: nil, away: true, on: false, why: "on in Settings, on battery, charge not known: boost on battery stops below 30%"),
+            Row(mode: .on, onAC: nil, percent: 86, away: true, on: false, why: "on in Settings, but power source not known yet"),
+            Row(mode: .on, onAC: true, percent: 10, away: false, on: true, why: "on in Settings, on AC"),
+            Row(mode: .automatic, onAC: false, percent: 86, away: true, on: true, why: "automatic: away, on battery (allowed, 86%)"),
+            Row(mode: .automatic, onAC: false, percent: 86, away: false, on: false, why: "automatic: you're at the Mac"),
+            Row(mode: .automatic, onAC: false, percent: 24, away: true, on: false, why: "automatic: on battery at 24%: boost on battery stops below 30%"),
+            Row(mode: .automatic, onAC: false, percent: 24, away: false, on: false,
+                why: "automatic: on battery at 24%: boost on battery stops below 30%, you're at the Mac"),
+            Row(mode: .automatic, onAC: false, percent: nil, away: true, on: false, why: "automatic: on battery, charge not known: boost on battery stops below 30%"),
+            Row(mode: .automatic, onAC: nil, percent: 86, away: true, on: false, why: "automatic: power source not known yet"),
+            Row(mode: .automatic, onAC: true, percent: 5, away: true, on: true, why: "automatic: away, on AC"),
+            Row(mode: .off, onAC: false, percent: 86, away: true, on: false, why: "off in Settings"),
+        ]
+        for row in rows {
+            let decided = Boost.decide(mode: row.mode, onAC: row.onAC, away: row.away, veto: nil, onBattery: true, percent: row.percent)
+            #expect(decided.on == row.on && decided.why == row.why, "\(row.mode) \(String(describing: row.onAC)) \(String(describing: row.percent)) away \(row.away): \(decided)")
+        }
+        // The usage veto still keeps it off, and says so.
+        let veto = Boost.veto(AccountUsage(limits: [Self.weekly(74)]), now: Self.now)
+        for mode in [BoostMode.on, .automatic] {
+            let decided = Boost.decide(mode: mode, onAC: false, away: true, veto: veto, onBattery: true, percent: 86, now: Self.now)
+            #expect(!decided.on && decided.why.hasPrefix("held off by the usage watch"), "\(decided.why)")
+        }
+    }
+
+    /// With the option off, the charge changes nothing: exactly as before it existed.
+    @Test func withoutAlsoOnBatteryTheChargeChangesNothing() {
+        for mode in BoostMode.allCases {
+            for onAC in [true, false, nil] as [Bool?] {
+                for away in [true, false] {
+                    let before = Boost.decide(mode: mode, onAC: onAC, away: away, veto: nil)
+                    for percent in [nil, 5, 29, 30, 86, 100] as [Int?] {
+                        #expect(Boost.decide(mode: mode, onAC: onAC, away: away, veto: nil, onBattery: false, percent: percent) == before)
+                    }
+                }
+            }
+        }
+    }
+
     /// The usage watch's veto keeps boost off near an every-model limit, and says why; a model's own limit doesn't
     /// (other models still work), and neither does one under the veto's share.
     @Test func aUsageLimitVetoKeepsBoostOffAndSaysWhy() {
@@ -228,6 +277,22 @@ extension LeadToolsetTests {
         #expect(status.contains("(mac_max_sessions 18 while boosted (15 normally))"), "\(status)")
         #expect(status.contains("max 7 workers at once"), "\(status)")
         #expect(call(lead, "configure").text.contains("- mac_max_sessions: 18 while boosted (15 normally)"))
+    }
+
+    /// "Also on battery": the lead's status boost line says boost runs on battery, or why it stopped.
+    @Test func statusSaysBoostOnBatteryAndWhyItStops() throws {
+        let root = try repo()
+        let lead = try lead(root, FakeRuntime())
+        try workflow(root, "max_workers: 5")
+        let on = Boost.decide(mode: .on, onAC: false, away: false, veto: nil, onBattery: true, percent: 86)
+        lead.macLimits = { MacLimits(maxSessions: 15).boosted(by: BoostState(on: on.on, why: on.why)) }
+        var status = call(lead, "status").text
+        #expect(status.contains("boost: on (on in Settings, on battery (allowed, 86%)): load_threshold 36"), "\(status)")
+        let low = Boost.decide(mode: .on, onAC: false, away: false, veto: nil, onBattery: true, percent: 24)
+        lead.macLimits = { MacLimits(maxSessions: 15) }
+        lead.boostState = { _ in BoostState(on: low.on, why: low.why) }
+        status = call(lead, "status").text
+        #expect(status.contains("boost: off (on in Settings, on battery at 24%: boost on battery stops below 30%): the normal limits hold."), "\(status)")
     }
 
     @Test func mergeBatchingBoostFollowsBoostMode() throws {

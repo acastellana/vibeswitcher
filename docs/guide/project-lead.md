@@ -274,8 +274,11 @@ Mac-wide limits are raised to the boost values, each editable: `load_threshold` 
 `max_workers` 7 per project (a project's own when higher), test and build slots 3 (from Settings' 2 on a 12-core Mac,
 so `VS_HEAVY_CORES` goes from 6 to 4; for `vs-heavy` and the leads' merges and audits alike); projects whose `merge_batching` is `boost` batch their merges. Automatic boosts only while the Mac is on AC power and
 you're away (screen locked or no input for 5 minutes, as the notifications judge it) and drops back within one 10-second
-look when either changes: new starts stop above the normal limits and running work finishes. Never on battery, whatever
-the mode. The usage watch keeps it off at 70 % of an every-model account limit, and says so. The app keeps its decision
+look when either changes: new starts stop above the normal limits and running work finishes. On battery it's off
+whatever the mode, unless **Also on battery** is on (off by default): then On and Automatic work on battery as on AC
+until the charge drops below 30 % (`Boost.batteryFloor`; a charge not known counts as below), and `status` says so:
+`boost: on (on in Settings, on battery (allowed, 86%))`, `boost: off (on in Settings, on battery at 24%: boost on
+battery stops below 30%)`. The away rule and the battery hold below still apply. The usage watch keeps it off at 70 % of an every-model account limit, and says so. The app keeps its decision
 in `~/.vibeswitcher/boost.json` (rewritten at least every minute; older than 150 s reads as off, so a quit app leaves
 the normal limits), and each lead's `status` says it: `boost: on (automatic: away, on AC): load_threshold 36, …`. While
 boosted, room freed on the Mac goes first to the project you last worked in: the witness wakes its refused starts first,

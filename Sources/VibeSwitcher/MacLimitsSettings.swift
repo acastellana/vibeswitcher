@@ -89,7 +89,8 @@ struct MacLimitsSection: View {
 }
 
 /// Settings › Project lead's Boost mode (see `Boost`): Off, On, or Automatic (only while you're away and the Mac is on
-/// AC power), and the limits it raises to. Saved through `Preferences`; `BoostWatch` decides and tells the leads.
+/// AC power), "Also on battery" (down to `Boost.batteryFloor` % of charge), and the limits it raises to. Saved through
+/// `Preferences`; `BoostWatch` decides and tells the leads.
 struct BoostSection: View {
     @ObservedObject var preferences: Preferences
     /// The app's watch, for what's decided now; nil in previews and tests without one.
@@ -102,6 +103,9 @@ struct BoostSection: View {
             }
             .pickerStyle(.segmented)
             .accessibilityLabel("Boost mode: off, on, or automatic while you're away and on AC power")
+            Toggle("Also on battery", isOn: $preferences.boostOnBattery)
+            Text("On and Automatic also boost on battery, until the charge drops below \(Boost.batteryFloor) %.")
+                .font(.caption).foregroundStyle(.secondary)
             LabeledContent("Start nothing above a load of, while boosted") {
                 TextField("Boost load limit", value: $preferences.boostLimits.loadThreshold, format: .number)
                     .labelsHidden().accessibilityLabel("Start nothing above a load of, while boosted")
@@ -117,7 +121,7 @@ struct BoostSection: View {
         } header: {
             Text("Project lead: Boost")
         } footer: {
-            SettingsFooter("Boost raises the Mac-wide limits to these for more throughput: leads start more workers and audits, and projects whose merge_batching is boost test merges in batches. Automatic boosts only while the Mac is on AC power and you're away (screen locked, or no input for 5 minutes), and drops back within \(BoostWatch.every) seconds of either changing: new starts stop above the normal limits, running work finishes. Never on battery, whatever the mode; the usage watch keeps it off at \(MacLoad.number(Boost.vetoPercent)) % of an account limit. While boosted, room freed on the Mac goes first to the project you last worked in, and no project runs more than its workers' limit. The test and build slots go up to these for vs-heavy and the leads' merges and audits alike (never below the normal count), and VS_HEAVY_CORES follows: the \(MacLoad.processors) cores ÷ the slots (\(Self.coresPerSlot(preferences.boostLimits.heavySlots)) each).")
+            SettingsFooter("Boost raises the Mac-wide limits to these for more throughput: leads start more workers and audits, and projects whose merge_batching is boost test merges in batches. Automatic boosts only while the Mac is on AC power and you're away (screen locked, or no input for 5 minutes), and drops back within \(BoostWatch.every) seconds of either changing: new starts stop above the normal limits, running work finishes. On battery it's off whatever the mode, unless Also on battery is on: then it runs on battery as on AC until the charge drops below \(Boost.batteryFloor) % (the battery hold above still pauses lead work below its limit). The usage watch keeps it off at \(MacLoad.number(Boost.vetoPercent)) % of an account limit. While boosted, room freed on the Mac goes first to the project you last worked in, and no project runs more than its workers' limit. The test and build slots go up to these for vs-heavy and the leads' merges and audits alike (never below the normal count), and VS_HEAVY_CORES follows: the \(MacLoad.processors) cores ÷ the slots (\(Self.coresPerSlot(preferences.boostLimits.heavySlots)) each).")
         }
     }
 }
