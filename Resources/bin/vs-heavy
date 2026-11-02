@@ -88,6 +88,9 @@ while [[ $lock_dir == */ && $lock_dir != / ]]; do lock_dir=${lock_dir%/}; done
 
 ncpu=${VIBESWITCHER_HEAVY_NCPU:-}
 [[ $ncpu =~ ^[0-9]+$ ]] && (( 10#$ncpu >= 1 )) || ncpu=$(sysctl -n hw.ncpu 2>/dev/null)
+# Where the sysctl command fails (Codex's sandbox: it asks for each name's format first, which the seatbelt refuses,
+# and a Codex worker's runs counted 4 cores and one slot), getconf's count: sysconf reads hw.ncpu, which it allows.
+[[ $ncpu =~ ^[0-9]+$ ]] && (( 10#$ncpu >= 1 )) || ncpu=$(getconf _NPROCESSORS_ONLN 2>/dev/null)
 [[ $ncpu =~ ^[0-9]+$ ]] && (( 10#$ncpu >= 1 )) || ncpu=4
 ncpu=$(( 10#$ncpu ))
 own=${VIBESWITCHER_HEAVY_SLOTS:-}

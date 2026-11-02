@@ -554,6 +554,52 @@ struct TestLockTests {
         #expect(try given("held-bare", cores: "12", slots: "3", extra: [TestLock.heldVariable: held, TestLock.coresVariable: ""]) == "cores=4")
     }
 
+    /// Where the sysctl command fails (Codex's sandbox refuses the format query it makes first), vs-heavy counts the cores
+    /// with getconf, not the hard 4: a Codex worker's runs had counted 4 cores and one slot, and waited on slot 1 alone
+    /// (547 s, 2026-11-02). Here a sysctl that fails comes first on PATH: the slots (cores ÷ 6, at least 1: what it says
+    /// once they're all held) and VS_HEAVY_CORES follow getconf's count.
+    @Test func whereSysctlFailsVsHeavyCountsTheCoresWithGetconf() throws {
+        let locks = url("heavy-locks").path
+        let home = url("getconf-home"), bin = url("failing-sysctl"), go = url("go")
+        for folder in [home, bin] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        try "#!/bin/sh\necho 'sysctl: sysctl fmt -1 1024 1: Operation not permitted' >&2\nexit 1\n"
+            .write(to: bin.appendingPathComponent("sysctl"), atomically: true, encoding: .utf8)
+        chmod(bin.appendingPathComponent("sysctl").path, 0o755)
+        let probe = Process()
+        probe.executableURL = URL(fileURLWithPath: "/usr/bin/getconf")
+        probe.arguments = ["_NPROCESSORS_ONLN"]
+        let pipe = Pipe()
+        probe.standardOutput = pipe
+        try probe.run()
+        probe.waitUntilExit()
+        let ncpu = try #require(Int(String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)))
+        let slots = max(1, ncpu / 6), share = max(2, (ncpu + slots - 1) / slots)
+        // No stand-in for the cores, no slot count given, a home without Settings' count: the cores ÷ 6.
+        let environment = ["PATH": bin.path + ":/usr/bin:/bin", "VIBESWITCHER_HEAVY_NCPU": "", TestLock.slotsVariable: "",
+                           "VIBESWITCHER_HOME": home.path]
+        let log = url("getconf.log").path
+        var holders: [Process] = []
+        defer {
+            try? Data().write(to: go)
+            for holder in holders { holder.waitUntilExit() }
+        }
+        for index in 1...slots {
+            holders.append(try Self.runVsHeavy(["/bin/sh", "-c", "echo \"held-\(index) cores=$\(TestLock.coresVariable)\" >> '\(log)'; until [ -e '\(go.path)' ]; do sleep 0.05; done"],
+                                               lockDirectory: locks, output: url("holder-\(index).out").path, environment: environment))
+            #expect(eventually { lines(log).count == index }, "\(lines(log))")
+        }
+        #expect(Set(lines(log).map { $0.replacingOccurrences(of: #"^held-\d+ "#, with: "", options: .regularExpression) }) == ["cores=\(share)"],
+                "\(lines(log)) with \(ncpu) cores")
+        let waiter = url("waiter.out").path
+        let last = try Self.runVsHeavy(["/bin/sh", "-c", "echo waited"], lockDirectory: locks, output: waiter, environment: environment)
+        let full = slots == 1 ? "its one slot held" : "all \(slots) slots held"
+        #expect(eventually { lines(waiter).contains { $0.contains(full) } }, "\(lines(waiter)) with \(ncpu) cores")
+        try Data().write(to: go)
+        last.waitUntilExit()
+        #expect(last.terminationStatus == 0 && lines(waiter).last == "waited", "\(lines(waiter))")
+    }
+
     /// F6 (boost release 6/7): one heavy-slot count for vs-heavy and the Swift side (`TestLock.slotCount`, which the
     /// leads' merges and audits take): Settings' Mac-wide count (mac-limits.json's heavySlots, the cores ÷ 6 unset),
     /// raised to boost's while boost.json says on and is fresh; a stale or forged boost.json doesn't raise it past the
