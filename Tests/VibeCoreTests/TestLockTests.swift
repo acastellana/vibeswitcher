@@ -721,6 +721,9 @@ struct TestLockTests {
         let said = lines(log + ".args").map { $0.replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression) }
         #expect(said == ["A build --disable-sandbox -j 2 -Xswiftc -j2", "A test --disable-sandbox -j 2 -Xswiftc -j2 --filter X"],
                 "\(lines(log + ".args"))")
+        // The security tests' scratch host can't listen there (Unix sockets refused): skipped, saying so, not failed.
+        #expect(lines(run.output).contains("security socket/signing tests: skipped inside Codex's sandbox, which refuses their scratch host's socket"),
+                "\(lines(run.output))")
     }
 
     /// heavy_swift (scripts/lib/swift-jobs.sh, which test.sh and build-app.sh run swift through): with VS_HEAVY_CORES a

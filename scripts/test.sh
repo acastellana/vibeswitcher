@@ -251,6 +251,10 @@ else
         # These use a private host, synthetic data and ad-hoc signed copies: no user sessions or Keychain.
         if [[ -e $VS_BUILD_FAILED_MARK ]]; then
             echo "security socket/signing tests: skipped, the build failed (above): they need its vibeswitcher-host"
+        elif [[ -n ${CODEX_SANDBOX:-} ]]; then
+            # Their scratch host listens on a Unix socket, which Codex's sandbox refuses (network off): the probe
+            # times out, and every Codex worker's run would fail on it. The merge's and an audit's runs have them.
+            echo "security socket/signing tests: skipped inside Codex's sandbox, which refuses their scratch host's socket"
         elif [[ -x .build/debug/vibeswitcher-host ]]; then
             run_web_tests Tests/SecurityAudit || status=1
         else
