@@ -590,6 +590,9 @@ private func number(_ value: Any?) -> Double? {
     return double.isFinite ? double : nil
 }
 
+/// A whole number from a file, nil when it isn't one an Int holds (a hand-edited 1e300 never traps).
+private func whole(_ value: Any?) -> Int? { number(value).flatMap { Int(exactly: $0.rounded(.towardZero)) } }
+
 /// A number the scripts read with Python's `or`: 0 or absent is none.
 private func given(_ value: Any?) -> Double? { number(value).flatMap { $0 == 0 ? nil : $0 } }
 
@@ -619,8 +622,8 @@ struct TaskView {
         mergedAt = number(merged?["at"])
         revertedAt = given(merged?["revertedAt"])
         reverted = merged?["revertedBy"] as? String != nil || score?["revertedBy"] as? String != nil || status == "reverted"
-        rounds = Int(number(score?["rounds"]) ?? number(audits?["rounds"]) ?? 0)
-        importantFindings = Int(number(score?["importantFindings"]) ?? 0)
+        rounds = whole(score?["rounds"]) ?? whole(audits?["rounds"]) ?? 0
+        importantFindings = whole(score?["importantFindings"]) ?? 0
         receipt = object(task["receipt"]).map(ReceiptView.init)
         codex = task["codexWorked"] as? Bool == true || task["agent"] as? String == "codex"
     }
@@ -641,8 +644,8 @@ struct ReceiptView {
 
         init(_ role: [String: Any]) {
             cost = number(role["cost"])
-            let parts = ["input", "output", "cacheRead", "cacheWrite"].compactMap { number(role[$0]) }
-            tokens = parts.isEmpty ? nil : Int(parts.reduce(0, +))
+            let parts = ["input", "output", "cacheRead", "cacheWrite"].compactMap { whole(role[$0]) }
+            tokens = parts.isEmpty ? nil : parts.reduce(0, &+)
         }
     }
 
@@ -650,7 +653,7 @@ struct ReceiptView {
         startedAt = given(receipt["startedAt"])
         endedAt = number(receipt["endedAt"])
         worked = number(receipt["worked"]) ?? 0
-        mergeReruns = Int(number(receipt["mergeReruns"]) ?? 0)
+        mergeReruns = whole(receipt["mergeReruns"]) ?? 0
         worker = object(receipt["worker"]).map(Role.init)
         verifier = object(receipt["verifier"]).map(Role.init)
     }
@@ -692,7 +695,7 @@ struct RecorderLine {
         guard let stamp = line["t"] as? String, let at = stamps.date(stamp) else { return nil }
         self.at = at
         load = (line["load"] as? [Any] ?? []).compactMap(number)
-        cores = number(line["cores"]).map { Int($0) }
+        cores = whole(line["cores"])
         result = line["result"] as? String
     }
 }

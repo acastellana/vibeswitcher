@@ -238,7 +238,9 @@ struct SetupStatsTests {
         let at = Self.date(2026, 10, 20, 12).timeIntervalSince1970
         let merged = Self.task("m", at: at, extra: ["merged": ["commit": "c", "tested": true, "at": at]])
         let line = String(decoding: try JSONSerialization.data(withJSONObject: merged), as: UTF8.self)
-        let good = try project("good", tasks: [], archive: [line, "{\"id\": \"CUT", "[1, 2]"], in: root)
+        // A hand-edited line with numbers no Int holds: read, those figures absent, never a trap.
+        let huge = #"{"id": "H", "status": "done", "score": {"rounds": 1e300, "importantFindings": -1e300}, "receipt": {"endedAt": 0, "mergeReruns": 1e300, "worker": {"input": 1e300}}}"#
+        let good = try project("good", tasks: [], archive: [line, "{\"id\": \"CUT", "[1, 2]", huge], in: root)
         // Recorder files: garbage lines, a line with no stamp, one good merge line.
         try "garbage\n{\"load\": [30]}\n".write(to: stats.appendingPathComponent("load-2026-10-20.jsonl"), atomically: true, encoding: .utf8)
         try "{\"t\": \"2026-10-20T09:00:00+00:00\", \"result\": \"passed\"}\nnope\n".write(to: stats.appendingPathComponent("merges-2026-10-20.jsonl"), atomically: true, encoding: .utf8)
