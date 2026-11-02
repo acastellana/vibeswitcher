@@ -607,7 +607,7 @@ struct SetupStatsTests {
         var uncounted = Self.merged("uncounted", at: at)
         uncounted.receipt = LeadReceipt(ending: .merged, startedAt: at - 3600, endedAt: at, worked: nil, worker: nil, verifier: nil)
         board.tasks = [uncounted]
-        let other = try project("uncounted", board: board, in: root)
+        let other = try self.project("uncounted", board: board, in: root)
         let counted = await collector(home: root.appendingPathComponent("home"), now: Self.date(2026, 10, 21))
             .collect(projects: [other.path], range: Self.fixtureDay)
         #expect(counted.quality?.all.parallelism == nil && counted.quality?.all.workerHours == 0 && counted.quality?.all.busyHours == 0)
