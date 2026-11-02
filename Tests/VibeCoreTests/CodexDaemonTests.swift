@@ -64,6 +64,16 @@ struct CodexDaemonHookTests {
         #expect(HookOwner.lineage([proc(9, 1, tty: nil, comm: "zsh", agent: nil)], arguments: { _ in [] }) == .none)
     }
 
+    /// A Codex TUI on a session host's terminal, the host started from a Claude Code session on another terminal (a
+    /// test's host): the Claude further up started a new session, it isn't this one's outer agent.
+    @Test func anAgentOnAnotherTerminalFurtherUpIsntAnOuterSession() {
+        let tui = proc(700, 650, tty: "ttys009", comm: "codex", agent: .codex)
+        let shell = proc(650, 600, tty: "ttys009", comm: "zsh", agent: nil)
+        let host = proc(600, 500, tty: nil, comm: "swiftpm-testing-helper", agent: nil)
+        let claude = proc(500, 400, tty: "ttys002", comm: "claude", agent: .claude)
+        #expect(HookOwner.lineage([tui, shell, host, claude], arguments: { _ in ["codex"] }) == .agent(pid: 700, tty: "ttys009"))
+    }
+
     // MARK: Which TUI it is for
 
     @Test func theOneTUIInThePayloadsFolderGetsTheRecordedSession() throws {

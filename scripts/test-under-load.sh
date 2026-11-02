@@ -46,6 +46,8 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
 source scripts/lib/module-cache.sh
+source scripts/lib/developer-dir.sh
+source scripts/lib/swift-jobs.sh
 # Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
 unset VIBESWITCHER_HOME
 
@@ -104,6 +106,13 @@ fi
 [[ $memory_floor -le 100 ]] || { echo "--memory-floor is a percentage (0–100), not $memory_floor"; exit 64; }
 [[ $max_time -le 3600 ]] || { echo "--max-time $max_time refused: at most 3600 s"; exit 1; }
 [[ $wait -le 3600 ]] || { echo "--wait $wait refused: at most 3600 s"; exit 1; }
+
+# Where the test bundles find Testing.framework (the caller's DEVELOPER_DIR, xcode-select's Xcode or Command Line Tools,
+# else an Xcode in /Applications, exported for the build too: scripts/lib/developer-dir.sh), picked before any wait or
+# build: a Mac without one is told so at once, not after them. A COMMAND finds its own.
+if [[ ${#command[@]} -eq 0 ]]; then
+    pick_developer_dir || exit 1
+fi
 
 # Run under vs-heavy (below), this script runs again as its command: `inner`, with the slot held.
 inner=0
@@ -223,8 +232,10 @@ if [[ $free_gb -lt $floor_gb ]]; then
 fi
 
 if [[ $check_only -eq 1 ]]; then
+    testing=""
+    [[ -n ${developer_dir-} ]] && testing="; tests run with $developer_dir's Testing.framework"
     echo "ok to start: load $loadavg (under $max_load), $memory % of memory free (floor $memory_floor %)," \
-        "$free_gb GB of disk free; up to $load load processes, owned by ${owners[*]}"
+        "$free_gb GB of disk free; up to $load load processes, owned by ${owners[*]}$testing"
     exit 0
 fi
 
@@ -347,7 +358,9 @@ if [[ ${#command[@]} -eq 0 ]]; then
     fi
 
     echo "building…"
-    swift build --build-tests > /dev/null 2>&1 8>&- || { echo "the build failed: run swift build --build-tests"; exit 1; }
+    # On this run's slot's share of the cores, VS_HEAVY_CORES from the vs-heavy it runs under (scripts/lib/swift-jobs.sh),
+    # as test.sh's and build-app.sh's builds: left to itself SwiftPM compiles on every core, beside the busy loops.
+    heavy_swift build --build-tests > /dev/null 2>&1 8>&- || { echo "the build failed: run swift build --build-tests"; exit 1; }
     bin=$(swift build --show-bin-path 2>/dev/null 8>&-)
     [[ -d $bin ]] || { echo "no build folder at ${bin:-?} (swift build --show-bin-path)"; exit 1; }
     helper="$(dirname "$(xcrun --find swift)")/../libexec/swift/pm/swiftpm-testing-helper"
@@ -377,11 +390,10 @@ if [[ ${#command[@]} -eq 0 ]]; then
     other=$(ls -d "$bin"/*.xctest 2>/dev/null | grep -vxF -f <(printf '%s\n' "${bundles[@]}"))
     [[ -z $other ]] || { echo "unexpected test bundles beside the package's in $bin: $(tr '\n' ' ' <<< "$other")"; echo "(the package's: $layout); remove them or run swift build --build-tests again"; exit 1; }
     echo "test bundles: $layout"
-    # Where a bundle finds XCTest and Testing (its own folder's dylibs too), as `swift test` tells dyld.
-    platform=$(xcrun --sdk macosx --show-sdk-platform-path 2>/dev/null)
-    [[ -d $platform/Developer/Library/Frameworks ]] || { echo "no macOS platform at ${platform:-?} (xcrun --show-sdk-platform-path): XCTest.framework can't be found"; exit 1; }
-    frameworks="$platform/Developer/Library/Frameworks:$platform/Developer/Library/PrivateFrameworks"
-    libraries="$bin:$platform/Developer/usr/lib"
+    # Where a bundle finds Testing (its own folder's dylibs too), as `swift test` tells dyld: picked above.
+    echo "Testing.framework: $developer_dir's"
+    frameworks=$test_frameworks
+    libraries="$bin:$test_libraries"
     failures="$bin/vibeswitcher-mcp"
     [[ -x $failures ]] || { echo "no $failures to name a failed run's tests with"; exit 1; }
     mkdir -p "$logs"

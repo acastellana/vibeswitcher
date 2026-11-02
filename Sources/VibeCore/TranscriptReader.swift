@@ -539,6 +539,9 @@ public struct TranscriptTail: Equatable, Sendable {
     /// Mid-turn, the last call of the turn with no result yet, in full (see `PendingPrompt`): when the session waits
     /// for input, what it waits for; `since` is when the call was written.
     public var pending: PendingPrompt?
+    /// The turn ended on the account's usage limit (an API error of its own kind, see `UsageLimit`): the session does
+    /// nothing until the limit resets, whatever its hooks say.
+    public var usageLimit: UsageLimit?
 
     public var midTurn: Bool { if case .turnOver = state { return false } else { return true } }
 
@@ -680,8 +683,8 @@ public struct TranscriptTail: Equatable, Sendable {
             case .over?:
                 // The turn's end is written after its last reply: that reply says whether an API error ended it.
                 if ended == nil { ended = at ?? 0 }
-            case .apiError(let text)?:
-                return TranscriptTail(state: .turnOver(apiError: text), at: ended ?? at)
+            case .apiError(let text, let limit)?:
+                return TranscriptTail(state: .turnOver(apiError: text), at: ended ?? at, usageLimit: limit)
             case .reply?:
                 return TranscriptTail(state: .turnOver(apiError: nil), at: ended ?? at)
             case .state(let state)? where ended == nil:
@@ -753,7 +756,7 @@ public struct TranscriptTail: Equatable, Sendable {
         return nil
     }
 
-    enum Step { case over, apiError(String), reply, state(State) }
+    enum Step { case over, apiError(String, UsageLimit?), reply, state(State) }
 
     static func step(_ line: [String: Any]) -> Step? {
         switch line["type"] as? String {
@@ -765,7 +768,7 @@ public struct TranscriptTail: Equatable, Sendable {
             let blocks = message["content"] as? [[String: Any]] ?? []
             if line["isApiErrorMessage"] as? Bool == true {
                 let text = blocks.compactMap { $0["text"] as? String }.joined(separator: " ")
-                return .apiError(text.isEmpty ? "API Error" : String(text.prefix(300)))
+                return .apiError(text.isEmpty ? "API Error" : String(text.prefix(300)), UsageLimit.read(line, text: text))
             }
             if blocks.contains(where: { $0["type"] as? String == "tool_use" }) { return .state(.toolCall) }
             if message["stop_reason"] as? String == "end_turn", blocks.contains(where: { $0["type"] as? String == "text" }) { return .reply }
@@ -788,6 +791,79 @@ public struct TranscriptTail: Equatable, Sendable {
         default:
             return nil
         }
+    }
+}
+
+/// The account's usage limit, as Claude Code writes it in the place of a reply when a request is refused for it
+/// ("You've hit your weekly limit · resets Nov 3 at 1am (Europe/Madrid)", `apiError: "usage_limit_reached"`, with
+/// `quotaLimits.resetsAt`): an API error that no message gets past until the limit resets. Claude Code fires no Stop
+/// hook on it, so its hooks go on saying the session works (incident 2026-10-31).
+public struct UsageLimit: Equatable, Sendable {
+    /// Claude's line, as it said it.
+    public var said: String
+    /// When the limit resets (seconds since 1970), when the line says.
+    public var resetsAt: Double?
+    /// When the line was written.
+    public var at: Double?
+    /// Which limit refused it, as Claude names it (`rateLimitType`: seven_day, five_hour, seven_day_opus,
+    /// seven_day_overage_included…), when the line says.
+    public var kind: String?
+    /// Claude's code for the error (`apiError`: usage_limit_reached, model_requires_usage_credits), when the line says.
+    public var apiError: String?
+
+    public init(said: String, resetsAt: Double? = nil, at: Double? = nil, kind: String? = nil, apiError: String? = nil) {
+        self.said = said
+        self.resetsAt = resetsAt
+        self.at = at
+        self.kind = kind
+        self.apiError = apiError
+    }
+
+    /// From an API-error line of a transcript (`isApiErrorMessage`) with its text: a usage limit when Claude marks it
+    /// one (`usage_limit_reached`, or a quota `rejected`) or says so ("You've hit your … limit", older versions'
+    /// "Claude AI usage limit reached|<reset>"); nil for any other API error (a lost connection, an overloaded server).
+    static func read(_ line: [String: Any], text: String) -> UsageLimit? {
+        let quota = line["quotaLimits"] as? [String: Any]
+        let info = (line["apiErrorParams"] as? [String: Any])?["rate_limit_info"] as? [String: Any]
+        let lowered = text.lowercased()
+        let marked = line["apiError"] as? String == "usage_limit_reached" || quota?["status"] as? String == "rejected"
+            || info?["status"] as? String == "rejected"
+        let said = (lowered.contains("hit your") && lowered.contains("limit")) || lowered.contains("usage limit reached")
+        guard marked || said else { return nil }
+        var resetsAt = (quota?["resetsAt"] as? NSNumber ?? info?["resetsAt"] as? NSNumber)?.doubleValue
+        var words = text
+        // "Claude AI usage limit reached|1730250000": the reset after the bar.
+        if let bar = text.lastIndex(of: "|"), let reset = Double(text[text.index(after: bar)...].trimmingCharacters(in: .whitespaces)) {
+            resetsAt = resetsAt ?? reset
+            words = String(text[..<bar])
+        }
+        let at = ChatReader.date(line["timestamp"])?.timeIntervalSince1970
+        let kind = (quota?["rateLimitType"] as? String) ?? (info?["rateLimitType"] as? String)
+        return UsageLimit(said: words.isEmpty ? "Usage limit reached" : String(words.prefix(300)), resetsAt: resetsAt, at: at,
+                          kind: kind, apiError: line["apiError"] as? String)
+    }
+
+    /// When it resets, in words: "Nov 3, 01:00" (this Mac's time), nil when not known.
+    public var resetText: String? { resetsAt.map(Self.resetText) }
+
+    /// A reset time in words: "Nov 3, 01:00" (this Mac's time).
+    public static func resetText(_ at: Double) -> String {
+        resetFormatter.string(from: Date(timeIntervalSince1970: at))
+    }
+
+    private static let resetFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d, HH:mm"
+        return formatter
+    }()
+
+    /// How `text` starts: what the lead's status takes for a session at the limit (its state is this text).
+    public static let statePrefix = "stopped at the account's usage limit"
+
+    /// "stopped at the account's usage limit until Nov 3, 01:00 (“You've hit your weekly limit · …”)".
+    public var text: String {
+        Self.statePrefix + " " + (resetText.map { "until \($0) " } ?? "") + "(“\(said)”)"
     }
 }
 

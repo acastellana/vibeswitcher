@@ -31,7 +31,7 @@ struct FastExitTests {
         let noOutput = probes.indices.filter { failures[$0] == nil && !probes[$0].text.contains("quick-\($0)") }
         #expect(noExit.isEmpty, "no exit code: \(noExit.map { i in "\(i):\(String(describing: probes[i].lastChange?.exit?.status)) \(sessions[i].map { probes[i].diagnosis($0) } ?? "")" })")
         #expect(noOutput.isEmpty, "lost output: \(noOutput)")
-        for i in probes.indices { probes[i].queue.sync { sessions[i]?.close() } }
+        for i in probes.indices { sessions[i].map(probes[i].end) }
     }
 
     /// Sessions started from many threads at once each start, and each get their own terminal: the program writes to

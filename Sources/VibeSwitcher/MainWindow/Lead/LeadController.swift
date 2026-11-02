@@ -129,6 +129,74 @@ final class HeavySlotsWatch: @unchecked Sendable {
     }
 }
 
+/// `HeavyJobs` and what it has told, looked at off the main thread (`LeadController.lookAtHeavyJobs`), one look at a
+/// time: the process table, the slots' holder notes and each heavy group's folder are read there. The projects'
+/// folders are the main thread's (the host's sessions, the boards): handed in at each look.
+final class HeavyJobsWatch: @unchecked Sendable {
+    private var jobs: HeavyJobs
+    private let lock = NSLock()
+    private let read: () -> [ProcUsage]?
+    private let holders: () -> [TestLock.Holder]
+    private let cwd: (Int32) -> String?
+    private let command: (Int32) -> String?
+    private let isRepository: (String) -> Bool
+    private let now: () -> Date
+    /// How many looks, and how many of them on the main thread (for tests).
+    private(set) var looks = 0
+    private(set) var lookedOnMain = 0
+
+    init(_ jobs: HeavyJobs = HeavyJobs(), read: @escaping () -> [ProcUsage]? = { ProcessTable.usage() },
+         holders: @escaping () -> [TestLock.Holder] = { TestLock.standard()?.holders() ?? [] },
+         cwd: @escaping (Int32) -> String? = ProcessTable.cwd(of:), command: @escaping (Int32) -> String? = ProcessTable.commandName(of:),
+         isRepository: @escaping (String) -> Bool = { FileManager.default.fileExists(atPath: ($0 as NSString).appendingPathComponent(".git")) },
+         now: @escaping () -> Date = Date.init) {
+        self.jobs = jobs
+        self.read = read
+        self.holders = holders
+        self.cwd = cwd
+        self.command = command
+        self.isRepository = isRepository
+        self.now = now
+    }
+
+    /// The jobs to tell now, among the projects whose folders are `candidates` (see `HeavyJobs.projectRoots`). A table
+    /// that couldn't be read is no look: what was watched waits for the next.
+    func look(candidates: [String]) -> [HeavyJobs.Job] {
+        lock.lock()
+        defer { lock.unlock() }
+        looks += 1
+        if Thread.isMainThread { lookedOnMain += 1 }
+        guard let processes = read() else { return [] }
+        let roots = HeavyJobs.projectRoots(candidates, isRepository: isRepository)
+        return jobs.look(processes, now: now(), holders: holders(), roots: roots, cwd: cwd, command: command)
+    }
+}
+
+/// `LeadWitness.Power` and what it has told, looked at off the main thread (`LeadController.lookAtPower`), one look at
+/// a time. The limit in Settings is the main thread's (`Preferences`): it's read there as each look starts and handed in.
+final class PowerLook: @unchecked Sendable {
+    private var power: LeadWitness.Power?
+    private let lock = NSLock()
+    /// Under `lock`: the limit handed to the look under way.
+    private var limit = PowerWatch.defaultLimit
+    /// How many looks, and how many of them on the main thread (for tests).
+    private(set) var looks = 0
+    private(set) var lookedOnMain = 0
+
+    init(read: @escaping () -> PowerState?, file: URL = PowerState.file) {
+        power = LeadWitness.Power(read: read, limit: { [unowned self] in self.limit }, file: file)
+    }
+
+    func look(limit: Int) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        looks += 1
+        if Thread.isMainThread { lookedOnMain += 1 }
+        self.limit = limit
+        return power?.look()
+    }
+}
+
 /// What the witness reads of a lead's team at each look, on `LeadReads`' queue: a team's transcripts are a few hundred
 /// KB each to parse (thirty of them froze the window when read on the main thread). The sessions as they were when the
 /// look began, what each member it watches is doing (`LeadObserver.watching`), the oldest message waiting for each
@@ -157,15 +225,15 @@ struct TeamReading {
         session == nil && scanSaysQuit && agentGone.contains(id)
     }
 
-    /// A worker's transcript is read whatever it shows: a stall is one that reads as working too (see `LeadStall`). A
-    /// verifier's while it doesn't show working: a turn that ended on an API error reads as finished or waiting, and
-    /// its transcript says which it was.
+    /// Each live member's transcript is read whatever it shows: a worker's stall is one that reads as working too (see
+    /// `LeadStall`), and a turn that ended on the account's usage limit reads as working (Claude Code fires no Stop hook
+    /// on it; a verifier's audit sat there for hours, 2026-10-31): its transcript says so (see `UsageLimit`).
     static func read(root: String, board: LeadBoard, hosted: [String: HostSession], sessions: [String: Session],
                      observer: LeadObserver) -> TeamReading {
         var team = TeamReading(hosted: hosted, sessions: sessions)
         let workers = Set(board.tasks.compactMap(\.worker))
-        for id in board.tasks.flatMap({ [$0.worker, $0.verifier] }).compactMap({ $0 }) where team.watched[id] == nil {
-            guard let info = hosted[id], info.isLive, let session = sessions[id], session.status != .working || workers.contains(id) else { continue }
+        for id in board.tasks.flatMap(\.members) where team.watched[id] == nil {
+            guard let info = hosted[id], info.isLive, let session = sessions[id] else { continue }
             team.watched[id] = observer.watching(info, agentPid: session.pid)
             if workers.contains(id) {
                 team.held[id] = SteerInbox.pending(tty: session.tty).filter { $0.agentPid == session.pid }.min { $0.at < $1.at }
@@ -178,7 +246,7 @@ struct TeamReading {
         team.workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
         team.advancing = team.workflow.autoAdvance && board.tasks.contains { $0.status == .review } && LeadAdvance.running(BoardStore(root: root))
         // The table is read only when the scan lacks a member's agent (rare), here off the main thread.
-        let unseen = board.tasks.flatMap { [$0.worker, $0.verifier] }.compactMap { $0 }.compactMap { id in
+        let unseen = board.tasks.flatMap(\.members).compactMap { id in
             hosted[id].flatMap { $0.isLive && sessions[id] == nil ? (id: id, session: $0) : nil }
         }
         if !unseen.isEmpty, let table = ProcessTable.trySnapshot() {
@@ -197,8 +265,12 @@ struct WitnessWork {
     var withoutTools: [String] = []
     /// The verifiers that ended without a verdict for auto_advance (`LeadWitness.endedForAdvance`), when it runs.
     var endedForAdvance: [String] = []
+    /// The workers auto_advance releases while their audits run, between turns now (`LeadWitness.releasableForAdvance`).
+    var releasableForAdvance: [String] = []
     /// The messages not told yet as of the look (`LeadWitness.unbuiltMessages`), their texts built where they're posted.
     var messages: [(keys: [String], text: @Sendable () -> String)] = []
+    /// The verifiers waiting on a prompt past its wait, not told yet (`LeadWitness.stuckPrompts`): declined, then told.
+    var stuckPrompts: [LeadWitness.StuckPrompt] = []
     /// The running tasks' workers at work (`LeadBudget.working`), and whether the board's counts change for it.
     var working: Set<String> = []
     var notesWork = false
@@ -219,9 +291,13 @@ struct WitnessWork {
             let first = Dictionary(endedForAdvance.map { ($0, firstSeen($0) ?? now) }, uniquingKeysWith: { first, _ in first })
             step?("leftToAdvance")
             advanced = LeadWitness.leftToAdvance(board: board, seen: seen, now: now, firstSeen: first)
+            step?("releasableForAdvance")
+            releasableForAdvance = LeadWitness.releasableForAdvance(board: board, seen: seen)
         }
         step?("unbuiltMessages")
         messages = LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, told: told)
+        step?("stuckPrompts")
+        stuckPrompts = LeadWitness.stuckPrompts(board: board, seen: seen, now: now, advanced: advanced).filter { !told($0.key) }
         step?("working")
         working = LeadBudget.working(board: board, seen: seen)
         notesWork = board.notesWork(working, defaultMinutes: budgetMinutes, now: now.timeIntervalSince1970)
@@ -264,7 +340,15 @@ struct LeadNames {
 /// being their witness (telling a lead when one of its workers needs input, stops without reporting, or dies).
 final class LeadController: ObservableObject {
     /// Each running lead's board, by repository root.
-    @Published private(set) var boards: [String: LeadBoard] = [:]
+    @Published private(set) var boards: [String: LeadBoard] = [:] {
+        didSet { countQuestions(was: oldValue) }
+    }
+    /// Each running lead's open questions for you and how many of them block, by repository root: counted when its
+    /// board's questions change, not as the sidebar draws its row (hang-20261101-034453: `LeadBoard.blockingQuestions`
+    /// on every update).
+    private(set) var questionCounts: [String: (open: Int, blocking: Int)] = [:]
+    /// How many times a board's questions were counted (for tests).
+    private(set) var questionsCounted = 0
     /// Each running lead's decisions (`BoardStore.decisions`), by repository root.
     @Published private(set) var decisions: [String: [LeadDecision]] = [:]
     /// Where each running lead's records are kept (`BoardStore.recordsDir`, nil: in .vibeswitcher), by repository
@@ -313,7 +397,11 @@ final class LeadController: ObservableObject {
     /// The Mac's power source, read once a minute: a hold under the battery limit in Settings, and the resume after
     /// it, is told to every running lead (see `LeadWitness.Power`). None until the app gives it the reader
     /// (`watchPower`): benches and tests read nothing.
-    private var power: LeadWitness.Power?
+    private(set) var power: PowerLook?
+    /// The limit in Settings, read on the main thread at each look.
+    private var powerLimit: () -> Int = { PowerWatch.defaultLimit }
+    /// Where the power source is looked at (`lookAtPower`).
+    private let powerQueue = DispatchQueue(label: "VibeSwitcher.power-look", qos: .utility)
     private var powerTimer: Heartbeat.Subscription?
     /// The working policy in Settings › Project lead, told to each running lead once when it changes and once when
     /// this build first runs (see `LeadWitness.PolicyWatch`); none until the app starts it (`watchPolicy`).
@@ -325,6 +413,14 @@ final class LeadController: ObservableObject {
     /// Where the slots are looked at (`lookAtHeavySlots`).
     private let heavySlotsQueue = DispatchQueue(label: "VibeSwitcher.heavy-slots", qos: .utility)
     private var heavySlotsTimer: Heartbeat.Subscription?
+    /// Heavy jobs outside the Mac-wide slots, looked at once a minute: each is told once to its project's lead, or the
+    /// user when none runs (see `HeavyJobs`); none until the app starts it (`watchHeavyJobs`).
+    private(set) var heavyJobs: HeavyJobsWatch?
+    /// Where they're looked at (`lookAtHeavyJobs`).
+    private let heavyJobsQueue = DispatchQueue(label: "VibeSwitcher.heavy-jobs", qos: .utility)
+    private var heavyJobsTimer: Heartbeat.Subscription?
+    /// A banner for the user (title, body): a heavy job in a project no lead runs for (the app's notifier).
+    var tellUser: (String, String) -> Void = { _, _ in }
     /// The leads refused for the Mac's room or load, looked at once a minute: each is woken once there's room, whichever
     /// project's sessions ended (see `LeadWitness.RoomWaits`); none until the app starts it (`watchRoom`).
     private var roomWaits: LeadWitness.RoomWaits?
@@ -512,6 +608,26 @@ final class LeadController: ObservableObject {
     /// The roots with a live lead in the window (no board read: which of two leads it is doesn't matter here).
     private var leadRoots: Set<String> {
         Set(host.sessions.filter { $0.isLive && LeadTeams.role(label: $0.label) == .lead }.map { ($0.cwd as NSString).standardizingPath })
+    }
+
+    /// A lead row's open questions for you and how many of them block (as `LeadBoard.openQuestions` and
+    /// `blockingQuestions` count them); nil if the row isn't a lead with a board.
+    func questions(for row: WindowRow) -> (open: Int, blocking: Int)? {
+        lead(for: row).flatMap { questionCounts[$0.root] }
+    }
+
+    /// Counts the questions of each board whose questions changed since `old`.
+    private func countQuestions(was old: [String: LeadBoard]) {
+        questionCounts = questionCounts.filter { boards[$0.key] != nil }
+        for (root, board) in boards where questionCounts[root] == nil || old[root]?.questions != board.questions {
+            questionsCounted += 1
+            var open = 0, blocking = 0
+            for question in board.questions where question.isOpen {
+                open += 1
+                if question.rank == .blocking { blocking += 1 }
+            }
+            questionCounts[root] = (open, blocking)
+        }
     }
 
     /// The lead a row is, if it is one: its root (the folder its window session started in, wherever its agent has
@@ -1303,9 +1419,10 @@ final class LeadController: ObservableObject {
     }
 
     /// Reads the power source with `read` once a minute from now on (the first a minute in: the host has said which
-    /// leads run by then), holding work below `limit` (the setting, read at each look).
-    func watchPower(limit: @escaping () -> Int, _ read: @escaping () -> PowerState?) {
-        power = LeadWitness.Power(read: read, limit: limit)
+    /// leads run by then), holding work below `limit` (the setting, read at each look); each reading is kept in `file`.
+    func watchPower(limit: @escaping () -> Int, file: URL = PowerState.file, _ read: @escaping () -> PowerState?) {
+        power = PowerLook(read: read, file: file)
+        powerLimit = limit
         powerTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtPower() }
     }
 
@@ -1331,6 +1448,38 @@ final class LeadController: ObservableObject {
         }
     }
 
+    /// Looks once a minute from now on for heavy jobs outside the Mac-wide slots (see `HeavyJobs`).
+    func watchHeavyJobs(_ watch: HeavyJobsWatch = HeavyJobsWatch()) {
+        heavyJobs = watch
+        heavyJobsTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtHeavyJobs() }
+    }
+
+    /// A heavy job outside the slots: to its project's lead as the witness, or to the user as a banner when no lead
+    /// runs for it (a held message would reach a lead started later, for a job long over). The process table and each
+    /// heavy group's folder are read on a queue of their own (`heavyJobsQueue`), never the main thread. `then` hears on
+    /// the main thread what was told, once the look is done, and `adding` names project folders beyond the leads', the
+    /// boards' and the host's sessions' (tests).
+    func lookAtHeavyJobs(adding projects: [String] = [], then: @escaping ([HeavyJobs.Job]) -> Void = { _ in }) {
+        guard let watch = heavyJobs else { return then([]) }
+        let leads = leadRoots
+        let candidates = Array(leads) + Array(boards.keys) + host.sessions.map(\.cwd) + projects
+        heavyJobsQueue.async { [weak self] in
+            let jobs = watch.look(candidates: candidates)
+            DispatchQueue.main.async {
+                defer { then(jobs) }
+                guard let self else { return }
+                for job in jobs {
+                    if leads.contains(job.root) {
+                        self.deliver(LeadWitness.heavyJobText(job), from: .system("witness"), root: job.root)
+                    } else {
+                        let banner = LeadWitness.heavyJobBanner(job)
+                        self.tellUser(banner.title, banner.body)
+                    }
+                }
+            }
+        }
+    }
+
     /// Looks once a minute from now on for leads refused for the Mac's room or load that have room now.
     func watchRoom(_ waits: LeadWitness.RoomWaits = LeadWitness.RoomWaits()) {
         roomWaits = waits
@@ -1339,7 +1488,7 @@ final class LeadController: ObservableObject {
 
     /// The Mac has room again: one message to each lead that was refused for it, as the witness, against every
     /// project's team sessions the host lists and the Mac-wide limits in Settings.
-    func lookAtRoom(limits: MacLimits = MacLimits.load()) {
+    func lookAtRoom(limits: MacLimits = MacLimits.current()) {
         guard let roomWaits else { return }
         let mac = MacLoad.count(host.sessions.map { ($0.label, $0.cwd, $0.isLive) }, load: macLoad())
         for (root, text) in roomWaits.look(mac: mac, limits: limits) { deliver(text, from: .system("witness"), root: root) }
@@ -1375,13 +1524,24 @@ final class LeadController: ObservableObject {
         }
     }
 
-    /// A hold on battery, or the resume after one: to each running lead, as the witness.
-    func lookAtPower() {
-        guard let text = power?.look() else { return }
-        for root in leadRoots {
-            deliver(text, from: .system("witness"), root: root)
-            // The lead's tool server looks again at what it held (see `LeadAdvance`).
-            LeadAdvance.nudge(root: root)
+    /// A hold on battery, or the resume after one: to each running lead, as the witness. The reading is read and
+    /// written on a queue of its own (`powerQueue`), never the main thread: on a loaded Mac writing it held the window
+    /// (hang-20261031-193728). `then` hears on the main thread what was told, once the look is done (nil: nothing to
+    /// tell; tests).
+    func lookAtPower(then: @escaping (String?) -> Void = { _ in }) {
+        guard let watch = power else { return then(nil) }
+        let limit = powerLimit()
+        powerQueue.async { [weak self] in
+            let text = watch.look(limit: limit)
+            DispatchQueue.main.async {
+                defer { then(text) }
+                guard let self, let text else { return }
+                for root in self.leadRoots {
+                    self.deliver(text, from: .system("witness"), root: root)
+                    // The lead's tool server looks again at what it held (see `LeadAdvance`).
+                    LeadAdvance.nudge(root: root)
+                }
+            }
         }
     }
 
@@ -1425,11 +1585,11 @@ final class LeadController: ObservableObject {
         var seen: [String: LeadWitness.Seen] = [:]
         let now = Date()
         let workers = Set(board.tasks.compactMap(\.worker))
-        for id in board.tasks.flatMap({ [$0.worker, $0.verifier] }).compactMap({ $0 }) {
+        for id in board.tasks.flatMap(\.members) {
             guard let info = hosted[id] else { continue }
             let session = team.sessions[id]
-            // A turn that ended on an API error reads as finished or waiting; its transcript says which it was. A
-            // worker's transcript is read whatever it shows: a stall is one that reads as working too (see `LeadStall`).
+            // A turn that ended on an API error reads as finished or waiting; its transcript says which it was. One that
+            // ended on the usage limit reads as working too: the witness takes it from the activity (`Seen.usageLimit`).
             var apiError: (text: String, at: Double?)?
             var watched: (activity: LeadActivity, tail: TranscriptTail?, progress: TranscriptProgress?)?
             var shells: [BackgroundJob] = []
@@ -1495,11 +1655,26 @@ final class LeadController: ObservableObject {
                 LeadAdvance.nudge(root: root)
             }
         }
+        // A worker whose turn ended after its audit started (it had only just reported): its loop looks now and releases
+        // it, freeing its Mac slot (its turn's end writes nothing in the project's folder). Once per worker.
+        for worker in work.releasableForAdvance {
+            let key = "\(root)|release|\(worker)"
+            if advanceSeen[key] == nil {
+                advanceSeen[key] = now
+                LeadAdvance.nudge(root: root)
+            }
+        }
         // Only the keys here: each text is built where it's posted, off the main thread. One a look before this told
         // already (two looks under way at once) isn't told again.
         for message in work.messages where !message.keys.allSatisfy({ told.contains("\(root)|\($0)") }) {
             message.keys.forEach { told.insert("\(root)|\($0)") }
             deliver(built: message.text, from: .system("witness"), root: root)
+        }
+        // A verifier waiting on a prompt no one answers: declined with a reason it can act on, and the lead told once
+        // what was asked (or that it couldn't be declined), instead of the audit hanging until it's started again.
+        for stuck in work.stuckPrompts where told.insert("\(root)|\(stuck.key)").inserted {
+            Breadcrumbs.shared.note("witness: declining the prompt verifier \(stuck.session.prefix(8)) on \(stuck.slug) waits on")
+            PromptDecline.handle(stuck, host: host) { [weak self] text in self?.deliver(built: text, from: .system("witness"), root: root) }
         }
         // Low disk space, once per episode; what takes it is sized off the main thread.
         var disk = disks[root] ?? LeadWitness.Disk(free: freeSpace, file: DiskWatch.file)
@@ -1556,6 +1731,37 @@ final class LeadController: ObservableObject {
             }) { [weak self] in self?.flush(worker) }
         }
         deliver(LeadBudget.leadText(task, minutes: minutes), from: .system("witness"), root: root)
+    }
+
+    /// A message from VibeSwitcher itself for the agent of window session `id` (a wallet request's answer, see
+    /// `WalletDesk`): posted into its steer inbox, which its hook hands over at its next step, and typed in once it's
+    /// between turns with an empty box (`flush`), as a time budget's stop is. `then` hears on the main thread whether
+    /// it reached the inbox, and if not, whether trying again later can (`SessionDelivery`): nothing is kept here, the
+    /// caller keeps what didn't go (the wallet desk's outbox).
+    func tell(_ text: String, from sender: SteerMessage.Sender, session id: UUID, then: @escaping (SessionDelivery) -> Void = { _ in }) {
+        // Before the host's welcome (the app just launched, a reconnect), or while it's gone, its list says nothing
+        // about who runs: sessions it lost are marked ended here though they may still run.
+        let welcomed: Bool
+        switch host.state {
+        case .connected, .outdated: welcomed = true
+        case .notRunning, .connecting, .failed: welcomed = false
+        }
+        guard let hosted = host.sessions.first(where: { $0.id == id && $0.isLive }), welcomed else {
+            let listed = host.sessions.contains { $0.id == id }
+            Breadcrumbs.shared.note("message for session \(id) not delivered: "
+                + (!welcomed ? "the session host hasn't welcomed this app yet" : listed ? "its session ended" : "the session host doesn't run it"))
+            return then(welcomed ? .ended : .notYet)
+        }
+        let pid = store.sessions.first { $0.hostID == id && $0.tty == hosted.tty }?.pid ?? hosted.childPID
+        let agent = LeadAgent(pid: pid, tty: hosted.tty, session: id.uuidString)
+        let inbox = self.inbox
+        reads.async({ _ in
+            (try? LeadDelivery.deliver(text, from: sender, to: agent, state: HookState.load(from: VibePaths.stateFile(tty: agent.tty)),
+                                       inputIsEmpty: nil, typeInto: nil, root: inbox)) != nil
+        }) { [weak self] went in
+            if went { self?.flush(agent) }
+            then(went ? .delivered : .notYet)
+        }
     }
 
     /// Who a waiting message is from, in words.
@@ -1625,4 +1831,14 @@ final class LeadController: ObservableObject {
         NSApp.activate()
         return alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
     }
+}
+
+/// What became of a message for a window session's agent (`LeadController.tell`).
+enum SessionDelivery: Equatable {
+    /// In its steer inbox: its hook hands it over at the agent's next step.
+    case delivered
+    /// Not now, but it may go later: the session host hasn't welcomed the app yet (or is gone), or the post failed.
+    case notYet
+    /// The session host, welcomed, says its session ended or doesn't run it: no agent there will read it.
+    case ended
 }

@@ -179,15 +179,53 @@ struct StatusMarkView: View {
 
 /// Draws the menu bar image: one dot per session, in list order, so a dot's position tells you which
 /// terminal it is. Falls back to per-status counts when there are too many sessions to fit.
+/// While Boost mode is on (`boost`), a small orange bolt follows, right of the dots (their hit areas unchanged).
 enum StatusIcon {
-    static func image(for sessions: [Session]) -> NSImage {
-        guard !sessions.isEmpty else {
-            let image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "VibeSwitcher")!
-            image.isTemplate = true
-            return image
+    static func image(for sessions: [Session], boost: BoostState? = nil) -> NSImage {
+        let base: NSImage
+        if sessions.isEmpty {
+            base = NSImage(systemSymbolName: "terminal", accessibilityDescription: "VibeSwitcher")!
+            base.isTemplate = true
+        } else {
+            base = sessions.count <= MenuBarDots.maxDots ? dots(sessions) : counts(sessions)
+            base.accessibilityDescription = StatusSummary.spoken(sessions)
         }
-        let image = sessions.count <= MenuBarDots.maxDots ? dots(sessions) : counts(sessions)
-        image.accessibilityDescription = StatusSummary.spoken(sessions)
+        guard let boost, boost.on else { return base }
+        return withBoost(base, boost)
+    }
+
+    /// The room the boost mark takes, right of the rest.
+    static let boostWidth: CGFloat = 12
+
+    private static func withBoost(_ base: NSImage, _ boost: BoostState) -> NSImage {
+        let height = max(base.size.height, MenuBarDots.height)
+        let size = NSSize(width: ceil(base.size.width) + boostWidth, height: height)
+        let image = NSImage(size: size, flipped: false) { _ in
+            let rect = NSRect(x: 0, y: (height - base.size.height) / 2, width: base.size.width, height: base.size.height)
+            if base.isTemplate {
+                // A template's colour is the bar's: drawn in labelColor, which resolves when the bar draws.
+                let tinted = NSImage(size: base.size, flipped: false) { bounds in
+                    base.draw(in: bounds)
+                    NSColor.labelColor.set()
+                    bounds.fill(using: .sourceAtop)
+                    return true
+                }
+                tinted.draw(in: rect)
+            } else {
+                base.draw(in: rect)
+            }
+            let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .bold)
+                .applying(NSImage.SymbolConfiguration(paletteColors: [.systemOrange]))
+            if let bolt = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: "Boost on")?.withSymbolConfiguration(config) {
+                let mark = NSRect(x: ceil(base.size.width) + (boostWidth - bolt.size.width) / 2, y: (height - bolt.size.height) / 2,
+                                  width: bolt.size.width, height: bolt.size.height)
+                bolt.draw(in: mark)
+            }
+            return true
+        }
+        image.isTemplate = false
+        image.cacheMode = .never
+        image.accessibilityDescription = (base.accessibilityDescription ?? "VibeSwitcher") + "; \(boost.text)"
         return image
     }
 

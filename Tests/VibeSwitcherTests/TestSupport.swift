@@ -36,6 +36,24 @@ let hangGuard: TimeInterval = 300
 /// `hostTestLimit`): past it the test fails and its waits end (see `until`), rather than holding the run.
 let hostTestLimit: TimeLimitTrait = .timeLimit(.minutes(10))
 
+/// Ends a scratch host that a test's `HostClient` started (this process's child, leading a process group of its own,
+/// its sessions in it): SIGKILL to the group and to it, then waits for it to end and reaps it. The client reaps the
+/// hosts it starts on the main queue, and only while it lives: a test's client is gone by then, and its host stayed a
+/// zombie of the test run (`ZombieWatch`). Done, too, when the client reaped it first.
+func endClientHost(_ pid: pid_t) {
+    kill(-pid, SIGKILL)
+    kill(pid, SIGKILL)
+    _ = BenchHostTests.waitForExit(of: pid, timeout: hangGuard)
+    // The exit is posted a moment before the process can be reaped.
+    let deadline = Date().addingTimeInterval(hangGuard)
+    var status: Int32 = 0
+    while Date() < deadline {
+        let reaped = waitpid(pid, &status, WNOHANG)
+        if reaped == pid || (reaped < 0 && errno != EINTR) { return }
+        usleep(10_000)
+    }
+}
+
 /// Whether `condition` holds within `timeout` seconds (a hang guard), checked every 20 ms. Awaiting lets the main
 /// thread run what's queued for it meanwhile. A cancelled test (past its time limit) waits no more: its sleep would
 /// throw at once, and the loop spin until the deadline.

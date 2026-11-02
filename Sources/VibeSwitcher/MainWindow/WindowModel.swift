@@ -4,9 +4,9 @@ import VibeCore
 
 /// The main window's list and selection.
 final class WindowModel: ObservableObject {
+    /// Set only by `update`, which arranges the list once after it (with the labels).
     @Published private(set) var sections: [WindowSection] = [] {
         didSet {
-            arrangedKept = nil
             allRowsKept = nil
             selectedKept = nil
         }
@@ -22,7 +22,7 @@ final class WindowModel: ObservableObject {
     }
     @Published var grouping: WindowGrouping {
         didSet {
-            arrangedKept = nil
+            if grouping != oldValue { arrange() }
             UserDefaults.standard.set(grouping.rawValue, forKey: Self.groupingKey)
         }
     }
@@ -33,12 +33,11 @@ final class WindowModel: ObservableObject {
     /// Folders you've recently run agents in, most recent first (for the start page and the palette).
     @Published var recentProjects: [String] = []
     /// Window sessions' labels ("Lead · acme", "Worker: …"), by host id: they say who's on a lead's team.
-    @Published private(set) var hostLabels: [UUID: String] = [:] {
-        didSet { arrangedKept = nil }
-    }
+    /// Set only by `update`, which arranges the list once after it (with the sections).
+    @Published private(set) var hostLabels: [UUID: String] = [:]
     /// Leads (row ids) whose team is shown under them.
     @Published var expandedTeams: Set<String> = [] {
-        didSet { arrangedKept = nil }
+        didSet { if expandedTeams != oldValue { arrange() } }
     }
     /// Leads another session of their project replaced (see `LeadController.replacedLeads`), by window session.
     @Published var replacedLeads: [UUID: ReplacedLead] = [:]
@@ -103,22 +102,32 @@ final class WindowModel: ObservableObject {
         WindowGroups.foldEnded(LeadTeams.arrange(sections, label: label(of:), expanded: []).sections).ended
     }
 
-    /// The list with each lead's team folded under it (the grunt work stays out of sight unless you open it). Made
-    /// again only when its inputs change (the rows, the grouping, the labels, the teams open) or, grouped by attention,
-    /// when a window session's "starting" runs out: the sidebar's body asks for it on every update, and a lead's
-    /// window updates many times a second (hang-20261027-201459).
-    var arranged: LeadTeams.Arranged {
-        let now = Date()
-        if let kept = arrangedKept, now < kept.until { return kept.arranged }
-        arrangedMade += 1
-        let arranged = LeadTeams.arrange(grouping == .attention ? WindowGroups.attention(sections, now: now) : sections, label: label(of:),
-                                         expanded: expandedTeams)
-        arrangedKept = (arranged, grouping == .attention ? Self.regroups(sections, after: now) : .distantFuture)
-        return arranged
-    }
-    private var arrangedKept: (arranged: LeadTeams.Arranged, until: Date)?
+    /// The list with each lead's team folded under it (the grunt work stays out of sight unless you open it). Stored,
+    /// and made again only when its inputs change (the rows, the grouping, the labels, the teams open) or, grouped by
+    /// attention, when a window session's "starting" runs out (`regroups`, on a timer): the sidebar's body reads it on
+    /// every update, and a lead's window updates many times a second (hang-20261027-201459, hang-20261101-054751).
+    @Published private(set) var arranged = LeadTeams.arrange([], label: { _ in nil }, expanded: [])
     /// How many times `arranged` was made (for tests).
     private(set) var arrangedMade = 0
+    /// Arranges the list again when grouped by attention and a "starting" runs out.
+    private var regroupTimer: DispatchWorkItem?
+
+    /// Makes `arranged` from the rows, the grouping, the labels and the teams open.
+    private func arrange() {
+        let now = Date()
+        arrangedMade += 1
+        arranged = LeadTeams.arrange(grouping == .attention ? WindowGroups.attention(sections, now: now) : sections, label: label(of:),
+                                     expanded: expandedTeams)
+        regroupTimer?.cancel()
+        regroupTimer = nil
+        guard grouping == .attention else { return }
+        let until = Self.regroups(sections, after: now)
+        guard until != .distantFuture else { return }
+        let regroup = DispatchWorkItem { [weak self] in self?.arrange() }
+        regroupTimer = regroup
+        // The wall clock's deadline, as `row.state(now:)` reads it: a Mac asleep past it arranges as it wakes.
+        DispatchQueue.main.asyncAfter(wallDeadline: .now() + max(0, until.timeIntervalSince(now)), execute: regroup)
+    }
 
     /// When the attention grouping may move a row with nothing else changing: a window session's agent "starting" for
     /// its first minute (`WindowRow.state(now:)`), the only state that turns with the clock.
@@ -181,9 +190,12 @@ final class WindowModel: ObservableObject {
         let known = Set(hosted.map(\.id))
         agentSessions = agentSessions.filter { known.contains($0.key) }
         let labels = Dictionary(uniqueKeysWithValues: hosted.map { ($0.id, $0.label) })
-        if labels != hostLabels { hostLabels = labels }
         let fresh = WindowRows.sections(sessions: sessions, hosted: hosted, table: table) { SessionNaming.name(forProjectRoot: $0) }
-        if fresh != sections { sections = fresh }
+        let labelsChanged = labels != hostLabels, sectionsChanged = fresh != sections
+        if labelsChanged { hostLabels = labels }
+        if sectionsChanged { sections = fresh }
+        // Once for both, here rather than as the sidebar draws.
+        if labelsChanged || sectionsChanged { arrange() }
         // Keep the selection while its row exists (or before anything has loaded).
         let all = allRows
         guard !all.isEmpty, !showsHome, !all.contains(where: { $0.id == selectedID }) else { return }

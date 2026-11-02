@@ -24,6 +24,19 @@ public enum AppHealth {
     public static let worryingGrowth: Double = 25
     public static let growthAfter: TimeInterval = 2 * 3600
 
+    /// What a footprint relief that freed nothing means (app-memory-steps-up): macOS 27.2's malloc keeps the pages of
+    /// freed blocks for reuse and `malloc_zone_pressure_relief` gives none back (0 bytes in 0 ms), so the footprint
+    /// stays at its last peak. Not live memory, and not a leak.
+    public static let keptForReuse = "macOS returned no pages (freed memory is kept for reuse)"
+
+    /// A footprint relief's app.log line: the footprint before and after (MB) and how long it held malloc's locks.
+    public static func reliefLine(before: Double, after: Double, took: Double) -> String {
+        String(format: "footprint relief: %.0f → %.0f MB in %.0f ms", before, after, took) + (freedNothing(before: before, after: after) ? ": \(keptForReuse)" : "")
+    }
+
+    /// Less than 1 MB given back.
+    public static func freedNothing(before: Double, after: Double) -> Bool { before - after < 1 }
+
     // MARK: Freezes
 
     /// The line `HangWatchdog` starts a hang's .log with: when the main thread got stuck, and once it answered again,
@@ -588,7 +601,7 @@ public enum AppHealth {
     /// The parts of the app that start their app.log lines with their name ("lead: …"); a line starting with anything
     /// else is the app's ("app: …"), so no word of what a line says becomes its kind.
     static let logParts: Set<String> = ["app", "app health", "bench", "chat", "composer", "handover refused", "host", "keep awake", "lead",
-                                        "move", "privacy", "role sweep", "sandbox", "shutdown refused", "spawn failed", "vault", "watchdog",
+                                        "move", "privacy", "role sweep", "sandbox", "shutdown refused", "spawn failed", "vault", "wallet", "watchdog",
                                         "window", "witness"]
 
     /// An app.log line's kind, when it's an error ("lead: couldn't"): what part of the app wrote it (one of `logParts`,
@@ -679,6 +692,18 @@ public enum AppHealth {
         /// over 6 h, while each relief's floor went 149 → 182 MB in that time and the last two hours 182 → 186).
         public var settled: Settled?
         public var launched: Date
+        /// The last footprint relief's footprint before and after it (MB); nil before the first.
+        public var relief: Relief?
+
+        public struct Relief: Equatable, Sendable {
+            public var before: Double
+            public var after: Double
+
+            public init(before: Double, after: Double) {
+                self.before = before
+                self.after = after
+            }
+        }
 
         public struct Settled: Equatable, Sendable {
             public var footprint: Double
@@ -690,11 +715,12 @@ public enum AppHealth {
             }
         }
 
-        public init(footprint: Double, peak: Double, settled: Settled?, launched: Date) {
+        public init(footprint: Double, peak: Double, settled: Settled?, launched: Date, relief: Relief? = nil) {
             self.footprint = footprint
             self.peak = peak
             self.settled = settled
             self.launched = launched
+            self.relief = relief
         }
 
         /// MB an hour since it settled; nil before it had, or less than `growthAfter` since.
@@ -980,6 +1006,11 @@ public enum AppHealth {
                                  String(format: ", %@%.0f MB an hour since it settled at %.0f MB", growth >= 0 ? "+" : "", growth, $0.footprint)
                              } } ?? "")
                              + (growing ? " (growing: worth a look)." : "."))
+                // A relief that freed nothing: what the footprint holds is freed pages kept for reuse, not a leak.
+                if let relief = memory.relief, AppHealth.freedNothing(before: relief.before, after: relief.after) {
+                    parts.append(String(format: "The last footprint relief freed nothing (%.0f → %.0f MB): %@.", relief.before, relief.after,
+                                        AppHealth.keptForReuse))
+                }
             }
             if !repeats.isEmpty {
                 parts.append("Seen again since told, not told again: " + repeats.map { "\($0.key) ×\($0.value.repeats) (first \($0.value.first))" }.joined(separator: "; ") + ".")

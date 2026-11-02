@@ -45,9 +45,33 @@ after the tests (a scratch host, a parser, a bench's app) is ended and named, an
 file the run added to `~/Library/Preferences`.
 
 `swift build` and `swift test` run under `vs-heavy`, the Mac-wide slots for heavy work, so suites and builds from every
-project's workers take turns. The count is `VIBESWITCHER_HEAVY_SLOTS`, else the cores ÷ 4. A run that finds every slot
+project's workers take turns. The count is `VIBESWITCHER_HEAVY_SLOTS`, else Settings › Project lead's test and build
+slots (the cores ÷ 6 while unset), raised to boost's while Boost mode is on. A run that finds every slot
 held waits, saying who holds each. Run a full suite or a release build in a session as `vs-heavy <command>`; it gives
 up after 60 minutes unless you pass `--timeout`.
+
+A slot is one job's room, not the whole Mac. `vs-heavy` gives its command `VS_HEAVY_CORES`, the slot's share of the
+cores: the cores ÷ the slots, rounded up, at least 2 (4 on a 12-core Mac with 3 slots). The job sizes its parallelism to
+it. A merge's or an audit's test run gets it from the app (`TestLock.coreBudget`). Other projects' commands use it like
+this:
+
+```sh
+vs-heavy sh -c 'node --test --test-concurrency="$VS_HEAVY_CORES"'                  # node --test
+vs-heavy sh -c 'make -j "$VS_HEAVY_CORES"'                                         # make
+vs-heavy sh -c 'npx vitest run --maxWorkers="$VS_HEAVY_CORES"'                     # a test runner's worker count
+vs-heavy sh -c 'swift build -j 2 -Xswiftc -j$(( (VS_HEAVY_CORES + 1) / 2 ))'       # SwiftPM (swift test the same)
+```
+
+SwiftPM is the odd one. Its `-j N` builds N modules at once and gives each module's compiler `-j N` as well, so a build
+can run N × N compiles. With `-j 4`, `swift test` built the test targets side by side with 12 `swift-frontend`
+processes at about 1100 % CPU. The line above builds two modules at once, each with half the share of compiles. The
+`-Xswiftc -j` comes after SwiftPM's own `-j`, so it wins. `scripts/test.sh` and `scripts/build-app.sh` build this way
+(`heavy_swift` in `scripts/lib/swift-jobs.sh`).
+
+The variable isn't set when the command runs without `vs-heavy`, so a project script that reads it should fall back to
+its own default: `${VS_HEAVY_CORES:-4}`. Swift Testing 6.1 has no setting for how many tests run at once (it runs them on
+Swift's thread pool, one thread per core), so only the build is limited. That's where the cores go: on 2026-11-01 one
+merge's build ran 9 `swift-frontend` processes at about 900 % CPU while two other slots were busy too.
 
 **Benches.** Tests judged by wall-clock time or memory are tagged `.perf` and skipped in the normal run, so its result
 doesn't depend on how busy the Mac is. `scripts/test.sh --perf` runs them alone. Over the load threshold a bench prints

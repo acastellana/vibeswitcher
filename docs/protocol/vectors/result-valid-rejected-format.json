@@ -1,0 +1,16 @@
+{
+  "type": "vibeswitcher.wallet-result",
+  "version": 1,
+  "id": "3f2b8c1e-5d4a-4b6f-9e0c-7a1d2e3f4a5b",
+  "sequence": 1,
+  "createdAt": "2026-10-31T12:01:00Z",
+  "status": "rejected",
+  "checks": [
+    {
+      "name": "format",
+      "ok": false,
+      "detail": "missingField: reason: the request has no reason, which wallet-request v1 requires"
+    }
+  ],
+  "message": "Rejected: the request file isn't a valid wallet-request v1, so nothing in it was checked or acted on."
+}

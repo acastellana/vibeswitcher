@@ -34,7 +34,9 @@ The lead turns what you ask for into tasks on its board. Each task has a contrac
 - **context**: what the worker needs to know.
 
 A task can also have a review level (below), an `after` list (tasks that must be done first), its own time budget
-(`budget_min`) and `auto_advance: false` to keep it out of automatic moves. The lead changes a task with
+(`budget_min`), a `model` for its worker (as `claude --model` takes it: `sonnet` for a mechanical task; left out, the
+worker runs on the project's Claude command's model, as before; given, it replaces a `--model` that command names) and `auto_advance: false` to keep it out of automatic
+moves. The lead changes a task with
 `update_task`. A task's state (`LeadBoard.swift:549`) is planned, running, review (reported done, being checked), done
 (merged), failed, blocked, kept, folded, abandoned or reverted. A task made by
 mistake that never ran can be removed.
@@ -58,6 +60,91 @@ proposal. Nothing is stopped; the lead extends the budget, re-plans or abandons 
 
 Workers can't push, move refs, rebase other branches, or check out the lead's branch: Claude Code's permission rules
 deny it. A worker brings its branch up to date by merging the base in.
+
+### Codex workers
+
+A task can name its worker's agent: `add_task` or `update_task` with `agent: codex` (`claude` is the default; `auto`
+chooses at each start, see [Auto routing](#auto-routing-agent-auto)). It's
+meant for bounded, mechanical tasks with a tight contract, to spread usage onto the Codex account when Claude's limits
+run low; near a Claude limit, start_worker's refusal and auto_advance's hold suggest it, and the lead decides. Codex
+only implements: the lead, verifiers and the risk check stay Claude.
+
+A Codex worker is the project's Codex command (its Codex launch preset) started in the task's worktree with:
+
+- the same brief as a Claude worker's (as Codex's `developer_instructions`), plus a part on its sandbox and the rules
+  below;
+- the VibeSwitcher tool server as its one MCP server, its tools pre-approved (under approval never Codex refuses an MCP
+  call that needs approval), scoped to the repository, the task and the worker role, so
+  `progress`, `report`, `ask_lead` and `answer_findings` work as for any worker, and auto_advance moves its work on the
+  same way. `--no-daemon` keeps that server under the session's own process, which is how the session host tells which
+  session asks;
+- `--sandbox workspace-write` with network off and `--ask-for-approval never` (no one answers approvals; a refused
+  command just fails). It writes only in its worktree, its TMPDIR and /tmp, and the git folders its commits need: its
+  worktree's own git folder, the object store and the `agent/` branches' refs. Never `main`'s ref, tags, the git config
+  or another checkout; no push or fetch;
+- the worktree trusted for that session only (nothing is written to `~/.codex`). Flags in the Codex command that
+  would loosen that (`--yolo`, `--dangerously-bypass-approvals-and-sandbox`, `--full-auto`, `-s`, `-a`, `-C`,
+  `--add-dir`, `-p`) are dropped; a task's `model` replaces its `-m`.
+
+A Codex task is always audited by a Claude verifier: its review is audit and can't be lowered while its worker is
+Codex, or once a Codex worker worked on it; merge refuses it without a passing audit whatever the board or the vault
+says. Status and board say `worker: Codex` on it (and `worker: Claude` on the other open tasks beside it), and the
+Mac-wide session limit counts it like any worker.
+
+What Codex can't be made to refuse (it has no per-session deny rules: its `.rules` files load only from its own home,
+the project's `.codex` folder or managed requirements, and its sandbox draws no line inside the worktree), and what
+checks it instead:
+
+| Claude worker's rule | Instead, for Codex |
+| --- | --- |
+| The refused git commands that stay on its own branch or another `agent/` one (amend, reset --hard, checkout or branch -D of another task's branch) | The sandbox holds the ones that write elsewhere (`main`, tags, config, the remote); the Claude audit's integrity check reads the branch's history |
+| No edits to the records folder (`docs/lead`) | Merge takes the base's copy of the lead's records whatever the branch did to them; the audit reads the rest of the diff |
+| No reads of `~/.vibeswitcher/lead` and `~/.vibeswitcher/steer` | Its brief; the session host tells callers apart by their process, never by what they've read |
+| (none: Codex's own) | Your Codex rules (`~/.codex/rules`) stay in force: a command prefix you approved there runs outside the sandbox. The TUI loads them whatever a session says (only `codex exec --ignore-rules` skips them), so keep them narrow; the audit reads what the branch did |
+| pkill, killall and debuggers refused by rule | Its brief; a sandboxed command signals only its own processes |
+
+Review a Codex worker's output critically: it's the audit's job, and the start_worker reply says so.
+
+A Codex worker starts through the session host as a Claude worker does: its TUI draws, its tools connect, it calls
+progress and report, and between turns it takes a message (the lead's, a verifier's findings that auto_advance sends
+back, what waited in its inbox) typed in as its next prompt. Its hooks (VibeSwitcher's Codex hooks, in your Codex home)
+tell when its turn is over, and its composer is read as Claude's box is (`LeadDelivery.codexBox`). The on-demand
+`CodexWorkerHostRunTests` runs a real one through all of that. Until 2026-11-01 none of it did (task
+codex-s-tui-renders): every hosted session started on a 0×0 terminal, where Codex 0.160's TUI draws only blank frames;
+the worktree's trust key never applied, so Codex sat on its trust prompt and started no MCP server; and its composer
+wasn't recognised. Should a Codex release break it again, `VIBESWITCHER_CODEX_WORKERS=0` in the lead's tool server's
+environment switches Codex workers off: start_worker refuses a codex task, auto_advance starts none (it tells the lead
+once), and the usage watch doesn't suggest Codex.
+
+### Auto routing: agent auto
+
+`agent: auto` (on `add_task` or `update_task`, or for every new task that names no agent with `configure
+agent_default: auto`) lets each start pick the agent from both accounts' usage. `start_worker` and auto_advance decide
+at the start, not when the task is planned:
+
+- **Codex** when Claude is *tight* and Codex *has room*. Claude is tight when one of its current limits on the
+  worker's model (or on every model) is at 70% or more, or a weekly limit is more than 10 points ahead of pace. Pace
+  is the used % against the % of the window gone, from its reset time: 64% used with 52% of the week gone is 12
+  points ahead. Codex has room when each of its known limits is under 85%, or under 100% with credits available, and
+  Codex doesn't say a limit is reached.
+- **Claude** otherwise, and whenever either side's usage isn't known. Unknown is never room.
+
+So where Claude's 80% hold would refuse or hold an auto task, it starts on Codex while Codex has room. A task pinned to
+`claude` holds as before. A start that lands on Codex is a Codex task from then on (`codexWorked`): a Claude verifier
+audits it before merge whatever its review says. Its `model` is Claude's, so a start on Codex runs Codex's own. The
+start's reply and its progress line say where it went and why, e.g. `auto → Codex: Claude weekly 64%, 12 points ahead
+of pace; Codex 40%`. Status shows Claude's limits and Codex's, each with its pace, and `Next auto task → codex|claude
+(why)`. Board says `worker: auto (now Codex)` while it runs.
+
+Codex's usage comes from its own session files: the newest `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`
+(`~/.codex` by default), the last `rate_limits` of a `token_count` event in its last 256 KB (`CodexUsage.swift`).
+That means the account's windows (`primary`, `secondary`: used %, length, reset) and its credits. Other limits in
+there (one model's, `premium`) are passed over. It's read only, kept for 30 s, and read again only when the file
+changes. A reading whose windows have all reset, a malformed one, or none at all is unknown. The thresholds are
+constants in one place, `UsageRouting`.
+
+Only workers are routed: the lead, planning, the risk check and verifiers stay on Claude whatever the quota. Mark
+bounded, mechanical tasks auto. Pin design-heavy or security work to `claude`.
 
 ## Review levels and audits
 
@@ -92,8 +179,16 @@ summary of the findings and answers so far.
 
 **Several finders.** With `audit_finders: 2` or `3`, an audit runs that many verifiers, each with its own focus
 (contract and acceptance; bugs and regressions; security or the tests). The audit builds and tests the commit once and
-hands every finder the logs. Findings most finders raised stay open; the rest show as **unconfirmed** and never block.
+hands every finder the logs. Findings most finders raised stay open; the rest show as **unconfirmed** and don't block
+unless `strict_paths` holds them (below).
 New Nits past `audit_nit_cap` (5) are left out and counted. Each finder counts against the Mac-wide session limit.
+
+**Strict paths.** `strict_paths` (globs, comma-separated, e.g. `src/signing/**, src/hardware/**`; set with
+`configure`; empty by default) makes every Important finding count on a branch that touches one: an unconfirmed one
+holds `merge` and auto_advance as an open one does, and goes back to the worker with the open ones. It holds until the
+lead dismisses it (`dismiss_finding`), makes it a task (`add_task(from_finding:)`), or a re-audit closes it, judging the
+worker's answer. The merge refusal, the audit's report, `status` and `board(task)` name each held finding and say
+`strict_paths` holds it. A branch that touches no strict path is as before.
 
 A verifier ends itself 20 seconds after it submits its verdict. The app ends every worker and verifier session of a
 task that merged, was folded, abandoned or cleaned up.
@@ -156,14 +251,69 @@ These are set once for the Mac, not per project, in Settings › General › Pro
 - **Team sessions** (`mac_max_sessions`): the most workers and verifiers of all projects together, 10 by default.
 - **Load** (`load_threshold`): the load above which leads start nothing, the greater of the 1- and 5-minute averages
   (so a dip of the 1-minute after a spike isn't room); empty means twice the cores.
+- **Test and build slots** (`heavySlots` in the file): the builds and full test runs at once, below. The cores ÷ 6,
+  rounded down, by default (2 on a 12-core Mac, the user's choice on 2026-11-01).
 
 The session host counts the live workers and verifiers of every project (the **census**), so every lead sees the same
 total. `start_worker` and `audit` refuse at either limit, and the lead gets one message once there's room again. A
 project's `workflow.md` lines for these two are ignored.
 
 **Heavy work.** Full test suites, release builds, merges and audits' test runs take a slot from `vs-heavy`, shared by
-every project on the Mac. There are `heavy_slots` of them: `VIBESWITCHER_HEAVY_SLOTS`, else the Mac's cores ÷ 4 (3 on a
-12-core Mac). A run that finds every slot held waits, naming who holds each.
+every project on the Mac. How many is one count, read the same way by `vs-heavy` and by the leads' merges and audits:
+`VIBESWITCHER_HEAVY_SLOTS` (a project's `heavy_slots` in workflow.md gives its sessions that), else the Settings value
+above (2 on a 12-core Mac); while Boost mode is on, raised to boost's (3), never lowered. A run that finds every slot
+held waits, naming who holds each. A slot assumes a job of about the cores ÷
+the slots, so each slot's command gets `VS_HEAVY_CORES`, its share of the cores (the cores ÷ the slots, rounded up, at
+least 2), and caps its own parallelism to it: `node --test --test-concurrency=$VS_HEAVY_CORES`, `make -j $VS_HEAVY_CORES`,
+and for SwiftPM `swift build -j 2 -Xswiftc -j$(( (VS_HEAVY_CORES + 1) / 2 ))` (see [Development](development.md)). The
+working policy's `vs-heavy` line tells every role so. Uncapped, a `node --test` run on ~9 cores and a Swift build beside
+it held the Mac at load 62 inside the lock (2026-11-01).
+
+**Boost.** Settings › Project lead › Boost is Off, On or Automatic (`Boost.swift`, `BoostWatch.swift`). While on, the
+Mac-wide limits are raised to the boost values, each editable: `load_threshold` 36, `mac_max_sessions` 18,
+`max_workers` 7 per project (a project's own when higher), test and build slots 3 (from Settings' 2 on a 12-core Mac,
+so `VS_HEAVY_CORES` goes from 6 to 4; for `vs-heavy` and the leads' merges and audits alike); projects whose `merge_batching` is `boost` batch their merges. Automatic boosts only while the Mac is on AC power and
+you're away (screen locked or no input for 5 minutes, as the notifications judge it) and drops back within one 10-second
+look when either changes: new starts stop above the normal limits and running work finishes. On battery it's off
+whatever the mode, unless **Also on battery** is on (off by default): then On and Automatic work on battery as on AC
+until the charge drops below 30 % (`Boost.batteryFloor`; a charge not known counts as below), and `status` says so:
+`boost: on (on in Settings, on battery (allowed, 86%))`, `boost: off (on in Settings, on battery at 24%: boost on
+battery stops below 30%)`. The away rule and the battery hold below still apply. The usage watch keeps it off at 70 % of an every-model account limit, and says so. The app keeps its decision
+in `~/.vibeswitcher/boost.json` (rewritten at least every minute; older than 150 s reads as off, so a quit app leaves
+the normal limits), and each lead's `status` says it: `boost: on (automatic: away, on AC): load_threshold 36, …`. While
+boosted, room freed on the Mac goes first to the project you last worked in: the witness wakes its refused starts first,
+and other projects' starts are held while the room left wouldn't fit it. A menu bar bolt shows while boost is on; its
+tooltip says why.
+
+## The account's usage limits
+
+Workers and verifiers spend the Claude account's usage, and a session that reaches a limit stops mid-task until it
+resets. VibeSwitcher reads what Claude Code exposes (`AccountUsage.swift`), best effort:
+
+- **The status line's input.** For a Claude.ai subscriber, after a session's first reply, Claude Code hands the status
+  line `rate_limits`: `five_hour` and `seven_day`, each with `used_percentage` (0–100) and `resets_at` (epoch seconds),
+  and `spend_limit` behind a gateway. These are the whole account's. The sessions VibeSwitcher starts (lead, workers,
+  verifiers) get its status line. It runs your own status line with the same input and prints its output byte for byte
+  first, then keeps the windows in `~/.vibeswitcher/account-usage.json`, so the line reads as yours, and nothing of
+  VibeSwitcher's that fails stops it from showing. Your status line is found as Claude Code layers its settings: the
+  project's `.claude/settings.local.json`, then its `.claude/settings.json`, then `~/.claude/settings.local.json`, then
+  `~/.claude/settings.json`. A verifier looks only at your user settings, since it runs with `--setting-sources user`
+  and the branch's project settings were written by a worker. Your own sessions are untouched. There's no per-model
+  percentage there.
+- **Transcripts** say nothing about usage until a request is refused. Then the API-error line carries `apiError`
+  (`usage_limit_reached`, or `model_requires_usage_credits` when only that model is out, as Fable was on 2026-11-01),
+  `rateLimitType` (`five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, `seven_day_overage_included`) and
+  `resetsAt`. A refusal counts as that limit at 100 % until its reset, for the session's model alone when the type
+  names a model or the model needs usage credits, else for every model.
+- Claude Code also reads per-window use from the API's response headers and shows `/usage` on its own screen, but
+  writes neither to a file. The OAuth usage endpoint would need the account's token from the Keychain, which
+  VibeSwitcher doesn't touch.
+
+At 80 % of a limit, `start_worker` and `audit` start nothing on the models that limit holds back (every model for the
+weekly and 5-hour limits) unless the lead passes `override_usage: true`. Sessions already running carry on.
+auto_advance skips those starts and audits and tells the lead once per limit, with the reset time. `status` shows each
+known limit, how much is used, when it resets and its pace (see [Auto routing](#auto-routing-agent-auto)). What isn't known (an API key, no status line run yet, a reading past
+its reset) means no back-off, never a stop.
 
 ## The battery hold
 
@@ -240,7 +390,7 @@ not edit that folder.
 
 `workflow.md` (in `.vibeswitcher/`, git-ignored) holds the limits and commands below. The lead changes it with its
 `configure` tool, which keeps your comments. The guard rails (the test and setup commands, `merge_policy`,
-`sensitive_paths`, `records_dir`, `max_workers`, `heavy_slots`, `audit_finders`, `audit_nit_cap`, `auto_advance`,
+`sensitive_paths`, `strict_paths`, `records_dir`, `max_workers`, `heavy_slots`, `audit_finders`, `audit_nit_cap`, `auto_advance`,
 `risk_lines`, `risk_model`; `Sources/VibeCore/LeadVaultGuarded.swift:11`)
 count only as the lead last set them: when the file says anything else, `merge` and `start_worker` refuse until the
 lead sets them again.
@@ -261,26 +411,28 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 | `max_workers` | 3 | `LeadWorkflow.swift:5` |
 | `task_budget_min` | 120 min (0: no budget) | `LeadBudget.swift:10` |
 | `test_timeout_min` | 45 min | `Worktrees.swift:1052` |
-| `audit_finders` | 1 (at most 3) | `LeadWorkflow.swift:38`, `:137` |
+| `audit_finders` | 1 (at most 3) | `LeadWorkflow.swift:38`, `:142` |
 | `audit_nit_cap` | 5 | `LeadWorkflow.swift:40` |
 | `risk_lines` | 400 | `LeadRisk.swift:23` |
-| `risk_model` | true (a model pass may also raise a task to audit) | `LeadWorkflow.swift:57` |
-| `auto_advance` | true | `LeadWorkflow.swift:52` |
+| `risk_model` | true (a model pass may also raise a task to audit) | `LeadWorkflow.swift:61` |
+| `auto_advance` | true | `LeadWorkflow.swift:56` |
 | `merge_policy` | unset: handled as `ask_sensitive` | `LeadWorkflow.swift:41-42` |
-| `sensitive_paths` | the list above | `LeadWorkflow.swift:189` |
-| `records_dir` | `docs/lead` | `LeadWorkflow.swift:134` |
+| `sensitive_paths` | the list above | `LeadWorkflow.swift:194` |
+| `strict_paths` | none | `LeadWorkflow.swift:49` |
+| `records_dir` | `docs/lead` | `LeadWorkflow.swift:139` |
 | `disk_warning_gb`, `disk_floor_gb` | 10 GB, 3 GB | `LeadWorkflow.swift:23-24` |
-| `watch_app_logs` | false | `LeadWorkflow.swift:60` |
+| `watch_app_logs` | false | `LeadWorkflow.swift:64` |
 | Audit round cap | 2 rounds | `LeadBoard.swift:300` |
-| Flake limit | 3 flakes of one test in 7 days | `LeadBoard.swift:1065-1066` |
+| Flake limit | 3 flakes of one test in 7 days | `LeadBoard.swift:1072-1073` |
 | Merge reruns | once, up to 20 named tests | `MergeRerun.swift` |
-| Question timer (`decide_in`) | 10 min | `LeadBoard.swift:770` |
+| Question timer (`decide_in`) | 10 min | `LeadBoard.swift:777` |
 | Board archive age | 24 h; at most hourly | `LeadBoardArchive.swift:43`, `:45` |
 | `mac_max_sessions` | 10 | `MacLoad.swift:112` |
 | `load_threshold` | 2 × cores | `MacLoad.swift:119-133` |
-| `heavy_slots` | `VIBESWITCHER_HEAVY_SLOTS`, else cores ÷ 4 | `TestLock.swift:85-89` |
+| `heavy_slots` | `VIBESWITCHER_HEAVY_SLOTS`, else Settings' (cores ÷ 6 unset); raised to boost's while on | `TestLock.slotCount`, `MacLimits.heavySlotsInForce` |
 | `vs-heavy` timeout | 60 min | `Resources/bin/vs-heavy` |
 | Battery hold | below 50 % on battery | `PowerSource.swift:74` |
+| Usage back-off | 80 % of a limit on the model | `AccountUsage.swift` |
 | Stall: silent, idle, compacted | 15, 10, 5 min | `LeadStall.swift:44-46` |
 | Verifier ends after its verdict | 20 s | `Sources/VibeHost/HostServer.swift:83` |
 | Records commit | after each merge, at most every 5 min | `LeadRecords.swift:65` |

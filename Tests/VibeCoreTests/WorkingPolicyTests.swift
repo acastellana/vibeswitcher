@@ -75,6 +75,36 @@ struct WorkingPolicyTests: LeadTeamFixture {
         }
     }
 
+    /// The boost release (2026-11-01): the worst load spikes came from heavy jobs outside the Mac-wide slots (an
+    /// hour-long Stryker run, VMs, simulations). Every lead, worker and verifier gets the rule in its policy section,
+    /// whatever the user's own policy says, and workers and verifiers in their heavy-work brief.
+    @Test func everyRoleIsToldLongOrManyCoreJobsRunUnderVsHeavy() {
+        let workflow = LeadWorkflow.parse("---\ntest_command: npm test\n---")
+        let root = "/Users/someone/dev/wallet-manager"
+        let prompts = [
+            ("lead", LeadPrompts.lead(project: "wallet-manager", root: root, workflow: workflow, policy: Self.custom)),
+            ("worker", LeadPrompts.worker(task: Self.task, root: root, workflow: workflow, policy: Self.custom)),
+            ("verifier", LeadPrompts.verifier(task: Self.task, root: root, workflow: workflow, policy: Self.custom)),
+        ]
+        for (role, prompt) in prompts {
+            #expect(prompt.contains(WorkingPolicy.heavyJobs), "\(role)")
+            #expect(prompt.contains(Self.custom + "\n" + WorkingPolicy.heavyJobs), "\(role)")
+        }
+        for words in ["Long or many-core jobs", "mutation testing", "fuzzing", "VMs", "load", "perf runs", "`vs-heavy",
+                      "`$VS_HEAVY_CORES`", "`swift build -j 2 -Xswiftc -j$(( (VS_HEAVY_CORES + 1) / 2 ))`",
+                      "`node --test --test-concurrency=$VS_HEAVY_CORES`",
+                      "`make -j $VS_HEAVY_CORES`"] {
+            #expect(WorkingPolicy.heavyJobs.contains(words), "\(words)")
+            #expect(WorkingPolicy.witnessText(Self.custom).contains(WorkingPolicy.heavyJobs))
+        }
+        for words in ["mutation testing", "fuzzing", "VMs", "load, simulation and perf runs", "goes under it too"] {
+            #expect(LeadPrompts.heavyWork.contains(words), "\(words)")
+        }
+        // A build that changes the rule tells the running leads once, as a changed policy is.
+        #expect(WorkingPolicy.digest(Self.custom) != WorkingPolicy.digest(Self.custom + "\n"))
+        #expect(!WorkingPolicy.digest(Self.custom).isEmpty)
+    }
+
     // MARK: The witness
 
     func watch(_ policy: Locked<String>) -> LeadWitness.PolicyWatch {
@@ -99,7 +129,8 @@ struct WorkingPolicyTests: LeadTeamFixture {
         policy.set(Self.custom)
         let changed = watch.look(running: ["project-c-lead", "tge-lead", "films-lead"])
         #expect(changed?.leads == ["project-c-lead", "tge-lead", "films-lead"])
-        #expect(changed?.text.hasSuffix(Self.custom) == true)
+        // The new text, then the rule every role gets after it (`WorkingPolicy.heavyJobs`).
+        #expect(changed?.text.hasSuffix(Self.custom + "\n" + WorkingPolicy.heavyJobs) == true)
         #expect(watch.look(running: ["project-c-lead", "tge-lead", "films-lead"]) == nil)
         // A lead whose prompt had the old one (prepared before the change) is told the new one.
         watch.started("late-lead", with: WorkingPolicy.defaultText)

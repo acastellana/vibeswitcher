@@ -173,28 +173,58 @@ struct LaunchPreflightTests {
 
     /// The login shell runs in a session of its own (no controlling terminal): an interactive zsh started from the tool
     /// server, which has the lead's terminal, would otherwise be stopped by SIGTTOU taking it, and read as not known.
-    /// The fake shell says its pid and waits for the test to look at its session.
-    @Test func theLoginShellRunsInASessionOfItsOwn() async throws {
+    /// The fake shell says its pid and waits for the test to look at its session (until `go`, or its folder is gone).
+    /// `resolve` blocks, so it runs on a thread of its own, not the shared pool a loaded full run can leave it no thread
+    /// on. Whatever happens, `go` is made and the answer waited for (`resolve` ends the shell's group at its timeout),
+    /// and a shell still there after that is killed with its group: a failed check leaves nothing looping.
+    @Test func theLoginShellRunsInASessionOfItsOwn() throws {
         let folder = scratch.url("own-session").path
         let (pidFile, go) = (folder + "/pid", folder + "/go")
         let shell = folder + "/fakesh"
         try script(shell, """
             echo $$ > '\(pidFile).tmp' && mv '\(pidFile).tmp' '\(pidFile)'
-            while [ ! -e '\(go)' ]; do sleep 0.05; done
+            while [ ! -e '\(go)' ] && [ -d '\(folder)' ]; do sleep 0.05; done
             shift 2
             exec /bin/sh "$@"
             """)
-        let answer = Task.detached { LoginShellCommand.resolve("sh", shell: shell, timeout: Self.budget) }
+        // Ceilings, not waits: the pid file or the answer ends each. The shell is given longer than the look at it.
+        let (lookBudget, shellBudget): (TimeInterval, TimeInterval) = (300, 330)
+        let answer = Answer()
+        Thread.detachNewThread { answer.give(LoginShellCommand.resolve("sh", shell: shell, timeout: shellBudget)) }
         var pid: Int32?
-        let deadline = Date().addingTimeInterval(Self.budget)
-        while pid == nil, Date() < deadline {
-            pid = (try? String(contentsOfFile: pidFile, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-            if pid == nil { try await Task.sleep(nanoseconds: 20_000_000) }
+        defer {
+            FileManager.default.createFile(atPath: go, contents: nil)
+            if answer.wait(shellBudget + 10) == nil, let pid { kill(-pid, SIGKILL) }
         }
-        let shellPid = try #require(pid)
+        // Until the pid file, or an answer without it (the shell couldn't start).
+        let said = { (try? String(contentsOfFile: pidFile, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) } }
+        let deadline = Date().addingTimeInterval(lookBudget)
+        while pid == nil, Date() < deadline {
+            pid = said()
+            if pid == nil, answer.wait(0.02) != nil { pid = said(); break }
+        }
+        let shellPid = try #require(pid, "no pid from the fake shell; resolve said \(String(describing: answer.wait(0)))")
         #expect(getsid(shellPid) == shellPid, "the login shell shares the caller's session (\(getsid(shellPid)), the caller's \(getsid(0)))")
         FileManager.default.createFile(atPath: go, contents: nil)
-        #expect(await answer.value == .found("/bin/sh"))
+        #expect(answer.wait(shellBudget + 10) == .found("/bin/sh"))
+    }
+
+    /// `LoginShellCommand.resolve`'s answer, given once from its thread and waited for any number of times.
+    final class Answer: @unchecked Sendable {
+        private let lock = NSLock()
+        private let given = DispatchSemaphore(value: 0)
+        private var outcome: LoginShellCommand.Outcome?
+        func give(_ outcome: LoginShellCommand.Outcome) {
+            lock.lock(); self.outcome = outcome; lock.unlock()
+            given.signal()
+        }
+        /// nil when there's none within `seconds`.
+        func wait(_ seconds: TimeInterval) -> LoginShellCommand.Outcome? {
+            guard given.wait(timeout: .now() + seconds) == .success else { return nil }
+            given.signal()
+            lock.lock(); defer { lock.unlock() }
+            return outcome
+        }
     }
 
     @Test func theLoginShellsAnswerIsRead() {

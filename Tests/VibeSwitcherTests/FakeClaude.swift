@@ -25,7 +25,8 @@ enum FakeClaude {
 # does it draw its caret and level cursor), "processing" (seconds a recording takes to process once it ends: a
 # Space then is typed, and it drops what it heard if the box changed meanwhile, as 2.1.312's input_diverged), "stuck" (a
 # recording goes on after the Spaces stop, until Esc), "loud" (its level cursor coloured though no words show)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
-# "processed" (the recording being processed is done now, whatever "processing" said) |
+# "processed" (the recording being processed is done now, whatever "processing" said) | "print" (the bytes of "file"
+# written on its terminal, as a command's output) |
 # "exit" (it quits, as /exit)).
 # Its /voice keeps Claude Code 2.1.312's timings: a repeat chain breaks 120 ms after the last Space (the key let go),
 # 5 repeats start recording, and a second push of the key within 300 ms of a transcript going in sends it. A held
@@ -93,12 +94,14 @@ state = {
     "voiceStarts": 0,        # recordings started
     "voiceCancels": 0,       # recordings cancelled (Esc)
     "voiceInserts": 0,       # transcripts written into the box
+    "strayed": 0,            # spaces typed by held chains that broke before recording (a stall past "gap"): they stay
     "killed": 0,             # ⌃U taken
 }
 # "awaiting": a transcript went in and a second push of the key would send it (2.1.312's awaitingVoiceSubmitDoubleTap);
-# "push": when the first push came; "submitAt": when an armed send fires (120 ms after the second push).
+# "push": when the first push came; "submitAt": when an armed send fires (120 ms after the second push); "typed": the
+# spaces the chain going now typed (its first two presses).
 VOICE = {"before": "", "last": 0.0, "repeats": 0, "awaiting": False, "push": 0.0, "submitAt": None,
-         "until": 0.0, "box": "", "processed": 0}
+         "until": 0.0, "box": "", "processed": 0, "typed": 0}
 METER = ESC + "[38;2;215;119;87m" + "▃" + ESC + "[39m"   # its recording-level cursor: a coloured bar, not dim
 QUIET = ESC + "[38;2;128;128;128m" + "▁" + ESC + "[39m"  # the same below a low level: grey
 CARET = ESC + "[7m" + " " + ESC + "[27m"                  # a focused terminal's caret at the box's end
@@ -280,9 +283,14 @@ def draw_permission():
     lines = ["⏺ Bash(" + p["command"] + ")", "╭" + "─" * 58 + "╮", "│ Bash command", "│", "│   " + p["command"], "│",
              "│ Do you want to proceed?"]
     for index, label in enumerate(p["options"]):
+        if index == 2 and p["amend"]:
+            # 2.1.316's No row with its text field open, drawn after its label (the Bash prompt's inlineDescriptions
+            # make its Select pass showLabel): "No, " and the text typed, or the placeholder while there's none and
+            # the cursor is on it.
+            label = "No, " + (p["feedback"] or ("and tell Claude what to do differently" if p["focus"] == 2 else ""))
         lines.append("│ " + ("❯ " if p["focus"] == index else "  ") + "%d. %s" % (index + 1, label))
     lines.append("╰" + "─" * 58 + "╯")
-    lines.append("Esc to cancel")
+    lines.append("Esc to cancel · Tab to amend" if p["v316"] else "Esc to cancel")
     return lines
 
 
@@ -368,6 +376,10 @@ def voice_space():
     if t - VOICE["last"] <= state["gap"] and state["recording"] in ("", "warming") and VOICE["repeats"] >= 0:
         VOICE["repeats"] += 1
     else:
+        # A new chain. The spaces the last one typed stay in the box if it broke before recording (a stall past `gap`
+        # between two repeats, as on a loaded Mac): a recording takes out only its own chain's.
+        state["strayed"] += VOICE["typed"]
+        VOICE["typed"] = 0
         VOICE["repeats"] = 0
         VOICE["before"] = state["input"]
     VOICE["last"] = t
@@ -379,6 +391,7 @@ def voice_space():
             return False
         # The warmup's spaces go; it records.
         state["input"] = VOICE["before"]
+        VOICE["typed"] = 0
         state["recording"] = "listening"
         VOICE["awaiting"] = False
         VOICE["submitAt"] = None
@@ -388,7 +401,10 @@ def voice_space():
     if VOICE["repeats"] >= 1:
         state["recording"] = "warming"
     # Its first two presses are typed; the later repeats are swallowed.
-    return VOICE["repeats"] >= 2
+    if VOICE["repeats"] < 2:
+        VOICE["typed"] += 1
+        return False
+    return True
 
 
 def finish_recording(submit=False):
@@ -627,13 +643,15 @@ def question_key(key):
                 answer_single(label)
 
 
-def open_permission(command):
+def open_permission(command, ui=None, plain_no=False):
     global permission
     tool = "toolu_" + uuid.uuid4().hex[:20]
     record({"type": "assistant", "message": {"role": "assistant", "content": [
         {"type": "tool_use", "id": tool, "name": "Bash", "input": {"command": command}}]}})
-    permission = {"command": command, "tool": tool, "focus": 0,
-                  "options": ["Yes", "Yes, and don't ask again for this command", "No, and tell Claude what to do differently (esc)"]}
+    v316 = ui == "2.1.316"
+    permission = {"command": command, "tool": tool, "focus": 0, "feedback": "", "amend": False, "v316": v316, "plainNo": plain_no,
+                  "options": ["Yes", "Yes, and don't ask again for this command",
+                              "No" if v316 else "No, and tell Claude what to do differently (esc)"]}
     state["mode"] = "permission"
 
 
@@ -641,6 +659,23 @@ def permission_key(key):
     global permission
     p = permission
     choice = None
+    # With ui "2.1.316", the No row as Claude Code 2.1.316 has it: a plain "No" (letters are the menu's keys: j and k
+    # move the cursor) until Tab, with the cursor on it, opens its text field ("amend": an input option, placeholder
+    # "and tell Claude what to do differently"); then every key but the arrows, Tab, Enter and Esc is typed there,
+    # leaving the row with nothing typed closes it again, and Enter declines with the text typed as the reason.
+    # With "plainNo" too, Tab doesn't open it (a No row that takes no reason).
+    if p["amend"] and p["focus"] == 2:
+        if len(key) == 1 or key in ("backspace", "space"):
+            p["feedback"] = p["feedback"][:-1] if key == "backspace" else p["feedback"] + (" " if key == "space" else key)
+            return
+        if key == "tab" or (key in ("up", "down") and not p["feedback"].strip()):
+            p["amend"] = False
+        if key == "tab":
+            return
+    elif key == "tab":
+        if p["v316"] and p["focus"] == 2 and not p["plainNo"]:
+            p["amend"] = True
+        return
     if key in ("up", "k"):
         p["focus"] = max(0, p["focus"] - 1)
     elif key in ("down", "j"):
@@ -653,7 +688,15 @@ def permission_key(key):
         choice = 2
     if choice is None:
         return
-    if choice == 2:
+    if choice == 2 and p["feedback"] and key == "enter":
+        # Declined with a reason: the turn goes on with it.
+        record({"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": p["tool"], "is_error": True,
+             "content": "The user doesn't want to proceed with this tool use. The tool use was rejected. To tell you how to proceed, the user said:\n" + p["feedback"]}]}})
+        state["mode"] = "working"
+        state["reply"] = "Denied: " + p["feedback"]
+        state["declined"] = p["feedback"]
+    elif choice == 2:
         record({"type": "user", "message": {"role": "user", "content": [
             {"type": "tool_result", "tool_use_id": p["tool"], "is_error": True,
              "content": "The user doesn't want to proceed with this tool use. The tool use was rejected."}]}})
@@ -725,6 +768,9 @@ def key(name):
             state["recording"] = ""
             state["voiceCancels"] += 1
             return
+        if name != "space":
+            # Another key: a chain's spaces typed before it aren't a held Space's strays.
+            VOICE["typed"] = 0
         if name == "space" and voice_space():
             return
         if name not in ("up", "down"):
@@ -885,7 +931,7 @@ def control():
         if op == "ask":
             open_question(command["questions"])
         elif op == "permission":
-            open_permission(command["command"])
+            open_permission(command["command"], command.get("ui"), command.get("plainNo", False))
         elif op == "work":
             state["mode"] = "working"
         elif op == "take":
@@ -929,6 +975,13 @@ def control():
             if "focusEvents" in command:
                 state["focusEvents"] = command["focusEvents"]
                 out(ESC + ("[?1004h" if command["focusEvents"] else "[?1004l"))
+        elif op == "print":
+            # A command's output printed on its terminal (the soak's worker: a build's and a test run's).
+            with open(command["file"], "rb") as f:
+                data = f.read()
+            while data:
+                data = data[os.write(1, data):]
+            draw()
         elif op == "freeze":
             state["frozen"] = True
         elif op == "thaw":

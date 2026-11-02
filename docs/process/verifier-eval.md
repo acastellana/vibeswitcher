@@ -98,3 +98,30 @@ Bugs found: 2 of 3 by place, 1 of 3 by substance and as Important. False alarms:
 in total, cost $11.46. The other nine cases have resolved in a dry run (`--all --dry-run`: 12 of 12) but haven't
 been scored. Before this branch, a-fix-s-regression scored 3 of 3 with the checklist and 0 of 3 without
 (security-checklist-for).
+
+### 2026-11-01, --all (verifiers-don-t-run): 12 of 12 cases, checklist auto, model fable
+
+The first full run, scoring the prompt in which a single verifier no longer runs the full suite of its own (merge's
+run is the one), except on a branch touching shared test or build infrastructure; it names the lint tests instead.
+The eval's clones have no test_command, so the prompt said the "no test_command" form of that rule.
+
+| Case | Score | Cost | What the findings say |
+|---|---|---|---|
+| a-fix-s-regression | 3 of 3 found, 1 by an Important finding | $3.78, 9.5 min | F2 (:69) as Important; F1 (:81) and F3 (:76) by Nits. |
+| a-slash-command-that | 0 of 1 found | $4.17, 7.4 min | Missed: nothing at ChatSync.swift:199 (its one Important is elsewhere). |
+| the-briefing-uses | 1 of 1 found | $3.82, 9.8 min | Found by a Nit at SettingsWindow.swift:540. |
+| ending-a-session-ends | 2 of 3 found, 1 by an Important finding | $5.86, 38.6 min | F1 (:62) as Important, F2 (:65) by a Nit; F3 (the bareword `setsid`, :34) missed. |
+| memory-the-host-parser | 1 of 1 found, as Important | $5.52, 13.2 min | Found as Important at HostedSession.swift:634. |
+| lead-record-commits | 0 of 1 found | $2.90, 6.3 min | Missed: nothing at Worktrees.swift:789 or :600. |
+| a-base-branch-the | 1 of 2 found, 1 by an Important finding | $4.86, 10.1 min | F1 (the PrivateWriteLint failure) as Important at LeadBaseMoves.swift:353, with no full suite run; F2 missed (in substance, as before). |
+| finished-work-lands | 0 of 1 found | $5.36, 11.0 min | Missed: nothing at LeadAdvance.swift:307 or :312. |
+| steadier-merge-gate | 0 of 1 found | $3.28, 9.5 min | Missed, as before. |
+| the-lead-s-rules | clean, 0 Important | $3.36, 10.8 min | No false alarm. |
+| the-phone-shows-needs | clean, 0 Important | $1.65, 7.3 min | No false alarm. |
+| every-task-gets-a | clean, 0 Important | $5.26, 10.4 min | No false alarm: 7 Nits. |
+
+Bugs found: 8 of 14 by place (4 as Important) in 9 bug cases. False alarms: 0 Important findings on 3 clean cases.
+Tokens 28.9 M in total, cost $49.81, 144 min. Against the last summary: no case caught before is missed now.
+a-base-branch-the's F1 is still found as Important, now through the lints instead of a full run; its F2, matched
+only by place before and missed in substance, is missed; steadier-merge-gate 0 of 1 and the-phone-shows-needs clean,
+as before; a-fix-s-regression 3 of 3, as with the checklist before.

@@ -31,21 +31,35 @@ public enum WorkingPolicy {
         try VibePaths.writePrivate(Data(((trimmed.isEmpty ? defaultText : trimmed) + "\n").utf8), to: file)
     }
 
+    /// The rule every role gets after the user's policy, whatever it says: CPU-heavy work outside the Mac-wide slots made
+    /// the worst load spikes (2026-10-31: load 72–193, an hour-long Stryker run with up to 14 node processes, another
+    /// project's VMs and simulations), and VibeSwitcher tells a lead of one (see `HeavyJobs`).
+    /// A slot is one job's room, not the whole Mac (2026-11-01: a merge's swift-frontend at ~900 % CPU and two node --test
+    /// runs at about 9 cores each, all inside the slots, made load 62–84): the job sizes itself to `VS_HEAVY_CORES`.
+    public static let heavyJobs = "- Long or many-core jobs (full suites, release builds, mutation testing, fuzzing, VMs, load, "
+        + "simulation and perf runs) run under `vs-heavy` (`vs-heavy --timeout 2h <command>` for one over an hour), never bare: "
+        + "it holds one of the Mac-wide slots every project's work shares. Size the job to the slot's share of the cores, "
+        + "which it exports as `$VS_HEAVY_CORES`: `node --test --test-concurrency=$VS_HEAVY_CORES`, `make -j $VS_HEAVY_CORES`, "
+        + "a test runner's worker count; SwiftPM's `-j N` runs N modules with N compiles each, so "
+        + "`swift build -j 2 -Xswiftc -j$(( (VS_HEAVY_CORES + 1) / 2 ))` (swift test too)."
+
     /// The policy as each role's prompt has it.
     public static func section(_ text: String) -> String {
         "The user's working policy (for every project; VibeSwitcher's Settings › Project lead). Follow it; where the rest of "
-            + "these instructions say more, they say how:\n" + text
+            + "these instructions say more, they say how:\n" + text + "\n" + heavyJobs
     }
 
     /// What the witness tells a running lead: the policy, and to apply it from now on.
     public static func witnessText(_ text: String) -> String {
         "The user's working policy for every project, as it is now (VibeSwitcher's Settings › Project lead). Apply it from now "
             + "on in how you plan, delegate, review and merge. Workers and verifiers you start get it in their prompts; tell the "
-            + "ones running now what concerns their task.\n\n" + text
+            + "ones running now what concerns their task.\n\n" + text + "\n" + heavyJobs
     }
 
+    /// What the leads were told, by digest: the user's text with the rule after it (`heavyJobs`), so a build that changes
+    /// the rule tells the leads running then once, as a changed policy is.
     static func digest(_ text: String) -> String {
-        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: Data((text + "\n" + heavyJobs).utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }
 

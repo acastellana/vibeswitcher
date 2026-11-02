@@ -23,6 +23,7 @@ vs-heavy bash scripts/test.sh                       # full suite, only when aske
 bash scripts/test.sh --filter 'AccessibilityLint|DebugAidsLint|HomePathLint|KeychainLint|PreferencesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
 scripts/test-under-load.sh --load 24 -r 3 -f 'NewTests'   # new or changed tests, under load, before reporting done
 bash scripts/test.sh --perf                         # benches, only on a calm Mac
+bash scripts/e2e/wallet-e2e.sh                      # on demand: sandbox → loop passage → ~/dev/wallet-manager and back, 5 cases
 ```
 
 UI changes: show them in the sandbox, each step its own command: `bash scripts/sandbox-app.sh run`, then
@@ -33,4 +34,6 @@ A new sheet goes in the sheet list in `Sources/VibeSwitcher/Sandbox.swift`.
 ## Practices
 
 - A test waits on the event it checks (a file, a reply, a semaphore, an injected clock), never on a fixed sleep.
+- Long or many-core jobs (full suites, release builds, mutation testing, fuzzing, VMs, load and perf runs) run under
+  `vs-heavy`, never bare: VibeSwitcher tells the lead of one that holds several cores for minutes outside it.
 - `docs/lead/` is the lead's record: only the lead edits it.

@@ -279,7 +279,7 @@ final class HostClient: ObservableObject {
     }
 
     /// Detached (own session, not our child for signals), stdout/stderr appended to host.log. Its pid.
-    private func startHost() throws -> pid_t {
+    func startHost() throws -> pid_t {
         let path = hostPath ?? Self.hostExecutable.path
         guard FileManager.default.isExecutableFile(atPath: path) else {
             throw HostClientError(message: "vibeswitcher-host is missing from the app")
@@ -311,14 +311,35 @@ final class HostClient: ObservableObject {
         guard result == 0 else { throw HostClientError(message: String(cString: strerror(result))) }
         // Reap it when it exits (idle exit or replacement) so it doesn't linger as a zombie.
         let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
-        source.setEventHandler { [weak self] in
-            var status: Int32 = 0
-            waitpid(pid, &status, WNOHANG)
-            self?.hostProcesses.removeValue(forKey: pid)?.cancel()
-        }
+        source.setEventHandler { [weak self] in self?.hostExited(pid) }
         source.resume()
         hostProcesses[pid] = source
         return pid
+    }
+
+    /// A test's look at a host this client started being reaped (by its exit event or `stillRuns`).
+    var onHostReaped: ((pid_t) -> Void)?
+
+    /// The looks again at a host whose exit event came before it could be reaped (see `hostExited`): soon, then less
+    /// often, the last repeated until it's reaped.
+    static let hostReapDelays: [TimeInterval] = [0.05, 0.2, 1, 5]
+
+    /// The exit source's event for `pid`, a host this client started: it ended. The kernel posts the event a moment
+    /// before the process can be reaped, and under load `waitpid` can find it still exiting (as HostedSession's
+    /// `exitEvent` finds its program): then it's looked at again (`hostReapDelays`), its source kept, rather than let go
+    /// of as a zombie for the app's life. The source doesn't fire again: an exit is posted once.
+    func hostExited(_ pid: pid_t, looks: Int = 0) {
+        // Reaped already: by `stillRuns`, or an earlier look (the event and a look can both be on their way).
+        guard hostProcesses[pid] != nil else { return }
+        var status: Int32 = 0
+        let reaped = waitpid(pid, &status, WNOHANG)
+        if reaped == 0 || (reaped < 0 && errno == EINTR) {
+            let delay = Self.hostReapDelays[min(looks, Self.hostReapDelays.count - 1)]
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.hostExited(pid, looks: looks + 1) }
+            return
+        }
+        if reaped == pid { onHostReaped?(pid) }
+        hostProcesses.removeValue(forKey: pid)?.cancel()
     }
 
     /// Whether `pid`, a host this client started, still runs: reaped here once it ended (one that ended before its
@@ -328,6 +349,7 @@ final class HostClient: ObservableObject {
         var status: Int32 = 0
         let reaped = waitpid(pid, &status, WNOHANG)
         if reaped == 0 || (reaped < 0 && errno == EINTR) { return true }
+        if reaped == pid { onHostReaped?(pid) }
         hostProcesses.removeValue(forKey: pid)?.cancel()
         return false
     }

@@ -225,12 +225,15 @@ final class AppHealthWatcher: @unchecked Sendable {
 
     /// The app's own footprint now and its peak (`task_vm_info` of this process), against the footprint it settled at
     /// (`AppHealth.Settling`: read once a minute, off the main thread, in the hour after this reader was made at launch).
-    static func memoryReader(footprint: @escaping @Sendable () -> (now: Double, peak: Double)? = { ownFootprint() }) -> () -> AppHealth.Memory? {
+    /// `relief`: the last footprint relief's before and after (`FootprintRelief.last`).
+    static func memoryReader(footprint: @escaping @Sendable () -> (now: Double, peak: Double)? = { ownFootprint() },
+                             relief: @escaping () -> AppHealth.Memory.Relief? = { nil }) -> () -> AppHealth.Memory? {
         let settling = Settling(launched: Date(), footprint: footprint)
         settling.start()
         return {
             guard let reading = footprint() else { return nil }
-            return AppHealth.Memory(footprint: reading.now, peak: reading.peak, settled: settling.settled, launched: settling.launched)
+            return AppHealth.Memory(footprint: reading.now, peak: reading.peak, settled: settling.settled, launched: settling.launched,
+                                    relief: relief())
         }
     }
 

@@ -10,6 +10,18 @@ extension View {
     /// VoiceOver still reaches and presses it (it's an accessibility button); the keyboard goes to the composer, the
     /// answer card and the Team panel instead of through every row.
     func chatRowControl() -> some View { focusable(false) }
+
+    /// A row's disclosure line as one element that says what the line says, pressed as the line is. Left to the button,
+    /// SwiftUI combines its label's texts and marks into the element's label on every update while an accessibility
+    /// client watches (`AccessibilityChildBehavior.Combine`, `AccessibilityCore.textsResolvedToAttributedText`: the chat's
+    /// hosting view had 81% of the accessibility samples in the hang reports of 2026-10-30/31 whose verdict was work,
+    /// scripts/hang-accessibility.py).
+    func chatRowButton(_ label: String, toggle: @escaping () -> Void) -> some View {
+        accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default, toggle)
+    }
 }
 
 /// A run of tool calls between two messages: one summary line (and any screenshots), opening to each tool.
@@ -53,6 +65,9 @@ struct ToolGroupView: View {
             }
             .buttonStyle(.plain)
             .chatRowControl()
+            .chatRowButton(Self.spoken(tools, duration: totalDuration)) {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { chat.toggle(id) }
+            }
             if !images.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -68,6 +83,17 @@ struct ToolGroupView: View {
                 .overlay(alignment: .leading) { Rectangle().fill(Color.secondary.opacity(0.2)).frame(width: 1) }
             }
         }
+    }
+
+    /// What VoiceOver says of the summary line: what its texts say ("3 commands, 2s").
+    static func spoken(_ tools: [ChatTool], duration: TimeInterval?) -> String {
+        ([ChatTimeline.summary(tools)] + (duration.map { $0 >= 1 ? [Durations.short($0)] : [] } ?? [])).joined(separator: ", ")
+    }
+
+    /// What VoiceOver says of a tool's line: "Failed, git status, 2s".
+    static func spokenTool(_ tool: ChatTool) -> String {
+        ((tool.result?.failed == true ? ["Failed"] : []) + [tool.title] + (tool.duration.map { $0 >= 1 ? [Durations.short($0)] : [] } ?? []))
+            .joined(separator: ", ")
     }
 
     private var totalDuration: TimeInterval? {
@@ -123,6 +149,7 @@ struct ToolRowView: View {
             }
             .buttonStyle(.plain)
             .chatRowControl()
+            .chatRowButton(ToolGroupView.spokenTool(tool)) { chat.toggle(tool.id) }
             if open {
                 ToolDetailView(tool: tool).padding(.leading, 23).padding(.bottom, 8)
             }

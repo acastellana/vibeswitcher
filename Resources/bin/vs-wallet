@@ -1,0 +1,9 @@
+#!/bin/bash
+# vs-wallet request --workspace NAME --from WALLET --chain ID --to ADDRESS --amount BASE_UNITS --reason TEXT [...]:
+# files a transaction request from this session (vs-wallet help says every option). VibeSwitcher puts it on PATH in
+# every session it starts (the app bundle's Contents/Resources/bin, as vs-heavy). The request shows as a card in the
+# session's chat; nothing goes to the Wallet Manager until the user presses Send to Wallet Manager there, and the
+# Wallet Manager's answers come back to the session as messages. It runs the app's tool server binary in its filing mode (`WalletAsk` in VibeCore),
+# which checks the request with the Wallet Manager's own parser and refuses what the format doesn't take.
+here="$(cd "$(dirname "$0")" && pwd)"
+exec "$here/../../MacOS/vibeswitcher-mcp" --wallet-request "$@"

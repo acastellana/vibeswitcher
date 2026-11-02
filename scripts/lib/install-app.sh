@@ -10,10 +10,16 @@
 # running process, and `open` only activated it. A quit Apple Event (what ⌘Q and osascript send) got it to quit at
 # once. So: ask with the Apple Event first, SIGTERM only as a fallback, and never carry on over a process still up.
 #
+# 2026-10-31: run from a sandboxed shell (`! scripts/build-app.sh --install` in a Claude Code session), `pgrep -x` saw no
+# process at all while ps listed the app, so the script said "VibeSwitcher isn't running", removed and replaced the
+# bundle under the live app, and `open` only brought the old process forward. So the app is found with ps (setuid, it
+# reads the process list where pgrep can't), by its executable inside DEST_APP rather than by name, and a process list
+# that can't be read stops the install before anything is copied.
+#
 # Its parts are injectable so a test can drive it against a scratch stand-in instead of the user's app:
 #
 # scripts/lib/install-app.sh SOURCE_APP DEST_APP
-#   VS_INSTALL_PROCESS  the app's process name, as pgrep -x sees it (VibeSwitcher)
+#   VS_INSTALL_PROCESS  the app's executable name, DEST_APP/Contents/MacOS/<name> (VibeSwitcher)
 #   VS_INSTALL_QUIT     the command that asks it to quit, run as `bash -c "$VS_INSTALL_QUIT" quit PID…` (osascript's
 #                       quit Apple Event to the app by name)
 #   VS_INSTALL_LAUNCH   the command that launches DEST_APP, run as `bash -c "$VS_INSTALL_LAUNCH" launch DEST_APP` (open)
@@ -27,8 +33,23 @@ launch=${VS_INSTALL_LAUNCH:-open "\$1"}
 wait_s=${VS_INSTALL_WAIT:-10}
 export LC_ALL=C
 
-# The pids of the app's processes, space separated ("" when none).
-running() { pgrep -x "$name" 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || true; }
+# The app's executable, as ps shows it (the path it was started by, with any // squeezed), and its path with the
+# symlinks above DEST_APP resolved: either is the app.
+exe="$dest/Contents/MacOS/$name"
+exe_real=$( (cd "$(dirname "$dest")" 2>/dev/null && pwd -P) || true)
+exe_real=${exe_real:+$exe_real/$(basename "$dest")/Contents/MacOS/$name}
+# The pids of the app's processes, space separated ("" when none): those whose executable is $exe, and those ps shows
+# by the bare name (it couldn't read their path, so they may be the app). 1 when the process list can't be read: then
+# nothing can say the app isn't running.
+running() {
+    local list
+    list=$(ps -Ao pid=,comm= 2>/dev/null) && [[ -n $list ]] || return 1
+    awk -v exe="$exe" -v real="$exe_real" -v name="$name" '
+        function squeeze(p) { while (index(p, "//")) sub("//", "/", p); return p }
+        { pid = $1; comm = $0; sub(/^ *[0-9]+ +/, "", comm); comm = squeeze(comm)
+          if (comm == squeeze(exe) || (real != "" && comm == squeeze(real)) || comm == name) printf "%s%s", (n++ ? " " : ""), pid }
+    ' <<<"$list"
+}
 # "pid N, started <lstart>" for each pid in $*.
 describe() {
     local pid out="" started
@@ -44,12 +65,18 @@ started_at() {
     lstart=$(ps -p "$1" -o lstart= 2>/dev/null | tr -s ' ' | sed 's/^ *//; s/ *$//') || return 0
     [[ -n $lstart ]] && date -j -f '%a %b %d %T %Y' "$lstart" +%s 2>/dev/null || true
 }
-# Waits up to $wait_s seconds for every pid in $* to be gone; 1 when one is still up.
+# Waits up to $wait_s seconds for every pid in $* to be gone from the app's processes; 1 when one is still up. Read from
+# ps, as running() is, not from `kill -0`: a sandbox that refuses signals to the app makes kill -0 fail on a live pid,
+# which would read as gone. A process list that can't be read counts as still up.
 wait_gone() {
-    local pid up
+    local pid up now
     for _ in $(seq 1 $((wait_s * 5))); do
         up=0
-        for pid in $*; do kill -0 "$pid" 2>/dev/null && up=1; done
+        if now=$(running); then
+            for pid in $*; do among "$pid" "$now" && up=1; done
+        else
+            up=1
+        fi
         (( up )) || return 0
         sleep 0.2
     done
@@ -58,7 +85,11 @@ wait_gone() {
 # $1 is one of the pids in $2.
 among() { local p; for p in $2; do [[ $p == "$1" ]] && return 0; done; return 1; }
 
-old=$(running)
+if ! old=$(running); then
+    echo "Couldn't read the process list (ps -Ao pid=,comm= failed), so this can't tell whether $name is running." >&2
+    echo "Nothing was installed: $dest is the one that was there. Quit $name yourself, then run this again." >&2
+    exit 1
+fi
 old_desc=$(describe $old)
 if [[ -z $old ]]; then
     echo "$name isn't running."
@@ -95,12 +126,12 @@ fi
 # process of the name that wasn't the app's survived: then it isn't the one just launched).
 new=""
 for _ in $(seq 1 $((wait_s * 5))); do
-    for pid in $(running); do among "$pid" "$old" || new="$new $pid"; done
+    for pid in $(running || true); do among "$pid" "$old" || new="$new $pid"; done
     [[ -z $new ]] || break
     sleep 0.2
 done
 if [[ -z $new ]]; then
-    echo "Installed $dest, but no new $name process is up ${wait_s}s after the launch (running: $(describe $(running)))." >&2
+    echo "Installed $dest, but no new $name process is up ${wait_s}s after the launch (running: $(describe $(running || true)))." >&2
     echo "Open it yourself: open $dest" >&2
     exit 1
 fi

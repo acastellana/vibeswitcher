@@ -31,9 +31,7 @@ import Testing
         func stop() {
             let started = (try? String(contentsOfFile: dir + "/starts", encoding: .utf8)) ?? ""
             for pid in started.split(separator: "\n").compactMap({ pid_t($0) }) {
-                kill(-pid, SIGKILL)
-                kill(pid, SIGKILL)
-                _ = BenchHostTests.waitForExit(of: pid, timeout: hangGuard)
+                endClientHost(pid)
             }
         }
 

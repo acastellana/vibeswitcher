@@ -186,7 +186,10 @@ struct LeadPolicyTextsTests {
         for (workflow, records) in [(LeadWorkflow.parse(""), "docs/lead"), (LeadWorkflow.parse("---\nbase_branch: project-lead\nrecords_dir: notes\n---"), "notes")] {
             let rules = LeadLaunch.deny(.worker, base: workflow.base, records: workflow.recordsDir)
             #expect(workflow.recordsDir == records)
-            let git = rules.filter { $0.hasPrefix("Bash(git ") }
+            // Not the outside-read patterns (round 1's F8): quotes, backticks and wildcards that read as noise there.
+            let git = rules.filter { $0.hasPrefix("Bash(git ") && !LeadLaunch.outsideReads.contains($0) }
+            let brief = LeadPrompts.worker(task: Self.task, root: "/r", workflow: workflow)
+            #expect(!brief.contains("git diff*`*") && !brief.contains("`git diff */..*`") && !brief.contains("git diff \"~"))
             #expect(git.count > 30 && git.contains("Bash(git -C:*)") && git.contains("Bash(git worktree:*)") && git.contains("Bash(git tag:*)")
                     && git.contains("Bash(git commit --amend:*)"))
             let lead = LeadPrompts.lead(project: "project-c", root: "/r", workflow: workflow)

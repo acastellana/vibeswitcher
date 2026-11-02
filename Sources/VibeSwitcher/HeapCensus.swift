@@ -4,9 +4,11 @@ import ObjectiveC
 
 /// Debug aid for the benches: this process's live malloc blocks, counted by the Objective-C or Swift class whose
 /// instance each one is (its first word, masked, is a known class), and the rest by size. What `heap` tells about a
-/// process, read from inside it, so no tool takes the bench's task port. The process's other threads are suspended
-/// while it counts (at a moment none is inside malloc), and the count itself allocates nothing (its tables are made
-/// before).
+/// process, read from inside it, so no tool takes the bench's task port. It never suspends a thread or locks a zone
+/// (either can deadlock or abort the process, see `take`), and the count itself allocates nothing (its tables are made
+/// before). Only a small block's first word is read (`classedUpTo`): those live in malloc's own regions, which stay
+/// mapped when a block is freed under it; a big one, which another thread may free and unmap meanwhile, is counted
+/// by size only.
 enum HeapCensus {
     struct Count: Equatable {
         var blocks = 0
@@ -75,36 +77,36 @@ enum HeapCensus {
             while keys[index] != 0, keys[index] != key { index = (index + 1) & (capacity - 1) }
             keys[index] = key
         }
+
+        /// Copies the counts (not the keys, which a census never changes) into `other`, of the same capacity.
+        func copyCounts(to other: inout Tables) {
+            other.counts.update(from: counts, count: capacity)
+            other.bytes.update(from: bytes, count: capacity)
+            other.unclassedCounts.update(from: unclassedCounts, count: HeapCensus.bucketNames.count)
+            other.unclassedBytes.update(from: unclassedBytes, count: HeapCensus.bucketNames.count)
+            other.totalBlocks = totalBlocks
+            other.totalBytes = totalBytes
+        }
     }
 
     nonisolated(unsafe) fileprivate static var tables: Tables?
 
-    /// Suspends every thread but this one at a moment none is inside malloc, and returns them.
-    private static func stopOtherThreads(_ zones: [UnsafeMutablePointer<malloc_zone_t>]) -> [thread_act_t] {
-        let me = mach_thread_self()
-        defer { mach_port_deallocate(mach_task_self_, me) }
-        // Made before the zones lock: nothing allocates while they're locked.
-        var stopped: [thread_act_t] = []
-        stopped.reserveCapacity(256)
-        var list: thread_act_array_t?
-        var count: mach_msg_type_number_t = 0
-        for zone in zones { zone.pointee.introspect?.pointee.force_lock?(zone) }
-        if task_threads(mach_task_self_, &list, &count) == KERN_SUCCESS, let list {
-            for index in 0..<Int(count) {
-                if list[index] != me, stopped.count < stopped.capacity, thread_suspend(list[index]) == KERN_SUCCESS {
-                    stopped.append(list[index])
-                } else {
-                    mach_port_deallocate(mach_task_self_, list[index])
-                }
-            }
-            vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: list)), vm_size_t(Int(count) * MemoryLayout<thread_act_t>.stride))
-        }
-        for zone in zones.reversed() { zone.pointee.introspect?.pointee.force_unlock?(zone) }
-        return stopped
-    }
+    /// The biggest block whose first word is read for its class: an object bigger than this is rare, and is counted
+    /// in its size's bucket instead.
+    static let classedUpTo = 16 * 1024
+
+    /// How many times a zone whose enumeration fails partway is counted again (see `take`).
+    static let attemptsPerZone = 5
+
+    /// One census at a time: each fills the one `tables` the enumerator's callback writes (a soak's hourly census
+    /// and the one at its end could overlap, each counting into the other's buffers and freeing them).
+    private static let running = NSLock()
 
     /// Counts the live blocks now. Slow (a second or so with a big heap); call it off the main thread or between phases.
+    /// A second caller waits for the first's census to end.
     static func take() -> Result {
+        running.lock()
+        defer { running.unlock() }
         var classCount: UInt32 = 0
         guard let classList = objc_copyClassList(&classCount) else { return Result() }
         defer { free(UnsafeMutableRawPointer(classList)) }
@@ -137,14 +139,32 @@ enum HeapCensus {
         }
         let zones = (0..<Int(zoneCount)).compactMap { UnsafeMutablePointer<malloc_zone_t>(bitPattern: zoneAddresses[$0]) }
         tables = built
-        // The other threads stopped while it counts, none of them inside malloc: every zone locked (so none holds a
-        // lock), the threads suspended, the zones unlocked again (each enumerator takes its zone's lock itself).
-        let others = stopOtherThreads(zones)
-        for zone in zones {
-            _ = zone.pointee.introspect?.pointee.enumerator?(mach_task_self_, nil, UInt32(MALLOC_PTR_IN_USE_RANGE_TYPE),
-                                                            vm_address_t(UInt(bitPattern: zone)), censusRead, censusRecord)
+        // No thread is suspended and no zone locked: a thread suspended while it held a malloc lock, or this one
+        // allocating while it held the zones' (fork) lock, aborted the process (_os_unfair_lock_recursive_abort under
+        // _xzm_fork_lock_wait, the sandbox's soak, 11-01). The others keep running, so a block may come or go while it's
+        // counted: a census is a close count, not an exact one.
+        // So is a zone's enumeration that stops partway, the rest of that zone uncounted: it says so (KERN_FAILURE, when
+        // another thread changed a block list under it; 1 census in 40 with ten threads allocating, and it dropped 15,000
+        // of the zone's 25,000 blocks), and that zone is counted again from what was counted before it.
+        var saved = Tables(capacity: capacity, keys: built.keys, counts: .allocate(capacity: capacity),
+                           bytes: .allocate(capacity: capacity), unclassedCounts: .allocate(capacity: bucketNames.count),
+                           unclassedBytes: .allocate(capacity: bucketNames.count), mask: mask)
+        defer {
+            saved.counts.deallocate(); saved.bytes.deallocate()
+            saved.unclassedCounts.deallocate(); saved.unclassedBytes.deallocate()
         }
-        for thread in others { thread_resume(thread); mach_port_deallocate(mach_task_self_, thread) }
+        for zone in zones {
+            guard let enumerate = zone.pointee.introspect?.pointee.enumerator else { continue }
+            tables?.copyCounts(to: &saved)
+            for attempt in 1...attemptsPerZone {
+                let status = enumerate(mach_task_self_, nil, UInt32(MALLOC_PTR_IN_USE_RANGE_TYPE),
+                                       vm_address_t(UInt(bitPattern: zone)), censusRead, censusRecord)
+                // The last attempt's partial count stays: a close count beats none.
+                guard status != KERN_SUCCESS, attempt < attemptsPerZone, var partial = tables else { break }
+                saved.copyCounts(to: &partial)
+                tables = partial
+            }
+        }
         guard let counted = tables else { return Result() }
         tables = nil
 
@@ -180,7 +200,7 @@ private func censusRecord(_ task: task_t, _ context: UnsafeMutableRawPointer?, _
         let size = Int(range.size)
         tables.totalBlocks += 1
         tables.totalBytes += size
-        if size >= MemoryLayout<UInt>.size, let first = UnsafePointer<UInt>(bitPattern: UInt(range.address)),
+        if size >= MemoryLayout<UInt>.size, size <= HeapCensus.classedUpTo, let first = UnsafePointer<UInt>(bitPattern: UInt(range.address)),
            let slot = tables.slot(first.pointee & tables.mask) {
             tables.counts[slot] += 1
             tables.bytes[slot] += size

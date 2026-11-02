@@ -25,6 +25,8 @@ struct InstallRelaunchTests {
         let built: URL
         let ready: URL
         let launcher: URL
+        /// Put first on the script's PATH: the stand-ins for the commands it finds there (`blindPgrep`, `failingPs`).
+        let shims: URL
         let old: Process
 
         var oldPid: pid_t { old.processIdentifier }
@@ -39,14 +41,16 @@ struct InstallRelaunchTests {
             built = root.appendingPathComponent("build/\(name).app")
             ready = root.appendingPathComponent("ready")
             launcher = root.appendingPathComponent("launch.sh")
+            shims = root.appendingPathComponent("shims")
             try FileManager.default.createDirectory(at: ready, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: shims, withIntermediateDirectories: true)
             try Self.makeBundle(installed, name: name, mode: mode, version: "old")
             try Self.makeBundle(built, name: name, mode: "quits-when-asked", version: "new")
             try """
                 #!/bin/bash
                 # Stands in for `open APP`: starts APP's process when none of its name is running; when one is, only
                 # activates it, which is to say does nothing.
-                pgrep -x "$VS_INSTALL_PROCESS" >/dev/null && exit 0
+                /usr/bin/pgrep -x "$VS_INSTALL_PROCESS" >/dev/null && exit 0
                 "$1/Contents/MacOS/$VS_INSTALL_PROCESS" "$1/Contents/Resources/main.sh" "$VS_STANDIN_READY" </dev/null >/dev/null 2>&1 &
                 exit 0
 
@@ -92,7 +96,30 @@ struct InstallRelaunchTests {
             eventually { FileManager.default.fileExists(atPath: ready.appendingPathComponent("\(pid)").path) }
         }
 
-        /// The pids pgrep -x finds under the stand-in's name, as the script sees them.
+        /// The script's pgrep sees no process at all, as from the sandboxed shell of 2026-10-31 (pgrep -x VibeSwitcher
+        /// exited 1 there while ps listed the app). The launcher and these tests use /usr/bin/pgrep, not this one.
+        func blindPgrep() throws { try shim("pgrep", "#!/bin/bash\nexit 1\n") }
+
+        /// The script's ps can't read the process list.
+        func failingPs() throws { try shim("ps", "#!/bin/bash\necho 'ps: the process list is out of reach here' >&2\nexit 1\n") }
+
+        /// The script's signals to any process are refused (EPERM), as a sandbox that allows signals only within itself
+        /// does; the quit request (SIGUSR1 here, an Apple Event for the app) still goes through. `kill` is a bash builtin,
+        /// so this is a function the script's bash loads from BASH_ENV.
+        func refusedSignals() throws {
+            try "kill() { [[ $1 == -USR1 ]] && { builtin kill \"$@\"; return; }; echo \"kill: operation not permitted\" >&2; return 1; }\n"
+                .write(to: shims.appendingPathComponent("refused-signals.bash"), atomically: true, encoding: .utf8)
+            bashEnv = shims.appendingPathComponent("refused-signals.bash").path
+        }
+        var bashEnv: String?
+
+        private func shim(_ command: String, _ body: String) throws {
+            let file = shims.appendingPathComponent(command)
+            try body.write(to: file, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        }
+
+        /// The pids pgrep -x finds under the stand-in's name (/usr/bin/pgrep, not a shim).
         func running() throws -> [pid_t] {
             let pgrep = Process(), out = Pipe()
             pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
@@ -115,6 +142,8 @@ struct InstallRelaunchTests {
             environment["VS_INSTALL_LAUNCH"] = "\"\(launcher.path)\" \"$1\""
             environment["VS_INSTALL_WAIT"] = "\(wait)"
             environment["VS_STANDIN_READY"] = ready.path
+            environment["BASH_ENV"] = bashEnv
+            environment["PATH"] = shims.path + ":" + (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
             process.environment = environment
             process.standardInput = FileHandle.nullDevice
             process.standardOutput = out
@@ -203,5 +232,83 @@ struct InstallRelaunchTests {
         #expect(!run.output.contains("Installed and launched"), Comment(rawValue: run.output))
         #expect(stand.installedVersion == "new")
         #expect(try stand.running() == [])
+    }
+
+    /// 2026-10-31: from a sandboxed shell pgrep saw no process at all, so the script said "VibeSwitcher isn't running",
+    /// removed and replaced the bundle under the live app, and `open` only brought the old process forward. Now the
+    /// script finds the app with ps, by its executable inside the installed bundle: it's asked to quit like any other
+    /// run, and the one running afterwards is the one just installed.
+    @Test func anAppPgrepCantSeeIsStillAskedToQuitBeforeItsBundleIsReplaced() throws {
+        let stand = try StandIn(temp, mode: "quits-when-asked")
+        defer { stand.cleanUp() }
+        try stand.blindPgrep()
+        let run = try stand.install(wait: 10)
+        #expect(!run.output.contains("isn't running"), Comment(rawValue: run.output))
+        #expect(run.output.contains("Asking \(stand.name) (pid \(stand.oldPid), started ") && run.output.contains("\n\(stand.name) quit.\n"), Comment(rawValue: run.output))
+        #expect(run.status == 0, Comment(rawValue: run.output))
+        let launched = try #require(StandIn.launchedPid(in: run.output), Comment(rawValue: run.output))
+        #expect(launched != stand.oldPid)
+        #expect(!stand.old.isRunning, "the old process outlived the replacement of its bundle")
+        #expect(stand.installedVersion == "new")
+        #expect(try stand.running() == [launched], "the one running is the one launched")
+    }
+
+    /// The same blind pgrep, and an app that won't quit: nothing is copied over it.
+    @Test func anAppPgrepCantSeeThatWontQuitKeepsItsBundle() throws {
+        let stand = try StandIn(temp, mode: "ignores-all")
+        defer { stand.cleanUp() }
+        try stand.blindPgrep()
+        let run = try stand.install(wait: 2)
+        #expect(run.status == 1, Comment(rawValue: run.output))
+        #expect(run.output.contains("Nothing was installed: \(stand.installed.path) is the one that was there."), Comment(rawValue: run.output))
+        #expect(!run.output.contains("Installed and launched"), Comment(rawValue: run.output))
+        #expect(stand.installedVersion == "old")
+        #expect(try stand.running() == [stand.oldPid])
+    }
+
+    /// The process list can't be read at all: the script can't tell whether the app is up, so it copies nothing and
+    /// says why, rather than taking "none found" for "not running".
+    @Test func anUnreadableProcessListInstallsNothing() throws {
+        let stand = try StandIn(temp, mode: "quits-when-asked")
+        defer { stand.cleanUp() }
+        try stand.blindPgrep()
+        try stand.failingPs()
+        let run = try stand.install(wait: 2)
+        #expect(run.status == 1, Comment(rawValue: run.output))
+        #expect(run.output.contains("Couldn't read the process list"), Comment(rawValue: run.output))
+        #expect(run.output.contains("Nothing was installed: \(stand.installed.path) is the one that was there."), Comment(rawValue: run.output))
+        #expect(!run.output.contains("isn't running"), Comment(rawValue: run.output))
+        #expect(stand.installedVersion == "old")
+        #expect(stand.old.isRunning)
+    }
+
+    /// The sandboxed shell may refuse the script's signals to the app as well (kill -0 fails with EPERM on a live pid):
+    /// that must read as "still up", never as "quit", so an app that won't quit keeps its bundle.
+    @Test func anAppTheScriptCantSignalIsStillUpUntilPsSaysItsGone() throws {
+        let stand = try StandIn(temp, mode: "ignores-all")
+        defer { stand.cleanUp() }
+        try stand.blindPgrep()
+        try stand.refusedSignals()
+        let run = try stand.install(wait: 2)
+        #expect(run.status == 1, Comment(rawValue: run.output))
+        #expect(!run.output.contains("\n\(stand.name) quit"), Comment(rawValue: run.output))
+        #expect(run.output.contains("Nothing was installed: \(stand.installed.path) is the one that was there."), Comment(rawValue: run.output))
+        #expect(stand.installedVersion == "old")
+        #expect(try stand.running() == [stand.oldPid])
+    }
+
+    /// The same refused signals and an app that quits when asked: ps sees it go, and the install carries on.
+    @Test func anAppTheScriptCantSignalIsReplacedOnceItQuits() throws {
+        let stand = try StandIn(temp, mode: "quits-when-asked")
+        defer { stand.cleanUp() }
+        try stand.blindPgrep()
+        try stand.refusedSignals()
+        let run = try stand.install(wait: 10)
+        #expect(run.status == 0, Comment(rawValue: run.output))
+        #expect(run.output.contains("\n\(stand.name) quit.\n"), Comment(rawValue: run.output))
+        let launched = try #require(StandIn.launchedPid(in: run.output), Comment(rawValue: run.output))
+        #expect(!stand.old.isRunning)
+        #expect(stand.installedVersion == "new")
+        #expect(try stand.running() == [launched])
     }
 }

@@ -70,6 +70,22 @@ final class Preferences: ObservableObject {
         if !up && limit <= range.lowerBound { return 0 }
         return PowerWatch.clamp(limit + (up ? 5 : -5))
     }
+    /// Boost mode (Settings › Project lead): higher Mac-wide limits On, or Automatic while away and on AC power; on
+    /// battery only with `boostOnBattery` (see `BoostWatch`, `Boost.decide`).
+    @Published var boostMode: BoostMode { didSet { defaults.set(boostMode.rawValue, forKey: "boostMode") } }
+    /// Boost's "Also on battery": On and Automatic work on battery as on AC while the charge is at
+    /// `Boost.batteryFloor` % or more. Off by default.
+    @Published var boostOnBattery: Bool { didSet { defaults.set(boostOnBattery, forKey: "boostOnBattery") } }
+    /// The limits boost raises to (`BoostLimits`, kept as JSON); out-of-range values are kept as their nearest.
+    @Published var boostLimits: BoostLimits {
+        didSet {
+            let kept = BoostLimits(loadThreshold: boostLimits.loadThreshold, maxSessions: boostLimits.maxSessions,
+                                   maxWorkers: boostLimits.maxWorkers, heavySlots: boostLimits.heavySlots)
+            // Setting it here doesn't run didSet again.
+            if kept != boostLimits { boostLimits = kept }
+            defaults.set(try? JSONEncoder().encode(kept), forKey: "boostLimits")
+        }
+    }
     /// Where Home's New Project… makes projects, as a tilde path ("~/dev").
     @Published var projectsFolder: String { didSet { defaults.set(projectsFolder, forKey: "projectsFolder") } }
     /// Projects made with New Project…, by when: Home lists them before an agent has run in them.
@@ -80,11 +96,17 @@ final class Preferences: ObservableObject {
     /// The language the spoken briefing is written and read in (an ElevenLabs language code, see `BriefingLanguage`);
     /// the Mac's first preferred language until you pick one.
     @Published var briefingLanguage: String { didSet { defaults.set(briefingLanguage, forKey: "briefingLanguage") } }
+    /// The Passage peer that is the Wallet Manager's Mac (its peer id); empty until you choose one, and until then
+    /// wallet requests can be signed only in the browser wallet (from an 0x address).
+    @Published var walletPeerID: String { didSet { defaults.set(walletPeerID, forKey: "walletPeerID") } }
+    /// The `passage` command wallet requests go through; empty: `passage` on the PATH.
+    @Published var walletPassagePath: String { didSet { defaults.set(walletPassagePath, forKey: "walletPassagePath") } }
 
     /// `defaults`, `presetsFile` and `reduceMotion` are for tests and offscreen renders; the app uses the standard ones.
     init(defaults: UserDefaults = .standard, presetsFile: URL = VibePaths.presetsFile, reduceMotion: Bool = Motion.isReduced) {
         self.defaults = defaults
         self.presetsFile = presetsFile
+        Self.carryOverWalletKeys(defaults)
         // Decided once, at first launch, and kept: turning Reduce Motion on later doesn't flip it behind your back.
         if defaults.object(forKey: "sidebarFlashOnSwitch") == nil {
             defaults.set(Self.flashOnSwitchByDefault(reduceMotion: reduceMotion), forKey: "sidebarFlashOnSwitch")
@@ -120,6 +142,23 @@ final class Preferences: ObservableObject {
         batteryHoldBelow = PowerWatch.clamp(defaults.integer(forKey: "batteryHoldBelow"))
         briefingLanguage = defaults.string(forKey: "briefingLanguage").flatMap(BriefingLanguage.named)?.code ?? BriefingLanguage.preferred().code
         projectsFolder = defaults.string(forKey: "projectsFolder") ?? ProjectCreation.defaultLocation
+        walletPeerID = defaults.string(forKey: "walletPeerID") ?? ""
+        walletPassagePath = defaults.string(forKey: "walletPassagePath") ?? ""
+        boostMode = BoostMode(rawValue: defaults.string(forKey: "boostMode") ?? "") ?? .off
+        boostOnBattery = defaults.bool(forKey: "boostOnBattery")
+        boostLimits = defaults.data(forKey: "boostLimits").flatMap { try? JSONDecoder().decode(BoostLimits.self, from: $0) } ?? BoostLimits()
+    }
+
+    /// The keys `walletPeerID` and `walletPassagePath` had while the feature was called vault requests (until
+    /// 2026-10-31): their values carried over once, unless the new key is already set, and the old keys removed.
+    static let formerWalletKeys = [("vaultPeerID", "walletPeerID"), ("vaultPassagePath", "walletPassagePath")]
+
+    static func carryOverWalletKeys(_ defaults: UserDefaults) {
+        for (old, new) in formerWalletKeys {
+            guard let value = defaults.object(forKey: old) else { continue }
+            if defaults.object(forKey: new) == nil { defaults.set(value, forKey: new) }
+            defaults.removeObject(forKey: old)
+        }
     }
 
     /// Showing the sidebar after a desktop switch slides it in at the screen's edge: not by default with Reduce Motion.

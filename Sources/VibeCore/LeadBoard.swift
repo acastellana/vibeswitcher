@@ -127,14 +127,18 @@ public struct LeadMergeRecord: Codable, Equatable, Sendable {
     /// false: it merged with no verdict, a `review: none` task on its worker's report and the merge's own test run;
     /// nil (older records, and every audited merge): a passing audit let it in.
     public var audited: Bool?
+    /// The tasks that landed with it on one test run of a batch (merge_batching, see `LeadToolset.mergeBatch`), in the
+    /// order they were stacked, itself among them; nil: it merged on a test run of its own.
+    public var batch: [String]?
 
-    public init(commit: String, tested: Bool, onto: String? = nil, regression: Bool? = nil, audited: Bool? = nil,
+    public init(commit: String, tested: Bool, onto: String? = nil, regression: Bool? = nil, audited: Bool? = nil, batch: [String]? = nil,
                 at: Double = Date().timeIntervalSince1970) {
         self.commit = commit
         self.tested = tested
         self.onto = onto
         self.regression = regression
         self.audited = audited
+        self.batch = batch
         self.at = at
     }
 
@@ -304,6 +308,13 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
     public var open: [LeadFinding] { findings.filter(\.isOpen) }
     /// Open Important findings: merge refuses while there are any.
     public var blocking: [LeadFinding] { findings.filter(\.blocks) }
+    /// The findings that hold the merge back: the open Important ones, and on a branch that touches strict_paths
+    /// (`strict`) the Important ones a vote left unconfirmed too.
+    public func holding(strict: Bool) -> [LeadFinding] {
+        strict ? findings.filter { $0.isLive && $0.severity == .important } : blocking
+    }
+    /// Important findings a vote left unconfirmed: only on a branch touching strict_paths do they hold the merge.
+    public var unconfirmedImportant: [LeadFinding] { findings.filter { $0.status == .unconfirmed && $0.severity == .important } }
     /// The open findings a re-audit must say fixed or still open about (an open Pre-existing one isn't the branch's).
     public var toRecheck: [LeadFinding] { open.filter { $0.severity != .preExisting } }
     /// A re-audit: an earlier one is recorded, so new findings come from the diff since its commit only.
@@ -602,6 +613,14 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var verifier: String?
     /// The worker session the lead itself stopped (stop_worker): its end is no news to the lead.
     public var stopped: String?
+    /// The worker session VibeSwitcher released while the task's audit ran (`LeadToolset.releaseWorker`, or audit
+    /// making room for its verifier): ended once idle after its done report, its worktree and branch kept, its Mac slot
+    /// and memory freed. It's `stopped` too, so its end is no news; findings the verdict sends back go to a fresh worker
+    /// there (`LeadAdvance.sendBack`). Status and board say "worker released during audit", not "ended".
+    public var released: String?
+    /// When the lead's tools last delivered a message to its worker (message, auto_advance's sends, a note to it):
+    /// one after its done report (`since` it went to review) starts a new turn, so that worker isn't released.
+    public var messagedAt: Double?
     public var branch: String?
     public var worktree: String?
     /// The verdict on the commit its branch is at, as long as it's there: a report on that commit keeps it; a new
@@ -675,6 +694,65 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// Its time budget in minutes as the lead set it (add_task's and update_task's budget_min; 0: none); nil: the
     /// workflow's task_budget_min (see `LeadBudget`).
     public var budgetMin: Int?
+    /// The model its worker runs on, as `claude --model` takes it (add_task's and update_task's `model`: sonnet for a
+    /// mechanical task, say); nil: the project's Claude command's, as before.
+    public var model: String?
+    /// The model each of its workers and verifiers was started on, by session (`claude --model`'s name; "" for Claude's
+    /// default), its current members only: which model a session's usage-limit refusal holds back (see
+    /// `AccountUsage.fromRefusal`), whatever the task's model or verifier_model says since.
+    public var launchedModels: [String: String]?
+    /// The agent its worker runs (add_task's and update_task's `agent`); nil: Claude, as before. Codex implements a
+    /// bounded task only: leads and verifiers stay Claude, and a Codex task is always audited (see `codexWorked`).
+    public var agent: WorkerAgent?
+    /// Why its current worker runs the agent it does, when its agent is auto (`UsageRouting.Route.why`: "Codex: Claude
+    /// weekly 64%, 12 points ahead of pace; Codex 40%"); nil for a task pinned to an agent.
+    public var routed: String?
+    /// A Codex worker was started on it once: its merge needs a Claude verifier's passing audit from then on, whatever
+    /// its review or agent says since (its branch holds Codex's commits).
+    public var codexWorked: Bool?
+
+    /// Who runs a task's worker. Only workers: Codex never plans, reviews or audits. `auto`: chosen at each start from
+    /// both accounts' usage (`UsageRouting.route`): Codex when Claude's runs ahead of pace and Codex has room, else Claude.
+    public enum WorkerAgent: String, Codable, Sendable, CaseIterable {
+        case claude, codex, auto
+
+        /// "codex", " Codex ": the agent; nil for anything else.
+        public init?(text: String) { self.init(rawValue: text.trimmingCharacters(in: .whitespaces).lowercased()) }
+
+        /// As status and board name it.
+        public var name: String {
+            switch self {
+            case .claude: return "Claude"
+            case .codex: return "Codex"
+            case .auto: return "auto"
+            }
+        }
+    }
+
+    /// The agent its worker runs: Claude unless the lead set codex or auto.
+    public var workerAgent: WorkerAgent { agent ?? .claude }
+
+    /// The agent its current worker was started on (an auto task's is Codex or Claude, as it was routed): Codex when its
+    /// session was noted as a Codex one at its start (`LeadToolset.codexMarker`); nil with no worker.
+    public var runningAgent: WorkerAgent? {
+        guard let worker else { return nil }
+        guard let noted = launchedModels?[worker] else { return workerAgent == .auto ? nil : workerAgent }
+        return noted == "codex" || noted.hasPrefix("codex:") ? .codex : .claude
+    }
+
+    /// Its merge needs a Claude verifier's passing audit because Codex works (or worked) on it; nil when not.
+    public var codexAudit: String? {
+        guard workerAgent == .codex || codexWorked == true else { return nil }
+        return workerAgent == .codex ? "Its worker is Codex, so a Claude verifier audits it whatever its review says."
+            : "A Codex worker worked on it, so a Claude verifier audits it whatever its review says."
+    }
+
+    /// Notes that `sessions` were started on `model` (nil: Claude's default), keeping only its members' entries.
+    public mutating func launched(_ sessions: [String], on model: String?) {
+        var kept = (launchedModels ?? [:]).filter { members.contains($0.key) }
+        for session in sessions { kept[session] = model ?? "" }
+        launchedModels = kept.isEmpty ? nil : kept
+    }
     /// How long its workers have worked on it, in seconds, as the witness counted (see `LeadBudget.counts`): waiting
     /// on a prompt, the lead or the user, and its audits, don't count.
     public var worked: Double?
@@ -703,6 +781,15 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public static let keptCheckpoints = 40
     /// Notes kept per task, the newest: an approval is rarely more than a few dozen messages back.
     public static let keptNotes = 100
+
+    /// The sessions the witness watches for the task: its worker, its verifier and, with several finders, each finder
+    /// (`panel.sessions`: the verifier is only the first). A finder 2 left out was never seen waiting on a prompt, so no
+    /// one declined it (`LeadWitness.stuckPrompts`), and its audit hung as in the incident of 2026-11-01.
+    public var members: [String] {
+        var ids = [worker, verifier].compactMap { $0 }
+        for id in panel?.sessions ?? [] where !ids.contains(id) { ids.append(id) }
+        return ids
+    }
 
     /// The verifiers whose word the task waits on: with several finders, those that haven't submitted yet (one that
     /// has may end while the others work); else its verifier.

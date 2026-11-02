@@ -12,6 +12,8 @@ public enum Git {
         public var timedOut = false
         /// The work it ran for was cancelled (see `ShellCancel`), and it was stopped.
         public var cancelled = false
+        /// A signal ended it: `status` is then the signal's number, not an exit code.
+        public var signaled = false
         public var ok: Bool { status == 0 && !timedOut && !cancelled }
     }
 

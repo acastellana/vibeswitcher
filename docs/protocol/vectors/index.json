@@ -1,0 +1,733 @@
+{
+  "format": "Test vectors for wallet-request v1 and wallet-result v1 (docs/protocol/wallet-request.md)",
+  "vectors": [
+    {
+      "file": "request-valid-transfer-native.json",
+      "kind": "request",
+      "valid": true,
+      "note": "A transfer of 1 GEN on GenLayer mainnet (42424242) from a wallet id: the doc's example."
+    },
+    {
+      "file": "request-valid-transfer-token.json",
+      "kind": "request",
+      "valid": true,
+      "note": "An ERC-20 transfer on GenLayer testnet (4221), from a hot wallet, with an empty label."
+    },
+    {
+      "file": "request-valid-call.json",
+      "kind": "request",
+      "valid": true,
+      "note": "A call with calldata (made of 32-byte words, not screened) on Ethereum mainnet (1), from a 0x address, expiring at the 7-day limit."
+    },
+    {
+      "file": "request-valid-mixed-case-address.json",
+      "kind": "request",
+      "valid": true,
+      "note": "A recipient address in mixed case: the format takes it (the Wallet Manager checks EIP-55)."
+    },
+    {
+      "file": "request-valid-limits.json",
+      "kind": "request",
+      "valid": true,
+      "note": "Every limit at its largest: chainId 2^53-1, a 60-digit amount, 200-character requester fields, a 64-character workspace, a 1000-character reason over two lines."
+    },
+    {
+      "file": "request-valid-ordinary-english.json",
+      "kind": "request",
+      "valid": true,
+      "note": "An ordinary English reason, many of whose words are BIP39 words but never 12 in a row: not key material."
+    },
+    {
+      "file": "request-valid-reason-8-lines.json",
+      "kind": "request",
+      "valid": true,
+      "note": "A reason of 8 lines, the most it may have, whose last holds a letter with two combining marks (decomposed Vietnamese), the most one character may carry."
+    },
+    {
+      "file": "request-valid-64kib.json",
+      "kind": "request",
+      "valid": true,
+      "note": "Exactly 65536 bytes (the request, then spaces): the largest file read."
+    },
+    {
+      "file": "request-invalid-too-large.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "tooLarge",
+      "note": "65537 bytes: over the 64 KiB limit, refused before parsing."
+    },
+    {
+      "file": "request-invalid-bom.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "notJSON",
+      "note": "Starts with a UTF-8 byte-order mark."
+    },
+    {
+      "file": "request-invalid-not-utf8.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "notJSON",
+      "note": "A byte that isn't UTF-8 inside a string."
+    },
+    {
+      "file": "request-invalid-duplicate-key.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "notJSON",
+      "note": "The key workspace appears twice."
+    },
+    {
+      "file": "request-invalid-fraction.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "notJSON",
+      "note": "chainId written with a fraction (42424242.0)."
+    },
+    {
+      "file": "request-invalid-exponent.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "notJSON",
+      "note": "chainId written with an exponent."
+    },
+    {
+      "file": "request-invalid-negative.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "notJSON",
+      "note": "chainId negative."
+    },
+    {
+      "file": "request-invalid-leading-zero-number.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "notJSON",
+      "note": "chainId with a leading zero."
+    },
+    {
+      "file": "request-invalid-17-digits.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "notJSON",
+      "note": "chainId of 17 digits: numbers have at most 16."
+    },
+    {
+      "file": "request-invalid-control-character.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "notJSON",
+      "note": "An unescaped tab inside a string."
+    },
+    {
+      "file": "request-invalid-lone-surrogate.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "notJSON",
+      "note": "A \\u escape of a lone surrogate."
+    },
+    {
+      "file": "request-invalid-trailing-text.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "notJSON",
+      "note": "A second value after the object."
+    },
+    {
+      "file": "request-invalid-array.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "wrongType",
+      "field": "",
+      "note": "An array holding the request, not an object."
+    },
+    {
+      "file": "request-invalid-unknown-field.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "unknownField",
+      "field": "note",
+      "note": "An unknown top-level field, note."
+    },
+    {
+      "file": "request-invalid-unknown-nested-field.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "unknownField",
+      "field": "requestedBy.host",
+      "note": "An unknown field inside requestedBy."
+    },
+    {
+      "file": "request-invalid-missing-reason.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "missingField",
+      "field": "reason",
+      "note": "No reason."
+    },
+    {
+      "file": "request-invalid-missing-label.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "missingField",
+      "field": "requestedBy.label",
+      "note": "No requestedBy.label (it may be empty, not absent)."
+    },
+    {
+      "file": "request-invalid-call-without-data.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "missingField",
+      "field": "data",
+      "note": "A call with no data."
+    },
+    {
+      "file": "request-invalid-null.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "wrongType",
+      "field": "reason",
+      "note": "reason is null: null is never a value."
+    },
+    {
+      "file": "request-invalid-chainid-string.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "wrongType",
+      "field": "chainId",
+      "note": "chainId as a string."
+    },
+    {
+      "file": "request-invalid-amount-number.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "wrongType",
+      "field": "amount",
+      "note": "amount as a number, not a string."
+    },
+    {
+      "file": "request-invalid-requestedby-string.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "wrongType",
+      "field": "requestedBy",
+      "note": "requestedBy as a string."
+    },
+    {
+      "file": "request-invalid-type.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "type",
+      "note": "The result's type on a request."
+    },
+    {
+      "file": "request-invalid-version.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "version",
+      "note": "version 2."
+    },
+    {
+      "file": "request-invalid-id-upper-case.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "id",
+      "note": "An id in upper case."
+    },
+    {
+      "file": "request-invalid-id-not-uuid.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "id",
+      "note": "An id that isn't a UUID."
+    },
+    {
+      "file": "request-invalid-time-fraction.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "createdAt",
+      "note": "createdAt with a fraction of a second."
+    },
+    {
+      "file": "request-invalid-time-offset.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "createdAt",
+      "note": "createdAt with an offset instead of Z."
+    },
+    {
+      "file": "request-invalid-time-not-a-date.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "createdAt",
+      "note": "createdAt on 30 February."
+    },
+    {
+      "file": "request-invalid-expires-before-created.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "expiresAt",
+      "note": "expiresAt equal to createdAt: it must be after."
+    },
+    {
+      "file": "request-invalid-expires-after-7-days.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "expiresAt",
+      "note": "expiresAt one second past the 7-day limit."
+    },
+    {
+      "file": "request-invalid-project-empty.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "requestedBy.project",
+      "note": "An empty requestedBy.project."
+    },
+    {
+      "file": "request-invalid-label-newline.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "requestedBy.label",
+      "note": "A line feed in requestedBy.label (only reason, detail and message may hold one)."
+    },
+    {
+      "file": "request-invalid-workspace.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "workspace",
+      "note": "A workspace with a '/'."
+    },
+    {
+      "file": "request-invalid-from-short-address.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "from",
+      "note": "from starts with 0x but isn't 40 hex digits."
+    },
+    {
+      "file": "request-invalid-chainid-zero.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "chainId",
+      "note": "chainId 0."
+    },
+    {
+      "file": "request-invalid-chainid-too-large.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "chainId",
+      "note": "chainId 2^53, one over the limit."
+    },
+    {
+      "file": "request-invalid-action.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "action",
+      "note": "An action other than transfer or call."
+    },
+    {
+      "file": "request-invalid-to-short.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "to",
+      "note": "to is 0x and 3 digits."
+    },
+    {
+      "file": "request-invalid-to-not-hex.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "to",
+      "note": "to holds non-hex characters."
+    },
+    {
+      "file": "request-invalid-to-41-digits.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "to",
+      "note": "to is 0x and 41 hex digits."
+    },
+    {
+      "file": "request-invalid-to-capital-x.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "to",
+      "note": "to starts 0X, not 0x."
+    },
+    {
+      "file": "request-invalid-to-no-prefix.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "to",
+      "note": "to without 0x."
+    },
+    {
+      "file": "request-invalid-asset.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "asset",
+      "note": "asset neither native nor an address."
+    },
+    {
+      "file": "request-invalid-amount-leading-zero.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "amount",
+      "note": "amount with a leading zero."
+    },
+    {
+      "file": "request-invalid-amount-decimal-point.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "amount",
+      "note": "amount with a decimal point."
+    },
+    {
+      "file": "request-invalid-amount-61-digits.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "amount",
+      "note": "amount of 61 digits."
+    },
+    {
+      "file": "request-invalid-transfer-zero.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "amount",
+      "note": "A transfer of 0."
+    },
+    {
+      "file": "request-invalid-transfer-with-data.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "data",
+      "note": "A transfer carrying data."
+    },
+    {
+      "file": "request-invalid-data-odd.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "data",
+      "note": "Calldata of an odd number of hex digits."
+    },
+    {
+      "file": "request-invalid-data-short.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "data",
+      "note": "Calldata of 3 bytes: under a 4-byte selector."
+    },
+    {
+      "file": "request-invalid-call-with-token.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "asset",
+      "note": "A call whose asset is a token: a call sends only native."
+    },
+    {
+      "file": "request-invalid-reason-empty.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "reason",
+      "note": "An empty reason."
+    },
+    {
+      "file": "request-invalid-reason-1001.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "reason",
+      "note": "A reason of 1001 characters."
+    },
+    {
+      "file": "request-invalid-reason-bidi.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "reason",
+      "note": "A bidi override (U+202E) in reason."
+    },
+    {
+      "file": "request-invalid-reason-9-lines.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "reason",
+      "note": "A reason of 9 lines: over 8."
+    },
+    {
+      "file": "request-invalid-reason-combining-marks.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "reason",
+      "note": "Three combining marks (U+0323 U+0302 U+0301) on one letter in reason: over 2."
+    },
+    {
+      "file": "request-invalid-reason-hangul-filler.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "reason",
+      "note": "A Hangul filler (U+3164), which draws as blank space, in reason."
+    },
+    {
+      "file": "request-invalid-reason-line-separator.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "reason",
+      "note": "A line separator (U+2028), which draws as a line break the line count doesn't see, in reason."
+    },
+    {
+      "file": "request-invalid-key-hex.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "keyMaterial",
+      "field": "reason",
+      "note": "64 hex digits in a row in reason: a raw private key."
+    },
+    {
+      "file": "request-invalid-key-hex-0x.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "keyMaterial",
+      "field": "requestedBy.label",
+      "note": "0x and 64 hex digits in requestedBy.label."
+    },
+    {
+      "file": "request-invalid-key-bip39.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "keyMaterial",
+      "field": "reason",
+      "note": "12 BIP39 words in a row in reason, upper case, comma-separated: a recovery phrase."
+    },
+    {
+      "file": "request-invalid-key-begin.json",
+      "kind": "request",
+      "valid": false,
+      "refusal": "keyMaterial",
+      "field": "reason",
+      "note": "A -----BEGIN block in reason."
+    },
+    {
+      "file": "result-valid-submitted.json",
+      "kind": "result",
+      "valid": true,
+      "note": "Submitted, with its checks, txHash and explorer link: the doc's example."
+    },
+    {
+      "file": "result-valid-received.json",
+      "kind": "result",
+      "valid": true,
+      "note": "The first result: received, no checks yet."
+    },
+    {
+      "file": "result-valid-rejected.json",
+      "kind": "result",
+      "valid": true,
+      "note": "Rejected, with the failing check."
+    },
+    {
+      "file": "result-valid-rejected-format.json",
+      "kind": "result",
+      "valid": true,
+      "note": "The answer to a request that didn't parse or broke the format: rejected, sequence 1, its only check format, whose detail names the rule and the field, never the file's content."
+    },
+    {
+      "file": "result-valid-safe-proposed.json",
+      "kind": "result",
+      "valid": true,
+      "note": "A Safe's proposal: safeTxHash and a link naming it, no txHash yet."
+    },
+    {
+      "file": "result-valid-failed.json",
+      "kind": "result",
+      "valid": true,
+      "note": "Failed after submission, with the reverted transaction's txHash."
+    },
+    {
+      "file": "result-invalid-status.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "status",
+      "note": "An unknown status, approved."
+    },
+    {
+      "file": "result-invalid-status-case.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "status",
+      "note": "A status in the wrong case."
+    },
+    {
+      "file": "result-invalid-explorer-http.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "explorerURL",
+      "note": "An http (not https) explorer link."
+    },
+    {
+      "file": "result-invalid-explorer-javascript.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "explorerURL",
+      "note": "A javascript: explorer link."
+    },
+    {
+      "file": "result-invalid-explorer-user.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "explorerURL",
+      "note": "An explorer link with a user and password."
+    },
+    {
+      "file": "result-invalid-explorer-other-hash.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "keyMaterial",
+      "field": "explorerURL",
+      "note": "An explorer link naming 64 hex digits that are neither hash."
+    },
+    {
+      "file": "result-invalid-explorer-without-hash.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "explorerURL",
+      "note": "An explorer link on a result with no hash."
+    },
+    {
+      "file": "result-invalid-submitted-without-txhash.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "missingField",
+      "field": "txHash",
+      "note": "submitted without txHash."
+    },
+    {
+      "file": "result-invalid-txhash-on-received.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "txHash",
+      "note": "A txHash on a received result."
+    },
+    {
+      "file": "result-invalid-safetxhash-on-rejected.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "safeTxHash",
+      "note": "A safeTxHash on a rejected result."
+    },
+    {
+      "file": "result-invalid-txhash-short.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "txHash",
+      "note": "A txHash that isn't 64 hex digits."
+    },
+    {
+      "file": "result-invalid-sequence-zero.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "sequence",
+      "note": "sequence 0: it starts at 1."
+    },
+    {
+      "file": "result-invalid-unknown-field.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "unknownField",
+      "field": "signature",
+      "note": "An unknown field, signature."
+    },
+    {
+      "file": "result-invalid-check-ok-string.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "wrongType",
+      "field": "checks[0].ok",
+      "note": "A check whose ok is a string."
+    },
+    {
+      "file": "result-invalid-check-unknown-field.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "unknownField",
+      "field": "checks[0].score",
+      "note": "A check with an unknown field."
+    },
+    {
+      "file": "result-invalid-too-many-checks.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "checks",
+      "note": "65 checks: at most 64."
+    },
+    {
+      "file": "result-invalid-key-in-message.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "keyMaterial",
+      "field": "message",
+      "note": "64 hex digits in a row in message."
+    },
+    {
+      "file": "result-invalid-key-in-detail.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "keyMaterial",
+      "field": "checks[0].detail",
+      "note": "12 BIP39 words in a row in a check's detail."
+    },
+    {
+      "file": "result-invalid-type.json",
+      "kind": "result",
+      "valid": false,
+      "refusal": "invalid",
+      "field": "type",
+      "note": "The request's type on a result."
+    }
+  ]
+}

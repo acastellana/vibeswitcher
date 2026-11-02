@@ -63,9 +63,12 @@ struct SessionTempTests {
         let verifier = try LeadLaunch.prepare(role: .verifier, root: root, task: "x", base: "claude", prompt: "p", start: "Check.",
                                               server: "/s", name: "verify-x", folder: temp.url("run-verifier"), temporary: sessions)
         let worktree = Worktrees.path(root: root, slug: "x")
-        #expect(lead.environment == ["TMPDIR": SessionTemp.folder(cwd: root, name: "lead-acme", in: sessions).path + "/"])
-        #expect(worker.environment == ["TMPDIR": SessionTemp.folder(cwd: worktree, name: "worker-x", in: sessions).path + "/"])
-        #expect(verifier.environment == ["TMPDIR": SessionTemp.folder(cwd: worktree, name: "verify-x", in: sessions).path + "/"])
+        #expect(lead.environment == ["TMPDIR": SessionTemp.folder(cwd: root, name: "lead-acme", in: sessions).path + "/",
+                                     SessionNote.roleVariable: "lead"])
+        #expect(worker.environment == ["TMPDIR": SessionTemp.folder(cwd: worktree, name: "worker-x", in: sessions).path + "/",
+                                     SessionNote.roleVariable: "worker"])
+        #expect(verifier.environment == ["TMPDIR": SessionTemp.folder(cwd: worktree, name: "verify-x", in: sessions).path + "/",
+                                     SessionNote.roleVariable: "verifier"])
         for launch in [lead, worker, verifier] {
             let tmpdir = try #require(launch.environment["TMPDIR"])
             #expect(try mode(tmpdir) == 0o700)
@@ -90,7 +93,7 @@ struct SessionTempTests {
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: elsewhere)
         let launch = try LeadLaunch.prepare(role: .worker, root: root, task: "x", base: "claude", prompt: "p", start: "Go.",
                                             server: "/s", name: "worker-x", folder: temp.url("run"), temporary: link)
-        #expect(launch.environment == [:])
+        #expect(launch.environment == [SessionNote.roleVariable: "worker"])
         // Nothing made or changed where it points.
         #expect(try FileManager.default.contentsOfDirectory(atPath: elsewhere.path) == [])
         #expect(try mode(elsewhere.path) == 0o755)

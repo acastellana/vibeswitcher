@@ -129,12 +129,22 @@ struct PendingPromptTests {
         let cut = "Run: S=/private/var/folders/…/scratchpad; H=/Users/albert/dev/vibeswitcher/.vibeswitcher/wo…"
         let pending = PendingPrompt(text: "Run: " + Self.script, since: since.timeIntervalSince1970 - 3)
         let seen = LeadWitness.Seen(live: true, status: .needsInput, since: since, detail: cut, pending: pending, activity: .needsInput(cut))
-        for (board, who) in [(board(.running, worker: "w1"), "worker"), (board(.review, worker: "w0", verifier: "w1"), "verifier")] {
-            let event = try #require(LeadWitness.events(board: board, seen: ["w1": seen], now: now).first)
-            #expect(event.text.hasPrefix("The \(who) on scratch is waiting for input since \(LeadBoard.clock(since.timeIntervalSince1970)) (7 min). It waits on:\n```\n"))
-            #expect(event.text.contains("Run: " + Self.script))
-            #expect(!event.text.contains("…"))
-            #expect(LeadWake.short(SteerMessage(text: event.text, from: .system("witness"), agentPid: 1)) == "\(who) scratch waits for input")
+        let event = try #require(LeadWitness.events(board: board(.running, worker: "w1"), seen: ["w1": seen], now: now).first)
+        #expect(event.text.hasPrefix("The worker on scratch is waiting for input since \(LeadBoard.clock(since.timeIntervalSince1970)) (7 min). It waits on:\n```\n"))
+        #expect(event.text.contains("Run: " + Self.script))
+        #expect(!event.text.contains("…"))
+        #expect(LeadWake.short(SteerMessage(text: event.text, from: .system("witness"), agentPid: 1)) == "worker scratch waits for input")
+        // A verifier's prompt is told once it's waited `promptWait`, with what VibeSwitcher did (see VerifierPromptTests):
+        // declined or not, the whole command quoted.
+        let review = board(.review, worker: "w0", verifier: "w1")
+        #expect(LeadWitness.events(board: review, seen: ["w1": seen], now: now).isEmpty)
+        let stuck = try #require(LeadWitness.stuckPrompts(board: review, seen: ["w1": seen], now: now).first)
+        for (text, short) in [(LeadWitness.declinedText(stuck, now: now), "verifier scratch had a prompt declined"),
+                              (LeadWitness.undeclinedText(stuck, now: now), "verifier scratch waits for input")] {
+            #expect(text.contains("(7 min)") || text.contains("7 min"), "\(text)")
+            #expect(text.contains("It waited on:\n```\n") && text.contains("Run: " + Self.script), "\(text)")
+            #expect(!text.contains("…"))
+            #expect(LeadWake.short(SteerMessage(text: text, from: .system("witness"), agentPid: 1)) == short)
         }
     }
 

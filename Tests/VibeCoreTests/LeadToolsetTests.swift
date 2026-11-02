@@ -42,20 +42,30 @@ final class FakeRuntime: LeadRuntime {
     var statuses: [String: String] = [:]
     /// The prompt each session waits on, as the host's reading of it says.
     var waiting: [String: PendingPrompt] = [:]
+    /// The account's usage limit each session's turn ended on, as the host's reading of its transcript says.
+    var usageLimits: [String: UsageLimit] = [:]
 
     /// Calls from the lead's automatic passes (`LeadAdvance`, on a thread of their own) and the test's own, one at a time.
     let calls = NSRecursiveLock()
+    /// Called as each session is killed, with the labels of the sessions spawned by then (under `calls`).
+    var onKill: ((String, [String]) -> Void)?
 
     let server = "/App/vibeswitcher-mcp"
     /// The project's Claude command, flags included.
     var claude = "claude --dangerously-skip-permissions"
     func claudeCommand(root: String) -> String { claude }
+    /// The project's Codex command, flags included.
+    var codex = "codex"
+    func codexCommand(root: String) -> String { codex }
+    /// The agent each session was started as ("claude", "codex"), by session.
+    var agents: [String: String] = [:]
     func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String {
         calls.lock()
         defer { calls.unlock() }
         let id = "session-\(spawned.count + 1)"
         spawned.append((id, cwd, command, label, false))
         environments[id] = env
+        agents[id] = agent
         onSpawn?(id)
         return id
     }
@@ -83,6 +93,7 @@ final class FakeRuntime: LeadRuntime {
         defer { calls.unlock() }
         if let refusal = refusals[session] { throw BoardError(text: refusal) }
         killed.append(session)
+        onKill?(session, spawned.map(\.label))
     }
     func forget(_ session: String) {
         calls.lock()
@@ -111,7 +122,7 @@ final class FakeRuntime: LeadRuntime {
         return listing
     }
     private var listing: [LeadSessionInfo] {
-        spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: statuses[$0.id] ?? "working", tty: nil, pid: pids[$0.id] ?? getpid(), waiting: waiting[$0.id]) } + others
+        spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: statuses[$0.id] ?? "working", tty: nil, pid: pids[$0.id] ?? getpid(), waiting: waiting[$0.id], usageLimit: usageLimits[$0.id]) } + others
     }
     /// As the host counts them: what it lists and what it doesn't (`HostCensus.count`).
     func census() throws -> [HostCensus]? {
@@ -216,8 +227,13 @@ extension LeadTeamFixture {
         // The Mac-wide cap these tests' scenes were written for, and refusals kept in the vault's folder (removed with it).
         lead.macLimits = { MacLimits(maxSessions: 6) }
         lead.roomWaits = roomWaits
+        // The account's usage kept in the vault's folder (removed with it), never the Mac's.
+        lead.usageStore = usageStore
         return lead
     }
+
+    /// Where this fixture's leads keep the account's usage (see `AccountUsage`).
+    var usageStore: AccountUsageStore { AccountUsageStore(file: vault.folder.appendingPathComponent("account-usage.json")) }
 
     /// Where this fixture's leads keep the refusals the app's witness wakes them for.
     var roomWaits: LeadWitness.RoomWaits { LeadWitness.RoomWaits(folder: vault.folder.appendingPathComponent("room-waits")) }
@@ -228,6 +244,14 @@ extension LeadTeamFixture {
 
     /// What the lead last started as `name` (worker-<slug>, verify-<slug>): its session and its tool server's arguments.
     func launched(_ name: String, _ runtime: FakeRuntime) throws -> (session: String, args: [String]) {
+        // A Codex worker has no --name and no MCP file: its tool server is on its command line (`LeadLaunch.prepareCodex`).
+        let codexArgs = #"mcp_servers\.vibeswitcher\.args=(\[[^\]]*\])"#
+        if name.hasPrefix("worker-"), let spawn = runtime.spawned.last(where: {
+            $0.command.range(of: codexArgs, options: .regularExpression) != nil && $0.cwd.hasSuffix("/" + name.dropFirst("worker-".count))
+        }), let range = spawn.command.range(of: codexArgs, options: .regularExpression) {
+            let list = String(spawn.command[range].dropFirst("mcp_servers.vibeswitcher.args=".count))
+            return (spawn.id, try #require(try JSONSerialization.jsonObject(with: Data(list.utf8)) as? [String]))
+        }
         let spawn = try #require(runtime.spawned.last { $0.command.contains("--name '\(name)'") })
         let range = try #require(spawn.command.range(of: #"--mcp-config '([^']+)'"#, options: .regularExpression))
         let path = String(spawn.command[range].dropFirst("--mcp-config '".count).dropLast())

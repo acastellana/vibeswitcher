@@ -25,12 +25,58 @@ if let at = CommandLine.arguments.dropFirst().firstIndex(of: MCPKeeper.flag) {
     exit(MCPKeeper.run(executable: executable, arguments: arguments))
 }
 
+// `vibeswitcher-mcp --read-only-permission --root WORKTREE [--worker]`, as a role's `PermissionRequest` hook (see
+// `LeadLaunch.hooks`): the event's JSON on stdin; prints the allow for a command line that only reads inside WORKTREE
+// (and for a worker, its own commits: `ReadOnlyCommand`), nothing otherwise (the prompt shows). First, so a hook runs
+// none of the server's code.
+if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == ReadOnlyCommand.hookArgument {
+    if let options = ReadOnlyCommand.hookOptions(Array(CommandLine.arguments.dropFirst(2))),
+       let answer = ReadOnlyCommand.hookAnswer(FileHandle.standardInput.readDataToEndOfFile(), root: options.root, writes: options.writes) {
+        FileHandle.standardOutput.write(answer)
+    }
+    exit(0)
+}
+
+// A role session's status line (see `UsageStatusLine`): prints your own status line's output, keeps the account's usage.
+// A reader that has gone (Claude Code closing the pipes early, your command not reading its input) makes a write fail,
+// never ends this process before your status line's output is printed: SIGPIPE ignored here (your command starts with it
+// at its default) and on stdout.
+if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == UsageStatusLine.argument {
+    signal(SIGPIPE, SIG_IGN)
+    _ = fcntl(STDOUT_FILENO, F_SETNOSIGPIPE, 1)
+    // Claude Code stopping it: heard by your command's runner, which stops your command too, never left running.
+    for stop in UsageStatusLine.stopSignals { signal(stop, SIG_IGN) }
+    let input = (try? FileHandle.standardInput.readToEnd()) ?? Data()
+    UsageStatusLine.run(input: input, userOnly: CommandLine.arguments.dropFirst(2).contains(UsageStatusLine.userOnlyArgument)) { output in
+        try? FileHandle.standardOutput.write(contentsOf: output)
+    }
+    exit(0)
+}
+
 // `vibeswitcher-mcp --test-failures FILE`, for scripts/test-under-load.sh: the failing tests in a saved `swift test`
 // output, as the lead's tools report them; nothing printed when it shows none.
 if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--test-failures" {
     let output = FileManager.default.contents(atPath: CommandLine.arguments[2]).map { String(decoding: $0, as: UTF8.self) } ?? ""
     if let summary = TestFailures(output: output).summary() { print(summary) }
     exit(0)
+}
+
+// `vibeswitcher-mcp --wallet-request request …`, as Resources/bin/vs-wallet runs it in a session VibeSwitcher started:
+// files a transaction request for the user to send to the Wallet Manager from its card (see `WalletAsk`). No tool server runs;
+// nothing is sent from here. Filed with or without the Wallet Manager set up in Settings › Wallet (the app's own defaults
+// say): without it, the output says the browser wallet is the way to sign it.
+if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--wallet-request" {
+    let defaults = UserDefaults(suiteName: "dev.vibeswitcher.VibeSwitcher")
+    let environment = ProcessInfo.processInfo.environment
+    let walletManager = WalletAsk.WalletManager.from(peer: defaults?.string(forKey: "walletPeerID") ?? "",
+                                                    passagePath: defaults?.string(forKey: "walletPassagePath") ?? "",
+                                                    path: environment["PATH"])
+    // The session host says which session this process runs in, and stamps the request for it.
+    let ran = WalletAsk.run(Array(CommandLine.arguments.dropFirst(2)), cwd: FileManager.default.currentDirectoryPath,
+                           walletManager: walletManager, vault: .standard)
+    if !ran.output.isEmpty { print(ran.output) }
+    if !ran.error.isEmpty { FileHandle.standardError.write(Data((ran.error + "\n").utf8)) }
+    exit(ran.status)
 }
 
 // `vibeswitcher-mcp --verifier-prompt ROOT SLUG BASE MESSAGE_FILE auto|off`, for scripts/verifier-eval.sh: what an
@@ -51,7 +97,9 @@ if CommandLine.arguments.count == 7, CommandLine.arguments[1] == "--verifier-pro
     let prompt = LeadPrompts.verifier(task: task, root: root, workflow: workflow, guide: LeadRisk.reviewGuide(root: root, base: base), security: security)
     let settings: [String: Any] = ["permissions": ["allow": LeadLaunch.allow(.verifier, base: base),
                                                    "deny": LeadLaunch.deny(.verifier, base: base, records: workflow.recordsDir)],
-                                   "env": LeadLaunch.environment(.verifier)]
+                                   "env": LeadLaunch.environment(.verifier),
+                                   // Its git reads go through the hook, as in an audit (the clone is its worktree).
+                                   "hooks": LeadLaunch.hooks(.verifier, server: Bundle.main.executablePath ?? CommandLine.arguments[0], root: root)]
     let model = workflow.auditModel(workerModel: LeadWorkflow.claudeModel(command: "claude", home: NSHomeDirectory()))
     let out: [String: Any] = ["prompt": prompt, "settings": settings, "model": model, "security": security ?? NSNull()]
     let data = (try? JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys])) ?? Data()
@@ -157,15 +205,20 @@ final class HostRuntime: LeadRuntime {
         LeadWorkflow.claudeModel(command: claudeCommand(root: root), home: VibePaths.home)
     }
 
-    func claudeCommand(root: String) -> String {
-        // The same command the app starts Claude with (its preferences), so workers run like your own sessions.
+    func claudeCommand(root: String) -> String { command(.claude, root: root) ?? "claude" }
+
+    func codexCommand(root: String) -> String { command(.codex, root: root) ?? "codex" }
+
+    /// The same command the app starts `agent` with (its preferences and launch presets), so workers run like your own
+    /// sessions.
+    private func command(_ agent: Agent, root: String) -> String? {
         let preferences = UserDefaults(suiteName: "dev.vibeswitcher.VibeSwitcher")
         let presets = LaunchPresets.load(from: VibePaths.presetsFile,
                                          claudeCommand: preferences?.string(forKey: "claudeCommand") ?? "claude",
                                          codexCommand: preferences?.string(forKey: "codexCommand") ?? "codex")
-        let preset = presets.presets(for: root).first { $0.agent == .claude && $0.place == .window }
-            ?? presets.presets(for: root).first { $0.agent == .claude }
-        return preset.flatMap(LaunchPlan.command(for:)) ?? "claude"
+        let preset = presets.presets(for: root).first { $0.agent == agent && $0.place == .window }
+            ?? presets.presets(for: root).first { $0.agent == agent }
+        return preset.flatMap(LaunchPlan.command(for:))
     }
 
     func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String {
@@ -255,7 +308,7 @@ final class HostRuntime: LeadRuntime {
                                         turnStarted: { [observer] in
                                             switch observer.activity(session, agentPid: agent.pid) {
                                             case .working, .needsInput: return true
-                                            case .idle, .apiError, .unknown: return false
+                                            case .idle, .apiError, .usageLimit, .unknown: return false
                                             }
                                         },
                                         pause: { usleep(250_000) })
@@ -267,7 +320,8 @@ final class HostRuntime: LeadRuntime {
         try HostCall.sessions(socket: socket).map { session in
             let reading = session.isLive ? waiting(session, agent: Self.agentPid(on: session.tty)) : nil
             return LeadSessionInfo(id: session.id.uuidString, cwd: session.cwd, label: session.label, live: session.isLive,
-                                   status: reading?.activity.text, tty: session.tty, pid: session.childPID, waiting: reading?.waiting)
+                                   status: reading?.activity.text, tty: session.tty, pid: session.childPID, waiting: reading?.waiting,
+                                   usageLimit: reading.flatMap { if case .usageLimit(let limit) = $0.activity { return limit } else { return nil } })
         }
     }
 
@@ -365,6 +419,7 @@ let toolset = MCPHostedToolset(attempt: {
     toolset.toolsWait = roleWait
     // Merges and audits hold the Mac-wide test and build lock around their tests, as `vs-heavy` does.
     toolset.testLock = TestLock.standard()
+    toolset.slotsFromSettings = true
     // The risk check's model pass (see `LeadRisk`): headless Claude, as the all-done summary's, from the diff's stat,
     // the contract and REVIEW.md only.
     toolset.riskModel = ClaudeHeadless.risk
@@ -380,6 +435,7 @@ let toolset = MCPHostedToolset(attempt: {
 }, giveUp: {
     let toolset = LeadToolset(arguments: arguments, runtime: runtime)
     toolset.testLock = TestLock.standard()
+    toolset.slotsFromSettings = true
     return toolset
 })
 // This binary as it is now: when an app update replaces it, the server switches to the new one between requests,

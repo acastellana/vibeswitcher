@@ -46,7 +46,7 @@ struct LeadLaunchTests {
             #expect(deny.contains(rule), "missing \(rule)")
         }
         // Its own branch it brings up to date with the lead's (the rest of the rules: LeadGuardRailsTests).
-        for rule in ["Bash(git rebase project-lead)", "Bash(git rebase --continue)", "Bash(git merge project-lead)", "Bash(git log:*)"] {
+        for rule in ["Bash(git rebase project-lead)", "Bash(git rebase --continue)", "Bash(git merge project-lead)"] {
             #expect(allow.contains(rule), "missing \(rule)")
         }
         // Its git never opens an editor, so the `git commit` that ends a merge needs nothing in front; its `git status`
@@ -102,6 +102,7 @@ struct LeadLaunchTests {
     @Test func noRoleMayWriteTheUsersMacWideSettings() throws {
         let root = try root()
         let rules = ["Edit(~/.vibeswitcher/mac-limits.json)", "Write(~/.vibeswitcher/mac-limits.json)",
+                     "Edit(~/.vibeswitcher/boost.json)", "Write(~/.vibeswitcher/boost.json)",
                      "Edit(~/.vibeswitcher/policy.md)", "Write(~/.vibeswitcher/policy.md)"]
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "fix", base: "claude",
@@ -109,7 +110,7 @@ struct LeadLaunchTests {
             let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
             let deny = (settings?["permissions"] as? [String: Any])?["deny"] as? [String] ?? []
             for rule in rules { #expect(deny.contains(rule), "\(role): \(rule)") }
-            #expect(!((settings?["permissions"] as? [String: Any])?["allow"] as? [String] ?? []).contains { $0.contains("mac-limits") || $0.contains("policy.md") })
+            #expect(!((settings?["permissions"] as? [String: Any])?["allow"] as? [String] ?? []).contains { $0.contains("mac-limits") || $0.contains("boost.json") || $0.contains("policy.md") })
         }
         // The app's own writes (Settings' save) go through, as before.
         let file = URL(fileURLWithPath: root).appendingPathComponent("home/mac-limits.json")
@@ -135,7 +136,210 @@ struct LeadLaunchTests {
             // 2.1.299+: `mcp__<server>__*` with the whole name; a bare `mcp__vibeswitcher` or a prefix no longer reads the same.
             #expect(allow.filter { $0.hasPrefix("mcp__") } == ["mcp__vibeswitcher__*"])
             #expect(!deny.contains { $0.hasPrefix("mcp__") })
-            #expect(allow.contains("Bash(git log:*)"))
+            // git reads go to the role's hook (LeadLaunchOutsideReadsTests), not to a rule.
+            #expect(!allow.contains("Bash(git log:*)") && settings["hooks"] != nil)
         }
+    }
+}
+
+/// Every role's git reads go through its `PermissionRequest` hook's parser (`ReadOnlyCommand`), not broad allow rules
+/// such as `Bash(git diff:*)`, which let `git diff --no-index /var/empty <file>` print the lead's private files past
+/// `Read(~/.vibeswitcher/lead/**)` (2026-11-01). Each leak form of round 1's findings (F1–F6), and a symlink the branch
+/// commits, is shown printing a scratch "private" file for real, then shown not running unasked for any role; the
+/// everyday reads, and a worker's commits, still do.
+struct LeadLaunchOutsideReadsTests {
+    let temp = Scratch()
+
+    func run(_ command: String, in folder: String) throws -> String { try Self.shell(command, in: folder) }
+
+    /// Runs `command` with sh in `folder` (no hooks, no global git config) and returns what it printed, errors included.
+    static func shell(_ command: String, in folder: String) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command]
+        process.currentDirectoryURL = URL(fileURLWithPath: folder)
+        var env = ProcessInfo.processInfo.environment
+        for (key, value) in ["GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_EDITOR": "true", "GIT_PAGER": "cat",
+                             "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"] {
+            env[key] = value
+        }
+        process.environment = env
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = out
+        try process.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// A role's permissions as `prepare` writes them, and whether Claude Code runs a line under them without asking:
+    /// no deny rule matches it, and an allow rule or the `PermissionRequest` hook (as its command line sets it up) takes it.
+    struct Role {
+        let role: LeadLaunch.Role
+        let allow: [String], deny: [String]
+        /// Nil when its settings have no hook (what runs unasked is then the allow rules' alone).
+        let hook: (root: String?, writes: Bool)?
+
+        init(_ role: LeadLaunch.Role, root: String, temp: Scratch) throws {
+            let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "t", base: "claude", prompt: "p",
+                                                start: "Go.", server: "/opt/vibe switcher/vibeswitcher-mcp", name: "\(role)-outside",
+                                                branch: "main", records: "docs/lead", folder: temp.url("run-\(role)"), cwd: root,
+                                                temporary: temp.url("session-tmp"))
+            let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
+            let permissions = try #require(settings["permissions"] as? [String: Any])
+            self.role = role
+            allow = permissions["allow"] as? [String] ?? []
+            deny = permissions["deny"] as? [String] ?? []
+            let groups = (settings["hooks"] as? [String: Any])?["PermissionRequest"] as? [[String: Any]]
+            let command = (groups?.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String
+            let words = command.flatMap { ReadOnlyCommand.parts(of: $0)?.first } ?? []
+            hook = words.dropFirst().first == ReadOnlyCommand.hookArgument ? ReadOnlyCommand.hookOptions(Array(words.dropFirst(2))) : nil
+        }
+
+        func runsUnasked(_ line: String, cwd: String) -> Bool {
+            if LeadGuardRailsTests.denied(line, by: deny) { return false }
+            if LeadGuardRailsTests.allowed(line, by: (allow, deny)) { return true }
+            guard let hook else { return false }
+            return ReadOnlyCommand.allows(line, in: ReadOnlyCommand.Scope(root: hook.root, cwd: cwd, writes: hook.writes))
+        }
+    }
+
+    @Test func gitReadsOfFilesOutsideTheWorktreeRunUnaskedForNoRole() throws {
+        let scratch = temp.url("outside").resolvingSymlinksInPath().path
+        let secret = "SECRET-SEAL-VALUE"
+        let privateDir = scratch + "/private", repo = scratch + "/repo"
+        try FileManager.default.createDirectory(atPath: privateDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        // A line of its own, then "--": rev-parse --parseopt prints the lines before "--" as its usage.
+        try Data((secret + "\n--\n").utf8).write(to: URL(fileURLWithPath: privateDir + "/seal"))
+        _ = try run("git init -q -b main && mkdir sub && echo a > a && echo b > sub/b && git add a sub/b && git commit -qm a"
+                    + " && echo c >> a && git commit -qam c", in: repo)
+        let seal = privateDir + "/seal"
+        // Each prints the secret when run (checked below), so each is a real way to read it.
+        let leaks = [
+            // The first report: --no-index, and a path outside the work tree (git then compares without it).
+            "git diff --no-index /var/empty \(privateDir)", "git diff /dev/null \(seal)", "git diff ../private/seal a",
+            "git diff sub/../../private/seal a", "git diff \"\(seal)\" a",
+            // F1: global options before the command.
+            "git -P diff /dev/null \(seal)", "git --no-pager diff --no-index /dev/null \(seal)",
+            "git --literal-pathspecs diff /dev/null ../private/seal",
+            // F2: a bare `..`.
+            "git diff /var/empty ..", "git diff .. /var/empty",
+            // F3: --stdin on diff and show (and log).
+            "git diff --stdin < \(seal)", "git show --stdin < \(seal)", "git log --stdin < \(seal)",
+            // F4: abbreviations and bundled short options of the flags that read a file.
+            "git add --pathspec-from=\(seal)", "git blame --cont \(seal) -- a", "git blame -wS \(seal) a",
+            "git blame --ignore-revs \(seal) a",
+            // F5: rev-parse --parseopt prints its input's usage lines.
+            "git rev-parse --parseopt -- -h < \(seal)",
+            // F6: commit's template (and its file, and abbreviations of both).
+            "git commit -q --allow-empty -t \(seal) --cleanup=verbatim && git log -1 --format=%B",
+            "git commit -q --allow-empty --templ=\(seal) --cleanup=verbatim && git log -1 --format=%B",
+            "git commit -q --allow-empty -F \(seal) && git log -1 --format=%B",
+            "git commit -q --allow-empty --fil=\(seal) && git log -1 --format=%B",
+            // Pathspecs from a file (git prints each line it can't match).
+            "git add --pathspec-from-file=\(seal)", "git rm --pathspec-from-file=\(seal)",
+        ]
+        for command in leaks {
+            #expect(try run(command, in: repo).contains(secret), "not a leak: \(command)")
+        }
+        // As a session would send them, plus shapes no rule can resolve: a path from home, behind an expansion.
+        let refused = leaks + ["git diff \"$S/private\" a", "git diff `echo /etc/hosts` a", "git diff /dev/null ~/.vibeswitcher/lead/x",
+                               "git diff --pathspec-from-file \(seal)"]
+        let roles = try [LeadLaunch.Role.lead, .worker, .verifier].map { try Role($0, root: repo, temp: temp) }
+        for role in roles {
+            // No broad git rule is left: every git read goes to the hook.
+            #expect(!role.allow.contains { $0.hasPrefix("Bash(git ") && $0.hasSuffix(":*)") }, "\(role.role): \(role.allow)")
+            #expect(role.hook?.root == repo && role.hook?.writes == (role.role == .worker), "\(role.role)")
+            for command in refused {
+                #expect(!role.runsUnasked(command, cwd: repo), "\(role.role): \(command)")
+            }
+            // The deny rules still come first: --no-index is refused there before the hook is asked.
+            #expect(LeadGuardRailsTests.denied("git diff --no-index /var/empty \(privateDir)", by: role.deny))
+        }
+
+        // What each role reads every day runs without a prompt: relative paths, paths absolute inside the worktree (F9),
+        // revisions and ranges.
+        let base = try run("git rev-parse HEAD~1", in: repo).trimmingCharacters(in: .whitespacesAndNewlines)
+        let reads = ["git diff main...HEAD", "git diff \(base) HEAD -- a sub/b", "git diff \(base) HEAD -- \(repo)/a \(repo)/sub/b",
+                     "git diff HEAD~1", "git diff --stat", "git diff main...HEAD -- a sub/b", "git log --oneline -5 -- a",
+                     "git log -p \(repo)/sub/b", "git show HEAD:a", "git show --stat HEAD", "git blame a", "git blame -L 1,2 \(repo)/a",
+                     "git status", "git status --short", "git log --format='%h %s' main..HEAD", "grep -rn x sub", "head -5 a"]
+        for role in roles {
+            for command in reads { #expect(role.runsUnasked(command, cwd: repo), "\(role.role): \(command)") }
+        }
+        // From a subfolder, `..` is the worktree (the deny rules still refuse a `git diff` path that starts with `../`).
+        for role in roles { #expect(role.runsUnasked("head ../a", cwd: repo + "/sub"), "\(role.role)") }
+        #expect(ReadOnlyCommand.allows("git diff HEAD~1 -- ../a", in: .init(root: repo, cwd: repo + "/sub")))
+        #expect(!ReadOnlyCommand.allows("git diff HEAD~1 -- ../../a", in: .init(root: repo, cwd: repo + "/sub")))
+        // A worker stages, removes, commits (a message on the line or in a here-document) and takes a fix out and back.
+        let writes = ["git add a", "git add -A", "git add \(repo)/sub/b", "git rm sub/b", "git rm --cached a", "git commit -m 'Add the login form'",
+                      "git commit -am \"Fix the form\"", "git commit", "git commit --no-edit",
+                      "git commit -m \"$(cat <<'EOF'\nRefuse `..` in ~/.vibeswitcher paths\n\nCo-Authored-By: x <x@y>\nEOF\n)\"",
+                      "git diff \(base) HEAD -- a | git apply -R", "git diff \(base) HEAD -- a | git apply"]
+        for role in roles {
+            for command in writes {
+                #expect(role.runsUnasked(command, cwd: repo) == (role.role == .worker), "\(role.role): \(command)")
+            }
+        }
+        // A here-document whose delimiter isn't quoted, or with anything after its closing line, still prompts.
+        let worker = try #require(roles.first { $0.role == .worker })
+        for command in ["git commit -m \"$(cat <<EOF\n$(id)\nEOF\n)\"", "git commit -m \"$(cat <<'EOF'\nx\nEOF\n); id)\"",
+                        "git commit -m \"$(cat <<'EOF'\nx\nEOF\n)\" -t \(seal)", "git commit -m x -t \(seal)", "git commit -m x --template \(seal)"] {
+            #expect(!worker.runsUnasked(command, cwd: repo), "worker: \(command)")
+        }
+    }
+
+    /// A symlink committed inside the worktree that points outside: the text of the path is inside, the file isn't.
+    /// Reads through it, directly, through a chain of links, from an absolute path, or by a flag that follows links
+    /// while it recurses, print the secret; none runs unasked for any role. A link that stays inside still reads.
+    @Test func aSymlinkInTheWorktreeThatPointsOutsidePrompts() throws {
+        let scratch = temp.url("symlink").resolvingSymlinksInPath().path
+        let secret = "SECRET-SEAL-VALUE"
+        let privateDir = scratch + "/private", repo = scratch + "/repo"
+        try FileManager.default.createDirectory(atPath: privateDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        try Data((secret + "\n").utf8).write(to: URL(fileURLWithPath: privateDir + "/seal"))
+        _ = try run("git init -q -b main && mkdir sub && echo a > a && ln -s ../private/seal inner && ln -s inner chain"
+                    + " && ln -s \(privateDir) linkdir && ln -s ../a sub/up && git add -A && git commit -qm links", in: repo)
+        let leaks = ["head inner", "tail -n 3 chain", "grep -h SECRET linkdir/seal", "head \(repo)/linkdir/seal", "wc -c inner && head inner",
+                     "grep -rS SECRET .", "rg -L SECRET .", "rg --follow SECRET ."]
+        for command in leaks {
+            #expect(try run(command, in: repo).contains(secret), "not a leak: \(command)")
+        }
+        let roles = try [LeadLaunch.Role.lead, .worker, .verifier].map { try Role($0, root: repo, temp: temp) }
+        for role in roles {
+            for command in leaks + ["git diff --stat inner a", "head sub/../inner"] {
+                #expect(!role.runsUnasked(command, cwd: repo), "\(role.role): \(command)")
+            }
+            for command in ["head sub/up", "head a", "grep -rn a ."] {
+                #expect(role.runsUnasked(command, cwd: repo), "\(role.role): \(command)")
+            }
+        }
+        // A link the line makes itself (the blind check's): a patch the worker wrote, applied, then read through in the
+        // same line, after the hook resolved its paths. `git apply` only ends a line; before it, a link it makes isn't there.
+        let patches = scratch + "/patches"
+        try FileManager.default.createDirectory(atPath: patches, withIntermediateDirectories: true)
+        _ = try run("git init -q && ln -s \(privateDir)/seal made && ln -s \(privateDir)/seal made2 && git add made && git diff --cached > \(repo)/one.patch"
+                    + " && git reset -q && git add made2 && git diff --cached > \(repo)/two.patch", in: patches)
+        let made = ["head -n 50 one.patch | git apply && head made", "head -n 50 two.patch | git apply | sort - made2"]
+        let worker = try #require(roles.first { $0.role == .worker })
+        #expect(!ReadOnlyCommand.allows(made[0], in: .init(root: repo, cwd: repo)))  // a read-only role has no git apply
+        for command in made + ["head one.patch | git apply ; head made", "head one.patch | git apply -R || head made",
+                               "head one.patch | git apply | git apply"] {
+            #expect(!worker.runsUnasked(command, cwd: repo), "worker: \(command)")
+        }
+        #expect(worker.runsUnasked("head -n 50 one.patch | git apply", cwd: repo))
+        #expect(worker.runsUnasked("git diff HEAD~0 HEAD -- a | git apply -R", cwd: repo))
+        // Asked while the links aren't there yet, as the hook is; then run, each prints the secret.
+        #expect(!FileManager.default.fileExists(atPath: repo + "/made") && !FileManager.default.fileExists(atPath: repo + "/made2"))
+        for command in made {
+            #expect(try run(command, in: repo).contains(secret), "not a leak: \(command)")
+        }
+        // A shell outside the worktree runs nothing unasked; nor does a worktree that isn't there.
+        #expect(!ReadOnlyCommand.allows("git status", in: .init(root: repo, cwd: privateDir)))
+        #expect(!ReadOnlyCommand.allows("git status", in: .init(root: scratch + "/gone", cwd: scratch + "/gone")))
+        #expect(ReadOnlyCommand.allows("git status", in: .init(root: repo, cwd: repo + "/sub")))
     }
 }

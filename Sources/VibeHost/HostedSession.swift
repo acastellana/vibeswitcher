@@ -82,13 +82,21 @@ public final class HostedSession {
     /// The looks' spacing, the last one repeated: a program the source missed is seen ended within 30 s at worst, and
     /// one ending once the source is registered (all but those that end in their first moments) at once.
     static let exitPollDelays: [TimeInterval] = [0.05, 1, 5, 30]
+    /// The looks' spacing once the exit event came (`exitEvent`) before the program could be reaped: it's ending, so
+    /// it's looked at every second until it's reaped, not left a zombie, its session shown running, for up to the
+    /// backoff's 30 s (22 sessions at once on a loaded test run's start, 2026-11-01).
+    static let endingPollDelays: [TimeInterval] = [0.05, 1]
     private var exitPolls = 0
+    /// The exit event came: the looks follow `endingPollDelays`.
+    private var exitSeen = false
     private var pendingInput = Data()
     /// The client that asked to end it (see `terminate`): its process id and name.
     private var killer: (pid: pid_t, name: String?)?
     /// Input was refused for lack of room: more is refused until what waits went in, so none lands out of order.
     private var refusingInput = false
     private var closed = false
+    /// Told to end (`terminate`): closed before its program is reaped, the session hands it to `reap(_:until:)`.
+    private var ending = false
     static let maxPendingInput = 1 << 20
     /// Told once the input waiting for room has all gone in (or can't: the session closed). See `whenInputWent`.
     private var inputWaiters: [() -> Void] = []
@@ -338,7 +346,7 @@ public final class HostedSession {
         // Ended (and reaped) already: its pid may belong to someone else now.
         guard info.isLive else { return }
         let exit = DispatchSource.makeProcessSource(identifier: info.childPID, eventMask: .exit, queue: queue)
-        exit.setEventHandler { [weak self] in self?.reap() }
+        exit.setEventHandler { [weak self] in self?.exitEvent() }
         exit.resume()
         exitSource = exit
 
@@ -347,7 +355,8 @@ public final class HostedSession {
             self.reap()
             guard let poll = self.exitPoll else { return }
             self.exitPolls += 1
-            let delay = Self.exitPollDelays[min(self.exitPolls, Self.exitPollDelays.count - 1)]
+            let delays = self.exitSeen ? Self.endingPollDelays : Self.exitPollDelays
+            let delay = delays[min(self.exitPolls, delays.count - 1)]
             poll.schedule(after: delay, repeating: nil, leeway: .milliseconds(Int(delay * 100)))
         }
         poll.schedule(after: Self.exitPollDelays[0], repeating: nil, leeway: .milliseconds(20))
@@ -402,9 +411,22 @@ public final class HostedSession {
         onChange?(info)
     }
 
-    private func reap() {
+    /// The exit source's event: the program ended. The kernel posts it a moment before the program can be reaped, and
+    /// under load that moment is long enough for `waitpid` to find it still exiting (9 of 5,000 kills beside 24 busy
+    /// loops, 2026-11-01): then the poll looks again at its shortest delay, its backoff starting over, rather than at
+    /// its next look (up to 30 s off). The source doesn't fire again: an exit is posted once.
+    func exitEvent() {
+        guard !reap(), let exitPoll else { return }
+        exitSeen = true
+        exitPolls = 0
+        exitPoll.schedule(after: Self.endingPollDelays[0], repeating: nil, leeway: .milliseconds(20))
+    }
+
+    /// Reaps the program if it ended; whether it did (false too once reaped already).
+    @discardableResult
+    private func reap() -> Bool {
         var status: Int32 = 0
-        guard waitpid(info.childPID, &status, WNOHANG) == info.childPID else { return }
+        guard waitpid(info.childPID, &status, WNOHANG) == info.childPID else { return false }
         let signal = status & 0x7f
         let code = signal == 0 ? (status >> 8) & 0xff : 128 + signal
         exitSource?.cancel()
@@ -423,6 +445,7 @@ public final class HostedSession {
             self.onEnd?(status)
             self.onChange?(self.info)
         }
+        return true
     }
 
     /// Once the parser got through everything the session printed, its last screen is kept and the rest let go
@@ -781,6 +804,7 @@ public final class HostedSession {
     /// `by`: the client that asked (its process id), which its exit names.
     public func terminate(by client: pid_t? = nil) {
         guard info.isLive || readSource != nil else { return }
+        ending = true
         if let client, info.isLive, killer == nil { killer = (client, ProcessTable.info(pid: client)?.comm) }
         let groups = Set([info.childPID, tcgetpgrp(masterFD)].filter { $0 > 0 })
         // Before the shell is asked to end: once it has, what it started is launchd's.
@@ -810,9 +834,33 @@ public final class HostedSession {
         }
         exitSource?.cancel()
         exitPoll?.cancel()
+        // Its exit is no longer watched: a program told to end is reaped as it goes (`terminate` kills it 5 s on at
+        // the latest), or a host that runs on (a test's, in the test runner) keeps it a zombie for good: 431 of them
+        // in one full suite's runner, 2026-11-01. One not told to end is left alone: a handover's new image reaps it.
+        if ending, info.isLive { Self.reap([info.childPID], until: Date().addingTimeInterval(Self.reapPatience)) }
         let fd = masterFD
         done.notify(queue: queue) { Darwin.close(fd) }
     }
+
+    /// How long a closed session's program, told to end, is looked for: past the SIGKILL `terminate` sends 5 s on,
+    /// with room for a loaded Mac.
+    static let reapPatience: TimeInterval = 60
+
+    /// Reaps each of `programs` (this process's children) once it ended, looking every 100 ms until `deadline`. One
+    /// reaped elsewhere already (the host's `exitOnceEnded`) is done with.
+    static func reap(_ programs: [pid_t], until deadline: Date) {
+        let left = programs.filter { pid in
+            var status: Int32 = 0
+            let reaped = waitpid(pid, &status, WNOHANG)
+            return reaped == 0 || (reaped < 0 && errno == EINTR)
+        }
+        guard !left.isEmpty, Date() < deadline else { return }
+        reaper.asyncAfter(deadline: .now() + 0.1) { reap(left, until: deadline) }
+    }
+
+    /// Where `reap` looks: a queue of its own, not a global one, whose few threads busy work can hold for many seconds
+    /// (a loaded test run's sessions waited 14 s, then 2.5 min, all reaped at once when they came free).
+    private static let reaper = DispatchQueue(label: "vibeswitcher.session-reaper")
 }
 
 /// The headless terminal's delegate (in the parser, see `SessionParser`): replies to queries, title, bell, program

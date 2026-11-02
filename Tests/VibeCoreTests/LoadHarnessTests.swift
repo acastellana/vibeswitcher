@@ -23,7 +23,8 @@ import Testing
 
     /// The harness with `arguments`, not started; `fake` readings (load, memory, disk, owner name, burner, tick) go in
     /// its environment, `output` takes what it says.
-    func process(_ arguments: [String], fake: [String: String] = [:], claudeCode: Bool = false, heldSlot: Bool = false) -> Process {
+    func process(_ arguments: [String], fake: [String: String] = [:], claudeCode: Bool = false, heldSlot: Bool = false,
+                 pathFirst: URL? = nil) -> Process {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [Self.repo.appendingPathComponent("scripts/test-under-load.sh").path] + arguments
@@ -34,13 +35,19 @@ import Testing
         environment["VIBESWITCHER_TEST_LOCK"] = heldSlot ? locks.appendingPathComponent("test-build.lock").path : nil
         environment["VIBESWITCHER_TEST_LOCK_DIR"] = locks.path
         for (name, value) in fake { environment["TEST_UNDER_LOAD_\(name)"] = value }
+        // pathFirst: a folder of fake commands (an xcode-select) found before the Mac's own, DEVELOPER_DIR unset.
+        if let pathFirst {
+            environment["PATH"] = "\(pathFirst.path):\(environment["PATH"] ?? "/usr/bin:/bin")"
+            environment["DEVELOPER_DIR"] = nil
+        }
         process.environment = environment
         return process
     }
 
     /// Runs the harness with `arguments` to its end.
-    func harness(_ arguments: [String], fake: [String: String] = [:], claudeCode: Bool = false) throws -> (status: Int32, output: String) {
-        let process = process(arguments, fake: fake, claudeCode: claudeCode)
+    func harness(_ arguments: [String], fake: [String: String] = [:], claudeCode: Bool = false,
+                 pathFirst: URL? = nil) throws -> (status: Int32, output: String) {
+        let process = process(arguments, fake: fake, claudeCode: claudeCode, pathFirst: pathFirst)
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -137,6 +144,24 @@ import Testing
         let run = try harness(["--check-only"], fake: idle.merging(["OWNER_NAME": "no-such-process"]) { $1 }, claudeCode: true)
         #expect(run.status != 0)
         #expect(run.output.contains("no live owner"), "\(run.output)")
+    }
+
+    /// On 2026-10-31 a worker's run stopped after its build with "no macOS platform": xcode-select pointed at the
+    /// Command Line Tools, which have Testing.framework (Library/Developer/Frameworks) and no platform. The developer
+    /// folder is picked before any wait (scripts/lib/developer-dir.sh, DeveloperDirTests), and --check-only names it:
+    /// here fake Command Line Tools that a fake xcode-select names, with DEVELOPER_DIR unset.
+    @Test func commandLineToolsSelectedAreTheDeveloperFolder() throws {
+        let tools = temp.url("CommandLineTools"), bin = temp.url("bin")
+        try FileManager.default.createDirectory(at: tools.appendingPathComponent("Library/Developer/Frameworks/Testing.framework"),
+                                                withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let select = bin.appendingPathComponent("xcode-select")
+        try "#!/bin/bash\n[[ $1 == -p ]] || exit 9\necho '\(tools.path)'\n".write(to: select, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: select.path)
+        let run = try harness(["--check-only"], fake: idle, pathFirst: bin)
+        #expect(run.status == 0, "\(run.output)")
+        #expect(run.output.contains("ok to start"), "\(run.output)")
+        #expect(run.output.contains("tests run with \(tools.path)'s Testing.framework"), "\(run.output)")
     }
 
     /// Without --check-only or the fake burner the fake load (0) is ignored: the real one, never 0.01 or less on a Mac
@@ -260,6 +285,45 @@ import Testing
         #expect(until { kill(harness, 0) != 0 }, "\(said())")
         #expect(!said().contains("busy loops"))
         #expect(!FileManager.default.fileExists(atPath: pids.path))
+    }
+
+    /// Its build goes through heavy_swift (scripts/lib/swift-jobs.sh), on its slot's share of the cores like test.sh's
+    /// and build-app.sh's: two modules at once, VS_HEAVY_CORES ÷ 2 (rounded up) frontends each; the bare
+    /// `swift build --build-tests` without VS_HEAVY_CORES. A fake swift says what it was asked and fails the build, so
+    /// the run ends there, before any busy loop. Through vs-heavy (12 cores, 3 slots: 4), and run as vs-heavy's inner
+    /// command directly, with VS_HEAVY_CORES 5 and with none.
+    @Test func itsBuildRunsOnItsSlotsShareOfTheCores() throws {
+        let bin = temp.url("fake-swift"), log = temp.url("swift-args")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let swift = bin.appendingPathComponent("swift")
+        try "#!/bin/bash\necho \"$*\" >> '\(log.path)'\nexit 1\n".write(to: swift, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: swift.path)
+        let fake = try fakeMac(temp.url("load"))
+        func build(_ environment: [String: String?]) throws -> String {
+            try? FileManager.default.removeItem(at: log)
+            let process = process(["--load", "2", "--max-time", "300", "-r", "1"], fake: fake, pathFirst: bin)
+            for (name, value) in environment { process.environment?[name] = value }
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            try process.run()
+            let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            process.waitUntilExit()
+            #expect(process.terminationStatus != 0)
+            #expect(output.contains("the build failed"), "\(output)")
+            #expect(!output.contains("busy loops"), "\(output)")
+            // In a worktree the lead made, scripts/lib/module-cache.sh puts its cache's path first.
+            return ((try? String(contentsOf: log, encoding: .utf8)) ?? "")
+                .replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        #expect(try build(["VIBESWITCHER_HEAVY_NCPU": "12", "VIBESWITCHER_HEAVY_SLOTS": "3", "VS_HEAVY_CORES": nil])
+                == "build -j 2 -Xswiftc -j2 --build-tests")
+        // vs-heavy's command itself: the slot held (VIBESWITCHER_TEST_LOCK) and started by this process.
+        let inner: [String: String?] = ["TEST_UNDER_LOAD_INNER": "\(ProcessInfo.processInfo.processIdentifier)",
+                     "VIBESWITCHER_TEST_LOCK": locks.appendingPathComponent("test-build.lock").path]
+        #expect(try build(inner.merging(["VS_HEAVY_CORES": "5"]) { $1 }) == "build -j 2 -Xswiftc -j3 --build-tests")
+        #expect(try build(inner.merging(["VS_HEAVY_CORES": nil]) { $1 }) == "build --build-tests")
     }
 
     /// The test process's home is the one its environment names. Under the harness (each run on a home of its own),

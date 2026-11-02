@@ -11,6 +11,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// test_command, and merges only when it passes too.
     public var regressionCommand: String?
     public var workerAgent = "claude"
+    /// The agent of a new task that names none (`agent_default:`): claude (the default) or auto (chosen at each start
+    /// from both accounts' usage, see `UsageRouting`). Anything else reads claude. Never codex: a task goes to Codex
+    /// only by the lead's word or auto's routing.
+    public var agentDefault: LeadTask.WorkerAgent = .claude
     /// The verifier's model (`verifier_model:`); when it's empty, audits run on another model than the workers' (see
     /// `auditModel`), a second opinion.
     public var verifierModel: String?
@@ -31,7 +35,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The Mac-wide keys (`macKeys`) set in this file: ignored, the Mac's are set once in Settings (see `MacLimits`).
     public var ignoredKeys: [String] = []
     /// How many test and build slots merge and an audit's shared run share with every project's `vs-heavy`
-    /// (`heavy_slots:`, see `TestLock`); nil: VIBESWITCHER_HEAVY_SLOTS, else the Mac's cores ÷ 4.
+    /// (`heavy_slots:`, see `TestLock`); nil: VIBESWITCHER_HEAVY_SLOTS, else Settings' (`MacLimits.heavySlots`).
     public var heavySlots: Int?
     /// How many finders an audit runs (`audit_finders:`, 1 to `maxFinders`): 1 is one verifier, as before; 2 or 3
     /// run that many with different focuses on one shared build and test run, and a vote keeps what most of them found.
@@ -43,6 +47,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     public var mergePolicy: MergePolicy?
     /// The globs ask_sensitive holds back (`sensitive_paths:`, comma-separated); nil: `defaultSensitivePaths`.
     public var sensitivePaths: [String]?
+    /// The globs whose changes make every Important finding hold the merge (`strict_paths:`, comma-separated; nil:
+    /// none): on a branch touching one, an Important finding the finders' vote left unconfirmed holds it too, until
+    /// the lead dismisses it, makes it a task (add_task from_finding) or a re-audit closes it.
+    public var strictPaths: [String]?
     /// Where the lead's decision log and progress log are kept and committed to the base branch, relative to the
     /// repository (`records_dir:`); nil (an empty value) keeps them in `.vibeswitcher/`, uncommitted, as before.
     public var recordsDir: String? = LeadWorkflow.defaultRecordsDir
@@ -50,6 +58,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// or audited, a clean audit merged, open Important findings sent back, a merged task cleaned up, and a planned task
     /// whose `after` tasks are done started. False: the lead does each.
     public var autoAdvance = true
+    /// Whether merges of review-passed tasks are tested together (`merge_batching:`, see `LeadToolset.mergeBatch`):
+    /// off (each on its own run, as before), boost (only while Boost mode is on) or always. Anything else reads off.
+    public var mergeBatching: MergeBatching = .off
     /// The risk check (see `LeadRisk`): a review none task whose branch changes more lines than this is audited
     /// (`risk_lines:`; 0: no size trigger).
     public var riskLines = LeadRisk.defaultLines
@@ -101,6 +112,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "init_command": workflow.initCommand = present
                 case "regression_command": workflow.regressionCommand = present
                 case "worker_agent": workflow.workerAgent = present ?? "claude"
+                case "agent_default": workflow.agentDefault = present.flatMap(LeadTask.WorkerAgent.init(text:)).flatMap { $0 == .codex ? nil : $0 } ?? .claude
                 case "verifier_model": workflow.verifierModel = present
                 case "base_branch": workflow.baseBranch = present
                 case "disk_warning_gb": workflow.diskWarningGB = gigabytes(value) ?? 10
@@ -115,8 +127,11 @@ public struct LeadWorkflow: Equatable, Sendable {
                 // One it can't read asks for everything rather than merging what the owner meant to see.
                 case "merge_policy": workflow.mergePolicy = present.map { MergePolicy(text: $0) ?? .askAll }
                 case "sensitive_paths": workflow.sensitivePaths = globs(value)
+                case "strict_paths": workflow.strictPaths = globs(value)
                 case "records_dir": workflow.recordsDir = recordsFolder(value)
                 case "auto_advance": workflow.autoAdvance = flag(value) ?? true
+                // One it can't read is off: one task at a time, as before.
+                case "merge_batching": workflow.mergeBatching = MergeBatching(text: value) ?? .off
                 case "risk_lines": workflow.riskLines = Int(value).map { max(0, $0) } ?? LeadRisk.defaultLines
                 case "risk_model": workflow.riskModel = flag(value) ?? true
                 case "watch_app_logs": workflow.watchAppLogs = flag(value) ?? false
@@ -159,6 +174,31 @@ public struct LeadWorkflow: Equatable, Sendable {
         Double(value).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
     }
 
+    // MARK: Merge batching
+
+    /// When merges are tested in batches (`merge_batching:`): ready tasks stacked on the base in order, one test run on
+    /// the stack, split on failure (see `LeadToolset.mergeBatch`).
+    public enum MergeBatching: String, CaseIterable, Sendable {
+        case off
+        /// Only while Boost mode is on (`LeadToolset.boosting`).
+        case boost
+        case always
+
+        /// "Always", " boost " read too; nil for anything else.
+        public init?(text: String) {
+            self.init(rawValue: text.trimmingCharacters(in: .whitespaces).lowercased())
+        }
+
+        /// What it means, in a line.
+        public var meaning: String {
+            switch self {
+            case .off: return "each merge runs the test command on its own"
+            case .boost: return "while Boost mode is on, auto_advance tests the tasks ready to merge together, one run for the batch, split on failure; else one at a time"
+            case .always: return "auto_advance tests the tasks ready to merge together, one run for the batch, split on failure"
+            }
+        }
+    }
+
     // MARK: Merge policy
 
     /// How the owner wants merges handled, chosen once per project: auto merges audited work and tells the user
@@ -195,6 +235,13 @@ public struct LeadWorkflow: Equatable, Sendable {
     static func globs(_ value: String) -> [String]? {
         let list = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         return list.isEmpty ? nil : list
+    }
+
+    /// The changed files in `strict_paths`: on a branch that touches any, an unconfirmed Important finding holds the
+    /// merge too. Empty when strict_paths names none.
+    public func strictTouched(_ changed: [String]) -> [String] {
+        guard let strictPaths else { return [] }
+        return changed.filter { path in strictPaths.contains { Self.matches(path, glob: $0) } }
     }
 
     /// The changed files a merge needs the user's approval for under the policy (an unset one counts as
@@ -352,8 +399,8 @@ public struct LeadWorkflow: Equatable, Sendable {
 
     public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "verifier_model", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "task_budget_min",
-                                      "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "records_dir",
-                                      "auto_advance", "risk_lines", "risk_model", "watch_app_logs"]
+                                      "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
+                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "watch_app_logs", "agent_default"]
 
     /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
     /// time (`BoardStore.prepare`), the lead's `configure` after.
@@ -470,6 +517,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     init_command:
     # Who works: claude (Codex support comes later).
     worker_agent: claude
+    # The agent of a new task that names none: claude, or auto (each start picks Codex when Claude's usage runs ahead
+    # of pace and Codex has room, else Claude; a task that lands on Codex is audited by a Claude verifier).
+    agent_default: claude
     # The verifier's model (e.g. fable, opus). Empty: audits run on another model than the workers', at least as
     # capable (fable; opus when the workers run fable).
     verifier_model:
@@ -485,7 +535,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     # to extend it (update_task budget_min), re-plan or abandon. Nothing is stopped. 0: no budget. Empty: 120.
     task_budget_min: 120
     # How many builds and full test runs (vs-heavy's, merge's, audits') may run at once across all projects on this
-    # Mac; one more waits, saying who holds each slot. Empty: the Mac's cores ÷ 4 (VIBESWITCHER_HEAVY_SLOTS when set).
+    # Mac; one more waits, saying who holds each slot. Empty: VibeSwitcher's Settings value (VIBESWITCHER_HEAVY_SLOTS when set).
     heavy_slots:
     # How many finders an audit runs: 1 is one verifier. 2 or 3 run that many with different focuses (contract and
     # acceptance; bugs and regressions; security when sensitive_paths are touched, else tests), on one build and test
@@ -501,6 +551,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     # The globs ask_sensitive holds back, comma-separated (as in .gitignore). Empty: Claude's settings and
     # instructions, .github, .env files, entitlements and keys.
     sensitive_paths:
+    # The globs where every Important finding holds the merge, comma-separated (as in .gitignore), e.g. src/signing/**:
+    # on a branch touching one, an Important finding the finders' vote left unconfirmed holds it (and auto_advance) too,
+    # until the lead dismisses it, makes it a task, or a re-audit closes it. Empty: none.
+    strict_paths:
     # Where the lead's decisions.md, progress.md and incidents.md are kept, committed to the base branch by VibeSwitcher
     # (only those files, in small commits of their own), so the plan's reasoning travels with the repository. Empty: kept in
     # .vibeswitcher, uncommitted. The board stays local either way.
@@ -510,6 +564,11 @@ public struct LeadWorkflow: Equatable, Sendable {
     # merged task cleaned up, and a planned task started once the tasks in its `after` list are done. false: the lead
     # does each. Empty: true.
     auto_advance: true
+    # Whether auto_advance tests the tasks ready to merge together: their branches stacked on the base in order, one
+    # run of the test command on the stack, and the base fast-forwarded to it when it passes (each task's merge recorded
+    # on its own). A failure is rerun as ever, then split to find the task that breaks it, which goes back to its worker;
+    # the rest merge. off, boost (only while Boost mode is on) or always. Empty: off.
+    merge_batching: off
     # The risk check: before a review none task merges, its branch's diff is read, and it's audited instead when it
     # changes more lines than this, or has code that deletes or rewrites files or data, changes permissions, spawns
     # processes or adds locks or threads, or changes the suite's own test or build infrastructure. 0: no size trigger.
@@ -561,7 +620,9 @@ public enum LeadPrompts {
         + "e.g. `vs-heavy npm test`; it's on PATH in this session), never bare: it runs a few at a time on this Mac (its "
         + "slots), every project's workers and merges included, and while every slot is held it waits, saying who holds "
         + "each. It stops a command still running after 60 min (exit 124): give a longer one `--timeout 2h`. Focused tests "
-        + "(one file, a filter) don't need it."
+        + "(one file, a filter) don't need it. Any other long or many-core job goes under it too: mutation testing (Stryker), "
+        + "fuzzing, VMs (colima), load, simulation and perf runs. VibeSwitcher tells your lead of one that runs on several "
+        + "cores for minutes outside it."
 
     /// What workers and verifiers are told about their scratch files: twice on 2026-10-23 a worker's
     /// `...; rm -f $TMPDIR/*.out` waited on a permission prompt until the user answered it. The lead can't answer one,
@@ -592,6 +653,35 @@ public enum LeadPrompts {
                 + "the test harness, build settings) or after a failed merge, and again only if you changed something after that "
                 + "run. Report each suite run's summary line, "
                 + "and don't repeat runs or benches the contract doesn't ask for."
+        }
+
+        /// What a single verifier runs besides the acceptance checks (`lints`: as in `workerLints`): the branch's own
+        /// tests, focused ones of the code it touches, and the lints, which take seconds and catch what a filtered run
+        /// misses (a-base-branch-the's F1, a PrivateWriteLint failure, was once found only by a full run).
+        public static func verifierTests(_ lints: [String], test: String?) -> String {
+            let which = lints.isEmpty ? "the repository-wide lint or check tests, if any"
+                : "the repository's lint tests (`\(test ?? "swift test") --filter '\(lints.joined(separator: "|"))'`)"
+            return "the tests the branch adds or changes, focused tests of the code it touches, and \(which)"
+        }
+
+        /// What counts as shared test or build infrastructure, where a verifier still runs the full suite.
+        public static let sharedInfrastructure = "shared test or build infrastructure (test scripts such as scripts/test.sh "
+            + "or scripts/lib, the test harness, build settings such as Package.swift)"
+
+        /// The single verifier's full-suite rule (2026-10-31, after the wallet batch ran every audited task's full
+        /// suite twice on a Mac shared at load 40–190): merge(task) runs test_command right after a passing audit, and
+        /// a failure there goes back to the worker the same way, so that run is the one full suite. A branch that
+        /// touches shared test or build infrastructure still gets the verifier's own run: it can change what merge's
+        /// run checks.
+        public static func verifierSuite(test: String?) -> String {
+            guard let test else {
+                return "This project has no test_command, so merge runs no tests: run a full suite of your own (under "
+                    + "`vs-heavy`) only when the branch touches \(sharedInfrastructure)."
+            }
+            return "Don't run the full suite (`\(test)`) yourself: merge(task) runs it right after a passing audit, and a "
+                + "failure there goes back to the worker the same way, so that run is the one full suite. Exception: a branch "
+                + "that touches \(sharedInfrastructure) still gets your full run (`vs-heavy \(test)`), since a change there "
+                + "can change what merge's run checks."
         }
 
         /// The repository's lint tests, run with the affected ones before a worker reports done (`lints`: their filter
@@ -858,7 +948,8 @@ public enum LeadPrompts {
         of the findings and answers so far. Or re-plan it (status planned) or ask the user. With audit_finders 2 or 3, audit \
         first builds and tests the commit once (it takes as long as the suite) and starts that many finders on its \
         logs, each with a focus; the verdict arrives once all have submitted, voted: a finding most of them raised is \
-        open, the rest unconfirmed (shown, never blocking: dismiss_finding or add_task(from_finding:) one that's a real Important problem). \
+        open, the rest unconfirmed (shown, never blocking: dismiss_finding or add_task(from_finding:) one that's a real Important problem; \
+        but on a branch touching strict_paths, an unconfirmed Important one holds the merge as an open one does, until you rule on it). \
         Each finder counts against mac_max_sessions; when audit says there's no room, lower audit_finders or retry \
         it when you're next woken.
         7. Keep the board, the progress log and decisions (record_decision) current. They are your memory: when your \
@@ -937,6 +1028,8 @@ public enum LeadPrompts {
         fails timing-sensitive tests. start_worker and audit refuse while its load (the greater of its 1- and 5-minute averages, so a dip after a spike \
         doesn't count as room) is above load_threshold (\(limit)) or the workers and verifiers of all projects together are at mac_max_sessions \
         (\(limits.maxSessions)); both are set once for the Mac by the user in VibeSwitcher's Settings, not in workflow.md. \
+        The user's Boost mode may raise them, and max_workers, for a while (when they're away on AC power, or on demand) and drop them \
+        back at once: status says which limits hold now ("boost: on (…)"). \
         After such a refusal VibeSwitcher sends you one message once there's room again. merge waits up to test_timeout_min (\(MacLoad.number(workflow.testTimeoutMinutes)) min) for \
         the load to drop before its tests, then refuses. status shows the Mac's load and every project's team \
         sessions: plan around them. When it's busy, start fewer workers, merge and cleanup finished tasks first \
@@ -1029,8 +1122,25 @@ public enum LeadPrompts {
         \(Policy.workerFindings)
         \(Policy.workerBudget(LeadBudget.minutes(task, default: workflow.taskBudgetMinutes)))
         Stuck: say exactly what you need and stop. Don't fake a pass: never weaken or delete tests.
-
+        \(task.workerAgent == .codex ? "\n" + codexWorker + "\n" : "")
         \(WorkerBrief.render(task))
+        """
+    }
+
+    /// What a Codex worker's brief adds: how its tools and sandbox differ from a Claude worker's, and the rules it holds
+    /// itself because Codex can't be made to refuse them (`LeadLaunch.codexUnenforced`).
+    public static var codexWorker: String {
+        """
+        You run in the Codex CLI. Your VibeSwitcher tools are the vibeswitcher MCP server's (progress, report, ask_lead, \
+        answer_findings): call them as tools, as the brief says. Your sandbox lets you write only in this worktree, its \
+        git folders and your TMPDIR (and /tmp), with no network: no push, fetch or download. Nothing asks for approval: a \
+        command the sandbox refuses fails. Don't look for a way around it; if the task needs it, say so with ask_lead or \
+        report blocked. These rules aren't refused for you, but they're the same rules, and a Claude verifier checks \
+        your branch for them before it merges: \(LeadLaunch.codexUnenforced.map(\.rule).joined(separator: "; ")). \
+        Commit only on your branch, never amend, and never touch another agent/ branch. Keep to the contract: \
+        nothing outside its boundaries, no refactors it doesn't ask for. Blind check: if you can't start a fresh \
+        subagent, put in `blind_check` that you couldn't (a Codex worker; the Claude audit is the independent check), \
+        and list anything you doubt.
         """
     }
 
@@ -1144,6 +1254,9 @@ public enum LeadPrompts {
         /// The sensitive paths the branch touches.
         public var sensitive: [String]
         public var nitCap: Int
+        /// The strict paths the branch touches (see `LeadWorkflow.strictTouched`): an unconfirmed Important finding
+        /// holds the merge then.
+        public var strict: [String] = []
     }
 
     /// A branch behind the base in files it changes too, whose trial merge onto the base is clean: the audit tests
@@ -1205,9 +1318,16 @@ public enum LeadPrompts {
         the logs are that run. Run only focused tests (one test or a filter) for what you need to see yourself.
         The other finders check the same branch with other focuses, and a vote decides: a finding most finders raise \
         (the same file, severity and line, give or take \(LeadAuditVote.lineTolerance)) stays open; one fewer raise is \
-        kept as unconfirmed, which doesn't hold the merge back. So give each finding its exact file and line. At most \
-        \(finder.nitCap) new Nits are kept in all: give only the ones that matter.
+        kept as unconfirmed, which doesn't hold the merge back\(strictHold(finder.strict)). So give each finding its exact \
+        file and line. At most \(finder.nitCap) new Nits are kept in all: give only the ones that matter.
         """
+    }
+
+    /// " unless strict_paths holds it: …" for a branch touching `strict` paths, or "" for none (the prompt as before).
+    static func strictHold(_ strict: [String]) -> String {
+        guard !strict.isEmpty else { return "" }
+        return " unless strict_paths holds it: this branch touches " + strict.prefix(8).joined(separator: ", ") + (strict.count > 8 ? ", …" : "")
+            + ", so an unconfirmed Important finding holds the merge as an open one does"
     }
 
     /// The lead's notes on a task (see `LeadNote`) as its verifier gets them: those sealed as the lead's for this task,
@@ -1288,7 +1408,9 @@ public enum LeadPrompts {
     public static func verifier(task: LeadTask, root: String, workflow: LeadWorkflow, reaudit: Reaudit? = nil, finder: Finder? = nil,
                                 merged: Merged? = nil, notes: Notes = Notes(), report: String? = nil, policy: String = WorkingPolicy.load(),
                                 guide: String? = nil, security: String? = nil) -> String {
-        """
+        // A finder, or a single verifier of a merged result, reads the audit's own run of the whole suite instead.
+        let sharedRun = finder != nil || merged?.run != nil
+        return """
         You are the verifier for a task of the project lead of \(root). You are read-only: don't edit, fix, commit or \
         stage anything. Check the branch agent/\(task.slug) in this worktree against its contract, independently of \
         what the worker said.
@@ -1297,9 +1419,9 @@ public enum LeadPrompts {
         \(finder.map { "\n" + finding($0) + "\n" } ?? "")
         \(merged.map { Self.merged($0) + "\n" } ?? "")
         \(reaudit.map(recheck) ?? """
-        Check: run every acceptance check\(finder != nil || merged?.run != nil ? "" : workflow.testCommand.map { " and `\($0)`" } ?? ""); read the whole change \
+        Check: run every acceptance check\(sharedRun ? "" : ", " + Policy.verifierTests(Policy.lintTests(in: root), test: workflow.testCommand)); read the whole change \
         (`git diff \(workflow.base)...HEAD`, `git log \(workflow.base)..HEAD`); look for edits outside the boundaries, weakened or deleted \
-        tests, hard-coded results, leftovers and anything that only looks done.
+        tests, hard-coded results, leftovers and anything that only looks done.\(sharedRun ? "" : " " + Policy.verifierSuite(test: workflow.testCommand))
         """)
         \(notesRule)
         \(routineCallsRule)
@@ -1445,7 +1567,7 @@ public enum LeadPrompts {
         }
         if !reaudit.open.isEmpty {
             text += "\n\nOpen findings:\n" + reaudit.open.map { finding in
-                var line = "- \(finding.id) [\(finding.severity.rawValue)] \(finding.place): \(finding.evidence)"
+                var line = "- \(finding.id) [\(finding.severity.rawValue)\(finding.status == .unconfirmed ? ", unconfirmed by the last vote; strict_paths holds the merge on it" : "")] \(finding.place): \(finding.evidence)"
                 if let scenario = finding.failureScenario { line += "\n  Fails when: \(scenario)" }
                 if let answer = reaudit.answers[finding.id.uppercased()] { line += "\n  The worker's answer: \(answer.text)" }
                 return line

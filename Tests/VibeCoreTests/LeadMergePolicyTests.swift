@@ -196,6 +196,29 @@ struct LeadMergePolicyTests: LeadTeamFixture {
         #expect(BoardStore(root: root).load().task("change")?.status == .done)
     }
 
+    /// A file moved out of a sensitive path changes it: git's rename detection would list only its new path.
+    @Test func askSensitiveHoldsACommitThatMovesAFileOutOfASensitivePath() throws {
+        let root = try repo()
+        try commit(".github/workflows/ci.yml", "on: push\n", in: root)
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        #expect(!lead.call("configure", ["merge_policy": "ask_sensitive", "sensitive_paths": ".github/"]).isError)
+        _ = lead.call("add_task", ["title": "Change", "goal": "it changes", "acceptance": ["it's there"]])
+        _ = lead.call("start_worker", ["task": "change"])
+        let worktree = Worktrees.path(root: root, slug: "change")
+        #expect(Git.run(["mv", ".github/workflows/ci.yml", "ci.yml"], in: worktree).ok)
+        Git.run(["commit", "-q", "-m", "move ci"], in: worktree)
+        _ = try seat("worker-change", runtime).call("report", doneReport("moved"))
+        #expect(!lead.call("audit", ["task": "change"]).isError)
+        #expect(!(try seat("verify-change", runtime)).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "ok"]).isError)
+        let commit = Git.run(["rev-parse", "agent/change"], in: root).output
+        let refused = lead.call("merge", ["task": "change"])
+        #expect(refused.isError)
+        #expect(refused.text.contains(LeadWorkflow.approval(of: commit)), "\(refused.text)")
+        #expect(refused.text.contains("It touches .github/workflows/ci.yml"), "\(refused.text)")
+        #expect(BoardStore(root: root).load().task("change")?.status != .done)
+    }
+
     @Test func askSensitiveMergesOtherCommitsWithoutAsking() throws {
         let root = try repo()
         let runtime = FakeRuntime()

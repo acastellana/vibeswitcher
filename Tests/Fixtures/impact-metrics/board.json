@@ -1,0 +1,221 @@
+{
+ "tasks": [
+  {
+   "id": "ALPHA-ID",
+   "slug": "alpha",
+   "title": "Alpha",
+   "status": "done",
+   "contract": {
+    "goal": "g",
+    "acceptance": [],
+    "boundaries": [],
+    "context": ""
+   },
+   "createdAt": 1792389600.0,
+   "startedAt": 1792483200.0,
+   "merged": {
+    "commit": "a1",
+    "tested": true,
+    "at": 1792490400.0
+   },
+   "score": {
+    "rounds": 2,
+    "roundsToPass": 2,
+    "importantFindings": 2,
+    "questions": 0,
+    "answers": 0,
+    "waitingOnUser": 0,
+    "asOf": 1792490400.0
+   },
+   "receipt": {
+    "ending": "merged",
+    "startedAt": 1792483200.0,
+    "endedAt": 1792490400.0,
+    "worked": 3600,
+    "rounds": 0,
+    "rerolls": 0,
+    "mergeReruns": 1,
+    "questions": 0,
+    "waitingOnUser": 0,
+    "pricesAsOf": "2026-10-06",
+    "worker": {
+     "cost": 3.0,
+     "models": [
+      "claude-opus-5-5"
+     ]
+    },
+    "verifier": {
+     "cost": 1.0
+    }
+   }
+  },
+  {
+   "id": "GAMMA-ID",
+   "slug": "gamma",
+   "title": "Gamma",
+   "status": "done",
+   "contract": {
+    "goal": "g",
+    "acceptance": [],
+    "boundaries": [],
+    "context": ""
+   },
+   "createdAt": 1792389600.0,
+   "startedAt": 1792497600.0,
+   "merged": {
+    "commit": "g1",
+    "tested": true,
+    "at": 1792508400.0
+   },
+   "score": {
+    "rounds": 1,
+    "roundsToPass": 1,
+    "importantFindings": 1,
+    "questions": 0,
+    "answers": 0,
+    "waitingOnUser": 0,
+    "asOf": 1792508400.0
+   },
+   "receipt": {
+    "ending": "merged",
+    "startedAt": 1792497600.0,
+    "endedAt": 1792508400.0,
+    "worked": 5400,
+    "rounds": 0,
+    "rerolls": 0,
+    "mergeReruns": 0,
+    "questions": 0,
+    "waitingOnUser": 0,
+    "pricesAsOf": "2026-10-06",
+    "worker": {
+     "cost": 6.0,
+     "models": [
+      "claude-opus-5-5"
+     ]
+    },
+    "verifier": {
+     "cost": null,
+     "models": [
+      "some-new-model"
+     ]
+    }
+   }
+  },
+  {
+   "id": "DELTA-ID",
+   "slug": "delta",
+   "title": "Delta",
+   "status": "done",
+   "contract": {
+    "goal": "g",
+    "acceptance": [],
+    "boundaries": [],
+    "context": ""
+   },
+   "createdAt": 1792389600.0,
+   "startedAt": 1792396800.0,
+   "merged": {
+    "commit": "d1",
+    "tested": true,
+    "at": 1792400400.0
+   },
+   "score": {
+    "rounds": 3,
+    "importantFindings": 5,
+    "questions": 0,
+    "answers": 0,
+    "waitingOnUser": 0,
+    "asOf": 1792400400.0
+   },
+   "receipt": {
+    "ending": "merged",
+    "startedAt": 1792396800.0,
+    "endedAt": 1792400400.0,
+    "worked": 7200,
+    "rounds": 0,
+    "rerolls": 0,
+    "mergeReruns": 1,
+    "questions": 0,
+    "waitingOnUser": 0,
+    "pricesAsOf": "2026-10-06",
+    "worker": {
+     "cost": 50.0,
+     "models": [
+      "claude-opus-5-5"
+     ]
+    },
+    "verifier": {
+     "cost": 9.0
+    }
+   }
+  },
+  {
+   "id": "EPSILON-ID",
+   "slug": "epsilon",
+   "title": "Epsilon",
+   "status": "abandoned",
+   "contract": {
+    "goal": "g",
+    "acceptance": [],
+    "boundaries": [],
+    "context": ""
+   },
+   "createdAt": 1792389600.0,
+   "startedAt": 1792508400.0,
+   "receipt": {
+    "ending": "abandoned",
+    "startedAt": 1792508400.0,
+    "endedAt": 1792512000.0,
+    "worked": 1800,
+    "rounds": 0,
+    "rerolls": 0,
+    "mergeReruns": 0,
+    "questions": 0,
+    "waitingOnUser": 0,
+    "pricesAsOf": "2026-10-06",
+    "worker": {
+     "cost": 1.0,
+     "models": [
+      "claude-opus-5-5"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ZETA-ID",
+   "slug": "zeta",
+   "title": "Zeta",
+   "status": "running",
+   "contract": {
+    "goal": "g",
+    "acceptance": [],
+    "boundaries": [],
+    "context": ""
+   },
+   "createdAt": 1792389600.0,
+   "startedAt": 1792515600.0
+  }
+ ],
+ "flakes": [
+  {
+   "test": "t1()",
+   "task": "alpha",
+   "commit": "a1",
+   "at": 1792490400.0
+  },
+  {
+   "test": "t2()",
+   "task": "alpha",
+   "commit": "a1",
+   "at": 1792490400.0
+  },
+  {
+   "test": "t1()",
+   "task": "delta",
+   "commit": "d1",
+   "at": 1792400400.0
+  }
+ ],
+ "questions": [],
+ "updates": []
+}

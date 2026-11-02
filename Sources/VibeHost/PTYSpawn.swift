@@ -39,11 +39,15 @@ public enum PTYSpawn {
         openptyLock.unlock()
         guard opened == 0 else { return nil }
         _ = fcntl(master, F_SETFD, FD_CLOEXEC)
+        _ = fcntl(slave, F_SETFD, FD_CLOEXEC)
+        // Held open until the program has opened the terminal (posix_spawn returns once it has): macOS clears a
+        // terminal's window size when its last slave descriptor closes, and a program that started on a 0×0 terminal
+        // and never got a resize (no view attached) drew nothing: Codex's TUI (task codex-s-tui-renders).
+        defer { close(slave) }
         // From the master (the kernel names it): ttyname's buffer is shared between threads, and on a busy Mac it
         // can find no name yet for a terminal just made.
         var buffer = [CChar](repeating: 0, count: 128)
         let name = ptsname_r(master, &buffer, buffer.count) == 0 ? String(cString: buffer) : nil
-        close(slave)
         guard let name else {
             close(master)
             return nil

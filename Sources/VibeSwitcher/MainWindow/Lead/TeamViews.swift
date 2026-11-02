@@ -89,7 +89,9 @@ struct TeamRowView: View, Equatable {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.spoken(now: now, summary: summary))
         .accessibilityAddTraits(.isButton)
-        .accessibilityHint(isOpen ? "Hides the task's details" : "Shows the task's details")
+        // Open or not is the row's value, as a disclosure's is; one hint for both (it was rebuilt on each draw).
+        .accessibilityValue(isOpen ? "expanded" : "collapsed")
+        .accessibilityHint("Shows or hides the task's details")
         .accessibilityAction(.default, toggle)
         .accessibilityActions {
             if let worker = row.task.worker, canOpen(worker) { Button("Open the worker") { open(worker) } }
@@ -630,7 +632,7 @@ struct LeadTeamPane: View, Equatable {
             asked += 1
             let number = asked
             run { [self] in
-                if reread || read == nil { read = (MacLoad.steady(), MacLimits.load()) }
+                if reread || read == nil { read = (MacLoad.steady(), MacLimits.current()) }
                 let read = read!
                 let line = MacLine.make(listed: hosted, load: read.load, limits: read.limits)
                 DispatchQueue.main.async { if number == self.asked { then(line) } }

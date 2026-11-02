@@ -14,6 +14,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private lazy var notifier: Notifier? = Bundle.main.bundleIdentifier == nil ? nil : Notifier(preferences: preferences)
     private lazy var phoneAccess = PhoneAccess(store: store)
     private var settingsWindow: SettingsWindowController?
+    /// The transaction requests agents file (`vs-wallet request`), as cards in their chats: nothing goes to the Wallet Manager
+    /// until you press Send to Wallet Manager; the Wallet Manager's answers go back to the asking session as messages.
+    private lazy var walletDesk: WalletDesk = {
+        let desk = WalletDesk(config: { [weak self] in
+            WalletDesk.Config(passage: self?.walletPeers.settledPath ?? "", peer: self?.preferences.walletPeerID ?? "")
+        })
+        // What doesn't reach the agent now (not live, or the host's welcome not in yet at launch) the desk keeps and
+        // hands over again.
+        desk.deliver = { [weak self] session, text, then in
+            guard let id = UUID(uuidString: session) else { return then(.ended) }
+            guard let self else { return then(.notYet) }
+            leadController.tell(text, from: .system("from the Wallet Manager"), session: id, then: then)
+        }
+        desk.openSettings = { [weak self] in self?.showSettings(tab: .wallet) }
+        // Cards name their session as the window does, and only sessions the host runs get one.
+        desk.sessionNames = { [weak self] in
+            guard let self else { return [:] }
+            return WalletDesk.names(hosted: hostClient.sessions, rows: windowModel.allRows)
+        }
+        // And only a request the host stamped for the session it names (see `WalletStamp`).
+        desk.verifyStamps = { try LeadVault.standard.verifyWallet($0) }
+        // Its undelivered messages on disk are sealed by the host too, and go only once it confirms the seal.
+        desk.sealMessage = { try LeadVault.standard.seal($0) }
+        desk.verifyMessages = { try LeadVault.standard.verify($0) }
+        return desk
+    }()
+    /// Settings › Wallet's peers: `passage peers --no-discovery --json`, read off the main thread each time the tab shows
+    /// and when the passage path changes.
+    /// Settings › Wallet's peers, and its passage path once typing paused (`settledPath`): what the wallet desk runs.
+    private lazy var walletPeers = WalletPeerList(settledPath: preferences.walletPassagePath)
     /// Hooks, permissions and login item: their live state for the welcome window and Settings.
     private lazy var setup: SetupModel = {
         let model = SetupModel(preferences: preferences, system: .live(notifier: notifier))
@@ -71,6 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         controller.watchPower(limit: { [weak self] in self?.preferences.batteryHoldBelow ?? PowerWatch.defaultLimit }) { power.state }
         controller.watchPolicy()
         controller.watchHeavySlots()
+        controller.tellUser = { [weak self] title, body in self?.notifier?.postInfo(title: title, body: body) }
+        controller.watchHeavyJobs()
         controller.watchRoom()
         // The all-done cards' summaries, by headless Claude (benches and tests leave it unset: the written fallback).
         controller.allDone.generate = ClaudeHeadless.allDone
@@ -112,6 +144,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private var visibilityTimer: Heartbeat.Subscription?
     private var hiddenReadings = 0
     private var notificationTimer: Heartbeat.Subscription?
+    /// The Mac's load, memory, team sessions and heavy slots, once a minute, to ~/.vibeswitcher/stats (`LoadRecorder`).
+    private let loadRecorder = LoadRecorder()
+    private var loadTimer: Heartbeat.Subscription?
+    /// Decides Boost mode for every project's leads (Settings › Project lead, see `BoostWatch`).
+    private(set) lazy var boostWatch = BoostWatch(preferences: preferences)
     /// Gives malloc's free pages back as the footprint grows (see `FootprintRelief`).
     private let footprintRelief = FootprintRelief()
     private var terminationSignal: DispatchSourceSignal?
@@ -150,7 +187,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         hostClient.connectIfRunning()
         // Leads' witness and questions work with the window closed too.
         _ = leadController
-        appHealth = AppHealthWatcher { [weak self] text in self?.leadController.tellAppHealth(text) ?? false }
+        // Requests filed or sent while the feature was called vault requests, carried over once.
+        do { try WalletRequestStore.carryOver() } catch { Breadcrumbs.shared.note("wallet: couldn't carry over vault-requests: \(error)") }
+        walletDesk.start()
+        // A peer or Passage path chosen in Settings › Wallet: the cards redraw now (Send comes back on waiting ones),
+        // not at the next look. After the change lands (@Published sends before it does). The path only once typing
+        // paused (`WalletPeerList.typed`): a half-typed one is never run.
+        preferences.$walletPeerID.combineLatest(walletPeers.$settledPath)
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.walletDesk.refresh(polling: false) }
+            .store(in: &cancellables)
+        // The host's sessions known, or changed: cards of the sessions it runs show, by the window's names.
+        hostClient.$sessions
+            .map { $0.map { "\($0.id) \($0.label) \($0.title)" } }
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.walletDesk.refresh(polling: false) }
+            .store(in: &cancellables)
+        appHealth = AppHealthWatcher(memory: AppHealthWatcher.memoryReader(relief: { [footprintRelief] in footprintRelief.last })) { [weak self] text in
+            self?.leadController.tellAppHealth(text) ?? false
+        }
         appHealth?.start()
         if UserDefaults.standard.bool(forKey: "windowWasOpen") {
             // Cleared until the window has been up a while: if opening it crashes the app, the next launch
@@ -303,20 +361,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .store(in: &cancellables)
         visibilityTimer = Heartbeat.shared.every(2) { [weak self] in self?.updateFloatingPanel() }
         notificationTimer = Heartbeat.shared.every(15) { [weak self] in self?.notifier?.refreshAuthorization() }
+        // The census on the main thread (the host's list is the main thread's: a few dozen string looks), the rest on
+        // the recorder's queue.
+        loadTimer = Heartbeat.shared.every(60) { [weak self] in
+            guard let self else { return }
+            loadRecorder.record(census: HostCensus.count(hostClient.sessions.map { ($0.label, $0.cwd, $0.isLive) }))
+        }
         footprintRelief.start()
+        boostWatch.currentFolder = { [weak self] in self?.store.sessions.first(where: \.isCurrent)?.cwd }
+        // Turned on: leads refused for room may start now; turned off: nothing to tell (running work finishes).
+        boostWatch.changed = { [weak self] state in if state.on { self?.leadController.lookAtRoom() } }
+        boostWatch.start()
 
-        store.$sessions
+        store.$sessions.combineLatest(boostWatch.$state)
             .receiveLatest(on: RunLoop.main)
-            .sink { [weak self] sessions in
+            .sink { [weak self] sessions, boost in
                 guard let self else { return }
                 // The dots are your own sessions: a lead's workers and verifiers are under it in the list.
                 let own = SessionTeams.split(sessions).own
+                let boosting = boost?.on == true ? boost : nil
                 let signature = own.map { "\($0.status.rawValue):\($0.isCurrent):\($0.isPaused)" }.joined(separator: ",")
+                    + "|" + (boosting?.why ?? "")
                 if signature != self.iconSignature {
                     self.iconSignature = signature
-                    self.statusItem.button?.image = StatusIcon.image(for: own)
+                    self.statusItem.button?.image = StatusIcon.image(for: own, boost: boosting)
                     // VoiceOver: "VibeSwitcher: 2 need you, 3 working".
-                    self.statusItem.button?.setAccessibilityLabel(StatusSummary.spoken(own))
+                    self.statusItem.button?.setAccessibilityLabel(StatusSummary.spoken(own) + (boosting.map { "; \($0.text)" } ?? ""))
                     DispatchQueue.main.async { self.updateDotToolTips() }
                 }
                 self.popoverState.selectedIndex = min(self.popoverState.selectedIndex, max(0, sessions.count - 1))
@@ -460,16 +530,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         return MenuBarDots.index(at: imagePoint(point, in: button, imageRect: rect, image: image), count: store.split.own.count)
     }
 
-    /// One tooltip region per dot, naming that session.
+    /// The boost mark's tooltip region's tag (a dot's is its number).
+    private static let boostToolTip = 1_000_000
+
+    /// One tooltip region per dot, naming that session, and the boost mark's.
     private func updateDotToolTips() {
         guard let button = statusItem.button else { return }
         button.removeAllToolTips()
         let own = store.split.own
+        let boost = boostWatch.menuText
         guard let rect = dotsImageRect(in: button), let image = button.image else {
-            button.toolTip = Self.tooltip(for: own)
+            button.toolTip = Self.tooltip(for: own) + (boost.map { "\n\($0)" } ?? "")
             return
         }
         button.toolTip = nil
+        if boost != nil {
+            // The boost mark, right of the dots.
+            let sx = rect.width / image.size.width
+            let markX = MenuBarDots.width(count: own.count)
+            button.addToolTip(NSRect(x: rect.minX + markX * sx, y: rect.minY, width: rect.maxX - (rect.minX + markX * sx), height: rect.height),
+                              owner: self, userData: UnsafeMutableRawPointer(bitPattern: Self.boostToolTip))
+        }
         let sx = rect.width / image.size.width, sy = rect.height / image.size.height
         for index in own.indices {
             let hit = MenuBarDots.hitRect(at: index, count: own.count)
@@ -481,6 +562,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
 
     func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
               userData data: UnsafeMutableRawPointer?) -> String {
+        if Int(bitPattern: data) == Self.boostToolTip { return boostWatch.menuText.map { "\($0)\nSettings › General › Project lead: Boost" } ?? "" }
         let index = Int(bitPattern: data) - 1
         let own = store.split.own
         guard own.indices.contains(index) else { return "" }
@@ -577,7 +659,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 preferences: preferences, setup: setup, phoneAccess: phoneAccess,
                 recentProjects: { [weak self] in self?.popoverState.recentProjects.map(\.path) ?? [] },
                 showWelcome: { [weak self] in self?.showWelcome(firstRun: false) }, host: hostClient, briefing: briefing,
-                dictation: dictation, policy: WorkingPolicyEditor(saved: { [weak self] in self?.leadController.lookAtPolicy() }))
+                dictation: dictation, policy: WorkingPolicyEditor(saved: { [weak self] in self?.leadController.lookAtPolicy() }),
+                boost: boostWatch, walletPeers: walletPeers)
         }
         loadRecentProjects()
         settingsWindow?.show(tab: tab)
@@ -630,7 +713,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     func showMainWindow(select hostID: UUID? = nil) {
         if mainWindow == nil {
             let controller = MainWindowController(store: store, host: hostClient, model: windowModel, actions: windowActions,
-                                                  leads: leadController, briefing: briefing, dictation: dictation)
+                                                  leads: leadController, briefing: briefing, dictation: dictation, wallet: walletDesk)
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
             controller.pane.configure = { [weak self] view in
                 guard let self else { return }
@@ -822,6 +905,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         SidebarWorkspace.restoreHiddenWindows(timeout: 1)
         store.saveLedger()
         phoneAccess.shutdown()
+        walletDesk.close()
         // Script blocks written for Run and not run yet.
         RunnableCommand.Script.removeAll()
     }

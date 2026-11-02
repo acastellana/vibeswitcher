@@ -141,6 +141,25 @@ struct TestLockTests {
         #expect(text.contains("scripts/test.sh in /r") && text.contains("Nothing was tested") && ran.isEmpty, "\(text)")
     }
 
+    /// A slot is one job's room, not the whole Mac: merge's and an audit's test command get the slot's share of the cores
+    /// (the cores ÷ the slots, rounded up, at least 2), as vs-heavy's command does.
+    @Test func theMergesTestRunGetsItsSlotsShareOfTheCores() throws {
+        #expect(TestLock.coreBudget(slots: 3, cores: 12) == 4)
+        #expect(TestLock.coreBudget(slots: 1, cores: 12) == 12)
+        #expect(TestLock.coreBudget(slots: 3, cores: 16) == 6)
+        #expect(TestLock.coreBudget(slots: 3, cores: 4) == 2)
+        #expect(TestLock.coreBudget(slots: 0, cores: 1) == 2)
+        let lock = TestLock(directory: url("locks").path, slots: 3)
+        let worktree = url("worktree")
+        try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
+        let seen = worktree.appendingPathComponent("seen").path
+        let (stopped, outputs) = Worktrees.runChecks(setup: nil, test: "echo \"$\(TestLock.coresVariable)\" > \(RecentProjects.shellQuote(seen))",
+                                                     in: worktree.path, home: url("home").path, timeout: hangGuard, lock: lock, as: "merge of x")
+        #expect(stopped == nil, "\(outputs)")
+        let given = try String(contentsOfFile: seen, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(given == String(TestLock.coreBudget(slots: 3)), "\(given)")
+    }
+
     @Test func underItsHolderTheLockIsntTakenAgain() {
         let path = TestLock(directory: "/l").path
         #expect(TestLock.standard([TestLock.directoryVariable: "/l"])?.path == path)
@@ -151,10 +170,11 @@ struct TestLockTests {
         #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.heldVariable: "/l/test-build-3.lock"]) == nil)
         #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.heldVariable: "/l/test-build-x.lock"]) != nil)
         #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.heldVariable: "/m/test-build-2.lock"]) != nil)
-        // The count: the variable, else the cores ÷ 4, at least 1.
-        #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.slotsVariable: "2"])?.slots == 2)
-        #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.slotsVariable: "0"])?.slots == TestLock.defaultSlots)
-        #expect(TestLock.standard([TestLock.directoryVariable: "/l"])?.slots == max(1, ProcessInfo.processInfo.processorCount / 4))
+        // The count: the variable, else Settings' (unset in a scratch VibeSwitcher folder: the cores ÷ 6, at least 1).
+        let scratch = [TestLock.directoryVariable: "/l", "VIBESWITCHER_HOME": url("no-settings").path]
+        #expect(TestLock.standard(scratch.merging([TestLock.slotsVariable: "2"]) { $1 })?.slots == 2)
+        #expect(TestLock.standard(scratch.merging([TestLock.slotsVariable: "0"]) { $1 })?.slots == TestLock.defaultSlots)
+        #expect(TestLock.standard(scratch)?.slots == max(1, ProcessInfo.processInfo.processorCount / 6))
     }
 
     // MARK: vs-heavy (any project's heavy work)
@@ -510,6 +530,81 @@ struct TestLockTests {
         held.process.waitUntilExit()
     }
 
+    /// vs-heavy gives its command VS_HEAVY_CORES, the slot's share of the Mac: the cores ÷ the slots, rounded up, at
+    /// least 2. Under a holder of its slots it keeps the share the holder gave, else works it out the same way.
+    @Test func vsHeavyGivesItsCommandItsSlotsShareOfTheCores() throws {
+        let locks = url("heavy-locks").path
+        func given(_ name: String, cores: String, slots: String, extra: [String: String] = [:]) throws -> String {
+            let output = url("\(name).out").path
+            let run = try Self.runVsHeavy(["/bin/sh", "-c", "echo \"cores=$\(TestLock.coresVariable)\""], lockDirectory: locks, output: output,
+                                          environment: ["VIBESWITCHER_HEAVY_NCPU": cores, TestLock.slotsVariable: slots].merging(extra) { $1 })
+            run.waitUntilExit()
+            #expect(run.terminationStatus == 0, "\(lines(output))")
+            return lines(output).last ?? ""
+        }
+        #expect(try given("twelve-three", cores: "12", slots: "3") == "cores=4")
+        #expect(try given("twelve-one", cores: "12", slots: "1") == "cores=12")
+        #expect(try given("sixteen-three", cores: "16", slots: "3") == "cores=6")
+        #expect(try given("four-three", cores: "4", slots: "3") == "cores=2")
+        // Its own, whatever the caller's environment held.
+        #expect(try given("caller-set", cores: "12", slots: "3", extra: [TestLock.coresVariable: "11"]) == "cores=4")
+        // Under a holder of its slots (a script a merge's test command runs): the holder's share, else its own sum.
+        let held = TestLock(directory: locks).path
+        #expect(try given("held-given", cores: "12", slots: "3", extra: [TestLock.heldVariable: held, TestLock.coresVariable: "5"]) == "cores=5")
+        #expect(try given("held-bare", cores: "12", slots: "3", extra: [TestLock.heldVariable: held, TestLock.coresVariable: ""]) == "cores=4")
+    }
+
+    /// F6 (boost release 6/7): one heavy-slot count for vs-heavy and the Swift side (`TestLock.slotCount`, which the
+    /// leads' merges and audits take): Settings' Mac-wide count (mac-limits.json's heavySlots, the cores ÷ 6 unset),
+    /// raised to boost's while boost.json says on and is fresh; a stale or forged boost.json doesn't raise it past the
+    /// cores. VS_HEAVY_CORES follows.
+    @Test func vsHeavyAndTheLeadsTakeOneSlotCountWithBoost() throws {
+        let locks = url("heavy-locks").path
+        let home = url("vs-home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let environment = ["VIBESWITCHER_HOME": home.path, "VIBESWITCHER_HEAVY_NCPU": "12", TestLock.slotsVariable: ""]
+        func cores(_ name: String) throws -> String {
+            let output = url("\(name).out").path
+            let run = try Self.runVsHeavy(["/bin/sh", "-c", "echo \"cores=$\(TestLock.coresVariable)\""], lockDirectory: locks, output: output,
+                                          environment: environment)
+            run.waitUntilExit()
+            #expect(run.terminationStatus == 0, "\(lines(output))")
+            return lines(output).last ?? ""
+        }
+        func boost(on: Bool, slots: Int, age: TimeInterval) throws {
+            try BoostState(on: on, why: "w", limits: BoostLimits(heavySlots: slots), at: Date().timeIntervalSince1970 - age)
+                .save(to: home.appendingPathComponent("boost.json"))
+        }
+        let swiftSide = { TestLock.slotCount(environment) }
+        // Nothing set: the cores ÷ 6 (2 on 12 cores, 6 cores a slot).
+        #expect(swiftSide() == MacLimits.defaultHeavySlots)
+        if MacLoad.processors == 12 {
+            #expect(try cores("unset") == "cores=6")
+        }
+        // Settings' 2, then boost's 3: 6 cores a slot, then 4.
+        try MacLimits(heavySlots: 2).save(to: home.appendingPathComponent("mac-limits.json"))
+        #expect(try cores("settings") == "cores=6")
+        #expect(swiftSide() == 2)
+        try boost(on: true, slots: 3, age: 0)
+        #expect(try cores("boosted") == "cores=4")
+        #expect(swiftSide() == 3)
+        // Off, or stale (the app quit): Settings' again.
+        try boost(on: false, slots: 3, age: 0)
+        #expect(try cores("off") == "cores=6")
+        #expect(swiftSide() == 2)
+        try boost(on: true, slots: 3, age: BoostState.staleAfter + 30)
+        #expect(try cores("stale") == "cores=6")
+        #expect(swiftSide() == 2)
+        // Forged past the cores: no more than a slot per core.
+        let forged = #"{"on": true, "why": "w", "at": \#(Date().timeIntervalSince1970), "limits": {"heavySlots": 64}}"#
+        try Data(forged.utf8).write(to: home.appendingPathComponent("boost.json"))
+        #expect(try cores("forged") == "cores=2")
+        #expect(swiftSide() == MacLoad.processors)
+        // A project's heavy_slots (given to its sessions as VIBESWITCHER_HEAVY_SLOTS) is its base, raised the same way.
+        try boost(on: true, slots: 3, age: 0)
+        #expect(TestLock.slotCount(environment.merging([TestLock.slotsVariable: "1"]) { $1 }) == 3)
+    }
+
     // MARK: scripts/test.sh
 
     /// A folder with a fake `swift` (it logs "<RUN> <verb> start|end" around a sleep of SWIFT_SLEEP seconds) and a
@@ -521,6 +616,7 @@ struct TestLockTests {
         let swift = """
             #!/bin/bash
             echo "$TMPDIR" > \(RecentProjects.shellQuote(log)).$RUN.tmpdir
+            echo "$RUN $*" >> \(RecentProjects.shellQuote(log)).args
             echo "$RUN $1 start" >> \(RecentProjects.shellQuote(log))
             sleep "${SWIFT_SLEEP:-1}"
             echo "$RUN $1 end" >> \(RecentProjects.shellQuote(log))
@@ -536,7 +632,8 @@ struct TestLockTests {
     /// `scripts/test.sh` as run `name`, in a process group of its own (as a terminal runs it, so Ctrl-C reaches all of
     /// it), with the fakes first on PATH and the lock in this test's scratch, given `arguments`; its output goes to
     /// `<name>.out`.
-    func start(_ name: String, sleep: Int = 1, bin: String, arguments: [String] = []) throws -> (process: Process, output: String) {
+    func start(_ name: String, sleep: Int = 1, bin: String, arguments: [String] = [],
+               environment extra: [String: String] = [:]) throws -> (process: Process, output: String) {
         let output = url("\(name).out").path
         FileManager.default.createFile(atPath: output, contents: nil)
         let process = Process()
@@ -549,6 +646,7 @@ struct TestLockTests {
         environment[TestLock.directoryVariable] = url("script-locks").path
         environment[TestLock.heldVariable] = nil
         environment[TestLock.slotsVariable] = "1"
+        environment.merge(extra) { $1 }
         process.environment = environment
         let handle = try #require(FileHandle(forWritingAtPath: output))
         process.standardOutput = handle
@@ -594,6 +692,52 @@ struct TestLockTests {
         #expect(said.contains(", scripts/test.sh in \(Self.repo.path) ("), "\(said)")
         #expect(said.contains("vs-heavy: scripts/test.sh: took the test and build lock (slot 1 of 1) after"), "\(said)")
         #expect(!lines(a.output).joined().contains("waiting for"))
+    }
+
+    /// swift build and swift test build on the slot's share of the cores (from vs-heavy's VS_HEAVY_CORES: 4 on a 12-core
+    /// Mac with 3 slots): two modules at once, two frontends each, not all 12 cores.
+    @Test func theScriptBuildsAndTestsOnItsSlotsShareOfTheCores() throws {
+        let (bin, log) = try fakes()
+        let run = try start("A", sleep: 0, bin: bin, arguments: ["--filter", "X"],
+                            environment: ["VIBESWITCHER_HEAVY_NCPU": "12", TestLock.slotsVariable: "3"])
+        run.process.waitUntilExit()
+        #expect(run.process.terminationStatus == 0, "\(lines(run.output))")
+        // In a worktree the lead made, scripts/lib/module-cache.sh puts its cache's path first.
+        let said = lines(log + ".args").map { $0.replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression) }
+        #expect(said == ["A build -j 2 -Xswiftc -j2", "A test -j 2 -Xswiftc -j2 --filter X"], "\(lines(log + ".args"))")
+    }
+
+    /// heavy_swift (scripts/lib/swift-jobs.sh, which test.sh and build-app.sh run swift through): with VS_HEAVY_CORES a
+    /// whole number N above 0, two modules at once with N ÷ 2 (rounded up) frontends each, else swift as before, on every
+    /// core; build-app.sh's release build goes through it under vs-heavy.
+    @Test func heavySwiftBoundsTheJobsOnlyWhenGivenAShare() throws {
+        let (bin, log) = try fakes()
+        func run(_ cores: String?) throws -> String {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = ["-c", "source scripts/lib/swift-jobs.sh && heavy_swift build -c release"]
+            process.currentDirectoryURL = Self.repo
+            var environment = ProcessInfo.processInfo.environment
+            environment["PATH"] = bin + ":/usr/bin:/bin"
+            environment["RUN"] = cores ?? "unset"
+            environment["SWIFT_SLEEP"] = "0"
+            environment[TestLock.coresVariable] = cores
+            process.environment = environment
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0)
+            return lines(log + ".args").last ?? ""
+        }
+        #expect(try run(nil) == "unset build -c release")
+        #expect(try run("") == " build -c release")
+        #expect(try run("x") == "x build -c release")
+        #expect(try run("0") == "0 build -c release")
+        #expect(try run("4") == "4 build -j 2 -Xswiftc -j2 -c release")
+        #expect(try run("5") == "5 build -j 2 -Xswiftc -j3 -c release")
+        #expect(try run("1") == "1 build -j 2 -Xswiftc -j1 -c release")
+        let buildApp = try String(contentsOf: Self.repo.appendingPathComponent("scripts/build-app.sh"), encoding: .utf8)
+        #expect(buildApp.contains("source scripts/lib/swift-jobs.sh"))
+        #expect(buildApp.contains("Resources/bin/vs-heavy --as scripts/build-app.sh bash -c 'heavy_swift build -c release'"))
     }
 
     @Test func ctrlCLetsGoOfTheLock() throws {

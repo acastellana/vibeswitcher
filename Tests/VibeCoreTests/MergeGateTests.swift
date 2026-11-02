@@ -344,6 +344,74 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
     }
 
+    // MARK: The Mac's merge stats
+
+    /// The lines `lead`'s merges appended to its stats folder.
+    func mergeLines(_ folder: URL) throws -> [MergeSample] {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let files = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasPrefix("merges-") }.sorted()
+        return try files.flatMap { name in
+            #expect(((try? FileManager.default.attributesOfItem(atPath: folder.appendingPathComponent(name).path))?[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+            return try String(contentsOf: folder.appendingPathComponent(name), encoding: .utf8).split(separator: "\n")
+                .map { try decoder.decode(MergeSample.self, from: Data($0.utf8)) }
+        }
+    }
+
+    /// A merge in any project appends one line to the Mac's merges-<day>.jsonl: the project and task, the load when
+    /// its tests started, how long they took, and the first run's result.
+    @Test func aMergeAppendsItsLineToTheMacsMergeStats() throws {
+        let root = try repo()
+        try fakeSuite(root, passes: "true")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let stats = temp.url("stats")
+        lead.mergeStats = { stats }
+        configure(lead, ["test_command": "bash scripts/test.sh"])
+        try audited(lead, runtime, root: root)
+
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        let lines = try mergeLines(stats)
+        let line = try #require(lines.first)
+        #expect(lines.count == 1)
+        #expect(line.project == (root as NSString).lastPathComponent && line.task == "add-b")
+        #expect(line.load.count == 3 && line.waitedS == 0 && line.slotWaitS != nil && line.durationS >= 0)
+        #expect(line.firstRun == "passed" && line.result == "passed" && line.reran == nil && line.rerunWhole == nil, "\(line)")
+    }
+
+    /// A first run that failed and a rerun that passed: the line says so, and which tests ran again.
+    @Test func aMergeThatPassedOnItsRerunSaysWhichTestsReran() throws {
+        let root = try repo()
+        try fakeSuite(root, passes: "[[ -e \"$HOME/ran\" ]] || { touch \"$HOME/ran\"; false; }")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let stats = temp.url("stats")
+        lead.mergeStats = { stats }
+        configure(lead, ["test_command": "bash scripts/test.sh"])
+        try audited(lead, runtime, root: root)
+
+        #expect(!lead.call("merge", ["task": "add-b"]).isError)
+        let line = try #require(try mergeLines(stats).first)
+        #expect(line.firstRun == "failed" && line.result == "passed_on_rerun" && line.reran == ["flaky()"] && line.rerunWhole == false, "\(line)")
+    }
+
+    /// A merge refused on its tests is a line too: first run failed, the rerun of the failing tests failed.
+    @Test func aMergeThatFailedTwiceIsALineToo() throws {
+        let root = try repo()
+        try fakeSuite(root, passes: "false")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let stats = temp.url("stats")
+        lead.mergeStats = { stats }
+        configure(lead, ["test_command": "bash scripts/test.sh"])
+        try audited(lead, runtime, root: root)
+
+        #expect(lead.call("merge", ["task": "add-b"]).isError)
+        let line = try #require(try mergeLines(stats).first)
+        #expect(line.firstRun == "failed" && line.result == "failed" && line.reran == ["flaky()"] && line.rerunWhole == false, "\(line)")
+    }
+
     @Test func aBuildErrorIsntRerun() throws {
         let root = try repo()
         try commit(["scripts/test.sh": "#!/bin/bash\necho \"run $*\" >> \(RecentProjects.shellQuote(runs))\necho '/r/Sources/A.swift:3:1: error: cannot find x in scope'\nexit 1\n"],

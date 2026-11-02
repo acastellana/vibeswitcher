@@ -52,6 +52,13 @@ public enum LeadWitness {
         /// How it ended, in words; its exit code when that wasn't said.
         var ending: String { cause ?? "exit \(exit ?? 0)" }
 
+        /// Its turn ended on the account's usage limit, by its transcript (see `LeadActivity.usageLimit`): stopped until
+        /// the limit resets, whatever its hooks (and so `status`) say. Claude Code fires no Stop hook on it.
+        public var usageLimit: UsageLimit? {
+            if case .usageLimit(let limit)? = activity { return limit }
+            return nil
+        }
+
         /// Between turns, the work of its own it waits on, in words: the background task its transcript names, or
         /// else its shells, as the lead's status says them ("1 shell: bash calm-check.sh", "2 shells"). Its turn goes
         /// on when that's done.
@@ -193,6 +200,20 @@ public enum LeadWitness {
         }
     }
 
+    /// The workers auto_advance releases while their task's audit runs (see `LeadToolset.releaseWorker`), seen between
+    /// turns now: a task that moves by itself, in review with its verifiers at work, whose worker (not stopped or
+    /// released already) is live, finished its turn, and waits on nothing. A worker mid-turn when its audit started
+    /// (it had only just reported) writes nothing in the project's folder when its turn ends: the app nudges the loop
+    /// at the first sight of each, and the loop's own checks decide.
+    public static func releasableForAdvance(board: LeadBoard, seen: [String: Seen]) -> [String] {
+        board.tasks.compactMap { task in
+            guard task.status == .review, task.evidence == nil, task.autoAdvance != false, !task.awaitedVerifiers.isEmpty,
+                  let worker = task.worker, worker != task.stopped, let info = seen[worker], info.live, !info.agentQuit,
+                  info.pending == nil, info.activity == .idle(background: nil) else { return nil }
+            return worker
+        }
+    }
+
     /// Of `endedForAdvance`, those `events` leaves to the loop while it runs (the app's `firstSeen`: when it first saw
     /// each so): its report told of it already (the retry's verifier, which ended too), or it was seen less than
     /// `advanceGrace` ago. Past that with no retry (the verifier still awaited), the lead is told as ever.
@@ -232,6 +253,9 @@ public enum LeadWitness {
                     add("\(worker)|ended", "The worker on \(task.slug) ended (\(info.ending)) without reporting. Its commits are on agent/\(task.slug); read_session to see why, then start_worker(\(task.slug)) starts it again where it was (the task needn't be set to blocked first), or re-plan.")
                 } else if info.live, info.agentQuit, [.running, .failed].contains(task.status) {
                     add("\(worker)|ended", "The worker on \(task.slug) ended without reporting: its agent quit and left the session's shell open. Its commits are on agent/\(task.slug); read_session to see why, then stop_worker (it closes the shell) and start_worker again, or re-plan.")
+                } else if info.live, !info.agentQuit, let limit = info.usageLimit, [.running, .failed].contains(task.status) {
+                    add(usageLimitKey(worker, limit), "The worker on \(task.slug) stopped at the account's usage limit: \(limitText(limit)). "
+                        + "It does nothing until then; its work so far is on agent/\(task.slug). Tell the user; after the reset, message(\(task.slug), …) tells it to go on where it was.")
                 } else if info.live, !info.agentQuit, let error = info.apiError, [.running, .failed].contains(task.status) {
                     add("\(worker)|api-error-\(Int(info.apiErrorAt ?? 0))", "The worker on \(task.slug) stopped mid-task: its turn ended on an API error (\(error)). Tell it to go on with message(\(task.slug), …); it picks up where it was.")
                 } else if info.live, !info.agentQuit, let event = waiting(info, session: worker, now: now,
@@ -248,10 +272,16 @@ public enum LeadWitness {
             // With several finders, each that hasn't submitted yet.
             for verifier in task.status == .review && task.evidence == nil ? task.awaitedVerifiers : [] {
                 guard !noTools.contains(verifier), !advanced.contains(verifier), let info = seen[verifier], !gaveVerdict(info, on: task) else { continue }
-                if info.live, !info.agentQuit, let error = info.apiError {
+                if info.live, !info.agentQuit, let limit = info.usageLimit {
+                    add(usageLimitKey(verifier, limit), "The verifier on \(task.slug) stopped mid-audit at the account's usage limit: \(limitText(limit)). "
+                        + "It gives no verdict until then. Tell the user; audit(\(task.slug)) again after the reset.")
+                } else if info.live, !info.agentQuit, let error = info.apiError {
                     add("\(verifier)|api-error-\(Int(info.apiErrorAt ?? 0))", "The verifier on \(task.slug) stopped mid-audit: its turn ended on an API error (\(error)). Tell the user, or audit again.")
                 } else if !info.live || info.agentQuit {
                     add("\(verifier)|ended", "The verifier on \(task.slug) ended without a verdict (\(verifierEnding(info))). read_session(\(task.slug), who: verifier) to see why, then audit again.")
+                } else if info.status == .needsInput {
+                    // Waiting on a prompt: told once it's waited `promptWait`, with what VibeSwitcher did about it
+                    // (`stuckPrompts`). Told now, the lead could only start the audit again, the finders' work lost.
                 } else if let event = waiting(info, session: verifier, now: now,
                                               input: waitingText("The verifier on \(task.slug)", info, now: now, advice: "Tell the user if it's theirs, or audit again."),
                                               stopped: "The verifier on \(task.slug) stopped without calling submit_audit. read_session(\(task.slug), who: verifier) to see why, then audit again.") {
@@ -260,6 +290,187 @@ public enum LeadWitness {
             }
         }
         return events
+    }
+
+    /// A verifier (or a finder) waiting on a prompt no one answers (see `stuckPrompts`).
+    public struct StuckPrompt: Equatable, Sendable {
+        /// The event key it's told by, once: the one its waiting notice had ("<session>|input-<since>").
+        public var key: String
+        public var session: String
+        public var slug: String
+        public var prompt: PendingPrompt
+
+        public init(key: String, session: String, slug: String, prompt: PendingPrompt) {
+            self.key = key
+            self.session = session
+            self.slug = slug
+            self.prompt = prompt
+        }
+    }
+
+    /// How long a verifier waits on a prompt before VibeSwitcher declines it: time for a user who's watching to answer.
+    public static let promptWait: TimeInterval = 120
+
+    /// What a declined verifier prompt tells the verifier (typed as the prompt's "No" reason): what it can do instead.
+    public static let declineReason = "No one answers verifier prompts: use only read-only commands, or report what you couldn't check."
+
+    /// The awaited verifiers (and finders) that have waited on a prompt for `promptWait` or longer. No one answers
+    /// one (the user doesn't see its session; the lead can't answer it), and on 2026-10-31 and 2026-11-01 two audits
+    /// hung so until the lead started them again, the finders' work lost. The app declines each permission prompt with
+    /// `declineReason` (`declinePlan`) and tells the lead once what was asked (`declinedText`), or that it couldn't
+    /// (`undeclinedText`); `events` tells nothing of them meanwhile.
+    public static func stuckPrompts(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = []) -> [StuckPrompt] {
+        var stuck: [StuckPrompt] = []
+        for task in board.tasks where task.status == .review && task.evidence == nil {
+            let noTools = noToolsSessions(task, seen: seen, now: now)
+            for verifier in task.awaitedVerifiers {
+                guard !noTools.contains(verifier), !advanced.contains(verifier), let info = seen[verifier], !gaveVerdict(info, on: task),
+                      info.live, !info.agentQuit, info.usageLimit == nil, info.apiError == nil, info.status == .needsInput,
+                      let since = info.since, now.timeIntervalSince(since) >= promptWait else { continue }
+                stuck.append(StuckPrompt(key: "\(verifier)|input-\(Int(since.timeIntervalSince1970))", session: verifier,
+                                         slug: task.slug, prompt: info.prompt))
+            }
+        }
+        return stuck
+    }
+
+    /// How the app declines a stuck prompt (`declinePlan`): the menu as it was read, its No row, the stuck command as
+    /// the screen must show it, and the keys (arrows to No, Tab to open its text field, the reason, Enter), each
+    /// checked against the screen before it goes (`declineMayGo`).
+    public struct DeclinePlan: Equatable, Sendable {
+        public var menu: ScreenMenu
+        public var no: Int
+        /// The stuck prompt's command, squashed (`squashed`): the screen shows that prompt only while it holds it.
+        public var command: String
+        /// Whether a Tab goes before the reason: the No row read a plain "No" (Claude Code 2.1.316's, see `amendKey`).
+        public var amend: Bool
+        public var writes: [HostInput.Write]
+        /// Esc, when the No row took no reason: it rejects the prompt (never approves), whichever row the cursor is on.
+        public static let escape = HostInput.Write(bytes: [27], delay: 0)
+    }
+
+    /// The plan for declining `prompt` (a stuck Bash prompt's "Run: <command>") on `screen`, with `declineReason`.
+    /// Nil unless the screen shows that command over a permission prompt ("Do you want to …?" over Yes … No): a
+    /// question isn't answered, and a prompt opened since (the one waited on was answered meanwhile) isn't declined.
+    public static func declinePlan(screen: String, prompt: PendingPrompt) -> DeclinePlan? {
+        guard let command = commandKey(prompt), squashed(screen).contains(command), let menu = permissionMenu(screen),
+              let no = menu.options.lastIndex(where: { $0 == "No" || $0.hasPrefix("No,") || $0.hasPrefix("No ") }) else { return nil }
+        let arrow: [UInt8] = no > menu.selected ? [27, 91, 66] : [27, 91, 65]
+        var writes = (0..<abs(no - menu.selected)).map { HostInput.Write(bytes: arrow, delay: $0 == 0 ? 0 : 0.03) }
+        let amend = squashed(menu.options[no]) == "No"
+        if amend { writes.append(HostInput.Write(bytes: amendKey, delay: 0.08)) }
+        writes.append(HostInput.Write(bytes: Array(declineReason.utf8), delay: 0.08))
+        writes.append(HostInput.Write(bytes: [13], delay: 0.08))
+        return DeclinePlan(menu: menu, no: no, command: command, amend: amend, writes: writes)
+    }
+
+    /// Tab: in Claude Code 2.1.316 the Bash prompt's No row is a plain "No" until Tab ("Tab to amend") turns it into a
+    /// text field (placeholder "and tell Claude what to do differently"). Before that, typed letters are the menu's
+    /// keys: j and k move the cursor (the "k" in "check" goes up a row), so the reason never arrives. In the bundle:
+    /// the permission menu pushes `{type:"input",label:"No",placeholder:"and tell Claude what to do differently"}`
+    /// only while `noInputMode` (the hook's `rejectInputMode`, false at first, flipped by `handleInputModeToggle`), and
+    /// the Select's key handler calls `onInputModeToggle(focused)` on `key === "tab"`; its keybindings map j and k to
+    /// select:next and select:previous.
+    public static let amendKey: [UInt8] = [9]
+
+    /// The placeholder Claude Code 2.1.316's No row shows once Tab opened its text field, squashed. The Bash prompt's
+    /// menu has `inlineDescriptions` on, which its Select passes each row as `showLabel`: the open field is drawn after
+    /// its label and ", ", so the row reads "No, and tell Claude what to do differently" (`amendOpen`).
+    static let amendPlaceholder = squashed("and tell Claude what to do differently")
+
+    /// Whether the No row (squashed) shows its text field open and empty: the placeholder, after "No," or alone.
+    static func amendOpen(_ row: String) -> Bool {
+        (row.hasPrefix("No,") ? String(row.dropFirst(3)) : row).hasPrefix(amendPlaceholder)
+    }
+
+    /// Whether the plan's write `step` may go, by the screen now: the same prompt (its command, question and rows),
+    /// and the cursor where the keys so far put it. Tab goes only on the No row still a plain "No"; the reason only
+    /// once that row shows its text field (Tab opened it); Enter only on the No row showing the reason typed in. A No
+    /// row Tab didn't open, or keys taken as moves, stop it short (Esc then), and never end on a Yes row.
+    public static func declineMayGo(_ plan: DeclinePlan, step: Int, screen: String) -> Bool {
+        guard squashed(screen).contains(plan.command), let menu = permissionMenu(screen), menu.question == plan.menu.question,
+              menu.options.count == plan.menu.options.count,
+              menu.options.indices.allSatisfy({ $0 == plan.no || menu.options[$0] == plan.menu.options[$0] }) else { return false }
+        let arrows = abs(plan.no - plan.menu.selected)
+        if step < arrows {
+            return menu.selected == plan.menu.selected + (plan.no > plan.menu.selected ? step : -step)
+                && menu.options[plan.no] == plan.menu.options[plan.no]
+        }
+        let row = squashed(menu.options[plan.no])
+        if plan.amend && step == arrows { return menu.selected == plan.no && row == "No" }
+        let typing = arrows + (plan.amend ? 1 : 0)
+        if step == typing { return menu.selected == plan.no && (!plan.amend || amendOpen(row)) }
+        return menu.selected == plan.no && row.contains(squashed(String(declineReason.prefix(24))))
+    }
+
+    /// Whether Esc may go after a decline stopped short: the stuck command's prompt still shows.
+    public static func escapeMayGo(_ plan: DeclinePlan, screen: String) -> Bool {
+        squashed(screen).contains(plan.command) && permissionMenu(screen)?.question == plan.menu.question
+    }
+
+    /// The permission prompt on `screen`: "Do you want to …?" over a single choice that starts with Yes.
+    static func permissionMenu(_ screen: String) -> ScreenMenu? {
+        guard let menu = ScreenMenu.parse(screen.components(separatedBy: "\n")), !menu.picker, !menu.commands, menu.tabs.isEmpty,
+              !menu.multiSelect, menu.question.contains("Do you want to"), menu.options.first?.hasPrefix("Yes") == true else { return nil }
+        return menu
+    }
+
+    /// A stuck Bash prompt's command as the screen shows it: its first line, squashed, at most 48 characters (a long
+    /// one wraps or is cut on screen). Nil for anything else: only a shell command's prompt is declined.
+    static func commandKey(_ prompt: PendingPrompt) -> String? {
+        guard prompt.text.hasPrefix("Run: ") else { return nil }
+        let first = prompt.text.dropFirst(5).split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
+        let key = String(squashed(first).prefix(48))
+        return key.isEmpty ? nil : key
+    }
+
+    /// `text` without spaces, line breaks and box drawing: a wrapped line reads as one.
+    static func squashed(_ text: String) -> String {
+        String(text.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) && !(0x2500...0x257F).contains($0.value) }
+            .map(Character.init))
+    }
+
+    /// "The verifier on a waited 2 min on a permission prompt no one answers: “Run: git config …”. VibeSwitcher
+    /// declined it, telling it …", for the lead.
+    public static func declinedText(_ stuck: StuckPrompt, now: Date = Date()) -> String {
+        "The verifier on \(stuck.slug) waited \(waitedText(stuck, now: now)) on a permission prompt no one answers\(asked(stuck.prompt)) "
+            + "VibeSwitcher declined it, telling it: “\(declineReason)” Its audit goes on; its report says what it couldn't check. "
+            + "If that command is one verifiers need, tell the user."
+    }
+
+    /// For a prompt VibeSwitcher declined with Esc (its No row took no reason), for the lead.
+    public static func escapedText(_ stuck: StuckPrompt, now: Date = Date()) -> String {
+        "The verifier on \(stuck.slug) waited \(waitedText(stuck, now: now)) on a permission prompt no one answers\(asked(stuck.prompt)) "
+            + "VibeSwitcher declined it with Esc (its No row took no reason), so the verifier's turn stopped there. "
+            + "Audit again if it doesn't go on; if that command is one verifiers need, tell the user."
+    }
+
+    /// For a prompt VibeSwitcher couldn't decline (no permission prompt on its screen: a question, or the screen
+    /// unread), for the lead: what it waits on.
+    public static func undeclinedText(_ stuck: StuckPrompt, now: Date = Date()) -> String {
+        "The verifier on \(stuck.slug) has waited \(waitedText(stuck, now: now)) for input no one answers\(asked(stuck.prompt)) "
+            + "VibeSwitcher couldn't decline it (that prompt isn't on its screen, or it changed while the keys went in). "
+            + "Tell the user if it's theirs, or audit again."
+    }
+
+    private static func waitedText(_ stuck: StuckPrompt, now: Date) -> String {
+        LeadToolset.age(now.timeIntervalSince1970 - (stuck.prompt.since ?? now.timeIntervalSince1970))
+    }
+
+    /// ": “Run: ls”." inline, or ". It waited on:" and a fenced block for a long one (`PendingPrompt.quoted`).
+    private static func asked(_ prompt: PendingPrompt) -> String {
+        let quoted = prompt.quoted
+        return quoted.hasPrefix("“") ? ": \(quoted)." : ". It waited on:\n\(quoted)\n"
+    }
+
+    /// A usage-limit stop is told once: by its session and when the line was written.
+    private static func usageLimitKey(_ session: String, _ limit: UsageLimit) -> String {
+        "\(session)|usage-limit-\(Int(limit.at ?? limit.resetsAt ?? 0))"
+    }
+
+    /// "Claude said “You've hit your weekly limit · …”, and it resets Nov 3, 01:00".
+    private static func limitText(_ limit: UsageLimit) -> String {
+        "Claude said “\(limit.said)”" + (limit.resetText.map { ", and it resets \($0)" } ?? ", and the reset time isn't known")
     }
 
     /// What to tell the lead: the `events` not `told` yet, as they are, except that sessions that ended without
@@ -569,14 +780,37 @@ extension LeadWitness {
         /// sessions within mac_max_sessions). Those told are removed; the rest stay until there's room for them too.
         /// A project whose automatic steps were refused is nudged (`LeadAdvance.nudge`) instead: its lead's tool server
         /// tries them again, and only the lead's own refusals are told.
+        /// While boosted, the room is shared out in turn instead (`Self.inTurn`): the project the user last worked in
+        /// (`BoostState.favored`) first, then the rest by when they were refused, each wait only while the sessions
+        /// woken before it leave room for it.
         public func look(mac: MacLoad, limits: MacLimits, now: Date = Date()) -> [(root: String, text: String)] {
             var due: [String: [Wait]] = [:]
+            var kept: [(file: URL, wait: Wait)] = []
             for (file, wait) in waits() {
                 if now.timeIntervalSince1970 - wait.at > Self.expiry {
                     try? FileManager.default.removeItem(at: file)
                     continue
                 }
-                guard Self.hasRoom(for: wait, mac: mac, limits: limits) else { continue }
+                kept.append((file, wait))
+            }
+            let favored = limits.boost?.favored
+            if favored != nil { kept = Self.inTurn(kept, favored: favored) }
+            // The sessions the waits woken so far will start, and the room kept for the favored project's first wait
+            // when it doesn't fit yet (as `heldFor` keeps it from start_worker and audit).
+            var woken = 0
+            var keptFor = false
+            for (file, wait) in kept {
+                var room = mac
+                if favored != nil, woken > 0 { room.holders.append(Holder(project: "", sessions: woken)) }
+                guard Self.hasRoom(for: wait, mac: room, limits: limits) else {
+                    if favored != nil, !keptFor, wait.need > 0, Self.isProject(wait.root, favored) {
+                        keptFor = true
+                        woken += wait.need
+                    }
+                    continue
+                }
+                if favored != nil, Self.isProject(wait.root, favored), wait.need > 0 { keptFor = true }
+                woken += wait.need
                 try? FileManager.default.removeItem(at: file)
                 due[wait.root, default: []].append(wait)
             }
@@ -594,6 +828,36 @@ extension LeadWitness {
             guard !mac.isBusy(threshold: limits.loadLimit) else { return false }
             return wait.need == 0 || mac.sessions + wait.need <= limits.maxSessions
         }
+
+        private typealias Holder = MacLoad.Holder
+
+        /// `waits` with the project `favored`'s first, each part by when it was refused.
+        static func inTurn(_ waits: [(file: URL, wait: Wait)], favored: String?) -> [(file: URL, wait: Wait)] {
+            waits.sorted { a, b in
+                let first = (Self.isProject(a.wait.root, favored), Self.isProject(b.wait.root, favored))
+                return first.0 != first.1 ? first.0 : a.wait.at < b.wait.at
+            }
+        }
+
+        /// The folder `path` is the project `root` or inside it (its worktrees are).
+        static func isProject(_ path: String, _ root: String?) -> Bool {
+            guard let root else { return false }
+            let folder = (path as NSString).standardizingPath, project = (root as NSString).standardizingPath
+            return folder == project || folder.hasPrefix(project + "/")
+        }
+
+        /// While boosted, the wait of the project the user last worked in (`BoostState.favored`) that `need` more
+        /// sessions for the project `root` would take the room of: a refused start or audit of the favored project,
+        /// still waiting, which wouldn't fit beside them. Nil when not boosted, `root` is the favored project, it
+        /// waits on nothing, or there's room for both. Fairness: freed room goes to where the user works first.
+        public func heldFor(root: String, need: Int, mac: MacLoad, limits: MacLimits, now: Date = Date()) -> Wait? {
+            guard let favored = limits.boost?.favored, !Self.isProject(root, favored) else { return nil }
+            let theirs = waits().map(\.wait).filter {
+                Self.isProject($0.root, favored) && $0.need > 0 && now.timeIntervalSince1970 - $0.at <= Self.expiry
+            }.sorted { $0.at < $1.at }
+            guard let first = theirs.first else { return nil }
+            return mac.sessions + need + first.need > limits.maxSessions ? first : nil
+        }
     }
 
     /// "The Mac has room again for what was refused: start_worker(one), audit(two). Now: load 3.0 (load_threshold 24,
@@ -601,7 +865,7 @@ extension LeadWitness {
     /// still wanted." Naming no project but the lead's `root`'s: the lead may copy it into its repo's records.
     public static func roomText(_ whats: [String], mac: MacLoad, limits: MacLimits, root: String) -> String {
         "The Mac has room again for what was refused: \(whats.joined(separator: ", ")). Now: load \(mac.loadText) "
-            + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessions)). "
+            + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessionsText)). "
             + "Retry what's still wanted; other projects' leads may take the room too."
     }
 }

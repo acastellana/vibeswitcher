@@ -1,0 +1,20 @@
+{
+  "type": "vibeswitcher.wallet-request",
+  "version": 1,
+  "id": "3f2b8c1e-5d4a-4b6f-9e0c-7a1d2e3f4a5b",
+  "createdAt": "2026-10-31T12:00:00Z",
+  "expiresAt": "2026-11-01T12:00:00Z",
+  "requestedBy": {
+    "project": "example-project",
+    "session": "example-session",
+    "label": "Example agent"
+  },
+  "workspace": "example",
+  "from": "example-hardware",
+  "chainId": 42424242,
+  "action": "transfer",
+  "to": "0x0000000000000000000000000000000000000001",
+  "asset": "native",
+  "amount": "1000000000000000000",
+  "reason": "My words: ABANDON, ABILITY, ABLE, ABOUT, ABOVE, ABSENT, ABSORB, ABSTRACT, ABSURD, ABUSE, ACCESS, ACCIDENT"
+}

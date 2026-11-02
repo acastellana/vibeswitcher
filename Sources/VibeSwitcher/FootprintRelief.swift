@@ -28,9 +28,13 @@ final class FootprintRelief {
     private var timer: Heartbeat.Subscription?
     private var reliefs = 0
     private var longest = 0.0
+    private var lastRelief: AppHealth.Memory.Relief?
 
     /// The reliefs so far and the longest, in ms (the soak bench's).
     var made: (reliefs: Int, longest: Double) { queue.sync { (reliefs, longest) } }
+
+    /// The last relief's footprint before and after it (the health digest's); nil before the first.
+    var last: AppHealth.Memory.Relief? { queue.sync { lastRelief } }
 
     init(footprint: @escaping () -> Double? = { AppHealthWatcher.ownFootprint()?.now },
          relieve: @escaping () -> Void = { malloc_zone_pressure_relief(nil, 0) },
@@ -61,7 +65,9 @@ final class FootprintRelief {
             relieve()
             let took = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1e6
             let after = footprint() ?? now
-            Breadcrumbs.shared.note(String(format: "footprint relief: %.0f → %.0f MB in %.0f ms", now, after, took))
+            // On macOS 27.2 it gives back nothing (see `AppHealth.keptForReuse`): the line says so.
+            Breadcrumbs.shared.note(AppHealth.reliefLine(before: now, after: after, took: took))
+            lastRelief = AppHealth.Memory.Relief(before: now, after: after)
             reliefs += 1
             longest = max(longest, took)
             self.floor = after

@@ -6,7 +6,7 @@ import Foundation
 /// or a release build), which merge and an audit's shared run take around their commands too. Two suites side by side
 /// starved each other and the benches (3–4 min each at load 30–50, measured 2026-10-21); a single slot let one
 /// 38-minute pytest hold up every project's builds, suites and merges (2026-10-22). N is `slotsVariable`, the
-/// workflow's heavy_slots for merge and audits, else the Mac's cores ÷ 4 (at least 1).
+/// workflow's heavy_slots for merge and audits, else Settings' Mac-wide count (`MacLimits.heavySlots`, the cores ÷ 6 unset), raised while Boost mode is on.
 /// Slot 1 is a flock on `<directory>/test-build.lock`, slot k on `<directory>/test-build-k.lock`: the kernel lets go of
 /// it when its holder exits, however it ends, so no stale slot outlives a run. `<slot>.holder` says who holds it, for
 /// the one waiting and for status: its first line "pid P, WHAT in DIR, since T" (all an older reader reads), then
@@ -39,6 +39,16 @@ public struct TestLock: Sendable {
     public static let sampleVariable = "VIBESWITCHER_HEAVY_SAMPLE"
     /// How many slots, when set (a whole number above 0); else `defaultSlots`.
     public static let slotsVariable = "VIBESWITCHER_HEAVY_SLOTS"
+    /// A slot's share of the Mac's cores, as its holder's command gets it (`coreBudget`): `vs-heavy` gives its own, merge
+    /// and an audit's shared run give their test command theirs, and builds and test runners take it as their
+    /// parallelism (`swift build -j`, `node --test --test-concurrency`, `make -j`).
+    public static let coresVariable = "VS_HEAVY_CORES"
+    /// The cores ÷ `slots`, rounded up, at least 2: 4 on a 12-core Mac with 3 slots (vs-heavy's sum too). A slot is one
+    /// job's room: on 2026-11-01 one merge's build ran 9 swift-frontends at ~900 % CPU beside two other slots' jobs.
+    public static func coreBudget(slots: Int, cores: Int = ProcessInfo.processInfo.processorCount) -> Int {
+        let slots = max(1, slots)
+        return max(2, (max(1, cores) + slots - 1) / slots)
+    }
     /// How long `vs-heavy` lets its command run before it ends its group, when set ("90", "90m", "30s", "2h"); else 60
     /// min. The lead gives its sessions the project's test_timeout_min, when the workflow sets one of its own.
     public static let timeoutVariable = "VIBESWITCHER_HEAVY_TIMEOUT"
@@ -81,12 +91,21 @@ public struct TestLock: Sendable {
         return !number.isEmpty && number.allSatisfy(\.isASCII) && number.allSatisfy(\.isNumber)
     }
 
-    /// The Mac's cores ÷ 4, at least 1: 3 on a 12-core Mac.
-    public static var defaultSlots: Int { max(1, ProcessInfo.processInfo.processorCount / 4) }
+    /// Settings' default (`MacLimits.defaultHeavySlots`): the cores ÷ 6, at least 1, 2 on a 12-core Mac.
+    public static var defaultSlots: Int { MacLimits.defaultHeavySlots }
 
-    /// The count `environment` sets (`slotsVariable`), else `defaultSlots`.
-    public static func slotCount(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> Int {
-        environment[slotsVariable].flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }.flatMap { $0 > 0 ? $0 : nil } ?? defaultSlots
+    /// The count `environment` sets (`slotsVariable`), else Settings' (`MacLimits.heavySlots`, `defaultSlots` while
+    /// unset), raised to boost's while Boost mode is on (`MacLimits.heavySlotsInForce`): the files of the VibeSwitcher
+    /// folder `environment` names (`VibePaths.root(environment:)`), read as `vs-heavy` reads them.
+    public static func slotCount(_ environment: [String: String] = ProcessInfo.processInfo.environment, now: Date = Date()) -> Int {
+        let root = VibePaths.root(environment: environment, fallbackHome: NSHomeDirectory())
+        let limits = MacLimits.current(file: root.appendingPathComponent("mac-limits.json"), boostFile: root.appendingPathComponent("boost.json"), now: now)
+        return limits.heavySlotsInForce(slotsSet(environment))
+    }
+
+    /// The count `environment` sets (`slotsVariable`, a whole number above 0); nil when it sets none.
+    public static func slotsSet(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> Int? {
+        environment[slotsVariable].flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }.flatMap { $0 > 0 ? $0 : nil }
     }
 
     /// `vs-heavy`, the command that runs its arguments under this lock, for any project (Resources/bin/vs-heavy in the
@@ -225,6 +244,9 @@ public struct TestLock: Sendable {
 
         /// The command (or what it said it is).
         public var what: String? { parts?.what }
+
+        /// The process holding it, as its note says (`vs-heavy`'s, or the merge's or audit's): its command runs under it.
+        public var pid: Int32? { parts.flatMap { Int32($0.pid) } }
 
         /// The folder it runs in, as its note says.
         public var directory: String? { parts?.directory ?? nil }

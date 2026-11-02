@@ -1,0 +1,33 @@
+{
+  "type": "vibeswitcher.wallet-result",
+  "version": 1,
+  "id": "3f2b8c1e-5d4a-4b6f-9e0c-7a1d2e3f4a5b",
+  "sequence": 0,
+  "createdAt": "2026-10-31T12:05:00Z",
+  "status": "submitted",
+  "checks": [
+    {
+      "name": "expiry",
+      "ok": true,
+      "detail": "expires 2026-11-01T12:00:00Z"
+    },
+    {
+      "name": "wallet",
+      "ok": true,
+      "detail": "example-hardware is a hardware wallet in example"
+    },
+    {
+      "name": "chain",
+      "ok": true,
+      "detail": "GenLayer mainnet (42424242)"
+    },
+    {
+      "name": "balance",
+      "ok": true,
+      "detail": "covers 1 GEN and the fee"
+    }
+  ],
+  "txHash": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  "explorerURL": "https://explorer.example/tx/0x0000000000000000000000000000000000000000000000000000000000000001",
+  "message": "Signed on the hardware wallet and submitted."
+}

@@ -364,26 +364,32 @@ struct KeepAwakeTests {
     // MARK: The power source, read off the main thread
 
     /// A power daemon as slow as on 2026-10-28 at 17:02 (the window froze 6.4 s in `SystemPower.onACPower`): each read
-    /// waits until the test opens the gate and finds the Mac on battery. The gate's 2 minutes are only a net for a test
-    /// that fails before opening it: with 5 s, a loaded Mac's full run let the first read end while the test was still
-    /// setting up, so its first look already read battery.
+    /// waits until the test opens the gate, however long that takes, and finds the Mac on battery. No timeout: a gate
+    /// that gave up after 5 s, then 2 minutes, let the first read end while a loaded Mac's full run still had the test
+    /// waiting for the main thread, so its second read had already begun (3 merges' first runs, 127 to 155 s). Every
+    /// test opens it in a `defer`, so a test that fails before opening it doesn't leave the read stuck.
     final class SlowPower: @unchecked Sendable {
         let started = DispatchSemaphore(value: 0)
         private let gate = DispatchSemaphore(value: 0)
         private let lock = NSLock()
         private var count = 0
+        private var opened = false
 
         var reads: Int { lock.withLock { count } }
 
         func read() -> PowerSourceCache.Reading {
-            lock.withLock { count += 1 }
+            let wait = lock.withLock { count += 1; return !opened }
             started.signal()
-            _ = gate.wait(timeout: .now() + 120)
+            // Reads run one at a time on the cache's queue: at most one waits here when `open` signals.
+            if wait { gate.wait() }
             return PowerSourceCache.Reading(onACPower: false, state: PowerState(onBattery: true, percent: 40, at: 0))
         }
 
         /// Lets every read through from now on.
-        func open() { for _ in 0..<16 { gate.signal() } }
+        func open() {
+            let first = lock.withLock { defer { opened = true }; return !opened }
+            if first { gate.signal() }
+        }
     }
 
     /// Waits until every read `source` was asked for so far has ended.

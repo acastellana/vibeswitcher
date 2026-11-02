@@ -19,6 +19,20 @@ import Testing
         let description: String
     }
 
+    /// The run's slot's share of the cores, as scripts/lib/swift-jobs.sh gives SwiftPM: two modules at once, with
+    /// VS_HEAVY_CORES ÷ 2 (rounded up) compiles each; nothing without it. A merge's fresh checkout builds the old host
+    /// in its suite: bare, that build ran 24 swift-frontends at ~780 % CPU inside a 4-core slot (2026-11-01).
+    static func heavyJobs(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> [String] {
+        guard let cores = environment[TestLock.coresVariable].flatMap({ Int($0) }), cores >= 1 else { return [] }
+        return ["-j", "2", "-Xswiftc", "-j\((cores + 1) / 2)"]
+    }
+
+    @Test func theOldHostsBuildTakesTheSlotsShareOfTheCores() {
+        #expect(Self.heavyJobs(["VS_HEAVY_CORES": "4"]) == ["-j", "2", "-Xswiftc", "-j2"])
+        #expect(Self.heavyJobs(["VS_HEAVY_CORES": "5"]) == ["-j", "2", "-Xswiftc", "-j3"])
+        #expect(Self.heavyJobs([:]).isEmpty && Self.heavyJobs(["VS_HEAVY_CORES": "x"]).isEmpty && Self.heavyJobs(["VS_HEAVY_CORES": "0"]).isEmpty)
+    }
+
     /// The old build's host: built once (minutes), then reused.
     static func oldHost() throws -> String {
         let folder = repo.appendingPathComponent(".build/old-hosts/\(commit)")
@@ -40,7 +54,7 @@ import Testing
         }
         // SwiftPM leaves folders in its TMPDIR: the build's own, removed with it.
         try run("/usr/bin/xcrun", ["swift", "build", "--package-path", source.path, "--scratch-path", scratch.path,
-                                   "--disable-automatic-resolution", "--product", "vibeswitcher-host"], temporary: temporary, limit: buildLimit)
+                                   "--disable-automatic-resolution", "--product", "vibeswitcher-host"] + heavyJobs(), temporary: temporary, limit: buildLimit)
         let product = try run("/usr/bin/xcrun", ["swift", "build", "--package-path", source.path, "--scratch-path", scratch.path,
                                                  "--disable-automatic-resolution", "--show-bin-path"], temporary: temporary, limit: buildLimit)
         let binary = product.trimmingCharacters(in: .whitespacesAndNewlines) + "/vibeswitcher-host"

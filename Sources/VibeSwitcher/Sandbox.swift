@@ -4,6 +4,7 @@ import CryptoKit
 import ObjectiveC
 import SwiftUI
 import VibeCore
+import WebKit
 
 /// `VibeSwitcher --sandbox STATE --shots DIR [--minutes N] [--fake-claude PATH]` (run by scripts/sandbox-app.sh): a
 /// copy of the app's window that a worker builds from its worktree, drives and photographs, with nothing of the user's
@@ -38,7 +39,8 @@ enum Sandbox {
         }
         guard let statePath = arguments.first.map({ ($0 as NSString).standardizingPath }), statePath.hasPrefix("/"),
               let shotsPath = value("--shots").map({ ($0 as NSString).standardizingPath }), shotsPath.hasPrefix("/") else {
-            refuse("usage: VibeSwitcher --sandbox STATE --shots DIR [--minutes N] [--fake-claude PATH] [--empty] (absolute paths); "
+            refuse("usage: VibeSwitcher --sandbox STATE --shots DIR [--minutes N] [--fake-claude PATH] [--empty] "
+                   + "[--wallet-passage PATH --wallet-inbox DIR] (absolute paths); "
                    + "run it with scripts/sandbox-app.sh")
         }
         if let problem = refusal(state: statePath, bundleID: Bundle.main.bundleIdentifier, root: VibePaths.root.path,
@@ -54,9 +56,25 @@ enum Sandbox {
         _ = app.setActivationPolicy(.prohibited)
         VibePaths.ensurePrivateDirectories()
         let minutes = value("--minutes").flatMap(Double.init).flatMap { $0 > 0 ? $0 : nil } ?? 10
+        // An outside passage for wallet requests (scripts/e2e/wallet-e2e.sh's loop stand-in), with the inbox it lists:
+        // both or neither, absolute. Without them the sandbox's own fake passage plays the Wallet Manager's Mac.
+        let walletPassage = value("--wallet-passage"), walletInbox = value("--wallet-inbox")
+        if walletPassage != nil || walletInbox != nil {
+            guard let walletPassage, let walletInbox, walletPassage.hasPrefix("/"), walletInbox.hasPrefix("/") else {
+                refuse("--wallet-passage PATH and --wallet-inbox DIR go together, as absolute paths")
+            }
+            // Never the real Passage: not its app's binary (nor a link to it), nor its inbox.
+            let real = URL(fileURLWithPath: walletPassage).resolvingSymlinksInPath().path
+            guard (walletPassage as NSString).lastPathComponent == "passage",
+                  ![walletPassage, real].contains(where: { $0.range(of: ".app/", options: .caseInsensitive) != nil }) else {
+                refuse("--wallet-passage \(walletPassage): a stand-in script named passage (scripts/e2e/loop-passage's side), never Passage itself")
+            }
+            guard !walletInbox.contains("app.passage.Passage") else { refuse("--wallet-inbox \(walletInbox): never Passage's own inbox") }
+        }
         let driver = Driver(state: URL(fileURLWithPath: statePath, isDirectory: true),
                             shots: URL(fileURLWithPath: shotsPath, isDirectory: true),
-                            fakeClaude: value("--fake-claude"), minutes: minutes, empty: arguments.contains("--empty"))
+                            fakeClaude: value("--fake-claude"), minutes: minutes, empty: arguments.contains("--empty"),
+                            walletPassage: walletPassage.flatMap { path in walletInbox.map { (path, URL(fileURLWithPath: $0, isDirectory: true)) } })
         app.delegate = driver
         withExtendedLifetime(driver) { app.run() }
         exit(0)
@@ -129,6 +147,16 @@ enum Sandbox {
         window.hasShadow = false
         window.isRestorable = false
         if window.sheetParent == nil { window.collectionBehavior.formUnion([.transient, .ignoresCycle]) }
+    }
+
+    /// The hidden window `wallet-page` draws its web view in. Not released by `close()`: Swift holds it, and a window
+    /// AppKit also released on close was released twice (the sandbox crashed in the autorelease pool's pop).
+    static func pageWindow(_ view: NSView) -> NSWindow {
+        let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        hide(window)
+        return window
     }
 
     /// Whether `frame` reaches any of the screens.
@@ -213,10 +241,26 @@ private final class Driver: NSObject, NSApplicationDelegate {
     let minutes: Double
     /// Started with no session (`run --empty`): no session host either until something asks for one, as at a first launch.
     let empty: Bool
+    /// `run --passage PATH --passage-inbox DIR`: wallet requests go through this passage (the e2e run's loop stand-in)
+    /// and results are read from this inbox, instead of the sandbox's own fake passage.
+    let externalPassage: (path: String, inbox: URL)?
     let store: SessionStore
     let host: HostClient
     let model = WindowModel()
     let preferences = Preferences()
+    /// Boost mode with the power source, your presence and the usage made up (`boost STATE`): never the Mac's.
+    var boostSignals = (onAC: true, away: false, usage: AccountUsage())
+    /// The battery's made-up charge for boost (`boost battery-on`, `battery-low`).
+    var boostCharge = 86
+    lazy var boostWatch: BoostWatch = {
+        let watch = BoostWatch(preferences: preferences)
+        watch.onAC = { [weak self] in self?.boostSignals.onAC }
+        watch.percent = { [weak self] in self?.boostCharge }
+        watch.away = { [weak self] in self?.boostSignals.away ?? false }
+        watch.usage = { [weak self] in self?.boostSignals.usage ?? AccountUsage() }
+        watch.currentFolder = { [weak self] in self?.store.sessions.first(where: \.isCurrent)?.cwd }
+        return watch
+    }()
     lazy var leads: LeadController = {
         // A lead `startlead` starts runs a fake Claude, never a real one (its arguments after the fake's own are ignored).
         let controller = LeadController(host: host, store: store) { [weak self] folder in self?.leadCommand(folder) ?? "exec /bin/cat" }
@@ -245,6 +289,70 @@ private final class Driver: NSObject, NSApplicationDelegate {
         controller.checkKey()
         return controller
     }()
+    /// The wallet requests fake agents file (`wallet-ask`), through a fake `passage` in the state folder: never the real
+    /// one, its Keychain, pairings or inbox. The Wallet Manager's Mac is played by `wallet-answer`.
+    lazy var walletPassage: URL = {
+        let folder = state.appendingPathComponent("wallet-passage", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder.appendingPathComponent("inbox"), withIntermediateDirectories: true)
+        let script = folder.appendingPathComponent("passage")
+        try? Driver.fakePassage(folder.path).write(to: script, atomically: true, encoding: .utf8)
+        chmod(script.path, 0o755)
+        let peers = Driver.walletPeers.map { #"{"peerID":"\#($0.peerID)","name":"\#($0.name)","reachable":null}"# }.joined(separator: "\n") + "\n"
+        try? peers.write(to: folder.appendingPathComponent("peers.jsonl"), atomically: true, encoding: .utf8)
+        return folder
+    }()
+    /// The sandbox's stand-in for the session host's vault, which stamps wallet requests (see `WalletStamp`).
+    let walletVault = LeadVault.Book()
+    lazy var walletDesk: WalletDesk = {
+        let passage = externalPassage?.path ?? walletPassage.appendingPathComponent("passage").path
+        let clock = walletClock
+        let desk = WalletDesk(folder: state.appendingPathComponent("wallet/asked", isDirectory: true),
+                             store: WalletRequestStore(folder: state.appendingPathComponent("wallet/requests", isDirectory: true)),
+                             inbox: externalPassage?.inbox ?? walletPassage.appendingPathComponent("inbox", isDirectory: true),
+                             config: { [weak self] in WalletDesk.Config(passage: passage, peer: self?.walletPeer ?? "") },
+                             now: { clock.now() })
+        desk.findPassage = { nil }
+        desk.openSettings = { [weak self] in self?.showSettings(.wallet) }
+        // The sandbox's host runs its fake sessions: named as the window lists them.
+        desk.sessionNames = { [weak self] in
+            guard let self else { return [:] }
+            let titles = Dictionary(model.allRows.compactMap { row in row.hostID.map { ($0, row.title) } }, uniquingKeysWith: { first, _ in first })
+            return Dictionary(fakeList.map { ($0.id.uuidString.lowercased(), titles[$0.id] ?? $0.label) }, uniquingKeysWith: { first, _ in first })
+        }
+        // Only a request its vault stamped (`wallet-ask` files through it, as the host's for the selected fake session).
+        let book = walletVault
+        desk.verifyStamps = { [folder = state] stamps in try book.vault(folder: folder.appendingPathComponent("wallet/vault"), as: { .app }).verifyWallet(stamps) }
+        desk.sealMessage = { [folder = state] message in try book.vault(folder: folder.appendingPathComponent("wallet/vault"), as: { .app }).seal(message) }
+        desk.verifyMessages = { [folder = state] messages in try book.vault(folder: folder.appendingPathComponent("wallet/vault"), as: { .app }).verify(messages) }
+        // Sign in browser wallet: never the user's browser. The page's address is kept for `wallet-page`, which renders
+        // it in a web view of the sandbox's own (no wallet extension there).
+        desk.openBrowser = { [weak self] url in self?.walletPageURL = url }
+        // The answer goes to the fake session's agent the way it would to a real one: its steer inbox, typed in between turns.
+        desk.deliver = { [weak self] session, text, then in
+            guard let id = UUID(uuidString: session) else { return then(.ended) }
+            guard let self else { return then(.notYet) }
+            leads.tell(text, from: .system("from the Wallet Manager"), session: id, then: then)
+        }
+        if preferences.walletPeerID.isEmpty { preferences.walletPeerID = Driver.walletPeers[0].peerID }
+        return desk
+    }()
+    /// The Wallet Manager peer the wallet desk sends to: the first made-up one, or none after `wallet-peer none`.
+    var walletPeer = Driver.walletPeers[0].peerID
+    /// The fake Wallet Manager's next result number, per request.
+    var walletSequence: [String: Int64] = [:]
+    /// The wallet desk's clock: the real one, moved ahead by `wallet-later`.
+    let walletClock = WalletClock()
+    final class WalletClock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var ahead: TimeInterval = 0
+        func now() -> Date { lock.withLock { Date().addingTimeInterval(ahead) } }
+        func advance(_ seconds: TimeInterval) { lock.withLock { ahead += seconds } }
+    }
+    /// The local page Sign in browser wallet opened last (`wallet-click browser`), for `wallet-page`.
+    var walletPageURL: URL?
+    /// `wallet-page`'s web view and the made-up request's server, while it draws.
+    var walletPageView: (window: NSWindow, view: WKWebView, loaded: WalletPageLoad)?
+    var walletPageServer: WalletSignServer?
     var window: MainWindowController?
     /// The main window's actions (`sheet new-session-menu` lists the empty sidebar's menu from them).
     var windowActions: WindowActions?
@@ -289,12 +397,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
     let watchdog = HangWatchdog(samples: false)
     var control: URL { state.appendingPathComponent("control", isDirectory: true) }
 
-    init(state: URL, shots: URL, fakeClaude: String?, minutes: Double, empty: Bool) {
+    init(state: URL, shots: URL, fakeClaude: String?, minutes: Double, empty: Bool, walletPassage: (String, URL)? = nil) {
         self.state = state
         self.shots = shots
         self.fakeClaude = fakeClaude
         self.minutes = minutes
         self.empty = empty
+        self.externalPassage = walletPassage.map { (path: $0.0, inbox: $0.1) }
         // Its own host: its own lock (not the user's host.lock: a host on it is the user's, which reads its vault key
         // from the Keychain), its socket in this home, ending with this process however it ends.
         let key = SandboxKey()
@@ -356,6 +465,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         Breadcrumbs.shared.note("sandbox: quitting")
+        // Its fake `passage listen`, ended by its pid.
+        walletDesk.close()
         Breadcrumbs.shared.flush()
         RunnableCommand.Script.removeAll()
     }
@@ -789,7 +900,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             projectCreated: { [weak self] folder, _ in self?.refuse("starting a lead in the new project \(folder)") })
         windowActions = actions
         let controller = MainWindowController(store: store, host: host, model: model, actions: actions, leads: leads, briefing: briefing,
-                                              dictation: dictation)
+                                              dictation: dictation, wallet: walletDesk)
         controller.pane.configure = { [weak self, weak controller] view in
             guard let self else { return }
             let dark = (view.window ?? controller?.window)?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -814,7 +925,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settings = SettingsWindowController(
                 preferences: preferences, setup: SetupModel(preferences: preferences, system: .fixed(hooks: [.claude: true, .codex: false], terminal: .notAsked, notifications: .off)),
                 phoneAccess: PhoneAccess(store: store), recentProjects: { [] }, showWelcome: { [weak self] in self?.refuse("the welcome window") },
-                host: host, briefing: briefing, dictation: dictation, policy: WorkingPolicyEditor())
+                host: host, briefing: briefing, dictation: dictation, policy: WorkingPolicyEditor(), boost: boostWatch,
+                // Its own fake passage's peers, whatever the path setting says: never the real passage.
+                walletPeers: WalletPeerList(load: { [passage = PassageCommand(executable: walletPassage.appendingPathComponent("passage").path)] _ in
+                    WalletPeerList.Read(passage: passage, peers: WalletPeerChoice.list(passage: passage))
+                }))
         }
         guard let window = settings?.window else { return }
         Sandbox.hide(window)
@@ -838,7 +953,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),
         ("scroll top|middle|bottom", "scrolls the shown chat"),
-        ("scroll settings top|middle|bottom", "scrolls the shown Settings tab"),
+        ("scroll settings top|middle|bottom|FRACTION", "scrolls the shown Settings tab (FRACTION: that far down, e.g. 0.4)"),
         ("size WxH", "resizes the main window's content (e.g. 1728x1015)"),
         ("board [N]", "adds N finished tasks (default 250) to the fake lead's board (start the lead first)"),
         ("churn [N]", "changes the fake lead's board N times (default 40), 0.15 s apart, each read and shown as a real change is"),
@@ -855,9 +970,18 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
-        ("soak [MINUTES [every SECONDS] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. LIST leaves out sessions, stream, dictation, team, ax, reports. With no MINUTES: the log so far"),
+        ("soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. every other cycle a worker shaped like a real one (a task on the lead's board, a transcript of MB MB of tool calls, default 4, its steer inbox, its chat and its terminal fed a build's output) ended by the role sweep, its footprint once removed, and RESULT soak-worker-growth-mb. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet, workers. With no MINUTES: the log so far"),
+        ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m] [--data 0x…] [--reason TEXT]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh); --data makes it a contract call (an approve's calldata, say)"),
+        ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint, transaction (tx HASH [EXPLORER URL], once signed and submitted) and the Wallet Manager's checks"),
+        ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
+        ("wallet-click send|retry|discard|browser|settings", "presses that button on the newest wallet request card in the selected chat (send goes to the sandbox's fake passage, never the real one; browser serves the local page but never opens a browser: wallet-page shows it; settings opens Settings › Wallet)"),
+        ("wallet-peer none|chosen", "no Wallet Manager peer chosen for the wallet desk (as with None in Settings › Wallet: cards offer the browser wallet and Open Settings instead of Send), or the made-up one again; the cards redraw"),
+        ("wallet-page [NAME]", "draws the local Sign in browser wallet page as served (the one wallet-click browser opened, else one for a made-up request), in a web view of the sandbox's own with no wallet extension, light and dark: NAME-light.png, NAME-dark.png (default wallet-page)"),
+        ("wallet-answer received|proposed|signed|submitted|rejected|failed", "the fake Wallet Manager's Mac answers the newest card's request: the card shows it, and the asking fake session gets it as a message"),
+        ("wallet [STATE]", "shows a made-up wallet request card as the sheet, in STATE: " + Driver.walletCards.map(\.state).joined(separator: ", ") + " (all: every state, one under another); settings wallet shows its Settings tab"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
+        ("boost off|on|away|present|battery|battery-on|battery-low|veto", "Boost mode in a made-up state (the power source, the charge, your presence and the usage made up): off; On on AC; Automatic away on AC (boosted), at the Mac, away on battery; On on battery with Also on battery at 86 % (boosted) or 24 %; or away on AC with the usage watch's veto. Settings and the menu-bar sheet show it"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
         ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", ")),
         ("close settings|sheet", "closes Settings or the sheet"),
@@ -875,6 +999,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }),
         // The lead's results as the Lead view lists them: an update whose screenshot post_update kept (its worktree
         // since removed), and an older one whose path into a cleaned-up worktree is gone.
+        // The menu bar icon as the app draws it for the fake sessions, with the boost mark while `boost` has it on, on a
+        // strip of the bar's colour (the sandbox has no menu bar of its own).
+        ("menu-bar", { driver in AnyView(MenuBarStrip(sessions: SessionTeams.split(driver.store.sessions).own, watch: driver.boostWatch)) }),
         ("results", { driver in AnyView(ResultsList(updates: Driver.results(home: driver.home)).frame(width: 460).padding(12)) }),
         // A lead's Team tab: a task at work, two blocked (one after it, one with no word why), one whose verifier ended
         // twice, merged ones of which
@@ -892,6 +1019,245 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 .frame(width: 360, height: 980))
         }),
     ]
+
+    /// The wallet request card (`WalletCard`) in each state, made-up values only, for `wallet STATE`.
+    static let walletCards: [(state: String, card: WalletCardModel)] = {
+        let request = WalletCardModel(
+            id: "example-request", workspace: "example", from: "0x0000000000000000000000000000000000000001", wallet: .hardware,
+            to: "0x0000000000000000000000000000000000000002", chainID: 42424242, asset: "GEN", amount: "12.5",
+            reason: "Pay the example invoice for the test deployment.", requestedBy: "example-agent", state: .waiting, browserSignable: true)
+        func with(_ state: WalletCardModel.State, checks: [WalletCardModel.Check] = []) -> WalletCardModel {
+            var card = request
+            card.state = state
+            card.checks = checks
+            return card
+        }
+        let hash = "0x" + String(repeating: "0", count: 61) + "abc"
+        return [
+            ("waiting-for-you", with(.waiting)),
+            ("sent", with(.sent)),
+            ("unreachable", with(.unreachable(message: "the Wallet Manager peer is offline"))),
+            ("received", with(.received, checks: [.init(name: "Recipient", ok: true, detail: "in the address book")])),
+            ("proposed", { var card = with(.proposed(safeTxHash: hash)); card.wallet = .safe; return card }()),
+            ("signed", with(.signed(txHash: hash, explorerURL: URL(string: "https://explorer.example/tx/" + hash)),
+                            checks: [.init(name: "Recipient", ok: true, detail: "in the address book"),
+                                     .init(name: "Amount", ok: true, detail: "under the daily limit")])),
+            ("rejected", with(.rejected(reason: "the amount is over the daily limit"),
+                              checks: [.init(name: "Recipient", ok: true, detail: "in the address book"),
+                                       .init(name: "Amount", ok: false, detail: "12.5 GEN is over the 10 GEN daily limit"),
+                                       .init(name: "Chain", ok: true)])),
+            ("failed", with(.failed(message: "the hardware wallet was disconnected"))),
+            ("expired", with(.expired)),
+            ("sent-not-picked-up", { var card = with(.sent); card.notPickedUp = true; return card }()),
+            ("signed-agent-missed", {
+                var card = with(.signed(txHash: hash, explorerURL: URL(string: "https://explorer.example/tx/" + hash)))
+                card.agentMissed = true
+                return card
+            }()),
+            ("in-browser", with(.inBrowser)),
+            ("sent-from-browser", with(.sentFromBrowser(txHash: hash, explorerURL: URL(string: "https://scan.chain.genlayer.com/tx/" + hash)))),
+            ("rejected-in-wallet", with(.rejectedInWallet)),
+            ("browser-no-answer", with(.browserNoAnswer)),
+            ("no-wallet-manager", { var card = with(.waiting); card.setupNeeded = WalletCardModel.noPeerNote; return card }()),
+            ("no-wallet-manager-wallet-id", {
+                var card = with(.waiting)
+                (card.from, card.wallet, card.browserSignable, card.setupNeeded) = ("example-hardware", nil, false, WalletCardModel.noPeerNote)
+                return card
+            }()),
+        ]
+    }()
+
+    /// The Wallet Manager peers the sandbox's fake `passage peers` lists: made up.
+    static let walletPeers = [WalletPeerChoice(peerID: "0a1b2c3d", name: "Example Wallet Manager Mac"),
+                             WalletPeerChoice(peerID: "0d0d0d0d", name: "Example laptop")]
+
+    /// A fake `passage` in `folder`: `send` copies the file there and says it sent it; `inbox` prints `inbox.jsonl`
+    /// (what `wallet-answer` puts there); `peers` prints `peers.jsonl`; `listen` sleeps until it's stopped by its pid.
+    static func fakePassage(_ folder: String) -> String {
+        """
+        #!/bin/bash
+        here=\(RecentProjects.shellQuote(folder))
+        printf '%s\\n' "$*" >> "$here/calls"
+        case "$1" in
+        send) cp "$3" "$here/sent-$5"; printf 'sent\\t%s\\t%s\\t%s\\n' "$2" "$5" "$(wc -c < "$3" | tr -d ' ')"; exit 0 ;;
+        inbox) cat "$here/inbox.jsonl" 2>/dev/null; exit 0 ;;
+        peers) cat "$here/peers.jsonl" 2>/dev/null; exit 0 ;;
+        listen) trap 'kill $! 2>/dev/null; exit 0' TERM; /bin/sleep 3600 & wait $!; exit 0 ;;
+        esac
+        exit 2
+        """
+    }
+
+    /// `wallet-ask`: the selected fake session's agent files a made-up request, as `vs-wallet request` does
+    /// (`WalletAsk.run`, the sandbox's vault placing it in that session, as the host would from its process).
+    private func walletAsk(_ words: [String], _ reply: @escaping (Bool, String) -> Void) {
+        guard let row = model.selectedRow, let id = row.hostID, let fake = fakeList.first(where: { $0.id == id }) else {
+            return reply(false, "no fake session selected: chat NAME first")
+        }
+        let address = words.first == "address"
+        var values = ["--workspace": "example", "--from": address ? "0x0000000000000000000000000000000000000001" : "example-hardware",
+                      "--chain": "42424242", "--to": "0x0000000000000000000000000000000000000002", "--amount": "12500000000000000000",
+                      "--expires-in": "24h"]
+        var rest = words.dropFirst(address ? 1 : 0)
+        var data: String?
+        var reason = "Pay the example invoice for the test deployment."
+        while let option = rest.first {
+            guard values[option] != nil || ["--data", "--reason"].contains(option), rest.count >= 2 else {
+                return reply(false, "wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m] "
+                             + "[--data 0x…] [--reason TEXT]: not \(option)")
+            }
+            let value = rest.dropFirst().first!
+            switch option {
+            case "--data": data = value
+            case "--reason": reason = value
+            default: values[option] = value
+            }
+            rest = rest.dropFirst(2)
+        }
+        let arguments = ["request"] + ["--workspace", "--from", "--chain", "--to", "--amount", "--expires-in"].flatMap { [$0, values[$0]!] }
+            + (data.map { ["--data", $0] } ?? []) + ["--reason", reason, "--label", fake.label]
+        // The process is in the selected fake session, as the host would tell.
+        let vault = walletVault.vault(folder: state.appendingPathComponent("wallet/vault"), as: { .session(id.uuidString) }, userOpened: true)
+        let ran = WalletAsk.run(arguments, cwd: fake.cwd, walletManager: walletPeer.isEmpty ? .noPeer : .ready,
+                               folder: walletDesk.folder, now: walletClock.now(), vault: vault)
+        guard ran.status == 0 else { return reply(false, ran.error) }
+        walletDesk.refresh { [weak self] in self?.settle { reply(true, ran.output) } }
+    }
+
+    /// The newest card of the selected session's chat.
+    private var walletCard: WalletCardModel? { model.selectedRow?.hostID.flatMap { walletDesk.cards(for: $0).last } }
+
+    /// `wallet-card`: the newest card as lines a script reads (`state Received`, `check chain failed …`).
+    private func walletCardText() -> (Bool, String) {
+        guard let card = walletCard else { return (false, "no wallet request in this chat: wallet-ask first") }
+        var lines = ["id \(card.id)", "state \(WalletCardModel.title(card.state))", "detail \(card.detail)",
+                     "from \(card.from) on \(card.chainText)", "not-picked-up \(card.notPickedUp ? "yes" : "no")"]
+        switch card.state {
+        case .signed(let hash, let url), .sentFromBrowser(let hash, let url):
+            lines.append("tx \(hash)" + (url.map { " \($0.absoluteString)" } ?? ""))
+        default: break
+        }
+        lines += card.checks.map { "check \($0.name) \($0.ok ? "ok" : "failed") \($0.detail)" }
+        lines.append("actions " + card.actions.map(\.rawValue).joined(separator: " "))
+        return (true, lines.joined(separator: "\n"))
+    }
+
+    /// `wallet-click send|retry|discard|browser|settings`: that button on the newest card in the selected session's chat.
+    private func walletClick(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard let action = WalletCardModel.Action(rawValue: what) else { return reply(false, "wallet-click send, retry, discard, browser or settings") }
+        guard let card = walletCard else { return reply(false, "no wallet request in this chat: wallet-ask first") }
+        guard card.actions.contains(action) else {
+            return reply(false, "the card (\(WalletCardModel.title(card.state))) has no \(action.title): " + card.actions.map(\.title).joined(separator: ", "))
+        }
+        walletDesk.act(action, on: card.id) { [weak self] in
+            self?.settle { reply(true, "\(action.title): the card is now \(self?.walletCard.map { WalletCardModel.title($0.state) } ?? "gone")") }
+        }
+    }
+
+    /// `wallet-answer STATUS`: the fake Wallet Manager's Mac answers the newest card's request (received, proposed, signed,
+    /// submitted, rejected, failed), as a result in the fake inbox; the desk takes it.
+    private func walletAnswer(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard let status = WalletResult.Status(rawValue: what) else {
+            return reply(false, "wallet-answer " + WalletResult.Status.allCases.map(\.rawValue).joined(separator: "|"))
+        }
+        guard let card = walletCard else { return reply(false, "no wallet request in this chat: wallet-ask first") }
+        let sequence = (walletSequence[card.id] ?? 0) + 1
+        walletSequence[card.id] = sequence
+        let hash = "0x" + String(repeating: "0", count: 61) + "abc"
+        var result = WalletResult(id: card.id, sequence: sequence, createdAt: Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970)),
+                                 status: status, checks: [.init(name: "Recipient", ok: true, detail: "in the address book"),
+                                                          .init(name: "Amount", ok: status != .rejected, detail: status == .rejected ? "over the daily limit" : "under the daily limit")],
+                                 message: status == .submitted ? "Signed on the hardware wallet and submitted." : status == .rejected ? "The amount is over the daily limit." : "")
+        if status == .submitted || status == .failed {
+            result.txHash = hash
+            result.explorerURL = "https://explorer.example/tx/" + hash
+        }
+        if status == .failed { result.message = "The hardware wallet was disconnected." }
+        do {
+            let data = try result.encoded()
+            let peer = Driver.walletPeers[0].peerID
+            let dir = walletPassage.appendingPathComponent("inbox/\(peer)", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let name = WalletResult.fileName(card.id)
+            let path = dir.appendingPathComponent(String(format: "20261031T1200%02dZ-", Int(sequence)) + name).path
+            try data.write(to: URL(fileURLWithPath: path))
+            let line = WalletRequestFormat.Value.object([.init("peerID", .string(peer)), .init("name", .string(name)),
+                                                 .init("size", .integer(Int64(data.count))), .init("path", .string(path))]).encoded()
+            let list = walletPassage.appendingPathComponent("inbox.jsonl")
+            try (((try? Data(contentsOf: list)) ?? Data()) + line + Data("\n".utf8)).write(to: list)
+        } catch {
+            return reply(false, "the fake Wallet Manager couldn't write its result: \(error)")
+        }
+        walletDesk.poll { [weak self] in
+            self?.settle { reply(true, "the Wallet Manager said \(status.rawValue): the card is now \(self?.walletCard.map { WalletCardModel.title($0.state) } ?? "gone")") }
+        }
+    }
+
+    /// `wallet-page NAME`: the local page as served, from the page Sign in browser wallet opened, else from a server of its
+    /// own for a made-up request (stopped once drawn), loaded in a web view with no wallet extension, drawn light and dark.
+    private func walletPage(_ name: String, _ reply: @escaping (Bool, String) -> Void) {
+        var url = walletPageURL
+        if url == nil {
+            let request = WalletRequest.make(requestedBy: .init(project: "sandbox-project", session: UUID().uuidString.lowercased(), label: "example-agent"),
+                                             workspace: "example", from: "0x0000000000000000000000000000000000000001", chainId: 42_424_242,
+                                             action: .transfer, to: "0x0000000000000000000000000000000000000002", asset: "native",
+                                             amount: "12500000000000000000", reason: "Pay the example invoice for the test deployment.")
+            guard let page = WalletSignPage.html(for: request) else { return reply(false, "no page for the made-up request") }
+            let server = WalletSignServer(page: page)
+            do { url = try server.start { _ in } } catch { return reply(false, "the page's server didn't start: \(error)") }
+            walletPageServer = server
+        }
+        guard let url else { return reply(false, "no page") }
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 720, height: 760), configuration: configuration)
+        let loaded = WalletPageLoad()
+        view.navigationDelegate = loaded
+        let window = Sandbox.pageWindow(view)
+        window.orderFront(nil)
+        walletPageView = (window, view, loaded)
+        let base = Sandbox.fileName(name)
+        var written: [String] = []
+        func finish(_ ok: Bool, _ text: String) {
+            walletPageServer?.stop()
+            walletPageServer = nil
+            walletPageView?.window.close()
+            walletPageView = nil
+            reply(ok, text)
+        }
+        func take(_ modes: ArraySlice<(String, NSAppearance.Name)>) {
+            guard let (mode, appearance) = modes.first else { return finish(true, written.joined(separator: "\n")) }
+            view.appearance = NSAppearance(named: appearance)
+            // The page's colors follow prefers-color-scheme: give it a moment to restyle, then snapshot.
+            view.evaluateJavaScript("document.getElementById('status').textContent") { status, _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    view.takeSnapshot(with: nil) { image, error in
+                        let file = self.shots.appendingPathComponent("\(base)-\(mode).png")
+                        guard let image, let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+                              let png = bitmap.representation(using: .png, properties: [:]), (try? png.write(to: file)) != nil else {
+                            return finish(false, "couldn't draw \(file.lastPathComponent): \(error.map { "\($0)" } ?? "no image")")
+                        }
+                        written.append(file.path + (status.map { "  (status: \($0))" } ?? ""))
+                        take(modes.dropFirst())
+                    }
+                }
+            }
+        }
+        loaded.done = { failure in
+            if let failure { return finish(false, "the page didn't load: \(failure)") }
+            take([("light", .aqua), ("dark", .darkAqua)][...])
+        }
+        view.load(URLRequest(url: url))
+    }
+
+    /// `wallet STATE`'s sheets: a card per state, and all of them.
+    static var walletSheets: [(name: String, make: (Driver) -> AnyView)] {
+        walletCards.map { entry in
+            ("wallet-" + entry.state, { _ in AnyView(WalletCard(card: entry.card).frame(width: 520).padding(16)) })
+        } + [("wallet-all", { _ in
+            AnyView(VStack(spacing: 12) { ForEach(walletCards, id: \.state) { WalletCard(card: $0.card) } }.frame(width: 520).padding(16))
+        })]
+    }
 
     /// AppKit windows `sheet NAME` shows too: the question for a chosen folder in no repository (a scratch folder under
     /// the sandbox's home, with a .gitignore of its own that misses its secret-named files).
@@ -1181,7 +1547,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             let to = rest.dropFirst("settings".count).trimmingCharacters(in: .whitespaces)
             let height = document.frame.height - scroll.contentSize.height
-            let y = to == "top" ? 0 : to == "middle" ? height / 2 : height
+            // A fraction (0.4) scrolls that far down.
+            let y: CGFloat = Double(to).map { height * CGFloat(min(1, max(0, $0))) } ?? (to == "top" ? 0 : to == "middle" ? height / 2 : height)
             scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, y)))
             scroll.reflectScrolledClipView(scroll.contentView)
             settle { reply(true, "scrolled settings to \(Int(y)) of \(Int(height))") }
@@ -1302,6 +1669,49 @@ private final class Driver: NSObject, NSApplicationDelegate {
             showSettings(tab)
             settle { reply(true, "settings shown on \(tab.rawValue)") }
         case "sheet": showSheet(rest, reply)
+        case "boost":
+            let now = Date().timeIntervalSince1970
+            switch rest {
+            case "off": preferences.boostMode = .off
+            case "on": (preferences.boostMode, boostSignals) = (.on, (true, false, AccountUsage()))
+            case "away": (preferences.boostMode, boostSignals) = (.automatic, (true, true, AccountUsage()))
+            case "present": (preferences.boostMode, boostSignals) = (.automatic, (true, false, AccountUsage()))
+            case "battery":
+                preferences.boostOnBattery = false
+                (preferences.boostMode, boostSignals) = (.automatic, (false, true, AccountUsage()))
+            case "battery-on", "battery-low":
+                preferences.boostOnBattery = true
+                boostCharge = rest == "battery-on" ? 86 : 24
+                (preferences.boostMode, boostSignals) = (.on, (false, false, AccountUsage()))
+            case "veto":
+                let limit = AccountUsage.Limit(name: "five_hour", usedPercent: 84, resetsAt: now + 7200, at: now)
+                (preferences.boostMode, boostSignals) = (.automatic, (true, true, AccountUsage(limits: [limit])))
+            default: return reply(false, "boost off|on|away|present|battery|battery-on|battery-low|veto")
+            }
+            boostWatch.look { [weak self] in self?.settle { reply(true, self?.boostWatch.state?.text ?? "not decided") } }
+        case "wallet-ask": walletAsk(Array(words.dropFirst()), reply)
+        case "wallet-card": let (ok, text) = walletCardText(); reply(ok, text)
+        case "wallet-later":
+            guard let minutes = Double(rest), minutes > 0 else { return reply(false, "wallet-later MINUTES (more than 0)") }
+            walletClock.advance(minutes * 60)
+            walletDesk.refresh(polling: false) { [weak self] in
+                self?.settle { reply(true, "the wallet desk's clock moved \(rest) min ahead\n" + (self?.walletCardText().1 ?? "")) }
+            }
+        case "wallet-page": walletPage(rest.isEmpty ? "wallet-page" : rest, reply)
+        case "wallet-click": walletClick(rest, reply)
+        case "wallet-peer":
+            guard rest == "none" || rest == "chosen" else { return reply(false, "wallet-peer none|chosen") }
+            walletPeer = rest == "none" ? "" : Driver.walletPeers[0].peerID
+            walletDesk.refresh(polling: false) { [weak self] in
+                self?.settle { reply(true, "Wallet Manager peer: \(rest)\n" + (self?.walletCardText().1 ?? "")) }
+            }
+        case "wallet-answer": walletAnswer(rest, reply)
+        case "wallet":
+            let state = rest.isEmpty ? "waiting-for-you" : rest
+            guard state == "all" || Self.walletCards.contains(where: { $0.state == state }) else {
+                return reply(false, "no wallet state \(state): " + (Self.walletCards.map(\.state) + ["all"]).joined(separator: ", "))
+            }
+            showSheet("wallet-" + state, reply)
         case "close":
             switch rest {
             case "settings": settings?.close()
@@ -1485,7 +1895,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             Sandbox.hide(shown)
             return settle { reply(true, "sheet \(name) shown") }
         }
-        guard let entry = Self.sheets.first(where: { $0.name == name }) else {
+        guard let entry = (Self.sheets + Self.walletSheets).first(where: { $0.name == name }) else {
             return reply(false, "no sheet \(name): " + (Self.sheets.map(\.name) + Self.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", "))
         }
         guard let parent = window?.window else { return reply(false, "no window") }
@@ -1619,6 +2029,8 @@ final class SoakRun {
     let minutes: Double
     let every: Double
     let without: Set<String>
+    /// Cycles in a simulated hour of the working day (`hour CYCLES`): each cycle stands for 60/CYCLES minutes of it.
+    let hour: Int
     let log: URL
     let started = Date()
     let relief = FootprintRelief()
@@ -1630,11 +2042,30 @@ final class SoakRun {
     var running = true
     /// Each minute's least footprint (MB).
     var floors: [Double] = []
+    /// The least footprint read in the simulated hour under way, and each simulated hour's (MB).
+    var hourLeast = Double.infinity
+    var hours: [Double] = []
+    /// The worker step's (`workers`): each real-shaped worker's footprint and malloc in use once it ended and was
+    /// removed (MB), and the size of each one's transcript (MB, `worker-mb`).
+    var workers: [(footprint: Double, malloc: Double)] = []
+    var workerMB = 4.0
+    /// The app's memory by VM tag when the last worker ended (`SoakMemory.byTag`).
+    var workerTags: [(tag: UInt32, mb: Double)]?
+    /// The worker step's role sweep (made on its first use, with the host it ends sessions on).
+    private var roleSweep: RoleSweep?
 
-    init(minutes: Double, every: Double, without: Set<String>, log: URL) {
+    func sweep(_ host: HostClient) -> RoleSweep {
+        if let roleSweep { return roleSweep }
+        let made = RoleSweep(roster: { [] }, end: { [weak host] session in DispatchQueue.main.async { host?.kill(session.id) } }, tell: { _ in })
+        roleSweep = made
+        return made
+    }
+
+    init(minutes: Double, every: Double, without: Set<String>, hour: Int = 30, log: URL) {
         self.minutes = minutes
         self.every = every
         self.without = without
+        self.hour = max(1, hour)
         self.log = log
     }
 
@@ -1664,15 +2095,19 @@ extension Driver {
             return reply(false, soakRun == nil ? "soak MINUTES [every SECONDS] [without LIST]" : "a soak is running (soak stop)")
         }
         func value(_ flag: String) -> String? { words.firstIndex(of: flag).flatMap { words.indices.contains($0 + 1) ? words[$0 + 1] : nil } }
-        let run = SoakRun(minutes: minutes, every: max(5, value("every").flatMap(Double.init) ?? 20),
-                          without: Set((value("without") ?? "").split(separator: ",").map(String.init)), log: log)
+        let run = SoakRun(minutes: minutes, every: max(1, value("every").flatMap(Double.init) ?? 20),
+                          without: Set((value("without") ?? "").split(separator: ",").map(String.init)),
+                          hour: value("hour").flatMap(Int.init) ?? 30, log: log)
+        if let mb = value("worker-mb").flatMap(Double.init), mb >= 0 { run.workerMB = mb }
         soakRun = run
-        run.note("soak: \(minutes) minutes, a cycle every \(run.every) s" + (run.without.isEmpty ? "" : ", without \(run.without.sorted().joined(separator: ", "))"))
+        run.note("soak: \(minutes) minutes, a cycle every \(run.every) s, \(run.hour) cycles a simulated hour"
+                 + (run.without.isEmpty ? "" : ", without \(run.without.sorted().joined(separator: ", "))"))
         // As the app runs it: malloc's free pages given back once the footprint grew 24 MB (the sandbox is never frontmost).
         run.relief.start()
         run.timers.append(Heartbeat.shared.every(5) { [weak run] in
             guard let run, let now = AppHealthWatcher.ownFootprint()?.now else { return }
             run.least = min(run.least, now)
+            run.hourLeast = min(run.hourLeast, now)
         })
         run.timers.append(Heartbeat.shared.every(60) { [weak self] in self?.soakMinute() })
         soakCycle()
@@ -1696,9 +2131,35 @@ extension Driver {
                  + "cycles \(run.cycles)  fakes \(fakeList.count)  host sessions \(host.sessions.count)  rows \(store.sessions.count)  "
                  + "chats \(IdleBench.Live.chats.map(String.init) ?? "n/a")  terminal views \(IdleBench.Live.views.map(String.init) ?? "n/a")  "
                  + "dictation runs \(dictation.runs.count) notices \(dictation.notices.count) deliveries \(dictation.deliveries.count) "
-                 + "turning on \(dictation.turningOn.count)  reliefs \(reliefs.reliefs)")
-        if run.minute == 2 || run.minute % 30 == 0 { soakCensus(run) }
+                 + "turning on \(dictation.turningOn.count)  reliefs \(reliefs.reliefs)  " + soakCounters())
+        if run.minute == 2 { soakCensus(run) }
         if Double(run.minute) >= run.minutes { soakFinish() }
+    }
+
+    /// The live objects the debug counters see: the wallet desk's cards and records, the heartbeat's timers, the
+    /// Combine sinks the app keeps, the lead controller's leads.
+    private func soakCounters() -> String {
+        #if DEBUG
+        let wallet = walletDesk.census
+        #else
+        let wallet = "n/a"
+        #endif
+        return "wallet \(wallet)  timers \(Heartbeat.shared.clientCount)  boards \(leads.boards.count)"
+    }
+
+    /// A simulated hour's line: its least footprint, malloc's bytes in use, the counters.
+    private func soakHour(_ run: SoakRun) {
+        var stats = malloc_statistics_t()
+        malloc_zone_statistics(nil, &stats)
+        let now = AppHealthWatcher.ownFootprint()?.now ?? 0
+        let least = min(run.hourLeast, now)
+        run.hourLeast = .infinity
+        run.hours.append(least)
+        run.note(String(format: "simulated hour %2d  footprint %6.1f MB (least %6.1f)  malloc in use %6.1f MB  cycles %d  ", run.hours.count,
+                        now, least, Double(stats.size_in_use) / 1_048_576, run.cycles)
+                 + "terminal views \(IdleBench.Live.views.map(String.init) ?? "n/a")  chats \(IdleBench.Live.chats.map(String.init) ?? "n/a")  "
+                 + soakCounters())
+        soakCensus(run)
     }
 
     private func soakCensus(_ run: SoakRun) {
@@ -1710,7 +2171,10 @@ extension Driver {
                     return run.note(String(format: "census: %ld blocks, %.1f MB (the baseline)", census.total.blocks, Double(census.total.bytes) / 1_048_576))
                 }
                 run.note(String(format: "census: %ld blocks, %.1f MB; grew since minute 2:", census.total.blocks, Double(census.total.bytes) / 1_048_576))
-                for row in HeapCensus.growth(from: baseline, to: census, top: 25) {
+                let views = HeapCensus.growth(from: baseline, to: census, top: .max)
+                    .filter { $0.name.contains("View") || $0.name.contains("Hosting") || $0.name.contains("Model") || $0.name.contains("Wallet") }
+                    .prefix(10)
+                for row in HeapCensus.growth(from: baseline, to: census, top: 12) + views {
                     run.note(String(format: "  %-70@ %+8.2f MB %+8ld blocks (%ld → %ld)", String(row.name.prefix(70)) as NSString,
                                     Double(row.after.bytes - row.before.bytes) / 1_048_576, row.after.blocks - row.before.blocks,
                                     row.before.blocks, row.after.blocks))
@@ -1734,6 +2198,36 @@ extension Driver {
             let slope = points.reduce(0.0) { $0 + (Double($1.offset) - meanX) * ($1.element - meanY) } / spread
             run.note(String(format: "RESULT soak-growth-mb-per-hour %.1f (each minute's least, minutes 11-%d; %.1f → %.1f MB)", slope * 60,
                             run.floors.count, points.first?.element ?? 0, points.last?.element ?? 0))
+        }
+        // Each simulated hour's least footprint after the first (the caches filling), as a line through them.
+        let hours = Array(run.hours.enumerated().dropFirst())
+        if hours.count >= 2 {
+            let meanX = hours.map { Double($0.offset) }.reduce(0, +) / Double(hours.count)
+            let meanY = hours.map(\.element).reduce(0, +) / Double(hours.count)
+            let spread = hours.reduce(0.0) { $0 + pow(Double($1.offset) - meanX, 2) }
+            let slope = hours.reduce(0.0) { $0 + (Double($1.offset) - meanX) * ($1.element - meanY) } / spread
+            run.note(String(format: "RESULT soak-simulated-hour-growth-mb %.1f (each simulated hour's least, hours 2-%d: ", slope, run.hours.count)
+                     + run.hours.map { String(format: "%.1f", $0) }.joined(separator: " ") + " MB)")
+        } else {
+            // Too few hours for a line (a slow Mac, a short run): said all the same.
+            run.note("RESULT soak-simulated-hour-growth-mb n/a (\(run.hours.count) simulated hours: a line needs 3)")
+        }
+        // Each real-shaped worker's footprint once it ended and was removed, after the first two, as a line: MB a worker;
+        // and malloc's bytes in use the same way (what's live), so freed pages kept for reuse read apart from live growth.
+        func slope(_ values: [Double]) -> Double {
+            let points = Array(values.enumerated().dropFirst(2))
+            let meanX = points.map { Double($0.offset) }.reduce(0, +) / Double(points.count)
+            let meanY = points.map(\.element).reduce(0, +) / Double(points.count)
+            let spread = points.reduce(0.0) { $0 + pow(Double($1.offset) - meanX, 2) }
+            return points.reduce(0.0) { $0 + (Double($1.offset) - meanX) * ($1.element - meanY) } / spread
+        }
+        if run.workers.count >= 5 {
+            let footprints = run.workers.map(\.footprint), live = run.workers.map(\.malloc)
+            run.note(String(format: "RESULT soak-worker-growth-mb %.2f (each worker's footprint once ended, workers 3-%d: %.1f → %.1f MB, the highest %.1f; "
+                            + "malloc in use %+.2f MB a worker: %.1f → %.1f MB)", slope(footprints), run.workers.count, footprints[2],
+                            footprints.last ?? 0, footprints.max() ?? 0, slope(live), live[2], live.last ?? 0))
+        } else if !run.without.contains("workers") {
+            run.note("RESULT soak-worker-growth-mb n/a (\(run.workers.count) workers ended: a line needs 5)")
         }
         run.note("soak: done after \(run.cycles) cycles")
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
@@ -1788,6 +2282,36 @@ extension Driver {
                 steps.append(command("unfold"))
             }
             if !off.contains("reports"), leadUp { steps.append(command("churn", "3")) }
+            // Every other cycle a worker shaped like a real one, from its start to the role sweep ending it.
+            if !off.contains("workers"), leadUp, cycle % 2 == 0 {
+                steps.append(("worker", { [weak self] done in
+                    guard let self else { return done(true, "") }
+                    self.soakWorker(cycle, done)
+                }))
+            }
+        }
+        if !off.contains("wallet") {
+            // The selected chat's agent files a request, and the desk's clock moves the cycle's share of the hour with
+            // its 15 s refreshes in between. Every third one is sent and the Wallet Manager answers twice; it stands a
+            // minute, so its card goes an hour later (`resultGrace`); the others are discarded. The cards alive stay
+            // few, so what grows is what's left behind, not cards still shown.
+            if cycle % 3 == 0 {
+                steps += [command("wallet-ask", "--expires-in", "1m"), command("wallet-click", "send"),
+                          command("wallet-answer", "received"), command("wallet-answer", "submitted")]
+            } else {
+                steps += [command("wallet-ask"), command("wallet-click", "discard")]
+            }
+            let minutes = 60 / Double(run.hour)
+            steps.append(("wallet refreshes", { [weak self] done in
+                guard let self else { return done(true, "") }
+                let ticks = max(1, Int(minutes * 4))
+                func tick(_ index: Int) {
+                    guard index < ticks else { return done(true, "") }
+                    self.walletClock.advance(15)
+                    self.walletDesk.refresh { tick(index + 1) }
+                }
+                tick(0)
+            }))
         }
         if !off.contains("ax") {
             steps.append(("ax", { [weak self] done in
@@ -1806,6 +2330,7 @@ extension Driver {
         func next(_ rest: ArraySlice<Step>) {
             guard let run = soakRun, run.running else { return }
             guard let step = rest.first else {
+                if cycle % run.hour == 0 { soakHour(run) }
                 let wait = max(0.5, run.every - Date().timeIntervalSince(began))
                 DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in self?.soakCycle() }
                 return
@@ -1844,6 +2369,295 @@ extension Driver {
     }
 }
 
+// MARK: Soak: where the footprint is
+
+/// The app's own memory by kind, read in-process (its own task_info, malloc's zones, a walk of its own VM regions):
+/// never another process, never a tool that inspects one.
+enum SoakMemory {
+    /// task_vm_info's footprint and the ledgers in it (MB): graphics (IOSurfaces, Metal), IOKit-mapped, compressed.
+    static func ledgers() -> String {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let ok = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
+        } == KERN_SUCCESS
+        guard ok else { return "task_info failed" }
+        let mb = { (bytes: UInt64) in String(format: "%.1f", Double(bytes) / 1_048_576) }
+        var stats = malloc_statistics_t()
+        malloc_zone_statistics(nil, &stats)
+        return "internal \(mb(info.internal)) compressed \(mb(info.compressed)) graphics \(mb(UInt64(max(0, info.ledger_tag_graphics_footprint)))) "
+            + "malloc allocated \(mb(UInt64(stats.size_allocated))) in use \(mb(UInt64(stats.size_in_use)))"
+    }
+
+    /// The app's private dirty and swapped memory by VM tag (MB), largest first: what vmmap's summary would say of it,
+    /// from its own regions.
+    static func byTag() -> [(tag: UInt32, mb: Double)] {
+        var totals: [UInt32: UInt64] = [:]
+        var address: mach_vm_address_t = 0
+        var depth: natural_t = 0
+        let page = UInt64(vm_kernel_page_size)
+        while true {
+            var size: mach_vm_size_t = 0
+            var info = vm_region_submap_info_data_64_t()
+            var count = mach_msg_type_number_t(MemoryLayout<vm_region_submap_info_data_64_t>.size / MemoryLayout<natural_t>.size)
+            let result = withUnsafeMutablePointer(to: &info) { pointer in
+                pointer.withMemoryRebound(to: Int32.self, capacity: Int(count)) {
+                    mach_vm_region_recurse(mach_task_self_, &address, &size, &depth, $0, &count)
+                }
+            }
+            guard result == KERN_SUCCESS else { break }
+            if info.is_submap != 0 {
+                depth += 1
+                continue
+            }
+            if [UInt8(SM_PRIVATE), UInt8(SM_COW), UInt8(SM_PRIVATE_ALIASED)].contains(info.share_mode) {
+                totals[info.user_tag, default: 0] += (UInt64(info.pages_dirtied) + UInt64(info.pages_swapped_out)) * page
+            }
+            address += size
+        }
+        return totals.map { ($0.key, Double($0.value) / 1_048_576) }.sorted { $0.mb > $1.mb }
+    }
+
+    /// The VM tags' names (mach/vm_statistics.h) for the ones a Mac app's footprint is made of.
+    static func name(_ tag: UInt32) -> String {
+        switch Int32(tag) {
+        case VM_MEMORY_MALLOC: "malloc"
+        case VM_MEMORY_MALLOC_SMALL: "malloc small"
+        case VM_MEMORY_MALLOC_LARGE: "malloc large"
+        case VM_MEMORY_MALLOC_HUGE: "malloc huge"
+        case VM_MEMORY_MALLOC_TINY: "malloc tiny"
+        case VM_MEMORY_MALLOC_NANO: "malloc nano"
+        case VM_MEMORY_MALLOC_MEDIUM: "malloc medium"
+        case VM_MEMORY_MALLOC_LARGE_REUSABLE: "malloc large reusable"
+        case VM_MEMORY_IOKIT: "IOKit"
+        case VM_MEMORY_COREGRAPHICS: "CoreGraphics"
+        case VM_MEMORY_COREGRAPHICS_DATA: "CG data"
+        case VM_MEMORY_COREGRAPHICS_SHARED: "CG shared"
+        case VM_MEMORY_COREGRAPHICS_BACKINGSTORES: "CG backing stores"
+        case VM_MEMORY_COREGRAPHICS_FRAMEBUFFERS: "CG framebuffers"
+        case VM_MEMORY_APPKIT: "AppKit"
+        case VM_MEMORY_COREUI: "CoreUI"
+        case VM_MEMORY_COREIMAGE: "CoreImage"
+        case VM_MEMORY_IOSURFACE: "IOSurface"
+        case VM_MEMORY_IMAGEIO: "ImageIO"
+        case VM_MEMORY_FOUNDATION: "Foundation"
+        case VM_MEMORY_COREDATA: "CoreData"
+        case VM_MEMORY_STACK: "stack"
+        case VM_MEMORY_DYLD: "dyld"
+        case VM_MEMORY_DYLD_MALLOC: "dyld malloc"
+        case VM_MEMORY_SQLITE: "SQLite"
+        case VM_MEMORY_JAVASCRIPT_CORE: "JavaScriptCore"
+        case VM_MEMORY_JAVASCRIPT_JIT_EXECUTABLE_ALLOCATOR, VM_MEMORY_JAVASCRIPT_JIT_REGISTER_FILE: "JS JIT"
+        case VM_MEMORY_LAYERKIT: "LayerKit"
+        case VM_MEMORY_CGIMAGE: "CGImage"
+        case VM_MEMORY_OS_ALLOC_ONCE: "OS alloc once"
+        case VM_MEMORY_LIBDISPATCH: "dispatch"
+        case VM_MEMORY_ACCELERATE: "Accelerate"
+        case VM_MEMORY_SWIFT_RUNTIME: "Swift runtime"
+        case VM_MEMORY_SWIFT_METADATA: "Swift metadata"
+        case 0: "untagged (mmap)"
+        default: "tag \(tag)"
+        }
+    }
+
+    /// The tags whose memory changed most between two walks: "name +X.X MB", the largest changes first.
+    static func change(from before: [(tag: UInt32, mb: Double)], to after: [(tag: UInt32, mb: Double)], top: Int = 5) -> String {
+        let old = Dictionary(before.map { ($0.tag, $0.mb) }, uniquingKeysWith: +)
+        let new = Dictionary(after.map { ($0.tag, $0.mb) }, uniquingKeysWith: +)
+        return Set(old.keys).union(new.keys).map { ($0, (new[$0] ?? 0) - (old[$0] ?? 0)) }
+            .sorted { abs($0.1) > abs($1.1) }.prefix(top)
+            .map { String(format: "%@ %+.1f", name($0.0), $0.1) }.joined(separator: ", ")
+    }
+}
+
+// MARK: Soak: a real-shaped worker
+
+extension Driver {
+    /// A worker shaped like a real one (app-memory-steps-up), from its start to the role sweep ending it: a task on the
+    /// fake lead's board, a transcript of `worker-mb` MB of tool calls and their output as Claude Code writes them,
+    /// messages in its steer inbox, its chat and then its terminal shown with a build's and a test run's output printed
+    /// in it. Then its task merges and the role sweep (the app's `RoleSweep`, on a roster of this worker: the sandbox's
+    /// fake lead can't bind roles in the host's vault) ends it, and the lead controller removes it as it removes a
+    /// finished task's ended workers (`forgetFinished`). Its footprint once it's gone goes in the log.
+    func soakWorker(_ cycle: Int, _ done: @escaping (Bool, String) -> Void) {
+        guard let run = soakRun else { return done(true, "") }
+        let lead = "sandbox-lead", slug = "soak-worker-\(cycle)", title = "Soak worker \(cycle)", label = "Worker: Soak worker \(cycle)"
+        let root = ((home as NSString).appendingPathComponent("projects/\(lead)") as NSString).standardizingPath
+        let contract = LeadContract(goal: "The board's rows read the board once a refresh, and the Team tab keeps its rows.",
+                                    acceptance: ["TeamRows reads the board once", "Focused tests pass", "The lint filter passes"],
+                                    boundaries: ["Sources/VibeSwitcher/MainWindow/Lead", "Tests"], context: "Cycle \(cycle) of the soak.")
+        do {
+            try BoardStore(root: root).update { board in
+                board.tasks.append(LeadTask(slug: slug, title: title, contract: contract, status: .running))
+            }
+        } catch {
+            return done(false, "couldn't write the lead's board: \(error)")
+        }
+        let transcript = Self.workerTranscript(cycle: cycle, bytes: Int(run.workerMB * 1_048_576))
+        startFake(label: label, slug: "\(lead)/.vibeswitcher/worktrees/\(slug)", transcript: transcript, title: "worker-\(slug)") { [weak self] problem in
+            guard let self else { return done(true, "") }
+            if let problem { return done(false, problem) }
+            guard let fake = self.fakeList.first(where: { $0.label == label }) else { return done(false, "the worker isn't listed") }
+            try? BoardStore(root: root).update { board in
+                guard let index = board.tasks.firstIndex(where: { $0.slug == slug }) else { return }
+                board.tasks[index].worker = fake.id.uuidString
+                board.tasks[index].worktree = fake.cwd
+            }
+            // Its steer inbox: the lead's messages, as a real worker gets them between its turns.
+            for text in Self.workerMessages(cycle) { self.leads.tell(text, from: .lead("lead"), session: fake.id) }
+            // Its chat (its whole transcript read), then its terminal with real output printed in it.
+            self.chat(label) { _, _ in
+                self.model.showsChat = false
+                self.tellFake(fake, #"{"op": "print", "file": "\#(self.soakOutputFile().path)"}"#)
+                self.waitFor({ [weak self] in (self?.window?.pane.terminalView(fake.id)?.getTerminal().getTopVisibleRow() ?? 0) >= 1_000 }) { printed in
+                    self.model.showsChat = true
+                    if !printed { run.note("cycle \(cycle): the worker's terminal didn't show its output") }
+                    self.soakEndWorker(fake, slug: slug, root: root, run: run, done)
+                }
+            }
+        }
+    }
+
+    /// The worker's task merges, the role sweep ends its session, and the lead controller removes it (the soak does
+    /// what's left after 30 s, and says so); then its footprint and malloc's are noted.
+    private func soakEndWorker(_ fake: Fake, slug: String, root: String, run: SoakRun, _ done: @escaping (Bool, String) -> Void) {
+        let now = Date().timeIntervalSince1970
+        try? BoardStore(root: root).update { board in
+            guard let index = board.tasks.firstIndex(where: { $0.slug == slug }) else { return }
+            board.tasks[index].status = .done
+            board.tasks[index].since = now
+            board.tasks[index].merged = LeadMergeRecord(commit: String(format: "%08x", slug.hashValue & 0xffff_ffff), tested: true, audited: false, at: now)
+        }
+        let entries = [LeadVault.RosterEntry(root: root, session: fake.id.uuidString, role: .worker, task: slug, holds: true,
+                                             boundAt: now - 600, toolsAt: now - 590)]
+        let hosted = host.sessions
+        let sweep = run.sweep(host)
+        sweep.queue.async {
+            sweep.roster = { entries }
+            sweep.look(hosted: hosted, idleSince: { _ in nil }, agent: { _ in (nil, nil) })
+        }
+        waitFor({ [weak self] in !(self?.host.sessions.contains { $0.id == fake.id } ?? false) }) { [weak self] removed in
+            guard let self else { return done(true, "") }
+            let measure = {
+                var stats = malloc_statistics_t()
+                malloc_zone_statistics(nil, &stats)
+                let footprint = AppHealthWatcher.ownFootprint()?.now ?? 0, malloc = Double(stats.size_in_use) / 1_048_576
+                run.workers.append((footprint, malloc))
+                let tags = SoakMemory.byTag()
+                let changed = run.workerTags.map { SoakMemory.change(from: $0, to: tags) } ?? "the first"
+                run.workerTags = tags
+                run.note(String(format: "worker %3d ended (%@): footprint %6.1f MB  malloc in use %6.1f MB  chats %@  terminal views %@  ",
+                                run.workers.count, slug, footprint, malloc, IdleBench.Live.chats.map(String.init) ?? "n/a",
+                                IdleBench.Live.views.map(String.init) ?? "n/a")
+                         + SoakMemory.ledgers() + "  since the last worker: " + changed)
+                done(true, "")
+            }
+            if removed { return measure() }
+            run.note("\(slug): not removed by the role sweep and the lead controller in 30 s: removed by the soak")
+            self.host.kill(fake.id)
+            self.waitFor({ [weak self] in self?.host.sessions.first { $0.id == fake.id }?.isLive != true }) { [weak self] _ in
+                self?.host.remove(fake.id)
+                self?.waitFor({ [weak self] in !(self?.host.sessions.contains { $0.id == fake.id } ?? false) }) { _ in measure() }
+            }
+        }
+    }
+
+    /// Appends a FakeClaude op to the fake's control file.
+    private func tellFake(_ fake: Fake, _ json: String) {
+        guard let file = fake.control, let handle = FileHandle(forWritingAtPath: file) else { return }
+        handle.seekToEndOfFile()
+        handle.write(Data((json + "\n").utf8))
+        try? handle.close()
+    }
+
+    /// A build's and a test run's output as a terminal shows them (colored, about 1.2 MB, 12,000 lines), written once.
+    private func soakOutputFile() -> URL {
+        let file = state.appendingPathComponent("soak-worker-output.txt")
+        if FileManager.default.fileExists(atPath: file.path) { return file }
+        var text = ""
+        for index in 0..<4_000 {
+            text += "\u{1b}[1m[\(index)/4000]\u{1b}[0m Compiling VibeSwitcher MainWindow/Lead/TeamRows\(index % 97).swift\r\n"
+            text += "Test Case '-[VibeSwitcherTests.TeamRowsTests testRow\(index)]' \u{1b}[32mpassed\u{1b}[0m (0.\(String(format: "%03d", index % 1000)) seconds).\r\n"
+            text += "    \u{1b}[2m/Users/sandbox/projects/sandbox-lead/Sources/VibeSwitcher/MainWindow/Lead/TeamRows.swift:\(index % 400): note: rows read once\u{1b}[0m\r\n"
+        }
+        try? VibePaths.writePrivate(Data(text.utf8), to: file)
+        return file
+    }
+
+    /// The lead's messages to a worker: its brief's follow-ups, a review's points, a merge's word.
+    static func workerMessages(_ cycle: Int) -> [String] {
+        let points = (1...12).map { "\($0). TeamRows.swift:\(40 + $0 * 7): the row reads the board again on each pass; read it once and keep the rows by slug." }
+        return [
+            "Cycle \(cycle): the verifier found two things to fix before the merge:\n" + points.joined(separator: "\n"),
+            "Rebase onto main first: main moved (3 commits, the board's reads). Then run the focused tests and the lint filter again.",
+            "Merged as abc\(cycle)def. Thanks: report done when the tests pass, and leave the worktree as it is.",
+        ]
+    }
+
+    /// A worker's transcript as Claude Code writes it, about `bytes` long: its brief, then rounds of tool calls (Bash,
+    /// Read, Edit, Grep) with their results (a test run's output, a file's lines, a diff), each result in the message
+    /// and again in its `toolUseResult`, as Claude Code keeps both.
+    static func workerTranscript(cycle: Int, bytes: Int) -> String {
+        let session = UUID().uuidString
+        let start = Date().addingTimeInterval(-3_600)
+        let stamps = ISO8601DateFormatter()
+        var lines: [String] = []
+        var size = 0
+        var parent: String?
+        func add(_ object: [String: Any]) {
+            var object = object
+            let id = UUID().uuidString
+            object["uuid"] = id
+            object["parentUuid"] = parent ?? NSNull()
+            object["sessionId"] = session
+            object["isSidechain"] = false
+            object["cwd"] = "/Users/sandbox/projects/sandbox-lead/.vibeswitcher/worktrees/soak-worker-\(cycle)"
+            object["timestamp"] = stamps.string(from: start.addingTimeInterval(Double(lines.count)))
+            object["version"] = "2.1.312"
+            parent = id
+            guard let data = try? JSONSerialization.data(withJSONObject: object), let line = String(data: data, encoding: .utf8) else { return }
+            lines.append(line)
+            size += line.utf8.count + 1
+        }
+        let brief = "You are a worker for the project lead. Task: the board's rows read the board once a refresh.\n\n"
+            + String(repeating: "Boundaries: Sources/VibeSwitcher/MainWindow/Lead, tests. Run the focused tests while editing.\n", count: 40)
+        add(["type": "user", "message": ["role": "user", "content": brief]])
+        var round = 0
+        while size < bytes {
+            round += 1
+            let tool = ["Bash", "Read", "Edit", "Grep"][round % 4]
+            let call = "toolu_\(cycle)_\(round)"
+            let input: [String: Any]
+            let output: String
+            switch tool {
+            case "Bash":
+                input = ["command": "bash scripts/test.sh --filter TeamRowsTests", "description": "Run the focused tests"]
+                output = (0..<160).map { "Test Case '-[VibeSwitcherTests.TeamRowsTests testRow\($0)]' passed (0.0\($0 % 10)2 seconds)." }.joined(separator: "\n")
+            case "Read":
+                input = ["file_path": "/Users/sandbox/projects/sandbox-lead/Sources/VibeSwitcher/MainWindow/Lead/TeamRows\(round % 9).swift"]
+                output = (1...220).map { "\($0)\u{2192}        let rows = TeamRows.rows(board, seen: seen) // line \($0) of round \(round)" }.joined(separator: "\n")
+            case "Edit":
+                input = ["file_path": "/Users/sandbox/projects/sandbox-lead/Sources/VibeSwitcher/MainWindow/Lead/TeamRows.swift",
+                         "old_string": String(repeating: "let rows = TeamRows.rows(board, seen: seen)\n", count: 12),
+                         "new_string": String(repeating: "let rows = cached ?? TeamRows.rows(board, seen: seen)\n", count: 12)]
+                output = "The file has been updated. Here's the result of running `cat -n` on a snippet:\n"
+                    + (1...60).map { "\($0)\u{2192}    let rows = cached ?? TeamRows.rows(board, seen: seen)" }.joined(separator: "\n")
+            default:
+                input = ["pattern": "TeamRows.rows", "output_mode": "content", "-n": true]
+                output = (1...120).map { "Sources/VibeSwitcher/MainWindow/Lead/File\($0 % 30).swift:\($0 * 3):        let rows = TeamRows.rows(board, seen: seen)" }.joined(separator: "\n")
+            }
+            add(["type": "assistant", "message": ["id": "msg_\(cycle)_\(round)", "type": "message", "role": "assistant", "model": "claude-opus-5-5",
+                                                  "content": [["type": "text", "text": "Round \(round): checking with \(tool) that the rows are read once."],
+                                                              ["type": "tool_use", "id": call, "name": tool, "input": input]],
+                                                  "usage": ["input_tokens": 12, "output_tokens": 240, "cache_read_input_tokens": 80_000 + round]]])
+            add(["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": call, "content": output]]],
+                 "toolUseResult": ["stdout": output, "stderr": "", "interrupted": false, "isImage": false]])
+        }
+        add(["type": "assistant", "message": ["role": "assistant", "content": [["type": "text", "text": "Done: the rows read the board once, and the tests pass."]]]])
+        return lines.joined(separator: "\n") + "\n"
+    }
+}
+
 /// The sandbox's microphone: no device opened, a made-up recording handed over.
 /// The sandbox's microphone permission: always allowed, never the Mac's (no dialog).
 final class SandboxMicrophone: MicrophoneAuthorizer {
@@ -1863,5 +2677,37 @@ struct SandboxTranscriber: HTTPClient {
     func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
         (Data(#"{"text":"run the tests on ComposerView.swift"}"#.utf8),
          HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!)
+    }
+}
+
+/// `wallet-page`'s web view's navigation: `done` once the page loaded (nil) or failed (why).
+final class WalletPageLoad: NSObject, WKNavigationDelegate {
+    var done: (String?) -> Void = { _ in }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { done(nil) }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { done("\(error)") }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { done("\(error)") }
+}
+
+
+/// The `menu-bar` sheet: the menu bar icon on a strip of the bar's material, its tooltip's words under it.
+private struct MenuBarStrip: View {
+    let sessions: [Session]
+    @ObservedObject var watch: BoostWatch
+
+    var body: some View {
+        let boost = watch.state?.on == true ? watch.state : nil
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Spacer()
+                Image(nsImage: StatusIcon.image(for: sessions, boost: boost))
+                Image(systemName: "wifi").foregroundStyle(.primary).accessibilityHidden(true)
+                Text("Sun 12:52").font(.system(size: 13)).foregroundStyle(.primary)
+            }
+            .padding(.horizontal, 10).frame(height: 24)
+            .background(.bar)
+            Text(watch.menuText ?? (watch.state?.text ?? "boost not decided")).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(width: 360).padding(12)
     }
 }

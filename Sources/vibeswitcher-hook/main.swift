@@ -2,8 +2,9 @@
 //
 // Contract with the agents: print nothing (stdout from some hooks is fed back to the model) and
 // always exit 0 (a non-zero exit can block the agent). Every failure path just exits quietly. The one
-// exception is a steered message (see `SteerInbox`): handed to Claude as JSON on the events that take it, as added
-// context on each, Stop included (a Stop block would show in its window as "Stop hook error"; see `SteerReply.output`).
+// exceptions are a steered message (see `SteerInbox`): handed to Claude as JSON on the events that take it, as added
+// context on each, Stop included (a Stop block would show in its window as "Stop hook error"; see `SteerReply.output`);
+// and, the same way, the note a session VibeSwitcher started gets at its start (`SessionNote`).
 import Darwin
 import Foundation
 import VibeCore
@@ -85,6 +86,12 @@ if lock >= 0 { close(lock) }
 // A git command that can move a branch, before and after it runs: the session host records it under the session it
 // tells this process is in (nothing said here names one), so a commit of yours on a lead's base is taken as yours.
 for (root, step) in GitMoves.steps(for: payload) { try? LeadVault.standard.record(step, root: root) }
+
+// A session VibeSwitcher started hears, as it starts, that it can ask for a transaction (vs-wallet).
+if agent == .claude, let note = SessionNote.output(payload: payload, environment: ProcessInfo.processInfo.environment) {
+    signal(SIGPIPE, SIG_IGN)
+    try? FileHandle.standardOutput.write(contentsOf: note)
+}
 
 // Messages sent to this agent while it works (Claude Code; Codex takes typed input mid-turn itself). Only the main
 // thread's hooks take them (a subagent's would put them in its context instead), and a message is marked delivered

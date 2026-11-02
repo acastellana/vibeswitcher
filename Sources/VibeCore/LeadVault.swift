@@ -205,6 +205,15 @@ public struct LeadVault: Sendable {
         case reportDone(root: String, task: String, commit: String?, evidence: LeadDoneEvidence? = nil)
         /// The task's review level and the commit its worker last reported done on (`Reply.unaudited`).
         case unaudited(root: String, task: String)
+        /// The session the calling process runs in, as the host tells from that process (`Reply.session`): the one a
+        /// wallet request it files names. Refused outside every session.
+        case walletSession
+        /// The host's seal (`Reply.seal`) on a wallet request's bytes (`WalletStamp.digest`) for `session`: only from a
+        /// process in that very session (not one it started, nor one it leads), and only while that session is the
+        /// user's (`userOpened`: the app opened it, no session started it, and no other session typed into it last).
+        case sealWalletRequest(session: String, digest: String)
+        /// Which of these wallet request stamps carry the host's seal.
+        case verifyWalletRequests([WalletStamp])
     }
 
     public enum Reply: Codable, Equatable, Sendable {
@@ -226,6 +235,8 @@ public struct LeadVault: Sendable {
         case approved(Bool)
         case roster([RosterEntry])
         case unaudited(review: LeadTask.Review?, reported: String?, evidence: LeadDoneEvidence? = nil)
+        /// A session's id, lower case (`Request.walletSession`).
+        case session(String)
     }
 
     /// The host said no, or couldn't be asked.
@@ -413,6 +424,27 @@ public struct LeadVault: Sendable {
 
     public func verify(_ messages: [SteerMessage]) throws -> [Bool] {
         guard case .verified(let valid) = try call(.verify(messages)), valid.count == messages.count else { throw Self.unexpected }
+        return valid
+    }
+
+    // MARK: Wallet requests
+
+    /// The session the calling process runs in, as the host tells from it (see `WalletStamp`).
+    public func walletSession() throws -> String {
+        guard case .session(let session) = try call(.walletSession) else { throw Self.unexpected }
+        return session
+    }
+
+    /// The host's seal on a wallet request's bytes for `session`, the caller's own.
+    public func sealWallet(session: String, digest: String) throws -> String {
+        guard case .seal(let seal) = try call(.sealWalletRequest(session: session, digest: digest)) else { throw Self.unexpected }
+        return seal
+    }
+
+    /// Which of `stamps` carry the host's seal.
+    public func verifyWallet(_ stamps: [WalletStamp]) throws -> [Bool] {
+        guard !stamps.isEmpty else { return [] }
+        guard case .verified(let valid) = try call(.verifyWalletRequests(stamps)), valid.count == stamps.count else { throw Self.unexpected }
         return valid
     }
 
@@ -827,6 +859,24 @@ extension LeadVault {
             case .verify(let messages):
                 let key = SymmetricKey(data: state.senderKey)
                 return .verified(messages.map { message in message.seal.map { $0 == SteerInbox.seal(message, key: key) } ?? false })
+            case .walletSession:
+                guard case .session(let session) = caller else {
+                    return .refused("This process isn't in any session VibeSwitcher's session host runs.")
+                }
+                return .session(session.lowercased())
+            case .sealWalletRequest(let session, let digest):
+                guard case .session(let from) = caller, from.lowercased() == session.lowercased() else {
+                    return .refused("A wallet request is sealed only for the session its process runs in.")
+                }
+                // A session another one started, or last typed into, is that one's to steer: its card would name a
+                // session the asker controls.
+                guard userOpened else {
+                    return .refused("A wallet request is sealed only for a session of the user's: this one was started, or last typed into, by another session.")
+                }
+                guard WalletStamp.isDigest(digest) else { return .refused("That isn't a wallet request's digest (SHA-256, lower-case hex).") }
+                return .seal(WalletStamp.seal(session: session, digest: digest, senderKey: state.senderKey))
+            case .verifyWalletRequests(let stamps):
+                return .verified(stamps.map { WalletStamp.isValid($0, senderKey: state.senderKey) })
             case .startedOver:
                 return .startedOver(state.startedOver)
             case .ranGit(let root, let step):

@@ -104,11 +104,11 @@ public struct LeadStall: Codable, Equatable, Sendable {
 
     /// The stalls a running task's worker is in, the most telling first (at most one of silent, idle and
     /// compacted, with undelivered beside it). Nothing for a worker that waits on a prompt, ended, or stopped on an
-    /// API error: the witness tells those its own way. Nor silent, idle or compacted while a run of its waits in line
+    /// API error or the usage limit: the witness tells those its own way. Nor silent, idle or compacted while a run of its waits in line
     /// for the Mac-wide test and build lock (`Seen.lockWait`): it goes on once a slot is free, and every holder's run
     /// ends within its timeout (status says whom it waits for).
     public static func detect(_ seen: LeadWitness.Seen, task: LeadTask, now: Date = Date()) -> [LeadStall] {
-        guard task.status == .running, seen.live, !seen.agentQuit, seen.apiError == nil,
+        guard task.status == .running, seen.live, !seen.agentQuit, seen.apiError == nil, seen.usageLimit == nil,
               seen.status != .needsInput, !(seen.activity.map { if case .needsInput = $0 { return true } else { return false } } ?? false)
         else { return [] }
         let at = now.timeIntervalSince1970
