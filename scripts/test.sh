@@ -26,8 +26,10 @@
 # build, naming it: PhoneWebTests (swift test) skips them without node, and Web/ changes had been checked only by hand.
 #
 # Inside Codex's sandbox (a Codex worker's commands: CODEX_SANDBOX is set) it runs the same, with no flag to give:
-# SwiftPM's own sandbox is left out (`heavy_swift` passes --disable-sandbox: macOS refuses a sandbox inside Codex's), and
-# the leftover check lists processes through libproc where /bin/ps, setuid, can't start (scripts/lib/processes.sh).
+# SwiftPM's own sandbox is left out (`heavy_swift` passes --disable-sandbox: macOS refuses a sandbox inside Codex's), a
+# new worktree's dependencies come from the main checkout's .build, there being no network to fetch them
+# (`swiftpm_offline_dependencies`), and the leftover check lists processes through libproc where /bin/ps, setuid, can't
+# start (scripts/lib/processes.sh).
 #
 # The default run is correctness only: its result doesn't depend on how busy the Mac is, so a merge's run doesn't fail
 # because other sessions load it. The benches, tests judged by wall-clock time or memory (`perf_tests` below, each
@@ -231,6 +233,8 @@ else
     fi
     # Both runs too: exports the swift function that adds it, for the bash under vs-heavy.
     shared_module_cache
+    # Inside Codex's sandbox, a new worktree's dependencies come from the main checkout (no network there).
+    swiftpm_offline_dependencies
     # The default run and --perf alike, under the one lock call. The repository's own vs-heavy, not the installed app's:
     # the one these tests check.
     preferences_before=$(test_preferences)

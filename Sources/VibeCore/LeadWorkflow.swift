@@ -1135,7 +1135,8 @@ public enum LeadPrompts {
         answer_findings): call them as tools, as the brief says. Your sandbox lets you write only in this worktree, its \
         git folders and your TMPDIR (and /tmp), with no network: no push, fetch or download. Nothing asks for approval: a \
         command the sandbox refuses fails. Don't look for a way around it; if the task needs it, say so with ask_lead or \
-        report blocked. These rules aren't refused for you, but they're the same rules, and a Claude verifier checks \
+        report blocked. Run the checks the brief names exactly as written: they work in your sandbox with no extra flags. \
+        These rules aren't refused for you, but they're the same rules, and a Claude verifier checks \
         your branch for them before it merges: \(LeadLaunch.codexUnenforced.map(\.rule).joined(separator: "; ")). \
         Commit only on your branch, never amend, and never touch another agent/ branch. Keep to the contract: \
         nothing outside its boundaries, no refactors it doesn't ask for. Blind check: if you can't start a fresh \

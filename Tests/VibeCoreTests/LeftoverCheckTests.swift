@@ -92,8 +92,9 @@ struct LeftoverCheckTests {
         #expect(!output.contains("/bin/ps"), "\(output)")
         #expect(output.contains("LEFTOVER PROCESSES") && output.contains("\(shell.processIdentifier) /bin/sh -c sleep 600"), "\(output)")
         #expect(output.contains("\(sleeper) sleep 600"), "\(output)")
-        shell.waitUntilExit()
-        #expect(eventually(timeout: 30) { kill(sleeper, 0) != 0 })
+        // Bounded: a check that ended nothing leaves the shell waiting on its pipe for good (the defer kills it).
+        #expect(eventually(timeout: 30) { !shell.isRunning && kill(sleeper, 0) != 0 })
+        if kill(sleeper, 0) == 0 { kill(sleeper, SIGKILL) }
         // Nothing left there: it passes, saying nothing.
         let clean = try Self.check("vs-test-leftover.\(UUID().uuidString.prefix(8))", sandbox: Self.psRefused)
         #expect(clean.status == 0 && clean.output.isEmpty, "\(clean.output)")

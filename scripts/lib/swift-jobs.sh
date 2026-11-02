@@ -34,4 +34,19 @@ swiftpm_sandbox() {
     [[ -n ${CODEX_SANDBOX:-} ]] && echo --disable-sandbox
     return 0
 }
+# Inside Codex's sandbox there's no network either, and a new worktree's first build clones the package's dependencies
+# (SwiftTerm, swift-argument-parser) from GitHub: "Could not resolve host: github.com". There, a checkout whose .build
+# has no dependencies yet takes the main checkout's (the git common folder's): its .build/repositories, checkouts and
+# workspace-state.json, cloned (cp -c, which takes no space on APFS; they hold no absolute paths). SwiftPM then builds
+# from them without fetching while the pins are the same; a branch that changed Package.resolved fetches as ever, which
+# fails there for want of the network. Run from the package's folder, before the build; outside Codex it does nothing.
+swiftpm_offline_dependencies() {
+    [[ -n ${CODEX_SANDBOX:-} && ! -e .build/workspace-state.json ]] || return 0
+    local common main
+    common=$(git rev-parse --path-format=absolute --git-common-dir 2> /dev/null) || return 0
+    main=$(dirname "$common")/.build
+    [[ $main != "$(pwd -P)/.build" && -f $main/workspace-state.json && -d $main/checkouts && -d $main/repositories ]] || return 0
+    mkdir -p .build && cp -cR "$main/repositories" "$main/checkouts" "$main/workspace-state.json" .build/ \
+        && echo "SwiftPM dependencies: the main checkout's, cloned into .build (Codex's sandbox has no network to fetch them)"
+}
 export -f heavy_swift swiftpm_sandbox

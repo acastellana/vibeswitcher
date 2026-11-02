@@ -347,6 +347,8 @@ stopped() {
 scratch_tmpdir vs-loadtmp
 # In a worktree the lead made, the build and a COMMAND's swift test take the SDK's modules from the worktrees' shared cache.
 shared_module_cache
+# Inside Codex's sandbox, a new worktree's dependencies come from the main checkout (no network there).
+swiftpm_offline_dependencies
 on_exit cleanup
 trap stopped INT TERM
 

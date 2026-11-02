@@ -98,4 +98,99 @@ struct CodexRealRunTests {
         #expect(Git.run(["rev-parse", "main"], in: root).output == main, "main moved")
         #expect(!Git.run(["rev-parse", "--verify", "--quiet", "refs/tags/codex-probe"], in: root).ok, "the tag was made")
     }
+
+    /// The project's own checks inside a real Codex worker's sandbox, on demand only (it spends Codex usage):
+    /// `VIBESWITCHER_REAL_CODEX_HOME=<your Codex home> bash scripts/test.sh --filter CodexRealRunTests/theProjectsChecks`.
+    /// A clone of this checkout's HEAD with a worktree as the lead makes them; Codex, on the command line
+    /// `LeadLaunch.prepareCodex` makes (as `codex exec`, above), in a scratch Codex home holding only your sign-in
+    /// (auth.json, copied: nothing is written to yours), runs `bash scripts/test.sh --filter LeftoverCheckTests`, the
+    /// lint filter and `scripts/test-under-load.sh --check-only` as written, each into a log in its TMPDIR. The worktree is
+    /// built first, outside Codex: the build isn't what's checked, and Codex would spend turns waiting on it; SwiftPM
+    /// compiles the manifest again in each run (its cache is in the run's scratch home), under its own sandbox-exec
+    /// unless told not to. Until 2026-11-02 the first failed there before compiling ("sandbox-exec: sandbox_apply:
+    /// Operation not permitted", task wallet-results-tests) and its leftover check said "env: /bin/ps: Operation not
+    /// permitted".
+    @Test(.enabled(if: codexHome != nil, "spends Codex usage: set VIBESWITCHER_REAL_CODEX_HOME to run it"))
+    func theProjectsChecksRunInARealCodexWorkersSandbox() throws {
+        let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let url = checkout.appendingPathComponent(".build/codex-checks/\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let root = url.path
+        let cloned = Git.run(["clone", "-q", "--shared", checkout.path, root], in: checkout.path)
+        try #require(cloned.ok, "\(cloned.output)")
+        Git.run(["branch", "-f", "main", "HEAD"], in: root)
+        // The worktrees' shared module cache, as the lead's repository has one (a writable root of the worker's).
+        try FileManager.default.createDirectory(atPath: root + "/.vibeswitcher/module-cache", withIntermediateDirectories: true)
+        let worktree = try Worktrees.open(root: root, slug: "checks", base: "main")
+        // Without Claude Code's or Codex's marks: a Codex worker's commands have neither.
+        var plain = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("CLAUDE") && !$0.key.hasPrefix("CODEX_") }
+        plain["PATH"] = "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        let build = Process()
+        build.executableURL = URL(fileURLWithPath: "/bin/bash")
+        build.arguments = ["scripts/test.sh", "--filter", "LeftoverCheckTests/aRunThatLeftNothingPasses"]
+        build.currentDirectoryURL = URL(fileURLWithPath: worktree)
+        build.environment = plain
+        build.standardOutput = FileHandle.nullDevice
+        build.standardError = FileHandle.nullDevice
+        try build.run()
+        build.waitUntilExit()
+        try #require(build.terminationStatus == 0, "the worktree's build failed outside Codex")
+
+        let codexHome = temp.url("codex-home").path
+        try FileManager.default.createDirectory(atPath: codexHome, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(atPath: try #require(Self.codexHome) + "/auth.json", toPath: codexHome + "/auth.json")
+        chmod(codexHome + "/auth.json", 0o600)
+        let log = temp.url("calls.jsonl").path
+        let server = temp.url("stub-mcp").path
+        try ("#!/usr/bin/python3\n" + Self.stub(log: log)).write(toFile: server, atomically: true, encoding: .utf8)
+        chmod(server, 0o755)
+        let lints = LeadWorkflow.Policy.lintTests(in: worktree).joined(separator: "|")
+        var task = LeadTask(slug: "checks", title: "Run the project's checks", contract: LeadContract(
+            goal: "Run the project's checks below, each exactly as written, one after the other, and report what each printed.",
+            acceptance: ["`bash scripts/test.sh --filter LeftoverCheckTests > \"$TMPDIR/focused.log\" 2>&1; echo \"exit $?\" >> \"$TMPDIR/focused.log\"`",
+                         "`bash scripts/test.sh --filter '\(lints)' > \"$TMPDIR/lints.log\" 2>&1; echo \"exit $?\" >> \"$TMPDIR/lints.log\"`",
+                         "`scripts/test-under-load.sh --check-only > \"$TMPDIR/load.log\" 2>&1; echo \"exit $?\" >> \"$TMPDIR/load.log\"` (it may refuse a loaded Mac: that's fine)",
+                         "Your report's summary: the last 3 lines of each log"],
+            boundaries: ["change no file and commit nothing"],
+            context: "A check of the checks: nothing to build or fix. No full suite, no load run, no screenshots. Skip the blind check: say so in blind_check."))
+        task.agent = .codex
+        var workflow = LeadWorkflow()
+        workflow.testCommand = "bash scripts/test.sh"
+        let prompt = LeadPrompts.worker(task: task, root: root, workflow: workflow, policy: "", screenshots: .some(nil))
+        let prepared = try LeadLaunch.prepareCodex(root: root, task: "checks", base: "/opt/homebrew/bin/codex", prompt: prompt,
+                                                   start: "Start on your task (it's in your instructions). Call progress at each milestone. When done, call report.",
+                                                   server: server, name: "worker-checks", folder: temp.url("run"), cwd: worktree,
+                                                   temporary: temp.url("tmp"))
+        let tmp = try #require(prepared.environment["TMPDIR"])
+        let command = prepared.command.replacingOccurrences(of: "/opt/homebrew/bin/codex --no-daemon ", with: "/opt/homebrew/bin/codex exec ")
+            .replacingOccurrences(of: " --ask-for-approval never", with: "")
+        let output = temp.url("codex-output.log").path
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command + " > '\(output)' 2>&1 < /dev/null"]
+        process.currentDirectoryURL = URL(fileURLWithPath: worktree)
+        var environment = plain.merging(prepared.environment) { $1 }
+        environment["CODEX_HOME"] = codexHome
+        process.environment = environment
+        let ended = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in ended.signal() }
+        try process.run()
+        // Until it exits (its turn over), 30 minutes at most.
+        if ended.wait(timeout: .now() + 1800) == .timedOut { process.terminate() }
+        let read = { (name: String) in (try? String(contentsOfFile: (tmp as NSString).appendingPathComponent(name), encoding: .utf8)) ?? "" }
+        let (focused, lintRun, load) = (read("focused.log"), read("lints.log"), read("load.log"))
+        let calls = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
+        print("CODEX CHECKS: focused.log:\n\(focused.suffix(3000))\nlints.log:\n\(lintRun.suffix(3000))\nload.log:\n\(load)\nCODEX CALLS:\n\(calls)")
+        for (name, text) in [("focused", focused), ("lints", lintRun)] {
+            #expect(text.hasSuffix("exit 0\n"), "\(name): \(text.suffix(2000))")
+            #expect(text.contains("Test run with ") && text.contains(" passed after "), "\(name): \(text.suffix(2000))")
+        }
+        for text in [focused, lintRun, load] {
+            #expect(!text.contains("sandbox_apply") && !text.contains("/bin/ps") && !text.contains("sysctl"), "\(text.suffix(2000))")
+        }
+        // Ready to start, or refusing a loaded Mac or low memory: its checks ran either way.
+        #expect(load.contains("ok to start") || load.contains("not starting:"), "\(load)")
+        #expect(calls.contains("\"name\": \"report\""), "no report call")
+    }
 }

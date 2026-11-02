@@ -761,6 +761,53 @@ struct TestLockTests {
         #expect(buildApp.contains("Resources/bin/vs-heavy --as scripts/build-app.sh bash -c 'heavy_swift build -c release'"))
     }
 
+    /// Inside Codex's sandbox there's no network, and a new worktree's first build clones SwiftTerm from GitHub ("Could
+    /// not resolve host: github.com"): `swiftpm_offline_dependencies` (scripts/lib/swift-jobs.sh, which test.sh and
+    /// test-under-load.sh run before building) gives a checkout whose .build has no dependencies the main checkout's,
+    /// cloned. Outside Codex, or where the worktree has its own already, it does nothing.
+    @Test func insideCodexsSandboxANewWorktreeTakesTheMainCheckoutsDependencies() throws {
+        let main = url("deps-main").resolvingSymlinksInPath().path
+        try FileManager.default.createDirectory(atPath: main, withIntermediateDirectories: true)
+        for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: main) }
+        try "x\n".write(toFile: main + "/a.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "a.txt"], in: main)
+        Git.run(["commit", "-q", "-m", "first"], in: main)
+        for folder in ["repositories/SwiftTerm-1", "checkouts/SwiftTerm"] {
+            try FileManager.default.createDirectory(atPath: main + "/.build/" + folder, withIntermediateDirectories: true)
+        }
+        try "pinned\n".write(toFile: main + "/.build/checkouts/SwiftTerm/Package.swift", atomically: true, encoding: .utf8)
+        try "{\"main\": 1}".write(toFile: main + "/.build/workspace-state.json", atomically: true, encoding: .utf8)
+        let worktree = try Worktrees.open(root: main, slug: "w", base: "main")
+        func seed(codex: String?) throws -> String {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = ["-c", "source '\(Self.repo.path)/scripts/lib/swift-jobs.sh' && swiftpm_offline_dependencies"]
+            process.currentDirectoryURL = URL(fileURLWithPath: worktree)
+            var environment = ProcessInfo.processInfo.environment
+            environment["CODEX_SANDBOX"] = codex
+            process.environment = environment
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            try process.run()
+            let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0, "\(output)")
+            return output
+        }
+        let state = worktree + "/.build/workspace-state.json"
+        #expect(try seed(codex: nil).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: worktree + "/.build"))
+        #expect(try seed(codex: "seatbelt").contains("SwiftPM dependencies: the main checkout's, cloned into .build"))
+        #expect(try String(contentsOfFile: state, encoding: .utf8) == "{\"main\": 1}")
+        #expect(try String(contentsOfFile: worktree + "/.build/checkouts/SwiftTerm/Package.swift", encoding: .utf8) == "pinned\n")
+        #expect(FileManager.default.fileExists(atPath: worktree + "/.build/repositories/SwiftTerm-1"))
+        // Its own, once it has them, are left as they are.
+        try "{\"own\": 1}".write(toFile: state, atomically: true, encoding: .utf8)
+        #expect(try seed(codex: "seatbelt").isEmpty)
+        #expect(try String(contentsOfFile: state, encoding: .utf8) == "{\"own\": 1}")
+    }
+
     @Test func ctrlCLetsGoOfTheLock() throws {
         let (bin, log) = try fakes()
         let a = try start("A", sleep: 60, bin: bin)
