@@ -48,10 +48,13 @@ source scripts/lib/scratch.sh
 source scripts/lib/module-cache.sh
 source scripts/lib/developer-dir.sh
 source scripts/lib/swift-jobs.sh
+# ps, pgrep and sysctl, or what answers inside Codex's sandbox where they don't (setuid ps can't start there).
+source scripts/lib/processes.sh
 # Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
 unset VIBESWITCHER_HOME
 
-cores=$(sysctl -n hw.ncpu)
+cores=$(cpu_count)
+[[ -n $cores ]] || { echo "the cores couldn't be counted (sysctl -n hw.ncpu, getconf _NPROCESSORS_ONLN)"; exit 1; }
 cap=$((2 * cores))
 usage="usage: scripts/test-under-load.sh [--load N] [--memory-floor PCT] [--max-load L] [--max-time S] [--wait S]"
 usage+=" [--pid-file FILE] [--check-only] [-r RUNS] [-f FILTER] [-- COMMAND...]"
@@ -126,9 +129,9 @@ unset TEST_UNDER_LOAD_INNER TEST_UNDER_LOAD_WAIT_UNTIL TEST_UNDER_LOAD_LOCK_NOTE
 claude_ancestor() {
     local pid=$PPID comm
     while [[ $pid -gt 1 ]]; do
-        comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
+        comm=$(process_field comm "$pid") || return 1
         [[ ${comm##*/} == "${TEST_UNDER_LOAD_OWNER_NAME:-claude}" ]] && { echo "$pid"; return 0; }
-        pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+        pid=$(process_field ppid "$pid" | tr -d ' ')
         [[ -n $pid ]] || return 1
     done
     return 1
@@ -142,7 +145,7 @@ owners=("$PPID")
 if [[ $inner -eq 1 ]]; then
     ancestor=$PPID
     while [[ $ancestor -gt 1 && $ancestor != "$starter" ]]; do
-        ancestor=$(ps -o ppid= -p "$ancestor" 2>/dev/null | tr -d ' ')
+        ancestor=$(process_field ppid "$ancestor" | tr -d ' ')
         [[ -n $ancestor ]] || ancestor=0
     done
     if [[ $ancestor != "$starter" || $ancestor -le 1 ]]; then
@@ -170,7 +173,7 @@ one_minute() {
     elif [[ -n $fake ]]; then
         echo "$fake"
     else
-        sysctl -n vm.loadavg | awk '{ print $2 }'
+        load_one_minute
     fi
 }
 over() { awk -v l="$1" -v m="$max_load" 'BEGIN { exit !(l > m) }'; }
@@ -287,7 +290,7 @@ script=$$
 # Every process started under `pid`, deepest first.
 descendants() {
     local child
-    for child in $(pgrep -P "$1"); do
+    for child in $(process_children "$1"); do
         descendants "$child"
         echo "$child"
     done
@@ -303,7 +306,7 @@ stop() {
     for _ in $(seq 1 100); do
         alive=0
         # A zombie (exited, not yet waited for) is gone.
-        for pid in "${pids[@]}"; do [[ $(ps -o stat= -p "$pid" 2>/dev/null) == [^Z]* ]] && alive=1; done
+        for pid in "${pids[@]}"; do [[ $(process_field stat "$pid") == [^Z]* ]] && alive=1; done
         [[ $alive -eq 0 ]] && return
         sleep 0.1
     done
@@ -361,7 +364,7 @@ if [[ ${#command[@]} -eq 0 ]]; then
     # On this run's slot's share of the cores, VS_HEAVY_CORES from the vs-heavy it runs under (scripts/lib/swift-jobs.sh),
     # as test.sh's and build-app.sh's builds: left to itself SwiftPM compiles on every core, beside the busy loops.
     heavy_swift build --build-tests > /dev/null 2>&1 8>&- || { echo "the build failed: run swift build --build-tests"; exit 1; }
-    bin=$(swift build --show-bin-path 2>/dev/null 8>&-)
+    bin=$(swift build $(swiftpm_sandbox) --show-bin-path 2>/dev/null 8>&-)
     [[ -d $bin ]] || { echo "no build folder at ${bin:-?} (swift build --show-bin-path)"; exit 1; }
     helper="$(dirname "$(xcrun --find swift)")/../libexec/swift/pm/swiftpm-testing-helper"
     [[ -x $helper ]] || { echo "no test runner at $helper"; exit 1; }
@@ -370,7 +373,7 @@ if [[ ${#command[@]} -eq 0 ]]; then
     # <Target>.xctest per test target. Which is in $bin says which; the package's test targets (swift package describe)
     # say what must be there, and a bundle missing or unexpected stops the run rather than drop or add tests.
     command -v jq > /dev/null || { echo "no jq on PATH (macOS 15 and later have /usr/bin/jq): the package's test targets can't be read"; exit 1; }
-    describe=$(swift package describe --type json 2>/dev/null 8>&-) || { echo "swift package describe failed: the test targets are unknown"; exit 1; }
+    describe=$(swift package $(swiftpm_sandbox) describe --type json 2>/dev/null 8>&-) || { echo "swift package describe failed: the test targets are unknown"; exit 1; }
     package=$(jq -r '.name' <<< "$describe")
     targets=$(jq -r '.targets[] | select(.type == "test") | .name' <<< "$describe" | sort)
     [[ -n $package && -n $targets ]] || { echo "swift package describe names no package or no test target; nothing to run"; exit 1; }
@@ -497,7 +500,7 @@ loops_file=$scratch/loops
 ) &
 burners+=($!)
 disown "$!"
-echo "topping the load up to $load on $cores cores (pids in $pid_file); load $(sysctl -n vm.loadavg)"
+echo "topping the load up to $load on $cores cores (pids in $pid_file); load $(load_one_minute)"
 # Its first look before the runs start: the loops it starts then are running when they do.
 for _ in $(seq 1 100); do [[ -s $loops_file ]] && break; sleep 0.1; done
 
@@ -614,8 +617,8 @@ burners=()
 read -r sum looks < "$loops_file" 2>/dev/null
 echo "busy loops: $(awk -v s="${sum:-0}" -v n="${looks:-0}" 'BEGIN { printf "%.1f", n ? s / n : 0 }') on average" \
     "(target load $load, over ${looks:-0} looks every $tick s)"
-echo "took $(($(date +%s) - started)) s; load $(sysctl -n vm.loadavg); lowest free disk $(cat "$scratch/disk-min" 2>/dev/null) MB;" \
-    "$(sysctl -n vm.swapusage | sed -E 's/  +/ /g')"
+echo "took $(($(date +%s) - started)) s; load $(load_one_minute); lowest free disk $(cat "$scratch/disk-min" 2>/dev/null) MB;" \
+    "$(sysctl -n vm.swapusage 2>/dev/null | sed -E 's/  +/ /g' | grep . || echo "swap: unknown here")"
 if [[ -e $scratch/disk-low ]]; then
     failed=1
     echo "STOPPED: the disk fell to $(cat "$scratch/disk-low") MB free (under $stop_mb MB); the load and the runs were ended"

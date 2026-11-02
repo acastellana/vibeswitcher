@@ -287,6 +287,35 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: pids.path))
     }
 
+    /// Inside Codex's sandbox /bin/ps can't start (setuid) and pgrep can't list: a Codex worker's run couldn't find the
+    /// shell that started it under vs-heavy ("not starting: … is gone") or the processes its runs started. There they
+    /// come from libproc (scripts/lib/processes.sh): it runs, and once its owner is gone it ends what its command
+    /// started, a process in a group of its own too (one vs-heavy's group signal doesn't reach).
+    @Test(.enabled(if: LeftoverCheckTests.canSandbox)) func insideASandboxThatRefusesPsItRunsAndEndsWhatItsCommandStarted() throws {
+        let fake = try fakeMac(temp.url("load"))
+        let out = temp.url("out"), child = temp.url("child-pid"), pids = temp.url("pids")
+        let script = Self.repo.appendingPathComponent("scripts/test-under-load.sh").path
+        let command = "/usr/bin/perl -e 'setpgrp(0, 0); exec qw(sleep 600)' & echo $! > \(child.path); wait"
+        let owner = process([], fake: fake)
+        owner.arguments = ["-c", "/usr/bin/sandbox-exec -p '\(LeftoverCheckTests.psRefused)' /bin/bash \(script) --load 2 --max-time 300"
+                           + " --pid-file \(pids.path) -- /bin/bash -c \(RecentProjects.shellQuote(command)) > \(out.path) 2>&1 & wait"]
+        try owner.run()
+        let said = { (try? String(contentsOf: out, encoding: .utf8)) ?? "" }
+        let sleeper = { pid_t(((try? String(contentsOf: child, encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0 }
+        defer {
+            if owner.isRunning { kill(owner.processIdentifier, SIGKILL) }
+            if sleeper() > 0 { kill(sleeper(), SIGKILL) }
+        }
+        #expect(until { said().contains("busy loops: 2 (1-minute load 0, target 2,") && sleeper() > 0 }, "\(said())")
+        #expect(kill(sleeper(), 0) == 0)
+        kill(owner.processIdentifier, SIGKILL)
+        owner.waitUntilExit()
+        #expect(until { said().contains("stopped: its owner (pid \(owner.processIdentifier)) is gone") }, "\(said())")
+        #expect(until { kill(sleeper(), 0) != 0 }, "\(said())")
+        #expect(until { live(pids) == 0 }, "\(said())")
+        #expect(!said().contains("/bin/ps"), "\(said())")
+    }
+
     /// Its build goes through heavy_swift (scripts/lib/swift-jobs.sh), on its slot's share of the cores like test.sh's
     /// and build-app.sh's: two modules at once, VS_HEAVY_CORES ÷ 2 (rounded up) frontends each; the bare
     /// `swift build --build-tests` without VS_HEAVY_CORES. A fake swift says what it was asked and fails the build, so

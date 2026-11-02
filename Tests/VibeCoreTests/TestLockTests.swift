@@ -646,6 +646,8 @@ struct TestLockTests {
         environment[TestLock.directoryVariable] = url("script-locks").path
         environment[TestLock.heldVariable] = nil
         environment[TestLock.slotsVariable] = "1"
+        // Outside Codex's sandbox, whatever runs these tests: inside it heavy_swift adds --disable-sandbox.
+        environment["CODEX_SANDBOX"] = nil
         environment.merge(extra) { $1 }
         process.environment = environment
         let handle = try #require(FileHandle(forWritingAtPath: output))
@@ -707,12 +709,26 @@ struct TestLockTests {
         #expect(said == ["A build -j 2 -Xswiftc -j2", "A test -j 2 -Xswiftc -j2 --filter X"], "\(lines(log + ".args"))")
     }
 
+    /// Inside Codex's sandbox (CODEX_SANDBOX set in its commands) swift build and swift test leave SwiftPM's own sandbox
+    /// out, with no flag the caller gives: macOS refuses a sandbox-exec inside Codex's seatbelt, and a Codex worker's
+    /// `scripts/test.sh --filter X` failed before compiling ("sandbox_apply: Operation not permitted", 2026-11-02).
+    @Test func insideCodexsSandboxSwiftPMsOwnSandboxIsLeftOut() throws {
+        let (bin, log) = try fakes()
+        let run = try start("A", sleep: 0, bin: bin, arguments: ["--filter", "X"],
+                            environment: ["VIBESWITCHER_HEAVY_NCPU": "12", TestLock.slotsVariable: "3", "CODEX_SANDBOX": "seatbelt"])
+        run.process.waitUntilExit()
+        #expect(run.process.terminationStatus == 0, "\(lines(run.output))")
+        let said = lines(log + ".args").map { $0.replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression) }
+        #expect(said == ["A build --disable-sandbox -j 2 -Xswiftc -j2", "A test --disable-sandbox -j 2 -Xswiftc -j2 --filter X"],
+                "\(lines(log + ".args"))")
+    }
+
     /// heavy_swift (scripts/lib/swift-jobs.sh, which test.sh and build-app.sh run swift through): with VS_HEAVY_CORES a
     /// whole number N above 0, two modules at once with N ÷ 2 (rounded up) frontends each, else swift as before, on every
     /// core; build-app.sh's release build goes through it under vs-heavy.
     @Test func heavySwiftBoundsTheJobsOnlyWhenGivenAShare() throws {
         let (bin, log) = try fakes()
-        func run(_ cores: String?) throws -> String {
+        func run(_ cores: String?, codex: String? = nil) throws -> String {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/bash")
             process.arguments = ["-c", "source scripts/lib/swift-jobs.sh && heavy_swift build -c release"]
@@ -722,6 +738,7 @@ struct TestLockTests {
             environment["RUN"] = cores ?? "unset"
             environment["SWIFT_SLEEP"] = "0"
             environment[TestLock.coresVariable] = cores
+            environment["CODEX_SANDBOX"] = codex
             process.environment = environment
             try process.run()
             process.waitUntilExit()
@@ -735,6 +752,10 @@ struct TestLockTests {
         #expect(try run("4") == "4 build -j 2 -Xswiftc -j2 -c release")
         #expect(try run("5") == "5 build -j 2 -Xswiftc -j3 -c release")
         #expect(try run("1") == "1 build -j 2 -Xswiftc -j1 -c release")
+        // Inside Codex's sandbox, SwiftPM's own goes (a sandbox inside it is refused); an empty CODEX_SANDBOX is none.
+        #expect(try run("4", codex: "seatbelt") == "4 build --disable-sandbox -j 2 -Xswiftc -j2 -c release")
+        #expect(try run(nil, codex: "seatbelt") == "unset build --disable-sandbox -c release")
+        #expect(try run("4", codex: "") == "4 build -j 2 -Xswiftc -j2 -c release")
         let buildApp = try String(contentsOf: Self.repo.appendingPathComponent("scripts/build-app.sh"), encoding: .utf8)
         #expect(buildApp.contains("source scripts/lib/swift-jobs.sh"))
         #expect(buildApp.contains("Resources/bin/vs-heavy --as scripts/build-app.sh bash -c 'heavy_swift build -c release'"))

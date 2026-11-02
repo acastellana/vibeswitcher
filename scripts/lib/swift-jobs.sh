@@ -12,14 +12,26 @@
 # thread a core, with no width to give (--num-workers is XCTest's, with --parallel); they use far less than the build.
 # It calls `swift` as the caller has it: module-cache.sh's function when that's in use. Exported, for the bash vs-heavy
 # runs.
+#
+# Inside Codex's sandbox (a Codex session's commands run under its seatbelt, which sets CODEX_SANDBOX, e.g. "seatbelt")
+# it passes --disable-sandbox too (`swiftpm_sandbox`): SwiftPM compiles and runs the package's manifest and plugins under
+# a sandbox-exec of its own, and macOS refuses a sandbox inside a sandbox ("sandbox-exec: sandbox_apply: Operation not
+# permitted", then "Invalid manifest": a Codex worker's scripts/test.sh, 2026-11-02, before anything compiled). Codex's
+# own still holds them (no network, writes only where the worker may). Outside Codex, nothing changes.
 heavy_swift() {
     local verb=$1 cores
     shift
     if [[ ${VS_HEAVY_CORES:-} =~ ^[0-9]+$ ]] && (( 10#$VS_HEAVY_CORES >= 1 )); then
         cores=$(( 10#$VS_HEAVY_CORES ))
-        swift "$verb" -j 2 -Xswiftc "-j$(( (cores + 1) / 2 ))" "$@"
+        swift "$verb" $(swiftpm_sandbox) -j 2 -Xswiftc "-j$(( (cores + 1) / 2 ))" "$@"
     else
-        swift "$verb" "$@"
+        swift "$verb" $(swiftpm_sandbox) "$@"
     fi
 }
-export -f heavy_swift
+# "--disable-sandbox" inside Codex's sandbox (CODEX_SANDBOX set), else nothing: for a SwiftPM command run outside
+# heavy_swift (`swift build --show-bin-path`, `swift package describe`), unquoted.
+swiftpm_sandbox() {
+    [[ -n ${CODEX_SANDBOX:-} ]] && echo --disable-sandbox
+    return 0
+}
+export -f heavy_swift swiftpm_sandbox

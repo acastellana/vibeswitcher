@@ -25,6 +25,10 @@
 # node, a failing one named, then one line saying how many passed. Without node on PATH the run stops before the
 # build, naming it: PhoneWebTests (swift test) skips them without node, and Web/ changes had been checked only by hand.
 #
+# Inside Codex's sandbox (a Codex worker's commands: CODEX_SANDBOX is set) it runs the same, with no flag to give:
+# SwiftPM's own sandbox is left out (`heavy_swift` passes --disable-sandbox: macOS refuses a sandbox inside Codex's), and
+# the leftover check lists processes through libproc where /bin/ps, setuid, can't start (scripts/lib/processes.sh).
+#
 # The default run is correctness only: its result doesn't depend on how busy the Mac is, so a merge's run doesn't fail
 # because other sessions load it. The benches, tests judged by wall-clock time or memory (`perf_tests` below, each
 # tagged `.perf` and skipped unless VIBESWITCHER_PERF=1), run alone in `--perf`: for a task about speed or memory, and
@@ -44,9 +48,11 @@ cd "$(dirname "$0")/.."
 # The live processes holding $1 in their environment or arguments, and every process under one of them (the programs a
 # scratch host runs: ps shows the environment of the app's own binaries, not of Apple's /bin/sh), as "pid command".
 # Never this script, a process it runs (the awk below, its subshells) or one it runs under (the shell that started it,
-# whose command line may name the mark). ps carries nothing of this run: it starts with an empty environment.
+# whose command line may name the mark). ps carries nothing of this run: it starts with an empty environment. Inside
+# Codex's sandbox, where /bin/ps can't start, the list comes from libproc instead (`processes`, scripts/lib/processes.sh):
+# the processes of the sandbox, which are the ones this run started.
 run_processes() {
-    env -i PATH=/usr/bin:/bin /bin/ps -axwwE -o pid=,ppid=,command= | awk -v self=$$ -v mark="$1" '
+    processes | awk -v self=$$ -v mark="$1" '
         { pid[NR] = $1; parent[$1] = $2; line[$1] = $0 }
         END {
             for (up = self; up > 1; up = parent[up]) kin[up] = 1
@@ -57,16 +63,21 @@ run_processes() {
                 for (up = p; up > 1 && up != self; up = parent[up]) if (up in found) ofRun = 1
                 if (up == self || !ofRun) continue
                 # The command, without the environment ps appends.
-                command = line[p]; sub(/^ *[0-9]+ +[0-9]+ +/, "", command); sub(/ [A-Z_][A-Z0-9_]*=.*/, "", command)
+                command = line[p]; sub(/^ *[0-9]+ +[0-9]+ +[^ ]+ +/, "", command); sub(/ [A-Z_][A-Z0-9_]*=.*/, "", command)
                 print p " " substr(command, 1, 200)
             }
         }'
 }
 
 # Waits up to 10 s for the run's processes to end on their own (a parser follows its host within a moment), then ends
-# the rest and names them. Returns 1 when any was left.
+# the rest and names them. Returns 1 when any was left. Where no process can be listed at all (neither ps nor libproc
+# answers), it says so in one line and passes: the check can't be made, which isn't the tests' failure.
 end_leftovers() {
     local mark=$1 left pids
+    if ! processes > /dev/null; then
+        echo "leftover check: skipped, no process could be listed here (/bin/ps and libproc both refused)"
+        return 0
+    fi
     for _ in $(seq 1 20); do
         left=$(run_processes "$mark")
         [[ -z $left ]] && return 0
@@ -120,6 +131,8 @@ perf_tests=(
     HostingViewDepthTests
     SandboxSoakBenchTests/theFootprintIsFlatOverFiveSimulatedHours
 )
+
+source scripts/lib/processes.sh
 
 if [[ ${1:-} == --leftovers ]]; then
     end_leftovers "${2:?scripts/test.sh --leftovers MARK}"
@@ -212,7 +225,7 @@ if [[ -n $web_only ]]; then
     status=$?
 else
     if [[ -n $perf ]]; then
-        echo "perf run: the benches alone; the Mac's 1-minute load is $(sysctl -n vm.loadavg | awk '{print $2}') on $(sysctl -n hw.ncpu) cores"
+        echo "perf run: the benches alone; the Mac's 1-minute load is $(load_one_minute) on $(cpu_count) cores"
         export VIBESWITCHER_PERF=1
         set -- --filter "$perf" "$@"
     fi
