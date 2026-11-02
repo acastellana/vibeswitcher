@@ -2867,3 +2867,4 @@
 - 2026-11-02 09:23 Released wallet-results-tests's worker (idle since its done report on 7bcaa54d) while its audit runs
 - 2026-11-02 09:23 Automatically (auto_advance): Started the audit of wallet-results-tests at 7bcaa54d (A Codex worker worked on it, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-02 09:30 Audit of wallet-results-tests: complete, clean
+- 2026-11-02 09:43 Merged wallet-results-tests: Wallet results: tests that a repeated result (same sequence) is dropped, final or not
