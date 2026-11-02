@@ -2894,3 +2894,4 @@
 - 2026-11-02 13:14 Released boost-mark-in-the's worker (idle since its done report on aba650ba) while its audit runs
 - 2026-11-02 13:14 Automatically (auto_advance): Released boost-mark-in-the's worker, idle since its done report on aba650ba, while its audit runs (ended pid 64305 (Worker: Boost mark in the main window: a small orange bolt while Boost is on)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-02 13:16 Audit of boost-mark-in-the: complete, clean
+- 2026-11-02 13:34 Merged boost-mark-in-the: Boost mark in the main window: a small orange bolt while Boost is on
