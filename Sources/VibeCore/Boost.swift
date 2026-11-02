@@ -45,7 +45,7 @@ public struct BoostLimits: Codable, Equatable, Sendable {
 
     public init(loadThreshold: Double = BoostLimits.defaultLoadThreshold, maxSessions: Int = BoostLimits.defaultMaxSessions,
                 maxWorkers: Int = BoostLimits.defaultMaxWorkers, heavySlots: Int = BoostLimits.defaultHeavySlots) {
-        self.loadThreshold = loadThreshold.isFinite && loadThreshold > 0 ? min(loadThreshold, Self.loadCeiling) : Self.defaultLoadThreshold
+        self.loadThreshold = min(loadThreshold.isFinite && loadThreshold > 0 ? loadThreshold : Self.defaultLoadThreshold, Self.loadCeiling)
         self.maxSessions = min(max(1, maxSessions), Self.countCeiling)
         self.maxWorkers = min(max(1, maxWorkers), Self.countCeiling)
         self.heavySlots = min(max(1, heavySlots), Self.slotCeiling)
