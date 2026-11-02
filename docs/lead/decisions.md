@@ -187,3 +187,7 @@ The user asked for it on 2026-11-02. The 30% floor is the lead's choice, so an u
 
 Decision 3 (2026-11-02) held auto back until Codex workers could run the checks. The audit and the full suite now show they can, except for socket tests and the full suite, which the merge's run covers.
 
+## 2026-11-02 10:26:32 Xcode's Metal Toolchain is a build prerequisite for VibeSwitcher on this Mac (SwiftTerm 1.19.0 compiles Shaders.metal in every configuration). Installed by the user on 2026-11-02. If a build fails with "missing Metal Toolchain", the user runs `xcodebuild -downloadComponent MetalToolchain`. Don't patch around it.
+
+Xcode 27.2 stopped bundling it. Every build, install and test run failed until the 840 MB component was downloaded. The user chose the download over changing the dependency.
+

@@ -2,6 +2,10 @@ import Foundation
 import Testing
 @testable import VibeCore
 
+/// Boost's default load_threshold on this Mac: 36, or the ceiling of 4× the cores where that's less (32 on 8 cores).
+private let boostedLoad = min(BoostLimits.defaultLoadThreshold, BoostLimits.loadCeiling)
+private let boostedLoadText = MacLoad.number(boostedLoad)
+
 /// Boost mode (boost release 6/7, 2026-11-01): what the app decides from the power source, the user's presence and the
 /// usage watch, kept in boost.json, and the limits every lead's tool server reads from it.
 struct BoostTests {
@@ -110,10 +114,10 @@ struct BoostTests {
         let normal = MacLimits(maxSessions: 15)
         let state = BoostState(on: true, why: "automatic: away, on AC")
         let boosted = normal.boosted(by: state)
-        #expect(boosted.maxSessions == 18 && boosted.loadLimit == 36)
+        #expect(boosted.maxSessions == 18 && boosted.loadLimit == boostedLoad)
         #expect(boosted.maxWorkers(5) == 7 && boosted.heavySlotsInForce(3) == 3)
         #expect(boosted.maxSessionsText == "18 while boosted (15 normally)")
-        #expect(boosted.loadLimitText == "36 while boosted (normally \(MacLoad.number(Double(2 * MacLoad.processors))), twice the \(MacLoad.processors) cores)")
+        #expect(boosted.loadLimitText == "\(boostedLoadText) while boosted (normally \(MacLoad.number(Double(2 * MacLoad.processors))), twice the \(MacLoad.processors) cores)")
         // Off, or none: the normal limits, said as before.
         for none in [nil, BoostState(on: false, why: "automatic: you're at the Mac")] {
             let same = normal.boosted(by: none)
@@ -124,7 +128,7 @@ struct BoostTests {
         #expect(high.maxSessions == 30 && high.loadLimit == 50 && high.maxWorkers(9) == 9)
         // The normal values are untouched: 15 sessions as set, load_threshold twice the cores, max_workers as set.
         #expect(MacLimits(maxSessions: 15).loadLimit == Double(2 * MacLoad.processors))
-        #expect(BoostLimits() == BoostLimits(loadThreshold: 36, maxSessions: 18, maxWorkers: 7, heavySlots: 3))
+        #expect(BoostLimits() == BoostLimits(loadThreshold: boostedLoad, maxSessions: 18, maxWorkers: 7, heavySlots: 3))
         #expect(BoostLimits(loadThreshold: -1, maxSessions: 0, maxWorkers: 0, heavySlots: 0) == BoostLimits(loadThreshold: 36, maxSessions: 1, maxWorkers: 1, heavySlots: 1))
     }
 
@@ -140,7 +144,7 @@ struct BoostTests {
         #expect(BoostState.load(from: boostFile, now: Self.now) == on)
         #expect(on.favored == "/Users/x/dev/alpha")
         let current = MacLimits.current(file: limitsFile, boostFile: boostFile, now: Self.now + 30)
-        #expect(current.maxSessions == 20 && current.loadLimit == 40 && current.maxWorkers(5) == 8 && current.heavySlotsInForce(3) == 4)
+        #expect(current.maxSessions == 20 && current.loadLimit == min(40, BoostLimits.loadCeiling) && current.maxWorkers(5) == 8 && current.heavySlotsInForce(3) == 4)
         #expect(current.boost?.text == "boost: on (automatic: away, on AC)")
         // Stale: the normal limits.
         let stale = Self.now + BoostState.staleAfter + 1
@@ -234,7 +238,7 @@ extension LeadToolsetTests {
         // Over boost's too: refused, said with both.
         runtime.load = 40
         let over = call(lead, "start_worker", ["task": "three"])
-        #expect(over.isError && over.text.contains("load_threshold 36 while boosted (normally 24 in Settings)"), "\(over.text)")
+        #expect(over.isError && over.text.contains("load_threshold \(boostedLoadText) while boosted (normally 24 in Settings)"), "\(over.text)")
         #expect(over.text.contains("mac_max_sessions 18 while boosted (6 normally)"), "\(over.text)")
         // Boost off again (the user came back): new starts stop above the normal limits; what runs goes on.
         boosting = false
@@ -273,7 +277,7 @@ extension LeadToolsetTests {
         #expect(call(lead, "status").text.contains("boost: off (automatic: you're at the Mac): the normal limits hold."))
         lead.macLimits = { MacLimits(maxSessions: 15).boosted(by: Self.boost()) }
         let status = call(lead, "status").text
-        #expect(status.contains("boost: on (automatic: away, on AC): load_threshold 36, mac_max_sessions 18, max_workers 7 (5 in workflow.md), heavy_slots 3; merge_batching boost batches now."), "\(status)")
+        #expect(status.contains("boost: on (automatic: away, on AC): load_threshold \(boostedLoadText), mac_max_sessions 18, max_workers 7 (5 in workflow.md), heavy_slots 3; merge_batching boost batches now."), "\(status)")
         #expect(status.contains("(mac_max_sessions 18 while boosted (15 normally))"), "\(status)")
         #expect(status.contains("max 7 workers at once"), "\(status)")
         #expect(call(lead, "configure").text.contains("- mac_max_sessions: 18 while boosted (15 normally)"))
@@ -287,7 +291,7 @@ extension LeadToolsetTests {
         let on = Boost.decide(mode: .on, onAC: false, away: false, veto: nil, onBattery: true, percent: 86)
         lead.macLimits = { MacLimits(maxSessions: 15).boosted(by: BoostState(on: on.on, why: on.why)) }
         var status = call(lead, "status").text
-        #expect(status.contains("boost: on (on in Settings, on battery (allowed, 86%)): load_threshold 36"), "\(status)")
+        #expect(status.contains("boost: on (on in Settings, on battery (allowed, 86%)): load_threshold \(boostedLoadText)"), "\(status)")
         let low = Boost.decide(mode: .on, onAC: false, away: false, veto: nil, onBattery: true, percent: 24)
         lead.macLimits = { MacLimits(maxSessions: 15) }
         lead.boostState = { _ in BoostState(on: low.on, why: low.why) }
