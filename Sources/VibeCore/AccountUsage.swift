@@ -137,7 +137,11 @@ public struct AccountUsage: Equatable, Sendable {
     public func statusText(now: Date = Date()) -> String? {
         let known = current(now: now).limits
         guard !known.isEmpty else { return nil }
-        return "Account usage (best effort: what sessions' status lines and refusals said): " + known.map(\.text).joined(separator: "; ")
+        let seconds = now.timeIntervalSince1970
+        return "Account usage (best effort: what sessions' status lines and refusals said): " + known.map { limit in
+            let pace = UsageRouting.pace(limit, now: seconds)
+            return limit.text + (limit.reached || pace.ahead == nil ? "" : ", " + pace.paceText)
+        }.joined(separator: "; ")
             + ". At \(Int(Self.threshold))% of a limit, start_worker and audit stop starting sessions on the models it holds back (override_usage: true overrides)."
     }
 }

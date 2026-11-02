@@ -751,14 +751,19 @@ public final class LeadAdvance: @unchecked Sendable {
             guard running < lead.maxWorkers(workflow) else { return }
             // The Mac's room as start_worker counts it; a refusal for it waits for the app's nudge.
             guard hasRoom(task.slug, need: 1) else { return roomWait("start_worker(\(task.slug))", need: 1) }
+            // An auto task goes where both accounts' usage says (start_worker routes it again in its lock): on Codex,
+            // Claude's back-off doesn't hold it.
+            let route = task.workerAgent == .auto ? lead.workerRoute(for: task, sessions: try? lead.advanceSessions()) : nil
             // Near a usage limit on its model: another task on another model may still start.
             // A Codex task runs on the Codex account: Claude's limits don't hold it.
-            if task.workerAgent != .codex, usageHeld(model: lead.workerModel(for: task)) { continue }
+            if (route?.agent ?? task.workerAgent) != .codex, usageHeld(model: lead.workerModel(for: task)) { continue }
             let after = (task.after ?? []).joined(separator: ", ")
             step("start|\(task.slug)") {
                 // Asked again in start_worker's lock: a hold set while the room was counted stands.
                 _ = try lead.advanceStart(task.slug, when: { [self] in isDue($0, [.planned]) })
-                return "Started a worker on \(task.slug) (\(task.title))" + (after.isEmpty ? "." : ", its after tasks done (\(after)).")
+                let routed = lead.store.load().task(task.slug)?.routed
+                return "Started a worker on \(task.slug) (\(task.title))" + (after.isEmpty ? "" : ", its after tasks done (\(after))")
+                    + (routed.map { "; its agent is auto, so it went to \($0)." } ?? ".")
             }
         }
     }

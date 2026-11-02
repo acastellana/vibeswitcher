@@ -11,6 +11,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// test_command, and merges only when it passes too.
     public var regressionCommand: String?
     public var workerAgent = "claude"
+    /// The agent of a new task that names none (`agent_default:`): claude (the default) or auto (chosen at each start
+    /// from both accounts' usage, see `UsageRouting`). Anything else reads claude. Never codex: a task goes to Codex
+    /// only by the lead's word or auto's routing.
+    public var agentDefault: LeadTask.WorkerAgent = .claude
     /// The verifier's model (`verifier_model:`); when it's empty, audits run on another model than the workers' (see
     /// `auditModel`), a second opinion.
     public var verifierModel: String?
@@ -108,6 +112,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "init_command": workflow.initCommand = present
                 case "regression_command": workflow.regressionCommand = present
                 case "worker_agent": workflow.workerAgent = present ?? "claude"
+                case "agent_default": workflow.agentDefault = present.flatMap(LeadTask.WorkerAgent.init(text:)).flatMap { $0 == .codex ? nil : $0 } ?? .claude
                 case "verifier_model": workflow.verifierModel = present
                 case "base_branch": workflow.baseBranch = present
                 case "disk_warning_gb": workflow.diskWarningGB = gigabytes(value) ?? 10
@@ -395,7 +400,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "verifier_model", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
-                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "watch_app_logs"]
+                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "watch_app_logs", "agent_default"]
 
     /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
     /// time (`BoardStore.prepare`), the lead's `configure` after.
@@ -512,6 +517,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     init_command:
     # Who works: claude (Codex support comes later).
     worker_agent: claude
+    # The agent of a new task that names none: claude, or auto (each start picks Codex when Claude's usage runs ahead
+    # of pace and Codex has room, else Claude; a task that lands on Codex is audited by a Claude verifier).
+    agent_default: claude
     # The verifier's model (e.g. fable, opus). Empty: audits run on another model than the workers', at least as
     # capable (fable; opus when the workers run fable).
     verifier_model:

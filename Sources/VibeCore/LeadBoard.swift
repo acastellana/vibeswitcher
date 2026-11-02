@@ -704,23 +704,41 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The agent its worker runs (add_task's and update_task's `agent`); nil: Claude, as before. Codex implements a
     /// bounded task only: leads and verifiers stay Claude, and a Codex task is always audited (see `codexWorked`).
     public var agent: WorkerAgent?
+    /// Why its current worker runs the agent it does, when its agent is auto (`UsageRouting.Route.why`: "Codex: Claude
+    /// weekly 64%, 12 points ahead of pace; Codex 40%"); nil for a task pinned to an agent.
+    public var routed: String?
     /// A Codex worker was started on it once: its merge needs a Claude verifier's passing audit from then on, whatever
     /// its review or agent says since (its branch holds Codex's commits).
     public var codexWorked: Bool?
 
-    /// Who runs a task's worker. Only workers: Codex never plans, reviews or audits.
+    /// Who runs a task's worker. Only workers: Codex never plans, reviews or audits. `auto`: chosen at each start from
+    /// both accounts' usage (`UsageRouting.route`): Codex when Claude's runs ahead of pace and Codex has room, else Claude.
     public enum WorkerAgent: String, Codable, Sendable, CaseIterable {
-        case claude, codex
+        case claude, codex, auto
 
         /// "codex", " Codex ": the agent; nil for anything else.
         public init?(text: String) { self.init(rawValue: text.trimmingCharacters(in: .whitespaces).lowercased()) }
 
         /// As status and board name it.
-        public var name: String { self == .claude ? "Claude" : "Codex" }
+        public var name: String {
+            switch self {
+            case .claude: return "Claude"
+            case .codex: return "Codex"
+            case .auto: return "auto"
+            }
+        }
     }
 
-    /// The agent its worker runs: Claude unless the lead set codex.
+    /// The agent its worker runs: Claude unless the lead set codex or auto.
     public var workerAgent: WorkerAgent { agent ?? .claude }
+
+    /// The agent its current worker was started on (an auto task's is Codex or Claude, as it was routed): Codex when its
+    /// session was noted as a Codex one at its start (`LeadToolset.codexMarker`); nil with no worker.
+    public var runningAgent: WorkerAgent? {
+        guard let worker else { return nil }
+        guard let noted = launchedModels?[worker] else { return workerAgent == .auto ? nil : workerAgent }
+        return noted == "codex" || noted.hasPrefix("codex:") ? .codex : .claude
+    }
 
     /// Its merge needs a Claude verifier's passing audit because Codex works (or worked) on it; nil when not.
     public var codexAudit: String? {
