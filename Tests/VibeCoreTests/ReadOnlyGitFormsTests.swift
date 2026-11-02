@@ -143,7 +143,10 @@ struct ReadOnlyGitFormsTests {
     @Test func fromASubfolderGitOpensFilesWhereThePathCheckLooks() throws {
         let (repo, _, _) = try repository()
         let sub = repo + "/sub"
-        #expect(try LeadLaunchOutsideReadsTests.shell("git grep -E -f ../private/seal", in: sub).contains("SECRET-SEAL-VALUE"), "not a leak")
+        // A git that opens -f's file from the top (as the audit's did) prints the seal; Apple Git 2.54 opens it from the
+        // shell's folder, as the path check judges it, and finds nothing there. Either way -f prompts below.
+        let witness = try LeadLaunchOutsideReadsTests.shell("git grep -E -f ../private/seal", in: sub)
+        #expect(witness.contains("SECRET-SEAL-VALUE") || witness.contains("cannot open '../private/seal'"), "\(witness)")
         let refused = ["git grep -E -f ../private/seal", "git grep -E -f ../private/seal HEAD", "git grep -f b HEAD", "git grep -fb HEAD",
                        "git grep -nfb", "git grep -f - HEAD", "git grep -e x -f b", "git ls-tree --full-tree HEAD a",
                        "git ls-tree --full-tree -r HEAD"]

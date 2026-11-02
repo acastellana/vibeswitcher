@@ -306,7 +306,10 @@ struct LeadLaunchOutsideReadsTests {
         let leaks = ["head inner", "tail -n 3 chain", "grep -h SECRET linkdir/seal", "head \(repo)/linkdir/seal", "wc -c inner && head inner",
                      "grep -rS SECRET .", "rg -L SECRET .", "rg --follow SECRET ."]
         for command in leaks {
-            #expect(try run(command, in: repo).contains(secret), "not a leak: \(command)")
+            let out = try run(command, in: repo)
+            // rg isn't on every Mac: where it's missing its forms can't leak here, and the refusals below still hold.
+            if command.hasPrefix("rg "), out.contains("rg: command not found") || out.contains("rg: not found") { continue }
+            #expect(out.contains(secret), "not a leak: \(command): \(out)")
         }
         let roles = try [LeadLaunch.Role.lead, .worker, .verifier].map { try Role($0, root: repo, temp: temp) }
         for role in roles {
