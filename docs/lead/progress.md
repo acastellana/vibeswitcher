@@ -2926,3 +2926,6 @@
 - 2026-11-02 15:33 Automatically (auto_advance): Merged fix-the-flaky-test-18 (Fix the flaky test largeFilesAreStreamedWithinATimeBound) into main at 738ad474, review none: on its worker's done report on 241c61d4 and the full test run. (Its first test run failed on aKilledBenchsHostAndSessionsAreGoneWithin10Seconds() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/fix-the-flaky-test-18/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitch….)
 - 2026-11-02 15:34 Automatically (auto_advance): Cleaned up fix-the-flaky-test-18; ended pid 29242 (Worker: Fix the flaky test largeFilesAreStreamedWithinATimeBound) (freed 1.3 GB of build output and temporary folders). It stays done.
 - 2026-11-02 15:35 Audit of statistics-2-2-a: complete, clean
+- 2026-11-02 15:46 Planned wallet-e2e-sh-write: wallet-e2e.sh: write the synthetic vault at the Wallet Manager's own format version
+- 2026-11-02 15:58 Merged statistics-2-2-a: Statistics 2/2: a Statistics page in the app
+- 2026-11-02 15:58 Flaky in statistics-2-2-a's merge: thePowerIsLookedAtOffTheMainThread() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
