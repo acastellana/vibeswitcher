@@ -493,8 +493,10 @@ struct SetupStatsTests {
         let project = try project("quality", board: board, in: root)
         // The incident about b, after it merged; one about a, before it merged.
         let lead = project.appendingPathComponent(".vibeswitcher")
-        try ("# Incidents\n\n## 2026-10-20 18:00:00 b broke X\n\nEvidence: e\n\nTask: b\nCheck: task t.\n\n"
-             + "## 2026-10-20 08:00:00 a stalled\n\nEvidence: e\n\nTask: a\n\n").write(to: lead.appendingPathComponent("incidents.md"), atomically: true, encoding: .utf8)
+        // Stamped in local time, as the lead's record_incident writes them.
+        let after = LeadDecision.stamp(Date(timeIntervalSince1970: at + 6 * 3600)), earlier = LeadDecision.stamp(Date(timeIntervalSince1970: at - 4 * 3600))
+        try ("# Incidents\n\n## \(after) b broke X\n\nEvidence: e\n\nTask: b\nCheck: task t.\n\n"
+             + "## \(earlier) a stalled\n\nEvidence: e\n\nTask: a\n\n").write(to: lead.appendingPathComponent("incidents.md"), atomically: true, encoding: .utf8)
         // The merges recorder: a passed; b failed, then passed on the rerun; another project's a failed.
         let home = root.appendingPathComponent("home"), stats = home.appendingPathComponent("stats")
         try FileManager.default.createDirectory(at: stats, withIntermediateDirectories: true)
@@ -601,6 +603,14 @@ struct SetupStatsTests {
         #expect(all.workingShare == nil && all.restShare == nil && all.auditWaitShare == nil && all.parallelism == nil)
         #expect(all.firstAuditPassRate == nil && all.meanRoundsToPass == nil && all.importantPerAudited == nil)
         #expect(stats.quality?.byModel == [], "no model recorded")
+        // A receipt whose working time wasn't counted: no parallelism (not 0×).
+        var uncounted = Self.merged("uncounted", at: at)
+        uncounted.receipt = LeadReceipt(ending: .merged, startedAt: at - 3600, endedAt: at, worked: nil, worker: nil, verifier: nil)
+        board.tasks = [uncounted]
+        let other = try project("uncounted", board: board, in: root)
+        let counted = await collector(home: root.appendingPathComponent("home"), now: Self.date(2026, 10, 21))
+            .collect(projects: [other.path], range: Self.fixtureDay)
+        #expect(counted.quality?.all.parallelism == nil && counted.quality?.all.workerHours == 0 && counted.quality?.all.busyHours == 0)
         // Nothing merged: per-merge figures have nothing to count.
         let empty = await collector(home: root.appendingPathComponent("home"), now: Self.date(2026, 10, 21))
             .collect(projects: [project.path], range: DateInterval(start: Self.date(2026, 9, 1), end: Self.date(2026, 9, 2)))

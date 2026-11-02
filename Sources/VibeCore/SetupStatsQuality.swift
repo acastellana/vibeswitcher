@@ -275,9 +275,10 @@ enum SetupQualityMath {
                 let slug = task.slug
                 task.slug = prefix + slug
                 let model = SetupStatsMath.family(task.worker.flatMap { task.launchedModels?[$0] })
-                if let receipt = view.receipt, window.within(receipt.endedAt) {
+                // A receipt whose working time wasn't counted has no worker hours to put over its span: left out.
+                if let receipt = view.receipt, window.within(receipt.endedAt), let worked = task.receipt?.worked ?? task.worked {
                     ended.append(Ended(codex: view.codex, model: model, start: receipt.startedAt ?? view.startedAt, end: receipt.endedAt!,
-                                       worked: receipt.worked))
+                                       worked: worked))
                 }
                 guard LeadScorecard.counts(task), let at = task.merged?.at else { continue }
                 let lines = mergeLines.map { $0[source.name]?[slug] ?? [] }
