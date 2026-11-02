@@ -380,8 +380,10 @@ public final class SetupStatsCollector: @unchecked Sendable {
             let name = (root as NSString).lastPathComponent
             projects.append(SetupStats.Project(name: name, root: root, hasArchive: archive != nil, figures: figures))
             if let board {
+                let incidents = incidents(root: root)
                 sources.append((root, QualitySource(name: name, tasks: Self.tasks(board: board, archive: archive ?? []), questions: board.questions,
-                                                   incidents: incidents(root: root))))
+                                                   incidents: incidents ?? [:], keepsIncidents: incidents != nil,
+                                                   flakes: board.flakes?.map { ($0.task, $0.at) })))
             }
         }
         projects.sort { ($0.name, $0.root) < ($1.name, $1.root) }
@@ -394,6 +396,7 @@ public final class SetupStatsCollector: @unchecked Sendable {
             sources.sort { $0.root < $1.root }
             stats.quality = SetupQualityMath.quality(sources.map(\.source), window: window, weeks: weeks(ending: range.end),
                                                      mergeLines: mergeLines(range))
+            stats.quality?.all.lead = total?.leadTokens.map { LeadSpend(tokens: $0, cost: total?.leadCost, unpricedDays: total?.leadUnpricedDays ?? 0) }
         }
         return stats
     }
@@ -430,16 +433,19 @@ public final class SetupStatsCollector: @unchecked Sendable {
     }
 
     /// The incidents a project's record names tasks in (where its records_dir keeps incidents.md, and the board's
-    /// folder, before a move), by task slug.
-    private func incidents(root: String) -> [String: [Double]] {
+    /// folder, before a move), by task slug; nil when it keeps no readable incidents record.
+    private func incidents(root: String) -> [String: [Double]]? {
         let store = BoardStore(root: root)
         let paths = Array(Set([store.recordPath("incidents.md"), (store.folder as NSString).appendingPathComponent("incidents.md")]))
-        var found: [String: [Double]] = [:]
+        var found: [String: [Double]]?
         for path in paths.sorted() {
             let parsed: [String: [Double]]? = cached(path) { path in
                 (try? String(contentsOfFile: path, encoding: .utf8)).map(SetupQualityMath.incidents)
             }
-            for (slug, times) in parsed ?? [:] { found[slug, default: []] += times }
+            guard let parsed else { continue }
+            var sum = found ?? [:]
+            for (slug, times) in parsed { sum[slug, default: []] += times }
+            found = sum
         }
         return found
     }
@@ -807,6 +813,7 @@ struct ReceiptView {
     var endedAt: Double?
     var worked: Double
     var mergeReruns: Int
+    var rerolls: Int
     var worker: Role?
     var verifier: Role?
     /// Seconds its questions waited on the user (0 when not said).
@@ -847,6 +854,7 @@ struct ReceiptView {
         endedAt = number(receipt["endedAt"])
         worked = number(receipt["worked"]) ?? 0
         mergeReruns = whole(receipt["mergeReruns"]) ?? 0
+        rerolls = whole(receipt["rerolls"]) ?? 0
         worker = object(receipt["worker"]).map(Role.init)
         verifier = object(receipt["verifier"]).map(Role.init)
         waitingOnUser = number(receipt["waitingOnUser"]) ?? 0

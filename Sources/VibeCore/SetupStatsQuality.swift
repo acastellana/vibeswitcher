@@ -117,6 +117,21 @@ public struct MergeFirstTry: Equatable, Sendable {
     }
 }
 
+/// The project lead's own tokens and their estimated cost over a range (`LeadTokenLedger`).
+public struct LeadSpend: Equatable, Sendable {
+    public var tokens: Int
+    /// The cost of its days whose cost is known; nil when none's is.
+    public var cost: Double?
+    /// Its days with a model `LeadPrices` has no price for: their cost isn't in `cost`.
+    public var unpricedDays: Int
+
+    public init(tokens: Int, cost: Double?, unpricedDays: Int) {
+        self.tokens = tokens
+        self.cost = cost
+        self.unpricedDays = unpricedDays
+    }
+}
+
 /// The figures of a set of merges (see `SetupQuality` for the definitions).
 public struct QualityFigures: Equatable, Sendable {
     // MARK: Quality
@@ -163,14 +178,23 @@ public struct QualityFigures: Equatable, Sendable {
     public var timedWorked = 0.0
     /// The worker's working time's share of created → merged; nil when no merge's working time is known.
     public var workingShare: Double? { timedSpan > 0 ? min(1, timedWorked / timedSpan) : nil }
-    /// Waiting for its audit: nil, not recorded (the board keeps no time an audit was asked for); in the rest.
-    public var auditWaitShare: Double?
+    /// Of the merges whose working time is known, those whose receipt keeps its waits (`LeadWaits`): how many, their
+    /// created → merged summed, and their waits for an audit to start summed (seconds).
+    public var waited = 0
+    public var waitedSpan = 0.0
+    public var auditWaited = 0.0
+    /// Waiting for its audit: the audit waits' share of created → merged, over the merges whose waits are kept; nil
+    /// when none's are (receipts from before they were kept): then in the rest.
+    public var auditWaitShare: Double? { waitedSpan > 0 ? min(1, auditWaited / waitedSpan) : nil }
     /// The rest (planning, queueing, audits, merging), audit waits included while they aren't recorded.
     public var restShare: Double? { workingShare.map { max(0, 1 - $0 - (auditWaitShare ?? 0)) } }
     /// Worker hours of the receipts that ended in the range, and the wall-clock hours any of them ran.
     public var workerHours = 0.0
     public var busyHours = 0.0
     public var parallelism: Double? { busyHours > 0 ? workerHours / busyHours : nil }
+    /// Verifier hours of those receipts (`LeadWaits.verifierTime`: each audit's time times its sessions); nil when none
+    /// of them kept it.
+    public var verifierHours: Double?
 
     // MARK: Cost
 
@@ -184,6 +208,37 @@ public struct QualityFigures: Equatable, Sendable {
     public var verificationShare: Double? { cost > 0 ? verifierCost / cost : nil }
     /// The merges' test reruns' cost: nil, not recorded (receipts count a rerun, not what it cost).
     public var mergeRerunCost: Double?
+    /// The merges' workers' Codex tokens (`LeadTokens.codex`): not in the cost (`LeadPrices` has no Codex price); nil
+    /// when no merge's receipt read any.
+    public var codexTokens: Int?
+    /// The project lead's own spend on the range's days, every project's (`ProjectFigures.leadTokens`): only on
+    /// `SetupQuality.all`, since the lead works for every agent's tasks; nil there when no lead's ledger covers the range.
+    public var lead: LeadSpend?
+
+    // MARK: Inputs of the comparison with working solo (see SetupStatsCompared.swift)
+
+    /// Merges whose audits are kept, and the Important findings among them a later audit saw fixed.
+    public var auditsKept = 0
+    public var importantFixed = 0
+    /// Of the merges the merges recorder saw (`mergeFirstTry.counted`), those whose first line failed its tests and
+    /// landed later: sent back, not passed on a rerun (a flake).
+    public var sentBack = 0
+    /// The flake ledger's entries in the range about these merges' tasks (each a flaky test a rerun caught); nil when
+    /// no project keeps a ledger.
+    public var flakesCaught: Int?
+    /// Merges named by an incident recorded after they merged, and the merges whose project keeps an incidents record.
+    public var incidents = 0
+    public var incidentsWatched = 0
+    /// The solo baseline's merges: cost known, no re-roll, their workers' tokens all priced (no Codex worker); their
+    /// workers' cost, their verifiers', and those of them whose merge's tests were rerun.
+    public var soloMerges = 0
+    public var soloWorkerCost = 0.0
+    public var soloVerifierCost = 0.0
+    public var soloReran = 0
+    /// Merges with a known cost left out of the baseline: re-rolled (their workers' tokens aren't split by attempt),
+    /// and worked by Codex (its tokens have no price).
+    public var rerolledLeftOut = 0
+    public var codexLeftOut = 0
 
     public init() {}
 }
@@ -229,6 +284,10 @@ struct QualitySource {
     var questions: [LeadQuestion]
     /// When each incident naming a task was recorded, by the task's slug.
     var incidents: [String: [Double]]
+    /// It keeps an incidents record (incidents.md): without one, no incident is known either way.
+    var keepsIncidents = false
+    /// Its flake ledger: each entry's task and when; nil when its board keeps none.
+    var flakes: [(task: String, at: Double?)]?
 }
 
 enum SetupQualityMath {
@@ -240,7 +299,11 @@ enum SetupQualityMath {
         var codex: Bool
         var model: String?
         var firstTry: Bool?
+        /// Its first line in the merges recorder failed its tests (it was sent back); nil: no line.
+        var sentBack: Bool?
         var escaped: Bool
+        var incident: Bool
+        var keepsIncidents: Bool
         var neededNobody: Bool
     }
 
@@ -251,6 +314,8 @@ enum SetupQualityMath {
         var start: Double?
         var end: Double
         var worked: Double
+        /// Its verifiers' time (`LeadWaits.verifierTime`), seconds; nil when not kept.
+        var verifier: Double?
     }
 
     /// The figures of `sources` for `window`; `merges` the recorder's lines by project name and task slug, oldest
@@ -259,6 +324,8 @@ enum SetupQualityMath {
                         mergeLines: [String: [String: [RecorderLine]]]?) -> SetupQuality {
         var merges: [Merge] = [], ended: [Ended] = []
         var questions: [LeadQuestion] = [], untasked: [LeadQuestion] = []
+        // Every task's worker (made unique as merges' are), for the flake ledger's entries; and those entries in the range.
+        var who: [String: (codex: Bool, model: String?)] = [:], flakes: [String]?
         for (index, source) in sources.enumerated() {
             let prefix = "\(index)/"
             for var question in source.questions {
@@ -270,40 +337,50 @@ enum SetupQualityMath {
                 }
             }
             let askedAbout = Set(source.questions.compactMap(\.task))
+            if let ledger = source.flakes {
+                flakes = (flakes ?? []) + ledger.filter { window.within($0.at) }.map { prefix + $0.task }
+            }
             for view in source.tasks {
                 guard var task = view.lead else { continue }
                 let slug = task.slug
                 task.slug = prefix + slug
                 let model = SetupStatsMath.family(task.worker.flatMap { task.launchedModels?[$0] })
+                who[task.slug] = (view.codex, model)
                 // A receipt whose working time wasn't counted has no worker hours to put over its span: left out.
                 if let receipt = view.receipt, window.within(receipt.endedAt), let worked = task.receipt?.worked ?? task.worked {
                     ended.append(Ended(codex: view.codex, model: model, start: receipt.startedAt ?? view.startedAt, end: receipt.endedAt!,
-                                       worked: worked))
+                                       worked: worked, verifier: receipt.waits?.verifierTime))
                 }
                 guard LeadScorecard.counts(task), let at = task.merged?.at else { continue }
                 let lines = mergeLines.map { $0[source.name]?[slug] ?? [] }
-                let firstTry = lines.flatMap { $0.first }.map { $0.result == "passed" && $0.firstRun != "failed" && (view.receipt?.mergeReruns ?? 0) == 0 }
+                let first = lines.flatMap { $0.first }
+                let firstTry = first.map { $0.result == "passed" && $0.firstRun != "failed" && (view.receipt?.mergeReruns ?? 0) == 0 }
+                let sentBack = first.map { $0.result == "failed" && $0.firstRun != "passed" }
                 let reverted = task.merged?.revertedBy != nil || task.status == .reverted
                 let incident = source.incidents[slug]?.contains { $0 >= at } ?? false
                 let began = task.startedAt ?? task.createdAt
                 let asked = askedAbout.contains(slug)
                 let messaged = task.notes?.contains { $0.kind == .message && $0.at > began } ?? false
                 let rerolled = max(task.rerolls?.count ?? 0, task.receipt?.rerolls ?? 0) > 0
-                merges.append(Merge(task: task, view: view, at: at, codex: view.codex, model: model, firstTry: firstTry,
-                                    escaped: reverted || incident, neededNobody: !asked && !messaged && !rerolled))
+                merges.append(Merge(task: task, view: view, at: at, codex: view.codex, model: model, firstTry: firstTry, sentBack: sentBack,
+                                    escaped: reverted || incident, incident: incident, keepsIncidents: source.keepsIncidents,
+                                    neededNobody: !asked && !messaged && !rerolled))
             }
         }
         merges.sort { $0.at < $1.at }
         let inRange = merges.filter { window.within($0.at) }
         let slugs = Set(inRange.map(\.task.slug))
         let about = questions.filter { slugs.contains($0.task ?? "") }
-        func group(_ keep: (Bool, String?) -> Bool, untasked extra: [LeadQuestion] = []) -> QualityFigures {
+        func group(_ keep: (Bool, String?) -> Bool, untasked extra: [LeadQuestion] = [], everyone: Bool = false) -> QualityFigures {
             let mine = inRange.filter { keep($0.codex, $0.model) }
             let tasks = Set(mine.map(\.task.slug))
-            return figures(mine, ended: ended.filter { keep($0.codex, $0.model) },
-                           questions: about.filter { tasks.contains($0.task ?? "") } + extra, now: window.now)
+            var f = figures(mine, ended: ended.filter { keep($0.codex, $0.model) },
+                            questions: about.filter { tasks.contains($0.task ?? "") } + extra, now: window.now)
+            // A flake whose task isn't on the board any more is no agent's: in everyone's only.
+            f.flakesCaught = flakes?.filter { slug in everyone || who[slug].map { keep($0.codex, $0.model) } == true }.count
+            return f
         }
-        let all = group({ _, _ in true }, untasked: untasked)
+        let all = group({ _, _ in true }, untasked: untasked, everyone: true)
         let byAgent = [QualityGroup(name: "Claude", figures: group { codex, _ in !codex }),
                        QualityGroup(name: "Codex", figures: group { codex, _ in codex })]
         let models = Set(inRange.filter { !$0.codex }.compactMap(\.model))
@@ -364,6 +441,15 @@ enum SetupQualityMath {
                 counted += 1
                 if passed { firstTry += 1 }
             }
+            if merge.sentBack == true { f.sentBack += 1 }
+            if let audits = task.audits {
+                f.auditsKept += 1
+                f.importantFixed += audits.findings.filter { $0.severity == .important && $0.status == .fixed }.count
+            }
+            if merge.keepsIncidents {
+                f.incidentsWatched += 1
+                if merge.incident { f.incidents += 1 }
+            }
             f.rerolls += max(task.rerolls?.count ?? 0, task.receipt?.rerolls ?? 0)
             if merge.escaped { f.escapes += 1 }
             if merge.neededNobody { f.neededNobody += 1 }
@@ -373,12 +459,29 @@ enum SetupQualityMath {
                 f.timed += 1
                 f.timedSpan += span
                 f.timedWorked += worked
+                if let waits = merge.view.receipt?.waits {
+                    f.waited += 1
+                    f.waitedSpan += span
+                    f.auditWaited += waits.auditWait ?? 0
+                }
             }
+            if let codex = merge.view.receipt?.worker?.codex { f.codexTokens = (f.codexTokens ?? 0) + codex }
             if let receipt = merge.view.receipt, let cost = receipt.cost {
                 f.costed += 1
                 f.cost += cost
                 f.workerCost += receipt.worker?.cost ?? 0
                 f.verifierCost += receipt.verifier?.cost ?? 0
+                let rerolled = max(task.rerolls?.count ?? 0, task.receipt?.rerolls ?? 0, receipt.rerolls) > 0
+                if merge.codex || (receipt.worker?.codex ?? 0) > 0 {
+                    f.codexLeftOut += 1
+                } else if rerolled {
+                    f.rerolledLeftOut += 1
+                } else {
+                    f.soloMerges += 1
+                    f.soloWorkerCost += receipt.worker?.cost ?? 0
+                    f.soloVerifierCost += receipt.verifier?.cost ?? 0
+                    if receipt.mergeReruns > 0 { f.soloReran += 1 }
+                }
             }
         }
         f.findings = outcomes
@@ -386,6 +489,8 @@ enum SetupQualityMath {
         f.busyHours = SetupStatsMath.covered(ended.compactMap { e in e.start.map { ($0, e.end) } })
         // Worker hours of receipts with no start have no wall-clock span to go over: left out of both.
         f.workerHours = ended.filter { $0.start != nil }.reduce(0) { $0 + $1.worked } / 3600
+        let verifiers = ended.compactMap(\.verifier)
+        f.verifierHours = verifiers.isEmpty ? nil : verifiers.reduce(0, +) / 3600
         return f
     }
 
