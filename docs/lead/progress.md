@@ -2838,3 +2838,6 @@
 - 2026-11-01 20:03 Workflow: cleared heavy_slots
 - 2026-11-01 20:03 Workflow: merge_batching = `boost`
 - 2026-11-01 20:03 Update: Today: boost, Codex workers, a calmer Mac (2026-11-01) — Landed (installed at 20:03):
+- 2026-11-02 08:18 Planned usage-aware-worker: Usage-aware worker routing: tasks go to Codex when Claude's quota runs ahead of pace (review audit)
+- 2026-11-02 08:20 Started a worker on usage-aware-worker
+- 2026-11-02 08:20 Automatically (auto_advance): Started a worker on usage-aware-worker (Usage-aware worker routing: tasks go to Codex when Claude's quota runs ahead of pace).

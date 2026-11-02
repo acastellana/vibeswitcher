@@ -219,3 +219,7 @@ With three full suites at once, the load reached 50–120 even with each job cap
 
 The lead asked the user to change a setting that didn't exist, so the load stayed at three heavy jobs. The worker found this while fixing F6. Lesson: verify a setting exists before asking the user to change it.
 
+## 2026-11-02 08:18:57 Usage-aware routing (2026-11-02): when Claude's quota runs ahead of pace, implementation work moves to Codex. Task usage-aware-worker adds agent: auto (Codex when Claude is tight and Codex has room), reads Codex's quota from its rollouts, shows both accounts' pace in status, and lets auto tasks go to Codex instead of waiting at Claude's 80% hold. Until it lands, the lead marks bounded implementation tasks agent: codex by hand whenever Claude's weekly usage is ahead of the week's elapsed share. Leads, planning and audits stay on Claude, and design-heavy or security tasks stay pinned to claude. Once it lands, the lead sets agent_default: auto for this project.
+
+The user, 2026-11-02: "if there's not a lot of quota I should be leveraging Codex much more". Codex workers have worked since 8f44a65, but nothing chose them: the usage watch only stopped work at 80%. A Codex worker spends roughly a tenth of a task's Claude cost (the audit), going by boost-release-3b-codex's receipt: verifier $1.86 against worker $14.79.
+
