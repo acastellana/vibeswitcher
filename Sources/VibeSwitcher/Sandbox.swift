@@ -900,7 +900,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             projectCreated: { [weak self] folder, _ in self?.refuse("starting a lead in the new project \(folder)") })
         windowActions = actions
         let controller = MainWindowController(store: store, host: host, model: model, actions: actions, leads: leads, briefing: briefing,
-                                              dictation: dictation, wallet: walletDesk)
+                                              dictation: dictation, wallet: walletDesk, boost: boostWatch)
+        controller.onBoostMark = { [weak self] in self?.showSettings(.general, reveal: .boost) }
         controller.pane.configure = { [weak self, weak controller] view in
             guard let self else { return }
             let dark = (view.window ?? controller?.window)?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -920,7 +921,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.waitForRow(tries: tries - 1, done) }
     }
 
-    func showSettings(_ tab: SettingsTab) {
+    func showSettings(_ tab: SettingsTab, reveal: SettingsSection? = nil) {
         if settings == nil {
             settings = SettingsWindowController(
                 preferences: preferences, setup: SetupModel(preferences: preferences, system: .fixed(hooks: [.claude: true, .codex: false], terminal: .notAsked, notifications: .off)),
@@ -933,7 +934,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
         guard let window = settings?.window else { return }
         Sandbox.hide(window)
-        settings?.open(tab: tab)
+        settings?.open(tab: tab, reveal: reveal)
         window.orderFrontRegardless()
         Sandbox.hide(window)
     }
@@ -981,7 +982,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("wallet [STATE]", "shows a made-up wallet request card as the sheet, in STATE: " + Driver.walletCards.map(\.state).joined(separator: ", ") + " (all: every state, one under another); settings wallet shows its Settings tab"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
-        ("boost off|on|away|present|battery|battery-on|battery-low|veto", "Boost mode in a made-up state (the power source, the charge, your presence and the usage made up): off; On on AC; Automatic away on AC (boosted), at the Mac, away on battery; On on battery with Also on battery at 86 % (boosted) or 24 %; or away on AC with the usage watch's veto. Settings and the menu-bar sheet show it"),
+        ("boost off|on|away|present|battery|battery-on|battery-low|veto|mark", "boost mark clicks the main window's Boost mark (Settings › General at Boost). Otherwise Boost mode in a made-up state (the power source, the charge, your presence and the usage made up): off; On on AC; Automatic away on AC (boosted), at the Mac, away on battery; On on battery with Also on battery at 86 % (boosted) or 24 %; or away on AC with the usage watch's veto. Settings and the menu-bar sheet show it"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
         ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", ")),
         ("close settings|sheet", "closes Settings or the sheet"),
@@ -1686,7 +1687,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
             case "veto":
                 let limit = AccountUsage.Limit(name: "five_hour", usedPercent: 84, resetsAt: now + 7200, at: now)
                 (preferences.boostMode, boostSignals) = (.automatic, (true, true, AccountUsage(limits: [limit])))
-            default: return reply(false, "boost off|on|away|present|battery|battery-on|battery-low|veto")
+            case "mark":
+                // The main window's Boost mark clicked, as the toolbar's button does.
+                guard window?.boostMarkItem != nil else { return reply(false, "no Boost mark: boost is off") }
+                window?.onBoostMark()
+                return settle { reply(true, "the Boost mark clicked: Settings › General at Boost") }
+            default: return reply(false, "boost off|on|away|present|battery|battery-on|battery-low|veto|mark")
             }
             boostWatch.look { [weak self] in self?.settle { reply(true, self?.boostWatch.state?.text ?? "not decided") } }
         case "wallet-ask": walletAsk(Array(words.dropFirst()), reply)

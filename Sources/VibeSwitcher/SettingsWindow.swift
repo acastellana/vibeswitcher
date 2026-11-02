@@ -5,8 +5,13 @@ import VibeCore
 /// Raw values are what `--settings TAB` takes.
 enum SettingsTab: String, CaseIterable { case general, agents, phone, launch, terminal, wallet }
 
+/// A section a tab scrolls to when Settings opens on it (the main window's Boost mark opens General at Boost).
+enum SettingsSection: String { case boost }
+
 final class SettingsSelection: ObservableObject {
     @Published var tab: SettingsTab = .general
+    /// Scrolled to once shown, then nil again.
+    @Published var reveal: SettingsSection?
 }
 
 /// VibeSwitcher › Settings… (⌘,): every preference. The ⚙︎ menu only repeats a few toggles.
@@ -42,8 +47,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func show(tab: SettingsTab) {
-        open(tab: tab)
+    func show(tab: SettingsTab, reveal: SettingsSection? = nil) {
+        open(tab: tab, reveal: reveal)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         // Up front even when macOS doesn't make the app active (opened from the command line, at login).
@@ -54,8 +59,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// Shows `tab`; on an opening (not when it's open already: ⌘, again, a tab switched), watches the setup and looks
     /// where the briefing's key comes from, the login shell's read again. Not on a view appearing: the window is kept
     /// for the whole launch, and the General tab appears again each time it's chosen.
-    func open(tab: SettingsTab) {
+    func open(tab: SettingsTab, reveal: SettingsSection? = nil) {
         selection.tab = tab
+        if let reveal { selection.reveal = reveal }
         guard !watching else { return }
         watching = true
         setup.watch()
@@ -84,8 +90,12 @@ struct SettingsView: View {
 
     var body: some View {
         TabView(selection: $selection.tab) {
-            GeneralSettings(preferences: preferences, setup: setup, showWelcome: showWelcome, host: host, briefing: briefing,
-                            dictation: dictation, policy: policy, boost: boost)
+            ScrollViewReader { proxy in
+                GeneralSettings(preferences: preferences, setup: setup, showWelcome: showWelcome, host: host, briefing: briefing,
+                                dictation: dictation, policy: policy, boost: boost)
+                    .onAppear { reveal(in: proxy) }
+                    .onChange(of: selection.reveal) { reveal(in: proxy) }
+            }
                 .tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
             AgentsSettings(setup: setup)
                 .tabItem { Label("Agents", systemImage: "waveform.path.ecg") }.tag(SettingsTab.agents)
@@ -100,6 +110,15 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(width: SettingsWindowController.size.width, height: SettingsWindowController.size.height)
+    }
+
+    /// Scrolls to the section asked for, once the form is laid out (its rows exist only then), and forgets it.
+    private func reveal(in proxy: ScrollViewProxy) {
+        guard let section = selection.reveal else { return }
+        DispatchQueue.main.async {
+            proxy.scrollTo(section, anchor: .top)
+            selection.reveal = nil
+        }
     }
 }
 
@@ -195,7 +214,7 @@ struct GeneralSettings: View {
                 SettingsFooter("The Team tab says in plain words what each task's agent is doing and what long decisions mean, written by a small Claude model (claude -p with haiku, no tools) from the task's title, checkpoints and last steps: at most every 3 minutes per task, while the tab is open. Off, it shows the latest checkpoint or activity. While a worker, verifier or merge runs, the Mac doesn't go to sleep on its own (the display still does); on battery only if set to Always. On battery, the lead starts no workers or audits and merges nothing only while the charge is under the level set here (work in flight finishes); above it, it works as on power. 0 never pauses.")
             }
             MacLimitsSection()
-            BoostSection(preferences: preferences, watch: boost)
+            BoostSection(preferences: preferences, watch: boost).id(SettingsSection.boost)
             if let policy { WorkingPolicySection(editor: policy) }
             if let briefing { BriefingSettings(preferences: preferences, briefing: briefing) }
             if let dictation { DictationSettings(dictation: dictation) }

@@ -652,7 +652,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
 
     @objc func showSettings(_ sender: Any?) { showSettings(tab: .general) }
 
-    func showSettings(tab: SettingsTab) {
+    func showSettings(tab: SettingsTab, reveal: SettingsSection? = nil) {
         popover.performClose(nil)
         if settingsWindow == nil {
             settingsWindow = SettingsWindowController(
@@ -663,7 +663,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 boost: boostWatch, walletPeers: walletPeers)
         }
         loadRecentProjects()
-        settingsWindow?.show(tab: tab)
+        settingsWindow?.show(tab: tab, reveal: reveal)
     }
 
     /// The welcome window: on first launch, and from Settings › General.
@@ -713,8 +713,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     func showMainWindow(select hostID: UUID? = nil) {
         if mainWindow == nil {
             let controller = MainWindowController(store: store, host: hostClient, model: windowModel, actions: windowActions,
-                                                  leads: leadController, briefing: briefing, dictation: dictation, wallet: walletDesk)
+                                                  leads: leadController, briefing: briefing, dictation: dictation, wallet: walletDesk,
+                                                  boost: boostWatch)
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
+            controller.onBoostMark = { [weak self] in self?.showSettings(tab: .general, reveal: .boost) }
             controller.pane.configure = { [weak self] view in
                 guard let self else { return }
                 // A new view isn't in the window yet, and on its own it reports the light appearance.

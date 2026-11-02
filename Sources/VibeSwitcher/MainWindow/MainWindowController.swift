@@ -10,6 +10,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     let pane: TerminalPaneController
     /// ⌘+ (1), ⌘− (−1), ⌘0 (0 = default size).
     var onFontSize: (Int) -> Void = { _ in }
+    /// The toolbar's Boost mark clicked: Settings › General at Boost.
+    var onBoostMark: () -> Void = {}
 
     private let store: SessionStore
     private let host: HostClient
@@ -104,10 +106,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let dictation: DictationController?
     /// The wallet requests agents filed, as cards in their chats (none in the benches).
     private let wallet: WalletDesk?
+    /// Boost mode as decided, for the toolbar's mark (none in the benches).
+    private let boost: BoostWatch?
 
     init(store: SessionStore, host: HostClient, model: WindowModel, actions: WindowActions, leads: LeadController,
-         briefing: BriefingModel? = nil, dictation: DictationController? = nil, wallet: WalletDesk? = nil) {
+         briefing: BriefingModel? = nil, dictation: DictationController? = nil, wallet: WalletDesk? = nil,
+         boost: BoostWatch? = nil) {
         self.wallet = wallet
+        self.boost = boost
         self.leads = leads
         self.briefing = briefing
         self.dictation = dictation
@@ -175,6 +181,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         }
         model.$selectedID.removeDuplicates().receiveLatest(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.showSelection() } }
+            .store(in: &cancellables)
+        // The Boost mark follows the decision as published: the watch publishes on the main thread, so no hop.
+        boost?.$state.removeDuplicates()
+            .sink { [weak self] state in self?.showBoostMark(state?.on == true ? state : nil) }
             .store(in: &cancellables)
         model.$sections.receiveLatest(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -579,6 +589,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private static let newItem = NSToolbarItem.Identifier("newSession")
     private static let homeItem = NSToolbarItem.Identifier("startPage")
     private static let briefItem = NSToolbarItem.Identifier("briefMe")
+    static let boostItem = NSToolbarItem.Identifier("boostMark")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [.toggleSidebar, .sidebarTrackingSeparator, Self.homeItem, .flexibleSpace, Self.newItem, .inspectorTrackingSeparator,
@@ -586,8 +597,33 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar)
+        toolbarDefaultItemIdentifiers(toolbar) + [Self.boostItem]
     }
+
+    /// The Boost mark while `state` is on (left of Brief Me, or of the inspector's button), its texts that state's;
+    /// off (nil), no item at all, so it takes no room. macOS 14 has no hidden toolbar items: it's inserted and removed.
+    private func showBoostMark(_ state: BoostState?) {
+        guard let toolbar = window?.toolbar else { return }
+        let index = toolbar.items.firstIndex { $0.itemIdentifier == Self.boostItem }
+        boostState = state
+        guard let state else {
+            if let index { toolbar.removeItem(at: index) }
+            return
+        }
+        if index == nil {
+            // Made by the delegate below, from `boostState`.
+            let before = toolbar.items.firstIndex { $0.itemIdentifier == Self.briefItem || $0.itemIdentifier == .toggleInspector }
+            toolbar.insertItem(withItemIdentifier: Self.boostItem, at: before ?? toolbar.items.count)
+        }
+        guard let item = boostMarkItem else { return }
+        item.toolTip = BoostMark.help(state)
+        (item.view as? NSHostingView<BoostMark>)?.rootView = BoostMark(state: state, open: { [weak self] in self?.onBoostMark() })
+    }
+
+    /// What the Boost mark shows; nil while it isn't in the toolbar.
+    private var boostState: BoostState?
+    /// The toolbar's Boost mark, while Boost is on.
+    var boostMarkItem: NSToolbarItem? { window?.toolbar?.items.first { $0.itemIdentifier == Self.boostItem } }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
@@ -605,6 +641,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             item.label = "Brief Me"
             item.toolTip = "Brief me: 30 seconds, spoken, on what happened lately across your projects"
             item.view = NSHostingView(rootView: BriefMeToolbarItem(model: briefing))
+            return item
+        }
+        if identifier == Self.boostItem, let boostState {
+            let item = NSToolbarItem(itemIdentifier: identifier)
+            item.label = "Boost"
+            item.toolTip = BoostMark.help(boostState)
+            item.view = NSHostingView(rootView: BoostMark(state: boostState, open: { [weak self] in self?.onBoostMark() }))
             return item
         }
         guard identifier == Self.newItem else { return nil }
