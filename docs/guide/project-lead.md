@@ -63,7 +63,8 @@ deny it. A worker brings its branch up to date by merging the base in.
 
 ### Codex workers
 
-A task can name its worker's agent: `add_task` or `update_task` with `agent: codex` (`claude` is the default). It's
+A task can name its worker's agent: `add_task` or `update_task` with `agent: codex` (`claude` is the default; `auto`
+chooses at each start, see [Auto routing](#auto-routing-agent-auto)). It's
 meant for bounded, mechanical tasks with a tight contract, to spread usage onto the Codex account when Claude's limits
 run low; near a Claude limit, start_worker's refusal and auto_advance's hold suggest it, and the lead decides. Codex
 only implements: the lead, verifiers and the risk check stay Claude.
@@ -114,6 +115,36 @@ the worktree's trust key never applied, so Codex sat on its trust prompt and sta
 wasn't recognised. Should a Codex release break it again, `VIBESWITCHER_CODEX_WORKERS=0` in the lead's tool server's
 environment switches Codex workers off: start_worker refuses a codex task, auto_advance starts none (it tells the lead
 once), and the usage watch doesn't suggest Codex.
+
+### Auto routing: agent auto
+
+`agent: auto` (on `add_task` or `update_task`, or for every new task that names no agent with `configure
+agent_default: auto`) lets each start pick the agent from both accounts' usage. `start_worker` and auto_advance decide
+at the start, not when the task is planned:
+
+- **Codex** when Claude is *tight* and Codex *has room*. Claude is tight when one of its current limits on the
+  worker's model (or on every model) is at 70% or more, or a weekly limit is more than 10 points ahead of pace. Pace
+  is the used % against the % of the window gone, from its reset time: 64% used with 52% of the week gone is 12
+  points ahead. Codex has room when each of its known limits is under 85%, or under 100% with credits available, and
+  Codex doesn't say a limit is reached.
+- **Claude** otherwise, and whenever either side's usage isn't known. Unknown is never room.
+
+So where Claude's 80% hold would refuse or hold an auto task, it starts on Codex while Codex has room. A task pinned to
+`claude` holds as before. A start that lands on Codex is a Codex task from then on (`codexWorked`): a Claude verifier
+audits it before merge whatever its review says. Its `model` is Claude's, so a start on Codex runs Codex's own. The
+start's reply and its progress line say where it went and why, e.g. `auto → Codex: Claude weekly 64%, 12 points ahead
+of pace; Codex 40%`. Status shows Claude's limits and Codex's, each with its pace, and `Next auto task → codex|claude
+(why)`. Board says `worker: auto (now Codex)` while it runs.
+
+Codex's usage comes from its own session files: the newest `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`
+(`~/.codex` by default), the last `rate_limits` of a `token_count` event in its last 256 KB (`CodexUsage.swift`).
+That means the account's windows (`primary`, `secondary`: used %, length, reset) and its credits. Other limits in
+there (one model's, `premium`) are passed over. It's read only, kept for 30 s, and read again only when the file
+changes. A reading whose windows have all reset, a malformed one, or none at all is unknown. The thresholds are
+constants in one place, `UsageRouting`.
+
+Only workers are routed: the lead, planning, the risk check and verifiers stay on Claude whatever the quota. Mark
+bounded, mechanical tasks auto. Pin design-heavy or security work to `claude`.
 
 ## Review levels and audits
 
@@ -278,7 +309,7 @@ resets. VibeSwitcher reads what Claude Code exposes (`AccountUsage.swift`), best
 At 80 % of a limit, `start_worker` and `audit` start nothing on the models that limit holds back (every model for the
 weekly and 5-hour limits) unless the lead passes `override_usage: true`. Sessions already running carry on.
 auto_advance skips those starts and audits and tells the lead once per limit, with the reset time. `status` shows each
-known limit, how much is used and when it resets. What isn't known (an API key, no status line run yet, a reading past
+known limit, how much is used, when it resets and its pace (see [Auto routing](#auto-routing-agent-auto)). What isn't known (an API key, no status line run yet, a reading past
 its reset) means no back-off, never a stop.
 
 ## The battery hold

@@ -127,6 +127,27 @@ cost, the receipts of the 2026-10-31 batch give 8 tasks, 2.9 h and ~$86.
 
 ## Entries
 
+### IM-13: Usage-aware worker routing (usage-aware-worker, planned)
+
+- **Change:** a task with `agent: auto` (or `agent_default: auto`) starts on Codex when Claude's usage is tight (a
+  limit at 70%+, or a weekly one more than 10 points ahead of pace) and Codex has room (under 85%, or under 100% with
+  credits), else on Claude. It no longer waits at Claude's 80% hold while Codex has room.
+- **Hypothesis:** with auto tasks, Claude's weekly % used per merged task drops, because bounded work moves to Codex
+  once Claude runs ahead of pace. The share of worker tokens on Codex rises from 0. Quality holds: Important findings
+  per Codex-routed task ≤ 0.4.
+- **Metric:** share of worker tokens on Codex vs Claude per merged task, from receipts (split by hand by
+  `codexWorked` until receipts count Codex tokens); Claude's weekly % used per merged task, from
+  `~/.vibeswitcher/account-usage.json` at the window's end over its merges. Guards: Important findings per Codex-routed
+  task; reverts of routed merges stay at 0.
+- **Baseline:** last 7 days (`scripts/impact-metrics.sh 2026-10-26..2026-11-01`): 148 merges, 0 of them Codex-worked, so
+  the Codex share of worker tokens is 0%. Claude's current weekly window (2026-10-28T18:00..2026-11-02T08:43): 55% used
+  over 87 merges, about 0.63% per merged task. Important findings 0.35 per audited task.
+- **Check:** 2026-11-16, window from this change's merge to 2026-11-16.
+- **Status:** measuring
+- **Result:** (pending)
+- **Verdict:** (pending)
+- **Why:** (pending)
+
 ### IM-12: Codex workers for bounded tasks (boost-release-3b-codex, planned)
 
 - **Change:** a task can run its worker on the Codex CLI. Codex tasks are always audited by Claude.
