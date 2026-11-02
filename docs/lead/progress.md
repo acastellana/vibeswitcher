@@ -2869,3 +2869,6 @@
 - 2026-11-02 09:31 Started a worker on main-s-full-suite-3
 - 2026-11-02 09:31 Automatically (auto_advance): Started a worker on main-s-full-suite-3 (Main's full suite is green after the 2026-11-02 GitHub merge).
 - 2026-11-02 10:26 Merged main-s-full-suite-3: Main's full suite is green after the 2026-11-02 GitHub merge (no audit: review none)
+- 2026-11-02 10:26 Automatically (auto_advance): Merged main-s-full-suite-3 (Main's full suite is green after the 2026-11-02 GitHub merge) into main at 815890b6, review none: on its worker's done report on a012204b and the full test run.
+- 2026-11-02 10:26 Automatically (auto_advance): Cleaned up main-s-full-suite-3; ended pid 7506 (Worker: Main's full suite is green after the 2026-11-02 GitHub merge) (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-02 10:26 Update: Main is green after the 2026-11-02 GitHub merge; latest app installed — **What changed:** the 337 commits from GitHub are on main, the Metal Toolchain is installed (Xcode 27.2 no longer bundles it, and SwiftTerm builds a shader), and the app is installed from that main. m…

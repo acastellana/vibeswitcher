@@ -231,3 +231,7 @@ The user asked for it on 2026-11-02. The 30% floor is the lead's choice, so an u
 
 The first real Codex task (wallet-results-tests, 2026-11-02) couldn't run any Swift test: Codex's seatbelt denies SwiftPM's nested sandbox-exec and test.sh's ps check. Routing work to a worker that can't run its own checks would push every check onto the audit and the merge, and cost rounds.
 
+## 2026-11-02 10:26:32 Xcode's Metal Toolchain is a build prerequisite for VibeSwitcher on this Mac (SwiftTerm 1.19.0 compiles Shaders.metal in every configuration). Installed by the user on 2026-11-02. If a build fails with "missing Metal Toolchain", the user runs `xcodebuild -downloadComponent MetalToolchain`. Don't patch around it.
+
+Xcode 27.2 stopped bundling it. Every build, install and test run failed until the 840 MB component was downloaded. The user chose the download over changing the dependency.
+
