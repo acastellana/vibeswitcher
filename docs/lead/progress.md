@@ -2855,3 +2855,8 @@
 - 2026-11-02 09:02 Planned codex-workers-can-run: Codex workers can run the project's checks: scripts/test.sh and test-under-load.sh work inside Codex's sandbox (review audit)
 - 2026-11-02 09:02 Started a worker on codex-workers-can-run
 - 2026-11-02 09:02 Automatically (auto_advance): Started a worker on codex-workers-can-run (Codex workers can run the project's checks: scripts/test.sh and test-under-load.sh work inside Codex's sandbox).
+- 2026-11-02 09:06 Started a worker on wallet-results-tests
+- 2026-11-02 09:07 Audit of boost-on-battery-a: complete, clean
+- 2026-11-02 09:07 Audit of usage-aware-worker: complete, clean, round 1: 3 Nit open
+- 2026-11-02 09:19 Merged usage-aware-worker: Usage-aware worker routing: tasks go to Codex when Claude's quota runs ahead of pace (in a batch: usage-aware-worker, boost-on-battery-a landed on one test run)
+- 2026-11-02 09:19 Merged boost-on-battery-a: Boost on battery: a Settings option to let Boost run on battery (in a batch: usage-aware-worker, boost-on-battery-a landed on one test run)
