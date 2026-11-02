@@ -2964,3 +2964,5 @@
 - 2026-11-03 00:04 Automatically (auto_advance): Merge of statistics-record-what failed: Tests fail rebased onto main: theLeadsTokensAreTalliedPerDayFromItsOwnTranscriptsOnly() Sent its worker the output; it's back at work.
 - 2026-11-03 00:06 Automatically (auto_advance): Started the audit of statistics-record-what at 657c4ad1 (Its review is audit).
 - 2026-11-03 00:07 Audit of statistics-record-what: complete, clean, round 2: 1 Nit open
+- 2026-11-03 00:19 Merged statistics-record-what: Statistics: record what the stats can't see yet (lead tokens, Codex tokens, boost hours, waits by cause)
+- 2026-11-03 00:19 Flaky in statistics-record-what's merge: aRetryAfterExpiryLeavesTheRecordToDecide() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
