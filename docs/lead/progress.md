@@ -2938,3 +2938,6 @@
 - 2026-11-02 16:26 Automatically (auto_advance): Started the audit of wallet-e2e-sh-write at 461a1c74 (The risk check raised it to audit: headless Claude said raise: The harness reads the Wallet Manager's format version and writes vault.json at it, a fail-closed path that touches a test script able to reach the real vault, and the contract's own "run it under…).
 - 2026-11-02 16:26 Released wallet-e2e-sh-write's worker (idle since its done report on 461a1c74) while its audit runs
 - 2026-11-02 16:26 Automatically (auto_advance): Released wallet-e2e-sh-write's worker, idle since its done report on 461a1c74, while its audit runs (ended pid 51980 (Worker: wallet-e2e.sh: write the synthetic vault at the Wallet Manager's own format version)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-02 16:30 Audit of wallet-e2e-sh-write: complete, clean, round 1: 1 Nit open
+- 2026-11-02 16:45 Merged wallet-e2e-sh-write: wallet-e2e.sh: write the synthetic vault at the Wallet Manager's own format version
+- 2026-11-02 16:45 Flaky in wallet-e2e-sh-write's merge: aRetryWithNoCourierLeavesTheRecordToDecide() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
