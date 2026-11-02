@@ -2870,3 +2870,6 @@
 - 2026-11-02 09:43 Merged wallet-results-tests: Wallet results: tests that a repeated result (same sequence) is dropped, final or not
 - 2026-11-02 09:43 Automatically (auto_advance): Merged wallet-results-tests (Wallet results: tests that a repeated result (same sequence) is dropped, final or not) into main at da7cd5c0, on its passing audit and the full test run.
 - 2026-11-02 09:43 Automatically (auto_advance): Cleaned up wallet-results-tests (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-02 10:31 Planned boost-mark-in-the: Boost mark in the main window: a small orange bolt while Boost is on (review audit)
+- 2026-11-02 10:31 Planned statistics-1-2-a: Statistics 1/2: a stats model of the whole VibeSwitcher setup (VibeCore, read-only) (review audit)
+- 2026-11-02 10:31 Planned statistics-2-2-a: Statistics 2/2: a Statistics page in the app (review audit)
