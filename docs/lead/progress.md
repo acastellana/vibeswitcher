@@ -2970,3 +2970,6 @@
 - 2026-11-03 00:19 Automatically (auto_advance): Cleaned up statistics-record-what; ended pid 78890 (Worker: Statistics: record what the stats can't see yet (lead tokens, Codex tokens, boost hours, waits by cause)) (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-03 00:19 Started a worker on statistics-4-compared
 - 2026-11-03 00:19 Automatically (auto_advance): Started a worker on statistics-4-compared (Statistics 4: 'Compared with working solo', an estimate labelled as one), its after tasks done (statistics-3-quality, statistics-record-what).
+- 2026-11-03 00:44 Automatically (auto_advance): Started the audit of statistics-4-compared at 820259ea (Its review is audit).
+- 2026-11-03 00:44 Released statistics-4-compared's worker (idle since its done report on 820259ea) while its audit runs
+- 2026-11-03 00:44 Automatically (auto_advance): Released statistics-4-compared's worker, idle since its done report on 820259ea, while its audit runs (ended pid 16015 (Worker: Statistics 4: 'Compared with working solo', an estimate labelled as one)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
