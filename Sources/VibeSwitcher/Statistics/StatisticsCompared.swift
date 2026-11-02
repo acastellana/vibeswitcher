@@ -56,7 +56,7 @@ struct ComparedPage: Equatable {
                 row("Important findings fixed", "Important findings a later audit saw fixed, per 100 merges whose audits are kept: a solo "
                     + "session is taken to have shipped them.") { f, _ in
                     Self.per100(f.importantFixedPer100, f.importantFixed, over: f.auditsKept, "whose audits are kept", f,
-                                missing: "no merge's audits are kept")
+                                missing: "no merge's audits are kept", of: "finding")
                 },
                 row("Test failures sent back", "Merges whose first test run failed (not a flake) and went back to their worker, per 100 "
                     + "merges the merges recorder saw: a solo session is taken to have merged them as they were.") { f, _ in
@@ -65,7 +65,8 @@ struct ComparedPage: Equatable {
                 },
                 row("Flaky tests caught by reruns", "Flaky tests a merge's rerun caught (the flake ledger), per 100 merges: a solo session "
                     + "is taken to have had no rerun to tell them apart.") { f, _ in
-                    Self.per100(f.flakesCaughtPer100, f.flakesCaught ?? 0, over: f.merged, nil, f, missing: "no board keeps a flake ledger")
+                    Self.per100(f.flakesCaughtPer100, f.flakesCaught ?? 0, over: f.merged, nil, f, missing: "no board keeps a flake ledger",
+                                of: "flake")
                 },
             ]),
             Group(title: "Escaped after merge, per 100 merged", rows: [
@@ -130,11 +131,13 @@ struct ComparedPage: Equatable {
     }
 
     /// A per-100 figure: "–" with nothing merged, "Not recorded" (`missing` said) when its inputs aren't kept, else
-    /// the rate with "2 of 20 merges …".
-    static func per100(_ rate: Double?, _ count: Int, over: Int, _ which: String?, _ f: QualityFigures, missing: String) -> Cell {
+    /// the rate with "2 of 20 merges …" (merges counted), or "3 flakes over 20 merges …" (`of`: what's counted).
+    static func per100(_ rate: Double?, _ count: Int, over: Int, _ which: String?, _ f: QualityFigures, missing: String,
+                       of noun: String? = nil) -> Cell {
         guard f.merged > 0 else { return Cell(value: none) }
         guard let rate else { return Cell(value: notRecorded, detail: missing.isEmpty ? nil : missing) }
-        return Cell(value: StatisticsPage.number(rate, digits: 0), detail: "\(count) of \(QualityPage.count(over, "merge"))" + (which.map { " " + $0 } ?? ""))
+        let counted = noun.map { "\(QualityPage.count(count, $0)) over" } ?? "\(count) of"
+        return Cell(value: StatisticsPage.number(rate, digits: 0), detail: "\(counted) \(QualityPage.count(over, "merge"))" + (which.map { " " + $0 } ?? ""))
     }
 
     static func handsOff(_ f: QualityFigures, _: Bool) -> Cell {

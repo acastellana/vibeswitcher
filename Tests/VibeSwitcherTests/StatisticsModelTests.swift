@@ -310,7 +310,8 @@ struct StatisticsModelTests {
         #expect(cost.cells[2].detail == "Codex tokens have no price: 1.5M, not in the cost")
         // Caught beside escaped.
         #expect(try row("Important findings fixed").cells.map(\.value) == ["50", "50", "Not recorded"])
-        #expect(try row("Important findings fixed").cells[0].detail == "1 of 2 merges whose audits are kept")
+        #expect(try row("Important findings fixed").cells[0].detail == "1 finding over 2 merges whose audits are kept")
+        #expect(try row("Flaky tests caught by reruns").cells[1].detail == "1 flake over 2 merges")
         #expect(try row("Important findings fixed").cells[2].detail == "no merge's audits are kept")
         #expect(try row("Test failures sent back").cells.map(\.value) == ["33", "0", "100"])
         #expect(try row("Test failures sent back").cells[1].detail == "0 of 2 merges the merges recorder saw")

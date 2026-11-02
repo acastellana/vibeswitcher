@@ -59,7 +59,8 @@ struct ComparedSectionView: View {
                         .accessibilityAddTraits(.isHeader)
                     ForEach(group.rows) { row in
                         GridRow(alignment: .firstTextBaseline) {
-                            Text(row.label).frame(minWidth: 180, alignment: .leading).help(row.help)
+                            Text(row.label).fixedSize(horizontal: false, vertical: true)
+                                .frame(width: 150, alignment: .leading).help(row.help)
                             ForEach(Array(row.cells.enumerated()), id: \.offset) { _, cell in
                                 VStack(alignment: .trailing, spacing: 2) {
                                     Text(cell.value).monospacedDigit()
@@ -69,7 +70,7 @@ struct ComparedSectionView: View {
                                             .fixedSize(horizontal: false, vertical: true)
                                     }
                                 }
-                                .frame(maxWidth: 220, alignment: .trailing)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
                             }
                         }
                         .accessibilityElement(children: .ignore)

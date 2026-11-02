@@ -1013,12 +1013,19 @@ private final class Driver: NSObject, NSApplicationDelegate {
             return AnyView(AllDoneCard(mark: mark, chat: ChatModel(), expanded: [AllDoneCard.key(mark)]).frame(width: 560).padding(16))
         }),
         // The Statistics window's page (`StatisticsView`) on made-up stats for the last 7 days: two projects and one whose
-        // board can't be read, Mac-wide figures with boost hours and Codex tokens not recorded; the quality sections, the
-        // breakdown and the trend. Shown loading, then filled, tall enough that a shot holds the whole page.
+        // board can't be read, Mac-wide figures; the quality sections, the breakdown, the comparison with working solo and
+        // the trend. Shown loading, then filled, tall enough that a shot holds the whole page.
         ("statistics", { _ in
             let model = StatisticsModel(load: { _, range in Driver.statistics(range: range) })
             model.reload()
-            return AnyView(StatisticsView(model: model).frame(width: StatisticsWindowController.size.width, height: 2500))
+            return AnyView(StatisticsView(model: model).frame(width: StatisticsWindowController.size.width, height: 3300))
+        }),
+        // The Statistics page's "Compared with working solo" section on the same made-up stats, its method shown as
+        // hovering its title shows it.
+        ("statistics-estimate", { _ in
+            let page = QualityPage(Driver.statisticsQuality(range: StatisticsRange.week.interval(now: Date())))
+            return AnyView(Form { ComparedSectionView(page: page.compared, methodShown: true) }.formStyle(.grouped)
+                .frame(width: StatisticsWindowController.size.width, height: 720))
         }),
         ("lead-team", { driver in
             let team = Driver.leadTeam()
@@ -1440,7 +1447,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             load: LoadProfile.make(minutes: 9_840, median: 9.4, p90: 22.8, max: 41.2, minutesAt24: 610, minutesAt36: 42, cores: 14),
             merges: MergeRate.make(recorded: 23, landed: 20, hours: 164),
             freezes: Freezes.make(count: 2, hours: 164, partial: false, perDay: ["2026-10-29": 2], byLoad: nil, unsampled: 0),
-            hoursBoosted: nil,
+            hoursBoosted: 38.5,
             boostNow: BoostState(on: true, why: "automatic: away, on AC", at: now),
             claude: [UsageNow.make(name: "seven_day", model: nil, usedPercent: 64, resetsAt: now + 3.4 * 86_400, reached: false,
                               pace: UsagePace(used: 64, elapsed: 52)),
@@ -1451,8 +1458,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
                                quality: statisticsQuality(range: range))
     }
 
-    /// The `statistics` sheet's quality figures: made up, every figure shown; the audit wait, the merge reruns' cost and
-    /// Codex's cost per task not recorded.
+    /// The `statistics` sheet's quality figures: made up, every figure shown; the merge reruns' cost, Codex's cost per
+    /// task and its process cost not recorded (its tokens have no price).
     static func statisticsQuality(range: DateInterval) -> SetupQuality {
         func figures(merged: Int, audited: Int, firstPass: Int, rounds: Int, important: Int, firstTry: Int?, rerolls: Int, reverts: Int,
                      escapes: Int, questions: Int, waitMinutes: Double, nobody: Int, hours: [Double], worked: Double, cost: (Double, Double)?) -> QualityFigures {
@@ -1480,10 +1487,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             return f
         }
-        let claude = figures(merged: 13, audited: 9, firstPass: 6, rounds: 13, important: 7, firstTry: 11, rerolls: 1, reverts: 1, escapes: 1,
+        var claude = figures(merged: 13, audited: 9, firstPass: 6, rounds: 13, important: 7, firstTry: 11, rerolls: 1, reverts: 1, escapes: 1,
                              questions: 5, waitMinutes: 38, nobody: 8, hours: [1.2, 1.9, 2.4, 3.1, 0.9, 1.5, 6.2, 2.2, 1.1, 2.8, 4.0, 1.7, 2.0],
                              worked: 11.5, cost: (121.6, 38.9))
-        let codex = figures(merged: 7, audited: 7, firstPass: 3, rounds: 12, important: 6, firstTry: 5, rerolls: 1, reverts: 0, escapes: 1,
+        var codex = figures(merged: 7, audited: 7, firstPass: 3, rounds: 12, important: 6, firstTry: 5, rerolls: 1, reverts: 0, escapes: 1,
                             questions: 2, waitMinutes: 9, nobody: 4, hours: [1.4, 2.9, 3.3, 1.8, 2.6, 5.1, 2.0], worked: 6.2, cost: nil)
         let fable = figures(merged: 3, audited: 3, firstPass: 3, rounds: 3, important: 1, firstTry: 3, rerolls: 0, reverts: 0, escapes: 0,
                             questions: 1, waitMinutes: 6, nobody: 2, hours: [3.1, 4.0, 6.2], worked: 5.0, cost: (61.2, 12.4))
@@ -1495,6 +1502,25 @@ private final class Driver: NSObject, NSApplicationDelegate {
                           questions: 9, waitMinutes: 52, nobody: 12, hours: claude.createdToMerged.map { $0 / 3600 } + codex.createdToMerged.map { $0 / 3600 },
                           worked: 17.7, cost: (121.6, 38.9))
         all.costed = 13
+        // What the comparison with working solo and the new records add: Claude's merges in the solo baseline but one
+        // re-rolled, Codex's left out (no price), the lead's spend in All.
+        func solo(_ f: inout QualityFigures, merges: Int, worker: Double, verifier: Double, reran: Int, rerolled: Int, codex: Int?,
+                  fixed: Int, sentBack: Int, flakes: Int, incidents: Int, waited: Double, verifierHours: Double) {
+            (f.soloMerges, f.soloWorkerCost, f.soloVerifierCost, f.soloReran, f.rerolledLeftOut) = (merges, worker, verifier, reran, rerolled)
+            if let codex { (f.codexLeftOut, f.codexTokens) = (f.merged, codex) }
+            (f.auditsKept, f.importantFixed, f.sentBack, f.flakesCaught) = (f.audited, fixed, sentBack, flakes)
+            (f.incidents, f.incidentsWatched) = (incidents, f.merged)
+            (f.waited, f.waitedSpan, f.auditWaited) = (f.timed, f.timedSpan, f.timedSpan * waited)
+            f.verifierHours = verifierHours
+        }
+        solo(&claude, merges: 12, worker: 112.4, verifier: 36.1, reran: 1, rerolled: 1, codex: nil, fixed: 5, sentBack: 2, flakes: 2, incidents: 1,
+             waited: 0.12, verifierHours: 6.8)
+        solo(&codex, merges: 0, worker: 0, verifier: 0, reran: 0, rerolled: 0, codex: 4_800_000, fixed: 4, sentBack: 1, flakes: 1, incidents: 1,
+             waited: 0.18, verifierHours: 4.1)
+        solo(&all, merges: 12, worker: 112.4, verifier: 36.1, reran: 1, rerolled: 1, codex: 4_800_000, fixed: 9, sentBack: 3, flakes: 3, incidents: 2,
+             waited: 0.14, verifierHours: 10.9)
+        all.codexLeftOut = 7
+        all.lead = LeadSpend(tokens: 41_200_000, cost: 27.3, unpricedDays: 0)
         let passes: [Double?] = [nil, 0.4, 0.5, 0.45, 0.6, 0.55, 0.62, 0.56]
         let costs: [Double?] = [nil, 14.2, 12.9, 13.6, 11.4, 12.2, 10.8, 12.4]
         let weeks = (0..<8).map { index -> QualityWeek in
