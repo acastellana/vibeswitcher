@@ -408,3 +408,57 @@ The user asked for the install. The census regression comes from PR #1's filtere
 
 Records what's installed and pushed, and the one step left for the keeper to cover the lead's own session.
 
+# Archived 2026-11-02 12:57:48: Superseded or obsolete: the stopgaps "until task X lands" have landed, one-off batch plans are done, and the heavy-slots and agent_default entries were superseded by later decisions.
+
+## 2026-10-18 18:23:05 An install must not replace a running lead. The lead session that is live keeps its role and conversation, and a new lead starts only when none is live or when the user asks for one, after a confirmation. This is task a-running-lead-keeps, started now. It changes the guard rails' role binding, so it's shown to the user before merging. Install plans stop telling the user to restart the lead from the app.
+
+At the 18:10 install, the films lead lost its role mid-conversation. The user's answer ('Do what we need to do') and its decisions never reached the board, and the refusal pointed to /mcp, which can't give the role back. The earlier claim that 'the transfer worked' was only true of the sessions, not of the leads.
+
+## 2026-10-18 18:49:28 Direction from the user: running VibeSwitcher must be seamless. The user never restarts a lead, runs /mcp, or confirms their own commits. Three tasks deliver it: (1) a-running-lead-keeps: installs never replace a running lead, the team keeps its grants, and when a new lead does start it's adopted rather than replacing. (2) tool-servers-update-in: every vibeswitcher-mcp swaps itself for the new build in place (exec between requests, same stdio and grant). (3) the-user-s-own: a base move made by the user's own (non-team) sessions is accepted automatically, provided the session is identified by what the host can verify. Anything else falls back to a one-click prompt in the app, never a restart. The current a92a8dc block is cleared once, at the end: the user does one restart and then one install, after which none are needed. The three are shown to the user together before merging, because they change guard rails.
+
+The user said: "all of this restarting the leaders … is just too complex … do whatever you need to do to make this seamless". The guard rail against unaudited base moves stays, but it learns to tell the user's own commits from the team's. Commits it can't attribute still need a click, never a restart. One last restart can't be avoided, because these fixes have to merge through the very check they replace.
+
+## 2026-10-18 23:43:32 Retrospective changes (2026-10-19 00:10): (1) audit evidence must survive a worker's report on an unchanged commit (task "Audit evidence survives a worker report on the same commit"); until it lands, the lead tells workers to answer non-code requests with progress(text:), never report(summary:). (2) The witness must not call a worker stalled while it waits on its own background task (task of that name). (3) Load tests run only through scripts/test-under-load.sh, capped at 2×ncpu, refusing an already loaded Mac (task "One load harness"); until it lands, every contract and audit that involves load says "at most 2×ncpu load processes, stopped by pid afterwards, never when the 1-minute load is already above 2×ncpu". (4) Sessions reported ended must really end (task ended-sessions-really, started).
+
+Each cost real time tonight: a reset audit cost 25 minutes and two verifier runs; a false stall woke the lead for nothing; a verifier's 96-process load slowed every other session for 25 minutes; seven leaked sessions hold 2.4 GB on a Mac that ran out of memory twice today. A rule in a note is forgotten by the next lead; a check isn't.
+
+## 2026-10-20 07:42:51 Swift tool runs (scripts and the lead's, workers' and verifiers' sessions) get a scratch TMPDIR of their own that is removed afterwards; the lead cleans the leaked empty TemporaryDirectory.* folders in the user's temp folder once by hand.
+
+2026-10-20 07:4x: 32,871 empty TemporaryDirectory.XXXXXX folders had piled up in the user's $TMPDIR; measured: SwiftPM leaves ~7 per swift build and ~5 per swift test, and only scripts/test.sh redirected TMPDIR. Per-session scratch stops ad hoc runs (benches, settle matrices) from leaking into the user's folder and lets cleanup and the disk witness account for them per task.
+
+## 2026-10-20 22:12:05 The battery hold is level-based and a user setting: leads pause starts, audits and merges only while the battery is under the user's limit (default 50 %), not at every unplug; task battery-hold-only-below implements it, and until it lands the lead applies the 50 % line by hand to the witness's messages.
+
+The user on 2026-10-20 at 21:2x: they plug and unplug often, and a hold at 100 % costs workers their context for nothing; the earlier 30 % practice becomes the setting's default of 50 %.
+
+## 2026-10-21 21:50:31 Working policy from the user, 2026-10-21 17:5x, effective now: (1) One agent owns each change through completion. Separate reviewers (audit) only for security, irreversible operations, or complex changes. (2) Run the affected tests while editing, then the full suite once before merging; repeat only when new changes justify it. (3) Parallelize independent implementation work; serialize expensive builds and tests so workers don't compete for CPU. (4) Fix material bugs; cosmetic observations don't become tasks or block delivery. (5) Stop when the requested behaviour works and the relevant checks pass; no recursive audit loop without a concrete unresolved concern. Until the tools support skipping audits (task one-agent-owns-each), the lead asks for light audits on low-risk work (diff plus affected tests plus one suite, no benches or screenshots unless the change is about them), never re-audits for nits, and contracts ask for one suite run, not two.
+
+The user's direction after the lead's introspection: about five full suites per change, re-audit loops (text selection took four rounds), nit follow-up chains (four picker-card tasks), and CPU contention between parallel suites made the team slower than a single Claude Code session, and hit the weekly usage limit.
+
+## 2026-10-24 18:27:33 Retrospective of the 2026-10-24 review-fix batch (6 tasks, all merged in about 4 h, no reverts). Changes: (1) audit takes a branch whose trial merge is clean, and ends the task's own idle worker to make room for its verifier (task audit-takes-a-branch). (2) Workers run the lint tests before reporting done (task workers-run-the-project-s). (3) Already running: boundary excursions a worker reports don't fail an audit, and dismissed findings don't force a re-audit (boundary-excursions-a). Until (1) lands, the lead stops a finished worker whose audit is refused for Mac room, and has branches catch up once, after the last of a run of merges, not after each.
+
+About 8 extra worker turns went to conflict-free catch-up merges. Idle finished workers held 4 to 5 of 10 Mac slots and blocked verifiers. One audit failed only on a missing lead note, and one only on a lint a filtered run doesn't cover. The audits also caught three real defects: records that merged cleanly kept the branch's copy, a team command in flight could pass as the user's, and the limits file was writable by agents.
+
+## 2026-10-26 02:06:07 No copy-of-the-build start for worktrees (a-fresh-worktree-starts abandoned). The only cheaper path left is SwiftTerm as a prebuilt binary target. That's not planned: it saves about 72 of 208 compile steps but adds an xcframework to maintain.
+
+The worker measured it on 2026-10-26. A fresh worktree's first swift build takes 91 s for 208 steps at load 28. A `cp -c` clone of an up-to-date .build still rebuilds all 208, because swift-driver disables incremental compilation when arguments change: absolute paths and -package-name are in master.priors and llbuild's build.db. Only .build/checkouts survives, saving about 5 s, and its alternates point into the source worktree. The earlier a-new-worktree-builds (727f29d) already shares the SDK module cache, the one part that does carry over.
+
+## 2026-10-30 21:27:20 2026-10-30: fix main's 2 failing tests (task main-s-full-suite) before merging anything else. build-app-sh-install (audit clean) is kept and test-under-load-sh has auto_advance off until it lands; then merge both.
+
+build-app-sh-install's verifier found TeamRowsTests.voiceOverReadsTheRow and HomeIsolationTests' installer test failing on main after today's ~130-commit pull. Every merge gate runs the full suite, so it would fail and bounce the workers' output onto code outside their tasks.
+
+## 2026-10-31 15:34:17 Vault feature batch (2026-10-31): no full suite or load runs until the whole feature works, then one check at the end. vault-requests-in-the merges the three finished branches (vault-requests-the, vault-request-card-and, test-under-load-sh) into its own, gets the one audit (focused tests, diff and shots, no audit-side suite) and the one merge (the full suite). The three are then folded into it. auto_advance is off on all four, and the lead starts vault-requests-in-the once vault-requests-the's worker reports done. This sets aside, for this batch only, the 2026-10-23 rule that each worker proves its new tests under load before reporting done: it's done once, at the end.
+
+User, 2026-10-31: our load and test runs were slowing other projects' leads, and they asked to wait until the whole thing is finished and test once at the end.
+
+## 2026-11-01 16:43:21 The Mac's heavy-work slots go from 3 to 2. The user set this in Settings on 2026-11-01.
+
+With three full suites at once, the load reached 50–120 even with each job capped at 4 cores (VS_HEAVY_CORES). Each suite starts thousands of short processes, which the core cap doesn't reach. The recorder data of both VibeSwitcher's and the Wallet Manager's leads agree. Batched merges (merged, off by default) is the other lever: it means fewer full runs.
+
+## 2026-11-02 09:02:40 agent_default stays claude for vibeswitcher until codex-workers-can-run merges. Codex workers must be able to run scripts/test.sh, the lint filter and test-under-load.sh inside their sandbox before tasks are routed to them by default. Until then, agent: auto or codex only for tasks the audit and merge can fully check.
+
+The first real Codex task (wallet-results-tests, 2026-11-02) couldn't run any Swift test: Codex's seatbelt denies SwiftPM's nested sandbox-exec and test.sh's ps check. Routing work to a worker that can't run its own checks would push every check onto the audit and the merge, and cost rounds.
+
+## 2026-11-02 12:21:01 The three queued tasks (boost-mark-in-the, statistics-1-2-a, statistics-2-2-a) go from codex to agent: auto. Claude's weekly usage is 8%, 60 points behind pace, so auto routes them to Claude now and to Codex only if Claude gets tight again. They still wait on codex-workers-can-run.
+
+They were marked codex by hand only because Claude's weekly usage was ahead of pace (decision 1). That reason has gone, and a Claude worker can run the full suite and socket tests, which a Codex worker still can't.
+

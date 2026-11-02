@@ -2882,3 +2882,11 @@
 - 2026-11-02 12:44 Audit of codex-workers-can-run at 40a18df3 tested its merged result 4a3f4caa onto main: the test command passed
 - 2026-11-02 12:45 Audit of codex-workers-can-run: complete, clean, round 2: 5 Nit (3 open)
 - 2026-11-02 12:56 Merged codex-workers-can-run: Codex workers can run the project's checks: scripts/test.sh and test-under-load.sh work inside Codex's sandbox
+- 2026-11-02 12:57 Automatically (auto_advance): Merged codex-workers-can-run (Codex workers can run the project's checks: scripts/test.sh and test-under-load.sh work inside Codex's sandbox) into main at 24716a28, on its passing audit and the full test run.
+- 2026-11-02 12:57 Automatically (auto_advance): Cleaned up codex-workers-can-run; ended pid 85498 (Worker: Codex workers can run the project's checks: scripts/test.sh and test-under-load.sh work inside Codex's sandbox) (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-02 12:57 Workflow: agent_default = `auto`
+- 2026-11-02 12:57 Update: Merged: Codex workers can run the project's checks — **What changed:** a Codex worker can now run `scripts/test.sh` (focused tests and lints) and `test-under-load.sh` inside Codex's sandbox as written, with no extra flags. Codex's sandbox is not loosene…
+- 2026-11-02 12:59 Started a worker on boost-mark-in-the (auto → Claude: Claude weekly 9%, 59 points behind pace, not tight; Codex 67%)
+- 2026-11-02 12:59 Automatically (auto_advance): Started a worker on boost-mark-in-the (Boost mark in the main window: a small orange bolt while Boost is on), its after tasks done (codex-workers-can-run); its agent is auto, so it went to Claude: Claude weekly 9%, 59 points behind pace, not tight; Codex 67%.
+- 2026-11-02 12:59 Started a worker on statistics-1-2-a (auto → Claude: Claude weekly 9%, 59 points behind pace, not tight; Codex 67%)
+- 2026-11-02 12:59 Automatically (auto_advance): Started a worker on statistics-1-2-a (Statistics 1/2: a stats model of the whole VibeSwitcher setup (VibeCore, read-only)), its after tasks done (codex-workers-can-run); its agent is auto, so it went to Claude: Claude weekly 9%, 59 points behind pace, not tight; Codex 67%.
