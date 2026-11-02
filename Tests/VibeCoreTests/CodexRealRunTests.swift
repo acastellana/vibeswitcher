@@ -145,7 +145,7 @@ struct CodexRealRunTests {
         let server = temp.url("stub-mcp").path
         try ("#!/usr/bin/python3\n" + Self.stub(log: log)).write(toFile: server, atomically: true, encoding: .utf8)
         chmod(server, 0o755)
-        let lints = LeadWorkflow.Policy.lintTests(in: worktree).joined(separator: "|")
+        let lints = LeadPrompts.Policy.lintTests(in: worktree).joined(separator: "|")
         var task = LeadTask(slug: "checks", title: "Run the project's checks", contract: LeadContract(
             goal: "Run the project's checks below, each exactly as written, one after the other, and report what each printed.",
             acceptance: ["`bash scripts/test.sh --filter LeftoverCheckTests > \"$TMPDIR/focused.log\" 2>&1; echo \"exit $?\" >> \"$TMPDIR/focused.log\"`",
