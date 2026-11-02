@@ -223,3 +223,7 @@ The lead asked the user to change a setting that didn't exist, so the load staye
 
 The user, 2026-11-02: "if there's not a lot of quota I should be leveraging Codex much more". Codex workers have worked since 8f44a65, but nothing chose them: the usage watch only stopped work at 80%. A Codex worker spends roughly a tenth of a task's Claude cost (the audit), going by boost-release-3b-codex's receipt: verifier $1.86 against worker $14.79.
 
+## 2026-11-02 08:45:52 Boost can run on battery when the user turns on a new Settings option, "Also on battery" (off by default; task boost-on-battery-a). With it on, On and Automatic behave as on AC down to 30% charge, and boost stays off below that or when the charge is unknown. This supersedes "never on battery, whatever the mode" from the 2026-11-01 boost release decision for users who opt in.
+
+The user asked for it on 2026-11-02. The 30% floor is the lead's choice, so an unattended boosted Mac doesn't drain its battery flat. The usage veto and the battery pause hold still apply.
+

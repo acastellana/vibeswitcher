@@ -2841,3 +2841,6 @@
 - 2026-11-02 08:18 Planned usage-aware-worker: Usage-aware worker routing: tasks go to Codex when Claude's quota runs ahead of pace (review audit)
 - 2026-11-02 08:20 Started a worker on usage-aware-worker
 - 2026-11-02 08:20 Automatically (auto_advance): Started a worker on usage-aware-worker (Usage-aware worker routing: tasks go to Codex when Claude's quota runs ahead of pace).
+- 2026-11-02 08:45 Planned boost-on-battery-a: Boost on battery: a Settings option to let Boost run on battery
+- 2026-11-02 08:45 Started a worker on boost-on-battery-a
+- 2026-11-02 08:45 Automatically (auto_advance): Started a worker on boost-on-battery-a (Boost on battery: a Settings option to let Boost run on battery).
