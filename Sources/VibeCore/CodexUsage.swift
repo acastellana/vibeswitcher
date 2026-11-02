@@ -75,9 +75,9 @@ public struct CodexUsage: Equatable, Sendable {
     /// Credits can be spent past a window's limit: unlimited, or credits said to be there (a balance said, above 0).
     public var creditsAvailable: Bool { unlimited == true || (hasCredits == true && (balance.map { $0 > 0 } ?? true)) }
 
-    /// Its windows still holding at `now`, the most used first.
+    /// Its windows still holding at `now`, in Codex's order (primary, then secondary).
     public func current(now: Date = Date()) -> [Window] {
-        windows.filter { $0.current(at: now.timeIntervalSince1970) }.sorted { $0.usedPercent > $1.usedPercent }
+        windows.filter { $0.current(at: now.timeIntervalSince1970) }
     }
 
     /// What one rollout line says of the account's limits: `.known` for a `token_count` event with the account's
