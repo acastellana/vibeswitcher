@@ -98,10 +98,13 @@ struct SetupStatsComparedTests {
     @Test func processCostIsTheShareThatIsntTheMergedAttemptsWorkers() async throws {
         let (project, home) = try soloLayout()
         let quality = try #require(await collect([project], home: home).quality)
-        // The baseline: s1 and s5 (s2 re-rolled, s3 Codex's, s4 no cost). The process: their verifiers ($2) and the lead ($3).
+        // The baseline: s1 and s5 (s2 re-rolled, s3 Codex's, s4 no cost). The process: their verifiers ($2) and their
+        // share of the lead's $3, spread over the 5 merges: 2/5 of it.
         let all = try #require(quality.all.processCost)
-        #expect(all.merges == 2 && all.solo == 8 && all.verifiers == 2 && all.lead == 3)
-        #expect(all.process == 5 && all.total == 13 && all.share == 5.0 / 13)
+        #expect(all.merges == 2 && all.solo == 8 && all.verifiers == 2 && all.leadWhole == 3 && all.merged == 5)
+        #expect(all.lead.map { abs($0 - 1.2) < 1e-9 } == true)
+        #expect(abs(all.process - 3.2) < 1e-9 && abs(all.total - 11.2) < 1e-9 && all.share.map { abs($0 - 3.2 / 11.2) < 1e-9 } == true)
+        #expect(!all.leadPartial, "the ledger covers the whole day")
         #expect(all.reran == 1 && all.rerolledLeftOut == 1 && all.codexLeftOut == 1)
         #expect(all.atLeast, "s5's merge rerun and s2's re-rolled attempt aren't priced: a lower bound")
         #expect(quality.all.lead == LeadSpend(tokens: 1150, cost: 3, unpricedDays: 0))
@@ -129,7 +132,7 @@ struct SetupStatsComparedTests {
         // Three flakes in the range (one before it not counted), per 5 merges.
         #expect(all.flakesCaught == 3 && all.flakesCaughtPer100 == 60)
         // Escaped: s4 reverted, s2 named by a later incident.
-        #expect(all.revertsPer100 == 20 && all.incidents == 1 && all.incidentsWatched == 5 && all.incidentsPer100 == 20)
+        #expect(all.revertsPer100 == 20 && all.incidents == 1 && all.incidentsPer100 == 20)
         // By agent: the flake about a task no longer on the board is in All only.
         let claude = try #require(quality.byAgent.first { $0.name == "Claude" }?.figures)
         let codex = try #require(quality.byAgent.first { $0.name == "Codex" }?.figures)
@@ -175,7 +178,8 @@ struct SetupStatsComparedTests {
         let all = try #require(await collect([project], home: root.appendingPathComponent("home")).quality?.all)
         #expect(all.merged == 1)
         #expect(all.processCost == nil && all.lead == nil && all.codexTokens == nil)
-        #expect(all.importantFixedPer100 == nil && all.sentBackPer100 == nil && all.flakesCaughtPer100 == nil && all.incidentsPer100 == nil)
+        #expect(all.importantFixedPer100 == nil && all.sentBackPer100 == nil && all.flakesCaughtPer100 == nil)
+        #expect(all.incidentsPer100 == 0, "the lead makes incidents.md on the first incident: no file is none")
         #expect(all.hoursOfWorkPerHour == nil && all.workerHoursPerMergedTask == nil && all.handsOffMinutesPerUserMinute == nil)
         #expect(all.auditWaitShare == nil && all.verifierHours == nil)
         #expect(all.revertsPer100 == 0, "reverts are on the board itself")
@@ -191,12 +195,41 @@ struct SetupStatsComparedTests {
         #expect(none.revertsPer100 == nil && none.flakesCaughtPer100 == nil && none.processCost == nil)
     }
 
+    @Test func theLeadsCostIsSpreadOverTheMergesNotPutOnTheBaselineAlone() {
+        // One Claude merge in the baseline, nine Codex merges left out: the baseline carries a tenth of the lead's $20.
+        var f = QualityFigures()
+        (f.merged, f.soloMerges, f.soloWorkerCost, f.soloVerifierCost, f.codexLeftOut) = (10, 1, 2, 0.5, 9)
+        f.lead = LeadSpend(tokens: 10, cost: 20, unpricedDays: 0)
+        let cost = f.processCost!
+        #expect(cost.lead == 2 && cost.process == 2.5 && cost.share == 2.5 / 4.5, "not 20.5 / 22.5")
+    }
+
+    @Test func aLeadLedgerCoveringPartOfTheRangeIsMarkedPartial() async throws {
+        let (project, home) = try soloLayout()
+        // The ledger began after the range started: the days before it aren't counted.
+        let ledger = project.appendingPathComponent(".vibeswitcher").appendingPathComponent(LeadTokenLedger.fileName)
+        var lead = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: ledger)) as? [String: Any])
+        lead["since"] = Self.at - 3600
+        try JSONSerialization.data(withJSONObject: lead).write(to: ledger)
+        let late = try #require(await collect([project], home: home).quality?.all)
+        #expect(late.lead?.partial == true && late.lead?.cost == 3 && late.processCost?.leadPartial == true && late.processCost?.atLeast == true)
+        // A whole ledger, but another project with a board keeps none for the range.
+        lead["since"] = Self.at - 5 * 86_400
+        try JSONSerialization.data(withJSONObject: lead).write(to: ledger)
+        let other = try self.project("unledgered", board: LeadBoard(), in: temp.url("compared-other"))
+        let both = try #require(await collect([project, other], home: home).quality?.all)
+        #expect(both.lead?.partial == true)
+        let alone = try #require(await collect([project], home: home).quality?.all)
+        #expect(alone.lead?.partial == false)
+    }
+
     @Test func theLeadsUnpricedDaysMakeItsCostALowerBound() {
         var f = QualityFigures()
         (f.merged, f.soloMerges, f.soloWorkerCost, f.soloVerifierCost) = (1, 1, 4, 1)
         f.lead = LeadSpend(tokens: 10, cost: 1, unpricedDays: 1)
         let cost = f.processCost!
         #expect(cost.share == 2.0 / 6 && cost.atLeast)
+        #expect(cost.lead == 1, "one merge: the lead's whole cost")
         f.lead = LeadSpend(tokens: 10, cost: 1, unpricedDays: 0)
         #expect(f.processCost?.atLeast == false, "every part recorded: no rerun, no re-roll, the lead priced")
         f.lead = LeadSpend(tokens: 10, cost: nil, unpricedDays: 2)

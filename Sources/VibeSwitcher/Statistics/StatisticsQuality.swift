@@ -213,8 +213,10 @@ struct QualityPage: Equatable {
             return Figure(label: "Project lead", value: notRecorded, detail: "no lead's token ledger covers the range", help: help)
         }
         let unpriced = lead.unpricedDays > 0 ? ", \(count(lead.unpricedDays, "day")) with a model that has no price not in the cost" : ""
-        return Figure(label: "Project lead", value: lead.cost.map { (lead.unpricedDays > 0 ? "≥ " : "") + StatisticsPage.money($0) } ?? notRecorded,
-                      detail: "\(LeadReceipt.count(lead.tokens)) tokens\(unpriced)", help: help)
+        let partial = lead.partial ? "; part of the range has no lead ledger: not counted" : ""
+        let atLeast = lead.unpricedDays > 0 || lead.partial
+        return Figure(label: "Project lead", value: lead.cost.map { (atLeast ? "≥ " : "") + StatisticsPage.money($0) } ?? notRecorded,
+                      detail: "\(LeadReceipt.count(lead.tokens)) tokens\(unpriced)\(partial)", help: help)
     }
 
     // MARK: Breakdown

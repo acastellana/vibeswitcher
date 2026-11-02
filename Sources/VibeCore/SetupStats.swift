@@ -133,6 +133,8 @@ public struct ProjectFigures: Equatable, Sendable {
     public var leadTokens: Int?
     public var leadCost: Double?
     public var leadUnpricedDays = 0
+    /// The lead's ledger began after the range started: the days before it aren't in `leadTokens` or `leadCost`.
+    public var leadPartial = false
 
     public init() {}
 
@@ -175,6 +177,7 @@ public struct ProjectFigures: Equatable, Sendable {
         sum.leadTokens = SetupStatsMath.add(sum.leadTokens, other.leadTokens)
         sum.leadCost = SetupStatsMath.add(sum.leadCost, other.leadCost)
         sum.leadUnpricedDays += other.leadUnpricedDays
+        sum.leadPartial = sum.leadPartial || other.leadPartial
         return sum
     }
 }
@@ -380,10 +383,8 @@ public final class SetupStatsCollector: @unchecked Sendable {
             let name = (root as NSString).lastPathComponent
             projects.append(SetupStats.Project(name: name, root: root, hasArchive: archive != nil, figures: figures))
             if let board {
-                let incidents = incidents(root: root)
                 sources.append((root, QualitySource(name: name, tasks: Self.tasks(board: board, archive: archive ?? []), questions: board.questions,
-                                                   incidents: incidents ?? [:], keepsIncidents: incidents != nil,
-                                                   flakes: board.flakes?.map { ($0.task, $0.at) })))
+                                                   incidents: incidents(root: root), flakes: board.flakes?.map { ($0.task, $0.at) })))
             }
         }
         projects.sort { ($0.name, $0.root) < ($1.name, $1.root) }
@@ -396,7 +397,11 @@ public final class SetupStatsCollector: @unchecked Sendable {
             sources.sort { $0.root < $1.root }
             stats.quality = SetupQualityMath.quality(sources.map(\.source), window: window, weeks: weeks(ending: range.end),
                                                      mergeLines: mergeLines(range))
-            stats.quality?.all.lead = total?.leadTokens.map { LeadSpend(tokens: $0, cost: total?.leadCost, unpricedDays: total?.leadUnpricedDays ?? 0) }
+            // A project with a board but no lead ledger for the range: its lead's spend isn't in the sum.
+            let unledgered = projects.contains { $0.figures != nil && $0.figures?.leadTokens == nil }
+            stats.quality?.all.lead = total?.leadTokens.map {
+                LeadSpend(tokens: $0, cost: total?.leadCost, unpricedDays: total?.leadUnpricedDays ?? 0, partial: (total?.leadPartial ?? false) || unledgered)
+            }
         }
         return stats
     }
@@ -433,19 +438,16 @@ public final class SetupStatsCollector: @unchecked Sendable {
     }
 
     /// The incidents a project's record names tasks in (where its records_dir keeps incidents.md, and the board's
-    /// folder, before a move), by task slug; nil when it keeps no readable incidents record.
-    private func incidents(root: String) -> [String: [Double]]? {
+    /// folder, before a move), by task slug. The lead's record_incident makes the file on the first one: none is none.
+    private func incidents(root: String) -> [String: [Double]] {
         let store = BoardStore(root: root)
         let paths = Array(Set([store.recordPath("incidents.md"), (store.folder as NSString).appendingPathComponent("incidents.md")]))
-        var found: [String: [Double]]?
+        var found: [String: [Double]] = [:]
         for path in paths.sorted() {
             let parsed: [String: [Double]]? = cached(path) { path in
                 (try? String(contentsOfFile: path, encoding: .utf8)).map(SetupQualityMath.incidents)
             }
-            guard let parsed else { continue }
-            var sum = found ?? [:]
-            for (slug, times) in parsed { sum[slug, default: []] += times }
-            found = sum
+            for (slug, times) in parsed ?? [:] { found[slug, default: []] += times }
         }
         return found
     }
@@ -570,6 +572,7 @@ public final class SetupStatsCollector: @unchecked Sendable {
         f.leadTokens = tokens
         f.leadCost = cost
         f.leadUnpricedDays = unpriced
+        f.leadPartial = since > window.t0
     }
 
     // MARK: Mac-wide

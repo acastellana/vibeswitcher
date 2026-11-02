@@ -1509,7 +1509,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             (f.soloMerges, f.soloWorkerCost, f.soloVerifierCost, f.soloReran, f.rerolledLeftOut) = (merges, worker, verifier, reran, rerolled)
             if let codex { (f.codexLeftOut, f.codexTokens) = (f.merged, codex) }
             (f.auditsKept, f.importantFixed, f.sentBack, f.flakesCaught) = (f.audited, fixed, sentBack, flakes)
-            (f.incidents, f.incidentsWatched) = (incidents, f.merged)
+            f.incidents = incidents
             (f.waited, f.waitedSpan, f.auditWaited) = (f.timed, f.timedSpan, f.timedSpan * waited)
             f.verifierHours = verifierHours
         }

@@ -277,18 +277,18 @@ struct StatisticsModelTests {
                 (f.codexLeftOut, f.codexTokens) = (1, 1_500_000)
                 (f.timed, f.timedWorked) = (1, 1800)
                 f.mergeFirstTry = MergeFirstTry(counted: 1, firstTry: 0)
-                (f.sentBack, f.flakesCaught, f.incidentsWatched) = (1, 0, 1)
+                (f.sentBack, f.flakesCaught) = (1, 0)
                 (f.workerHours, f.busyHours) = (0.5, 0.5)
             } else {
                 (f.soloMerges, f.soloWorkerCost, f.soloVerifierCost, f.soloReran) = (2, 6, 3, 1)
-                (f.auditsKept, f.importantFixed, f.flakesCaught, f.incidentsWatched) = (2, 1, 1, 2)
+                (f.auditsKept, f.importantFixed, f.flakesCaught) = (2, 1, 1)
             }
         }
         fill(&quality.byAgent[0].figures, codex: false)
         fill(&quality.byAgent[1].figures, codex: true)
         var all = quality.all
         fill(&all, codex: false)
-        (all.codexLeftOut, all.codexTokens, all.flakesCaught, all.incidentsWatched, all.sentBack) = (1, 1_500_000, 1, 3, 1)
+        (all.codexLeftOut, all.codexTokens, all.flakesCaught, all.sentBack) = (1, 1_500_000, 1, 1)
         all.mergeFirstTry = MergeFirstTry(counted: 3, firstTry: 1)
         all.lead = LeadSpend(tokens: 2_400_000, cost: 1.5, unpricedDays: 0)
         quality.all = all
@@ -303,9 +303,10 @@ struct StatisticsModelTests {
         func row(_ label: String) throws -> ComparedPage.Row { try #require(page.groups.flatMap(\.rows).first { $0.label == label }) }
         // Process cost: All has the lead; Claude's hasn't (in All only); Codex's tokens have no price.
         let cost = try row("Process cost")
-        #expect(cost.cells.map(\.value) == ["≥ 43%", "≥ 33%", "Not recorded"])
-        #expect(cost.cells[0].detail == "$4.50 of $10.50 over 2 merges · lead $1.50, verifiers $3.00 · not recorded: 1 merge rerun "
-            + "· Codex tokens 1.5M, not in the cost")
+        // All: the lead's $1.50 spread over 3 merges, the baseline's 2 carry $1.
+        #expect(cost.cells.map(\.value) == ["≥ 40%", "≥ 33%", "Not recorded"])
+        #expect(cost.cells[0].detail == "$4.00 of $10.00 over 2 merges · lead $1.00 (2 of 3 merges' share of $1.50), verifiers $3.00 "
+            + "· not recorded: 1 merge rerun · Codex tokens 1.5M, not in the cost")
         #expect(cost.cells[1].detail == "$3.00 of $9.00 over 2 merges · verifiers $3.00 · not recorded: the lead's (in All only), 1 merge rerun")
         #expect(cost.cells[2].detail == "Codex tokens have no price: 1.5M, not in the cost")
         // Caught beside escaped.
@@ -339,13 +340,14 @@ struct StatisticsModelTests {
         old.createdToMerged = [60, 120]
         let page = ComparedPage(all: old, byAgent: [])
         let cells = Dictionary(uniqueKeysWithValues: page.groups.flatMap(\.rows).map { ($0.label, $0.cells[0]) })
-        for label in ["Process cost", "Important findings fixed", "Test failures sent back", "Flaky tests caught by reruns", "Incidents",
+        for label in ["Process cost", "Important findings fixed", "Test failures sent back", "Flaky tests caught by reruns",
                       "Hours of work per hour", "Hands-off work per minute of yours"] {
             #expect(cells[label]?.value == "Not recorded", "\(label)")
             #expect(cells[label]?.detail?.isEmpty == false, "\(label) says why")
         }
         #expect(cells["Process cost"]?.detail == "no merge's cost is known")
         #expect(cells["Reverts"]?.value == "0", "reverts are kept on the board")
+        #expect(cells["Incidents"]?.value == "0", "the lead records incidents: no record is none")
         // Only re-rolled merges with a known cost.
         old.rerolledLeftOut = 2
         #expect(ComparedPage.processCost(old, all: true).detail == "the merges with a known cost were re-rolled: their attempts aren't split")
@@ -379,6 +381,9 @@ struct StatisticsModelTests {
         // The lead's days without a price: what's known, marked at least.
         #expect(QualityPage.lead(LeadSpend(tokens: 5000, cost: 2, unpricedDays: 1)).value == "≥ $2.00")
         #expect(QualityPage.lead(LeadSpend(tokens: 5000, cost: nil, unpricedDays: 3)).value == "Not recorded")
+        // A ledger that began after the range started, or a project with none: what's known, marked at least.
+        let partial = QualityPage.lead(LeadSpend(tokens: 5000, cost: 2, unpricedDays: 0, partial: true))
+        #expect(partial.value == "≥ $2.00" && partial.detail == "5.0k tokens; part of the range has no lead ledger: not counted")
     }
 
     @Test func itShowsLoadingUntilTheStatsAreInThenThem() async throws {

@@ -124,11 +124,14 @@ public struct LeadSpend: Equatable, Sendable {
     public var cost: Double?
     /// Its days with a model `LeadPrices` has no price for: their cost isn't in `cost`.
     public var unpricedDays: Int
+    /// Part of the range isn't covered: a ledger began after the range started, or a project keeps none for it.
+    public var partial: Bool
 
-    public init(tokens: Int, cost: Double?, unpricedDays: Int) {
+    public init(tokens: Int, cost: Double?, unpricedDays: Int, partial: Bool = false) {
         self.tokens = tokens
         self.cost = cost
         self.unpricedDays = unpricedDays
+        self.partial = partial
     }
 }
 
@@ -226,9 +229,8 @@ public struct QualityFigures: Equatable, Sendable {
     /// The flake ledger's entries in the range about these merges' tasks (each a flaky test a rerun caught); nil when
     /// no project keeps a ledger.
     public var flakesCaught: Int?
-    /// Merges named by an incident recorded after they merged, and the merges whose project keeps an incidents record.
+    /// Merges named by an incident recorded after they merged.
     public var incidents = 0
-    public var incidentsWatched = 0
     /// The solo baseline's merges: cost known, no re-roll, their workers' tokens all priced (no Codex worker); their
     /// workers' cost, their verifiers', and those of them whose merge's tests were rerun.
     public var soloMerges = 0
@@ -284,8 +286,6 @@ struct QualitySource {
     var questions: [LeadQuestion]
     /// When each incident naming a task was recorded, by the task's slug.
     var incidents: [String: [Double]]
-    /// It keeps an incidents record (incidents.md): without one, no incident is known either way.
-    var keepsIncidents = false
     /// Its flake ledger: each entry's task and when; nil when its board keeps none.
     var flakes: [(task: String, at: Double?)]?
 }
@@ -303,7 +303,6 @@ enum SetupQualityMath {
         var sentBack: Bool?
         var escaped: Bool
         var incident: Bool
-        var keepsIncidents: Bool
         var neededNobody: Bool
     }
 
@@ -363,8 +362,7 @@ enum SetupQualityMath {
                 let messaged = task.notes?.contains { $0.kind == .message && $0.at > began } ?? false
                 let rerolled = max(task.rerolls?.count ?? 0, task.receipt?.rerolls ?? 0) > 0
                 merges.append(Merge(task: task, view: view, at: at, codex: view.codex, model: model, firstTry: firstTry, sentBack: sentBack,
-                                    escaped: reverted || incident, incident: incident, keepsIncidents: source.keepsIncidents,
-                                    neededNobody: !asked && !messaged && !rerolled))
+                                    escaped: reverted || incident, incident: incident, neededNobody: !asked && !messaged && !rerolled))
             }
         }
         merges.sort { $0.at < $1.at }
@@ -446,10 +444,7 @@ enum SetupQualityMath {
                 f.auditsKept += 1
                 f.importantFixed += audits.findings.filter { $0.severity == .important && $0.status == .fixed }.count
             }
-            if merge.keepsIncidents {
-                f.incidentsWatched += 1
-                if merge.incident { f.incidents += 1 }
-            }
+            if merge.incident { f.incidents += 1 }
             f.rerolls += max(task.rerolls?.count ?? 0, task.receipt?.rerolls ?? 0)
             if merge.escaped { f.escapes += 1 }
             if merge.neededNobody { f.neededNobody += 1 }

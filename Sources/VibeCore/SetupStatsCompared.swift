@@ -15,11 +15,15 @@ public struct ProcessCost: Equatable, Sendable {
     public var solo: Double
     /// Their verifiers' (and finders') cost.
     public var verifiers: Double
-    /// The project lead's, on the range's days; nil when not recorded, or for one agent's merges (the lead isn't split
-    /// by agent).
+    /// The baseline merges' share of the project lead's cost on the range's days (spread evenly over the range's
+    /// merges); nil when not recorded, or for one agent's merges (the lead isn't split by agent).
     public var lead: Double?
-    /// The lead's days with a model that has no price: their cost isn't in `lead`.
+    /// The lead's cost on the range's days, whole, and the range's merges it's spread over.
+    public var leadWhole: Double?
+    public var merged: Int
+    /// The lead's days with a model that has no price, or days its ledger doesn't cover: their cost isn't in `lead`.
     public var leadUnpricedDays: Int
+    public var leadPartial: Bool
     /// Of `merges`, those whose merge's tests were rerun: what the reruns cost isn't recorded.
     public var reran: Int
     /// Merges with a known cost left out: re-rolled (their attempts' worker tokens aren't split, so their re-rolled
@@ -34,7 +38,7 @@ public struct ProcessCost: Equatable, Sendable {
     public var share: Double? { total > 0 ? process / total : nil }
     /// A part of the process's cost isn't recorded (the lead's, a priced day of it, a merge rerun's, a re-rolled
     /// attempt's): the real share is at least `share`.
-    public var atLeast: Bool { lead == nil || leadUnpricedDays > 0 || reran > 0 || rerolledLeftOut > 0 }
+    public var atLeast: Bool { lead == nil || leadUnpricedDays > 0 || leadPartial || reran > 0 || rerolledLeftOut > 0 }
 }
 
 extension QualityFigures {
@@ -43,14 +47,17 @@ extension QualityFigures {
     /// Process cost: the share of the total that isn't the implementing worker's. Assumes a plain session per task
     /// would have spent what the worker of the attempt that merged spent, and nothing else: the merges whose cost is
     /// known, not re-rolled (their workers' tokens aren't split by attempt) and not worked by Codex (its tokens have no
-    /// price) are the baseline; their verifiers' cost and the lead's (every lead token on the range's days, whatever
-    /// task it went to, so including tasks that didn't merge) are the process's. Merge reruns and re-rolled attempts
-    /// aren't priced, so the share is a lower bound when any happened. Nil when no merge fits the baseline.
+    /// price) are the baseline; their verifiers' cost and their share of the lead's are the process's. The lead's
+    /// tokens aren't kept by task, so its cost on the range's days (tasks that didn't merge included) is taken as
+    /// spread evenly over the range's merges, and the baseline merges carry their count's share of it. Merge reruns,
+    /// re-rolled attempts and the lead's unpriced or unrecorded days aren't priced, so the share is a lower bound when
+    /// any happened. Nil when no merge fits the baseline.
     public var processCost: ProcessCost? {
-        guard soloMerges > 0 else { return nil }
-        return ProcessCost(merges: soloMerges, solo: soloWorkerCost, verifiers: soloVerifierCost, lead: lead?.cost,
-                           leadUnpricedDays: lead?.unpricedDays ?? 0, reran: soloReran, rerolledLeftOut: rerolledLeftOut,
-                           codexLeftOut: codexLeftOut)
+        guard soloMerges > 0, merged > 0 else { return nil }
+        let share = lead?.cost.map { $0 * Double(soloMerges) / Double(merged) }
+        return ProcessCost(merges: soloMerges, solo: soloWorkerCost, verifiers: soloVerifierCost, lead: share, leadWhole: lead?.cost,
+                           merged: merged, leadUnpricedDays: lead?.unpricedDays ?? 0, leadPartial: lead?.partial ?? false, reran: soloReran,
+                           rerolledLeftOut: rerolledLeftOut, codexLeftOut: codexLeftOut)
     }
 
     // MARK: (2) What it caught before merge, per 100 merged tasks
@@ -75,9 +82,9 @@ extension QualityFigures {
     /// Merges since reverted, per 100 merged tasks: what the process missed. Nil when nothing merged.
     public var revertsPer100: Double? { Self.per100(reverts, merged) }
 
-    /// Merges named by an incident recorded after they merged, per 100 merges whose project keeps an incidents record.
-    /// Nil when none does.
-    public var incidentsPer100: Double? { Self.per100(incidents, incidentsWatched) }
+    /// Merges named by an incident recorded after they merged, per 100 merged tasks. The lead records incidents
+    /// (incidents.md, made on the first): a project without the file has had none. Nil when nothing merged.
+    public var incidentsPer100: Double? { Self.per100(incidents, merged) }
 
     // MARK: (4) Parallel time saved
 

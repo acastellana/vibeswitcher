@@ -50,7 +50,8 @@ struct ComparedPage: Equatable {
         groups = [
             Group(title: "What it costs", rows: [
                 row("Process cost", "The lead's and verifiers' share of the cost (merge reruns and re-rolled attempts aren't priced) over the "
-                    + "merges whose solo cost is known: their workers' cost is the solo baseline. ≥: a part isn't recorded.", Self.processCost),
+                    + "merges whose solo cost is known: their workers' cost is the solo baseline, and the lead's cost is taken as spread evenly "
+                    + "over the range's merges. ≥: a part isn't recorded.", Self.processCost),
             ]),
             Group(title: "Caught before merge, per 100 merged", rows: [
                 row("Important findings fixed", "Important findings a later audit saw fixed, per 100 merges whose audits are kept: a solo "
@@ -73,10 +74,8 @@ struct ComparedPage: Equatable {
                 row("Reverts", "Merges since reverted, per 100 merges: what the process let through.") { f, _ in
                     Self.per100(f.revertsPer100, f.reverts, over: f.merged, nil, f, missing: "")
                 },
-                row("Incidents", "Merges named by an incident recorded after they merged, per 100 merges whose project keeps an incidents "
-                    + "record.") { f, _ in
-                    Self.per100(f.incidentsPer100, f.incidents, over: f.incidentsWatched, "whose project keeps an incidents record", f,
-                                missing: "no project keeps an incidents record")
+                row("Incidents", "Merges named by an incident the lead recorded after they merged, per 100 merges.") { f, _ in
+                    Self.per100(f.incidentsPer100, f.incidents, over: f.merged, nil, f, missing: "")
                 },
             ]),
             Group(title: "Time", rows: [
@@ -116,9 +115,11 @@ struct ComparedPage: Equatable {
         guard let share = cost.share else { return Cell(value: none, detail: "nothing spent") }
         var parts = ["\(StatisticsPage.money(cost.process)) of \(StatisticsPage.money(cost.total)) over \(QualityPage.count(cost.merges, "merge"))"]
         var unknown: [String] = []
-        if let lead = cost.lead {
-            parts.append("lead \(StatisticsPage.money(lead)), verifiers \(StatisticsPage.money(cost.verifiers))")
+        if let lead = cost.lead, let whole = cost.leadWhole {
+            let spread = cost.merges == cost.merged ? "" : " (\(cost.merges) of \(cost.merged) merges' share of \(StatisticsPage.money(whole)))"
+            parts.append("lead \(StatisticsPage.money(lead))\(spread), verifiers \(StatisticsPage.money(cost.verifiers))")
             if cost.leadUnpricedDays > 0 { unknown.append("the lead's unpriced days") }
+            if cost.leadPartial { unknown.append("the lead's days before its ledger") }
         } else {
             parts.append("verifiers \(StatisticsPage.money(cost.verifiers))")
             unknown.append(all ? "the lead's" : "the lead's (in All only)")
