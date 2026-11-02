@@ -124,7 +124,7 @@ struct StatisticsPage: Equatable {
     }
 
     /// The table's columns, in order.
-    static let columns = ["Merged", "Abandoned", "Audits", "Flakes", "Worker hours", "Cost", "Codex share", "Median to merge"]
+    static let columns = ["Merged", "Abandoned", "Audits · rounds", "Flakes", "Worker hours", "Cost", "Codex share", "Median to merge"]
 
     /// One project's row (or the totals'): a cell per column; `note` under its name.
     struct ProjectRow: Equatable, Identifiable {
@@ -212,13 +212,14 @@ struct StatisticsPage: Equatable {
         guard let f = figures else {
             return ProjectRow(name: name, note: note, cells: Array(repeating: notRecorded, count: columns.count), id: id)
         }
-        let audits = f.audited == 0 ? "0" : "\(f.audited) · \(f.auditRounds) round\(f.auditRounds == 1 ? "" : "s")"
+        let audits = f.audited == 0 ? "0" : "\(f.audited) · \(f.auditRounds)"
         let flakes = f.flakes.map { "\($0.flakes)" } ?? notRecorded
-        // Cost: only the receipts whose cost is known; none ended is $0 spent, ended but none costed isn't known.
+        // Cost: only the receipts whose cost is known; none ended is $0 spent, ended but none costed isn't known, and
+        // some costed is at least what they cost.
         let cost: String
         if f.ended == 0 { cost = money(0) }
         else if f.costed == 0 { cost = notRecorded }
-        else { cost = money(f.cost) + (f.costed < f.ended ? " (\(f.costed) of \(f.ended))" : "") }
+        else { cost = (f.costed < f.ended ? "≥ " : "") + money(f.cost) }
         let share = f.codexShare.map { "\(Int(($0 * 100).rounded()))%" } ?? none
         let median = f.medianStartToMerge.map(duration) ?? none
         return ProjectRow(name: name, note: note,

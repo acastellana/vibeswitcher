@@ -61,7 +61,8 @@ struct StatisticsPageView: View {
                 Text("Projects")
             } footer: {
                 Text("Merges, audits and start-to-merge count tasks merged in the range; worker hours, cost and Codex share "
-                     + "the tasks that ended in it. Not recorded: the data isn't kept on this Mac. –: nothing to count.")
+                     + "the tasks that ended in it. ≥: some of those tasks' cost isn't known. Not recorded: the data isn't kept on "
+                     + "this Mac. –: nothing to count.")
                     .font(.caption).foregroundStyle(.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -121,14 +122,25 @@ private struct ProjectTable: View {
     let rows: [StatisticsPage.ProjectRow]
     let total: StatisticsPage.ProjectRow?
 
+    /// A column's title on two lines when it's two words or more, so the columns stay narrow.
+    static func header(_ column: String) -> String {
+        switch column {
+        case "Audits · rounds": return "Audits ·\nrounds"
+        case "Median to merge": return "Median\nto merge"
+        default: return column.replacingOccurrences(of: " ", with: "\n")
+        }
+    }
+
     var body: some View {
         if rows.isEmpty {
             Text("No project with a board").foregroundStyle(.secondaryInk)
         } else {
-            Grid(alignment: .trailing, horizontalSpacing: 14, verticalSpacing: 8) {
-                GridRow {
+            Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 8) {
+                GridRow(alignment: .bottom) {
                     Text("Project").gridColumnAlignment(.leading)
-                    ForEach(StatisticsPage.columns, id: \.self) { Text($0).multilineTextAlignment(.trailing) }
+                    ForEach(StatisticsPage.columns, id: \.self) {
+                        Text(Self.header($0)).multilineTextAlignment(.trailing).fixedSize()
+                    }
                 }
                 .font(.caption).foregroundStyle(.secondaryInk)
                 .accessibilityHidden(true)
@@ -149,14 +161,21 @@ private struct ProjectGridRow: View {
     var body: some View {
         GridRow(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(row.name).lineLimit(1).truncationMode(.middle)
-                if let note = row.note { Text(note).font(.caption2).foregroundStyle(.secondaryInk) }
+                Text(row.name).lineLimit(1)
+                if let note = row.note { Text(note).font(.caption2).foregroundStyle(.secondaryInk).lineLimit(1).help(note) }
             }
-            ForEach(Array(row.cells.enumerated()), id: \.offset) { _, cell in
-                Text(cell)
-                    .monospacedDigit()
-                    .font(cell == StatisticsPage.notRecorded ? .caption : nil)
-                    .foregroundStyle(cell == StatisticsPage.notRecorded ? .secondaryInk : .primary)
+            .frame(minWidth: 130, maxWidth: 170, alignment: .leading)
+            if row.cells.allSatisfy({ $0 == StatisticsPage.notRecorded }) {
+                // A board that can't be read: said once, across the row.
+                Text(StatisticsPage.notRecorded).foregroundStyle(.secondaryInk)
+                    .gridCellColumns(row.cells.count).gridCellAnchor(.leading)
+            } else {
+                ForEach(Array(row.cells.enumerated()), id: \.offset) { _, cell in
+                    Text(cell)
+                        .monospacedDigit()
+                        .fixedSize()
+                        .foregroundStyle(cell == StatisticsPage.notRecorded ? .secondaryInk : .primary)
+                }
             }
         }
         .accessibilityElement(children: .ignore)

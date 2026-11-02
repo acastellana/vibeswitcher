@@ -92,19 +92,19 @@ struct StatisticsModelTests {
         #expect(weekly.meter == StatisticsPage.Meter(used: 0.64, elapsed: 0.52, reached: false))
         #expect(weekly.spoken == "Claude weekly: 64%, 12 points ahead of pace")
 
-        #expect(StatisticsPage.columns == ["Merged", "Abandoned", "Audits", "Flakes", "Worker hours", "Cost", "Codex share", "Median to merge"])
+        #expect(StatisticsPage.columns == ["Merged", "Abandoned", "Audits · rounds", "Flakes", "Worker hours", "Cost", "Codex share", "Median to merge"])
         #expect(page.projects.map(\.name) == ["alpha", "beta", "gamma"])
-        #expect(page.projects[0].cells == ["3", "1", "2 · 3 rounds", "2", "6.5 h", "$12.50 (3 of 4)", "25%", "1 h"])
+        #expect(page.projects[0].cells == ["3", "1", "2 · 3", "2", "6.5 h", "≥ $12.50", "25%", "1 h"])
         #expect(page.projects[0].note == nil)
         // No ledger, no cost known: not recorded; nothing merged: no median ("–"), never 0.
         #expect(page.projects[1].cells == ["0", "0", "0", "Not recorded", "1 h", "Not recorded", "0%", "–"])
         #expect(page.projects[1].note == "no archive: archived tasks not counted")
         #expect(page.projects[2].cells == Array(repeating: "Not recorded", count: 8))
         #expect(page.projects[2].note == "board not readable")
-        #expect(page.projects[0].spoken.hasPrefix("alpha, Merged 3, Abandoned 1, Audits 2 · 3 rounds"))
+        #expect(page.projects[0].spoken.hasPrefix("alpha, Merged 3, Abandoned 1, Audits · rounds 2 · 3"))
         let total = try #require(page.total)
         #expect(total.name == "Total")
-        #expect(total.cells == ["3", "1", "2 · 3 rounds", "2", "7.5 h", "$12.50 (3 of 6)", "17%", "1 h"])
+        #expect(total.cells == ["3", "1", "2 · 3", "2", "7.5 h", "≥ $12.50", "17%", "1 h"])
     }
 
     @Test func nothingReadableIsNotRecordedEverywhere() {
@@ -115,6 +115,11 @@ struct StatisticsModelTests {
         #expect(page.projects.isEmpty)
         #expect(page.mac.map(\.label) == ["Load", "Freezes", "Boost hours", "Merges per hour", "Claude usage", "Codex usage"])
         #expect(page.mac.allSatisfy { $0.value == "Not recorded" && $0.meter == nil })
+        // Cost: nothing ended is $0 spent; every task's cost known is that cost.
+        #expect(StatisticsPage.row(name: "idle", note: nil, ProjectFigures(), id: "idle").cells[5] == "$0.00")
+        var costed = ProjectFigures()
+        (costed.ended, costed.costed, costed.cost) = (2, 2, 3)
+        #expect(StatisticsPage.row(name: "costed", note: nil, costed, id: "costed").cells[5] == "$3.00")
     }
 
     @Test func itShowsLoadingUntilTheStatsAreInThenThem() async throws {
