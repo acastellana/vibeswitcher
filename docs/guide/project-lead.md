@@ -100,8 +100,8 @@ failed before compiling, and the lead had to hand its worker `--disable-sandbox`
   lints run; the audit and the merge's full run cover the rest, so a task about the session host stays Claude's;
 - `scripts/sandbox-app.sh` (the UI check in the real app): a UI task stays Claude's;
 - a change to the package's dependencies (`Package.resolved`): fetching them needs the network;
-- vs-heavy's view of it: there `sysctl` fails, so vs-heavy counts 4 cores (a smaller share for its builds), and its
-  holder note can't read the run's CPU time, so a waiter may see the Codex run as idle. Nothing acts on either.
+- vs-heavy's view of its CPU use: vs-heavy reads that with `ps`, which can't start there, so a waiter may see the
+  Codex run as idle. Nothing acts on it. (Its core count falls back to `getconf` where the `sysctl` command fails.)
 
 The on-demand `CodexRealRunTests/theProjectsChecksRunInARealCodexWorkersSandbox` runs these checks in a real Codex
 worker's sandbox.
