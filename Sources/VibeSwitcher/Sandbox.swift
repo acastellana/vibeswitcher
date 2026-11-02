@@ -250,9 +250,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
     let preferences = Preferences()
     /// Boost mode with the power source, your presence and the usage made up (`boost STATE`): never the Mac's.
     var boostSignals = (onAC: true, away: false, usage: AccountUsage())
+    /// The battery's made-up charge for boost (`boost battery-on`, `battery-low`).
+    var boostCharge = 86
     lazy var boostWatch: BoostWatch = {
         let watch = BoostWatch(preferences: preferences)
         watch.onAC = { [weak self] in self?.boostSignals.onAC }
+        watch.percent = { [weak self] in self?.boostCharge }
         watch.away = { [weak self] in self?.boostSignals.away ?? false }
         watch.usage = { [weak self] in self?.boostSignals.usage ?? AccountUsage() }
         watch.currentFolder = { [weak self] in self?.store.sessions.first(where: \.isCurrent)?.cwd }
@@ -978,7 +981,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("wallet [STATE]", "shows a made-up wallet request card as the sheet, in STATE: " + Driver.walletCards.map(\.state).joined(separator: ", ") + " (all: every state, one under another); settings wallet shows its Settings tab"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
-        ("boost off|on|away|present|battery|veto", "Boost mode in a made-up state (the power source, your presence and the usage made up): off; On on AC; Automatic away on AC (boosted), at the Mac, away on battery, or away on AC with the usage watch's veto. Settings and the menu-bar sheet show it"),
+        ("boost off|on|away|present|battery|battery-on|battery-low|veto", "Boost mode in a made-up state (the power source, the charge, your presence and the usage made up): off; On on AC; Automatic away on AC (boosted), at the Mac, away on battery; On on battery with Also on battery at 86 % (boosted) or 24 %; or away on AC with the usage watch's veto. Settings and the menu-bar sheet show it"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
         ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", ")),
         ("close settings|sheet", "closes Settings or the sheet"),
@@ -1673,11 +1676,17 @@ private final class Driver: NSObject, NSApplicationDelegate {
             case "on": (preferences.boostMode, boostSignals) = (.on, (true, false, AccountUsage()))
             case "away": (preferences.boostMode, boostSignals) = (.automatic, (true, true, AccountUsage()))
             case "present": (preferences.boostMode, boostSignals) = (.automatic, (true, false, AccountUsage()))
-            case "battery": (preferences.boostMode, boostSignals) = (.automatic, (false, true, AccountUsage()))
+            case "battery":
+                preferences.boostOnBattery = false
+                (preferences.boostMode, boostSignals) = (.automatic, (false, true, AccountUsage()))
+            case "battery-on", "battery-low":
+                preferences.boostOnBattery = true
+                boostCharge = rest == "battery-on" ? 86 : 24
+                (preferences.boostMode, boostSignals) = (.on, (false, false, AccountUsage()))
             case "veto":
                 let limit = AccountUsage.Limit(name: "five_hour", usedPercent: 84, resetsAt: now + 7200, at: now)
                 (preferences.boostMode, boostSignals) = (.automatic, (true, true, AccountUsage(limits: [limit])))
-            default: return reply(false, "boost off|on|away|present|battery|veto")
+            default: return reply(false, "boost off|on|away|present|battery|battery-on|battery-low|veto")
             }
             boostWatch.look { [weak self] in self?.settle { reply(true, self?.boostWatch.state?.text ?? "not decided") } }
         case "wallet-ask": walletAsk(Array(words.dropFirst()), reply)
