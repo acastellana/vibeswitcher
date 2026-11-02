@@ -190,7 +190,7 @@ struct UsageRoutingTests: LeadTeamFixture {
                               hasCredits: credits, unlimited: unlimited, balance: balance, reached: reached, at: now.timeIntervalSince1970))
         }
         let cases: [(reading: CodexReading, room: Bool, text: String)] = [
-            (.unknown("no Codex session file"), false, "Codex usage not known (no Codex session file)"),
+            (.unknown("no Codex session file"), false, "Codex usage not known"),
             (usage([40]), true, "Codex 40%"),
             (usage([84.9]), true, "Codex 85%"),
             (usage([85]), false, "Codex 85%, no room"),
@@ -203,6 +203,9 @@ struct UsageRoutingTests: LeadTeamFixture {
             (usage([90, 40]), false, "Codex 5-hour 90%, weekly 40%, no room"),
             (usage([20, 40]), true, "Codex 5-hour 20%, weekly 40%"),
             (usage([10], reached: "rate_limit"), false, "Codex 10%, at a limit (rate_limit)"),
+            // A full 5-hour window whose reset isn't said: unknown, never room on the weekly alone (blind check).
+            (.known(CodexUsage(windows: [.init(usedPercent: 99, windowMinutes: 300), .init(usedPercent: 40, windowMinutes: 10080, resetsAt: resets)],
+                               at: now.timeIntervalSince1970)), false, "Codex usage not known (a limit's reset time isn't said)"),
         ]
         for item in cases {
             let codex = UsageRouting.codex(item.reading, now: now)
@@ -390,15 +393,19 @@ struct UsageRoutingTests: LeadTeamFixture {
     @Test func statusShowsBothAccountsUsageWithPaceAndWhereTheNextAutoTaskGoes() throws {
         let root = try repo()
         let lead = try routingLead(root, FakeRuntime())
+        // Neither account's usage known, and no task is auto: nothing to say.
         var status = lead.call("status", [:]).text
-        #expect(status.contains("Codex usage: not known") && status.contains("Next auto task → claude (Claude: Claude's usage not known, not tight; Codex usage not known"),
-                "\(status)")
+        #expect(!status.contains("Codex usage") && !status.contains("Next auto task"), "\(status)")
+        _ = lead.call("add_task", ["title": "Auto one", "goal": "g", "acceptance": ["a"], "agent": "auto"])
+        status = lead.call("status", [:]).text
+        #expect(status.contains("Codex usage: not known (no Codex session file under ")
+                && status.contains("Next auto task → claude (Claude: Claude's usage not known, not tight; Codex usage not known), auto-one first."), "\(status)")
         claudeWeekly(64, gone: 0.52)
         try rollout([Self.event(primary: Self.window(40, resets: soon), credits: Self.credits)])
         status = lead.call("status", [:]).text
         #expect(status.contains("the weekly limit (every model): 64% used, resets ") && status.contains(", 12 points ahead of pace"), "\(status)")
         #expect(status.contains("Codex usage (best effort: its newest session file") && status.contains("the weekly limit: 40% used (")
                 && status.contains("credits available (36762.87)"), "\(status)")
-        #expect(status.contains("Next auto task → codex (Codex: Claude weekly 64%, 12 points ahead of pace; Codex 40%)."), "\(status)")
+        #expect(status.contains("Next auto task → codex (Codex: Claude weekly 64%, 12 points ahead of pace; Codex 40%), auto-one first."), "\(status)")
     }
 }

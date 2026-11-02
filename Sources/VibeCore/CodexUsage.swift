@@ -375,10 +375,10 @@ public enum UsageRouting {
     /// `codexRoomWithCreditsPercent` with credits available), and no limit Codex says is reached; with it in words.
     /// Unknown is no room.
     public static func codex(_ reading: CodexReading, now: Date = Date()) -> (room: Bool, text: String) {
-        guard let usage = reading.usage else {
-            if case .unknown(let why) = reading { return (false, "Codex usage not known (\(why))") }
-            return (false, "Codex usage not known")
-        }
+        // Why it isn't known is status's Codex line's to say (`CodexReading.statusText`).
+        guard let usage = reading.usage else { return (false, "Codex usage not known") }
+        // A window with no reset time can't be told current or not: unknown, so no room (whatever the others say).
+        guard usage.windows.allSatisfy({ $0.resetsAt != nil }) else { return (false, "Codex usage not known (a limit's reset time isn't said)") }
         let windows = usage.current(now: now)
         guard !windows.isEmpty else { return (false, "Codex usage not known (its last reading's windows have reset)") }
         let percents = windows.count == 1 ? "\(Int(windows[0].usedPercent.rounded()))%"

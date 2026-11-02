@@ -1479,13 +1479,18 @@ public final class LeadToolset: MCPToolset {
 
     /// status's lines on both accounts' usage, each limit with its pace, and where the next auto task would go: Claude's
     /// when known, Codex's (or why it isn't known), and the next auto task's route (the first planned auto task's, else
-    /// one on the project's model).
+    /// one on the project's model). Codex's and the route only when they say something: either account's usage is
+    /// known, an open task is auto, or agent_default is auto (status stays bounded on a board that uses neither).
     func usageLines(sessions: [LeadSessionInfo]?, now: Date = Date()) -> [String] {
         var lines: [String] = []
         let claude = accountUsage(sessions: sessions, now: now)
         if let line = claude.statusText(now: now) { lines.append(line) }
-        lines.append(codexUsage.read(now: now).statusText(now: now))
-        let planned = store.load().tasks.first { $0.status == .planned && $0.workerAgent == .auto }
+        let codex = codexUsage.read(now: now)
+        let tasks = store.load().tasks
+        let auto = workflow.agentDefault == .auto || tasks.contains { $0.workerAgent == .auto && !Self.finishedStates.contains($0.status) }
+        guard auto || !claude.limits.isEmpty || codex.usage != nil else { return lines }
+        lines.append(codex.statusText(now: now))
+        let planned = tasks.first { $0.status == .planned && $0.workerAgent == .auto }
         let next = planned ?? LeadTask(slug: "next", title: "next", contract: LeadContract(goal: "", acceptance: [], boundaries: [], context: ""))
         let route = workerRoute(for: next, sessions: nil, now: now)
         lines.append("Next auto task → \(route.agent.rawValue) (\(route.why))" + (planned.map { ", \($0.slug) first" } ?? "")
