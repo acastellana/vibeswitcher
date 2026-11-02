@@ -27,6 +27,8 @@ struct PopoverView: View {
     var isSidebar = false
     var onOpenWindow: () -> Void = {}
     var onSettings: () -> Void = {}
+    /// The gear menu's Statistics…: the Statistics window.
+    var onStatistics: () -> Void = {}
     /// The "Notifications are off" banner's button: macOS's prompt if it never asked, else System Settings.
     var onAllowNotifications: () -> Void = { Notifier.openSettings() }
     /// Brief me, in the header, and its panel under it (none in the sidebar and the snapshots).
@@ -262,6 +264,7 @@ struct PopoverView: View {
                 Toggle("Notify when a session finishes", isOn: $preferences.notifyDone)
                 Toggle("Sidebar mode", isOn: $preferences.sidebarMode)
                 Divider()
+                Button("Statistics…", action: onStatistics)
                 Button("Settings…", action: onSettings)
                 Button("Quit VibeSwitcher", action: onQuit)
             } label: {

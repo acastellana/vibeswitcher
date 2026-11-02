@@ -14,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private lazy var notifier: Notifier? = Bundle.main.bundleIdentifier == nil ? nil : Notifier(preferences: preferences)
     private lazy var phoneAccess = PhoneAccess(store: store)
     private var settingsWindow: SettingsWindowController?
+    /// The Statistics window (`showStatistics`), and the collector it keeps (its parsed files cached between openings).
+    private var statisticsWindow: StatisticsWindowController?
     /// The transaction requests agents file (`vs-wallet request`), as cards in their chats: nothing goes to the Wallet Manager
     /// until you press Send to Wallet Manager; the Wallet Manager's answers go back to the asking session as messages.
     private lazy var walletDesk: WalletDesk = {
@@ -296,6 +298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                    self?.showMainWindow()
                                },
                                onSettings: { [weak self] in self?.showSettings(tab: .general) },
+                               onStatistics: { [weak self] in self?.showStatistics() },
                                onAllowNotifications: { [weak self] in self?.setup.allowNotifications() })
         var menuView = view
         menuView.briefing = briefing
@@ -311,6 +314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             onPause: sidebarView.onPause, onResume: sidebarView.onResume,
             isSidebar: true, onOpenWindow: { [weak self] in self?.showMainWindow() },
             onSettings: { [weak self] in self?.showSettings(tab: .general) },
+            onStatistics: sidebarView.onStatistics,
             onAllowNotifications: sidebarView.onAllowNotifications)))
         // Windows hidden by the earlier sidebar mode (or a crash during it) always come back.
         DispatchQueue.global(qos: .utility).async { SidebarWorkspace.restoreHiddenWindows() }
@@ -666,6 +670,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         settingsWindow?.show(tab: tab, reveal: reveal)
     }
 
+    /// The Statistics window: the whole setup's figures (`SetupStats`) for today, 7 or 30 days, worked out on the
+    /// collector's queue each time it opens. Its projects: the recent ones, the observed and created ones, and every
+    /// session's folder (the collector keeps those with a board, a worktree as its repository).
+    func showStatistics() {
+        popover.performClose(nil)
+        if statisticsWindow == nil {
+            let collector = SetupStatsCollector.standard()
+            statisticsWindow = StatisticsWindowController(model: StatisticsModel(collector: collector, projects: { [weak self] in
+                guard let self else { return [] }
+                return self.popoverState.recentProjects.map(\.path) + Array(self.store.observedProjects.keys)
+                    + Array(self.preferences.createdProjects.keys) + self.store.sessions.compactMap(\.cwd)
+            }))
+        }
+        loadRecentProjects()
+        statisticsWindow?.show()
+    }
+
     /// The welcome window: on first launch, and from Settings › General.
     private func showWelcome(firstRun: Bool) {
         popover.performClose(nil)
@@ -717,6 +738,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                                   boost: boostWatch)
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
             controller.onBoostMark = { [weak self] in self?.showSettings(tab: .general, reveal: .boost) }
+            controller.onStatistics = { [weak self] in self?.showStatistics() }
             controller.pane.configure = { [weak self] view in
                 guard let self else { return }
                 // A new view isn't in the window yet, and on its own it reports the light appearance.

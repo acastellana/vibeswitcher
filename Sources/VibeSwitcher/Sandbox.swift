@@ -1012,6 +1012,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
             let mark = Driver.allDoneMark()
             return AnyView(AllDoneCard(mark: mark, chat: ChatModel(), expanded: [AllDoneCard.key(mark)]).frame(width: 560).padding(16))
         }),
+        // The Statistics window's page (`StatisticsView`) on made-up stats for the last 7 days: two projects and one whose
+        // board can't be read, Mac-wide figures with boost hours and Codex tokens not recorded. Shown loading, then filled.
+        ("statistics", { _ in
+            let model = StatisticsModel(load: { _, range in Driver.statistics(range: range) })
+            model.reload()
+            return AnyView(StatisticsView(model: model).frame(width: StatisticsWindowController.size.width, height: 820))
+        }),
         ("lead-team", { driver in
             let team = Driver.leadTeam()
             return AnyView(LeadTeamView(root: driver.home + "/projects/sandbox-project", board: team.board, seen: team.seen, open: { _ in },
@@ -1406,6 +1413,40 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
         return LeadReceipt(ending: .merged, startedAt: end - worked * 1.6, endedAt: end, worked: worked, worker: tokens(opus, "claude-opus-5-5"),
                            verifier: fable.map { tokens($0, "claude-fable-5-1") }, rounds: fable == nil ? 0 : 1, tests: 1_412)
+    }
+
+    /// The `statistics` sheet's stats: made up, for `range`.
+    static func statistics(range: DateInterval) -> SetupStats {
+        let now = Date().timeIntervalSince1970
+        func figures(merged: Int, abandoned: Int, audited: Int, rounds: Int, flakes: Int?, hours: Double, cost: Double, costed: Int,
+                     codex: Int, claude: Int, minutes: [Double]) -> ProjectFigures {
+            var f = ProjectFigures()
+            (f.merged, f.abandoned, f.audited, f.auditRounds) = (merged, abandoned, audited, rounds)
+            f.flakes = flakes.map { ProjectFigures.Flakes.make(flakes: $0, tests: $0, merges: max(1, $0 - 1)) }
+            (f.workerHours, f.cost, f.costed, f.ended) = (hours, cost, costed, codex + claude)
+            (f.codexTasks, f.claudeTasks) = (codex, claude)
+            f.startToMerge = minutes.map { $0 * 60 }
+            return f
+        }
+        let payouts = figures(merged: 14, abandoned: 1, audited: 9, rounds: 13, flakes: 3, hours: 31.5, cost: 182.4, costed: 15,
+                              codex: 4, claude: 11, minutes: [48, 72, 95, 130, 61])
+        let site = figures(merged: 6, abandoned: 0, audited: 2, rounds: 2, flakes: nil, hours: 9.25, cost: 41.1, costed: 5,
+                           codex: 3, claude: 3, minutes: [35, 52, 44])
+        let projects = [SetupStats.Project.make(name: "example-payouts", root: "/example/payouts", hasArchive: true, figures: payouts),
+                        SetupStats.Project.make(name: "example-site", root: "/example/site", hasArchive: false, figures: site),
+                        SetupStats.Project.make(name: "example-old", root: "/example/old", hasArchive: true, figures: nil)]
+        let mac = SetupStats.MacWide.make(
+            load: LoadProfile.make(minutes: 9_840, median: 9.4, p90: 22.8, max: 41.2, minutesAt24: 610, minutesAt36: 42, cores: 14),
+            merges: MergeRate.make(recorded: 23, landed: 20, hours: 164),
+            freezes: Freezes.make(count: 2, hours: 164, partial: false, perDay: ["2026-10-29": 2], byLoad: nil, unsampled: 0),
+            hoursBoosted: nil,
+            boostNow: BoostState(on: true, why: "automatic: away, on AC", at: now),
+            claude: [UsageNow.make(name: "seven_day", model: nil, usedPercent: 64, resetsAt: now + 3.4 * 86_400, reached: false,
+                              pace: UsagePace(used: 64, elapsed: 52)),
+                     UsageNow.make(name: "five_hour", model: nil, usedPercent: 18, resetsAt: now + 2 * 3_600, reached: false,
+                              pace: UsagePace(used: 18, elapsed: 60))],
+            codex: [UsageNow.make(name: "weekly", model: nil, usedPercent: 31, resetsAt: nil, reached: false, pace: UsagePace(used: 31, elapsed: nil))])
+        return SetupStats.make(range: range, at: Date(), projects: projects, total: payouts.adding(site), mac: mac)
     }
 
     /// The `all-done` sheet's mark: a batch of four, three merged with receipts and one folded.

@@ -12,6 +12,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     var onFontSize: (Int) -> Void = { _ in }
     /// The toolbar's Boost mark clicked: Settings › General at Boost.
     var onBoostMark: () -> Void = {}
+    /// The toolbar's Statistics button: the Statistics window.
+    var onStatistics: () -> Void = {}
 
     private let store: SessionStore
     private let host: HostClient
@@ -589,10 +591,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private static let newItem = NSToolbarItem.Identifier("newSession")
     private static let homeItem = NSToolbarItem.Identifier("startPage")
     private static let briefItem = NSToolbarItem.Identifier("briefMe")
+    static let statisticsItem = NSToolbarItem.Identifier("statistics")
     static let boostItem = NSToolbarItem.Identifier("boostMark")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, Self.homeItem, .flexibleSpace, Self.newItem, .inspectorTrackingSeparator,
+        [.toggleSidebar, .sidebarTrackingSeparator, Self.homeItem, Self.statisticsItem, .flexibleSpace, Self.newItem, .inspectorTrackingSeparator,
          .flexibleSpace] + (briefing == nil ? [] : [Self.briefItem]) + [.toggleInspector]
     }
 
@@ -636,6 +639,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             item.action = #selector(showHomeAction(_:))
             return item
         }
+        if identifier == Self.statisticsItem {
+            let item = NSToolbarItem(itemIdentifier: identifier)
+            item.label = "Statistics"
+            item.toolTip = "Statistics: merges, audits, cost and load across your projects"
+            item.image = NSImage(systemSymbolName: "chart.bar", accessibilityDescription: "Statistics")
+            item.target = self
+            item.action = #selector(showStatisticsAction(_:))
+            return item
+        }
         if identifier == Self.briefItem, let briefing {
             let item = NSToolbarItem(itemIdentifier: identifier)
             item.label = "Brief Me"
@@ -665,6 +677,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private var selectedFolder: String? { model.selectedRow?.cwd }
 
     @objc func newSessionAction(_ sender: Any?) { actions.newSession(nil, selectedFolder) }
+
+    @objc func showStatisticsAction(_ sender: Any?) { onStatistics() }
 
     @objc func newShellAction(_ sender: Any?) {
         // No Shell preset: nothing (with no folder, a nil preset would start a project lead).
