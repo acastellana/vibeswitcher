@@ -250,9 +250,14 @@ public final class SetupStatsCollector: @unchecked Sendable {
     private let counter = NSLock()
     private var parsed = 0
     private var onMain = 0
+    /// By path: the `read(2)` calls the jsonl files took, their bytes, and the largest one (for the tests).
+    private var readLog: [String: Reads] = [:]
+    struct Reads: Equatable { var calls = 0, bytes = 0, largest = 0 }
 
     /// A jsonl line longer than this is passed over (read through, never held).
     public static let maxLine = 8 << 20
+    /// The bytes a jsonl file is read in, a read at a time.
+    static let readSize = 1 << 16
     /// A board.json larger than this isn't read (its figures: not recorded).
     public static let maxBoard: Int64 = 128 << 20
 
@@ -294,6 +299,21 @@ public final class SetupStatsCollector: @unchecked Sendable {
     /// How many files were parsed (not served from the cache), and how many times the work ran on the main thread.
     public var parses: Int { counter.withLock { parsed } }
     public var mainThreadRuns: Int { counter.withLock { onMain } }
+    /// The reads of the jsonl file at `path` so far, all collections together.
+    func reads(of path: String) -> Reads { counter.withLock { readLog[path] ?? Reads() } }
+
+    /// `jsonLines(path)`, its reads tallied in `readLog`.
+    private func jsonLines(_ path: String) -> [[String: Any]]? {
+        Self.jsonLines(path) { count in
+            counter.withLock {
+                var tally = readLog[path] ?? Reads()
+                tally.calls += 1
+                tally.bytes += count
+                tally.largest = max(tally.largest, count)
+                readLog[path] = tally
+            }
+        }
+    }
 
     // MARK: - The work, on `queue`
 
@@ -307,7 +327,7 @@ public final class SetupStatsCollector: @unchecked Sendable {
             let folder = (root as NSString).appendingPathComponent(".vibeswitcher")
             let archivePath = (folder as NSString).appendingPathComponent("board-archive.jsonl")
             let archive: [TaskView]? = cached(archivePath) { path in
-                Self.jsonLines(path).map { lines in lines.compactMap { TaskView($0) } }
+                jsonLines(path).map { lines in lines.compactMap { TaskView($0) } }
             }
             let board: BoardView? = cached((folder as NSString).appendingPathComponent("board.json")) { path in BoardView(path: path) }
             let figures = board.map { Self.figures(board: $0, archive: archive ?? [], window: window) }
@@ -418,7 +438,7 @@ public final class SetupStatsCollector: @unchecked Sendable {
             var found: [RecorderLine] = [], any = false
             for day in days {
                 let lines: [RecorderLine]? = cached((stats as NSString).appendingPathComponent("\(kind)-\(day).jsonl")) { path in
-                    Self.jsonLines(path).map { $0.compactMap { RecorderLine($0, stamps: stamps) } }
+                    jsonLines(path).map { $0.compactMap { RecorderLine($0, stamps: stamps) } }
                 }
                 guard let lines else { continue }
                 any = true
@@ -539,8 +559,8 @@ public final class SetupStatsCollector: @unchecked Sendable {
     // MARK: Reading
 
     /// The JSON objects of `path`'s lines, streamed: a line that doesn't parse (cut short by a crash) or is longer
-    /// than `maxLine` is passed over. Nil when the file can't be opened.
-    static func jsonLines(_ path: String) -> [[String: Any]]? {
+    /// than `maxLine` is passed over. Nil when the file can't be opened. `onRead`: told each read's byte count.
+    static func jsonLines(_ path: String, onRead: (Int) -> Void = { _ in }) -> [[String: Any]]? {
         let fd = open(path, O_RDONLY | O_CLOEXEC)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
@@ -552,11 +572,12 @@ public final class SetupStatsCollector: @unchecked Sendable {
                   let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return }
             found.append(object)
         }
-        var buffer = [UInt8](repeating: 0, count: 1 << 16)
+        var buffer = [UInt8](repeating: 0, count: readSize)
         while true {
             let count = buffer.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
             if count < 0, errno == EINTR { continue }
             guard count > 0 else { break }
+            onRead(count)
             var start = 0
             // Bytes of the line under way: held up to `maxLine`, then dropped and the rest of the line read through.
             func take(_ bytes: UnsafeRawBufferPointer, _ range: Range<Int>) {

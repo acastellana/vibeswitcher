@@ -340,7 +340,9 @@ struct SetupStatsTests {
         #expect(changed.projects.first?.figures?.merged == 4)
     }
 
-    @Test func largeFilesAreStreamedWithinATimeBound() async throws {
+    /// Streaming is checked by the reads the collector makes, not by a clock: each file read through once, in reads
+    /// of at most `readSize`, and not again while unchanged. The time limit is only a hang guard.
+    @Test(.timeLimit(.minutes(10))) func largeFilesAreStreamedReadOnceInBoundedReads() async throws {
         let root = temp.url("large")
         let home = root.appendingPathComponent("home"), stats = home.appendingPathComponent("stats")
         try FileManager.default.createDirectory(at: stats, withIntermediateDirectories: true)
@@ -357,25 +359,41 @@ struct SetupStatsTests {
         // A sample a minute for the 8 days.
         let range = DateInterval(start: Date(timeIntervalSince1970: start), duration: 8 * 86_400)
         let stamps = ISO8601DateFormatter()
+        var loadFiles: [String] = []
         for day in 0..<8 {
             var lines = ""
             for minute in 0..<1440 {
                 let at = Date(timeIntervalSince1970: start + Double(day * 86_400 + minute * 60))
                 lines += #"{"t":"\#(stamps.string(from: at))","load":[\#(minute % 60),1,1],"cores":12,"sessions":[],"heavy":{"slots":3,"held":[]},"cost_ms":1}"# + "\n"
             }
-            try lines.write(to: stats.appendingPathComponent("load-\(SetupStatsCollector(home: home, codexHome: nil, calendar: Self.utc).days(range)[day]).jsonl"),
-                            atomically: true, encoding: .utf8)
+            let file = stats.appendingPathComponent("load-\(SetupStatsCollector(home: home, codexHome: nil, calendar: Self.utc).days(range)[day]).jsonl")
+            try lines.write(to: file, atomically: true, encoding: .utf8)
+            loadFiles.append(file.path)
         }
-        let clock = ContinuousClock()
-        let began = clock.now
-        let result = await collector(home: home, now: range.end).collect(projects: [project.path], range: range)
-        let took = clock.now - began
+        let collector = collector(home: home, now: range.end)
+        let result = await collector.collect(projects: [project.path], range: range)
         #expect(result.projects.first?.figures?.merged == 20_000)
         #expect(result.projects.first?.figures?.workerTokens == 200_000)
         #expect(result.mac.load?.minutes == 8 * 1440)
         #expect(result.mac.load?.minutesAt24 == 8 * 24 * 36)
-        // Generous for a loaded Mac and a debug build; a whole-file reread per figure or a quadratic join would blow it.
-        #expect(took < .seconds(60), "took \(took)")
+
+        // The collector names the archive by its standardized repository path.
+        let archivePath = ((project.path as NSString).standardizingPath as NSString).appendingPathComponent(".vibeswitcher/board-archive.jsonl")
+        let files = [archivePath] + loadFiles
+        func size(_ path: String) throws -> Int { try #require(FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) }
+        #expect(try size(archivePath) > 8 * SetupStatsCollector.readSize, "the archive spans many reads")
+        for path in files {
+            let reads = collector.reads(of: path), bytes = try size(path)
+            // Read through exactly once (no whole-file reread per figure), a bounded read at a time (never slurped).
+            #expect(reads.bytes == bytes, "\(path): \(reads.bytes) bytes read of \(bytes)")
+            #expect(reads.largest <= SetupStatsCollector.readSize, "\(path): a read of \(reads.largest) bytes")
+            #expect(reads.calls >= (bytes + SetupStatsCollector.readSize - 1) / SetupStatsCollector.readSize, "\(path): \(reads.calls) reads")
+        }
+        // Unchanged files come from the cache: nothing read again.
+        let before = files.map { collector.reads(of: $0) }
+        let again = await collector.collect(projects: [project.path], range: range)
+        #expect(again.projects.first?.figures?.merged == 20_000)
+        #expect(files.map { collector.reads(of: $0) } == before)
     }
 
     @Test func aLineOverTheLimitIsPassedOver() throws {
