@@ -266,6 +266,120 @@ struct StatisticsModelTests {
                                           mac: SetupStats.MacWide()), calendar: Self.utc).quality == nil)
     }
 
+    // MARK: Compared with working solo
+
+    /// `quality()` with what the comparison needs: Claude's 2 merges both in the solo baseline ($6 worker, $3 verifier,
+    /// one merge rerun), Codex's merge with 1.5M Codex tokens and no price; the lead $1.50 in All.
+    static func compared() -> SetupQuality {
+        var quality = Self.quality()
+        func fill(_ f: inout QualityFigures, codex: Bool) {
+            if codex {
+                (f.codexLeftOut, f.codexTokens) = (1, 1_500_000)
+                (f.timed, f.timedWorked) = (1, 1800)
+                f.mergeFirstTry = MergeFirstTry(counted: 1, firstTry: 0)
+                (f.sentBack, f.flakesCaught, f.incidentsWatched) = (1, 0, 1)
+                (f.workerHours, f.busyHours) = (0.5, 0.5)
+            } else {
+                (f.soloMerges, f.soloWorkerCost, f.soloVerifierCost, f.soloReran) = (2, 6, 3, 1)
+                (f.auditsKept, f.importantFixed, f.flakesCaught, f.incidentsWatched) = (2, 1, 1, 2)
+            }
+        }
+        fill(&quality.byAgent[0].figures, codex: false)
+        fill(&quality.byAgent[1].figures, codex: true)
+        var all = quality.all
+        fill(&all, codex: false)
+        (all.codexLeftOut, all.codexTokens, all.flakesCaught, all.incidentsWatched, all.sentBack) = (1, 1_500_000, 1, 3, 1)
+        all.mergeFirstTry = MergeFirstTry(counted: 3, firstTry: 1)
+        all.lead = LeadSpend(tokens: 2_400_000, cost: 1.5, unpricedDays: 0)
+        quality.all = all
+        return quality
+    }
+
+    @Test func comparedWithWorkingSoloIsAnEstimateSplitByAgent() throws {
+        let page = QualityPage(Self.compared(), calendar: Self.utc).compared
+        #expect(ComparedPage.title == "Compared with working solo" && ComparedPage.badge == "Estimate")
+        #expect(ComparedPage.method.hasPrefix("Estimated, not measured: nothing was run solo."))
+        #expect(page.groups.map(\.title) == ["What it costs", "Caught before merge, per 100 merged", "Escaped after merge, per 100 merged", "Time"])
+        func row(_ label: String) throws -> ComparedPage.Row { try #require(page.groups.flatMap(\.rows).first { $0.label == label }) }
+        // Process cost: All has the lead; Claude's hasn't (in All only); Codex's tokens have no price.
+        let cost = try row("Process cost")
+        #expect(cost.cells.map(\.value) == ["≥ 43%", "≥ 33%", "Not recorded"])
+        #expect(cost.cells[0].detail == "$4.50 of $10.50 over 2 merges · lead $1.50, verifiers $3.00 · not recorded: 1 merge rerun "
+            + "· Codex tokens 1.5M, not in the cost")
+        #expect(cost.cells[1].detail == "$3.00 of $9.00 over 2 merges · verifiers $3.00 · not recorded: the lead's (in All only), 1 merge rerun")
+        #expect(cost.cells[2].detail == "Codex tokens have no price: 1.5M, not in the cost")
+        // Caught beside escaped.
+        #expect(try row("Important findings fixed").cells.map(\.value) == ["50", "50", "Not recorded"])
+        #expect(try row("Important findings fixed").cells[0].detail == "1 of 2 merges whose audits are kept")
+        #expect(try row("Important findings fixed").cells[2].detail == "no merge's audits are kept")
+        #expect(try row("Test failures sent back").cells.map(\.value) == ["33", "0", "100"])
+        #expect(try row("Test failures sent back").cells[1].detail == "0 of 2 merges the merges recorder saw")
+        #expect(try row("Flaky tests caught by reruns").cells.map(\.value) == ["33", "50", "0"])
+        #expect(try row("Reverts").cells.map(\.value) == ["33", "0", "100"])
+        #expect(try row("Incidents").cells.map(\.value) == ["0", "0", "0"])
+        // Time.
+        #expect(try row("Hours of work per hour").cells.map(\.value) == ["1.5", "1.5", "1"])
+        #expect(try row("Your minutes per merged task").cells.map(\.value) == ["5 min", "5 min", "0 min"])
+        let handsOff = try row("Hands-off work per minute of yours")
+        // Claude: 45 min of work per merged task over 5 of your minutes; Codex: no minute of yours.
+        #expect(handsOff.cells.map(\.value) == ["9 min", "9 min", "–"])
+        #expect(handsOff.cells[1].detail == "45 min of work per merged task" && handsOff.cells[2].detail == "30 min of work per merged task, no minute of yours")
+        // Every row says what it assumes on hover, and speaks each column.
+        for row in page.groups.flatMap(\.rows) {
+            #expect(!row.help.isEmpty && row.cells.count == ComparedPage.columns.count, "\(row.label)")
+            #expect(row.spoken.hasPrefix("\(row.label); All \(row.cells[0].value)"))
+        }
+    }
+
+    @Test func comparedFiguresNotKeptReadNotRecordedAndNothingMergedReadsNone() throws {
+        // Merged, nothing kept: every estimate whose inputs are missing says so.
+        var old = QualityFigures()
+        old.merged = 2
+        old.createdToMerged = [60, 120]
+        let page = ComparedPage(all: old, byAgent: [])
+        let cells = Dictionary(uniqueKeysWithValues: page.groups.flatMap(\.rows).map { ($0.label, $0.cells[0]) })
+        for label in ["Process cost", "Important findings fixed", "Test failures sent back", "Flaky tests caught by reruns", "Incidents",
+                      "Hours of work per hour", "Hands-off work per minute of yours"] {
+            #expect(cells[label]?.value == "Not recorded", "\(label)")
+            #expect(cells[label]?.detail?.isEmpty == false, "\(label) says why")
+        }
+        #expect(cells["Process cost"]?.detail == "no merge's cost is known")
+        #expect(cells["Reverts"]?.value == "0", "reverts are kept on the board")
+        // Only re-rolled merges with a known cost.
+        old.rerolledLeftOut = 2
+        #expect(ComparedPage.processCost(old, all: true).detail == "the merges with a known cost were re-rolled: their attempts aren't split")
+        // No agent's merges: nothing to count ("–"), not "Not recorded".
+        let none = ComparedPage(all: QualityFigures(), byAgent: [])
+        for row in none.groups.flatMap(\.rows) where row.label != "Hours of work per hour" {
+            #expect(row.cells.allSatisfy { $0.value == "–" }, "\(row.label)")
+        }
+    }
+
+    @Test func theNewRecordsFillWhatStatistics3LeftNotRecorded() throws {
+        var quality = Self.compared()
+        (quality.all.waited, quality.all.waitedSpan, quality.all.auditWaited) = (2, 14_460, 1446)
+        quality.all.verifierHours = 1.25
+        let page = QualityPage(quality, calendar: Self.utc)
+        func figure(_ label: String) throws -> StatisticsPage.Figure { try #require(page.sections.flatMap(\.figures).first { $0.label == label }) }
+        #expect(try figure("Waiting for its audit").value == "10%")
+        #expect(try figure("Waiting for its audit").detail == "of created → merged, over 2 merges whose waits are kept")
+        #expect(try figure("Worker working").value == "37%" && figure("The rest").value == "53%")
+        #expect(try figure("Verifier hours").value == StatisticsPage.hours(1.25))
+        #expect(try figure("Project lead").value == "$1.50" && figure("Project lead").detail == "2.4M tokens")
+        #expect(try figure("Codex tokens").value == "1.5M" && figure("Codex tokens").detail == "not in the cost: Codex has no price here")
+        #expect(try figure("Merge reruns").value == "Not recorded", "receipts still don't price a rerun")
+        // Not kept: said so.
+        var bare = QualityFigures()
+        bare.merged = 1
+        let kept = QualityPage(SetupQuality(all: bare, byAgent: [], byModel: [], weeks: []), calendar: Self.utc).sections.flatMap(\.figures)
+        for label in ["Waiting for its audit", "Verifier hours", "Project lead", "Codex tokens"] {
+            #expect(kept.first { $0.label == label }?.value == "Not recorded", "\(label)")
+        }
+        // The lead's days without a price: what's known, marked at least.
+        #expect(QualityPage.lead(LeadSpend(tokens: 5000, cost: 2, unpricedDays: 1)).value == "≥ $2.00")
+        #expect(QualityPage.lead(LeadSpend(tokens: 5000, cost: nil, unpricedDays: 3)).value == "Not recorded")
+    }
+
     @Test func itShowsLoadingUntilTheStatsAreInThenThem() async throws {
         let gate = Gate()
         let model = StatisticsModel(calendar: Self.utc, now: { Self.now }, projects: { ["/p/alpha"] }, load: { _, range in await gate.load(range) })

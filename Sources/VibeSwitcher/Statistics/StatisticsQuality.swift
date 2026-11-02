@@ -10,6 +10,8 @@ struct QualityPage: Equatable {
     /// Said under the breakdown when no merge's model is recorded.
     var modelsNote: String?
     var trend: [TrendWeek]
+    /// Compared with working solo: estimates, split by Claude and Codex.
+    var compared: ComparedPage
 
     typealias Figure = StatisticsPage.Figure
 
@@ -60,6 +62,7 @@ struct QualityPage: Equatable {
     init(_ quality: SetupQuality, calendar: Calendar = .current) {
         let all = quality.all
         sections = [Self.quality(all), Self.autonomy(all), Self.time(all), Self.cost(all)]
+        compared = ComparedPage(all: all, byAgent: quality.byAgent)
         breakdown = quality.byAgent.flatMap { group -> [BreakdownRow] in
             let row = BreakdownRow(name: group.name, model: false, cells: Self.cells(group.figures))
             guard group.name == "Claude" else { return [row] }
@@ -159,16 +162,22 @@ struct QualityPage: Equatable {
                    meter: f.workingShare.map(share),
                    help: "The workers' counted working time over created → merged, summed over the merges whose working time is known."),
             Figure(label: "Waiting for its audit", value: f.auditWaitShare.map(percent) ?? (merged ? notRecorded : none),
-                   detail: f.auditWaitShare == nil && merged ? "the board keeps no time an audit was asked for: in the rest" : nil,
+                   detail: f.auditWaitShare != nil ? "of created → merged, over \(count(f.waited, "merge")) whose waits are kept"
+                       : merged ? "no merge's receipt keeps its waits: in the rest" : nil,
                    meter: f.auditWaitShare.map(share),
-                   help: "From the worker's done report to the audit's verdict. Not kept yet: a separate task records it."),
+                   help: "From the worker's done report to the start of the audit that followed it, summed over its rounds, over created → merged "
+                       + "of the merges whose receipts keep their waits."),
             Figure(label: "The rest", value: f.restShare.map(percent) ?? (unknownWork ? notRecorded : none),
-                   detail: f.restShare == nil ? nil : "planning, queueing, audits and merging", meter: f.restShare.map(share),
-                   help: "Created → merged less the workers' working time (and the audit wait, once it's kept)."),
+                   detail: f.restShare == nil ? nil : f.auditWaitShare == nil ? "planning, queueing, audits and merging (audit waits included)"
+                       : "planning, queueing, audits and merging", meter: f.restShare.map(share),
+                   help: "Created → merged less the workers' working time and the audit waits."),
             Figure(label: "Parallelism", value: f.parallelism.map { "\(StatisticsPage.number($0))×" } ?? notRecorded,
                    detail: f.parallelism == nil ? "no receipt with a start ended in the range"
                        : "\(StatisticsPage.hours(f.workerHours)) of work over \(StatisticsPage.hours(f.busyHours)) with a task under way",
                    help: "Worker hours of the tasks that ended in the range over the wall-clock hours from the start to the end of any of them."),
+            Figure(label: "Verifier hours", value: f.verifierHours.map(StatisticsPage.hours) ?? notRecorded,
+                   detail: f.verifierHours == nil ? "no receipt that ended in the range keeps its verifiers' time" : "of the tasks that ended in the range",
+                   help: "The verifiers' (and finders') time on the tasks that ended in the range: each audit's time times the sessions it ran."),
         ])
     }
 
@@ -188,8 +197,24 @@ struct QualityPage: Equatable {
                    help: "The verifiers' (and finders') part of that cost, and its share."),
             Figure(label: "Merge reruns", value: f.mergeRerunCost.map(StatisticsPage.money) ?? (merged ? notRecorded : none),
                    detail: f.mergeRerunCost == nil && merged ? "receipts count a rerun, not what it cost" : nil,
-                   help: "What the merges' test reruns cost. Not kept yet: a separate task records it."),
+                   help: "What the merges' test reruns cost: receipts count a rerun but don't price it."),
+            lead(f.lead),
+            Figure(label: "Codex tokens", value: f.codexTokens.map { LeadReceipt.count($0) } ?? (merged ? notRecorded : none),
+                   detail: f.codexTokens != nil ? "not in the cost: Codex has no price here" : merged ? "no merge's receipt read a Codex worker's tokens" : nil,
+                   help: "The tokens Codex workers spent on the merged tasks, from Codex's own records. Codex has no price in the price table, "
+                       + "so they aren't in any cost here."),
         ])
+    }
+
+    /// The project lead's own tokens and cost on the range's days (every project's).
+    static func lead(_ lead: LeadSpend?) -> Figure {
+        let help = "The project leads' own tokens on the range's days (planning, steering, merging), with their estimated cost."
+        guard let lead else {
+            return Figure(label: "Project lead", value: notRecorded, detail: "no lead's token ledger covers the range", help: help)
+        }
+        let unpriced = lead.unpricedDays > 0 ? ", \(count(lead.unpricedDays, "day")) with a model that has no price not in the cost" : ""
+        return Figure(label: "Project lead", value: lead.cost.map { (lead.unpricedDays > 0 ? "≥ " : "") + StatisticsPage.money($0) } ?? notRecorded,
+                      detail: "\(LeadReceipt.count(lead.tokens)) tokens\(unpriced)", help: help)
     }
 
     // MARK: Breakdown

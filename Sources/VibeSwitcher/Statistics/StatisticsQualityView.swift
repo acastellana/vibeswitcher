@@ -2,8 +2,7 @@ import SwiftUI
 import VibeCore
 
 /// The quality part of the Statistics page, as Form sections: quality, autonomy, where time goes and cost, the
-/// breakdown by who did the work, and the last 8 weeks. A section comparing with working solo (plain Claude Code and
-/// Codex runs) goes after the breakdown, once those runs are recorded.
+/// breakdown by who did the work, the comparison with working solo (estimates), and the last 8 weeks.
 struct QualitySectionsView: View {
     let page: QualityPage
 
@@ -23,6 +22,7 @@ struct QualitySectionsView: View {
                 .font(.caption).foregroundStyle(.secondaryInk)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        ComparedSectionView(page: page.compared)
         Section {
             HStack(alignment: .top, spacing: 32) {
                 TrendChart(title: "First-audit pass rate", weeks: page.trend, value: \.passRate, bar: \.passBar)
@@ -33,6 +33,77 @@ struct QualitySectionsView: View {
         } footer: {
             Text("A week a bar, the last ending today. –: no audited merge, or no merge with a known cost, that week.")
                 .font(.caption).foregroundStyle(.secondaryInk)
+        }
+    }
+}
+
+/// Compared with working solo: its title marked an estimate, the method said under it on hover (shown from the start
+/// with `methodShown`: the sandbox's shot of it), and a row per figure with a column for all merges, Claude's and Codex's.
+struct ComparedSectionView: View {
+    let page: ComparedPage
+    var methodShown = false
+    @State private var hovering = false
+
+    var body: some View {
+        Section {
+            Grid(alignment: .topTrailing, horizontalSpacing: 16, verticalSpacing: 8) {
+                GridRow(alignment: .bottom) {
+                    Text("").gridColumnAlignment(.leading)
+                    ForEach(ComparedPage.columns, id: \.self) { Text($0) }
+                }
+                .font(.caption).foregroundStyle(.secondaryInk)
+                .accessibilityHidden(true)
+                ForEach(page.groups) { group in
+                    Divider()
+                    Text(group.title).font(.callout.weight(.semibold)).gridCellAnchor(.leading)
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(group.rows) { row in
+                        GridRow(alignment: .firstTextBaseline) {
+                            Text(row.label).frame(minWidth: 180, alignment: .leading).help(row.help)
+                            ForEach(Array(row.cells.enumerated()), id: \.offset) { _, cell in
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text(cell.value).monospacedDigit()
+                                        .foregroundStyle(cell.value == StatisticsPage.notRecorded ? .secondaryInk : .primary)
+                                    if let detail = cell.detail {
+                                        Text(detail).font(.caption).foregroundStyle(.secondaryInk).multilineTextAlignment(.trailing)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                .frame(maxWidth: 220, alignment: .trailing)
+                            }
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(row.spoken)
+                        .accessibilityHint(row.help)
+                    }
+                }
+            }
+        } header: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(ComparedPage.title)
+                    Text(ComparedPage.badge)
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .overlay(Capsule().strokeBorder(.secondary))
+                        .foregroundStyle(.secondaryInk)
+                }
+                if hovering || methodShown {
+                    Text(ComparedPage.method).font(.caption).foregroundStyle(.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(ComparedPage.title), \(ComparedPage.badge.lowercased())")
+            .accessibilityHint(ComparedPage.method)
+            .accessibilityAddTraits(.isHeader)
+        } footer: {
+            Text("Per 100: per 100 merged tasks (those whose inputs are kept, where said). ≥: a part of the process's cost isn't recorded, "
+                 + "so its share is at least this. The lead works for every agent: its cost is in All only.")
+                .font(.caption).foregroundStyle(.secondaryInk)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
