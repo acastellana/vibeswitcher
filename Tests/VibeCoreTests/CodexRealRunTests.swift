@@ -124,6 +124,8 @@ struct CodexRealRunTests {
         try export.run()
         export.waitUntilExit()
         try #require(export.terminationStatus == 0, "git archive of this checkout failed")
+        // A stand-in where the docs link to it (DocLinksLint), not the checkout's.
+        try "# A scratch export: the checkout's AGENTS.md is left out.\n".write(toFile: root + "/AGENTS.md", atomically: true, encoding: .utf8)
         for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"], ["add", "-A"], ["commit", "-q", "-m", "export"]] {
             Git.run(args, in: root)
         }
