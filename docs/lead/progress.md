@@ -2911,3 +2911,5 @@
 - 2026-11-02 14:20 Automatically (auto_advance): Cleaned up statistics-1-2-a (freed 1.5 GB of build output and temporary folders). It stays done.
 - 2026-11-02 14:20 Started a worker on statistics-2-2-a (auto → Claude: Claude weekly 12%, 57 points behind pace, not tight; Codex 67%)
 - 2026-11-02 14:20 Automatically (auto_advance): Started a worker on statistics-2-2-a (Statistics 2/2: a Statistics page in the app), its after tasks done (statistics-1-2-a); its agent is auto, so it went to Claude: Claude weekly 12%, 57 points behind pace, not tight; Codex 67%.
+- 2026-11-02 14:51 Merged lead-records-merge: Lead records merge without conflicts across Macs (no audit: review none)
+- 2026-11-02 14:51 Flaky in lead-records-merge's merge: largeFilesAreStreamedWithinATimeBound() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
