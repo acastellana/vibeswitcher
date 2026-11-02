@@ -2860,3 +2860,9 @@
 - 2026-11-02 09:07 Audit of usage-aware-worker: complete, clean, round 1: 3 Nit open
 - 2026-11-02 09:19 Merged usage-aware-worker: Usage-aware worker routing: tasks go to Codex when Claude's quota runs ahead of pace (in a batch: usage-aware-worker, boost-on-battery-a landed on one test run)
 - 2026-11-02 09:19 Merged boost-on-battery-a: Boost on battery: a Settings option to let Boost run on battery (in a batch: usage-aware-worker, boost-on-battery-a landed on one test run)
+- 2026-11-02 09:19 Automatically (auto_advance): Merged usage-aware-worker at 5aa78afd (its passing audit), boost-on-battery-a at a1f8f21c (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-02 09:19 Automatically (auto_advance): Cleaned up usage-aware-worker (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-02 09:19 Automatically (auto_advance): Cleaned up boost-on-battery-a (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-02 09:20 Update: Merged: Boost "Also on battery" and Codex usage routing (install to use) — **Also on battery** (890248f, a1f8f21)
+- 2026-11-02 09:23 Released wallet-results-tests's worker (idle since its done report on 7bcaa54d) while its audit runs
+- 2026-11-02 09:23 Automatically (auto_advance): Started the audit of wallet-results-tests at 7bcaa54d (A Codex worker worked on it, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
