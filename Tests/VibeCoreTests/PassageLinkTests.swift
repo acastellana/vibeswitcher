@@ -354,6 +354,89 @@ struct PassageLinkTests {
         #expect(log.lines.contains("ignored \(late): a second result for request \(other.id), already finished (failed)"))
     }
 
+    @Test func aRepeatedNonFinalResultInALaterPollIsIgnoredAndLogged() throws {
+        let fake = try FakePassage(scratch)
+        let log = Log()
+        let heard = Log()
+        let courier = courier(fake, log: log)
+        defer { courier.close() }
+        courier.onTaken { heard.note($0.map { "\($0.id) \($0.sequence)" }.joined(separator: ",")) }
+        let request = Self.request()
+        #expect(courier.send(request) == .passage(.sent))
+        let result = Self.result(request, .received, sequence: 1)
+        let bytes = result.encoded()
+        let name = WalletResult.fileName(request.id)
+        let first = try fake.receive(bytes, name: name)
+        #expect(courier.poll() == [result])
+        let record = try #require(courier.record(request.id))
+        #expect(record.results == [result])
+        #expect(record.inboxFiles == [first])
+        #expect(heard.lines == ["\(request.id) 1"])
+
+        // Same bytes at a new path: it must reach the sequence guard, not the handled-path shortcut.
+        let repeatPath = try fake.receive(bytes, name: name, second: 1)
+        #expect(courier.poll().isEmpty)
+        #expect(log.lines.contains("ignored \(repeatPath): result 1 for request \(request.id) isn't after 1"))
+        #expect(courier.record(request.id) == record)
+        #expect(try courier.store.read(courier.store.file(request.id)) == record)
+        #expect(heard.lines == ["\(request.id) 1"])
+    }
+
+    @Test func aRepeatedNonFinalResultInOneListingIsIgnoredAndLogged() throws {
+        let fake = try FakePassage(scratch)
+        let log = Log()
+        let heard = Log()
+        let courier = courier(fake, log: log)
+        defer { courier.close() }
+        courier.onTaken { heard.note($0.map { "\($0.id) \($0.sequence)" }.joined(separator: ",")) }
+        let request = Self.request()
+        #expect(courier.send(request) == .passage(.sent))
+        let result = Self.result(request, .received, sequence: 1)
+        let bytes = result.encoded()
+        let name = WalletResult.fileName(request.id)
+        let first = try fake.receive(bytes, name: name)
+        let repeatPath = try fake.receive(bytes, name: name, second: 1)
+
+        #expect(courier.poll() == [result])
+        #expect(log.lines.contains("ignored \(repeatPath): result 1 for request \(request.id) isn't after 1"))
+        let record = try #require(courier.record(request.id))
+        #expect(record.results == [result])
+        #expect(record.inboxFiles == [first])
+        #expect(try courier.store.read(courier.store.file(request.id)) == record)
+        #expect(heard.lines == ["\(request.id) 1"])
+        #expect(courier.poll().isEmpty)
+        #expect(heard.lines == ["\(request.id) 1"])
+    }
+
+    @Test func aRepeatedFinalResultIsIgnoredAndLogged() throws {
+        let fake = try FakePassage(scratch)
+        let log = Log()
+        let heard = Log()
+        let courier = courier(fake, log: log)
+        defer { courier.close() }
+        courier.onTaken { heard.note($0.map { "\($0.id) \($0.sequence)" }.joined(separator: ",")) }
+        let request = Self.request()
+        #expect(courier.send(request) == .passage(.sent))
+        let result = Self.result(request, .submitted, sequence: 2)
+        #expect(result.txHash == "0x" + String(repeating: "ab", count: 32))
+        let bytes = result.encoded()
+        let name = WalletResult.fileName(request.id)
+        let first = try fake.receive(bytes, name: name)
+        #expect(courier.poll() == [result])
+        let record = try #require(courier.record(request.id))
+        #expect(record.results == [result])
+        #expect(record.inboxFiles == [first])
+        #expect(record.finished)
+        #expect(heard.lines == ["\(request.id) 2"])
+
+        let repeatPath = try fake.receive(bytes, name: name, second: 1)
+        #expect(courier.poll().isEmpty)
+        #expect(log.lines.contains("ignored \(repeatPath): a result for request \(request.id), already finished (submitted)"))
+        #expect(courier.record(request.id) == record)
+        #expect(try courier.store.read(courier.store.file(request.id)) == record)
+        #expect(heard.lines == ["\(request.id) 2"])
+    }
+
     @Test func aResultThatDoesntParseOrIsntItsNamesIsIgnored() throws {
         let fake = try FakePassage(scratch)
         let log = Log()
