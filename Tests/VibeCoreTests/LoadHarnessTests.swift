@@ -287,17 +287,22 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: pids.path))
     }
 
-    /// Inside Codex's sandbox /bin/ps can't start (setuid) and pgrep can't list: a Codex worker's run couldn't find the
-    /// shell that started it under vs-heavy ("not starting: … is gone") or the processes its runs started. There they
+    /// Inside Codex's sandbox /bin/ps can't start (setuid), pgrep can't list and kill -0 can't reach its owner outside the
+    /// sandbox: a Codex worker's run couldn't find the shell that started it under vs-heavy ("not starting: … is gone"),
+    /// took its owner for gone, or missed the processes its runs started. There they
     /// come from libproc (scripts/lib/processes.sh): it runs, and once its owner is gone it ends what its command
     /// started, a process in a group of its own too (one vs-heavy's group signal doesn't reach).
+    /// As Codex's seatbelt is to processes: no setuid program starts (/bin/ps), and signals reach only the sandbox's own
+    /// processes, so kill -0 to its owner, outside, fails with "Operation not permitted".
+    static let codexLike = "(version 1)(allow default)(deny signal)(allow signal (target same-sandbox))"
+
     @Test(.enabled(if: LeftoverCheckTests.canSandbox)) func insideASandboxThatRefusesPsItRunsAndEndsWhatItsCommandStarted() throws {
         let fake = try fakeMac(temp.url("load"))
         let out = temp.url("out"), child = temp.url("child-pid"), pids = temp.url("pids")
         let script = Self.repo.appendingPathComponent("scripts/test-under-load.sh").path
         let command = "/usr/bin/perl -e 'setpgrp(0, 0); exec qw(sleep 600)' & echo $! > \(child.path); wait"
         let owner = process([], fake: fake)
-        owner.arguments = ["-c", "/usr/bin/sandbox-exec -p '\(LeftoverCheckTests.psRefused)' /bin/bash \(script) --load 2 --max-time 300"
+        owner.arguments = ["-c", "/usr/bin/sandbox-exec -p '\(Self.codexLike)' /bin/bash \(script) --load 2 --max-time 300"
                            + " --pid-file \(pids.path) -- /bin/bash -c \(RecentProjects.shellQuote(command)) > \(out.path) 2>&1 & wait"]
         try owner.run()
         let said = { (try? String(contentsOf: out, encoding: .utf8)) ?? "" }

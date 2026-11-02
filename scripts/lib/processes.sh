@@ -92,6 +92,15 @@ process_children() {
 # Whether ps's exit status $1 says it couldn't start (bash's 126 when exec is refused) rather than found no process.
 ps_denied() { (( $1 == 126 || $1 == 127 )); }
 
+# Whether PID is still there (kill -0). Inside Codex's sandbox a signal reaches only the sandbox's own processes: kill -0
+# to another (the codex process a command's shell exec'd from, a run's owner) fails with "Operation not permitted",
+# though it lives. Only "No such process" is gone.
+process_alive() {
+    local err
+    err=$(kill -0 "$1" 2>&1) && return 0
+    [[ $err != *"No such process"* ]]
+}
+
 # The Mac's cores (sysctl -n hw.ncpu); where the sysctl command fails, getconf's count.
 cpu_count() {
     local n

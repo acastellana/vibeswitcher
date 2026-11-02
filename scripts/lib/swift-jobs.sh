@@ -37,7 +37,9 @@ swiftpm_sandbox() {
 # Inside Codex's sandbox there's no network either, and a new worktree's first build clones the package's dependencies
 # (SwiftTerm, swift-argument-parser) from GitHub: "Could not resolve host: github.com". There, a checkout whose .build
 # has no dependencies yet takes the main checkout's (the git common folder's): its .build/repositories, checkouts and
-# workspace-state.json, cloned (cp -c, which takes no space on APFS; they hold no absolute paths). SwiftPM then builds
+# workspace-state.json, cloned (cp -c, which takes no space on APFS). The checkouts' git objects stay in the main
+# checkout's .build/repositories (their alternates name it): removing that folder while the worktree lives breaks its
+# builds, as it would the main checkout's. SwiftPM then builds
 # from them without fetching while the pins are the same; a branch that changed Package.resolved fetches as ever, which
 # fails there for want of the network. Run from the package's folder, before the build; outside Codex it does nothing.
 swiftpm_offline_dependencies() {

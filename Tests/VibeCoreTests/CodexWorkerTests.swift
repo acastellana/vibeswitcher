@@ -97,7 +97,7 @@ struct CodexWorkerTests: LeadTeamFixture {
         #expect(brief == LeadPrompts.worker(task: try #require(task("rename-x", root)), root: root, workflow: lead.workflow), "brief differs")
         #expect(brief.contains("You run in the Codex CLI") && brief.contains("agent/rename-x"))
         // Its checks run as a Claude worker's do: no flag of their own (scripts/test.sh leaves SwiftPM's sandbox out there).
-        #expect(brief.contains("they work in your sandbox with no extra flags") && !brief.contains("--disable-sandbox"))
+        #expect(brief.contains("they work in your sandbox with no extra flags") && brief.contains("The full suite doesn't") && !brief.contains("--disable-sandbox"))
         // The tool server: the worker's role, scoped to this repository and task, as a Claude worker's.
         let server: String = try json(config["mcp_servers.vibeswitcher.command"])
         let serverArgs: [String] = try json(config["mcp_servers.vibeswitcher.args"])

@@ -101,7 +101,7 @@ struct CodexRealRunTests {
 
     /// The project's own checks inside a real Codex worker's sandbox, on demand only (it spends Codex usage):
     /// `VIBESWITCHER_REAL_CODEX_HOME=<your Codex home> bash scripts/test.sh --filter CodexRealRunTests/theProjectsChecks`.
-    /// A clone of this checkout's HEAD with a worktree as the lead makes them; Codex, on the command line
+    /// This checkout's HEAD (its agent files left out) in a scratch repository, with a worktree as the lead makes them; Codex, on the command line
     /// `LeadLaunch.prepareCodex` makes (as `codex exec`, above), in a scratch Codex home holding only your sign-in
     /// (auth.json, copied: nothing is written to yours), runs `bash scripts/test.sh --filter LeftoverCheckTests`, the
     /// lint filter and `scripts/test-under-load.sh --check-only` as written, each into a log in its TMPDIR. The worktree is
@@ -113,20 +113,20 @@ struct CodexRealRunTests {
     @Test(.enabled(if: codexHome != nil, "spends Codex usage: set VIBESWITCHER_REAL_CODEX_HOME to run it"))
     func theProjectsChecksRunInARealCodexWorkersSandbox() throws {
         let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let url = checkout.appendingPathComponent(".build/codex-checks/\(UUID().uuidString.prefix(8))")
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: url) }
-        let root = url.path
-        // Not Git.run, which allows no transport (a local clone is one).
-        let clone = Process()
-        clone.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        clone.arguments = ["clone", "-q", "--shared", checkout.path, root]
-        clone.standardOutput = FileHandle.nullDevice
-        clone.standardError = FileHandle.nullDevice
-        try clone.run()
-        clone.waitUntilExit()
-        try #require(clone.terminationStatus == 0, "git clone of this checkout failed")
-        Git.run(["branch", "-f", "main", "HEAD"], in: root)
+        // This checkout's HEAD, exported without its agent files into a scratch repository outside the worktree (an
+        // export inside it would hold AGENTS.md and CLAUDE.md for the audit to take as a worker's: AgentExportLintTests).
+        let root = temp.url("codex-checks").resolvingSymlinksInPath().path
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        let export = Process()
+        export.executableURL = URL(fileURLWithPath: "/bin/sh")
+        export.arguments = ["-c", "/usr/bin/git archive HEAD | tar -x -C '\(root)' --exclude AGENTS.md --exclude 'CLAUDE*.md' --exclude .claude --exclude .mcp.json"]
+        export.currentDirectoryURL = checkout
+        try export.run()
+        export.waitUntilExit()
+        try #require(export.terminationStatus == 0, "git archive of this checkout failed")
+        for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"], ["add", "-A"], ["commit", "-q", "-m", "export"]] {
+            Git.run(args, in: root)
+        }
         // The worktrees' shared module cache, as the lead's repository has one (a writable root of the worker's).
         try FileManager.default.createDirectory(atPath: root + "/.vibeswitcher/module-cache", withIntermediateDirectories: true)
         let worktree = try Worktrees.open(root: root, slug: "checks", base: "main")

@@ -182,7 +182,7 @@ over() { awk -v l="$1" -v m="$max_load" 'BEGIN { exit !(l > m) }'; }
 owned() {
     local pid
     for pid in "${owners[@]}"; do
-        kill -0 "$pid" 2>/dev/null && continue
+        process_alive "$pid" && continue
         echo "stopped waiting: its owner (pid $pid) is gone, so nothing would own the load; nothing was started"
         exit 1
     done
@@ -256,7 +256,7 @@ if [[ $inner -eq 0 ]]; then
     until /usr/bin/perl -MFcntl=:flock -e 'open(my $fh, ">&=", 8) or exit 2; exit(flock($fh, LOCK_EX | LOCK_NB) ? 0 : 1)'; do
         holder=$(head -n 1 "$lock.holder" 2>/dev/null)
         # A note naming a process that has ended says nothing.
-        [[ $holder =~ ^pid\ ([0-9]+), ]] && ! kill -0 "${BASH_REMATCH[1]}" 2>/dev/null && holder=""
+        [[ $holder =~ ^pid\ ([0-9]+), ]] && ! process_alive "${BASH_REMATCH[1]}" && holder=""
         holder=${holder:-a run that did not say who it is}
         if [[ $holder != "$said" ]]; then
             echo "waiting for the other load run to end (one burns at a time on this Mac, $lock): $holder"
@@ -422,7 +422,7 @@ memory_stop=$((memory_floor / 2))
     lowest="" deadline=$((SECONDS + max_time))
     while kill -0 "$script" 2>/dev/null; do
         for pid in "${owners[@]}"; do
-            if ! kill -0 "$pid" 2>/dev/null; then
+            if ! process_alive "$pid"; then
                 echo "$pid" > "$scratch/owner-gone"
                 kill -TERM "$script"
                 break 2
@@ -461,7 +461,8 @@ work='for ((i = 0; i < 200000; i++)); do :; done'
 [[ $fake_burner -eq 1 ]] && work='sleep 0.1'
 burn='end=$((SECONDS + $1)); shift
 while [[ $SECONDS -lt $end ]]; do
-    for pid in "$@"; do kill -0 "$pid" 2>/dev/null || exit 0; done
+    # Gone is "No such process": in Codex'"'"'s sandbox an owner outside it answers "Operation not permitted" (process_alive).
+    for pid in "$@"; do err=$(kill -0 "$pid" 2>&1) || [[ $err != *"No such process"* ]] || exit 0; done
     '"$work"'
 done'
 # The top-up: every $tick seconds, as many busy loops as the others' load leaves short of --load. The others' load is
