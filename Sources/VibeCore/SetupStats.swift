@@ -50,7 +50,8 @@ public struct SetupStats: Equatable, Sendable {
         public var merges: MergeRate?
         /// Nil: no debug folder, or the range is before every hang report left.
         public var freezes: Freezes?
-        /// Hours boosted in the range: nil, not recorded (neither the load recorder nor boost.json keeps a history).
+        /// Hours boosted in the range: the load recorder's samples (a minute each) that say boost was on; nil when no
+        /// sample in the range says either way (lines from before the recorder kept it).
         public var hoursBoosted: Double?
         /// Boost as the app last decided it (boost.json); nil when unknown or stale.
         public var boostNow: BoostState?
@@ -58,7 +59,7 @@ public struct SetupStats: Equatable, Sendable {
         public var claude: [UsageNow]?
         /// The Codex account's windows still holding now, with their pace; nil when none is known.
         public var codex: [UsageNow]?
-        /// Codex tokens: nil, not recorded (receipts don't count them yet).
+        /// Codex tokens: every project's receipts' (`ProjectFigures.codexTokens`) summed; nil when none read any.
         public var codexTokens: Int?
     }
 }
@@ -91,7 +92,8 @@ public struct ProjectFigures: Equatable, Sendable {
     /// and the estimated cost of those whose cost is known.
     public var ended = 0
     public var workerHours = 0.0
-    /// Verifier hours: nil, not recorded (receipts keep the workers' working time only).
+    /// Verifier hours: the receipts' verifier time (`LeadWaits.verifierTime`: each audit's time times its sessions);
+    /// nil when no receipt in the range kept it (receipts from before it was recorded).
     public var verifierHours: Double?
     public var workerTokens: Int?
     public var verifierTokens: Int?
@@ -114,6 +116,23 @@ public struct ProjectFigures: Equatable, Sendable {
         public var tests = 0
         public var merges = 0
     }
+
+    // Recorded since receipts kept them (each nil when nothing in the range did).
+    /// The receipts that ended: the Codex tokens among their workers' (`LeadTokens.codex`).
+    public var codexTokens: Int?
+    /// The receipts that ended, their time between start and end by cause, in hours (`LeadWaits`): waiting for an
+    /// audit to start, auditing, the merges' test runs waiting for the load and a heavy slot, and running; and the user's
+    /// answers (`LeadReceipt.waitingOnUser`). Worker hours are `workerHours`.
+    public var auditWaitHours: Double?
+    public var auditingHours: Double?
+    public var mergeWaitHours: Double?
+    public var mergeTestHours: Double?
+    public var userWaitHours: Double?
+    /// The project lead's own tokens on the range's days (`LeadTokenLedger`), and the estimated cost of the days whose
+    /// cost is known (`leadUnpricedDays`: those whose isn't); nil when it kept none for the range.
+    public var leadTokens: Int?
+    public var leadCost: Double?
+    public var leadUnpricedDays = 0
 
     public init() {}
 
@@ -146,6 +165,16 @@ public struct ProjectFigures: Equatable, Sendable {
         sum.codexTasks += other.codexTasks
         sum.claudeTasks += other.claudeTasks
         sum.startToMerge += other.startToMerge
+        sum.verifierHours = SetupStatsMath.add(sum.verifierHours, other.verifierHours)
+        sum.codexTokens = SetupStatsMath.add(sum.codexTokens, other.codexTokens)
+        sum.auditWaitHours = SetupStatsMath.add(sum.auditWaitHours, other.auditWaitHours)
+        sum.auditingHours = SetupStatsMath.add(sum.auditingHours, other.auditingHours)
+        sum.mergeWaitHours = SetupStatsMath.add(sum.mergeWaitHours, other.mergeWaitHours)
+        sum.mergeTestHours = SetupStatsMath.add(sum.mergeTestHours, other.mergeTestHours)
+        sum.userWaitHours = SetupStatsMath.add(sum.userWaitHours, other.userWaitHours)
+        sum.leadTokens = SetupStatsMath.add(sum.leadTokens, other.leadTokens)
+        sum.leadCost = SetupStatsMath.add(sum.leadCost, other.leadCost)
+        sum.leadUnpricedDays += other.leadUnpricedDays
         return sum
     }
 }
@@ -221,6 +250,11 @@ enum SetupStatsMath {
     }
 
     static func add(_ a: Int?, _ b: Int?) -> Int? {
+        guard a != nil || b != nil else { return nil }
+        return (a ?? 0) + (b ?? 0)
+    }
+
+    static func add(_ a: Double?, _ b: Double?) -> Double? {
         guard a != nil || b != nil else { return nil }
         return (a ?? 0) + (b ?? 0)
     }
@@ -337,7 +371,12 @@ public final class SetupStatsCollector: @unchecked Sendable {
             }
             }
             let board: BoardView? = cached((folder as NSString).appendingPathComponent("board.json")) { path in BoardView(path: path) }
-            let figures = board.map { Self.figures(board: $0, archive: archive ?? [], window: window) }
+            let lead: LeadLedgerView? = cached((folder as NSString).appendingPathComponent(LeadTokenLedger.fileName)) { path in LeadLedgerView(path: path) }
+            let figures = board.map { board in
+                var figures = Self.figures(board: board, archive: archive ?? [], window: window)
+                if let lead { Self.addLead(lead, to: &figures, window: window, calendar: calendar) }
+                return figures
+            }
             let name = (root as NSString).lastPathComponent
             projects.append(SetupStats.Project(name: name, root: root, hasArchive: archive != nil, figures: figures))
             if let board {
@@ -348,7 +387,9 @@ public final class SetupStatsCollector: @unchecked Sendable {
         projects.sort { ($0.name, $0.root) < ($1.name, $1.root) }
         let known = projects.compactMap(\.figures)
         let total = known.isEmpty ? nil : known.dropFirst().reduce(known[0]) { $0.adding($1) }
-        var stats = SetupStats(range: range, at: at, projects: projects, total: total, mac: mac(range: range, window: window, at: at))
+        var mac = mac(range: range, window: window, at: at)
+        mac.codexTokens = total?.codexTokens
+        var stats = SetupStats(range: range, at: at, projects: projects, total: total, mac: mac)
         if !sources.isEmpty {
             sources.sort { $0.root < $1.root }
             stats.quality = SetupQualityMath.quality(sources.map(\.source), window: window, weeks: weeks(ending: range.end),
@@ -491,8 +532,38 @@ public final class SetupStatsCollector: @unchecked Sendable {
                 f.costed += 1
             }
             if task.codex { f.codexTasks += 1 } else { f.claudeTasks += 1 }
+            if let codex = receipt.worker?.codex { f.codexTokens = (f.codexTokens ?? 0) + codex }
+            f.userWaitHours = (f.userWaitHours ?? 0) + receipt.waitingOnUser / 3600
+            if let waits = receipt.waits {
+                func hours(_ seconds: Double?, into sum: inout Double?) { if let seconds { sum = (sum ?? 0) + seconds / 3600 } }
+                hours(waits.verifierTime, into: &f.verifierHours)
+                hours(waits.auditWait, into: &f.auditWaitHours)
+                hours(waits.auditing, into: &f.auditingHours)
+                hours(SetupStatsMath.add(waits.mergeLoadWait, waits.mergeSlotWait), into: &f.mergeWaitHours)
+                hours(waits.mergeTesting, into: &f.mergeTestHours)
+            }
         }
         return f
+    }
+
+    /// The lead's tokens on the range's days (a day counts when its start is in the range) into `f`; none when the
+    /// ledger began after the range ended (nothing recorded for it).
+    static func addLead(_ lead: LeadLedgerView, to f: inout ProjectFigures, window: Window, calendar: Calendar) {
+        guard let since = lead.since, since < window.t1 else { return }
+        let parser = DateFormatter()
+        parser.calendar = calendar
+        parser.timeZone = calendar.timeZone
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "yyyy-MM-dd"
+        var tokens = 0, cost: Double?, unpriced = 0
+        for (day, tally) in lead.days {
+            guard let start = parser.date(from: day), window.within(start.timeIntervalSince1970) else { continue }
+            tokens += tally.tokens
+            if tally.unpriced { unpriced += 1 } else { cost = (cost ?? 0) + tally.cost }
+        }
+        f.leadTokens = tokens
+        f.leadCost = cost
+        f.leadUnpricedDays = unpriced
     }
 
     // MARK: Mac-wide
@@ -528,6 +599,10 @@ public final class SetupStatsCollector: @unchecked Sendable {
         if let merges {
             mac.merges = MergeRate(recorded: merges.count, landed: merges.filter { ["passed", "passed_on_rerun"].contains($0.result) }.count,
                                    hours: window.hours())
+        }
+        if let samples {
+            let said = samples.compactMap(\.boost)
+            if !said.isEmpty { mac.hoursBoosted = Double(said.filter { $0 }.count) / 60 }
         }
         mac.freezes = freezes(debug: debug, samples: samples ?? [], window: window)
         mac.boostNow = BoostState.load(from: home.appendingPathComponent("boost.json"), now: at)
@@ -734,16 +809,36 @@ struct ReceiptView {
     var mergeReruns: Int
     var worker: Role?
     var verifier: Role?
+    /// Seconds its questions waited on the user (0 when not said).
+    var waitingOnUser: Double
+    /// Its `LeadWaits`, seconds by cause; nil in receipts from before they were kept.
+    var waits: Waits?
 
     struct Role {
         var cost: Double?
         /// Input, output, cache reads and writes, as `LeadTokens.total`; nil when none is said.
         var tokens: Int?
+        /// Of them, Codex's (`LeadTokens.codex`); nil when not said.
+        var codex: Int?
 
         init(_ role: [String: Any]) {
             cost = number(role["cost"])
             let parts = ["input", "output", "cacheRead", "cacheWrite"].compactMap { whole(role[$0]) }
             tokens = parts.isEmpty ? nil : parts.reduce(0, &+)
+            codex = whole(role["codex"])
+        }
+    }
+
+    struct Waits {
+        var auditWait, auditing, verifierTime, mergeLoadWait, mergeSlotWait, mergeTesting: Double?
+
+        init(_ waits: [String: Any]) {
+            auditWait = number(waits["auditWait"])
+            auditing = number(waits["auditing"])
+            verifierTime = number(waits["verifierTime"])
+            mergeLoadWait = number(waits["mergeLoadWait"])
+            mergeSlotWait = number(waits["mergeSlotWait"])
+            mergeTesting = number(waits["mergeTesting"])
         }
     }
 
@@ -754,6 +849,8 @@ struct ReceiptView {
         mergeReruns = whole(receipt["mergeReruns"]) ?? 0
         worker = object(receipt["worker"]).map(Role.init)
         verifier = object(receipt["verifier"]).map(Role.init)
+        waitingOnUser = number(receipt["waitingOnUser"]) ?? 0
+        waits = object(receipt["waits"]).map(Waits.init)
     }
 
     /// Both roles' cost; nil when it has no role, or a role's is unknown (impact-metrics.sh's `receipt_cost`).
@@ -794,7 +891,10 @@ struct RecorderLine {
     var load: [Double]
     var cores: Int?
     var result: String?
-    /// A merges line's: the project's folder name, the task's slug, and its first test run ("passed", "failed").
+    /// A load line's boost flag; nil when it doesn't say (lines from before it was recorded).
+    var boost: Bool?
+    /// A merges line's: the project's folder name, the task's slug, and its first test run ("passed", "failed"; a
+    /// batched task's own where the line says it).
     var project: String?
     var task: String?
     var firstRun: String?
@@ -807,7 +907,29 @@ struct RecorderLine {
         result = line["result"] as? String
         project = line["project"] as? String
         task = line["task"] as? String
-        firstRun = line["firstRun"] as? String
+        // A batched task's own first run where its line says it (`MergeSample.taskFirstRun`), else the run's: the
+        // recorder writes snake_case keys (`first_run`); "firstRun" as hand-written lines have it.
+        firstRun = line["task_first_run"] as? String ?? line["first_run"] as? String ?? line["firstRun"] as? String
+        if let flag = line["boost"] as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() { boost = flag.boolValue }
+    }
+}
+
+/// A project's lead-tokens.json (`LeadTokenLedger`): when it began, and each day's tokens and cost.
+struct LeadLedgerView {
+    var since: Double?
+    var days: [String: (tokens: Int, cost: Double, unpriced: Bool)]
+
+    init?(path: String) {
+        guard let data = FileManager.default.contents(atPath: path),
+              let ledger = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        since = number(ledger["since"])
+        days = [:]
+        for (day, value) in ledger["days"] as? [String: Any] ?? [:] {
+            guard let tally = value as? [String: Any] else { continue }
+            let tokens = ["input", "output", "cacheRead", "cacheWrite"].compactMap { whole(tally[$0]) }.reduce(0, &+)
+            let unpriced = !((tally["unpriced"] as? [Any])?.isEmpty ?? true)
+            days[day] = (tokens, number(tally["cost"]) ?? 0, unpriced)
+        }
     }
 }
 

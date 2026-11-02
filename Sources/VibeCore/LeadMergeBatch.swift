@@ -238,6 +238,8 @@ extension LeadToolset {
             do { planned = try store.update { board -> [(test: String, slug: String, noted: Bool)] in
                 for (index, gate) in prefix.enumerated() {
                     guard let at = board.taskIndex(gate.task.slug) else { continue }
+                    // The batch's waits and its runs until now, in its receipt (`LeadWaits`).
+                    board.tasks[at].noteMergeRun(loadWait: waited?.after ?? 0, called: called, begun: begun?.at, ended: Date())
                     board.tasks[at].status = .done
                     board.tasks[at].merged = LeadMergeRecord(commit: stack.tips[index], tested: true, onto: under[gate.task.slug],
                                                              regression: workflow.regressionCommand.map { _ in true },
@@ -435,7 +437,19 @@ extension LeadToolset {
                 sample.batch = id
                 sample.batchTasks = gates.count
                 sample.batchRuns = runs
+                sample.taskFirstRun = decided.result == "passed" ? "passed" : ["failed", "passed_on_rerun"].contains(decided.result) ? "failed" : nil
                 try? sample.append(in: folder, at: start)
+            }
+        }
+        // The tasks tested that didn't land: the batch's waits and runs until each was decided (`LeadWaits`); the landed
+        // ones' are in their receipts.
+        let unlanded = gates.filter { !landed.contains($0.task.slug) && results[$0.task.slug] != nil }
+        if !unlanded.isEmpty {
+            _ = try? store.update { board in
+                for gate in unlanded {
+                    guard let at = board.taskIndex(gate.task.slug), let decided = results[gate.task.slug]?.at else { continue }
+                    board.tasks[at].noteMergeRun(loadWait: waited?.after ?? 0, called: called, begun: begun?.at, ended: decided)
+                }
             }
         }
         if !landed.isEmpty { archiveFinished(force: false) }

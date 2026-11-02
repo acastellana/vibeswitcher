@@ -1928,7 +1928,9 @@ public final class LeadToolset: MCPToolset {
 
     /// The tokens `task`'s own workers and verifiers spent, from their transcripts, for its receipt (see `LeadReceipts`).
     func receiptUsage(_ task: LeadTask) -> LeadReceipts.Usage {
-        LeadReceipts.usage(root: root, slug: task.slug, since: task.createdAt, home: claudeHome)
+        // A Codex worker's tokens are in its rollouts, read only for a task one worked on.
+        let codex = task.workerAgent == .codex || task.codexWorked == true
+        return LeadReceipts.usage(root: root, slug: task.slug, since: task.createdAt, home: claudeHome, codexHome: codex ? codexUsage.home.path : nil)
     }
 
     /// read_session's last section: "Waiting on: since 09:52 (6 min), the prompt it shows:" and that prompt in full.
@@ -2086,6 +2088,8 @@ public final class LeadToolset: MCPToolset {
         var panel: LeadAuditPanel?
         var merged = upToDate.merged
         let earlier: String
+        // The audit starts here (a merged result's test run is part of it): its wait ends, its time begins.
+        let auditStart = Date().timeIntervalSince1970
         if finders > 1 {
             let started = try startFinders(finders, task: task, head: head, merged: merged, workflow: workflow, recheck: recheck, trust: config.isEmpty)
             (panel, earlier) = (started.0, started.1)
@@ -2112,6 +2116,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].verifier = session
             board.tasks[index].panel = panel
             board.tasks[index].launched(panel?.sessions ?? [session], on: auditModel(workflow))
+            board.tasks[index].noteWaits { $0.auditStarted(at: auditStart, sessions: panel?.sessions.count ?? 1) }
             // A kept task stays kept through a new audit: what holds it back hasn't changed.
             if ![.kept, .folded, .abandoned, .reverted].contains(board.tasks[index].status) { board.tasks[index].status = .review }
             board.tasks[index].evidence = nil
@@ -2684,6 +2689,12 @@ public final class LeadToolset: MCPToolset {
                                      started: start, load: begun?.load ?? LoadRecorder.averages() ?? [], waited: waited?.after ?? 0,
                                      slotWait: begun.map { $0.at.timeIntervalSince(called) }, ended: Date())
             try? sample.append(in: folder, at: start)
+        }
+        // Its waits for the load and a slot, and its run's time, for the task's receipt (`LeadWaits`).
+        let ranUntil = Date()
+        try? store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].noteMergeRun(loadWait: waited?.after ?? 0, called: called, begun: begun?.at, ended: ranUntil)
         }
         switch checked {
         case .passed(let commit): tested = commit
@@ -3987,6 +3998,8 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].evidence = nil
             }
             if done { board.tasks[index].report = summary }
+            // A done on a new commit: an audit started next waited from now (`LeadWaits`).
+            if done, standing == nil { board.tasks[index].noteWaits { $0.reportedDone(at: Date().timeIntervalSince1970) } }
             board.tasks[index].auditNeeded = needed
             board.tasks[index].blocker = done ? nil : (summary.isEmpty ? "The worker is blocked." : summary)
         }
@@ -4202,6 +4215,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].evidence = evidence
             board.tasks[index].outdatedEvidence = nil
             board.tasks[index].audits = ledger
+            board.tasks[index].noteWaits { $0.auditEnded(at: Date().timeIntervalSince1970) }
             if let size = board.tasks[index].panel?.size { board.tasks[index].panel?.reported = Array(1...size) }
             // A pass that leaves an Important finding open isn't mergeable yet: the lead decides, as on a failure.
             if ![.kept, .folded, .abandoned, .reverted].contains(board.tasks[index].status) { board.tasks[index].status = evidence.passes && blocking.isEmpty ? .review : .failed }

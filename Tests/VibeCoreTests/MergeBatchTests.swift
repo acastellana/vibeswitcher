@@ -163,6 +163,7 @@ struct MergeBatchTests: LeadTeamFixture {
         let lines = try mergeLines(stats)
         #expect(lines.map(\.task) == ["add-x", "add-y", "add-z"])
         #expect(Set(lines.compactMap(\.batch)).count == 1 && lines.allSatisfy { $0.batchRuns == 1 && $0.batchTasks == 3 && $0.result == "passed" }, "\(lines)")
+        #expect(lines.allSatisfy { $0.firstRun == "passed" && $0.taskFirstRun == "passed" }, "\(lines)")
         let progress = try String(contentsOfFile: lead.store.recordPath("progress.md"), encoding: .utf8)
         #expect(["add-x", "add-y", "add-z"].allSatisfy { progress.contains("Merged \($0): \($0) (in a batch: add-x, add-y, add-z landed on one test run)") }, "\(progress)")
         #expect(advancing.until { reports(runtime).contains { $0.contains("as one batch, on 1 test run for 3 tasks") } }, "\(reports(runtime))")
@@ -231,6 +232,8 @@ struct MergeBatchTests: LeadTeamFixture {
     /// back to its worker with its failing output, and the one after it lands on a run of its own.
     @Test func aBreakerIsFoundInLog2NRunsAndTheOthersMerge() throws {
         let (root, runtime, lead) = try team(["merge_batching": "always"])
+        let stats = temp.url("stats")
+        lead.mergeStats = { stats }
         lead.batchSize = 4
         for (slug, file) in [("add-w", "w.txt"), ("add-x", "x.txt"), ("add-break", "break.txt"), ("add-z", "z.txt")] {
             try audited(lead, runtime, root: root, slug, [file: "\(slug)\n"])
@@ -249,6 +252,11 @@ struct MergeBatchTests: LeadTeamFixture {
         // Failed, then back at work once its worker has the output.
         #expect([.failed, .running].contains(breaker.status) && breaker.merged == nil && breaker.setback?.stage == .merge && breaker.setback?.reason.contains("breaks()") == true, "\(String(describing: breaker.setback))")
         #expect(board(root).task("add-w")?.merged?.batch == ["add-w", "add-x"] && board(root).task("add-z")?.merged?.batch == nil)
+        // The batch's shared first run failed on every line; each task's own says only the breaker's tests failed.
+        let lines = try mergeLines(stats).filter { $0.batch != nil }
+        let own = Dictionary(lines.map { ($0.task, $0.taskFirstRun ?? "none") }, uniquingKeysWith: { first, _ in first })
+        #expect(own["add-w"] == "passed" && own["add-x"] == "passed" && own["add-break"] == "failed", "\(lines)")
+        #expect(lines.filter { ["add-w", "add-x", "add-break"].contains($0.task) }.allSatisfy { $0.firstRun == "failed" }, "\(lines)")
         #expect(advancing.until { toWorker("add-break", root, runtime).contains { $0.contains("Failing tests (1): breaks()") && $0.contains("the stack without it passes") } },
                 "\(toWorker("add-break", root, runtime))")
     }

@@ -123,6 +123,9 @@ public struct LoadSample: Codable, Equatable, Sendable {
     public var top: [Group]?
     /// The CPU time this sample took to take, in milliseconds.
     public var costMs: Double
+    /// Boost mode was in force (`BoostState.active`: the app's last word on, and fresh); nil in lines from before it was
+    /// recorded, so hours boosted sum the samples with true.
+    public var boost: Bool? = nil
 
     public struct Memory: Codable, Equatable, Sendable {
         /// "normal", "warn" or "critical" (the kernel's memory pressure level).
@@ -207,6 +210,11 @@ public struct MergeSample: Codable, Equatable, Sendable {
     public var batch: String?
     public var batchTasks: Int?
     public var batchRuns: Int?
+    /// A batched merge's: this task's own first try, where the batch's runs tell it apart from the others' ("passed":
+    /// it landed on a run that passed first; "failed": its tests failed on it (the split found it the breaker), or the
+    /// run it landed on passed only on its rerun); nil when they don't (a conflict, a stop) and on lines from before
+    /// it was kept. `firstRun` stays the batch's shared first run.
+    public var taskFirstRun: String?
 
     public init(t: String, project: String, task: String, load: [Double], waitedS: Int, slotWaitS: Int?, durationS: Int,
                 firstRun: String?, reran: [String]?, rerunWhole: Bool?, result: String) {
@@ -291,11 +299,17 @@ public final class LoadRecorder: @unchecked Sendable {
         /// How long to wait for a second look at the processes when there's no recent first one.
         public var window: TimeInterval
         public var sleep: (TimeInterval) -> Void
+        /// Whether Boost mode is in force; nil: not known (not recorded in the line).
+        public var boost: () -> Bool?
+        /// Tallies the tokens of the leads of these projects (roots) up to now (`LeadTokenLedger.tally`), on the
+        /// recorder's queue, at most every `LeadTokenLedger.every`.
+        public var tallyLeads: ([String], Date) -> Void
 
         public init(averages: @escaping () -> [Double]?, memory: @escaping () -> LoadSample.Memory?,
                     heavy: @escaping () -> (slots: Int, holders: [TestLock.Holder]), processes: @escaping () -> [LoadProcess]?,
                     cwd: @escaping (Int32) -> String?, project: @escaping (String) -> String?, window: TimeInterval = 2,
-                    sleep: @escaping (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }) {
+                    sleep: @escaping (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
+                    boost: @escaping () -> Bool? = { nil }, tallyLeads: @escaping ([String], Date) -> Void = { _, _ in }) {
             self.averages = averages
             self.memory = memory
             self.heavy = heavy
@@ -304,12 +318,16 @@ public final class LoadRecorder: @unchecked Sendable {
             self.project = project
             self.window = window
             self.sleep = sleep
+            self.boost = boost
+            self.tallyLeads = tallyLeads
         }
 
         /// The Mac's own.
         public static var mac: Sources {
             Sources(averages: LoadRecorder.averages, memory: LoadRecorder.memory, heavy: LoadRecorder.heavySlots,
-                    processes: LoadRecorder.processes, cwd: LoadRecorder.cwd, project: { LoadStats.project(ofFolder: $0) })
+                    processes: LoadRecorder.processes, cwd: LoadRecorder.cwd, project: { LoadStats.project(ofFolder: $0) },
+                    boost: { BoostState.active() != nil },
+                    tallyLeads: { roots, now in LeadTokenLedger.tally(roots: roots, now: now) })
         }
     }
 
@@ -321,6 +339,9 @@ public final class LoadRecorder: @unchecked Sendable {
     private var lastLook: (at: Date, cpu: [Int32: Double])?
     /// The day last pruned.
     private var pruned: String?
+    /// When the leads' tokens were last tallied, and the projects whose lead was live then (tallied once more after
+    /// their lead ends, for its last minutes).
+    private var leadsTallied: (at: Date, roots: Set<String>)?
     /// A sample is under way: the next minute's is skipped rather than queued behind it.
     private var busy = false
     private let lock = NSLock()
@@ -357,7 +378,17 @@ public final class LoadRecorder: @unchecked Sendable {
             LoadStats.prune(folder(), now: date)
             pruned = today
         }
+        tallyLeads(census: census, at: date)
         return sample
+    }
+
+    /// Every `LeadTokenLedger.every`, the tokens of the projects' leads live now, and of those live at the last tally.
+    func tallyLeads(census: [HostCensus], at date: Date) {
+        let live = Set(census.filter { $0.role == .lead && $0.sessions > 0 }.map { ($0.root as NSString).standardizingPath })
+        if let last = leadsTallied, date >= last.at, date.timeIntervalSince(last.at) < LeadTokenLedger.every { return }
+        let roots = live.union(leadsTallied?.roots ?? [])
+        leadsTallied = (date, live)
+        if !roots.isEmpty { sources.tallyLeads(roots.sorted(), date) }
     }
 
     /// The sample as of `date`, its own CPU cost measured. On the caller's thread.
@@ -376,7 +407,7 @@ public final class LoadRecorder: @unchecked Sendable {
                                         task: holder.task,
                                         minutes: holder.since.map { _ in Int(holder.held(now: date) / 60) })
             }),
-            top: nil, costMs: 0)
+            top: nil, costMs: 0, boost: sources.boost())
         if let one = averages.first, one > LoadStats.topLoad {
             sample.top = topGroups(at: date)
         } else {

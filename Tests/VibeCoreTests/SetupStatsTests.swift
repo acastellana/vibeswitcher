@@ -224,6 +224,83 @@ struct SetupStatsTests {
         #expect(total.cost == 3 && total.costed == 3)
     }
 
+    // MARK: What's recorded since receipts, the recorder and the leads' ledger kept more
+
+    @Test func itReadsWaitsCodexTokensBoostAndLeadTokensWhereRecordedAndNotBefore() async throws {
+        let root = temp.url("recorded")
+        let home = root.appendingPathComponent("home"), stats = home.appendingPathComponent("stats")
+        try FileManager.default.createDirectory(at: stats, withIntermediateDirectories: true)
+        let at = Self.date(2026, 10, 20, 12).timeIntervalSince1970
+        var newer = Self.receipt(started: at - 7200, ended: at, tokens: 1000)
+        newer["worker"] = ["cost": 1.0, "input": 1000, "output": 0, "cacheRead": 0, "cacheWrite": 0, "codex": 400, "models": ["gpt-6.1-sol"]]
+        newer["waitingOnUser"] = 360
+        newer["waits"] = ["auditWait": 1800, "auditing": 3600, "verifierTime": 7200, "mergeLoadWait": 600, "mergeSlotWait": 1200, "mergeTesting": 900]
+        var outside = newer
+        outside["endedAt"] = at - 3 * 86_400
+        let one = try project("one", tasks: [
+            Self.task("a", at: at, extra: ["codexWorked": true, "merged": ["commit": "c", "tested": true, "at": at], "receipt": newer]),
+            // A receipt from before: none of the new figures, and nothing it lacks counted as zero but the user's wait.
+            Self.task("b", at: at, extra: ["merged": ["commit": "c", "tested": true, "at": at], "receipt": Self.receipt(started: at - 600, ended: at)]),
+            Self.task("c", at: at, extra: ["receipt": outside]),
+        ], in: root)
+        // The lead's ledger: the range's day, a day before it, and an unpriced day after it.
+        let ledger: [String: Any] = ["since": at - 5 * 86_400, "at": at, "files": [:], "days": [
+            "2026-10-20": ["input": 100, "output": 50, "cacheRead": 1000, "cacheWrite": 0, "cacheWrite1h": 0, "cost": 0.5, "models": [:], "sessions": []],
+            "2026-10-19": ["input": 9999, "output": 0, "cacheRead": 0, "cacheWrite": 0, "cacheWrite1h": 0, "cost": 9.0, "models": [:], "sessions": []],
+            "2026-10-21": ["input": 7, "output": 0, "cacheRead": 0, "cacheWrite": 0, "cacheWrite1h": 0, "cost": 0, "unpriced": ["x"], "models": [:], "sessions": []]]]
+        try JSONSerialization.data(withJSONObject: ledger).write(to: one.appendingPathComponent(".vibeswitcher/lead-tokens.json"))
+        // A project whose ledger began after the range: its lead's tokens not recorded for it; one with none at all.
+        let two = try project("two", tasks: [], in: root)
+        let late: [String: Any] = ["since": at + 2 * 86_400, "at": at + 2 * 86_400, "files": [:], "days": [:]]
+        try JSONSerialization.data(withJSONObject: late).write(to: two.appendingPathComponent(".vibeswitcher/lead-tokens.json"))
+        let three = try project("three", tasks: [], in: root)
+        // Load lines: three boosted minutes, one not, and one from before the flag.
+        let lines = (0..<5).map { minute -> String in
+            let flag = minute < 3 ? ", \"boost\": true" : minute == 3 ? ", \"boost\": false" : ""
+            return "{\"t\": \"2026-10-20T10:0\(minute):00+00:00\", \"load\": [10, 9, 8], \"cores\": 16\(flag)}"
+        }
+        try (lines.joined(separator: "\n") + "\n").write(to: stats.appendingPathComponent("load-2026-10-20.jsonl"), atomically: true, encoding: .utf8)
+
+        let result = await collector(home: home).collect(projects: [one.path, two.path, three.path], range: Self.fixtureDay)
+        let first = try #require(result.projects.first { $0.name == "one" }?.figures)
+        #expect(first.ended == 2 && first.codexTokens == 400)
+        #expect(first.verifierHours == 2 && first.auditWaitHours == 0.5 && first.auditingHours == 1)
+        #expect(first.mergeWaitHours == 0.5 && first.mergeTestHours == 0.25 && first.userWaitHours == 0.1)
+        #expect(first.leadTokens == 1150 && first.leadCost == 0.5 && first.leadUnpricedDays == 0)
+        let second = try #require(result.projects.first { $0.name == "two" }?.figures)
+        let third = try #require(result.projects.first { $0.name == "three" }?.figures)
+        for figures in [second, third] {
+            #expect(figures.leadTokens == nil && figures.leadCost == nil && figures.codexTokens == nil && figures.verifierHours == nil)
+            #expect(figures.auditWaitHours == nil && figures.userWaitHours == nil)
+        }
+        let total = try #require(result.total)
+        #expect(total.codexTokens == 400 && total.leadTokens == 1150 && total.verifierHours == 2)
+        #expect(result.mac.codexTokens == 400)
+        #expect(result.mac.hoursBoosted == 3.0 / 60)
+        // Its earlier figures as they were.
+        #expect(first.merged == 2 && first.workerTokens == 1000 && first.cost == 2 && first.workerHours == 2)
+
+        // A range with an unpriced day: its tokens counted, its cost not known.
+        let next = DateInterval(start: Self.date(2026, 10, 21), end: Self.date(2026, 10, 22))
+        let later = await collector(home: home).collect(projects: [one.path], range: next)
+        let figures = try #require(later.projects.first?.figures)
+        #expect(figures.leadTokens == 7 && figures.leadCost == nil && figures.leadUnpricedDays == 1)
+        #expect(later.mac.hoursBoosted == nil, "no sample in the range says")
+    }
+
+    @Test func aMergesLinesFirstRunIsReadAsTheRecorderWritesItATasksOwnFirst() throws {
+        let stamps = StampParser(calendar: Self.utc)
+        func line(_ json: String) throws -> RecorderLine {
+            let object = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+            return try #require(RecorderLine(object, stamps: stamps))
+        }
+        #expect(try line(#"{"t":"2026-10-20T09:00:00+00:00","task":"a","first_run":"failed","result":"passed_on_rerun"}"#).firstRun == "failed")
+        // A batch's shared first run failed, this task's own passed: its own counts.
+        #expect(try line(#"{"t":"2026-10-20T09:00:00+00:00","task":"a","first_run":"failed","task_first_run":"passed","batch":"b"}"#).firstRun == "passed")
+        #expect(try line(#"{"t":"2026-10-20T09:00:00+00:00","task":"a","firstRun":"passed"}"#).firstRun == "passed")
+        #expect(try line(#"{"t":"2026-10-20T09:00:00+00:00","task":"a"}"#).firstRun == nil)
+    }
+
     // MARK: Failing soft
 
     @Test func missingOrUnreadableFilesAreNotRecordedAndStopNothingElse() async throws {

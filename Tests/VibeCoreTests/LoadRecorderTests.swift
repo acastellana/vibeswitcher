@@ -58,6 +58,57 @@ struct LoadRecorderTests {
         #expect(lines[0].contains("\"swap_used_mb\":2048") && lines[0].contains("\"cost_ms\":"), "\(lines[0])")
     }
 
+    @Test func eachSampleSaysWhetherBoostWasOnAndOlderLinesDecodeWithout() throws {
+        let folder = temp.url("stats")
+        var boost: Bool? = true
+        var sources = sources(load: 3)
+        sources.boost = { boost }
+        let recorder = LoadRecorder(folder: folder, sources: sources)
+        let now = Date(timeIntervalSince1970: 1_793_000_000)
+        try recorder.write(census: [], at: now)
+        boost = false
+        try recorder.write(census: [], at: now.addingTimeInterval(60))
+        boost = nil
+        try recorder.write(census: [], at: now.addingTimeInterval(120))
+        let lines = try String(contentsOf: folder.appendingPathComponent(LoadStats.fileName("load", for: now)), encoding: .utf8).split(separator: "\n")
+        #expect(try lines.map { try decode($0).boost } == [true, false, nil])
+        #expect(lines[0].contains("\"boost\":true") && lines[1].contains("\"boost\":false") && !lines[2].contains("boost"), "\(lines)")
+        // A line from before the flag: decoded unchanged, boost unknown.
+        let old = #"{"cores":16,"cost_ms":0.5,"heavy":{"held":[],"slots":2},"load":[3,2,1],"sessions":[],"t":"2026-11-01T14:02:00+01:00"}"#
+        let sample = try decode(Substring(old))
+        #expect(sample.boost == nil && sample.load == [3, 2, 1] && sample.cores == 16)
+        #expect(try LoadStats.line(sample) == old)
+        // A merges line from before a batched task's own first run was kept: read as before.
+        let merge = #"{"batch":"b","batch_runs":2,"batch_tasks":2,"duration_s":30,"first_run":"failed","load":[1,1,1],"project":"p","result":"passed","t":"2026-11-01T14:02:00+01:00","task":"x","waited_s":0}"#
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let line = try decoder.decode(MergeSample.self, from: Data(merge.utf8))
+        #expect(line.taskFirstRun == nil && line.firstRun == "failed" && line.batchRuns == 2)
+        #expect(try LoadStats.line(line) == merge)
+    }
+
+    @Test func leadsAreTalliedEveryFiveMinutesOnceMoreAfterTheirLeadEnds() throws {
+        var tallies: [([String], Date)] = []
+        var sources = sources(load: 3)
+        sources.tallyLeads = { tallies.append(($0, $1)) }
+        let recorder = LoadRecorder(folder: temp.url("stats"), sources: sources)
+        let now = Date(timeIntervalSince1970: 1_793_000_000)
+        let leads = [HostCensus(root: "/r/a", role: .lead, sessions: 1), HostCensus(root: "/r/b/../b", role: .lead, sessions: 1),
+                     HostCensus(root: "/r/c", role: .worker, sessions: 2), HostCensus(root: "/r/d", role: .lead, sessions: 0)]
+        try recorder.write(census: leads, at: now)
+        // Within five minutes: not again.
+        try recorder.write(census: leads, at: now.addingTimeInterval(60))
+        #expect(tallies.map(\.0) == [["/r/a", "/r/b"]])
+        // Five minutes on, b's lead ended: b once more (its last minutes), then no more.
+        try recorder.write(census: [leads[0]], at: now.addingTimeInterval(LeadTokenLedger.every))
+        try recorder.write(census: [leads[0]], at: now.addingTimeInterval(2 * LeadTokenLedger.every))
+        try recorder.write(census: [], at: now.addingTimeInterval(3 * LeadTokenLedger.every))
+        try recorder.write(census: [], at: now.addingTimeInterval(4 * LeadTokenLedger.every))
+        #expect(tallies.map(\.0) == [["/r/a", "/r/b"], ["/r/a", "/r/b"], ["/r/a"], ["/r/a"]], "\(tallies.map(\.0))")
+        #expect(tallies.map(\.1) == [now, now.addingTimeInterval(LeadTokenLedger.every), now.addingTimeInterval(2 * LeadTokenLedger.every),
+                                     now.addingTimeInterval(3 * LeadTokenLedger.every)])
+    }
+
     @Test func daysOlderThanFourteenArePrunedAndNothingElse() throws {
         let folder = temp.url("stats")
         try VibePaths.ensurePrivate(folder)

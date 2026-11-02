@@ -763,6 +763,8 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// What it cost, once it ended (merged, folded or abandoned): see `LeadReceipt`. nil for tasks that ended before
     /// receipts, and for any still open.
     public var receipt: LeadReceipt?
+    /// Where its time went while it waited on an audit or a merge's test run (see `LeadWaits`); nil before any.
+    public var waits: LeadWaits?
 
     /// Its review level: none unless the lead set audit.
     public var reviewLevel: Review { review ?? .none }

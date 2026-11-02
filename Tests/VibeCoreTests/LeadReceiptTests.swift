@@ -287,6 +287,94 @@ struct LeadReceiptTests: LeadTeamFixture {
         #expect(BatchSummary.detect(previous: previous, current: board, now: Date().timeIntervalSince1970 + 1)?.receipts == nil)
     }
 
+    // MARK: Codex tokens
+
+    /// A Codex rollout's lines as Codex 0.16x writes them: its session_meta (with `cwd`), a turn_context naming its
+    /// model, a message (text never read), and a token_count event per reply with the session's running total.
+    static func rollout(session: String, cwd: String, model: String = "gpt-6.1-sol", totals: [(at: Double, input: Int, cached: Int, output: Int)]) -> [String] {
+        func json(_ object: [String: Any]) -> String {
+            String(decoding: try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
+        }
+        let first = totals.first?.at ?? 0
+        var lines = [json(["timestamp": stamp(first - 5), "type": "session_meta",
+                           "payload": ["id": session, "session_id": session, "cwd": cwd, "base_instructions": ["text": "SECRET-INSTRUCTIONS"]]]),
+                     json(["timestamp": stamp(first - 4), "type": "turn_context", "payload": ["cwd": cwd, "model": model, "summary": "auto"]]),
+                     json(["timestamp": stamp(first - 3), "type": "response_item",
+                           "payload": ["type": "message", "role": "assistant", "content": [["type": "output_text", "text": "SECRET-TRANSCRIPT-TEXT token_count"]]]])]
+        for total in totals {
+            let usage: [String: Any] = ["input_tokens": total.input, "cached_input_tokens": total.cached, "cache_write_input_tokens": 0,
+                                        "output_tokens": total.output, "reasoning_output_tokens": total.output / 10, "total_tokens": total.input + total.output]
+            lines.append(json(["timestamp": stamp(total.at), "type": "event_msg",
+                               "payload": ["type": "token_count", "info": ["total_token_usage": usage, "last_token_usage": usage],
+                                           "rate_limits": ["limit_id": "codex", "primary": ["used_percent": 10.0, "window_minutes": 10080, "resets_at": 1_900_000_000]]]]))
+        }
+        return lines
+    }
+
+    /// Writes `lines` as a rollout in Codex's day folder for `at` under `codexHome`.
+    func writeRollout(_ name: String, _ lines: [String], codexHome: String, at: Double) throws {
+        let parts = Calendar.current.dateComponents([.year, .month, .day], from: Date(timeIntervalSince1970: at))
+        let folder = URL(fileURLWithPath: codexHome).appendingPathComponent(String(format: "sessions/%04d/%02d/%02d", parts.year!, parts.month!, parts.day!))
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try (lines.joined(separator: "\n") + "\n").write(to: folder.appendingPathComponent("rollout-\(name).jsonl"), atomically: true, encoding: .utf8)
+    }
+
+    @Test func aCodexWorkersTokensComeFromItsRolloutsIntoTheWorkersTokens() throws {
+        let root = try repo()
+        let start = Date().timeIntervalSince1970
+        let codexHome = temp.url("codex").path
+        let worktree = Worktrees.path(root: root, slug: "change")
+        // Its worker's session: a total from before the task (a session resumed in that folder) taken off; then two
+        // replies, the last total counting. Codex counts cached input inside input.
+        try writeRollout("a", Self.rollout(session: "s-a", cwd: worktree, totals: [(start - 600, 1000, 800, 50), (start + 10, 5000, 3000, 400),
+                                                                                    (start + 20, 9000, 6000, 700)]), codexHome: codexHome, at: start)
+        // The same session copied to another file with less of it: counted once, by its fuller copy.
+        try writeRollout("a-copy", Self.rollout(session: "s-a", cwd: worktree, totals: [(start + 10, 5000, 3000, 400)]), codexHome: codexHome, at: start)
+        // Another folder's session (the user's own Codex elsewhere): never counted.
+        try writeRollout("b", Self.rollout(session: "s-b", cwd: root, totals: [(start + 15, 99_999, 0, 99_999)]), codexHome: codexHome, at: start)
+
+        let codex = try #require(LeadReceipts.codex(root: root, slug: "change", since: start, codexHome: codexHome))
+        // Since the task: input 8000 of which 5200 cached; output 650.
+        #expect(codex.input == 2800 && codex.cacheRead == 5200 && codex.output == 650 && codex.cacheWrite == 0, "\(codex)")
+        #expect(codex.total == 8650 && codex.codex == 8650 && codex.sessions == 1 && codex.models == ["gpt-6.1-sol"])
+        // Codex has no price here: its tokens are left out of the estimate, never priced wrong, and say so.
+        #expect(codex.cost == 0 && codex.unpriced == nil)
+        #expect(codex.text.hasSuffix("; gpt-6.1-sol; 8.7k of them Codex's, not in the cost)"), "\(codex.text)")
+
+        // With the task's Claude transcripts too: one worker, both summed.
+        try fixtures(root: root, slug: "change", start: start)
+        let usage = LeadReceipts.usage(root: root, slug: "change", since: start, home: home, codexHome: codexHome)
+        let worker = try #require(usage.worker)
+        #expect(worker.input == 16 + 2800 && worker.output == 3500 + 650 && worker.cacheRead == 180_000 + 5200 && worker.sessions == 3)
+        #expect(worker.codex == 8650 && worker.models == ["claude-opus-5-5", "gpt-6.1-sol"])
+        // The receipt's cost stays its Claude sessions' estimate, as before Codex tokens were read: not unknown.
+        #expect(abs((worker.cost ?? -1) - 0.127064) < 1e-9 && worker.unpriced == nil)
+        #expect(usage.verifier?.codex == nil)
+        // Without Codex's home, as before.
+        #expect(LeadReceipts.usage(root: root, slug: "change", since: start, home: home).worker?.codex == nil)
+
+        // The lead reads Codex's rollouts only for a task a Codex worker worked on, from its Codex home.
+        let lead = try lead(root, FakeRuntime())
+        lead.claudeHome = home
+        lead.codexUsage = CodexUsageReader(home: URL(fileURLWithPath: codexHome))
+        var task = LeadTask(slug: "change", title: "Change", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""))
+        task.createdAt = start
+        #expect(lead.receiptUsage(task).worker?.codex == nil)
+        task.codexWorked = true
+        #expect(lead.receiptUsage(task).worker?.codex == 8650)
+
+        // A receipt keeps numbers only.
+        let receipt = LeadReceipt(task, ending: .merged, questions: [], usage: lead.receiptUsage(task), now: start + 30)
+        let saved = String(decoding: try JSONEncoder().encode(receipt), as: UTF8.self)
+        #expect(saved.contains("\"codex\":8650") && !saved.contains("SECRET") && !saved.contains(worktree))
+    }
+
+    @Test func receiptsFromBeforeCodexTokensDecodeWithNone() throws {
+        let old = #"{"ending":"merged","endedAt":100,"worked":5,"worker":{"input":1,"output":2,"cacheRead":0,"cacheWrite":0,"cacheWrite1h":0,"sessions":1,"models":["claude-opus-5-5"],"cost":0.5},"rounds":0,"rerolls":0,"mergeReruns":0,"questions":0,"waitingOnUser":0,"pricesAsOf":"2026-10-06"}"#
+        let receipt = try JSONDecoder().decode(LeadReceipt.self, from: Data(old.utf8))
+        #expect(receipt.worker?.codex == nil && receipt.waits == nil && receipt.worker?.total == 3 && receipt.cost == 0.5)
+    }
+
     // MARK: A batch's totals
 
     func ended(_ slug: String, title: String, worked: Double, output: Int, model: String = "claude-opus-5-5", at: Double) -> LeadTask {

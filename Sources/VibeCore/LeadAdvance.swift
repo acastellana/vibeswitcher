@@ -538,6 +538,8 @@ public final class LeadAdvance: @unchecked Sendable {
             try? lead.store.update { board in
                 guard let index = board.taskIndex(slug) else { return }
                 board.tasks[index].verifierRetry?.second = ended.ending
+                // Its audit ended here, without a verdict (`LeadWaits`).
+                board.tasks[index].noteWaits { $0.auditEnded(at: Date().timeIntervalSince1970) }
             }
             if ended.live { try? lead.runtime.kill(ended.session) }
             did("The verifier on \(slug) ended without a verdict twice at \(head.prefix(8)), so its audit doesn't start again by itself: "

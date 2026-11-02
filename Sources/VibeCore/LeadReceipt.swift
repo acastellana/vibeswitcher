@@ -33,6 +33,9 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
     public var commits: Int?
     /// The date of the prices its cost is estimated with (`LeadPrices.asOf`).
     public var pricesAsOf: String
+    /// Where its time went waiting on audits and the merge's test runs (`LeadWaits`), as of its end; nil for receipts
+    /// from before they were kept, and for a task that waited on neither.
+    public var waits: LeadWaits?
 
     public init(ending: Ending, startedAt: Double?, endedAt: Double, worked: Double?, worker: LeadTokens?, verifier: LeadTokens?,
                 rounds: Int = 0, rerolls: Int = 0, mergeReruns: Int = 0, tests: Int? = nil, questions: Int = 0, waitingOnUser: Double = 0,
@@ -64,6 +67,7 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
                   rounds: task.audits?.rounds ?? 0, rerolls: task.rerolls?.count ?? 0, mergeReruns: mergeReruns, tests: tests,
                   questions: asked.count, waitingOnUser: asked.reduce(0) { $0 + $1.waitingOnUser(now: now) },
                   onto: merged?.onto, commit: merged?.commit, commits: commits)
+        waits = task.waits.map { $0.closed(at: now) }
     }
 
     /// Seconds from its first worker's start to its end.
@@ -160,9 +164,12 @@ public struct LeadTokens: Codable, Equatable, Sendable {
     /// Its estimated cost in US dollars; nil when a model it used has no price (`unpriced`).
     public var cost: Double?
     public var unpriced: [String]?
+    /// Of `total`, the tokens Codex sessions spent (a Codex worker's, read from its rollouts: `LeadReceipts.codex`);
+    /// nil when none was read (receipts from before they were, and Claude-only roles). They aren't in `cost`.
+    public var codex: Int?
 
     public init(input: Int = 0, output: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, cacheWrite1h: Int = 0, sessions: Int = 0,
-                models: [String] = [], cost: Double? = 0, unpriced: [String]? = nil) {
+                models: [String] = [], cost: Double? = 0, unpriced: [String]? = nil, codex: Int? = nil) {
         self.input = input
         self.output = output
         self.cacheRead = cacheRead
@@ -172,14 +179,17 @@ public struct LeadTokens: Codable, Equatable, Sendable {
         self.models = models
         self.cost = cost
         self.unpriced = unpriced
+        self.codex = codex
     }
 
     public var total: Int { input + output + cacheRead + cacheWrite }
 
-    /// "15.5M tokens (in 202, out 73.2k, cache read 15.2M, cache write 298k; claude-opus-5-5)".
+    /// "15.5M tokens (in 202, out 73.2k, cache read 15.2M, cache write 298k; claude-opus-5-5)", with "; 8.7k of them
+    /// Codex's, not in the cost" when Codex's are among them.
     public var text: String {
         "\(LeadReceipt.count(total)) tokens (in \(LeadReceipt.count(input)), out \(LeadReceipt.count(output)), cache read "
-            + "\(LeadReceipt.count(cacheRead)), cache write \(LeadReceipt.count(cacheWrite))" + (models.isEmpty ? "" : "; \(models.joined(separator: ", "))") + ")"
+            + "\(LeadReceipt.count(cacheRead)), cache write \(LeadReceipt.count(cacheWrite))" + (models.isEmpty ? "" : "; \(models.joined(separator: ", "))")
+            + (codex.map { $0 > 0 ? "; \(LeadReceipt.count($0)) of them Codex's, not in the cost" : "" } ?? "") + ")"
     }
 }
 
@@ -265,6 +275,9 @@ public enum LeadReceipts {
         var model: String
         var input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cacheWrite1h = 0
         var fast = false
+        /// When it was written (its line's timestamp), and its message id (else request id): for the leads' ledger.
+        var at: Double?
+        var id = ""
     }
 
     /// Both roles' tokens.
@@ -332,9 +345,164 @@ public enum LeadReceipts {
     }
 
     /// The tokens of `slug`'s sessions (see `transcripts`), counting responses from `since` on (its creation: a folder
-    /// a removed task of the same name used stays out).
-    public static func usage(root: String, slug: String, since: Double, home: String = VibePaths.home) -> Usage {
-        usage(transcripts(root: root, slug: slug, home: home), since: since)
+    /// a removed task of the same name used stays out); with `codexHome`, its Codex worker's rollouts' among the
+    /// worker's (see `codex`).
+    public static func usage(root: String, slug: String, since: Double, home: String = VibePaths.home, codexHome: String? = nil,
+                             now: Date = Date()) -> Usage {
+        var usage = usage(transcripts(root: root, slug: slug, home: home), since: since)
+        if let codexHome, let codex = codex(root: root, slug: slug, since: since, codexHome: codexHome, now: now) {
+            usage.worker = combined(usage.worker, codex)
+        }
+        return usage
+    }
+
+    /// `a` and `b` summed: one role's Claude and Codex sessions. The cost is unknown when either's is (Codex's never is:
+    /// it's left out).
+    static func combined(_ a: LeadTokens?, _ b: LeadTokens) -> LeadTokens {
+        guard var sum = a else { return b }
+        let (first, second) = a!.total >= b.total ? (a!, b) : (b, a!)
+        sum.input += b.input
+        sum.output += b.output
+        sum.cacheRead += b.cacheRead
+        sum.cacheWrite += b.cacheWrite
+        sum.cacheWrite1h += b.cacheWrite1h
+        sum.sessions += b.sessions
+        sum.models = first.models + second.models.filter { !first.models.contains($0) }
+        sum.cost = sum.cost.flatMap { mine in b.cost.map { mine + $0 } }
+        let unpriced = Set((a!.unpriced ?? []) + (b.unpriced ?? []))
+        sum.unpriced = unpriced.isEmpty ? nil : unpriced.sorted()
+        sum.codex = a!.codex == nil && b.codex == nil ? nil : (a!.codex ?? 0) + (b.codex ?? 0)
+        return sum
+    }
+
+    // MARK: Codex
+
+    /// The most days of Codex's day folders a task's rollouts are looked for in (its last ones).
+    static let codexDays = 45
+    /// A compressed rollout larger than this isn't opened (a rollout is a few MB).
+    static let codexCompressedLimit = 64 << 20
+
+    /// The tokens `slug`'s Codex worker spent, from Codex's rollouts (`<codexHome>/sessions/YYYY/MM/DD/rollout-*.jsonl`,
+    /// or `.jsonl.zst` once Codex has compressed one) started in its worktree (their `session_meta`'s `cwd`): each
+    /// rollout's last `token_count` total less its last one from before `since`, each session once. Codex counts
+    /// cached input inside its input, so input here is the uncached part and the cached part is cache reads. Only the
+    /// head's `cwd`, the `token_count` totals and the `turn_context` model are read; nil when no rollout of it is found.
+    public static func codex(root: String, slug: String, since: Double, codexHome: String, now: Date = Date()) -> LeadTokens? {
+        let worktree = Worktrees.path(root: root, slug: slug)
+        let resolved = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
+        let places = Set([worktree, (worktree as NSString).standardizingPath, Worktrees.path(root: resolved, slug: slug)])
+        let sessions = URL(fileURLWithPath: codexHome).appendingPathComponent("sessions")
+        // Its days, a day either side for the folders' local dates.
+        var bySession: [String: CodexSession] = [:]
+        for folder in codexDayFolders(sessions, from: since - 86_400, to: now.timeIntervalSince1970 + 86_400) {
+            let names = ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).sorted()
+            for name in names where name.hasPrefix("rollout-") && (name.hasSuffix(".jsonl") || name.hasSuffix(".jsonl.zst")) {
+                guard let session = codexSession(folder.appendingPathComponent(name), in: places, since: since) else { continue }
+                if let kept = bySession[session.id], kept.total >= session.total { continue }
+                bySession[session.id] = session
+            }
+        }
+        guard !bySession.isEmpty else { return nil }
+        var tokens = LeadTokens(sessions: bySession.count)
+        var byModel: [String: Int] = [:]
+        for session in bySession.values {
+            tokens.input += session.input
+            tokens.output += session.output
+            tokens.cacheRead += session.cacheRead
+            tokens.cacheWrite += session.cacheWrite
+            byModel[session.model ?? "codex", default: 0] += session.total
+        }
+        tokens.models = byModel.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.map(\.key)
+        // Codex runs on its plan's credits and `LeadPrices` has no Codex price: its tokens are counted (`codex`) and
+        // left out of the estimate, never priced wrong, and they don't make the Claude sessions' estimate unknown (a
+        // receipt's cost stays what it was before Codex tokens were read: its Claude roles').
+        tokens.cost = 0
+        tokens.codex = tokens.total
+        return tokens
+    }
+
+    /// One Codex session's tokens since a moment.
+    struct CodexSession: Equatable {
+        var id: String
+        var model: String?
+        var input = 0, output = 0, cacheRead = 0, cacheWrite = 0
+        var total: Int { input + output + cacheRead + cacheWrite }
+    }
+
+    /// The day folders (`YYYY/MM/DD`) under `sessions` for the local days from `from` to `to`, the last `codexDays` at most.
+    static func codexDayFolders(_ sessions: URL, from: Double, to: Double) -> [URL] {
+        let calendar = Calendar.current
+        var day = calendar.startOfDay(for: Date(timeIntervalSince1970: max(from, to - Double(codexDays) * 86_400)))
+        let last = Date(timeIntervalSince1970: to)
+        var folders: [URL] = []
+        while day <= last {
+            let parts = calendar.dateComponents([.year, .month, .day], from: day)
+            folders.append(sessions.appendingPathComponent(String(format: "%04d/%02d/%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)))
+            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
+        return folders
+    }
+
+    /// The rollout at `url`'s session, when it was started in one of `places`: its tokens from `since` on.
+    static func codexSession(_ url: URL, in places: Set<String>, since: Double) -> CodexSession? {
+        let data: Data
+        if url.pathExtension == "zst" {
+            guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber, size.intValue <= codexCompressedLimit,
+                  let compressed = try? Data(contentsOf: url), let plain = try? Zstd.decompress(compressed) else { return nil }
+            guard let cwd = codexCwd(plain.prefix(64 * 1024)), places.contains(cwd) else { return nil }
+            data = plain
+        } else {
+            guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+            let head = (try? handle.read(upToCount: 64 * 1024)) ?? Data()
+            try? handle.close()
+            guard let cwd = codexCwd(head), places.contains(cwd), let whole = try? Data(contentsOf: url) else { return nil }
+            data = whole
+        }
+        var session = CodexSession(id: url.lastPathComponent)
+        var baseline: [String: Int] = [:], last: [String: Int] = [:]
+        let tokenKey = Data("\"token_count\"".utf8), contextKey = Data("\"turn_context\"".utf8), metaKey = Data("\"session_meta\"".utf8)
+        for line in data.split(separator: UInt8(ascii: "\n")) {
+            let isToken = line.range(of: tokenKey) != nil, isContext = !isToken && line.range(of: contextKey) != nil
+            let isMeta = !isToken && !isContext && session.id == url.lastPathComponent && line.range(of: metaKey) != nil
+            guard isToken || isContext || isMeta,
+                  let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  let payload = object["payload"] as? [String: Any] else { continue }
+            if isMeta, object["type"] as? String == "session_meta" {
+                if let id = payload["id"] as? String ?? payload["session_id"] as? String, !id.isEmpty { session.id = id }
+                continue
+            }
+            if isContext, object["type"] as? String == "turn_context" {
+                if let model = payload["model"] as? String, !model.isEmpty { session.model = model }
+                continue
+            }
+            guard payload["type"] as? String == "token_count", let info = payload["info"] as? [String: Any],
+                  let usage = info["total_token_usage"] as? [String: Any] else { continue }
+            var totals: [String: Int] = [:]
+            for key in ["input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens"] {
+                totals[key] = (usage[key] as? NSNumber).map { max(0, $0.intValue) } ?? 0
+            }
+            if let stamp = (object["timestamp"] as? String).flatMap(CodexUsage.timestamp), stamp < since { baseline = totals }
+            last = totals
+        }
+        guard !last.isEmpty else { return nil }
+        func delta(_ key: String) -> Int { max(0, (last[key] ?? 0) - (baseline[key] ?? 0)) }
+        let cached = delta("cached_input_tokens")
+        session.cacheRead = cached
+        session.input = max(0, delta("input_tokens") - cached)
+        session.cacheWrite = delta("cache_write_input_tokens")
+        session.output = delta("output_tokens")
+        return session.total > 0 ? session : nil
+    }
+
+    /// The `cwd` a rollout's head (its `session_meta`, Codex's first line) names; nil when it names none.
+    static func codexCwd(_ head: Data) -> String? {
+        let text = String(decoding: head, as: UTF8.self)
+        guard let line = text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).first, line.contains("\"session_meta\""),
+              let match = line.firstMatch(of: #/"cwd":"((?:[^"\\]|\\.){1,4096})"/#) else { return nil }
+        // The JSON string's escapes (a path's only ones: \/ and \\, \" and \uXXXX rarely), undone by the parser.
+        guard let data = "[\"\(match.1)\"]".data(using: .utf8), let value = (try? JSONSerialization.jsonObject(with: data)) as? [String] else { return nil }
+        return value.first.map { ($0 as NSString).standardizingPath }
     }
 
     /// The tokens in `files`, by role: each response once, wherever it's repeated.
@@ -385,7 +553,8 @@ public enum LeadReceipts {
         for line in data.split(separator: UInt8(ascii: "\n")) where line.range(of: usageKey) != nil {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any], object["type"] as? String == "assistant",
                   let message = object["message"] as? [String: Any], let usage = message["usage"] as? [String: Any] else { continue }
-            if let stamp = object["timestamp"] as? String, let date = iso.date(from: stamp), date.timeIntervalSince1970 < since { continue }
+            let at = (object["timestamp"] as? String).flatMap { iso.date(from: $0) }?.timeIntervalSince1970
+            if let at, at < since { continue }
             let int = { (key: String) in (usage[key] as? NSNumber)?.intValue ?? 0 }
             let creation = usage["cache_creation"] as? [String: Any]
             var response = Response(model: message["model"] as? String ?? "unknown", input: int("input_tokens"), output: int("output_tokens"),
@@ -396,6 +565,8 @@ public enum LeadReceipts {
             guard response.input + response.output + response.cacheRead + response.cacheWrite > 0 else { continue }
             guard let id = message["id"] as? String ?? object["requestId"] as? String ?? object["uuid"] as? String else { continue }
             guard seen.insert(id).inserted else { continue }
+            response.at = at
+            response.id = id
             responses.append(response)
         }
         return responses
