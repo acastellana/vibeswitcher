@@ -231,3 +231,7 @@ The user asked for it on 2026-11-02. The 30% floor is the lead's choice, so an u
 
 The first real Codex task (wallet-results-tests, 2026-11-02) couldn't run any Swift test: Codex's seatbelt denies SwiftPM's nested sandbox-exec and test.sh's ps check. Routing work to a worker that can't run its own checks would push every check onto the audit and the merge, and cost rounds.
 
+## 2026-11-02 12:21:01 The three queued tasks (boost-mark-in-the, statistics-1-2-a, statistics-2-2-a) go from codex to agent: auto. Claude's weekly usage is 8%, 60 points behind pace, so auto routes them to Claude now and to Codex only if Claude gets tight again. They still wait on codex-workers-can-run.
+
+They were marked codex by hand only because Claude's weekly usage was ahead of pace (decision 1). That reason has gone, and a Claude worker can run the full suite and socket tests, which a Codex worker still can't.
+

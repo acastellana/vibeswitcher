@@ -2874,3 +2874,5 @@
 - 2026-11-02 10:31 Planned statistics-1-2-a: Statistics 1/2: a stats model of the whole VibeSwitcher setup (VibeCore, read-only) (review audit)
 - 2026-11-02 10:31 Planned statistics-2-2-a: Statistics 2/2: a Statistics page in the app (review audit)
 - 2026-11-02 11:03 Automatically (auto_advance): The account's usage is near a limit: the 5-hour limit (every model): 82% used, resets Nov 2, 12:10. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway. A bounded, mechanical task with a tight contract can run on Codex instead (update_task(<task>, agent: codex): the Codex account's usage, always audited by a Claude verifier); you decide.
+- 2026-11-02 12:20 Audit of codex-workers-can-run at 40a18df3 tested its merged result 0531fefd onto main: the test command passed
+- 2026-11-02 12:20 Automatically (auto_advance): Started the audit of codex-workers-can-run at 40a18df3 (Its review is audit).
