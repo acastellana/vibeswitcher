@@ -195,3 +195,11 @@ Xcode 27.2 stopped bundling it. Every build, install and test run failed until t
 
 Both Macs' leads write the same lead record. Task lead-records-merge adds merge=union so future merges don't stop on it.
 
+## 2026-11-02 22:59:59 Statistics grows from activity counts to "how well is it working", in three parts. (1) statistics-3-quality, from data already kept: first-audit pass rate, rounds, what happened to findings, merge first-try rate, escapes, autonomy (questions, user minutes, share of tasks that needed nobody), where time goes, cost split into implementation, verification and reruns. Each broken down by Claude vs Codex and by model, with an 8-week trend. (2) statistics-record-what records what's missing: lead tokens, Codex tokens, boost hours, waits by cause. (3) The comparison with working solo in Claude Code or Codex: a measured replay of past tasks if the user approves the spend (question AA210BD8), else an estimate labelled as one.
+
+The user (2026-11-02, about 21:30) asked for more information and for how well this setup does compared with working directly in Claude Code or Codex. Only a measured replay answers the counterfactual honestly. Everything else comes from the receipts and the board.
+
+## 2026-11-02 23:00:53 No replays to compare VibeSwitcher with working solo (the user's answer to AA210BD8, 2026-11-02). Statistics 4 shows an estimate, labelled as one: process cost beyond the implementing worker, what reviews and reruns caught before merge next to what escaped after, parallel hours of work per hour, and hands-off work per minute of the user's time.
+
+The user chose estimate only over a $60–100 pilot.
+

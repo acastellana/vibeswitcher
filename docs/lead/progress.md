@@ -2944,3 +2944,10 @@
 - 2026-11-02 16:45 Automatically (auto_advance): Merged wallet-e2e-sh-write (wallet-e2e.sh: write the synthetic vault at the Wallet Manager's own format version) into main at b8c5ab80, on its passing audit and the full test run. (Its first test run failed on aRetryWithNoCourierLeavesTheRecordToDecide() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/wallet-e2e-sh-write/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibesw….)
 - 2026-11-02 16:45 Automatically (auto_advance): Cleaned up wallet-e2e-sh-write (freed 1.2 GB of build output and temporary folders). It stays done.
 - 2026-11-02 16:46 Update: Today: Codex workers, routing, Boost on battery, Statistics, the GitHub merge — **Landed today (2026-11-02):**
+- 2026-11-02 22:59 Planned statistics-3-quality: Statistics 3: quality, autonomy and cost from the data already kept (review audit)
+- 2026-11-02 22:59 Started a worker on statistics-3-quality
+- 2026-11-02 22:59 Automatically (auto_advance): Started a worker on statistics-3-quality (Statistics 3: quality, autonomy and cost from the data already kept).
+- 2026-11-02 22:59 Planned statistics-record-what: Statistics: record what the stats can't see yet (lead tokens, Codex tokens, boost hours, waits by cause) (review audit)
+- 2026-11-02 22:59 Started a worker on statistics-record-what
+- 2026-11-02 22:59 Automatically (auto_advance): Started a worker on statistics-record-what (Statistics: record what the stats can't see yet (lead tokens, Codex tokens, boost hours, waits by cause)).
+- 2026-11-02 23:00 Planned statistics-4-compared: Statistics 4: 'Compared with working solo', an estimate labelled as one (review audit)
