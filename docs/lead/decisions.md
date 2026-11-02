@@ -227,3 +227,7 @@ The user, 2026-11-02: "if there's not a lot of quota I should be leveraging Code
 
 The user asked for it on 2026-11-02. The 30% floor is the lead's choice, so an unattended boosted Mac doesn't drain its battery flat. The usage veto and the battery pause hold still apply.
 
+## 2026-11-02 09:02:40 agent_default stays claude for vibeswitcher until codex-workers-can-run merges. Codex workers must be able to run scripts/test.sh, the lint filter and test-under-load.sh inside their sandbox before tasks are routed to them by default. Until then, agent: auto or codex only for tasks the audit and merge can fully check.
+
+The first real Codex task (wallet-results-tests, 2026-11-02) couldn't run any Swift test: Codex's seatbelt denies SwiftPM's nested sandbox-exec and test.sh's ps check. Routing work to a worker that can't run its own checks would push every check onto the audit and the merge, and cost rounds.
+

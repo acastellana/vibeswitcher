@@ -2847,3 +2847,11 @@
 - 2026-11-02 08:57 Planned wallet-results-tests: Wallet results: tests that a repeated result (same sequence) is dropped, final or not (review audit)
 - 2026-11-02 08:59 Started a worker on wallet-results-tests
 - 2026-11-02 08:59 Automatically (auto_advance): Started a worker on wallet-results-tests (Wallet results: tests that a repeated result (same sequence) is dropped, final or not).
+- 2026-11-02 09:01 Released boost-on-battery-a's worker (idle since its done report on 7ac5f42b) while its audit runs
+- 2026-11-02 09:01 Automatically (auto_advance): Started the audit of boost-on-battery-a at 7ac5f42b (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-02 09:02 Automatically (auto_advance): Started the audit of usage-aware-worker at 4c701df7 (Its review is audit).
+- 2026-11-02 09:02 Released usage-aware-worker's worker (idle since its done report on 4c701df7) while its audit runs
+- 2026-11-02 09:02 Automatically (auto_advance): Released usage-aware-worker's worker, idle since its done report on 4c701df7, while its audit runs (ended pid 12219 (Worker: Usage-aware worker routing: tasks go to Codex when Claude's quota runs ahead of pace)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-02 09:02 Planned codex-workers-can-run: Codex workers can run the project's checks: scripts/test.sh and test-under-load.sh work inside Codex's sandbox (review audit)
+- 2026-11-02 09:02 Started a worker on codex-workers-can-run
+- 2026-11-02 09:02 Automatically (auto_advance): Started a worker on codex-workers-can-run (Codex workers can run the project's checks: scripts/test.sh and test-under-load.sh work inside Codex's sandbox).
