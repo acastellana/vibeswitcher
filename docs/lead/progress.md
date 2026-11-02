@@ -2270,4 +2270,597 @@
 - 2026-10-31 13:10 Automatically (auto_advance): Cleaned up hosthandovertests; ended pid 74261 (Worker: HostHandoverTests.aHandoverKeepsEverySession waits for the whole "bg=<pid>" line) (freed 1.2 GB of build output and temporary folders). It stays done.
 - 2026-10-31 13:11 Update: Today: GitHub merge, install, two host-test fixes landed — **Landed**
 - 2026-10-31 11:42 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+<<<<<<< HEAD
 - 2026-10-31 13:26 You accepted 2 commits on main in VibeSwitcher: 6e3b810 Merge branch 'main' of https://github.com/acastellana/vibeswitcher; b6ffab3 Lead: decisions and progress
+=======
+- 2026-10-31 13:26 accepted 37 commits on main that you ran from VibeSwitcher's window: 6e3b810 Merge branch 'main' of https://github.com/acastellana/vibeswitcher; 6000cb5 Lead: decisions and progress; bf953f0 Lead: decisions and progress; …
+- 2026-10-31 14:54 Planned vault-requests-the: Vault requests: the request/result format and the Passage link (review audit)
+- 2026-10-31 14:54 Planned vault-requests-in-the: Vault requests in the app: agents ask, you see it, the result comes back (review audit)
+- 2026-10-31 14:56 Started a worker on vault-requests-the
+- 2026-10-31 14:56 Automatically (auto_advance): Started a worker on vault-requests-the (Vault requests: the request/result format and the Passage link).
+- 2026-10-31 15:01 Planned vault-request-card-and: Vault request card and Settings › Vault (UI only, on its own display model)
+- 2026-10-31 15:01 Started a worker on vault-request-card-and
+- 2026-10-31 15:01 Automatically (auto_advance): Started a worker on vault-request-card-and (Vault request card and Settings › Vault (UI only, on its own display model)).
+- 2026-10-31 15:16 Automatically (auto_advance): Started the audit of vault-request-card-and at 71f19adc (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-10-31 15:16 Planned test-under-load-sh: test-under-load.sh fails when xcode-select points at Command Line Tools
+- 2026-10-31 15:16 Started a worker on test-under-load-sh
+- 2026-10-31 15:16 Automatically (auto_advance): Started a worker on test-under-load-sh (test-under-load.sh fails when xcode-select points at Command Line Tools).
+- 2026-10-31 15:30 Audit of vault-request-card-and: complete, clean, round 1: 1 Important open, 2 Nit open
+- 2026-10-31 15:30 Automatically (auto_advance): Sent vault-request-card-and's worker the open Important findings vault-request-card-and:F1 from its audit at 71f19adc.
+- 2026-10-31 15:33 The worker on vault-request-card-and answered findings: vault-request-card-and:F1 fixed at e48350ec: Commit e48350e: the sandbox's name for the vault card's first state is now 'waiting-for-you' (Sandbox.swift:912 and the `vault` command's default at :1352), matching the card's 'Waiting for you' badge. I renamed it instead of allow-listing 'waiting' for Sandbox.swift, because an allow-list entry would hide real session-state misuse anywhere in that file. GlossaryTests/everyStateWordIsTheGlossarys fails with the fix reverted (git diff 71f19ad HEAD -- S…
+- 2026-10-31 15:36 Started a worker on vault-requests-in-the
+- 2026-10-31 16:12 Planned agents-know-they-can: Agents know they can ask for a transaction (vs-vault), and hear when a request expires unsent
+- 2026-10-31 16:22 Audit of vault-requests-in-the: complete, clean, round 1: 3 Nit open
+- 2026-10-31 16:27 Merged vault-requests-in-the: Vault requests wired end to end: agents ask, the card sends, the result comes back
+- 2026-10-31 16:27 Started a worker on agents-know-they-can
+- 2026-10-31 16:27 Automatically (auto_advance): Started a worker on agents-know-they-can (Agents know they can ask for a transaction (vs-vault), and hear when a request expires unsent), its after tasks done (vault-requests-in-the).
+- 2026-10-31 16:27 Folded vault-requests-the into vault-requests-in-the: that task carries its work
+- 2026-10-31 16:27 Folded vault-request-card-and into vault-requests-in-the: that task carries its work
+- 2026-10-31 16:27 Folded test-under-load-sh into vault-requests-in-the: that task carries its work
+- 2026-10-31 16:28 Update: Vault requests: agents ask, you click Send to vault, the answer comes back — **What changed** (one commit on main, 64e3b83)
+- 2026-10-31 16:48 Incident: A worker's or verifier's session that hits the account's usage limit isn't reported as stopped: status keeps it running or in review, and no witness report is s… (in agents-know-they-can); planned turn-this-incident-into-6 to turn it into a check
+- 2026-10-31 16:48 Started a worker on turn-this-incident-into-6
+- 2026-10-31 16:48 Automatically (auto_advance): Started a worker on turn-this-incident-into-6 (Turn this incident into a check: A worker's or verifier's session that hits the account's usa…).
+- 2026-10-31 16:48 Automatically (auto_advance): Didn't start agents-know-they-can: agents-know-they-can's worker is still running. Send it what to do with message, or stop_worker first.
+- 2026-10-31 16:49 Started a worker on agents-know-they-can
+- 2026-10-31 16:49 Automatically (auto_advance): Started a worker on agents-know-they-can (Agents know they can ask for a transaction (vs-vault), and hear when a request expires unsent), its after tasks done (vault-requests-in-the).
+- 2026-10-31 16:51 Incident: `build-app.sh --install` replaced the bundle of a VibeSwitcher that was still running. Its process check (`pgrep -x VibeSwitcher`) finds nothing from a sandboxe…; planned turn-this-incident-into-7 to turn it into a check
+- 2026-10-31 16:51 Started a worker on turn-this-incident-into-7
+- 2026-10-31 16:51 Automatically (auto_advance): Started a worker on turn-this-incident-into-7 (Turn this incident into a check: `build-app.sh --install` replaced the bundle of a VibeSwitch…).
+- 2026-10-31 17:08 Raised turn-this-incident-into-7 to audit (the risk check, at 64766a7f): it changes test or build infrastructure the suite relies on (scripts/lib/install-app.sh)
+- 2026-10-31 17:08 Automatically (auto_advance): turn-this-incident-into-7 is audited, not merged: it changes test or build infrastructure the suite relies on (scripts/lib/install-app.sh) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-10-31 17:11 Raised turn-this-incident-into-6 to audit (the risk check, at 0f47195a): headless Claude said raise: The change touches LeadWitness, LeadStall and LeadToolset, which decide when lead-run sessions are reported as stopped or stalled, and the task's goal is to stop the status from showing sessions as…
+- 2026-10-31 17:11 Automatically (auto_advance): turn-this-incident-into-6 is audited, not merged: headless Claude said raise: The change touches LeadWitness, LeadStall and LeadToolset, which decide when lead-run sessions are reported as stopped or stalled, and the task's goal is to stop the status from showing sessions as… (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-10-31 17:12 Automatically (auto_advance): Started the audit of agents-know-they-can at 19785088 (It touches sensitive_paths (Sources/VibeCore/LeadLaunch.swift), so it's treated as audit whatever its review says).
+- 2026-10-31 17:12 Automatically (auto_advance): Started the audit of turn-this-incident-into-6 at 0f47195a (Its review is audit. (audited: headless Claude said raise: The change touches LeadWitness, LeadStall and LeadToolset, which decide when lead-run sessions are reported as stopped or stalled, and the task's goal is to stop the status from showing sessions as…, as the risk check found.)).
+- 2026-10-31 17:12 Ended turn-this-incident-into-7's worker (idle since its done report on 64766a7f) to make room on the Mac for its audit
+- 2026-10-31 17:12 Automatically (auto_advance): Started the audit of turn-this-incident-into-7 at 64766a7f (Its review is audit. (audited: it changes test or build infrastructure the suite relies on (scripts/lib/install-app.sh), as the risk check found.)).
+- 2026-10-31 17:16 Planned rename-the-vault-request: Rename the vault-request feature to "wallet requests" (VibeSwitcher's "vault" means only the lead's vault)
+- 2026-10-31 17:27 Audit of turn-this-incident-into-7: complete, clean, round 1: 1 Nit open
+- 2026-10-31 17:29 Audit of agents-know-they-can: complete, clean, round 1: 1 Important open, 1 Pre-existing open
+- 2026-10-31 17:29 Automatically (auto_advance): Sent agents-know-they-can's worker the open Important findings agents-know-they-can:F1 from its audit at 19785088.
+- 2026-10-31 17:31 Planned wallet-request-fallback: Wallet request fallback: sign in the browser's wallet (Rabby/MetaMask), plus a "not picked up" hint (review audit)
+- 2026-10-31 17:34 The worker on agents-know-they-can answered findings: agents-know-they-can:F1 fixed at e490d8d3: Commit e490d8d. DiskSpaceTests.cleanupRemovesTheTasksSessionTMPDIRs compared a worker's whole spawn environment with TMPDIR alone. The branch now also sets SessionNote.roleVariable ("worker") through LeadLaunch.prepare, as the lead decided, so the expectation now includes that variable. No other test compares a role's whole environment (grep for environments[...] == and .environment ==). Full suite at e490d8d: vs-heavy bash scripts/test.sh printed 'Test…
+- 2026-10-31 17:37 Merged turn-this-incident-into-7: Turn this incident into a check: `build-app.sh --install` replaced the bundle of a VibeSwitch…
+- 2026-10-31 17:37 Automatically (auto_advance): Merged turn-this-incident-into-7 (Turn this incident into a check: `build-app.sh --install` replaced the bundle of a VibeSwitch…) into main at 72bd3aa9, on its passing audit and the full test run.
+- 2026-10-31 17:37 Automatically (auto_advance): Cleaned up turn-this-incident-into-7 (freed 1.0 GB of build output and temporary folders). It stays done.
+- 2026-10-31 17:38 Update: Install no longer replaces a running app it can't see — **What changed:** `scripts/build-app.sh --install` now finds the running app with `ps`, by its executable path inside /Applications/VibeSwitcher.app, instead of `pgrep`, which a sandboxed shell (a `!`…
+- 2026-10-31 17:39 Audit of turn-this-incident-into-6: complete, clean, round 1: 3 Nit open
+- 2026-10-31 17:43 Automatically (auto_advance): Started the audit of agents-know-they-can at e490d8d3 (An audit was started on it: its verdict decides).
+- 2026-10-31 17:48 Audit of agents-know-they-can: complete, clean, round 2: 1 Important closed, 1 Pre-existing open
+- 2026-10-31 17:50 Merged turn-this-incident-into-6: Turn this incident into a check: A worker's or verifier's session that hits the account's usa…
+- 2026-10-31 17:50 Automatically (auto_advance): Merged turn-this-incident-into-6 (Turn this incident into a check: A worker's or verifier's session that hits the account's usa…) into main at f3e7054f, on its passing audit and the full test run.
+- 2026-10-31 17:50 Automatically (auto_advance): Cleaned up turn-this-incident-into-6; ended pid 76535 (Worker: Turn this incident into a check: A worker's or verifier's session that hits the account's usa…) (freed 2.6 GB of build output and temporary folders). It stays done.
+- 2026-10-31 17:57 Merged agents-know-they-can: Agents know they can ask for a transaction (vs-vault), and hear when a request expires unsent
+- 2026-10-31 17:57 Automatically (auto_advance): Merged agents-know-they-can (Agents know they can ask for a transaction (vs-vault), and hear when a request expires unsent) into main at 6b18ca2b, on its passing audit and the full test run.
+- 2026-10-31 17:57 Automatically (auto_advance): Cleaned up agents-know-they-can; ended pid 82440 (Worker: Agents know they can ask for a transaction (vs-vault), and hear when a request expires unsent) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-31 18:00 Started a worker on rename-the-vault-request
+- 2026-10-31 18:00 Automatically (auto_advance): Started a worker on rename-the-vault-request (Rename the vault-request feature to "wallet requests" (VibeSwitcher's "vault" means only the lead's vault)), its after tasks done (agents-know-they-can).
+- 2026-10-31 18:13 Planned wallet-requests-find: Wallet requests find Passage.app by themselves (no `passage` symlink needed)
+- 2026-10-31 18:19 Planned local-end-to-end: Local end-to-end: VibeSwitcher → loop Passage → Wallet Manager → back, on this Mac
+- 2026-10-31 18:27 Automatically (auto_advance): Started the audit of rename-the-vault-request at 4c3f66aa (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift, scripts/build-app.sh), so it's treated as audit whatever its review says).
+- 2026-10-31 18:39 Planned the-main-thread-blocks: The main thread blocks writing to the session host's socket (HostConnection.flush from SessionStore.refresh) (review audit)
+- 2026-10-31 18:54 Audit of rename-the-vault-request: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-10-31 19:07 Started a worker on the-main-thread-blocks
+- 2026-10-31 19:07 Automatically (auto_advance): Started a worker on the-main-thread-blocks (The main thread blocks writing to the session host's socket (HostConnection.flush from SessionStore.refresh)).
+- 2026-10-31 19:15 Merged rename-the-vault-request: Rename the vault-request feature to "wallet requests" (VibeSwitcher's "vault" means only the lead's vault)
+- 2026-10-31 19:15 Automatically (auto_advance): Merged rename-the-vault-request (Rename the vault-request feature to "wallet requests" (VibeSwitcher's "vault" means only the lead's vault)) into main at c3a9b59e, on its passing audit and the full test run.
+- 2026-10-31 19:15 Automatically (auto_advance): Cleaned up rename-the-vault-request; ended pid 23676 (Worker: Rename the vault-request feature to "wallet requests" (VibeSwitcher's "vault" means only the lead's vault)) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-31 19:27 Started a worker on wallet-request-fallback
+- 2026-10-31 19:27 Automatically (auto_advance): Started a worker on wallet-request-fallback (Wallet request fallback: sign in the browser's wallet (Rabby/MetaMask), plus a "not picked up" hint), its after tasks done (rename-the-vault-request).
+- 2026-10-31 19:27 Started a worker on wallet-requests-find
+- 2026-10-31 19:27 Automatically (auto_advance): Started a worker on wallet-requests-find (Wallet requests find Passage.app by themselves (no `passage` symlink needed)), its after tasks done (rename-the-vault-request).
+- 2026-10-31 19:27 Automatically (auto_advance): Started the audit of the-main-thread-blocks at a4b3ef50 (Its review is audit).
+- 2026-10-31 19:38 Planned the-power-check-writes: The power check writes its state file on the main thread (LeadController.lookAtPower)
+- 2026-10-31 19:42 Audit of the-main-thread-blocks: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-10-31 19:43 Started a worker on the-power-check-writes
+- 2026-10-31 19:43 Automatically (auto_advance): Started a worker on the-power-check-writes (The power check writes its state file on the main thread (LeadController.lookAtPower)).
+- 2026-10-31 19:43 Automatically (auto_advance): Started the audit of wallet-requests-find at ebc81aa6 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-10-31 19:52 Merged the-main-thread-blocks: The main thread blocks writing to the session host's socket (HostConnection.flush from SessionStore.refresh)
+- 2026-10-31 19:52 Automatically (auto_advance): Merged the-main-thread-blocks (The main thread blocks writing to the session host's socket (HostConnection.flush from SessionStore.refresh)) into main at 6a7433c4, on its passing audit and the full test run.
+- 2026-10-31 19:52 Automatically (auto_advance): Cleaned up the-main-thread-blocks; ended pid 44186 (Worker: The main thread blocks writing to the session host's socket (HostConnection.flush from SessionStore.refresh)) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-10-31 19:59 Audit of wallet-requests-find: complete, clean, round 1: 2 Nit open
+- 2026-10-31 20:00 Raised the-power-check-writes to audit (the risk check, at f68b028f): it has code that adds locks or threads (Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift: private let lock = NSLock())
+- 2026-10-31 20:00 Automatically (auto_advance): the-power-check-writes is audited, not merged: it has code that adds locks or threads (Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift: private let lock = NSLock()) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-10-31 20:09 Merged wallet-requests-find: Wallet requests find Passage.app by themselves (no `passage` symlink needed)
+- 2026-10-31 20:09 Automatically (auto_advance): Merged wallet-requests-find (Wallet requests find Passage.app by themselves (no `passage` symlink needed)) into main at bb042414, on its passing audit and the full test run.
+- 2026-10-31 20:10 Automatically (auto_advance): Cleaned up wallet-requests-find; ended pid 3764 (Worker: Wallet requests find Passage.app by themselves (no `passage` symlink needed)) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-10-31 20:16 Automatically (auto_advance): Started the audit of the-power-check-writes at f68b028f (Its review is audit. (audited: it has code that adds locks or threads (Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift: private let lock = NSLock()), as the risk check found.)).
+- 2026-10-31 20:18 Automatically (auto_advance): Started the audit of wallet-request-fallback at 72a1a8a8 (Its review is audit).
+- 2026-10-31 20:23 Planned swiftui-accessibility: SwiftUI accessibility work dominates the window's freezes: measure which views, then flatten their accessibility trees
+- 2026-10-31 20:26 Audit of the-power-check-writes: complete, clean, round 1: 1 Nit open
+- 2026-10-31 20:27 Started a worker on swiftui-accessibility
+- 2026-10-31 20:27 Automatically (auto_advance): Started a worker on swiftui-accessibility (SwiftUI accessibility work dominates the window's freezes: measure which views, then flatten their accessibility trees).
+- 2026-10-31 20:28 Audit of wallet-request-fallback: complete, clean, round 1: 3 Nit open
+- 2026-10-31 20:36 Merged the-power-check-writes: The power check writes its state file on the main thread (LeadController.lookAtPower)
+- 2026-10-31 20:36 Flaky in the-power-check-writes's merge: theScreenRouteReadsATerminalTabOffTheMainThread() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-10-31 20:36 Automatically (auto_advance): Merged the-power-check-writes (The power check writes its state file on the main thread (LeadController.lookAtPower)) into main at d4c16783, on its passing audit and the full test run. (Its first test run failed on theScreenRouteReadsATerminalTabOffTheMainThread() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/the-power-check-writes/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher….)
+- 2026-10-31 20:36 Automatically (auto_advance): Cleaned up the-power-check-writes; ended pid 43288 (Worker: The power check writes its state file on the main thread (LeadController.lookAtPower)) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-10-31 21:01 Merged wallet-request-fallback: Wallet request fallback: sign in the browser's wallet (Rabby/MetaMask), plus a "not picked up" hint
+- 2026-10-31 21:01 Automatically (auto_advance): Merged wallet-request-fallback (Wallet request fallback: sign in the browser's wallet (Rabby/MetaMask), plus a "not picked up" hint) into main at 90289cf3, on its passing audit and the full test run.
+- 2026-10-31 21:01 Automatically (auto_advance): Cleaned up wallet-request-fallback; ended pid 3258 (Worker: Wallet request fallback: sign in the browser's wallet (Rabby/MetaMask), plus a "not picked up" hint) (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-10-31 21:01 Update: Wallet requests: sign in your browser wallet as a fallback, and a "not picked up" hint — **What changed** (main at 90289cf3, with the rename c3a9b59e and the Passage.app fix bb042414)
+- 2026-10-31 21:13 Started a worker on local-end-to-end
+- 2026-10-31 21:13 Automatically (auto_advance): Started a worker on local-end-to-end (Local end-to-end: VibeSwitcher → loop Passage → Wallet Manager → back, on this Mac), its after tasks done (wallet-request-fallback).
+- 2026-10-31 21:23 Raised swiftui-accessibility to audit (the risk check, at f82d198f): it changes test or build infrastructure the suite relies on (scripts/test.sh)
+- 2026-10-31 21:23 Automatically (auto_advance): swiftui-accessibility is audited, not merged: it changes test or build infrastructure the suite relies on (scripts/test.sh) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-10-31 21:31 Automatically (auto_advance): Started the audit of swiftui-accessibility at f82d198f (Its review is audit. (audited: it changes test or build infrastructure the suite relies on (scripts/test.sh), as the risk check found.)).
+- 2026-10-31 21:42 Audit of swiftui-accessibility: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-10-31 21:50 Merged swiftui-accessibility: SwiftUI accessibility work dominates the window's freezes: measure which views, then flatten their accessibility trees
+- 2026-10-31 21:50 Automatically (auto_advance): Merged swiftui-accessibility (SwiftUI accessibility work dominates the window's freezes: measure which views, then flatten their accessibility trees) into main at d8756ec7, on its passing audit and the full test run.
+- 2026-10-31 21:50 Automatically (auto_advance): Cleaned up swiftui-accessibility; ended pid 13682 (Worker: SwiftUI accessibility work dominates the window's freezes: measure which views, then flatten their accessibility trees) (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-10-31 21:50 Automatically (auto_advance): Started the audit of local-end-to-end at 39cece00 (It touches sensitive_paths (AGENTS.md, Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-10-31 22:07 Audit of local-end-to-end: complete, clean, round 1: 4 Nit open
+- 2026-10-31 22:08 Planned wallet-e2e-sh-refreshes: wallet-e2e.sh refreshes the Wallet Manager's node_modules when its lockfile is newer
+- 2026-10-31 22:17 Planned wallet-requests-work: Wallet requests work without a Wallet Manager chosen: the card offers the browser wallet (review audit)
+- 2026-10-31 22:23 Merged local-end-to-end: Local end-to-end: VibeSwitcher → loop Passage → Wallet Manager → back, on this Mac
+- 2026-10-31 22:23 Automatically (auto_advance): Merged local-end-to-end (Local end-to-end: VibeSwitcher → loop Passage → Wallet Manager → back, on this Mac) into main at b8009e3d, on its passing audit and the full test run.
+- 2026-10-31 22:23 Automatically (auto_advance): Cleaned up local-end-to-end; ended pid 88761 (Worker: Local end-to-end: VibeSwitcher → loop Passage → Wallet Manager → back, on this Mac) (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-10-31 22:35 Started a worker on wallet-e2e-sh-refreshes
+- 2026-10-31 22:35 Automatically (auto_advance): Started a worker on wallet-e2e-sh-refreshes (wallet-e2e.sh refreshes the Wallet Manager's node_modules when its lockfile is newer), its after tasks done (local-end-to-end).
+- 2026-10-31 22:35 Started a worker on wallet-requests-work
+- 2026-10-31 22:35 Automatically (auto_advance): Started a worker on wallet-requests-work (Wallet requests work without a Wallet Manager chosen: the card offers the browser wallet).
+- 2026-10-31 22:56 Raised wallet-e2e-sh-refreshes to audit (the risk check, at 06369048): it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$npm_log")
+- 2026-10-31 22:56 Automatically (auto_advance): wallet-e2e-sh-refreshes is audited, not merged: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$npm_log") (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-10-31 22:59 Automatically (auto_advance): Started the audit of wallet-e2e-sh-refreshes at 06369048 (Its review is audit. (audited: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$npm_log"), as the risk check found.)).
+- 2026-10-31 22:59 Automatically (auto_advance): Started the audit of wallet-requests-work at 882b99f9 (Its review is audit).
+- 2026-10-31 23:09 Audit of wallet-requests-work: complete, clean, round 1: 4 Nit open
+- 2026-10-31 23:11 Audit of wallet-e2e-sh-refreshes: complete, clean, round 1: 1 Nit open
+- 2026-10-31 23:21 Merged wallet-e2e-sh-refreshes: wallet-e2e.sh refreshes the Wallet Manager's node_modules when its lockfile is newer
+- 2026-10-31 23:21 Automatically (auto_advance): Merged wallet-e2e-sh-refreshes (wallet-e2e.sh refreshes the Wallet Manager's node_modules when its lockfile is newer) into main at 62221c68, on its passing audit and the full test run.
+- 2026-10-31 23:29 Merged wallet-requests-work: Wallet requests work without a Wallet Manager chosen: the card offers the browser wallet
+- 2026-10-31 23:29 Automatically (auto_advance): Merged wallet-requests-work (Wallet requests work without a Wallet Manager chosen: the card offers the browser wallet) into main at 308a5fcc, on its passing audit and the full test run.
+- 2026-10-31 23:29 Automatically (auto_advance): Cleaned up wallet-e2e-sh-refreshes (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-10-31 23:30 Automatically (auto_advance): Cleaned up wallet-requests-work; ended pid 48092 (Worker: Wallet requests work without a Wallet Manager chosen: the card offers the browser wallet) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-10-31 23:30 Update: Today: wallet requests end to end, a browser-wallet fallback, and five reliability fixes — **Landed (all audited, full suite at each merge)**
+- 2026-10-31 23:30 Planned verifiers-don-t-run: Verifiers don't run a full suite of their own: the merge's run is the one full suite (review audit)
+- 2026-10-31 23:30 Started a worker on verifiers-don-t-run
+- 2026-10-31 23:30 Automatically (auto_advance): Started a worker on verifiers-don-t-run (Verifiers don't run a full suite of their own: the merge's run is the one full suite).
+- 2026-10-31 23:30 Update: Retrospective: wallet requests batch (2026-10-31) — **Went well**
+- 2026-10-31 23:42 Planned wallet-e2e-a-failed: wallet-e2e: a failed check in a non-rejected result is a warning, not a failure (recipient-known, calldata)
+- 2026-10-31 23:57 Started a worker on wallet-e2e-a-failed
+- 2026-10-31 23:57 Automatically (auto_advance): Started a worker on wallet-e2e-a-failed (wallet-e2e: a failed check in a non-rejected result is a warning, not a failure (recipient-known, calldata)).
+- 2026-11-01 00:08 Raised wallet-e2e-a-failed to audit (the risk check, at 50b5a836): it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$loop/vault/hold")
+- 2026-11-01 00:08 Automatically (auto_advance): Started the audit of wallet-e2e-a-failed at 50b5a836 (The risk check raised it to audit: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$loop/vault/hold")).
+- 2026-11-01 00:21 Audit of wallet-e2e-a-failed: complete, clean, round 1: 2 Nit open
+- 2026-11-01 00:30 Merged wallet-e2e-a-failed: wallet-e2e: a failed check in a non-rejected result is a warning, not a failure (recipient-known, calldata)
+- 2026-11-01 00:30 Flaky in wallet-e2e-a-failed's merge: theExitSourceReapsAtOnce() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 00:30 Planned fix-the-flaky-test-13: theExitSourceReapsAtOnce() flaked 3 times within 7 days
+- 2026-11-01 00:30 Automatically (auto_advance): Merged wallet-e2e-a-failed (wallet-e2e: a failed check in a non-rejected result is a warning, not a failure (recipient-known, calldata)) into main at 5f5e3e04, on its passing audit and the full test run. (Its first test run failed on theExitSourceReapsAtOnce() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/wallet-e2e-a-failed/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibeswitcher/flakes/2026….)
+- 2026-11-01 00:30 Automatically (auto_advance): Cleaned up wallet-e2e-a-failed; ended pid 86896 (Worker: wallet-e2e: a failed check in a non-rejected result is a warning, not a failure (recipient-known, calldata)) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 00:30 Started a worker on fix-the-flaky-test-13
+- 2026-11-01 00:30 Automatically (auto_advance): Started a worker on fix-the-flaky-test-13 (Fix the flaky test theExitSourceReapsAtOnce()).
+- 2026-11-01 00:32 Incident: A verifier's session waits indefinitely on a permission prompt the user can't see or reach, often for read-only commands, and the only way out is restarting the…; planned turn-this-incident-into-8 to turn it into a check
+- 2026-11-01 00:32 Review of turn-this-incident-into-8: audit
+- 2026-11-01 00:59 Started a worker on turn-this-incident-into-8
+- 2026-11-01 00:59 Automatically (auto_advance): Started a worker on turn-this-incident-into-8 (Turn this incident into a check: A verifier's session waits indefinitely on a permission prom…).
+- 2026-11-01 00:59 Automatically (auto_advance): Started the audit of fix-the-flaky-test-13 at 333b2ed1 (It touches sensitive_paths (Sources/VibeHost/HostedSession.swift), so it's treated as audit whatever its review says).
+- 2026-11-01 01:10 Audit of fix-the-flaky-test-13: complete, clean, round 1: 2 Pre-existing open
+- 2026-11-01 01:11 Planned the-app-s-host: The app's host exit watcher gives up if the exit event comes before the host can be reaped (HostClient.swift:313-317)
+- 2026-11-01 01:11 Planned strict-paths-an: Strict paths: an Important finding on configured paths blocks auto-merge, even unconfirmed, until the lead rules (review audit)
+- 2026-11-01 01:11 Planned wallet-e2e-real-testnet: wallet-e2e --real-testnet: one real GenLayer testnet payment through the whole chain on this Mac
+- 2026-11-01 01:12 Planned spec-an-unparseable: Spec: an unparseable request gets `rejected` (format check) when its file name's id is valid and it came from the configured peer
+- 2026-11-01 01:14 Planned wallet-card-truth-the: Wallet card truth: the record decides the state, and the browser path keeps what was signed (review audit)
+- 2026-11-01 01:14 Started a worker on the-app-s-host
+- 2026-11-01 01:14 Automatically (auto_advance): Started a worker on the-app-s-host (The app's host exit watcher gives up if the exit event comes before the host can be reaped (HostClient.swift:313-317)).
+- 2026-11-01 01:15 Started a worker on strict-paths-an
+- 2026-11-01 01:15 Automatically (auto_advance): Started a worker on strict-paths-an (Strict paths: an Important finding on configured paths blocks auto-merge, even unconfirmed, until the lead rules).
+- 2026-11-01 01:15 Planned wallet-card-can-t: Wallet card can't be made misleading: who asked, the reason field, and contract calls that move tokens (review audit)
+- 2026-11-01 01:15 Planned wallet-outcomes-always: Wallet outcomes always reach the agent: undelivered messages kept on disk and retried (review audit)
+- 2026-11-01 01:15 Planned wallet-path-robustness: Wallet path robustness: no typed path is ever run, polls coalesce, records are bounded and read safely (review audit)
+- 2026-11-01 02:00 Merged fix-the-flaky-test-13: Fix the flaky test theExitSourceReapsAtOnce()
+- 2026-11-01 02:00 Flaky in fix-the-flaky-test-13's merge: aSlowPowerDaemonDoesntHoldUpALeadRefresh() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 02:00 Automatically (auto_advance): Merged fix-the-flaky-test-13 (Fix the flaky test theExitSourceReapsAtOnce()) into main at 68b71815, on its passing audit and the full test run. (Its first test run failed on aSlowPowerDaemonDoesntHoldUpALeadRefresh() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/fix-the-flaky-test-13/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibesw….)
+- 2026-11-01 02:00 Automatically (auto_advance): Cleaned up fix-the-flaky-test-13; ended pid 22986 (Worker: Fix the flaky test theExitSourceReapsAtOnce()) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-11-01 02:00 Raised the-app-s-host to audit (the risk check, at e675a98d): headless Claude said raise: The branch changes HostClient.swift, which spawns and reaps host processes over waitpid, and the review rules flag a one-shot WNOHANG wait on a host socket path as a real risk; the owner's review…
+- 2026-11-01 02:00 Automatically (auto_advance): the-app-s-host is audited, not merged: headless Claude said raise: The branch changes HostClient.swift, which spawns and reaps host processes over waitpid, and the review rules flag a one-shot WNOHANG wait on a host socket path as a real risk; the owner's review… (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-01 02:11 Started a worker on wallet-e2e-real-testnet
+- 2026-11-01 02:11 Automatically (auto_advance): Started a worker on wallet-e2e-real-testnet (wallet-e2e --real-testnet: one real GenLayer testnet payment through the whole chain on this Mac).
+- 2026-11-01 02:11 Ended verifiers-don-t-run's worker (idle since its done report on 7da47511) to make room on the Mac for its audit
+- 2026-11-01 02:11 Automatically (auto_advance): Started the audit of verifiers-don-t-run at 7da47511 (Its review is audit).
+- 2026-11-01 02:12 Ended turn-this-incident-into-8's worker (idle since its done report on 83bbb1d7) to make room on the Mac for its audit
+- 2026-11-01 02:12 Automatically (auto_advance): Started the audit of turn-this-incident-into-8 at 83bbb1d7 (Its review is audit).
+- 2026-11-01 02:12 Ended the-app-s-host's worker (idle since its done report on e675a98d) to make room on the Mac for its audit
+- 2026-11-01 02:12 Automatically (auto_advance): Started the audit of the-app-s-host at e675a98d (Its review is audit. (audited: headless Claude said raise: The branch changes HostClient.swift, which spawns and reaps host processes over waitpid, and the review rules flag a one-shot WNOHANG wait on a host socket path as a real risk; the owner's review…, as the risk check found.)).
+- 2026-11-01 02:12 Ended strict-paths-an's worker (idle since its done report on d3e1becb) to make room on the Mac for its audit
+- 2026-11-01 02:12 Automatically (auto_advance): Started the audit of strict-paths-an at d3e1becb (Its review is audit).
+- 2026-11-01 02:12 Started a worker on spec-an-unparseable
+- 2026-11-01 02:12 Automatically (auto_advance): Started a worker on spec-an-unparseable (Spec: an unparseable request gets `rejected` (format check) when its file name's id is valid and it came from the configured peer).
+- 2026-11-01 02:23 Audit of the-app-s-host: complete, clean, round 1: 1 Nit open
+- 2026-11-01 02:27 Audit of verifiers-don-t-run: complete, clean
+- 2026-11-01 02:28 Planned app-memory-grows-17: App memory grows ~17 MB an hour again (297 → 347 MB in 3 h at a steady session count)
+- 2026-11-01 02:30 Audit of strict-paths-an: complete, clean, round 1: 1 Important open, 2 Nit open, 2 Pre-existing open
+- 2026-11-01 02:30 Automatically (auto_advance): Couldn't send strict-paths-an's worker its open Important findings (strict-paths-an:F1): Not started: the Mac is shared by every project's team, and its load (the greater of its 1- and 5-minute averages) is above load_threshold. Now: load 37.2 (load_threshold 24, twice the 12 cores), 12 team sessions across 3 projects (this one 3, 2 others 9) (mac_max_sessions 15). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, …
+- 2026-11-01 02:37 Audit of turn-this-incident-into-8: complete, clean, round 1: 1 Important open, 3 Nit open, 1 Pre-existing open
+- 2026-11-01 02:37 Automatically (auto_advance): Couldn't send turn-this-incident-into-8's worker its open Important findings (turn-this-incident-into-8:F1): Not started: the Mac is shared by every project's team, and its load (the greater of its 1- and 5-minute averages) is above load_threshold. Now: load 30.8 (load_threshold 24, twice the 12 cores), 11 team sessions across 3 projects (this one 2, 2 others 9) (mac_max_sessions 15). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, …
+- 2026-11-01 02:37 Planned workers-and-verifiers-2: Workers and verifiers can read the lead's private files through `git diff --no-index` (Bash(git diff:*) bypasses the Read deny) (review audit)
+- 2026-11-01 02:39 Started a worker on turn-this-incident-into-8
+- 2026-11-01 02:39 Automatically (auto_advance): Sent turn-this-incident-into-8's worker the open Important findings turn-this-incident-into-8:F1 from its audit at 83bbb1d7 (in a new worker: its last one had ended).
+- 2026-11-01 02:39 Started a worker on strict-paths-an
+- 2026-11-01 02:39 Automatically (auto_advance): Sent strict-paths-an's worker the open Important findings strict-paths-an:F1 from its audit at d3e1becb (in a new worker: its last one had ended).
+- 2026-11-01 02:39 Started a worker on wallet-card-truth-the
+- 2026-11-01 02:39 Automatically (auto_advance): Started a worker on wallet-card-truth-the (Wallet card truth: the record decides the state, and the browser path keeps what was signed).
+- 2026-11-01 02:39 Started a worker on app-memory-grows-17
+- 2026-11-01 02:39 Automatically (auto_advance): Started a worker on app-memory-grows-17 (App memory grows ~17 MB an hour again (297 → 347 MB in 3 h at a steady session count)).
+- 2026-11-01 02:39 Started a worker on workers-and-verifiers-2
+- 2026-11-01 02:39 Automatically (auto_advance): Started a worker on workers-and-verifiers-2 (Workers and verifiers can read the lead's private files through `git diff --no-index` (Bash(git diff:*) bypasses the Read deny)).
+- 2026-11-01 02:49 Merged verifiers-don-t-run: Verifiers don't run a full suite of their own: the merge's run is the one full suite
+- 2026-11-01 02:49 Flaky in verifiers-don-t-run's merge: aReadBehindAHungOneWaitsNoLongerThanItsTimeout(), theScreenRouteReadsATerminalTabOffTheMainThread() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 02:49 Automatically (auto_advance): Merged verifiers-don-t-run (Verifiers don't run a full suite of their own: the merge's run is the one full suite) into main at 03bd1d6a, on its passing audit and the full test run. (Its first test run failed on aReadBehindAHungOneWaitsNoLongerThanItsTimeout(), theScreenRouteReadsATerminalTabOffTheMainThread() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/verifiers-don-t-run/merge-test.log. Each flaky test's failing lines, readab….)
+- 2026-11-01 02:54 The worker on strict-paths-an answered findings: strict-paths-an:F1 fixed at bfb777a7: 5d85d30: hold() now lists the branch's files through LeadToolset.changedFiles, which runs `git diff --name-only --no-renames`, so a file moved out of a strict path shows at its old path as well as its new one. Test strictPathsHoldABranchThatMovesAFileOutOfOne (git mv a.txt moved.txt, strict_paths a.txt) is refused by merge naming a.txt. It fails with the fix taken out and passes with it.
+- 2026-11-01 03:11 Merged the-app-s-host: The app's host exit watcher gives up if the exit event comes before the host can be reaped (HostClient.swift:313-317)
+- 2026-11-01 03:11 Automatically (auto_advance): Merged the-app-s-host (The app's host exit watcher gives up if the exit event comes before the host can be reaped (HostClient.swift:313-317)) into main at 2353d4ab, on its passing audit and the full test run.
+- 2026-11-01 03:17 Merged spec-an-unparseable: Spec: an unparseable request gets `rejected` (format check) when its file name's id is valid and it came from the configured peer (no audit: review none)
+- 2026-11-01 03:17 Automatically (auto_advance): Merged spec-an-unparseable (Spec: an unparseable request gets `rejected` (format check) when its file name's id is valid and it came from the configured peer) into main at 3a302d8c, review none: on its worker's done report on 14b679a4 and the full test run.
+- 2026-11-01 03:17 Automatically (auto_advance): Cleaned up verifiers-don-t-run (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 03:17 Automatically (auto_advance): Cleaned up the-app-s-host (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 03:17 Automatically (auto_advance): Cleaned up spec-an-unparseable (freed 1.0 GB of build output and temporary folders). It stays done.
+- 2026-11-01 03:19 Automatically (auto_advance): Started the audit of strict-paths-an at bfb777a7 (Its review is audit).
+- 2026-11-01 03:19 Ended workers-and-verifiers-2's worker (idle since its done report on 12db3a69) to make room on the Mac for its audit
+- 2026-11-01 03:20 Automatically (auto_advance): Started the audit of workers-and-verifiers-2 at 12db3a69 (Its review is audit).
+- 2026-11-01 03:20 The worker on turn-this-incident-into-8 answered findings: turn-this-incident-into-8:F1 fixed at ae855000: Commits 8b6c567 and ae85500. Checked against the 2.1.316 bundle (.build/cc/strings.txt): the No row is an input only while noInputMode (rejectInputMode, false at first), which the Select's handleKeyDown flips on key==='tab' through onInputModeToggle. Its keybindings map j/k to select:next/previous. The Bash prompt sets inlineDescriptions:!0, which the Select passes each row as showLabel, so the open field draws as 'No, and tell Claude what to do di…
+- 2026-11-01 03:21 Automatically (auto_advance): Started the audit of turn-this-incident-into-8 at ae855000 (Its review is audit).
+- 2026-11-01 03:24 Automatically (auto_advance): Started the audit of turn-this-incident-into-8 at adc4b0c2 (Its review is audit).
+- 2026-11-01 03:25 Audit of strict-paths-an: complete, clean, round 2: 1 Important closed, 2 Nit closed, 2 Pre-existing open
+- 2026-11-01 03:32 Merged strict-paths-an: Strict paths: an Important finding on configured paths blocks auto-merge, even unconfirmed, until the lead rules
+- 2026-11-01 03:32 Automatically (auto_advance): Merged strict-paths-an (Strict paths: an Important finding on configured paths blocks auto-merge, even unconfirmed, until the lead rules) into main at b6dc4949, on its passing audit and the full test run.
+- 2026-11-01 03:32 Ended wallet-card-truth-the's worker (idle since its done report on 78fcb1f7) to make room on the Mac for its audit
+- 2026-11-01 03:32 Automatically (auto_advance): Started the audit of wallet-card-truth-the at 78fcb1f7 (Its review is audit).
+- 2026-11-01 03:32 Automatically (auto_advance): Cleaned up strict-paths-an (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 03:32 Audit of workers-and-verifiers-2: incomplete, clean, round 1: 4 Important open, 5 Nit open
+- 2026-11-01 03:32 Started a worker on workers-and-verifiers-2
+- 2026-11-01 03:32 Automatically (auto_advance): Sent workers-and-verifiers-2's worker the open Important findings workers-and-verifiers-2:F1, workers-and-verifiers-2:F2, workers-and-verifiers-2:F3, workers-and-verifiers-2:F4 from its audit at 12db3a69 (in a new worker: its last one had ended).
+- 2026-11-01 03:41 Audit of wallet-card-truth-the: incomplete, clean, round 1: 1 Important open, 3 Nit open
+- 2026-11-01 03:41 Audit of turn-this-incident-into-8: complete, clean, round 2: 1 Important closed, 3 Nit (1 open), 1 Pre-existing closed
+- 2026-11-01 03:41 Automatically (auto_advance): Couldn't send wallet-card-truth-the's worker its open Important findings (wallet-card-truth-the:F1): Not started: the Mac is shared by every project's team, and its load (the greater of its 1- and 5-minute averages) is above load_threshold. Now: load 31.3 (load_threshold 24, twice the 12 cores), 12 team sessions across 3 projects (this one 4, 2 others 8) (mac_max_sessions 15). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, …
+- 2026-11-01 03:44 Started a worker on wallet-card-truth-the
+- 2026-11-01 03:44 Automatically (auto_advance): Sent wallet-card-truth-the's worker the open Important findings wallet-card-truth-the:F1 from its audit at 78fcb1f7 (in a new worker: its last one had ended).
+- 2026-11-01 03:48 The worker on wallet-card-truth-the answered findings: wallet-card-truth-the:F1 fixed at 4a16de46: 4a16de4: outstandingRequestsSurviveARestartAsPrivateFiles expected the restored record without sentAt, which this branch now stores at send (check 4). The test now takes sentAt from the first courier's record and expects the record after the restart to equal Record(request:, state: .sent, sentAt: sentAt), so it also checks that sentAt survives a restart. PassageLinkTests: 17 tests passed; under load: all 3 runs passed and left nothing behind (97 tests …
+- 2026-11-01 03:55 Planned app-memory-steps-up: App memory steps up 17–20 MB after a real worker session ends: reproduce and fix
+- 2026-11-01 03:59 Audit of turn-this-incident-into-8 at 704951af tested its merged result 09201be2 onto main: the test command passed
+- 2026-11-01 03:59 Automatically (auto_advance): Started the audit of turn-this-incident-into-8 at 704951af (Its review is audit).
+- 2026-11-01 04:03 Audit of turn-this-incident-into-8: complete, clean, round 3: 1 Important closed, 3 Nit (1 open), 1 Pre-existing closed
+- 2026-11-01 04:06 Automatically (auto_advance): Didn't start app-memory-grows-17: app-memory-grows-17's worker is still running. Send it what to do with message, or stop_worker first.
+- 2026-11-01 04:14 Merged turn-this-incident-into-8: Turn this incident into a check: A verifier's session waits indefinitely on a permission prom…
+- 2026-11-01 04:14 Automatically (auto_advance): Merged turn-this-incident-into-8 (Turn this incident into a check: A verifier's session waits indefinitely on a permission prom…) into main at d886431f, on its passing audit and the full test run.
+- 2026-11-01 04:14 Automatically (auto_advance): Cleaned up turn-this-incident-into-8; ended pid 71765 (Worker: Turn this incident into a check: A verifier's session waits indefinitely on a permission prom…) (freed 4.7 GB of build output and temporary folders). It stays done.
+- 2026-11-01 04:16 Started a worker on workers-and-verifiers-2
+- 2026-11-01 04:16 Automatically (auto_advance): Started a worker on workers-and-verifiers-2 (Workers and verifiers can read the lead's private files through `git diff --no-index` (Bash(git diff:*) bypasses the Read deny)), its after tasks done (turn-this-incident-into-8).
+- 2026-11-01 04:16 Automatically (auto_advance): Started the audit of wallet-card-truth-the at 4a16de46 (Its review is audit).
+- 2026-11-01 04:16 Automatically (auto_advance): Started the audit of app-memory-grows-17 at 1f8f57a1 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-11-01 04:19 Audit of wallet-card-truth-the: complete, clean, round 2: 1 Important closed, 3 Nit open
+- 2026-11-01 04:28 Merged wallet-card-truth-the: Wallet card truth: the record decides the state, and the browser path keeps what was signed
+- 2026-11-01 04:28 Flaky in wallet-card-truth-the's merge: theScreenRouteReadsATerminalTabOffTheMainThread() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 04:28 Planned fix-the-flaky-test-14: theScreenRouteReadsATerminalTabOffTheMainThread() flaked 3 times within 7 days
+- 2026-11-01 04:28 Automatically (auto_advance): Merged wallet-card-truth-the (Wallet card truth: the record decides the state, and the browser path keeps what was signed) into main at 87ca2909, on its passing audit and the full test run. (Its first test run failed on theScreenRouteReadsATerminalTabOffTheMainThread() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/wallet-card-truth-the/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/….)
+- 2026-11-01 04:28 Automatically (auto_advance): Cleaned up wallet-card-truth-the; ended pid 88014 (Worker: Wallet card truth: the record decides the state, and the browser path keeps what was signed) (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-01 04:34 Started a worker on wallet-card-can-t
+- 2026-11-01 04:34 Automatically (auto_advance): Started a worker on wallet-card-can-t (Wallet card can't be made misleading: who asked, the reason field, and contract calls that move tokens), its after tasks done (wallet-card-truth-the).
+- 2026-11-01 04:34 Started a worker on fix-the-flaky-test-14
+- 2026-11-01 04:34 Automatically (auto_advance): Started a worker on fix-the-flaky-test-14 (Fix the flaky test theScreenRouteReadsATerminalTabOffTheMainThread()).
+- 2026-11-01 04:47 Audit of app-memory-grows-17: complete, clean, round 1: 5 Nit open
+- 2026-11-01 05:01 Merged app-memory-grows-17: App memory grows ~17 MB an hour again (297 → 347 MB in 3 h at a steady session count)
+- 2026-11-01 05:01 Flaky in app-memory-grows-17's merge: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 05:01 Automatically (auto_advance): Merged app-memory-grows-17 (App memory grows ~17 MB an hour again (297 → 347 MB in 3 h at a steady session count)) into main at 49cf98c5, on its passing audit and the full test run. (Its first test run failed on heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/app-memory-grows-17/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibes….)
+- 2026-11-01 05:14 Merged fix-the-flaky-test-14: Fix the flaky test theScreenRouteReadsATerminalTabOffTheMainThread() (no audit: review none)
+- 2026-11-01 05:14 Flaky in fix-the-flaky-test-14's merge: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 05:14 Automatically (auto_advance): Merged fix-the-flaky-test-14 (Fix the flaky test theScreenRouteReadsATerminalTabOffTheMainThread()) into main at 700a64e6, review none: on its worker's done report on 70390263 and the full test run. (Its first test run failed on heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/fix-the-flaky-test-14/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vib….)
+- 2026-11-01 05:14 Automatically (auto_advance): Cleaned up app-memory-grows-17 (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-01 05:14 Automatically (auto_advance): Cleaned up fix-the-flaky-test-14; ended pid 50785 (Worker: Fix the flaky test theScreenRouteReadsATerminalTabOffTheMainThread()) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 05:22 Started a worker on app-memory-steps-up
+- 2026-11-01 05:22 Automatically (auto_advance): Started a worker on app-memory-steps-up (App memory steps up 17–20 MB after a real worker session ends: reproduce and fix), its after tasks done (app-memory-grows-17).
+- 2026-11-01 05:22 Automatically (auto_advance): Started the audit of wallet-card-can-t at 125a3180 (Its review is audit).
+- 2026-11-01 05:32 Automatically (auto_advance): Started the audit of workers-and-verifiers-2 at e66c6661 (Its review is audit).
+- 2026-11-01 05:55 Planned the-sidebar-recomputes: The sidebar recomputes its team arrangement and each lead's blocking questions on every redraw
+- 2026-11-01 06:03 Started a worker on the-sidebar-recomputes
+- 2026-11-01 06:03 Automatically (auto_advance): Started a worker on the-sidebar-recomputes (The sidebar recomputes its team arrangement and each lead's blocking questions on every redraw).
+- 2026-11-01 06:12 Automatically (auto_advance): Started the audit of app-memory-steps-up at d4f5b800 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-11-01 07:13 Merged the-sidebar-recomputes: The sidebar recomputes its team arrangement and each lead's blocking questions on every redraw (no audit: review none)
+- 2026-11-01 07:13 Flaky in the-sidebar-recomputes's merge: itCountsWhileOtherThreadsAllocate(), aBuildSlowToStartStillTakesOver(), aLeadRunningAtRelaunchKeepsItsRoleAndNoNewLeadStarts(), activatingAHostAppLeavesTheMainThreadFree(), theAppsUnitsAndTheToolServersAtOnceGoInWhole(), theScreenRouteReadsATerminalTabOffTheMainThread(), aRefreshWorksOutNoneOfTheWit… failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 07:13 Automatically (auto_advance): Merged the-sidebar-recomputes (The sidebar recomputes its team arrangement and each lead's blocking questions on every redraw) into main at 49037a4b, review none: on its worker's done report on 4cdd4b5a and the full test run. (Its first test run failed on itCountsWhileOtherThreadsAllocate(), aBuildSlowToStartStillTakesOver(), aLeadRunningAtRelaunchKeepsItsRoleAndNoNewLeadStarts(), activatingAHostAppLeavesTheMainThreadFree(), theAppsUnitsAndTheToolServersAtOnceGoInWhole(), theScreenRouteReadsATerminalTabOffTheMainThread(), aRefreshWorksOutNoneOfTheWit… and the rerun of those tests passed, so it merged on the rerun: reco….)
+- 2026-11-01 07:13 Automatically (auto_advance): Cleaned up the-sidebar-recomputes; ended pid 66562 (Worker: The sidebar recomputes its team arrangement and each lead's blocking questions on every redraw) (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-01 07:55 Workflow: verifier_model = `opus`
+- 2026-11-01 07:57 Automatically (auto_advance): Didn't start wallet-e2e-real-testnet: wallet-e2e-real-testnet's worker is still running. Send it what to do with message, or stop_worker first.
+- 2026-11-01 08:04 Audit of wallet-card-can-t: incomplete, clean, round 1: 2 Important open, 3 Nit open
+- 2026-11-01 08:04 Automatically (auto_advance): Sent wallet-card-can-t's worker the open Important findings wallet-card-can-t:F1, wallet-card-can-t:F2 from its audit at 125a3180.
+- 2026-11-01 08:07 Update: First real payment through the whole wallet chain: passed on GenLayer testnet — **What happened:** `scripts/e2e/wallet-e2e.sh --real-testnet` sent one real transaction end to end on this Mac. A fake agent filed a request in the VibeSwitcher sandbox, Send was clicked, the loop Pas…
+- 2026-11-01 08:08 Planned wallet-e2e-reads-the: wallet-e2e reads the Wallet Manager's stable hooks (signing-page data attributes, networks --json) instead of its markup and source
+- 2026-11-01 08:11 Audit of workers-and-verifiers-2: complete, clean, round 2: 4 Important closed, 7 Nit (3 open)
+- 2026-11-01 08:11 Planned terminal-drawing-froze: Terminal drawing froze the window for 15 s in SwiftTerm's buildAttributedString (String.UnicodeScalarView.distance per run)
+- 2026-11-01 08:15 Audit of app-memory-steps-up: complete, clean, round 1: 3 Nit open
+- 2026-11-01 08:18 Started a worker on terminal-drawing-froze
+- 2026-11-01 08:18 Automatically (auto_advance): Started a worker on terminal-drawing-froze (Terminal drawing froze the window for 15 s in SwiftTerm's buildAttributedString (String.UnicodeScalarView.distance per run)).
+- 2026-11-01 08:18 Automatically (auto_advance): Didn't audit wallet-e2e-real-testnet: Not audited, no verifier started: a trial merge of agent/wallet-e2e-real-testnet (53a132e5) onto main (git merge-tree) conflicts, so it can't land as it is. Files: Sources/VibeSwitcher/Sandbox.swift. main's commits that touched them since agent/wallet-e2e-real-testnet last took it in (at 12b2c630): 49cf98c HeapCensus takes one census at a time; the soak always prints its RESULT (Sources/VibeSwitcher/Sandbox.swift); 894caf8 Sandbox soak bench under --perf; the soak's wallet step leaves few cards …
+- 2026-11-01 08:20 Abandoned terminal-drawing-froze: Not a bug: the lead misread the report ('100% of its sample inside the stall' means the sample was taken within the stall). In hang-20261101-080139, 0 of 2092 main-thread samples are in TerminalView.draw; the stall was SwiftUI sidebar and layout churn at 44 sessions under load 36. buildAttributedString is linear in cols; its distance calls measure one Character's scalars; SwiftTerm is a pinned SwiftPM dependency. The sidebar churn is partly addressed by 49037a4b, which isn't installed yet; revisit after the next install.
+- 2026-11-01 08:25 Merged workers-and-verifiers-2: Workers and verifiers can read the lead's private files through `git diff --no-index` (Bash(git diff:*) bypasses the Read deny)
+- 2026-11-01 08:25 Automatically (auto_advance): Merged workers-and-verifiers-2 (Workers and verifiers can read the lead's private files through `git diff --no-index` (Bash(git diff:*) bypasses the Read deny)) into main at 85f3e417, on its passing audit and the full test run.
+- 2026-11-01 08:27 Planned wallet-requests-know: Wallet requests know Ethereum, Base and their testnets (names, explorer links, browser-wallet chain switch)
+- 2026-11-01 08:34 Merged app-memory-steps-up: App memory steps up 17–20 MB after a real worker session ends: reproduce and fix
+- 2026-11-01 08:34 Automatically (auto_advance): Merged app-memory-steps-up (App memory steps up 17–20 MB after a real worker session ends: reproduce and fix) into main at dde41def, on its passing audit and the full test run.
+- 2026-11-01 08:34 Automatically (auto_advance): Cleaned up workers-and-verifiers-2 (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-01 08:34 Automatically (auto_advance): Cleaned up app-memory-steps-up; ended pid 48805 (Worker: App memory steps up 17–20 MB after a real worker session ends: reproduce and fix) (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-01 08:40 The worker on wallet-card-can-t answered findings: wallet-card-can-t:F1 fixed at 6e23edfa: 6723558, dde68ff, 8ed12ec. The session on a card no longer comes from VIBESWITCHER_SESSION or the host's welcome list. vs-wallet asks the host's vault (.walletSession) which session the calling process runs in; the host tells from that process. It then asks for .sealWalletRequest over the request's SHA-256, and the vault refuses unless the caller is in exactly that session and the host says it's the user's (userOpened: opened by the app, not started by ano…
+- 2026-11-01 08:41 Automatically (auto_advance): Started the audit of wallet-e2e-real-testnet at ce174d1f (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-11-01 08:41 Automatically (auto_advance): Started the audit of wallet-card-can-t at 6e23edfa (Its review is audit).
+- 2026-11-01 08:47 Audit of wallet-e2e-real-testnet: complete, clean, round 1: 2 Nit open
+- 2026-11-01 08:48 Audit of wallet-card-can-t: complete, clean, round 2: 2 Important closed, 3 Nit closed
+- 2026-11-01 08:49 Planned boost-release-1-7: Boost release 1/7: a once-a-minute load recorder (load, memory, sessions, heavy slots, merges)
+- 2026-11-01 08:49 Planned boost-release-2-7: Boost release 2/7: heavy jobs outside the Mac-wide lock are noticed and their lead is told
+- 2026-11-01 08:49 Planned boost-release-3-7: Boost release 3/7: watch the account's usage limits and back off before hitting them (review audit)
+- 2026-11-01 08:49 Planned boost-release-4-7: Boost release 4/7: a task's idle worker is released while its audit runs, and restarted only if findings come back (review audit)
+- 2026-11-01 08:49 Planned boost-release-5-7: Boost release 5/7: batched merges: test several passed tasks together, split automatically on failure (review audit)
+- 2026-11-01 08:49 Started a worker on boost-release-1-7
+- 2026-11-01 08:49 Automatically (auto_advance): Started a worker on boost-release-1-7 (Boost release 1/7: a once-a-minute load recorder (load, memory, sessions, heavy slots, merges)).
+- 2026-11-01 08:49 Started a worker on boost-release-2-7
+- 2026-11-01 08:49 Automatically (auto_advance): Started a worker on boost-release-2-7 (Boost release 2/7: heavy jobs outside the Mac-wide lock are noticed and their lead is told).
+- 2026-11-01 08:50 Planned boost-release-6-7: Boost release 6/7: Boost mode: higher Mac-wide limits on demand, or automatically when the user is away and on AC power (review audit)
+- 2026-11-01 08:50 Started a worker on boost-release-3-7
+- 2026-11-01 08:50 Automatically (auto_advance): Started a worker on boost-release-3-7 (Boost release 3/7: watch the account's usage limits and back off before hitting them).
+- 2026-11-01 08:50 Planned boost-release-7-7: Boost release 7/7: release check: tune boost from the recorder's data, notes, and one install
+- 2026-11-01 08:50 Started a worker on boost-release-4-7
+- 2026-11-01 08:50 Automatically (auto_advance): Started a worker on boost-release-4-7 (Boost release 4/7: a task's idle worker is released while its audit runs, and restarted only if findings come back).
+- 2026-11-01 08:52 Planned boost-release-3b-codex: Boost release 3b: Codex workers for bounded tasks (spread usage across accounts), always audited by Claude (review audit)
+- 2026-11-01 08:54 Planned feature-impact-ledger: Feature impact ledger + metrics script: track which changes help, and why
+- 2026-11-01 08:58 Merged wallet-e2e-real-testnet: wallet-e2e --real-testnet: one real GenLayer testnet payment through the whole chain on this Mac
+- 2026-11-01 08:58 Flaky in wallet-e2e-real-testnet's merge: aSlowPowerDaemonDoesntHoldUpALeadRefresh() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 08:58 Automatically (auto_advance): Merged wallet-e2e-real-testnet (wallet-e2e --real-testnet: one real GenLayer testnet payment through the whole chain on this Mac) into main at 9ea13096, on its passing audit and the full test run. (Its first test run failed on aSlowPowerDaemonDoesntHoldUpALeadRefresh() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/wallet-e2e-real-testnet/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibe….)
+- 2026-11-01 09:14 Automatically (auto_advance): Merge of wallet-card-can-t failed: Conflicts with main: the branch needs bringing up to date. Sent its worker the output; it's back at work.
+- 2026-11-01 09:14 Automatically (auto_advance): Cleaned up wallet-e2e-real-testnet (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-01 09:14 Started a worker on feature-impact-ledger
+- 2026-11-01 09:14 Automatically (auto_advance): Started a worker on feature-impact-ledger (Feature impact ledger + metrics script: track which changes help, and why).
+- 2026-11-01 09:14 Automatically (auto_advance): Started the audit of boost-release-2-7 at 65a7704b (It touches sensitive_paths (AGENTS.md, Sources/VibeCore/TestLock.swift), so it's treated as audit whatever its review says).
+- 2026-11-01 09:14 Automatically (auto_advance): Didn't audit boost-release-4-7: No verifier started: the Mac is shared by every project's team, and the team sessions of all its projects are at mac_max_sessions. Now: load 23.3 (load_threshold 24, twice the 12 cores), 15 team sessions across 3 projects (this one 6, 2 others 9) (mac_max_sessions 15). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, the user, or a VibeSwitcher message). Meanwhile merge and cleanup finished tasks (cleanup ends their sessions…
+- 2026-11-01 09:21 Audit of boost-release-2-7: complete, clean, round 1: 1 Nit open
+- 2026-11-01 09:25 Automatically (auto_advance): Started the audit of wallet-card-can-t at b169a564 (Its review is audit).
+- 2026-11-01 09:30 Audit of wallet-card-can-t: complete, clean, round 3: 2 Important closed, 3 Nit closed
+- 2026-11-01 09:33 Merged boost-release-2-7: Boost release 2/7: heavy jobs outside the Mac-wide lock are noticed and their lead is told
+- 2026-11-01 09:33 Automatically (auto_advance): Merged boost-release-2-7 (Boost release 2/7: heavy jobs outside the Mac-wide lock are noticed and their lead is told) into main at c6e873f5, on its passing audit and the full test run.
+- 2026-11-01 09:33 Automatically (auto_advance): Cleaned up boost-release-2-7; ended pid 40253 (Worker: Boost release 2/7: heavy jobs outside the Mac-wide lock are noticed and their lead is told) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 09:43 Merged wallet-card-can-t: Wallet card can't be made misleading: who asked, the reason field, and contract calls that move tokens
+- 2026-11-01 09:43 Flaky in wallet-card-can-t's merge: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 09:43 Planned fix-the-flaky-test-15: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() flaked 3 times within 7 days
+- 2026-11-01 09:43 Automatically (auto_advance): Merged wallet-card-can-t (Wallet card can't be made misleading: who asked, the reason field, and contract calls that move tokens) into main at 27b8aa36, on its passing audit and the full test run. (Its first test run failed on heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/wallet-card-can-t/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswi….)
+- 2026-11-01 09:43 Automatically (auto_advance): Cleaned up wallet-card-can-t; ended pid 50603 (Worker: Wallet card can't be made misleading: who asked, the reason field, and contract calls that move tokens) (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-01 09:43 Raised feature-impact-ledger to audit (the risk check, at 9316df23): it changes 674 lines outside tests, over risk_lines (400)
+- 2026-11-01 09:43 Automatically (auto_advance): feature-impact-ledger is audited, not merged: it changes 674 lines outside tests, over risk_lines (400) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-01 09:43 Update: Wallet cards can't be made misleading: host-stamped requests, plain-words token calls — **What changed** (main at 27b8aa36, with card accuracy at 87ca2909)
+- 2026-11-01 09:47 Started a worker on wallet-outcomes-always
+- 2026-11-01 09:47 Automatically (auto_advance): Started a worker on wallet-outcomes-always (Wallet outcomes always reach the agent: undelivered messages kept on disk and retried), its after tasks done (wallet-card-can-t).
+- 2026-11-01 09:47 Started a worker on fix-the-flaky-test-15
+- 2026-11-01 09:47 Automatically (auto_advance): Started a worker on fix-the-flaky-test-15 (Fix the flaky test heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared()).
+- 2026-11-01 09:54 Audit of boost-release-1-7 at 549ce92c tested its merged result 72eb27ee onto main: test command failed
+- 2026-11-01 09:54 Automatically (auto_advance): Started the audit of boost-release-1-7 at 549ce92c (It touches sensitive_paths (Sources/VibeCore/Worktrees.swift), so it's treated as audit whatever its review says).
+- 2026-11-01 09:58 Audit of boost-release-1-7: complete, clean, round 1: 2 Nit open
+- 2026-11-01 10:03 Started a worker on wallet-e2e-reads-the
+- 2026-11-01 10:03 Automatically (auto_advance): Started a worker on wallet-e2e-reads-the (wallet-e2e reads the Wallet Manager's stable hooks (signing-page data attributes, networks --json) instead of its markup and source).
+- 2026-11-01 10:09 Merged boost-release-1-7: Boost release 1/7: a once-a-minute load recorder (load, memory, sessions, heavy slots, merges)
+- 2026-11-01 10:09 Automatically (auto_advance): Merged boost-release-1-7 (Boost release 1/7: a once-a-minute load recorder (load, memory, sessions, heavy slots, merges)) into main at b1675d3b, on its passing audit and the full test run.
+- 2026-11-01 10:09 Automatically (auto_advance): Cleaned up boost-release-1-7; ended pid 39763 (Worker: Boost release 1/7: a once-a-minute load recorder (load, memory, sessions, heavy slots, merges)) (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-01 10:22 Raised fix-the-flaky-test-15 to audit (the risk check, at 53f686ae): it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift)
+- 2026-11-01 10:22 Automatically (auto_advance): fix-the-flaky-test-15 is audited, not merged: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-01 10:23 Raised wallet-e2e-reads-the to audit (the risk check, at b6b15f6e): it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$err")
+- 2026-11-01 10:23 Automatically (auto_advance): wallet-e2e-reads-the is audited, not merged: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$err") (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-01 10:30 Automatically (auto_advance): Started the audit of wallet-outcomes-always at 7e98bce2 (Its review is audit).
+- 2026-11-01 10:30 Ended wallet-e2e-reads-the's worker (idle since its done report on b6b15f6e) to make room on the Mac for its audit
+- 2026-11-01 10:30 Automatically (auto_advance): Started the audit of wallet-e2e-reads-the at b6b15f6e (Its review is audit. (audited: it has code that deletes or rewrites files or data (scripts/e2e/wallet-e2e.sh: rm -f "$err"), as the risk check found.)).
+- 2026-11-01 10:30 Ended boost-release-3-7's worker (idle since its done report on a8414196) to make room on the Mac for its audit
+- 2026-11-01 10:37 Audit of boost-release-3-7 at a8414196 tested its merged result 0faaab62 onto main: test command failed
+- 2026-11-01 10:37 Automatically (auto_advance): Started the audit of boost-release-3-7 at a8414196 (Its review is audit).
+- 2026-11-01 10:40 Audit of wallet-outcomes-always: incomplete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-11-01 10:40 Automatically (auto_advance): Sent wallet-outcomes-always's worker the open Important findings wallet-outcomes-always:F1 from its audit at 7e98bce2.
+- 2026-11-01 10:42 Audit of wallet-e2e-reads-the: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-11-01 10:43 Audit of boost-release-3-7: incomplete, clean, round 1: 3 Important open, 3 Nit open
+- 2026-11-01 10:43 Automatically (auto_advance): Couldn't send boost-release-3-7's worker its open Important findings (boost-release-3-7:F1, boost-release-3-7:F2, boost-release-3-7:F3): Not started: the Mac is shared by every project's team, and its load (the greater of its 1- and 5-minute averages) is above load_threshold. Now: load 56.0 (load_threshold 24, twice the 12 cores), 11 team sessions across 3 projects (this one 4, 2 others 7) (mac_max_sessions 15). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, …
+- 2026-11-01 10:48 Started a worker on boost-release-3-7
+- 2026-11-01 10:48 Automatically (auto_advance): Sent boost-release-3-7's worker the open Important findings boost-release-3-7:F1, boost-release-3-7:F2, boost-release-3-7:F3 from its audit at a8414196 (in a new worker: its last one had ended).
+- 2026-11-01 10:55 Merged wallet-e2e-reads-the: wallet-e2e reads the Wallet Manager's stable hooks (signing-page data attributes, networks --json) instead of its markup and source
+- 2026-11-01 10:55 Flaky in wallet-e2e-reads-the's merge: aRetryWithNoCourierLeavesTheRecordToDecide() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 10:55 Automatically (auto_advance): Merged wallet-e2e-reads-the (wallet-e2e reads the Wallet Manager's stable hooks (signing-page data attributes, networks --json) instead of its markup and source) into main at 58464206, on its passing audit and the full test run. (Its first test run failed on aRetryWithNoCourierLeavesTheRecordToDecide() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/wallet-e2e-reads-the/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibes….)
+- 2026-11-01 10:56 Automatically (auto_advance): Cleaned up wallet-e2e-reads-the (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-01 10:58 The worker on wallet-outcomes-always answered findings: wallet-outcomes-always:F1 fixed at 5b0fde62: Fixed in 3dd848a, 564fcf1 and 5b0fde6. Each outbox entry now carries the session host's seal (`LeadVault.seal`). The seal is made with the vault key that survives restarts, over a .system("wallet outbox") message whose id and text bind the request id, key, session, window end, marker and text. `maySeal` lets only the app seal that sender. An entry read from disk is handed to LeadController.tell only after the host confirms the seal (`LeadVault.verify`…
+- 2026-11-01 11:05 Audit of boost-release-4-7 at 185090f8 tested its merged result a84ac7cd onto main: test command failed
+- 2026-11-01 11:05 Automatically (auto_advance): Started the audit of boost-release-4-7 at 185090f8 (Its review is audit).
+- 2026-11-01 11:07 Audit of boost-release-4-7: incomplete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-11-01 11:07 Automatically (auto_advance): Sent boost-release-4-7's worker the open Important findings boost-release-4-7:F1 from its audit at 185090f8.
+- 2026-11-01 11:19 The worker on boost-release-4-7 answered findings: boost-release-4-7:F1 fixed at 85756efa: c9617a8: WitnessOffMainTests' expected step list now includes releasableForAdvance (after leftToAdvance), the computation this branch adds to WitnessWork. The test still checks that it runs off the main thread. bash scripts/test.sh --filter WitnessOffMainTests: 2 tests passed; the full suite passes it too.; boost-release-4-7:F2 fixed at 85756efa: 85756ef: every delivery to a worker (message, auto_advance's sends, tellWorker) now goes through deliver(), whi…
+- 2026-11-01 11:21 Automatically (auto_advance): Started the audit of wallet-outcomes-always at 5b0fde62 (Its review is audit).
+- 2026-11-01 11:27 Audit of wallet-outcomes-always: complete, clean, round 2: 1 Important closed, 1 Nit open
+- 2026-11-01 11:28 The worker on boost-release-3-7 answered findings: boost-release-3-7:F1 fixed at 7b8bc913: 7152c68 + 425feeb. The user's status line now runs through posix_spawn and a single-thread kqueue loop (UsageStatusLine.runCommand). F_SETNOSIGPIPE on the stdin pipe. Writing stops at the child's exit (NOTE_EXIT handled first) or at EV_EOF on the pipe. main.swift ignores SIGPIPE (and sets F_SETNOSIGPIPE on stdout) before the --status-line branch; the child starts with SIGPIPE at its default. The user's output is shown first, byte for byte as Data, and the …
+- 2026-11-01 11:28 Audit of boost-release-4-7 at 85756efa tested its merged result c762f860 onto main: the test command passed
+- 2026-11-01 11:28 Automatically (auto_advance): Started the audit of boost-release-4-7 at 85756efa (Its review is audit).
+- 2026-11-01 11:31 Audit of boost-release-4-7: complete, clean, round 2: 2 Important (1 open), 1 Nit closed
+- 2026-11-01 11:31 Planned leadauditreleasetests: LeadAuditReleaseTests: the wait for the message has no overall time limit (line 139)
+- 2026-11-01 11:31 boost-release-4-7 back in review: no Important finding open, and its audit passed
+- 2026-11-01 11:41 Merged wallet-outcomes-always: Wallet outcomes always reach the agent: undelivered messages kept on disk and retried
+- 2026-11-01 11:41 Flaky in wallet-outcomes-always's merge: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-01 11:41 Automatically (auto_advance): Merged wallet-outcomes-always (Wallet outcomes always reach the agent: undelivered messages kept on disk and retried) into main at ce4c9aa9, on its passing audit and the full test run. (Its first test run failed on heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared(), (the test command, naming no test) and the rerun of the whole test command passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/wallet-outcomes-always/merge-test.log. Each flaky test's failing lin….)
+- 2026-11-01 11:41 Automatically (auto_advance): Cleaned up wallet-outcomes-always; ended pid 61396 (Worker: Wallet outcomes always reach the agent: undelivered messages kept on disk and retried) (freed 3.0 GB of build output and temporary folders). It stays done.
+- 2026-11-01 11:42 Started a worker on wallet-path-robustness
+- 2026-11-01 11:42 Automatically (auto_advance): Started a worker on wallet-path-robustness (Wallet path robustness: no typed path is ever run, polls coalesce, records are bounded and read safely), its after tasks done (wallet-outcomes-always).
+- 2026-11-01 11:50 Audit of boost-release-3-7 at 7b8bc913 tested its merged result 1bacef01 onto main: the test command passed
+- 2026-11-01 11:50 Automatically (auto_advance): Started the audit of boost-release-3-7 at 7b8bc913 (Its review is audit).
+- 2026-11-01 11:53 Audit of boost-release-3-7: complete, clean, round 2: 3 Important closed, 3 Nit closed
+- 2026-11-01 12:09 Planned read-only-git-parser: Read-only git parser: allow the everyday forms other projects' workers and verifiers use (merge-tree, --stat, show --cc, git grep <rev>), and a worker's diff | apply -R proof (review audit)
+- 2026-11-01 12:09 Automatically (auto_advance): Merge of boost-release-4-7 failed: Tests fail rebased onto main: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() Sent its worker the output; it's back at work.
+- 2026-11-01 12:09 Automatically (auto_advance): feature-impact-ledger is audited, not merged: it changes 674 lines outside tests, over risk_lines (400) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-01 12:09 Automatically (auto_advance): fix-the-flaky-test-15 is audited, not merged: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-01 12:17 Started a worker on read-only-git-parser
+- 2026-11-01 12:17 Automatically (auto_advance): Started a worker on read-only-git-parser (Read-only git parser: allow the everyday forms other projects' workers and verifiers use (merge-tree, --stat, show --cc, git grep <rev>), and a worker's diff | apply -R proof).
+- 2026-11-01 12:23 Merged boost-release-3-7: Boost release 3/7: watch the account's usage limits and back off before hitting them
+- 2026-11-01 12:23 Flaky in boost-release-3-7's merge: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 12:23 Automatically (auto_advance): Merged boost-release-3-7 (Boost release 3/7: watch the account's usage limits and back off before hitting them) into main at 79498a95, on its passing audit and the full test run. (Its first test run failed on heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/boost-release-3-7/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswi….)
+- 2026-11-01 12:30 Audit of boost-release-4-7 at 3598755c tested its merged result 86d492e5 onto main: the test command passed
+- 2026-11-01 12:30 Automatically (auto_advance): Started the audit of boost-release-4-7 at 3598755c (Its review is audit).
+- 2026-11-01 12:30 Ended feature-impact-ledger's worker (idle since its done report on 9316df23) to make room on the Mac for its audit
+- 2026-11-01 12:30 Automatically (auto_advance): Started the audit of feature-impact-ledger at 9316df23 (Its review is audit. (audited: it changes 674 lines outside tests, over risk_lines (400), as the risk check found.)).
+- 2026-11-01 12:30 Ended fix-the-flaky-test-15's worker (idle since its done report on 53f686ae) to make room on the Mac for its audit
+- 2026-11-01 12:30 Automatically (auto_advance): Started the audit of fix-the-flaky-test-15 at 53f686ae (Its review is audit. (audited: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift), as the risk check found.)).
+- 2026-11-01 12:30 Automatically (auto_advance): Cleaned up boost-release-3-7; ended pid 81327 (Worker: Boost release 3/7: watch the account's usage limits and back off before hitting them) (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-01 12:30 Started a worker on boost-release-3b-codex
+- 2026-11-01 12:30 Automatically (auto_advance): Started a worker on boost-release-3b-codex (Boost release 3b: Codex workers for bounded tasks (spread usage across accounts), always audited by Claude), its after tasks done (boost-release-3-7).
+- 2026-11-01 12:30 Audit of boost-release-4-7: complete, clean, round 3: 2 Important closed, 1 Nit closed
+- 2026-11-01 12:32 Audit of feature-impact-ledger: complete, clean, round 1: 1 Nit open
+- 2026-11-01 12:34 Audit of fix-the-flaky-test-15: complete, clean, round 1: 1 Nit open
+- 2026-11-01 12:37 Merged boost-release-4-7: Boost release 4/7: a task's idle worker is released while its audit runs, and restarted only if findings come back
+- 2026-11-01 12:37 Automatically (auto_advance): Merged boost-release-4-7 (Boost release 4/7: a task's idle worker is released while its audit runs, and restarted only if findings come back) into main at 7c48eb90, on its passing audit and the full test run.
+- 2026-11-01 12:43 Merged feature-impact-ledger: Feature impact ledger + metrics script: track which changes help, and why
+- 2026-11-01 12:43 Automatically (auto_advance): Merged feature-impact-ledger (Feature impact ledger + metrics script: track which changes help, and why) into main at b6c44f6a, on its passing audit and the full test run.
+- 2026-11-01 12:50 Merged fix-the-flaky-test-15: Fix the flaky test heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared()
+- 2026-11-01 12:50 Flaky in fix-the-flaky-test-15's merge: itCountsWhileOtherThreadsAllocate() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 12:50 Automatically (auto_advance): Merged fix-the-flaky-test-15 (Fix the flaky test heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared()) into main at 573ebf46, on its passing audit and the full test run. (Its first test run failed on itCountsWhileOtherThreadsAllocate() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/fix-the-flaky-test-15/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibeswitcher/….)
+- 2026-11-01 12:50 Automatically (auto_advance): Cleaned up boost-release-4-7 (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 12:50 Automatically (auto_advance): Cleaned up feature-impact-ledger (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 12:50 Automatically (auto_advance): Cleaned up fix-the-flaky-test-15 (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 12:52 Started a worker on boost-release-5-7
+- 2026-11-01 12:52 Automatically (auto_advance): Started a worker on boost-release-5-7 (Boost release 5/7: batched merges: test several passed tasks together, split automatically on failure), its after tasks done (boost-release-4-7).
+- 2026-11-01 12:52 Started a worker on leadauditreleasetests
+- 2026-11-01 12:52 Automatically (auto_advance): Started a worker on leadauditreleasetests (LeadAuditReleaseTests: the wait for the message has no overall time limit (line 139)), its after tasks done (boost-release-4-7).
+- 2026-11-01 12:52 Automatically (auto_advance): Started the audit of wallet-path-robustness at d8e85e06 (Its review is audit).
+- 2026-11-01 12:52 Automatically (auto_advance): Started the audit of read-only-git-parser at f8dcd45d (Its review is audit).
+- 2026-11-01 13:00 Audit of read-only-git-parser: incomplete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-11-01 13:00 Automatically (auto_advance): Sent read-only-git-parser's worker the open Important findings read-only-git-parser:F1 from its audit at f8dcd45d.
+- 2026-11-01 13:00 Audit of wallet-path-robustness: complete, clean, round 1: 3 Nit open
+- 2026-11-01 13:04 The worker on read-only-git-parser answered findings: read-only-git-parser:F1 fixed at 51a7e8a0: 51a7e8a removes -f from git grep's flags (valuedLetters now "CBAme"). So -f <file>, -f<file>, -nf<file> and -f - (stdin, the lead's F2) prompt in every spelling. I checked the other commands newly allowed on this branch for arguments git resolves from the top of the work tree. ls-tree's --full-tree takes its paths from the top, so it's removed too. On git 2.39.5, run from a subfolder: diff, log and diff-tree open -O's orderfile from the shell's folder (…
+- 2026-11-01 13:10 Merged wallet-path-robustness: Wallet path robustness: no typed path is ever run, polls coalesce, records are bounded and read safely
+- 2026-11-01 13:10 Automatically (auto_advance): Merged wallet-path-robustness (Wallet path robustness: no typed path is ever run, polls coalesce, records are bounded and read safely) into main at 4e1b5212, on its passing audit and the full test run.
+- 2026-11-01 13:15 Planned heavy-jobs-fit-their: Heavy jobs fit their slot: vs-heavy gives each job a core budget, and our builds and tests honour it (review audit)
+- 2026-11-01 13:22 Merged leadauditreleasetests: LeadAuditReleaseTests: the wait for the message has no overall time limit (line 139) (no audit: review none)
+- 2026-11-01 13:22 Automatically (auto_advance): Merged leadauditreleasetests (LeadAuditReleaseTests: the wait for the message has no overall time limit (line 139)) into main at 43fcb510, review none: on its worker's done report on 0704019f and the full test run.
+- 2026-11-01 13:22 Automatically (auto_advance): Cleaned up wallet-path-robustness (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-01 13:22 Automatically (auto_advance): Cleaned up leadauditreleasetests; ended pid 4007 (Worker: LeadAuditReleaseTests: the wait for the message has no overall time limit (line 139)) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 13:23 Update: Wallet requests: VibeSwitcher's production-readiness pass is complete — **All four hardening tasks merged:**
+- 2026-11-01 13:23 Started a worker on wallet-requests-know
+- 2026-11-01 13:23 Automatically (auto_advance): Started a worker on wallet-requests-know (Wallet requests know Ethereum, Base and their testnets (names, explorer links, browser-wallet chain switch)), its after tasks done (wallet-path-robustness).
+- 2026-11-01 13:24 Started a worker on heavy-jobs-fit-their
+- 2026-11-01 13:24 Automatically (auto_advance): Started a worker on heavy-jobs-fit-their (Heavy jobs fit their slot: vs-heavy gives each job a core budget, and our builds and tests honour it).
+- 2026-11-01 13:24 Automatically (auto_advance): Started the audit of read-only-git-parser at 51a7e8a0 (Its review is audit).
+- 2026-11-01 13:25 Audit of read-only-git-parser: complete, clean, round 2: 1 Important closed, 1 Nit closed
+- 2026-11-01 13:29 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-01 13:36 Planned codex-s-tui-renders: Codex's TUI renders blank and never starts its MCP server under the session host: find why, then enable Codex workers (review audit)
+- 2026-11-01 13:58 Planned the-test-suite-leaves: The test suite leaves hundreds of zombie processes (a test helper had 431 unreaped children)
+- 2026-11-01 14:09 Started a worker on the-test-suite-leaves
+- 2026-11-01 14:09 Automatically (auto_advance): Started a worker on the-test-suite-leaves (The test suite leaves hundreds of zombie processes (a test helper had 431 unreaped children)).
+- 2026-11-01 14:18 Merged wallet-requests-know: Wallet requests know Ethereum, Base and their testnets (names, explorer links, browser-wallet chain switch) (no audit: review none)
+- 2026-11-01 14:18 Flaky in wallet-requests-know's merge: theLoginShellRunsInASessionOfItsOwn(), itCountsWhileOtherThreadsAllocate(), aReadBehindAHungOneWaitsNoLongerThanItsTimeout() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 14:18 Planned fix-the-flaky-test-16: itCountsWhileOtherThreadsAllocate() flaked 3 times within 7 days
+- 2026-11-01 14:18 Automatically (auto_advance): Merged wallet-requests-know (Wallet requests know Ethereum, Base and their testnets (names, explorer links, browser-wallet chain switch)) into main at d39533ca, review none: on its worker's done report on 7fb9edec and the full test run. (Its first test run failed on theLoginShellRunsInASessionOfItsOwn(), itCountsWhileOtherThreadsAllocate(), aReadBehindAHungOneWaitsNoLongerThanItsTimeout() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/wallet-requests-know/merge-test.log. Each flaky te….)
+- 2026-11-01 14:21 Planned test-under-load-sh-2: test-under-load.sh builds through heavy_swift too (its bare swift build ignores the core budget)
+- 2026-11-01 14:34 Merged read-only-git-parser: Read-only git parser: allow the everyday forms other projects' workers and verifiers use (merge-tree, --stat, show --cc, git grep <rev>), and a worker's diff | apply -R proof
+- 2026-11-01 14:34 Flaky in read-only-git-parser's merge: aSlowPowerDaemonDoesntHoldUpALeadRefresh() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 14:34 Planned fix-the-flaky-test-17: aSlowPowerDaemonDoesntHoldUpALeadRefresh() flaked 3 times within 7 days
+- 2026-11-01 14:34 Automatically (auto_advance): Merged read-only-git-parser (Read-only git parser: allow the everyday forms other projects' workers and verifiers use (merge-tree, --stat, show --cc, git grep <rev>), and a worker's diff | apply -R proof) into main at 4be0a3fc, on its passing audit and the full test run. (Its first test run failed on aSlowPowerDaemonDoesntHoldUpALeadRefresh() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/read-only-git-parser/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibeswi….)
+- 2026-11-01 14:34 Automatically (auto_advance): Cleaned up wallet-requests-know (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 14:34 Automatically (auto_advance): Cleaned up read-only-git-parser; ended pid 60357 (Worker: Read-only git parser: allow the everyday forms other projects' workers and verifiers use (merge-tree, --stat, show --cc, git grep <rev>), and a worker's diff | apply -R proof) (freed 1.2 GB of build output and temporary folders). It stays don…
+- 2026-11-01 14:39 Started a worker on fix-the-flaky-test-16
+- 2026-11-01 14:39 Automatically (auto_advance): Started a worker on fix-the-flaky-test-16 (Fix the flaky test itCountsWhileOtherThreadsAllocate()).
+- 2026-11-01 14:39 Started a worker on fix-the-flaky-test-17
+- 2026-11-01 14:39 Automatically (auto_advance): Started a worker on fix-the-flaky-test-17 (Fix the flaky test aSlowPowerDaemonDoesntHoldUpALeadRefresh()).
+- 2026-11-01 14:39 Automatically (auto_advance): Started the audit of boost-release-5-7 at 7a3470d8 (Its review is audit).
+- 2026-11-01 14:39 Ended boost-release-3b-codex's worker (idle since its done report on b08d45b6) to make room on the Mac for its audit
+- 2026-11-01 14:49 Audit of boost-release-3b-codex at b08d45b6 tested its merged result 9606e8e1 onto main: test command failed
+- 2026-11-01 14:49 Automatically (auto_advance): Started the audit of boost-release-3b-codex at b08d45b6 (Its review is audit).
+- 2026-11-01 14:52 Audit of boost-release-5-7: incomplete, clean, round 1: 1 Important open, 3 Nit open
+- 2026-11-01 14:52 Automatically (auto_advance): Sent boost-release-5-7's worker the open Important findings boost-release-5-7:F1 from its audit at 7a3470d8.
+- 2026-11-01 14:54 Audit of boost-release-3b-codex: complete, clean, round 1: 2 Nit open, 2 Pre-existing open
+- 2026-11-01 14:57 The worker on boost-release-5-7 answered findings: boost-release-5-7:F1 fixed at e299ba9e: e299ba9: every round after the first calls mergeGate again on each restacked task, just before that round's run, and checks changedMeanwhile against its last state. Its audit or done report on the head, findings, strict_paths holds, kept and approvals are all read fresh, and a refused task is left out with merge's own text. The fresh gate's commit and task are what gets stacked and compared before landing. Regression test MergeBatchTests.tasksRestackedAfte…
+- 2026-11-01 15:08 Automatically (auto_advance): Started the audit of boost-release-5-7 at e299ba9e (Its review is audit).
+- 2026-11-01 15:16 Audit of boost-release-5-7: complete, clean, round 2: 1 Important closed, 3 Nit closed
+- 2026-11-01 15:17 Merged boost-release-3b-codex: Boost release 3b: Codex workers for bounded tasks (spread usage across accounts), always audited by Claude
+- 2026-11-01 15:17 Flaky in boost-release-3b-codex's merge: theLoginShellRunsInASessionOfItsOwn(), aSlowPowerDaemonDoesntHoldUpALeadRefresh() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 15:17 Automatically (auto_advance): Merged boost-release-3b-codex (Boost release 3b: Codex workers for bounded tasks (spread usage across accounts), always audited by Claude) into main at 96c8fb2c, on its passing audit and the full test run. (Its first test run failed on theLoginShellRunsInASessionOfItsOwn(), aSlowPowerDaemonDoesntHoldUpALeadRefresh() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/boost-release-3b-codex/merge-test.log. Each flaky test's failing lines, readable by its fixer….)
+- 2026-11-01 15:30 Merged fix-the-flaky-test-17: Fix the flaky test aSlowPowerDaemonDoesntHoldUpALeadRefresh() (no audit: review none)
+- 2026-11-01 15:30 Automatically (auto_advance): Merged fix-the-flaky-test-17 (Fix the flaky test aSlowPowerDaemonDoesntHoldUpALeadRefresh()) into main at b9f49220, review none: on its worker's done report on c96f0511 and the full test run.
+- 2026-11-01 15:30 Automatically (auto_advance): Cleaned up boost-release-3b-codex (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-01 15:30 Automatically (auto_advance): Cleaned up fix-the-flaky-test-17; ended pid 1695 (Worker: Fix the flaky test aSlowPowerDaemonDoesntHoldUpALeadRefresh()) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 15:55 Planned wallet-e2e-sh-the: wallet-e2e.sh: the real-testnet case no longer waits for Proposed before the sign POST (the Wallet Manager sends it with the POST now)
+- 2026-11-01 15:56 Started a worker on codex-s-tui-renders
+- 2026-11-01 15:56 Automatically (auto_advance): Started a worker on codex-s-tui-renders (Codex's TUI renders blank and never starts its MCP server under the session host: find why, then enable Codex workers), its after tasks done (boost-release-3b-codex).
+- 2026-11-01 16:09 Merged boost-release-5-7: Boost release 5/7: batched merges: test several passed tasks together, split automatically on failure
+- 2026-11-01 16:09 Flaky in boost-release-5-7's merge: claudeCodeStoppingTheStatusLineStopsYourCommandToo(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-01 16:09 Automatically (auto_advance): Merged boost-release-5-7 (Boost release 5/7: batched merges: test several passed tasks together, split automatically on failure) into main at f30a9cbc, on its passing audit and the full test run. (Its first test run failed on claudeCodeStoppingTheStatusLineStopsYourCommandToo(), (the test command, naming no test) and the rerun of the whole test command passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/boost-release-5-7/merge-test.log. Each flaky test's failing lines, readable….)
+- 2026-11-01 16:24 Merged fix-the-flaky-test-16: Fix the flaky test itCountsWhileOtherThreadsAllocate() (no audit: review none)
+- 2026-11-01 16:24 Flaky in fix-the-flaky-test-16's merge: aClaudeSessionDictatesThroughClaudeAndOthersThroughOpenAI() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 16:24 Automatically (auto_advance): Merged fix-the-flaky-test-16 (Fix the flaky test itCountsWhileOtherThreadsAllocate()) into main at 0aea0927, review none: on its worker's done report on 010ab1ba and the full test run. (Its first test run failed on aClaudeSessionDictatesThroughClaudeAndOthersThroughOpenAI() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/fix-the-flaky-test-16/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vib….)
+- 2026-11-01 16:24 Automatically (auto_advance): Cleaned up boost-release-5-7 (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-01 16:24 Automatically (auto_advance): Cleaned up fix-the-flaky-test-16 (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 16:36 Started a worker on boost-release-6-7
+- 2026-11-01 16:36 Automatically (auto_advance): Started a worker on boost-release-6-7 (Boost release 6/7: Boost mode: higher Mac-wide limits on demand, or automatically when the user is away and on AC power), its after tasks done (boost-release-3-7, boost-release-5-7).
+- 2026-11-01 16:46 Audit of heavy-jobs-fit-their at 11d1fb3d tested its merged result fa1d5050 onto main: the test command passed
+- 2026-11-01 16:46 Automatically (auto_advance): Started the audit of heavy-jobs-fit-their at 11d1fb3d (Its review is audit).
+- 2026-11-01 16:48 Automatically (auto_advance): Started the audit of the-test-suite-leaves at e1181513 (It touches sensitive_paths (Sources/VibeHost/HostedSession.swift), so it's treated as audit whatever its review says).
+- 2026-11-01 16:52 Audit of heavy-jobs-fit-their: complete, clean, round 1: 3 Nit open
+- 2026-11-01 16:57 Audit of the-test-suite-leaves: complete, clean, round 1: 1 Nit open
+- 2026-11-01 17:05 Merged heavy-jobs-fit-their: Heavy jobs fit their slot: vs-heavy gives each job a core budget, and our builds and tests honour it
+- 2026-11-01 17:05 Automatically (auto_advance): Merged heavy-jobs-fit-their (Heavy jobs fit their slot: vs-heavy gives each job a core budget, and our builds and tests honour it) into main at 8fde5718, on its passing audit and the full test run.
+- 2026-11-01 17:23 Merged the-test-suite-leaves: The test suite leaves hundreds of zombie processes (a test helper had 431 unreaped children)
+- 2026-11-01 17:23 Automatically (auto_advance): Merged the-test-suite-leaves (The test suite leaves hundreds of zombie processes (a test helper had 431 unreaped children)) into main at b981307b, on its passing audit and the full test run.
+- 2026-11-01 17:23 Automatically (auto_advance): Cleaned up heavy-jobs-fit-their (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-11-01 17:24 Automatically (auto_advance): Cleaned up the-test-suite-leaves; ended pid 26223 (Worker: The test suite leaves hundreds of zombie processes (a test helper had 431 unreaped children)) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 17:27 Started a worker on test-under-load-sh-2
+- 2026-11-01 17:27 Automatically (auto_advance): Started a worker on test-under-load-sh-2 (test-under-load.sh builds through heavy_swift too (its bare swift build ignores the core budget)), its after tasks done (heavy-jobs-fit-their).
+- 2026-11-01 17:27 Started a worker on wallet-e2e-sh-the
+- 2026-11-01 17:27 Automatically (auto_advance): Started a worker on wallet-e2e-sh-the (wallet-e2e.sh: the real-testnet case no longer waits for Proposed before the sign POST (the Wallet Manager sends it with the POST now)).
+- 2026-11-01 17:27 Automatically (auto_advance): Didn't audit boost-release-6-7: Not audited, no verifier started: a trial merge of agent/boost-release-6-7 (40fed0d6) onto main (git merge-tree) conflicts, so it can't land as it is. Files: docs/guide/project-lead.md. main's commits that touched them since agent/boost-release-6-7 last took it in (at ec9c3ba9): 9a39119 heavy_swift: two modules at once with half the share of compiles each (SwiftPM's -j N alone ran N×N: 12 frontends at -j 4); policy and docs give that SwiftPM line (docs/guide/project-lead.md); 86b5e25 Working pol…
+- 2026-11-01 17:37 Audit of codex-s-tui-renders at b01cdf8e tested its merged result 3a2c0a77 onto main: test command failed
+- 2026-11-01 17:37 Automatically (auto_advance): Started the audit of codex-s-tui-renders at b01cdf8e (Its review is audit).
+- 2026-11-01 17:46 Audit of codex-s-tui-renders: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
+- 2026-11-01 17:46 Planned theloginshellrunsinasess: theLoginShellRunsInASessionOfItsOwn: flakes under load and leaves its fake shell looping forever when it fails
+- 2026-11-01 17:50 Raised test-under-load-sh-2 to audit (the risk check, at ea955926): it changes test or build infrastructure the suite relies on (scripts/test-under-load.sh)
+- 2026-11-01 17:50 Automatically (auto_advance): test-under-load-sh-2 is audited, not merged: it changes test or build infrastructure the suite relies on (scripts/test-under-load.sh) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-01 17:56 Started a worker on theloginshellrunsinasess
+- 2026-11-01 17:56 Automatically (auto_advance): Started a worker on theloginshellrunsinasess (theLoginShellRunsInASessionOfItsOwn: flakes under load and leaves its fake shell looping forever when it fails).
+- 2026-11-01 17:56 Automatically (auto_advance): Started the audit of boost-release-6-7 at 56334f18 (Its review is audit).
+- 2026-11-01 18:07 Merged codex-s-tui-renders: Codex's TUI renders blank and never starts its MCP server under the session host: find why, then enable Codex workers
+- 2026-11-01 18:07 Automatically (auto_advance): Merged codex-s-tui-renders (Codex's TUI renders blank and never starts its MCP server under the session host: find why, then enable Codex workers) into main at 8f44a65c, on its passing audit and the full test run.
+- 2026-11-01 18:07 Audit of boost-release-6-7: incomplete, clean, round 1: 3 Important open, 3 Nit open
+- 2026-11-01 18:30 Merged wallet-e2e-sh-the: wallet-e2e.sh: the real-testnet case no longer waits for Proposed before the sign POST (the Wallet Manager sends it with the POST now) (no audit: review none)
+- 2026-11-01 18:30 Automatically (auto_advance): Merged wallet-e2e-sh-the (wallet-e2e.sh: the real-testnet case no longer waits for Proposed before the sign POST (the Wallet Manager sends it with the POST now)) into main at e34ef497, review none: on its worker's done report on 7129872a and the full test run.
+- 2026-11-01 18:30 Automatically (auto_advance): Cleaned up codex-s-tui-renders (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 18:30 Automatically (auto_advance): Cleaned up wallet-e2e-sh-the; ended pid 44766 (Worker: wallet-e2e.sh: the real-testnet case no longer waits for Proposed before the sign POST (the Wallet Manager sends it with the POST now)) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 18:31 Update: Codex workers work (after your next install) — What changed: a task can now run on Codex instead of Claude (add_task or update_task with agent: codex), always with a Claude audit before it merges, to spread usage across accounts. Codex workers are…
+- 2026-11-01 18:36 Workflow: heavy_slots = `2`
+- 2026-11-01 18:51 Automatically (auto_advance): Started the audit of test-under-load-sh-2 at ea955926 (Its review is audit. (audited: it changes test or build infrastructure the suite relies on (scripts/test-under-load.sh), as the risk check found.)).
+- 2026-11-01 19:06 Merged theloginshellrunsinasess: theLoginShellRunsInASessionOfItsOwn: flakes under load and leaves its fake shell looping forever when it fails (no audit: review none)
+- 2026-11-01 19:06 Flaky in theloginshellrunsinasess's merge: aClaudeSessionDictatesThroughClaudeAndOthersThroughOpenAI() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 19:06 Automatically (auto_advance): Merged theloginshellrunsinasess (theLoginShellRunsInASessionOfItsOwn: flakes under load and leaves its fake shell looping forever when it fails) into main at 6b0530ce, review none: on its worker's done report on b346a995 and the full test run. (Its first test run failed on aClaudeSessionDictatesThroughClaudeAndOthersThroughOpenAI() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/theloginshellrunsinasess/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/….)
+- 2026-11-01 19:06 Automatically (auto_advance): Cleaned up theloginshellrunsinasess; ended pid 81439 (Worker: theLoginShellRunsInASessionOfItsOwn: flakes under load and leaves its fake shell looping forever when it fails) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 19:14 Audit of test-under-load-sh-2: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-11-01 19:16 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-01 19:21 The worker on boost-release-6-7 answered findings: boost-release-6-7:F1 fixed at 124033a4: 63b7d85: LeadLaunch.userSettings now denies Edit/Write(~/.vibeswitcher/boost.json) to the lead, workers and verifiers, as it does mac-limits.json. BoostLimits clamps every value as it's read and decoded: load_threshold ≤ 4× the cores, sessions and workers ≤ 4× the cores, heavy slots ≤ one per core. Tests: LeadLaunchTests.noRoleMayWriteTheUsersMacWideSettings (now includes boost.json) and BoostTests.anOutOfRangeBoostFileIsClamped. Both fail with the fix tak…
+- 2026-11-01 19:32 Audit of boost-release-6-7 at 124033a4 tested its merged result eeaf4dc8 onto main: test command failed
+- 2026-11-01 19:32 Automatically (auto_advance): Started the audit of boost-release-6-7 at 124033a4 (Its review is audit).
+- 2026-11-01 19:39 Audit of boost-release-6-7: complete, clean, round 2: 3 Important closed, 3 Nit closed
+- 2026-11-01 19:42 Merged test-under-load-sh-2: test-under-load.sh builds through heavy_swift too (its bare swift build ignores the core budget)
+- 2026-11-01 19:42 Automatically (auto_advance): Merged test-under-load-sh-2 (test-under-load.sh builds through heavy_swift too (its bare swift build ignores the core budget)) into main at 9aad9145, on its passing audit and the full test run.
+- 2026-11-01 19:42 Automatically (auto_advance): Cleaned up test-under-load-sh-2; ended pid 44261 (Worker: test-under-load.sh builds through heavy_swift too (its bare swift build ignores the core budget)) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-01 19:52 Merged boost-release-6-7: Boost release 6/7: Boost mode: higher Mac-wide limits on demand, or automatically when the user is away and on AC power
+- 2026-11-01 19:52 Flaky in boost-release-6-7's merge: claudeCodeStoppingTheStatusLineStopsYourCommandToo() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-01 19:52 Automatically (auto_advance): Merged boost-release-6-7 (Boost release 6/7: Boost mode: higher Mac-wide limits on demand, or automatically when the user is away and on AC power) into main at 3705ab93, on its passing audit and the full test run. (Its first test run failed on claudeCodeStoppingTheStatusLineStopsYourCommandToo() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/boost-release-6-7/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.….)
+- 2026-11-01 19:52 Automatically (auto_advance): Cleaned up boost-release-6-7; ended pid 38574 (Worker: Boost release 6/7: Boost mode: higher Mac-wide limits on demand, or automatically when the user is away and on AC power) (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-01 19:52 Update: Boost mode is ready: please install — What changed (main at 3705ab93):
+- 2026-11-01 20:03 Workflow: cleared heavy_slots
+- 2026-11-01 20:03 Workflow: merge_batching = `boost`
+- 2026-11-01 20:03 Update: Today: boost, Codex workers, a calmer Mac (2026-11-01) — Landed (installed at 20:03):
+- 2026-11-02 08:18 Planned usage-aware-worker: Usage-aware worker routing: tasks go to Codex when Claude's quota runs ahead of pace (review audit)
+- 2026-11-02 08:20 Started a worker on usage-aware-worker
+- 2026-11-02 08:20 Automatically (auto_advance): Started a worker on usage-aware-worker (Usage-aware worker routing: tasks go to Codex when Claude's quota runs ahead of pace).
+- 2026-11-02 08:45 Planned boost-on-battery-a: Boost on battery: a Settings option to let Boost run on battery
+- 2026-11-02 08:45 Started a worker on boost-on-battery-a
+- 2026-11-02 08:45 Automatically (auto_advance): Started a worker on boost-on-battery-a (Boost on battery: a Settings option to let Boost run on battery).
+- 2026-11-02 08:57 Planned wallet-results-tests: Wallet results: tests that a repeated result (same sequence) is dropped, final or not (review audit)
+- 2026-11-02 08:59 Started a worker on wallet-results-tests
+- 2026-11-02 08:59 Automatically (auto_advance): Started a worker on wallet-results-tests (Wallet results: tests that a repeated result (same sequence) is dropped, final or not).
+- 2026-11-02 09:01 Released boost-on-battery-a's worker (idle since its done report on 7ac5f42b) while its audit runs
+- 2026-11-02 09:01 Automatically (auto_advance): Started the audit of boost-on-battery-a at 7ac5f42b (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-02 09:02 Automatically (auto_advance): Started the audit of usage-aware-worker at 4c701df7 (Its review is audit).
+- 2026-11-02 09:02 Released usage-aware-worker's worker (idle since its done report on 4c701df7) while its audit runs
+- 2026-11-02 09:02 Automatically (auto_advance): Released usage-aware-worker's worker, idle since its done report on 4c701df7, while its audit runs (ended pid 12219 (Worker: Usage-aware worker routing: tasks go to Codex when Claude's quota runs ahead of pace)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-02 09:02 Planned codex-workers-can-run: Codex workers can run the project's checks: scripts/test.sh and test-under-load.sh work inside Codex's sandbox (review audit)
+- 2026-11-02 09:02 Started a worker on codex-workers-can-run
+- 2026-11-02 09:02 Automatically (auto_advance): Started a worker on codex-workers-can-run (Codex workers can run the project's checks: scripts/test.sh and test-under-load.sh work inside Codex's sandbox).
+- 2026-11-02 09:06 Started a worker on wallet-results-tests
+- 2026-11-02 09:07 Audit of boost-on-battery-a: complete, clean
+- 2026-11-02 09:07 Audit of usage-aware-worker: complete, clean, round 1: 3 Nit open
+- 2026-11-02 09:19 Merged usage-aware-worker: Usage-aware worker routing: tasks go to Codex when Claude's quota runs ahead of pace (in a batch: usage-aware-worker, boost-on-battery-a landed on one test run)
+- 2026-11-02 09:19 Merged boost-on-battery-a: Boost on battery: a Settings option to let Boost run on battery (in a batch: usage-aware-worker, boost-on-battery-a landed on one test run)
+>>>>>>> 7f33cc8168e8a41987ec4a4f7953d6780ee45bc9

@@ -163,3 +163,71 @@ build-app-sh-install's verifier found TeamRowsTests.voiceOverReadsTheRow and Hom
 
 On 2026-10-30, a ~130-commit pull left main failing 2 tests on this Mac (Spanish locale, Swift 6.4 per-target bundles). It surfaced only at the first merge and held 3 tasks back.
 
+## 2026-10-31 14:54:51 Vault requests: VibeSwitcher only initiates transactions. It writes a strict, secret-free request (vault-request v1, specified in docs/protocol/vault-request.md), sends it through the `passage` CLI to the paired vault Mac, and shows the vault's result and delivers it back to the session that asked. A wallet app on the vault Mac checks each request and proposes it, and the user signs there with a hardware wallet. VibeSwitcher never signs, holds keys or judges whether a transaction is correct. Two tasks carry it: vault-requests-the, then vault-requests-in-the. Both are audited (security).
+
+User's direction, 2026-10-31: the keys stay on one isolated Mac behind a hardware wallet, and agents can only ask. The repo names Passage because the code calls its CLI. The wallet app and wallet profiles stay generic in the repo, under the 2026-10-28 naming rule.
+
+## 2026-10-31 15:15:54 The wallet app's baseline is developed on this Mac as its own project (code and made-up data only), and the vault Mac pulls it from a private repository and runs it. The app holds no keys or data: it reads a versioned per-workspace folder structure on the encrypted volume, with hardware, hot and Safe wallets in every workspace. Hot-wallet keys are the only keys stored, encrypted in the volume. Transactions cross between the Macs only through Passage. VibeSwitcher on the vault Mac is for availability and never carries requests, keys or approvals. VibeSwitcher's request format (docs/protocol/vault-request.md and its vectors) is the contract both projects test against.
+
+User's direction, 2026-10-31: keep the vault domain as safe as possible but VibeSwitcher always available. Keeping one narrow channel and a single shared format lets us verify the integration here without real keys ever being on this Mac.
+
+## 2026-10-31 15:34:17 Vault feature batch (2026-10-31): no full suite or load runs until the whole feature works, then one check at the end. vault-requests-in-the merges the three finished branches (vault-requests-the, vault-request-card-and, test-under-load-sh) into its own, gets the one audit (focused tests, diff and shots, no audit-side suite) and the one merge (the full suite). The three are then folded into it. auto_advance is off on all four, and the lead starts vault-requests-in-the once vault-requests-the's worker reports done. This sets aside, for this batch only, the 2026-10-23 rule that each worker proves its new tests under load before reporting done: it's done once, at the end.
+
+User, 2026-10-31: our load and test runs were slowing other projects' leads, and they asked to wait until the whole thing is finished and test once at the end.
+
+## 2026-10-31 17:16:40 The payment-request feature is renamed to "wallet requests". The new names are WalletRequest… code, the `vs-wallet` CLI, Settings › Wallet, the "Send to Wallet Manager" button, and a wire format of vibeswitcher.wallet-request/-result in docs/protocol/wallet-request.md, still version 1. In VibeSwitcher, "vault" means only the lead's vault (LeadVault/VaultStorage). Stored state is carried over once. The Wallet Manager's lead was told and updates its side when the rename merges (task rename-the-vault-request, after agents-know-they-can).
+
+User's call, 2026-10-31. Two unrelated things were both called "vault" in VibeSwitcher, the lead's team and key store and the payment requests, which invites mix-ups for the user and for agents. It's renamed now, while the format is new and nothing real uses it yet.
+
+## 2026-10-31 18:19:28 Wallet requests are tested end to end on this Mac first: VibeSwitcher's sandbox, a loop `passage` stand-in and a locally run Wallet Manager on a synthetic vault (task local-end-to-end). The real two-Mac trial over Passage, with the older MacBook already paired as the vault Mac, and moving the Wallet Manager there through a private GitHub repository come at the end, once everything is tested, at the user's go.
+
+User, 2026-10-31: the vault Mac isn't at hand, so test everything locally; the GitHub transfer is later, at the end. Passage can't pair a Mac with itself, and the rules forbid touching real pairings, so the loop stands in for the transport.
+
+## 2026-10-31 23:30:46 From the 2026-10-31 wallet batch retrospective. (1) Before building a feature that integrates with another app or a second Mac, the lead first checks the real environment on this Mac: the other app's CLI on the PATH or in /Applications and how it's invoked, the names VibeSwitcher already uses, and what happens with nothing set up. The plan covers each case (task contexts name it). Today three follow-up tasks came from skipping that: the vault/wallet name clash, Passage.app not on the PATH, and no fallback without a Wallet Manager. (2) Verifiers stop running a full suite of their own, and the merge's run is the one full suite (task verifiers-don-t-run-a, with verifier-eval). (3) Cross-project work runs through the other project's lead by cross-session message, with the shared contract (docs/protocol and vectors) and an on-demand end-to-end script both sides can run.
+
+The batch landed (13 tasks, no reverts, 2 incidents turned into checks). But three tasks were rework from environment facts that one look would have shown, and doubled full-suite runs added to a load the user complained about.
+
+## 2026-11-01 01:12:23 The user approved real GenLayer testnet transactions for the end-to-end harness (2026-11-01, F9C2A658): one proving run now, and on demand later, only with an explicit --real-testnet. Each run is a self-transfer of at most 1000 wei from the Wallet Manager project's throwaway testnet wallet (0x4c50…ab99), never mainnet or any other wallet, never in normal tests, merges or audits.
+
+Production readiness: the Wallet Manager's lead and an independent review both asked for one real payment through the whole chain before more features. It broadcasts publicly, which is why it was the user's call.
+
+## 2026-11-01 01:15:26 Wallet production-readiness pass (2026-11-01, user: "make sure this is production ready"). VibeSwitcher's wallet path gets four audited hardening tasks, run in this order because they share files: wallet-card-truth-the, wallet-card-can-t, wallet-outcomes-always, wallet-path-robustness. Alongside: spec-an-unparseable, strict-paths-an, the-app-s-host and wallet-e2e-real-testnet (one real testnet payment, user-approved). The Wallet Manager's lead is fixing its review's five concerns (approvals, audit holds, logs, the real path, local writers). Done means: all of it merged, the real-testnet run passing, and then the two-Mac run when the older MacBook is back.
+
+Independent read-only reviews of both projects found no way to sign or send without the user, but several states that could mislead the user into paying again, a token-approval drain risk on the browser path and the Wallet Manager's signing page, and missing production logs.
+
+## 2026-11-01 07:55:22 Audits run on Opus (configure verifier_model: opus) from 2026-11-01 06:4x until the Fable limit resets on 2026-11-05 at 12:00. The lead then switches back with configure(verifier_model: "") (the default: Fable while workers run Opus).
+
+User's answer to 19AF8BCD. The account hit its Fable usage limit, and the wallet production-readiness pass's audited tasks would otherwise wait three days. The verifier-eval baseline was measured with Fable, so Opus verdicts in this window get the same scrutiny, and nothing about the audit rules changes.
+
+## 2026-11-01 08:20:57 Reading freeze reports: "N% of its sample inside the stall" is how much of the sample was taken during the stall, not the share of time in the frames listed. Before planning a freeze task, count the main thread's samples in the .txt that pass through the suspected code (the 2026-10-31 00:48 rule), and plan only if they're a real share.
+
+2026-11-01: the lead planned terminal-drawing-froze from a report saying '100% of its sample inside the stall' under SwiftTerm.buildAttributedString. 0 of 2092 main-thread samples were actually in terminal drawing. The worker checked before building and the task was abandoned, but it cost a worker start. Third-party code (SwiftTerm, a pinned dependency) was also assumed to be vendored.
+
+## 2026-11-01 08:50:10 The boost release (2026-11-01), approved by the user in full, ships as 7 tasks in waves. Wave 1, in parallel: the load recorder, heavy jobs outside vs-heavy reported to their lead, and the usage-limit watch. Wave 2: release idle workers during audits, then batched merges (merge_batching off|boost|always, default off). Wave 3: Boost mode (Off/On/Automatic), with load_threshold 36, mac_max_sessions 18, max_workers 7 and heavy_slots 3; Automatic only when away AND on AC power, never on battery; fairness to the most recently active project, and a usage-watch veto. Then a release check tuned on the recorder's data. Always-on regardless of boost: the recorder, the heavy-job reports, releasing idle workers and the usage watch.
+
+The user wants more throughput when away. A 4-day load study found freezes and suite time bend at 24, throughput peaks around 36–48 and falls past 48, the worst spikes come from heavy jobs outside the lock, and two account limits stopped work on 2026-10-31/11-01. The user chose AC-only for automatic boost.
+
+## 2026-11-01 08:54:47 From 2026-11-01, every feature or process change the lead plans gets an entry in docs/process/impact.md, written when it's planned: hypothesis, metric, baseline, check date and window. Each retrospective reviews the entries that are due with scripts/impact-metrics.sh, records the result and a verdict (keep/tune/revert/inconclusive) with the why, and each verdict becomes a task or a recorded decision. It starts manual; a lead tool replaces it only once the routine has proved useful.
+
+The user wants to track which features help and why, to self-improve recursively. Today's changes (one suite per task, strict paths, the boost release) were all made on reasoned guesses; the ledger turns them into checked results.
+
+## 2026-11-01 16:43:21 The Mac's heavy-work slots go from 3 to 2. The user set this in Settings on 2026-11-01.
+
+With three full suites at once, the load reached 50–120 even with each job capped at 4 cores (VS_HEAVY_CORES). Each suite starts thousands of short processes, which the core cap doesn't reach. The recorder data of both VibeSwitcher's and the Wallet Manager's leads agree. Batched merges (merged, off by default) is the other lever: it means fewer full runs.
+
+## 2026-11-01 18:08:55 Correction to "heavy slots go from 3 to 2": there was no Settings value for heavy slots. The count came from VIBESWITCHER_HEAVY_SLOTS or cores ÷ 4 (3 here). boost-release-6-7 adds it to Settings › Project lead and mac-limits.json, default cores ÷ 6 (2 here), with the lead's lock and vs-heavy reading one count.
+
+The lead asked the user to change a setting that didn't exist, so the load stayed at three heavy jobs. The worker found this while fixing F6. Lesson: verify a setting exists before asking the user to change it.
+
+## 2026-11-02 08:18:57 Usage-aware routing (2026-11-02): when Claude's quota runs ahead of pace, implementation work moves to Codex. Task usage-aware-worker adds agent: auto (Codex when Claude is tight and Codex has room), reads Codex's quota from its rollouts, shows both accounts' pace in status, and lets auto tasks go to Codex instead of waiting at Claude's 80% hold. Until it lands, the lead marks bounded implementation tasks agent: codex by hand whenever Claude's weekly usage is ahead of the week's elapsed share. Leads, planning and audits stay on Claude, and design-heavy or security tasks stay pinned to claude. Once it lands, the lead sets agent_default: auto for this project.
+
+The user, 2026-11-02: "if there's not a lot of quota I should be leveraging Codex much more". Codex workers have worked since 8f44a65, but nothing chose them: the usage watch only stopped work at 80%. A Codex worker spends roughly a tenth of a task's Claude cost (the audit), going by boost-release-3b-codex's receipt: verifier $1.86 against worker $14.79.
+
+## 2026-11-02 08:45:52 Boost can run on battery when the user turns on a new Settings option, "Also on battery" (off by default; task boost-on-battery-a). With it on, On and Automatic behave as on AC down to 30% charge, and boost stays off below that or when the charge is unknown. This supersedes "never on battery, whatever the mode" from the 2026-11-01 boost release decision for users who opt in.
+
+The user asked for it on 2026-11-02. The 30% floor is the lead's choice, so an unattended boosted Mac doesn't drain its battery flat. The usage veto and the battery pause hold still apply.
+
+## 2026-11-02 09:02:40 agent_default stays claude for vibeswitcher until codex-workers-can-run merges. Codex workers must be able to run scripts/test.sh, the lint filter and test-under-load.sh inside their sandbox before tasks are routed to them by default. Until then, agent: auto or codex only for tasks the audit and merge can fully check.
+
+The first real Codex task (wallet-results-tests, 2026-11-02) couldn't run any Swift test: Codex's seatbelt denies SwiftPM's nested sandbox-exec and test.sh's ps check. Routing work to a worker that can't run its own checks would push every check onto the audit and the merge, and cost rounds.
+

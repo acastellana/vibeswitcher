@@ -40,3 +40,22 @@ Evidence: 2026-10-30. build-app-sh-install's audit passed at 21:26. The lead the
 Task: build-app-sh-install
 Check: task turn-this-incident-into-2 turns it into a check that runs before merge.
 
+## 2026-10-31 16:48:31 A worker's or verifier's session that hits the account's usage limit isn't reported as stopped: status keeps it running or in review, and no witness report is sent, so the lead and the user wait on a session that will do nothing until the reset.
+
+Evidence: 2026-10-31, two projects. (1) Reported by another project's lead: at about 16:41 a re-audit started, ran one command, and its session printed "You've hit your weekly limit · resets Nov 3 at 1am (Europe/Madrid)" and sat there. status kept showing the task in review as if the audit were running, no witness report said stalled or stopped, and the user had to ask "u sure we're not stuck?". It was found only with read_session(verifier). (2) In this project, agents-know-they-can's worker hit the same limit at about 16:35. status showed "its turn ended on an API error (You've hit your weekly limit …)" only when called, and no report came. The fix: the witness treats a usage-limit line in a worker's or verifier's output as a stop, reports it to the lead with the reset time (parsed when present), and status shows the task as waiting on the limit, not running or in review.
+
+Task: agents-know-they-can
+Check: task turn-this-incident-into-6 turns it into a check that runs before merge.
+
+## 2026-10-31 16:51:30 `build-app.sh --install` replaced the bundle of a VibeSwitcher that was still running. Its process check (`pgrep -x VibeSwitcher`) finds nothing from a sandboxed shell, so the script printed "VibeSwitcher isn't running", copied over the live app, and `open` only brought the old process forward.
+
+Evidence: 2026-10-31 ~16:46, the user ran `! scripts/build-app.sh --install` from a Claude Code session. The output: "VibeSwitcher isn't running." … "Installed /Applications/VibeSwitcher.app, but no new VibeSwitcher process is up 10s after the launch (running: )." Meanwhile `ps` shows pid 3218 /Applications/VibeSwitcher.app/Contents/MacOS/VibeSwitcher, started 14:37:49, still running at 16:51. From the same shell, `pgrep -x VibeSwitcher` exits 1, while `ps -Ao pid=,comm=` lists it. This is the second install that left the old process running (the first was 2026-10-30, fixed in scripts/lib/install-app.sh), and it's worse this time: the bundle was removed and replaced under the live process. The fix: running() finds the app with ps (by its executable path inside DEST_APP, not just the name), and fails closed. If the process list can't be read, or a process of that path is up and won't quit, nothing is copied. The test drives install-app.sh with a stand-in process that pgrep can't see but ps can.
+
+Check: task turn-this-incident-into-7 turns it into a check that runs before merge.
+
+## 2026-11-01 00:32:38 A verifier's session waits indefinitely on a permission prompt the user can't see or reach, often for read-only commands, and the only way out is restarting the audit, which throws away the finders' work. It has happened twice.
+
+Evidence: Reported by another project's lead. (1) 2026-10-31 ~16:2x: vault-structure-v1's verifier hung on a probe script's permission prompt (that project's incidents.md, 16:23). (2) 2026-11-01 00:31: crypto-hardening-harness's audit finder waited on a prompt for `git ls-files -s …; git remote -v; git branch -r | grep …; grep … package-lock.json`, all read-only. Each time the lead could only restart the audit. Two fixes are wanted. (a) Verifiers (and finders) run read-only git (ls-files, remote -v, branch -r/-a, log, show, diff, status, rev-parse, merge-base, cat-file) and grep/rg/head/tail/wc/sort without a prompt, including when chained with ; && | in one command, as long as every part is on the read-only list. (b) The witness treats a verifier or finder waiting on a permission prompt for more than ~2 minutes as stuck: it declines the prompt with a reason the verifier can act on ('No one answers verifier prompts: use only read-only commands, or report what you couldn't check') and tells the lead what was asked, instead of leaving the audit hanging.
+
+Check: task turn-this-incident-into-8 turns it into a check that runs before merge.
+
