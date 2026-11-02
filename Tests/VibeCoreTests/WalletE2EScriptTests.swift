@@ -30,6 +30,8 @@ struct WalletE2EScriptTests {
                 // The fake checkout: what the script looks for, and a lockfile.
                 "wallet-manager/src/server/main.ts": "\n", "wallet-manager/src/dev/fake-chain-cli.ts": "\n",
                 "wallet-manager/package-lock.json": "{}\n",
+                // Its vault format, as its src/vault/format.ts says it (read as text).
+                "wallet-manager/src/vault/format.ts": WalletE2EScriptTests.formatTs(minor: "WATCH_MINOR"),
                 // npm: records its arguments; as npm ci, writes node_modules/.package-lock.json where it runs, or
                 // fails with a stack trace when FAKE_NPM_FAIL is set.
                 "bin/npm": """
@@ -125,6 +127,90 @@ struct WalletE2EScriptTests {
         let log = failure.range(of: "its output: ").map { String(failure[$0.upperBound...]) } ?? ""
         #expect(((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").contains("ERESOLVE"), "\(failure)")
         #expect(!FileManager.default.fileExists(atPath: setup.nodeLog.path))
+    }
+
+    @Test func aCheckoutWithoutItsVaultFormatStopsTheRunBeforeAnything() throws {
+        let setup = try Setup(scratch)
+        try FileManager.default.removeItem(at: setup.wm.appendingPathComponent("src/vault/format.ts"))
+        let ran = try setup.run()
+        #expect(ran.status == 1, "\(ran.output)")
+        // The checkout as the run resolves it (pwd -P), then the file under it.
+        #expect(ran.output.hasPrefix("wallet-e2e: can't read the Wallet Manager's vault format version from /"), "\(ran.output)")
+        #expect(ran.output.hasSuffix("/wallet-manager/src/vault/format.ts: no such file\n"), "\(ran.output)")
+        #expect(ran.output.split(separator: "\n").count == 1, "\(ran.output)")
+        #expect(setup.npmCalls().isEmpty && !FileManager.default.fileExists(atPath: setup.nodeLog.path), "nothing ran")
+    }
+
+    /// A stand-in src/vault/format.ts: the Wallet Manager's shape (1.11, contacts per chain from 1.10), with FORMAT_VERSION's
+    /// minor as given and its other lines as given.
+    static func formatTs(minor: String, contactChains: String? = "export const CONTACT_CHAINS_MINOR = 10;",
+                         version: String? = nil) -> String {
+        """
+        // Vault format v1 (a stand-in).
+        export const VAULT_FORMAT_ID = "wallet-manager-vault";
+        export const CHAINS_MINOR = 7;
+        export const EDIT_AUTH_MINOR = 9;
+        \(contactChains ?? "")
+        /** "1.10": the version a vault says once a contact is saved with `chains`. */
+        export const CONTACT_CHAINS_VERSION = `1.${CONTACT_CHAINS_MINOR}`;
+        export const WATCH_MINOR = 11;
+
+        /** The format version this app writes and the newest it reads. */
+        \(version ?? "export const FORMAT_VERSION = { major: 1, minor: \(minor) } as const;")
+        export const FORMAT_VERSION_STRING = `${FORMAT_VERSION.major}.${FORMAT_VERSION.minor}`;
+        export const CONTACTS_MINOR = 2;
+
+        """
+    }
+
+    /// `--vault-format FILE` (runs nothing else): the version the run writes vault.json at and the contact shape for it.
+    func vaultFormat(_ text: String?) throws -> (file: String, status: Int32, output: String) {
+        let script = Self.repo.appendingPathComponent("scripts/e2e/wallet-e2e.sh").path
+        let dir = scratch.url("format")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("format.ts")
+        if let text { try text.write(to: file, atomically: true, encoding: .utf8) }
+        let ran = try HomeIsolationTests.run("/bin/bash", [script, "--vault-format", file.path],
+                                             environment: ["PATH": "/usr/bin:/bin", "HOME": scratch.url("format-home").path])
+        return (file.path, ran.status, ran.output)
+    }
+
+    @Test(arguments: [
+        // The Wallet Manager's own form: the minor names a constant; contacts have chains from CONTACT_CHAINS_MINOR on.
+        (formatTs(minor: "WATCH_MINOR"), "1.11 chains"),
+        (formatTs(minor: "10"), "1.10 chains"),
+        (formatTs(minor: "EDIT_AUTH_MINOR"), "1.9 networks"),
+        // Before contacts per chain: no CONTACT_CHAINS_MINOR at all, a number for the minor.
+        (formatTs(minor: "2", contactChains: nil), "1.2 networks"),
+        (formatTs(minor: "WATCH_MINOR", version: "export const FORMAT_VERSION = {major: 1,minor: WATCH_MINOR};"), "1.11 chains"),
+    ])
+    func theVaultFormatIsReadFromTheWalletManagersFormatTs(_ text: String, _ expected: String) throws {
+        let ran = try vaultFormat(text)
+        #expect(ran.status == 0, "\(ran.output)")
+        #expect(ran.output == expected + "\n", "\(ran.output)")
+    }
+
+    @Test(arguments: [
+        (nil, "no such file"),
+        (formatTs(minor: "1", version: ""), "it doesn't have exactly one `export const FORMAT_VERSION`"),
+        (formatTs(minor: "1", version: "export const FORMAT_VERSION = { major: 1, minor: 10 } as const;\nexport const FORMAT_VERSION = { major: 1, minor: 11 } as const;"),
+         "it doesn't have exactly one `export const FORMAT_VERSION`"),
+        (formatTs(minor: "1", version: #"export const FORMAT_VERSION = "1.11";"#), "FORMAT_VERSION isn't `{ major: N, minor: N } as const`"),
+        (formatTs(minor: "1", version: "export const FORMAT_VERSION = { major: 1, minor: WATCH_MINOR + 1 } as const;"),
+         "FORMAT_VERSION isn't `{ major: N, minor: N } as const`"),
+        (formatTs(minor: "NO_SUCH_MINOR"), "FORMAT_VERSION's minor (NO_SUCH_MINOR) isn't a number or a constant set to one"),
+        (formatTs(minor: "CONTACT_CHAINS_VERSION"), "FORMAT_VERSION's minor (CONTACT_CHAINS_VERSION) isn't a number or a constant set to one"),
+        (formatTs(minor: "1.5"), "FORMAT_VERSION isn't `{ major: N, minor: N } as const`"),
+        (formatTs(minor: "011"), "FORMAT_VERSION's minor (011) isn't a number or a constant set to one"),
+        (formatTs(minor: "WATCH_MINOR", version: "export const FORMAT_VERSION = { major: 2, minor: 0 } as const;"),
+         "it says format 2.0, and this run writes format 1 vaults"),
+        (formatTs(minor: "WATCH_MINOR", contactChains: "export const CONTACT_CHAINS_MINOR = CHAINS_MINOR + 3;"),
+         "CONTACT_CHAINS_MINOR isn't `export const CONTACT_CHAINS_MINOR = N;`"),
+    ] as [(String?, String)])
+    func anUnreadableVaultFormatStopsTheRunNamingTheFile(_ text: String?, _ why: String) throws {
+        let ran = try vaultFormat(text)
+        #expect(ran.status == 1, "\(ran.output)")
+        #expect(ran.output == "wallet-e2e: can't read the Wallet Manager's vault format version from \(ran.file): \(why)\n", "\(ran.output)")
     }
 
     /// Case 1's verdict on recorded outcomes (`--judge-case-1 SEEN RECORD`, which runs nothing else): a check that failed

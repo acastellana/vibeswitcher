@@ -26,6 +26,8 @@
 #   --judge-real-results DIR ID  runs nothing: judges the results for request ID in DIR (the dev side's inbox folder) as
 #                         --real-testnet does after its POST; prints their statuses in sequence order and exits 0 when
 #                         they read received → proposed → signed → submitted, the last with a txHash, else 1.
+#   --vault-format FILE   runs nothing: reads FILE (a Wallet Manager's src/vault/format.ts) as the run does; prints
+#                         "VERSION CONTACT-SHAPE" ("1.11 chains") and exits 0, or why it can't and exits 1.
 #
 # --real-testnet: one real GenLayer testnet payment through the same chain, instead of the cases below. Never part of
 # scripts/test.sh, a merge or an audit: it broadcasts a real transaction, so it runs only when asked for by name. It
@@ -57,13 +59,16 @@
 #     that failed in a result that isn't rejected is a warning (docs/protocol/wallet-request.md): named, not a failure.
 #     Its recipient isn't in the vault, so a Wallet Manager with an address book warns `recipient-known`.
 #  1b the same with case 1's recipient in the vault's address book (contacts/, as the Wallet Manager's
-#     docs/vault-format.md has it): no warnings. Skipped, saying so, when that document doesn't describe contacts/.
+#     docs/vault-format.md has it, in its format version's shape): no warnings. Skipped, saying so, when that document
+#     doesn't describe contacts/.
 #   2 an unknown wallet: rejected, the failed check named on the card
 #   3 the wrong chain (the testnet wallet asked for mainnet): rejected, the chain check failed
 #   5 the same id sent again after an unsure send (Retry): the Wallet Manager takes it once
 #   4 the Wallet Manager stopped: the request stays Sent and shows the not-picked-up hint (the desk's clock moved on)
 # (5 runs before 4, which stops the Wallet Manager.) Never the real Passage, its inbox or pairings, the Keychain, a
 # real key or address, or the network: the chains are the Wallet Manager's fake chain on 127.0.0.1, for both networks.
+# The scratch vault says the format version the Wallet Manager under test writes (FORMAT_VERSION in its
+# src/vault/format.ts, read as text): the run stops, naming the file, when it can't read one.
 # At the end it stops everything it started, by pid, and checks nothing of the run is left running.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
@@ -76,6 +81,7 @@ keep=""
 judge=""
 judge_page=""
 judge_results=""
+vault_format_file=""
 real=""
 dry_run=""
 check_guards=""
@@ -105,6 +111,7 @@ while [[ $# -gt 0 ]]; do
         --dry-run) dry_run=1; real_options+=" $1"; shift ;;
         --check-guards) check_guards=1; real_options+=" $1"; shift ;;
         --judge-sign-page) [[ $# -ge 2 ]] || { echo "--judge-sign-page PAGE"; exit 64; }; judge_page=$2; shift 2 ;;
+        --vault-format) [[ $# -ge 2 ]] || { echo "--vault-format FILE"; exit 64; }; vault_format_file=$2; shift 2 ;;
         --judge-real-results) [[ $# -ge 3 ]] || { echo "--judge-real-results DIR ID"; exit 64; }; judge_results=$2; judge_results_id=$3; shift 3 ;;
         --judge-case-1) [[ $# -ge 3 ]] || { echo "--judge-case-1 SEEN RECORD"; exit 64; }; judge_seen=$2; judge_record=$3; judge=1; shift 3 ;;
         -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
@@ -121,6 +128,46 @@ AMOUNT=1000000000000000000
 
 say() { printf '%s\n' "$*"; }
 die() { say "wallet-e2e: $*"; exit 1; }
+
+# vault_format FILE: the vault format the Wallet Manager under test writes, read as text from its src/vault/format.ts
+# (nothing of the checkout runs): FORMAT_VERSION's major and minor, each a number or the name of an
+# `export const NAME = N;` in the same file, as `{ major: 1, minor: WATCH_MINOR } as const` has it. Sets VAULT_VERSION
+# ("1.11") and CONTACT_FORM, the shape of a contact at that version: chains (chain IDs) from CONTACT_CHAINS_MINOR on
+# (1.10), networks before it or when the file has no CONTACT_CHAINS_MINOR. The Wallet Manager adds versions often, so
+# the run follows it rather than pinning one. Fail-closed, naming the file: no file, not exactly one FORMAT_VERSION, a
+# part that isn't a number or one such constant, a CONTACT_CHAINS_MINOR that isn't one, or a major other than 1 (the
+# vault this run writes is format 1's).
+VAULT_VERSION=""
+CONTACT_FORM=""
+format_number() {   # format_number FILE NAME: N from FILE's one `export const NAME = N;`, else nothing
+    local values
+    values=$(sed -nE "s/^export const $2(: number)? = (0|[1-9][0-9]{0,5})( as const)?;[[:space:]]*(\/\/.*)?$/\2/p" "$1")
+    [[ $(grep -c . <<<"$values") == 1 ]] && printf '%s' "$values"
+}
+format_part() {     # format_part FILE TEXT: TEXT as a number, or the number its constant names, else nothing
+    if [[ $2 =~ ^(0|[1-9][0-9]{0,5})$ ]]; then printf '%s' "$2"
+    elif [[ $2 =~ ^[A-Z][A-Z0-9_]*$ ]]; then format_number "$1" "$2"
+    else return 1
+    fi
+}
+vault_format() {
+    local file=$1 lines major minor threshold
+    local shape='^export const FORMAT_VERSION = \{ *major: *([A-Za-z0-9_]+), *minor: *([A-Za-z0-9_]+) *\}( as const)?; *$'
+    local why="can't read the Wallet Manager's vault format version from $file"
+    [[ -f $file ]] || die "$why: no such file"
+    lines=$(grep -E '^export const FORMAT_VERSION[^A-Za-z0-9_]' "$file")
+    [[ $(grep -c . <<<"$lines") == 1 ]] || die "$why: it doesn't have exactly one \`export const FORMAT_VERSION\`"
+    [[ $lines =~ $shape ]] || die "$why: FORMAT_VERSION isn't \`{ major: N, minor: N } as const\`"
+    major=$(format_part "$file" "${BASH_REMATCH[1]}") || die "$why: FORMAT_VERSION's major (${BASH_REMATCH[1]}) isn't a number or a constant set to one"
+    minor=$(format_part "$file" "${BASH_REMATCH[2]}") || die "$why: FORMAT_VERSION's minor (${BASH_REMATCH[2]}) isn't a number or a constant set to one"
+    [[ $major == 1 ]] || die "$why: it says format $major.$minor, and this run writes format 1 vaults"
+    CONTACT_FORM=networks
+    if grep -qE '^export const CONTACT_CHAINS_MINOR[^A-Za-z0-9_]' "$file"; then
+        threshold=$(format_number "$file" CONTACT_CHAINS_MINOR) || die "$why: CONTACT_CHAINS_MINOR isn't \`export const CONTACT_CHAINS_MINOR = N;\`"
+        ((minor >= threshold)) && CONTACT_FORM=chains
+    fi
+    VAULT_VERSION=$major.$minor
+}
 
 failures=0
 cases=0
@@ -213,6 +260,12 @@ real_results() {
         if (!/^0x[0-9a-f]{64}$/.test(last.txHash ?? "")) fail(`the submitted result has no txHash (${last.txHash ?? "none"})`);
         process.stdout.write(`${seen}\t${last.txHash}\t${last.explorerURL ?? ""}\n`)' "$1" "$2" "$REAL_RESULTS" </dev/null
 }
+if [[ -n $vault_format_file ]]; then
+    [[ -z $judge && -z $judge_page && -z $judge_results && -z $real && -z $real_options ]] || { say "wallet-e2e: --vault-format takes nothing else"; exit 64; }
+    vault_format "$vault_format_file"
+    say "$VAULT_VERSION $CONTACT_FORM"
+    exit 0
+fi
 if [[ -n $judge_results ]]; then
     [[ -z $judge && -z $judge_page && -z $real && -z $real_options ]] || { say "wallet-e2e: --judge-real-results takes nothing else"; exit 64; }
     command -v node >/dev/null || { say "wallet-e2e: node isn't on the PATH"; exit 1; }
@@ -327,6 +380,8 @@ fi
 command -v node >/dev/null || die "node isn't on the PATH"
 wm=$(cd "$wm" 2>/dev/null && pwd -P) || die "no Wallet Manager checkout at $wm (--wallet-manager DIR)"
 [[ -f $wm/src/server/main.ts && -f $wm/src/dev/fake-chain-cli.ts ]] || die "$wm isn't the Wallet Manager's checkout (no src/server/main.ts)"
+# The vault format it writes: the scratch vault says that version (vault_format; it stops the run if it can't tell).
+vault_format "$wm/src/vault/format.ts"
 # Its dependencies as its lockfile has them: npm writes node_modules/.package-lock.json at each install, so one missing or
 # older than package-lock.json means the lockfile changed since (a dependency added, e.g.). --ignore-scripts: no
 # package's install scripts run; npm ci writes only node_modules. Its output goes to a log, named if it fails.
@@ -435,7 +490,7 @@ if [[ -n $real ]]; then
     # 0600 copy beside the vault, read by the sign POST on stdin. Both go first when the run ends (cleanup).
     keystore_copy=$vault/workspaces/$REAL_WORKSPACE/hot/$REAL_WALLET.keystore.json
     passphrase_copy=$run/passphrase
-    write "$vault/vault.json" '{ "format": "wallet-manager-vault", "version": "1.0" }'
+    write "$vault/vault.json" "{ \"format\": \"wallet-manager-vault\", \"version\": \"$VAULT_VERSION\" }"
     write "$vault/workspaces/$REAL_WORKSPACE/workspace.json" "{ \"name\": \"$REAL_WORKSPACE\", \"label\": \"Throwaway testnet (end-to-end)\" }"
     write "$vault/workspaces/$REAL_WORKSPACE/hot/$REAL_WALLET.json" "{ \"address\": \"$THROWAWAY\", \"label\": \"Throwaway testnet hot wallet\", \"network\": \"testnet\", \"chainIds\": [$TESTNET_CHAIN] }"
     write "$vault/requests/config.json" "{\"vibeswitcherPeer\":\"$DEV_PEER\"}"
@@ -447,7 +502,7 @@ if [[ -n $real ]]; then
     (cd "$wm" && node src/cli/check-vault.ts "$vault") >"$run/check-vault.log" 2>&1 || { cat "$run/check-vault.log"; die "the Wallet Manager's checker refused the throwaway vault"; }
 else
 # The synthetic vault: one made-up workspace with one testnet hot wallet, no keys.
-write "$vault/vault.json" '{ "format": "wallet-manager-vault", "version": "1.0" }'
+write "$vault/vault.json" "{ \"format\": \"wallet-manager-vault\", \"version\": \"$VAULT_VERSION\" }"
 write "$vault/workspaces/e2e/workspace.json" '{ "name": "e2e", "label": "End-to-end (made up)" }'
 write "$vault/workspaces/e2e/hot/$WALLET.json" "{ \"address\": \"$WALLET_ADDRESS\", \"label\": \"Made-up testnet hot wallet\", \"network\": \"testnet\", \"chainIds\": [4221] }"
 write "$vault/requests/config.json" "{\"vibeswitcherPeer\":\"$DEV_PEER\"}"
@@ -688,19 +743,18 @@ case_1() {   # case_1 NUMBER TITLE SHOT [STRICT]
 case_1 1 "valid testnet transfer from a known wallet" e2e-1-valid
 
 # 1b. Case 1's recipient in the vault's address book, as the Wallet Manager's docs/vault-format.md describes it: a
-# contacts/<id>.json, in a vault whose version has contacts (the version the document's contacts/ section names; the
-# vault stays 1.0 until here). The checker must take the vault; then no warnings.
+# contacts/<id>.json in the shape its vault format has (vault_format: chains, chain IDs, from 1.10; networks before).
+# The vault already says that version (the address book is 1.2's), so nothing lowers what the running Wallet Manager
+# raised it to (its logs/ is 1.5's). The checker must take the vault; then no warnings.
 contacts_doc=$wm/docs/vault-format.md
 if [[ -f $contacts_doc ]] && grep -q '^## `contacts/' "$contacts_doc"; then
-    contacts_version=$(awk '/^## `contacts\//{on=1; next} on && /^## /{exit} on' "$contacts_doc" | grep -oE 'format [0-9]+\.[0-9]+' | head -1 | cut -d' ' -f2)
-    [[ -n $contacts_version ]] || contacts_version=$(sed -n '1s/^# Vault format, version \([0-9]*\.[0-9]*\).*/\1/p' "$contacts_doc")
-    if [[ -z $contacts_version ]]; then
-        report 1b "recipient in the address book" fail "$contacts_doc describes contacts/ but names no format version for them"
+    if ((${VAULT_VERSION#*.} < 2)); then
+        report 1b "recipient in the address book" fail "$contacts_doc describes contacts/, but the Wallet Manager writes format $VAULT_VERSION, older than the address book's 1.2"
     else
-        write "$vault/vault.json" "{ \"format\": \"wallet-manager-vault\", \"version\": \"$contacts_version\" }"
-        write "$vault/contacts/e2e-recipient.json" "{ \"address\": \"$RECIPIENT\", \"label\": \"Made-up end-to-end recipient\", \"networks\": [\"testnet\"], \"workspaces\": [\"e2e\"] }"
+        if [[ $CONTACT_FORM == chains ]]; then contact_chains="\"chains\": [$TESTNET_CHAIN]"; else contact_chains='"networks": ["testnet"]'; fi
+        write "$vault/contacts/e2e-recipient.json" "{ \"address\": \"$RECIPIENT\", \"label\": \"Made-up end-to-end recipient\", $contact_chains, \"workspaces\": [\"e2e\"] }"
         if (cd "$wm" && node src/cli/check-vault.ts "$vault") >"$run/check-vault-contacts.log" 2>&1; then
-            case_1 1b "recipient in the address book (vault $contacts_version, contacts/e2e-recipient.json)" e2e-1b-recipient-known strict
+            case_1 1b "recipient in the address book (vault $VAULT_VERSION, contacts/e2e-recipient.json with $CONTACT_FORM)" e2e-1b-recipient-known strict
         else
             report 1b "recipient in the address book" fail "the Wallet Manager's checker refused the vault with the contact: $(tr '\n' ';' <"$run/check-vault-contacts.log")"
         fi
