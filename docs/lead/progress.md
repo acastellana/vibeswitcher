@@ -2962,3 +2962,5 @@
 - 2026-11-02 23:49 Automatically (auto_advance): Started the audit of statistics-record-what at fbf35d74 (Its review is audit).
 - 2026-11-02 23:52 Audit of statistics-record-what: complete, clean, round 1: 1 Nit open
 - 2026-11-03 00:04 Automatically (auto_advance): Merge of statistics-record-what failed: Tests fail rebased onto main: theLeadsTokensAreTalliedPerDayFromItsOwnTranscriptsOnly() Sent its worker the output; it's back at work.
+- 2026-11-03 00:06 Automatically (auto_advance): Started the audit of statistics-record-what at 657c4ad1 (Its review is audit).
+- 2026-11-03 00:07 Audit of statistics-record-what: complete, clean, round 2: 1 Nit open
