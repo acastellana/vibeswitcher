@@ -2879,3 +2879,4 @@
 - 2026-11-02 12:26 Audit of codex-workers-can-run: complete, suspect, round 1: 5 Nit open
 - 2026-11-02 12:26 Dismissed codex-workers-can-run:F1: Accepted scope: swift-jobs.sh is where heavy_swift lives, and the goal (Codex workers run scripts/test.sh as written) needs it. The worker named the script-side fix in its 11:03 done report, and the lead accepted it.
 - 2026-11-02 12:26 Dismissed codex-workers-can-run:F2: Accepted scope: processes.sh replaces ps, which can't run in any sandbox, for test.sh and test-under-load.sh. The goal needs it, and the verifier found it correct.
+- 2026-11-02 12:44 Audit of codex-workers-can-run at 40a18df3 tested its merged result 4a3f4caa onto main: the test command passed
