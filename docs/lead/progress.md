@@ -2973,3 +2973,5 @@
 - 2026-11-03 00:44 Automatically (auto_advance): Started the audit of statistics-4-compared at 820259ea (Its review is audit).
 - 2026-11-03 00:44 Released statistics-4-compared's worker (idle since its done report on 820259ea) while its audit runs
 - 2026-11-03 00:44 Automatically (auto_advance): Released statistics-4-compared's worker, idle since its done report on 820259ea, while its audit runs (ended pid 16015 (Worker: Statistics 4: 'Compared with working solo', an estimate labelled as one)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-03 00:46 Audit of statistics-4-compared: complete, clean, round 1: 2 Nit open
+- 2026-11-03 00:57 Merged statistics-4-compared: Statistics 4: 'Compared with working solo', an estimate labelled as one
