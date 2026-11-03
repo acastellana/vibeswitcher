@@ -2985,3 +2985,6 @@
 - 2026-11-03 01:21 Merged setupstats-reads-what: SetupStats reads what the recorders actually write (round-trip test) (no audit: review none)
 - 2026-11-03 01:21 Automatically (auto_advance): Merged setupstats-reads-what (SetupStats reads what the recorders actually write (round-trip test)) into main at cbdf3d89, review none: on its worker's done report on 57f356a4 and the full test run.
 - 2026-11-03 01:21 Automatically (auto_advance): Cleaned up setupstats-reads-what; ended pid 29831 (Worker: SetupStats reads what the recorders actually write (round-trip test)) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-03 08:55 Planned installer-s-quit-apple: Installer's quit Apple Event fails with -1708
+- 2026-11-03 08:55 Started a worker on installer-s-quit-apple (auto → Claude: Claude weekly 28%, 52 points behind pace, not tight; Codex 67%)
+- 2026-11-03 08:55 Automatically (auto_advance): Started a worker on installer-s-quit-apple (Installer's quit Apple Event fails with -1708); its agent is auto, so it went to Claude: Claude weekly 28%, 52 points behind pace, not tight; Codex 67%.
