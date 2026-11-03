@@ -15,6 +15,14 @@ public struct LeadAgent: Equatable, Sendable {
         self.session = session
         self.agent = agent
     }
+
+    /// The agent running on `tty`, from a process table: its oldest agent process (the session's own, not a tool it
+    /// runs), with which agent it is, so a message reaches it the way it takes one (see `LeadDelivery.deliver`).
+    public static func running(on tty: String, session: String?, in processes: [Int32: ProcInfo]) -> LeadAgent? {
+        guard let found = processes.values.filter({ $0.tty == tty && $0.agent != nil }).min(by: { $0.startTime < $1.startTime }),
+              let agent = found.agent else { return nil }
+        return LeadAgent(pid: found.pid, tty: tty, session: session, agent: agent)
+    }
 }
 
 public enum LeadTarget: Equatable, Sendable {

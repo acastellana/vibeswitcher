@@ -99,6 +99,45 @@ struct CodexMidTurnMessageTests {
         #expect(SteerInbox.pending(tty: agent.tty, root: root).map(\.text) == ["a", "b", "c"])
     }
 
+    /// The tool server finds the session's agent in the process table (`HostRuntime.steer`, through
+    /// `LeadAgent.running`): a Codex there is said to be Codex, so its message is typed in, not left in its inbox.
+    @Test func theAgentFoundOnAWorkersTerminalSaysItsCodexAndGetsTheMessageTyped() throws {
+        let root = temp.url("inbox")
+        let started = Date(timeIntervalSince1970: 1_793_690_000)
+        let processes: [Int32: ProcInfo] = [
+            900: ProcInfo(pid: 900, ppid: 1, tty: "ttys955", comm: "zsh", startTime: started, agent: nil),
+            901: ProcInfo(pid: 901, ppid: 900, tty: "ttys955", comm: "codex", startTime: started + 1, agent: .codex),
+            // A Codex it runs as a tool is not the session's agent.
+            902: ProcInfo(pid: 902, ppid: 901, tty: "ttys955", comm: "codex", startTime: started + 30, agent: .codex),
+            903: ProcInfo(pid: 903, ppid: 1, tty: "ttys956", comm: "claude", startTime: started, agent: .claude),
+        ]
+        let agent = try #require(LeadAgent.running(on: "ttys955", session: "s", in: processes))
+        #expect(agent == LeadAgent(pid: 901, tty: "ttys955", session: "s", agent: .codex))
+        #expect(LeadAgent.running(on: "ttys956", session: nil, in: processes)?.agent == .claude)
+        #expect(LeadAgent.running(on: "ttys957", session: nil, in: processes) == nil)
+        let empty = try working()
+        var typed: [String] = []
+        #expect(try LeadDelivery.deliver("go on", from: .lead("lead"), to: agent, activity: .working("Bash"), styledScreen: { empty },
+                                         typeInto: { typed.append($0); return true }, pause: {}, root: root) == .typedWhileWorking)
+        #expect(typed.count == 1 && SteerInbox.pending(tty: agent.tty, root: root).isEmpty)
+    }
+
+    /// Typed mid-turn but not submitted, it stays in the box; sent again (auto_advance retries with clear_draft), it
+    /// isn't put in the inbox too, where it would go in a second time: still not submitted, and said so.
+    @Test func aMessageLeftUnsubmittedInAWorkingCodexsBoxIsntQueuedASecondTime() throws {
+        let root = temp.url("inbox")
+        let agent = codex("ttys958")
+        let prompt = LeadDelivery.typed("go on", from: .lead("lead"))
+        let held = try working(composer: ["› " + prompt])
+        var typed: [String] = []
+        var cleared = 0
+        let delivered = try LeadDelivery.deliver("go on", from: .lead("lead"), to: agent, activity: .working("Bash"), styledScreen: { held },
+                                                 typeInto: { typed.append($0); return true }, clearDraft: true,
+                                                 clear: { cleared += 1; return true }, pause: {}, root: root)
+        #expect(delivered == .notSubmitted(prompt))
+        #expect(typed.isEmpty && cleared == 0 && SteerInbox.pending(tty: agent.tty, root: root).isEmpty)
+    }
+
     /// A working Claude still gets it through its hook at its next step: steered, never typed.
     @Test func aWorkingClaudeIsStillSteered() throws {
         let root = temp.url("inbox")

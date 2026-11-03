@@ -263,6 +263,9 @@ extension LeadDelivery {
                 case let other: return other
                 }
             case .draft(let draft):
+                // This very message, typed before and not submitted (auto_advance tries again with clear_draft): it's
+                // in the box, and a copy in the inbox too would go in twice.
+                if holds(draft, typed(text, from: sender)) { return .notSubmitted(draft) }
                 try post()
                 return .atTurnEnd(draft: draft)
             case .dialog:
