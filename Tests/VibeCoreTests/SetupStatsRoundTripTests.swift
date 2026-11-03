@@ -102,7 +102,8 @@ struct SetupStatsRoundTripTests {
         let leadName = LeadTokenLedger.leadName(root: root)
         try (LeadReceiptTests.named(leadName, session: "lead").joined(separator: "\n") + "\n").write(to: transcript, atomically: true, encoding: .utf8)
         let begun = Date().timeIntervalSince1970
-        try #require(try LeadTokenLedger.tally(root: root, home: home.path, now: Date(timeIntervalSince1970: begun)))
+        let made = try #require(try LeadTokenLedger.tally(root: root, home: home.path, now: Date(timeIntervalSince1970: begun)))
+        #expect(made.since == begun && made.days.isEmpty)
         let responses = [LeadReceiptTests.response("m1", "claude-opus-5-5", input: 100, output: 50, read: 1000, at: begun + 10),
                          LeadReceiptTests.response("m2", "claude-opus-5-5", input: 10, output: 5, at: begun + 20)]
         let handle = try FileHandle(forWritingTo: transcript)
@@ -143,7 +144,7 @@ struct SetupStatsRoundTripTests {
         let paths = Set(mergeDates.map { stats.appendingPathComponent(LoadStats.fileName("merges", for: $0)).path })
         let lines = paths.sorted().flatMap { path in
             (SetupStatsCollector.jsonLines(path) ?? []).compactMap { RecorderLine($0, stamps: stamps) }
-        }.sorted { $0.at < $1.at }
+        }.sorted { ($0.at, $0.task ?? "") < ($1.at, $1.task ?? "") }
         #expect(lines.count == 7)
         let read = lines.map { "\($0.task ?? "?") \($0.result ?? "?") \($0.firstRun ?? "none")" }
         #expect(read == ["d failed failed", "c passed passed", "e failed failed", "d passed passed", "e passed passed",
