@@ -2997,3 +2997,7 @@
 - 2026-11-03 09:17 Automatically (auto_advance): Merged installer-s-quit-apple (Installer's quit Apple Event fails with -1708) into main at 11c5a65a, on its passing audit and the full test run.
 - 2026-11-03 09:17 Automatically (auto_advance): Cleaned up installer-s-quit-apple (freed 1.2 GB of build output and temporary folders). It stays done.
 - 2026-11-03 09:17 Update: Install now quits VibeSwitcher properly (no more -1708 / SIGTERM fallback) — **What changed:** `scripts/lib/install-app.sh` builds its default quit command so the quotes survive. It now sends a real quit Apple Event to the app at its install path. The cause was bash quote remo…
+- 2026-11-03 09:26 Incident: Lead messages to a working Codex worker sat undelivered for about 40 min. The worker reported blocked "no answer received" while the answer was in its inbox.; planned turn-this-incident-into-9 to turn it into a check
+- 2026-11-03 09:26 Started a worker on turn-this-incident-into-9
+- 2026-11-03 09:26 Automatically (auto_advance): Started a worker on turn-this-incident-into-9 (Turn this incident into a check: Lead messages to a working Codex worker sat undelivered for …).
+- 2026-11-03 09:26 Review of turn-this-incident-into-9: audit

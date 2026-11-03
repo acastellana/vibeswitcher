@@ -59,3 +59,13 @@ Evidence: Reported by another project's lead. (1) 2026-10-31 ~16:2x: vault-struc
 
 Check: task turn-this-incident-into-8 turns it into a check that runs before merge.
 
+## 2026-11-03 09:26:45 Lead messages to a working Codex worker sat undelivered for about 40 min. The worker reported blocked "no answer received" while the answer was in its inbox.
+
+Evidence: This came from wallet-manager's lead, a cross-session report on 2026-11-03. Its task merge-the-other-computer runs on Codex. 5 message() calls over about 40 min each returned "Sent to … while it works; it gets it at its next step". The worker kept running commands, and the witness twice reported "a message … has waited 5/7 min in its inbox, undelivered". The worker then reported blocked: it had asked via ask_lead and got "no answer received". read_session showed no draft or prompt holding the messages.
+Likely cause, from reading the code:
+- LeadDelivery.way(lastEvent:) (Sources/VibeCore/LeadDelivery.swift:16) picks .steer for any agent whose last hook event is a tool event. That puts the message in the SteerInbox.
+- Only Claude drains the SteerInbox. In Sources/vibeswitcher-hook/main.swift:96-101, `if agent == .claude, let pid = agentPid { SteerReply.answer(...) }`, with the comment "Codex takes typed input mid-turn itself".
+- So a working Codex worker's messages wait until its turn ends.
+
+Check: task turn-this-incident-into-9 turns it into a check that runs before merge.
+
