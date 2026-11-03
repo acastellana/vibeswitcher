@@ -260,7 +260,7 @@ struct CodexMidTurnHostRunTests {
                 _ = eventually { log("taken.log").contains(prompt) }
             },
             root: dir.appendingPathComponent("inbox"))
-        #expect(delivered == .typedWhileWorking)
+        try #require(delivered == .typedWhileWorking)
         // It arrived in its composer, and Enter handed it to the running turn: once, nothing left in the inbox, and
         // its turn never interrupted (no ^C, no Esc).
         #expect(eventually { log("taken.log") == prompt + "\n" }, "taken: \(log("taken.log"))")
