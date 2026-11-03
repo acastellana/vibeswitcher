@@ -148,3 +148,127 @@ struct CodexMidTurnMessageTests {
         #expect(typed.isEmpty && SteerInbox.pending(tty: agent.tty, root: root).count == 1)
     }
 }
+
+/// The lead's message to a working Codex, end to end through a session host (F1 of this fix's audit): a fake Codex
+/// on the host's pty draws Codex CLI 0.160's working screen (its status row, its composer with the faint
+/// placeholder, its footer; see `codex-0.160-idle-120x40.json`) and takes keys as Codex does mid-turn: a bracketed
+/// paste goes into its composer, and Enter hands the composer's text to the running turn (logged), which goes on. Its
+/// hooks' last event is PreToolUse, folded as `vibeswitcher-hook` folds it. The message goes through what the tool server
+/// does (`HostRuntime.steer`): the agent found on the terminal, its activity read from its hooks, the styled screen
+/// and the typing through the host. A scratch host and a fake program only, never a real session.
+struct CodexMidTurnHostRunTests {
+    let temp = Scratch()
+
+    /// A stand-in for Codex mid-turn, in bash (run under the name `codex`, so the process scan takes it for Codex).
+    /// Logs in its folder: `composer.log` (its composer's text as each paste ends), `taken.log` (what Enter handed to
+    /// its turn), `interrupts.log` (a ^C or a bare Esc: either stops a real Codex's turn). bash's `read -n1` turns the
+    /// terminal's CR into LF, so Enter is either.
+    static let fakeCodex = #"""
+    dir="$1"
+    stty raw -echo 2>/dev/null
+    box=""; taken=""; paste=0
+    draw() {
+      printf '\033[H\033[2J'
+      printf '\342\200\272 Start on your task.\r\n\r\n'
+      printf '\342\200\242 Ran git status --short\r\n  \342\224\224 (no output)\r\n\r\n'
+      [ -n "$taken" ] && printf '%s' "$taken"
+      printf '\342\200\242 Working (41s \342\200\242 esc to interrupt)\r\n\r\n'
+      if [ -z "$box" ]; then printf '\342\200\272 \033[2mAsk Codex to do anything\033[22m\r\n'; else printf '\342\200\272 %s\r\n' "$box"; fi
+      printf '\r\n  gpt-5.1 medium \302\267 ~/repo\r\n  ? for shortcuts'
+    }
+    draw
+    while IFS= read -r -s -n1 -d '' c; do
+      case "$c" in
+        $'\033')
+          IFS= read -r -s -n1 -d '' n
+          if [ "$n" = "[" ]; then
+            seq=""
+            while IFS= read -r -s -n1 -d '' k; do seq="$seq$k"; case "$k" in [@-~]) break;; esac; done
+            case "$seq" in
+              200~) paste=1 ;;
+              201~) paste=0; printf '%s\n' "$box" >> "$dir/composer.log"; draw ;;
+            esac
+          else
+            echo esc >> "$dir/interrupts.log"
+          fi ;;
+        $'\r'|$'\n')
+          if [ "$paste" = 1 ]; then box="$box "
+          elif [ -n "$box" ]; then
+            taken="$taken$(printf '\342\200\272') $box"$'\r\n\r\n'
+            printf '%s\n' "$box" >> "$dir/taken.log"; box=""; draw
+          fi ;;
+        $'\003') echo ctrl-c >> "$dir/interrupts.log"; box=""; draw ;;
+        *) box="$box$c"; [ "$paste" = 0 ] && draw ;;
+      esac
+    done
+    """#
+
+    @Test func aWorkingFakeCodexGetsTheLeadsMessageInItsComposerAndTakesItIntoItsTurn() throws {
+        let dir = temp.url("codex-midturn")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let script = dir.appendingPathComponent("codex.sh").path
+        try Self.fakeCodex.write(toFile: script, atomically: true, encoding: .utf8)
+        let log = { (name: String) in (try? String(contentsOf: dir.appendingPathComponent(name), encoding: .utf8)) ?? "" }
+
+        let host = try TestHost()
+        let client = try TestClient(host)
+        let session = try client.spawn("exec /bin/bash -c \"exec -a codex /bin/bash '\(script)' '\(dir.path)'\"", cwd: dir.path)
+        let id = session.id
+        defer { _ = client.send(.kill(id: id)) }
+        let screen = { HostCall.styledScreen(id, socket: host.socket, appKey: host.appKey) }
+        // Drawn: working, its composer empty (its placeholder faint, so not typed text).
+        #expect(eventually { screen().map { $0.text.contains("Working") && LeadDelivery.box(in: $0) == .empty } ?? false },
+                "screen:\n\(screen()?.text ?? "none")")
+
+        // The agent on its terminal, as the tool server finds it: Codex.
+        var found: LeadAgent?
+        #expect(eventually {
+            found = ProcessTable.trySnapshot().flatMap { LeadAgent.running(on: session.tty, session: id.uuidString, in: $0) }
+            return found?.agent == .codex
+        }, "found \(String(describing: found)) on \(session.tty)")
+        let agent = try #require(found)
+
+        // Its hooks' last event: PreToolUse, folded as the hook folds it, in a scratch state file.
+        let stateFile = dir.appendingPathComponent("state.json")
+        let payload: [String: Any] = ["hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "s", "cwd": dir.path,
+                                      "tool_input": ["command": "swift build"]]
+        guard case .write(let state) = HookState.reduce(current: nil, payload: payload, agent: .codex, tty: session.tty,
+                                                         agentPid: agent.pid, now: Date().timeIntervalSince1970) else {
+            Issue.record("PreToolUse wasn't folded into a state"); return
+        }
+        try state.save(to: stateFile)
+        let observer = LeadObserver(home: dir.path, stateFile: { _ in stateFile })
+        let activity = observer.activity(session, agentPid: agent.pid)
+        guard case .working = activity else { Issue.record("not working: \(activity.text)"); return }
+
+        // Delivered as `HostRuntime.steer` delivers it.
+        let text = "Yes: merge it into main."
+        let prompt = LeadDelivery.typed(text, from: .lead("lead of wallet-manager"))
+        var cleared = 0
+        var waited = false
+        let delivered = try LeadDelivery.deliver(
+            text, from: .lead("lead of wallet-manager"), to: agent, activity: activity, styledScreen: screen,
+            typeInto: { (try? HostCall.type(ComposerText.writes($0, bracketed: true), into: id, socket: host.socket, appKey: host.appKey)) != nil },
+            clearDraft: true, clear: { cleared += 1; return true },
+            enter: { (try? HostCall.type([HostInput.Write(bytes: [13], delay: 0)], into: id, socket: host.socket, appKey: host.appKey)) != nil },
+            turnStarted: { observer.activity(session, agentPid: agent.pid).betweenTurns == false },
+            // Before its first read of the box: until the fake has taken it (the event this checks), at most one hang
+            // guard; its later reads follow at once.
+            pause: {
+                guard !waited else { return }
+                waited = true
+                _ = eventually { log("taken.log").contains(prompt) }
+            },
+            root: dir.appendingPathComponent("inbox"))
+        #expect(delivered == .typedWhileWorking)
+        // It arrived in its composer, and Enter handed it to the running turn: once, nothing left in the inbox, and
+        // its turn never interrupted (no ^C, no Esc).
+        #expect(eventually { log("taken.log") == prompt + "\n" }, "taken: \(log("taken.log"))")
+        #expect(log("composer.log") == prompt + "\n")
+        #expect(log("interrupts.log").isEmpty && cleared == 0)
+        #expect(SteerInbox.pending(tty: agent.tty, root: dir.appendingPathComponent("inbox")).isEmpty)
+        // Still working, its composer empty again, the message in its transcript (wrapped at 80 columns).
+        #expect(eventually { screen().map { $0.text.contains("Working") && LeadDelivery.box(in: $0) == .empty && $0.text.contains("Yes: merge it into") } ?? false },
+                "screen:\n\(screen()?.text ?? "none")")
+    }
+}
