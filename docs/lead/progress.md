@@ -2997,3 +2997,7 @@
 - 2026-11-03 09:17 Automatically (auto_advance): Merged installer-s-quit-apple (Installer's quit Apple Event fails with -1708) into main at 11c5a65a, on its passing audit and the full test run.
 - 2026-11-03 09:17 Automatically (auto_advance): Cleaned up installer-s-quit-apple (freed 1.2 GB of build output and temporary folders). It stays done.
 - 2026-11-03 09:17 Update: Install now quits VibeSwitcher properly (no more -1708 / SIGTERM fallback) — **What changed:** `scripts/lib/install-app.sh` builds its default quit command so the quotes survive. It now sends a real quit Apple Event to the app at its install path. The cause was bash quote remo…
+- 2026-11-03 11:06 You accepted 75 commits on main in VibeSwitcher: 86aa477 Lead: decisions and progress; aff7940 Lead: decisions and progress; 11c5a65 InstallRelaunchTests: the default quit command, run through an osascript stand-in, asks the installed app to quit; …
+- 2026-11-03 11:08 Planned main-s-full-suite-4: Main's full suite is green after the 2026-11-03 GitHub pull
+- 2026-11-03 11:08 Started a worker on main-s-full-suite-4
+- 2026-11-03 11:08 Automatically (auto_advance): Started a worker on main-s-full-suite-4 (Main's full suite is green after the 2026-11-03 GitHub pull).
