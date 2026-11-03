@@ -3007,3 +3007,9 @@
 - 2026-11-03 09:56 Audit of turn-this-incident-into-9: incomplete, clean, round 1: 1 Important open, 1 Nit open
 - 2026-11-03 09:56 Started a worker on turn-this-incident-into-9
 - 2026-11-03 09:56 Automatically (auto_advance): Sent turn-this-incident-into-9's worker the open Important findings turn-this-incident-into-9:F1 from its audit at 0a64152b (in a new worker: its last one was released during the audit).
+- 2026-11-03 10:40 The worker on turn-this-incident-into-9 answered findings: turn-this-incident-into-9:F1 fixed at 9e389e05: c6fc0ce (+6388d2b fail-fast): CodexMidTurnHostRunTests.aWorkingFakeCodexGetsTheLeadsMessageInItsComposerAndTakesItIntoItsTurn. A fake Codex (bash run as `codex`, so ProcessTable/LeadAgent.running finds it as .codex) runs on a TestHost pty and draws Codex 0.160's working screen: a status row, a composer with the faint placeholder, a footer. Its hooks' last event is PreToolUse, folded by HookState.reduce, so LeadObserver reads .working. The message i…
+- 2026-11-03 10:40 Automatically (auto_advance): Started the audit of turn-this-incident-into-9 at 9e389e05 (Its review is audit).
+- 2026-11-03 10:40 Released turn-this-incident-into-9's worker (idle since its done report on 9e389e05) while its audit runs
+- 2026-11-03 10:40 Automatically (auto_advance): Released turn-this-incident-into-9's worker, idle since its done report on 9e389e05, while its audit runs (ended pid 9870 (Worker: Codex workers get lead messages mid-turn)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-03 10:42 Audit of turn-this-incident-into-9: complete, clean, round 2: 1 Important closed, 1 Nit open
+- 2026-11-03 10:49 Merged turn-this-incident-into-9: Codex workers get lead messages mid-turn
