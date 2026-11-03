@@ -3016,3 +3016,4 @@
 - 2026-11-03 10:49 Automatically (auto_advance): Merged turn-this-incident-into-9 (Codex workers get lead messages mid-turn) into main at 409db84a, on its passing audit and the full test run.
 - 2026-11-03 10:49 Automatically (auto_advance): Cleaned up turn-this-incident-into-9 (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-03 10:49 Update: Codex workers now get lead messages mid-turn — **What changed:** a lead's `message()` to a Codex worker that is mid-turn is now typed into its composer, and Codex takes it at its next step. Before, it sat in the hook inbox, which only Claude drain…
+- 2026-11-03 19:50 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
