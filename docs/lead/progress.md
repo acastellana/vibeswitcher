@@ -3013,3 +3013,6 @@
 - 2026-11-03 10:40 Automatically (auto_advance): Released turn-this-incident-into-9's worker, idle since its done report on 9e389e05, while its audit runs (ended pid 9870 (Worker: Codex workers get lead messages mid-turn)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-03 10:42 Audit of turn-this-incident-into-9: complete, clean, round 2: 1 Important closed, 1 Nit open
 - 2026-11-03 10:49 Merged turn-this-incident-into-9: Codex workers get lead messages mid-turn
+- 2026-11-03 10:49 Automatically (auto_advance): Merged turn-this-incident-into-9 (Codex workers get lead messages mid-turn) into main at 409db84a, on its passing audit and the full test run.
+- 2026-11-03 10:49 Automatically (auto_advance): Cleaned up turn-this-incident-into-9 (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-03 10:49 Update: Codex workers now get lead messages mid-turn — **What changed:** a lead's `message()` to a Codex worker that is mid-turn is now typed into its composer, and Codex takes it at its next step. Before, it sat in the hook inbox, which only Claude drain…
