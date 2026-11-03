@@ -16,20 +16,33 @@
 # reads the process list where pgrep can't), by its executable inside DEST_APP rather than by name, and a process list
 # that can't be read stops the install before anything is copied.
 #
+# 2026-11-03: the quit Apple Event had never been sent. Every --install printed `0:4: execution error: «script» doesn't
+# understand the "quit" message. (-1708)` and fell back to SIGTERM 10 s later. The default was written
+# ${VS_INSTALL_QUIT:-osascript -e "quit app \"$name\""}, and quote removal inside ${…:-…} strips the inner quotes, so
+# the command run was `osascript -e quit app "VibeSwitcher"`: a script of just `quit` (to the script itself, hence
+# «script» at 0:4), with "app" and the name as its arguments. Not a sandbox or TCC refusal. The default is now built
+# outside the expansion and tells the app at DEST_APP, by its path (the copy running from there, not another of the
+# same name or bundle id, which is how the app is found below too), to quit.
+#
 # Its parts are injectable so a test can drive it against a scratch stand-in instead of the user's app:
 #
 # scripts/lib/install-app.sh SOURCE_APP DEST_APP
 #   VS_INSTALL_PROCESS  the app's executable name, DEST_APP/Contents/MacOS/<name> (VibeSwitcher)
 #   VS_INSTALL_QUIT     the command that asks it to quit, run as `bash -c "$VS_INSTALL_QUIT" quit PID…` (osascript's
-#                       quit Apple Event to the app by name)
+#                       quit Apple Event to the app at DEST_APP, by its path)
 #   VS_INSTALL_LAUNCH   the command that launches DEST_APP, run as `bash -c "$VS_INSTALL_LAUNCH" launch DEST_APP` (open)
 #   VS_INSTALL_WAIT     seconds to wait for each quit attempt, and for the new process after the launch (10)
 set -euo pipefail
 source_app=$1
 dest=$2
 name=${VS_INSTALL_PROCESS:-VibeSwitcher}
-quit=${VS_INSTALL_QUIT:-osascript -e "quit app \"$name\""}
-launch=${VS_INSTALL_LAUNCH:-open "\$1"}
+# Built here, not inside ${VS_INSTALL_QUIT:-…}, whose quote removal took the script apart (2026-11-03, above). The path
+# goes in as the script's argument, so no quote or backslash in it can change the script.
+default_quit=$(printf 'osascript -e %q -e %q -e %q %q' 'on run argv' 'tell application (item 1 of argv) to quit' 'end run' "$dest")
+quit=${VS_INSTALL_QUIT:-$default_quit}
+# The same quote removal made this `open $1`, split at any space in DEST_APP.
+default_launch='open "$1"'
+launch=${VS_INSTALL_LAUNCH:-$default_launch}
 wait_s=${VS_INSTALL_WAIT:-10}
 export LC_ALL=C
 
