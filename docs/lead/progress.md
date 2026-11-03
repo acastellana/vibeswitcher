@@ -2988,3 +2988,9 @@
 - 2026-11-03 08:55 Planned installer-s-quit-apple: Installer's quit Apple Event fails with -1708
 - 2026-11-03 08:55 Started a worker on installer-s-quit-apple (auto → Claude: Claude weekly 28%, 52 points behind pace, not tight; Codex 67%)
 - 2026-11-03 08:55 Automatically (auto_advance): Started a worker on installer-s-quit-apple (Installer's quit Apple Event fails with -1708); its agent is auto, so it went to Claude: Claude weekly 28%, 52 points behind pace, not tight; Codex 67%.
+- 2026-11-03 09:07 Raised installer-s-quit-apple to audit (the risk check, at 2728d33e): it changes test or build infrastructure the suite relies on (scripts/lib/install-app.sh)
+- 2026-11-03 09:07 Automatically (auto_advance): Started the audit of installer-s-quit-apple at 2728d33e (The risk check raised it to audit: it changes test or build infrastructure the suite relies on (scripts/lib/install-app.sh)).
+- 2026-11-03 09:07 Released installer-s-quit-apple's worker (idle since its done report on 2728d33e) while its audit runs
+- 2026-11-03 09:07 Automatically (auto_advance): Released installer-s-quit-apple's worker, idle since its done report on 2728d33e, while its audit runs (ended pid 47721 (Worker: Installer's quit Apple Event fails with -1708)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-03 09:10 Audit of installer-s-quit-apple: complete, clean
+- 2026-11-03 09:17 Merged installer-s-quit-apple: Installer's quit Apple Event fails with -1708
