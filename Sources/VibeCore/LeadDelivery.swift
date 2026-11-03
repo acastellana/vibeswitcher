@@ -245,6 +245,32 @@ extension LeadDelivery {
                                clear: (() -> Bool)? = nil, enter: (() -> Bool)? = nil, turnStarted: (() -> Bool)? = nil,
                                pause: () -> Void = {}, root: URL = VibePaths.root) throws -> Delivered {
         let post = { try SteerInbox.post(SteerMessage(text: text, from: sender, agentPid: agent.pid), tty: agent.tty, root: root) }
+        // Codex's hooks hand it nothing from the inbox (only Claude's do, see `vibeswitcher-hook`): mid-turn it takes
+        // a message typed into its box as steering, as the chat's composer sends it. Typed only into an empty box,
+        // never after a ^C (mid-turn that stops its turn); else it waits, typed in once the turn ends (`flush`).
+        if agent.agent == .codex, case .working = activity {
+            guard let screen, let typeInto, let shown = screen() else {
+                try post()
+                return .atTurnEnd(draft: nil)
+            }
+            switch box(in: shown) {
+            case .empty:
+                let prompt = typed(text, from: sender)
+                guard typeInto(prompt) else { break }
+                // Mid-turn a started turn says nothing: whether it went in is read off its box alone.
+                switch submitted(prompt, screen: screen, enter: enter, turnStarted: nil, pause: pause) {
+                case .typed: return .typedWhileWorking
+                case let other: return other
+                }
+            case .draft(let draft):
+                try post()
+                return .atTurnEnd(draft: draft)
+            case .dialog:
+                break
+            }
+            try post()
+            return .atTurnEnd(draft: nil)
+        }
         switch activity {
         case .working, .unknown:
             try post()
