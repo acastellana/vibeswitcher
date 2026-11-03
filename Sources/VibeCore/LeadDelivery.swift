@@ -264,8 +264,11 @@ extension LeadDelivery {
                 }
             case .draft(let draft):
                 // This very message, typed before and not submitted (auto_advance tries again with clear_draft): it's
-                // in the box, and a copy in the inbox too would go in twice.
-                if holds(draft, typed(text, from: sender)) { return .notSubmitted(draft) }
+                // in the box, and a copy in the inbox too would go in twice. The whole of it, not `holds`'s first 40
+                // characters: the marker (`[VibeSwitcher · from lead of …, not the user]`) fills those, so another of
+                // the lead's messages left there would pass for this one, and this one would go nowhere. Codex's box
+                // shows all of its text (`codexBox` reads up to 8 rows, and more isn't a box).
+                if isWhole(draft, typed(text, from: sender)) { return .notSubmitted(draft) }
                 try post()
                 return .atTurnEnd(draft: draft)
             case .dialog:
@@ -366,6 +369,12 @@ extension LeadDelivery {
         guard let held = left() else { return .typed }
         guard let enter, enter() else { return .notSubmitted(held) }
         return left().map { .notSubmitted($0) } ?? .typed
+    }
+
+    /// Whether the box's `draft` is all of the typed `prompt`, however the box wraps it, and nothing else.
+    static func isWhole(_ draft: String, _ prompt: String) -> Bool {
+        let squeezed = { (text: String) in text.filter { !$0.isWhitespace } }
+        return squeezed(draft) == squeezed(prompt)
     }
 
     /// Whether the box's `draft` is the typed `prompt`: its start (the box wraps it), or Claude's stand-in for a long
