@@ -138,6 +138,23 @@ struct CodexMidTurnMessageTests {
         #expect(typed.isEmpty && cleared == 0 && SteerInbox.pending(tty: agent.tty, root: root).isEmpty)
     }
 
+    /// Another message of the lead's left unsubmitted in the box isn't this one, though both start with the same
+    /// marker (`[VibeSwitcher · from lead of …, not the user]`, longer than what `holds` compares): this one waits in
+    /// the inbox for the turn's end, and isn't said to be in the box.
+    @Test func anotherLeadMessageInAWorkingCodexsBoxDoesntSwallowThisOne() throws {
+        let root = temp.url("inbox")
+        let agent = codex("ttys959")
+        let earlier = LeadDelivery.typed("Run the lints before you report.", from: .lead("lead of wallet-manager"))
+        let held = try working(composer: ["› " + earlier])
+        var typed: [String] = []
+        let delivered = try LeadDelivery.deliver("Yes: merge it into main.", from: .lead("lead of wallet-manager"), to: agent,
+                                                 activity: .working("Bash"), styledScreen: { held },
+                                                 typeInto: { typed.append($0); return true }, clearDraft: true, pause: {}, root: root)
+        #expect(delivered == .atTurnEnd(draft: earlier))
+        #expect(typed.isEmpty)
+        #expect(SteerInbox.pending(tty: agent.tty, root: root).map(\.text) == ["Yes: merge it into main."])
+    }
+
     /// A working Claude still gets it through its hook at its next step: steered, never typed.
     @Test func aWorkingClaudeIsStillSteered() throws {
         let root = temp.url("inbox")
