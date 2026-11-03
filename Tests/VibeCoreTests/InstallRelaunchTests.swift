@@ -113,6 +113,26 @@ struct InstallRelaunchTests {
         }
         var bashEnv: String?
 
+        /// The script's osascript, for a run with its default quit command: it records its arguments, one per line, in
+        /// `osascriptArgs`, and passes the quit on (SIGUSR1, as the app gets the Apple Event) only when it's given the
+        /// whole script, telling the app at the installed bundle's path to quit. Anything else gets what osascript gave
+        /// the 2026-11-03 runs, whose script was just `quit`: an error, and no quit.
+        func quittingOsascript() throws {
+            try shim("osascript", """
+                #!/bin/bash
+                printf '%s\\n' "$@" >"$VS_STANDIN_OSASCRIPT_ARGS"
+                if [[ $# == 7 && $1 == -e && $2 == 'on run argv' && $3 == -e && $4 == 'tell application (item 1 of argv) to quit' &&
+                      $5 == -e && $6 == 'end run' && $7 == "$VS_STANDIN_DEST" ]]; then
+                    /usr/bin/pgrep -x "$VS_INSTALL_PROCESS" | while read -r pid; do builtin kill -USR1 "$pid"; done
+                    exit 0
+                fi
+                echo "osascript (stand-in): not a quit to $VS_STANDIN_DEST: $*" >&2
+                exit 1
+
+                """)
+        }
+        var osascriptArgs: URL { root.appendingPathComponent("osascript-args") }
+
         private func shim(_ command: String, _ body: String) throws {
             let file = shims.appendingPathComponent(command)
             try body.write(to: file, atomically: true, encoding: .utf8)
@@ -132,13 +152,20 @@ struct InstallRelaunchTests {
         }
 
         /// Runs the install step with the stand-in's parts, waiting `wait` seconds at each of its waits.
-        func install(wait: Int) throws -> (status: Int32, output: String) {
+        /// `defaultQuit`: VS_INSTALL_QUIT unset, so the script's own quit command runs (see `quittingOsascript`).
+        func install(wait: Int, defaultQuit: Bool = false) throws -> (status: Int32, output: String) {
             let process = Process(), out = Pipe()
             process.executableURL = URL(fileURLWithPath: "/bin/bash")
             process.arguments = [InstallRelaunchTests.script.path, built.path, installed.path]
             var environment = ProcessInfo.processInfo.environment
             environment["VS_INSTALL_PROCESS"] = name
-            environment["VS_INSTALL_QUIT"] = "kill -USR1 \"$@\""
+            if defaultQuit {
+                environment["VS_INSTALL_QUIT"] = nil
+                environment["VS_STANDIN_DEST"] = installed.path
+                environment["VS_STANDIN_OSASCRIPT_ARGS"] = osascriptArgs.path
+            } else {
+                environment["VS_INSTALL_QUIT"] = "kill -USR1 \"$@\""
+            }
             environment["VS_INSTALL_LAUNCH"] = "\"\(launcher.path)\" \"$1\""
             environment["VS_INSTALL_WAIT"] = "\(wait)"
             environment["VS_STANDIN_READY"] = ready.path
@@ -201,6 +228,26 @@ struct InstallRelaunchTests {
         #expect(try stand.running() == [launched], "the one running is the one launched")
         #expect(stand.waitReady(launched), "the launched process is the new bundle's")
         #expect(!stand.old.isRunning)
+    }
+
+    /// 2026-11-03: the default quit command had lost its quotes to the ${VS_INSTALL_QUIT:-…} it was written in, so
+    /// osascript got `-e quit app VibeSwitcher`, a script of just `quit` (-1708), and every install waited out the 10 s
+    /// and fell back to SIGTERM. Run with that default, the quit now reaches the app at once: osascript is given the
+    /// whole script and the installed bundle's path, and SIGTERM is never sent.
+    @Test func theDefaultQuitCommandAsksTheInstalledAppToQuit() throws {
+        let stand = try StandIn(temp, mode: "quits-when-asked")
+        defer { stand.cleanUp() }
+        try stand.quittingOsascript()
+        let run = try stand.install(wait: 10, defaultQuit: true)
+        let args = (try? String(contentsOf: stand.osascriptArgs, encoding: .utf8)) ?? "(osascript wasn't run)"
+        #expect(args == "-e\non run argv\n-e\ntell application (item 1 of argv) to quit\n-e\nend run\n\(stand.installed.path)\n", Comment(rawValue: args))
+        #expect(run.status == 0, Comment(rawValue: run.output))
+        #expect(run.output.contains("Asking \(stand.name) (pid \(stand.oldPid), started ") && run.output.contains("\n\(stand.name) quit.\n"), Comment(rawValue: run.output))
+        #expect(!run.output.contains("SIGTERM") && !run.output.contains("not a quit"), Comment(rawValue: run.output))
+        let launched = try #require(StandIn.launchedPid(in: run.output), Comment(rawValue: run.output))
+        #expect(!stand.old.isRunning)
+        #expect(stand.installedVersion == "new")
+        #expect(try stand.running() == [launched])
     }
 
     /// The app doesn't answer the quit request (no Apple Events reach it) but quits on SIGTERM, the fallback: replaced
