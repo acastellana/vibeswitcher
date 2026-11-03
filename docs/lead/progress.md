@@ -2975,3 +2975,10 @@
 - 2026-11-03 00:44 Automatically (auto_advance): Released statistics-4-compared's worker, idle since its done report on 820259ea, while its audit runs (ended pid 16015 (Worker: Statistics 4: 'Compared with working solo', an estimate labelled as one)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-03 00:46 Audit of statistics-4-compared: complete, clean, round 1: 2 Nit open
 - 2026-11-03 00:57 Merged statistics-4-compared: Statistics 4: 'Compared with working solo', an estimate labelled as one
+- 2026-11-03 00:57 Automatically (auto_advance): Merged statistics-4-compared (Statistics 4: 'Compared with working solo', an estimate labelled as one) into main at 71615ffd, on its passing audit and the full test run.
+- 2026-11-03 00:57 Automatically (auto_advance): Cleaned up statistics-4-compared (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-03 00:57 Update: Merged: Statistics now says how well the setup is doing — **What changed:** three merges, on top of yesterday's Statistics window.
+- 2026-11-03 00:58 Planned setupstats-reads-what: SetupStats reads what the recorders actually write (round-trip test)
+- 2026-11-03 00:58 Started a worker on setupstats-reads-what (auto → Claude: Claude weekly 23%, 53 points behind pace, not tight; Codex 67%)
+- 2026-11-03 00:58 Automatically (auto_advance): Started a worker on setupstats-reads-what (SetupStats reads what the recorders actually write (round-trip test)); its agent is auto, so it went to Claude: Claude weekly 23%, 53 points behind pace, not tight; Codex 67%.
+- 2026-11-03 00:58 Update: Retrospective: the Statistics batch — **Batch:** statistics-1 and 2 (Nov 2), then 3-quality, record-what and 4-compared (Nov 3). All 5 merged with no reverts. Every audit had 0 Important findings.
