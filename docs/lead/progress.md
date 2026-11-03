@@ -2994,3 +2994,6 @@
 - 2026-11-03 09:07 Automatically (auto_advance): Released installer-s-quit-apple's worker, idle since its done report on 2728d33e, while its audit runs (ended pid 47721 (Worker: Installer's quit Apple Event fails with -1708)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-03 09:10 Audit of installer-s-quit-apple: complete, clean
 - 2026-11-03 09:17 Merged installer-s-quit-apple: Installer's quit Apple Event fails with -1708
+- 2026-11-03 09:17 Automatically (auto_advance): Merged installer-s-quit-apple (Installer's quit Apple Event fails with -1708) into main at 11c5a65a, on its passing audit and the full test run.
+- 2026-11-03 09:17 Automatically (auto_advance): Cleaned up installer-s-quit-apple (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-03 09:17 Update: Install now quits VibeSwitcher properly (no more -1708 / SIGTERM fallback) — **What changed:** `scripts/lib/install-app.sh` builds its default quit command so the quotes survive. It now sends a real quit Apple Event to the app at its install path. The cause was bash quote remo…
