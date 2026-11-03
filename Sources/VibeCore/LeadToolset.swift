@@ -6,11 +6,14 @@ public struct LeadAgent: Equatable, Sendable {
     public var tty: String
     /// Its window session's id, when it runs in the window.
     public var session: String?
+    /// Which agent it is, when known: a message reaches each a different way while it works (see `LeadDelivery`).
+    public var agent: Agent?
 
-    public init(pid: Int32, tty: String, session: String?) {
+    public init(pid: Int32, tty: String, session: String?, agent: Agent? = nil) {
         self.pid = pid
         self.tty = tty
         self.session = session
+        self.agent = agent
     }
 }
 

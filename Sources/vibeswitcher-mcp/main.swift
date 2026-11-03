@@ -283,10 +283,10 @@ final class HostRuntime: LeadRuntime {
             agent = known
         case .session(let id):
             hosted = try HostCall.sessions(socket: socket)
-            guard let tty = hosted.first(where: { $0.id.uuidString == id && $0.isLive })?.tty, let pid = Self.agentPid(on: tty) else {
+            guard let tty = hosted.first(where: { $0.id.uuidString == id && $0.isLive })?.tty, let found = Self.agentProcess(on: tty) else {
                 throw HostCall.Failure(description: "That session isn't running an agent.")
             }
-            agent = LeadAgent(pid: pid, tty: tty, session: id)
+            agent = LeadAgent(pid: found.pid, tty: tty, session: id, agent: found.agent)
         }
         let session = hosted.first { hosted in hosted.isLive && (agent.session.map { $0 == hosted.id.uuidString } ?? (hosted.tty == agent.tty)) }
         // Not a window session: only its hooks can take the message.
@@ -368,8 +368,13 @@ final class HostRuntime: LeadRuntime {
 
     /// The oldest agent process on a terminal (the session's own, not a tool it runs); nil when there's none, or the
     /// process table couldn't be read in time.
-    static func agentPid(on tty: String) -> Int32? {
-        ProcessTable.trySnapshot()?.values.filter { $0.tty == tty && $0.agent != nil }.min { $0.startTime < $1.startTime }?.pid
+    static func agentPid(on tty: String) -> Int32? { agentProcess(on: tty)?.pid }
+
+    /// The terminal's first agent process, and which agent it is.
+    static func agentProcess(on tty: String) -> (pid: Int32, agent: Agent)? {
+        guard let found = ProcessTable.trySnapshot()?.values.filter({ $0.tty == tty && $0.agent != nil }).min(by: { $0.startTime < $1.startTime }),
+              let agent = found.agent else { return nil }
+        return (found.pid, agent)
     }
 }
 
