@@ -57,6 +57,12 @@ extension LeadDelivery {
         /// Typed, but the box kept it (what it shows) and no turn started, one more Enter too (see `submitted`). It's
         /// in the box, not the inbox.
         case notSubmitted(String)
+        /// Typed into a working agent that takes typed input as steering (Codex): it gets it at its next step.
+        case typedWhileWorking
+        /// A working agent that takes messages only typed into its box (Codex: its hooks hand it nothing) whose box
+        /// couldn't take it now: the draft it holds (never cleared mid-turn: a ^C there stops the turn), or nil when
+        /// its screen couldn't be read or typed into. The message waits in the inbox and is typed in once its turn ends.
+        case atTurnEnd(draft: String?)
     }
 
     /// What Claude Code's input box shows: nothing typed, a draft, or no box at all (a dialog is on screen: a

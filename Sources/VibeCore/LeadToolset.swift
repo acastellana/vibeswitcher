@@ -1895,8 +1895,15 @@ public final class LeadToolset: MCPToolset {
             let saw = after.map { $0.isEmpty ? "then read empty, but typing didn't go out" : "still showed “\(Self.clip($0))”" }
                 ?? "couldn't be cleared (the ^C didn't go out, or its screen couldn't be read)"
             result = MCPToolResult(text: "\(slug)'s worker is between turns with “\(Self.clip(before))” in its input box. clear_draft sent one ^C, and the box \(saw). The message waits in its inbox and goes in with its next prompt or once the box reads empty. Don't send it again; read_session to see where it is, or tell the user what's in its box.")
+        case .typedWhileWorking:
+            result = MCPToolResult(text: "Typed into \(slug)'s worker while it works (Codex takes a message typed into its box into its running turn): it gets it at its next step.")
+        case .atTurnEnd(let draft):
+            let held = draft.map { "its input box holds a draft, “\(Self.clip($0))”, which isn't cleared mid-turn (a ^C there would stop its turn)" }
+                ?? "its input box couldn't be read or typed into just now"
+            result = MCPToolResult(text: "\(slug)'s worker runs Codex and is mid-turn. Codex takes a message only typed into its input box, and \(held). "
+                                 + "The message waits in its inbox and is typed in once its turn ends; it doesn't have it yet. read_session to see where it is.")
         case .notSubmitted(let shown):
-            result = MCPToolResult(text: "Typed into \(slug)'s worker (it was between turns\(clear ? "; a leftover draft was cleared first" : "")), but it wasn't submitted: "
+            result = MCPToolResult(text: "Typed into \(slug)'s worker\(clear ? " (a leftover draft was cleared first)" : ""), but it wasn't submitted: "
                                  + "its input box still shows “\(Self.clip(shown))” and no turn started, one more Enter too. It's in its box, not its inbox. "
                                  + "message again with clear_draft: true to clear it and type it once more; if that isn't submitted either, stop_worker and "
                                  + "start_worker (its worktree and commits stay), or tell the user what's in its box.")
