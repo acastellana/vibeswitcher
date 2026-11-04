@@ -569,6 +569,8 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "revert", description: "Undo a merged task in one step: one commit on top of the lead's branch reverts the commits its merge put there, the test command runs on it, and the branch fast-forwards to it; the task reads reverted. It only adds a commit (nothing is reset or rewritten). Refused, with the branch untouched, when the tests fail or when later commits conflict with the revert (it names the files and the tasks that touched them: plan a fix-forward task instead).",
                             properties: ["task": task, "reason": P(type: "string", description: "What the merge broke, in one line: it goes into the revert commit's message and the task's record")],
                             required: ["task", "reason"]),
+                MCPToolInfo(name: "fetch_remote", description: "Fetch the project's remote (workflow.md's remote, origin unless set): only the base branch, into its remote-tracking ref (origin/main); nothing else moves. Says how far the base is ahead and behind, the incoming commits, and whether merge_remote would fast-forward, merge cleanly (the lead's records by union) or stop on a conflict. It takes no arguments: the remote and branch come from workflow.md, never a URL or refspec."),
+                MCPToolInfo(name: "merge_remote", description: "Merge the remote-tracking branch fetch_remote fetched into the base: in a scratch worktree, a fast-forward when the base has nothing of its own, else a true merge commit (so the remote's tip stays an ancestor and a later push is a fast-forward); the lead's records merge by union. The test command runs on the result, and the base fast-forwards to it only when it passes and the base hasn't moved; the main checkout's uncommitted files stay as they are. A conflict outside the records stops it with the files named; it never picks a side. The remote's commits count as the user's work."),
                 MCPToolInfo(name: "cleanup", description: "End a task's sessions and remove its worktree and branch (after merging, or force to abandon it).",
                             properties: ["task": task, "force": P(type: "boolean", description: "Also discard unmerged work")], required: ["task"]),
                 MCPToolInfo(name: "accept_git_hooks", description: "Let the tool server's git (merges, cleanups, start_worker, auto_advance) run the repository's git hooks as they are now. It runs only hooks you accepted, from a copy, never the hooks folder a worker can write: status, merge and the rest tell you when that folder isn't as you accepted it. Read each hook first; accept only the user's own.",
@@ -616,6 +618,7 @@ public final class LeadToolset: MCPToolset {
                                          "regression_command": P(type: "string", description: "The checks incidents became (e.g. a bench corpus run); merge runs it after test_command and merges only when it passes too"),
                                          "init_command": P(type: "string", description: "What a fresh worktree needs before work starts (install, build)"),
                                          "base_branch": P(type: "string", description: "The branch workers start from and verified work is merged into (an existing local branch)"),
+                                         "remote": P(type: "string", description: "The git remote, by its name, that fetch_remote fetches the base branch from and merge_remote merges it in from (empty: origin)"),
                                          "verifier_model": P(type: "string", description: "The verifier's model (e.g. fable, opus). Empty: audits run on another model than the workers', at least as capable (fable; opus when the workers run fable)"),
                                          "max_workers": P(type: "integer", description: "How many workers may run at once (at least 1)"),
                                          "disk_warning_gb": P(type: "number", description: "Free space (GB) on the worktrees' volume below which you're told, once, what takes the space (default 10)"),
@@ -672,6 +675,11 @@ public final class LeadToolset: MCPToolset {
                 let reverted = try revert(try taskSlug(arguments), reason: arguments["reason"] as? String ?? "")
                 records.flush(base: base)
                 return withGitNotice(reverted)
+            case "fetch_remote": return withGitNotice(try fetchRemote())
+            case "merge_remote":
+                let merged = try mergeRemote()
+                records.flush(base: base)
+                return withGitNotice(merged)
             case "cleanup": return withGitNotice(try cleanup(try taskSlug(arguments), force: arguments["force"] as? Bool ?? false))
             case "accept_git_hooks": return try acceptGitHooks(arguments)
             case "ask_user": return try askUser(arguments)
@@ -3850,6 +3858,10 @@ public final class LeadToolset: MCPToolset {
                 let flag = (given as? Bool) ?? LeadWorkflow.flag(value)
                 guard let flag else { throw Problem(text: "\(key) is true or false.") }
                 value = String(flag)
+            case "remote" where !value.isEmpty:
+                guard LeadRemote.isName(value) else {
+                    throw Problem(text: "remote is a git remote's name (letters, digits, . _ -), as `git remote` lists it: never a URL or a refspec. Empty: origin.")
+                }
             case "base_branch" where !value.isEmpty:
                 guard Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(value)"], in: root).ok else {
                     throw Problem(text: "There's no local branch \(value) to work on.")
@@ -3871,7 +3883,7 @@ public final class LeadToolset: MCPToolset {
             let after = LeadWorkflow.load(from: path)
             let read: [String: String] = ["test_command": after.testCommand ?? "", "regression_command": after.regressionCommand ?? "",
                                           "init_command": after.initCommand ?? "",
-                                          "base_branch": after.baseBranch ?? "", "verifier_model": after.verifierModel ?? "",
+                                          "base_branch": after.baseBranch ?? "", "remote": after.remote ?? "", "verifier_model": after.verifierModel ?? "",
                                           "max_workers": String(after.maxWorkers),
                                           "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
                                           "test_timeout_min": Self.gb(after.testTimeoutMinutes), "task_budget_min": String(after.taskBudgetMinutes),
@@ -3902,6 +3914,13 @@ public final class LeadToolset: MCPToolset {
                 if !hashes.isEmpty { try vault.setGuardedSettings(hashes, root: root) }
             } catch {
                 throw Problem(text: "Wrote workflow.md, but the session host didn't record its settings as yours (\(error)); merge and start_worker refuse them until it does. Run configure with them again.")
+            }
+        }
+        // The remote set: its URL now is the one fetch_remote takes (`LeadRemote.urlKey`).
+        if changes.contains(where: { $0.key == "remote" }) {
+            let remote = self.workflow.remoteName
+            if case .success(let url) = LeadRemote.url(root: root, remote: remote) {
+                try? vault.setGuardedSettings([LeadRemote.urlKey(remote): LeadVault.hash(url)], root: root)
             }
         }
         // A branch the lead hasn't merged into yet: its head now is where merges into it start from.
@@ -4940,6 +4959,7 @@ public final class LeadToolset: MCPToolset {
                      "- regression_command: " + (workflow.regressionCommand.map { "`\($0)` (merge runs it after test_command)" } ?? "not set: the incidents' checks (record_incident) run only as part of test_command"),
                      "- init_command: " + (workflow.initCommand.map { "`\($0)`" } ?? "not set" + (detectedInit.map { " (suggested from the repository: `\($0)`)" } ?? "")),
                      "- base_branch: " + (raw.baseBranch ?? "not set: \(fallback) (the branch the lead first started on)"),
+                     "- remote: " + (workflow.remote ?? "not set: \(LeadRemote.defaultRemote)") + " (fetch_remote and merge_remote sync the base branch with it)",
                      "- verifier_model: " + (workflow.verifierModel ?? "not set: audits run on \(auditModel(workflow)), another model than the workers' (\(runtime.workerModel(root: root) ?? "Claude's default"))"),
                      "- max_workers: \(workflow.maxWorkers)",
                      "- disk_warning_gb: \(Self.gb(workflow.diskWarningGB)) (the lead is told below this much free space)",
