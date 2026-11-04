@@ -1029,8 +1029,9 @@ extension LeadVault {
         }
 
         /// Why `caller` may not seal a message as `sender`'s (nil: it may). The user's words are the app's to seal;
-        /// a lead's, a lead's (or the app's, passing them on), and one under another project's lead's name
-        /// (`LeadMail.sender`) only that project's own lead's; VibeSwitcher's, the app's, but for the reports a
+        /// a lead's, a lead's (or the app's, passing them on), and one whose name says it's a project's lead
+        /// (`claimedProject`: tell_lead's `LeadMail.sender`, a lead's `lead of <project>`) only that project's own
+        /// lead's; VibeSwitcher's, the app's, but for the reports a
         /// worker's or verifier's tool server sends its lead (`worker <task>`, `verifier <task>`), which the
         /// session holding that role seals about itself, and auto_advance's (`LeadAdvance.sender`), which the lead's
         /// own tool server runs: a lead's session seals those only for an agent in that same session (`agentSession`),
@@ -1046,9 +1047,11 @@ extension LeadVault {
                 guard case .session(let session) = caller else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
                 let led = state.teams.values.filter { $0.members.contains { $0.role == .lead && $0.session == session } }
                 guard !led.isEmpty else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
-                // Another project's lead's name (tell_lead's, `LeadMail.sender`): only the project's own lead seals it.
-                if LeadMail.isPeer(name), !led.contains(where: { LeadMail.sender(LeadMail.project(of: $0.root)) == sender }) {
-                    return "A lead seals a message as from \"the lead of\" a project only for the project it leads itself."
+                // A name that says whose lead it is (tell_lead's `the lead of <project>`, a lead's own `lead of
+                // <project>`, however it's spelled): only that project's own lead seals it.
+                if let claimed = Book.claimedProject(name),
+                   !led.contains(where: { Book.folded(LeadMail.project(of: $0.root)) == claimed }) {
+                    return "A lead seals a message as from the lead of a project only for the project it leads itself."
                 }
                 return nil
             case .system(let about) where about == LeadAdvance.sender:
@@ -1064,6 +1067,26 @@ extension LeadVault {
                 else { return "Only VibeSwitcher seals a message as its own (a worker or verifier, only its report about its own task)." }
                 return nil
             }
+        }
+
+        /// The project a lead's name says it's the lead of, read as its receiver would read it: case, spaces and
+        /// invisible characters aside, so `The lead of X`, `lead of X` and `the lead of\u{200B} X` all name `X`
+        /// (folded, see `folded`); nil when it names none (`lead`).
+        static func claimedProject(_ name: String) -> String? {
+            let name = folded(name)
+            guard let of = name.range(of: "leadof") else { return nil }
+            return String(name[of.upperBound...])
+        }
+
+        /// `text` lowercased, without its whitespace and its invisible (format and control) characters.
+        static func folded(_ text: String) -> String {
+            var kept = String.UnicodeScalarView()
+            for scalar in text.lowercased().unicodeScalars {
+                let category = scalar.properties.generalCategory
+                if scalar.properties.isWhitespace || category == .format || category == .control { continue }
+                kept.append(scalar)
+            }
+            return String(kept)
         }
 
         private func isLead(_ caller: Caller, _ root: String) -> Bool {
