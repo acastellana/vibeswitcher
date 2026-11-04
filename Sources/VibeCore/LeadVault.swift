@@ -174,7 +174,7 @@ public struct LeadVault: Sendable {
         /// The app, or the repository's lead.
         case setHead(root: String, branch: String, commit: String)
         /// A message sealed for its sender (see `Book.maySeal`): the user's for the app only, the lead's for the app or
-        /// a lead, VibeSwitcher's for the app, a worker's or verifier's tool server about itself, or (auto_advance's
+        /// a lead (its own team's sessions, or tell_lead's for another project's lead), VibeSwitcher's for the app, a worker's or verifier's tool server about itself, or (auto_advance's
         /// reports) the lead's tool server for its own agent.
         case seal(SteerMessage)
         /// Which of these carry a valid seal.
@@ -854,7 +854,7 @@ extension LeadVault {
                 change(root, &changed) { $0.heads[branch] = commit }
                 return .ok
             case .seal(let message):
-                if let refusal = maySeal(message.from, caller: caller, agentSession: agentSession) { return .refused(refusal) }
+                if let refusal = maySeal(message, caller: caller, agentSession: agentSession) { return .refused(refusal) }
                 return .seal(SteerInbox.seal(message, key: SymmetricKey(data: state.senderKey)))
             case .verify(let messages):
                 let key = SymmetricKey(data: state.senderKey)
@@ -1037,17 +1037,35 @@ extension LeadVault {
         /// itself. So a worker's Bash can't seal a line as its lead's, the witness's, auto_advance's or another
         /// worker's (it can only say, as itself, what its report tool says), and a lead can't pass auto_advance's
         /// word on to anyone else.
-        private func maySeal(_ sender: SteerMessage.Sender, caller: Caller, agentSession: String?) -> String? {
+        ///
+        /// A lead's own line is sealed for its recipient too (`agentSession`, the session the message's agent runs in):
+        /// `lead of <project>` only for a session of that project's team, which its delivery marks as that session's
+        /// own lead's; tell_lead's `the lead of <project>` only for another project's lead. So a lead can't post its
+        /// honest name into another team's worker's or verifier's inbox and pass for that team's lead. A board note
+        /// (`LeadNote`, agent pid 0) is no agent's: no inbox line for pid 0 reaches one.
+        private func maySeal(_ message: SteerMessage, caller: Caller, agentSession: String?) -> String? {
             if caller == .app { return nil }
-            switch sender {
+            switch message.from {
             case .user:
                 return "Only VibeSwitcher seals a message as the user's."
             case .lead(let name):
                 guard case .session(let session) = caller else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
-                let led = state.teams.values.filter { $0.members.contains { $0.role == .lead && $0.session == session } }
+                let leads = { (team: Team, session: String) in team.members.contains { $0.role == .lead && $0.session == session } }
+                let led = state.teams.values.filter { leads($0, session) }
                 guard !led.isEmpty else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
-                guard led.contains(where: { Book.leadNames(root: $0.root).contains(name) }) else {
+                let named = led.filter { Book.leadNames(root: $0.root).contains(name) }
+                guard !named.isEmpty else {
                     return "A lead seals a message as a lead's only under its own project's name (lead of <project>, or tell_lead's the lead of <project>)."
+                }
+                if LeadMail.isPeer(name) {
+                    guard let to = agentSession, state.teams.values.contains(where: { leads($0, to) && !leads($0, session) }) else {
+                        return "A lead seals tell_lead's name (the lead of <project>) only for another project's lead."
+                    }
+                    return nil
+                }
+                if message.agentPid == 0 { return nil }
+                guard let to = agentSession, named.contains(where: { team in team.members.contains { $0.session == to } }) else {
+                    return "A lead seals its line (lead of <project>) only for a session of its own team: another project's lead takes tell_lead."
                 }
                 return nil
             case .system(let about) where about == LeadAdvance.sender:

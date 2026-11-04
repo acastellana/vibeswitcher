@@ -442,7 +442,9 @@ public final class LeadToolset: MCPToolset {
     /// The branch workers start from and verified work is merged into.
     public var base: String { workflow.base }
 
-    var project: String { (root as NSString).lastPathComponent }
+    /// The project as the vault names it (`LeadMail.project`: the folder a symlinked root leads to), so the lead's lines
+    /// carry a name the vault seals as its own (`Book.leadNames`).
+    var project: String { LeadMail.project(of: root) }
 
     /// The lead records where it runs, so answers and worker events reach it; it also sets up the folder, and the
     /// head of its branch when VibeSwitcher has none yet (merges check that nothing else moves it).
