@@ -207,3 +207,7 @@ The user chose estimate only over a $60–100 pilot.
 
 The user wants lead-to-lead messaging kept and made truly safe, and chose immediate delivery with full visibility and an off switch (4D5835E0). Raw cross-session messages can be spoofed (any session can take a --name), workers can use them, the user can't see them, and nothing guards secrets. Repo records are pushed to GitHub, so message content stays out of them.
 
+## 2026-11-04 22:42:35 The lead syncs with GitHub through fixed-shape VibeSwitcher tools, not raw git: - fetch_remote and merge_remote: a true merge, tested before main moves, with lead records merged by union. - push_remote: each push needs the user's one click in the app, which pushes exactly the approved sha as a fast-forward, never forced. LeadLaunch's deny rules on raw git fetch and push stay.
+
+The user wants the lead to handle the GitHub sync and chose "ask me each time: one click in the app" for pushes (F6BE148C). Raw fetch and push can move main or reach any URL, so the shape is fixed in audited code. Pushing is outward-facing, so only the user's click in the app approves it.
+

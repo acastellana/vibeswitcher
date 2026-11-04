@@ -3027,3 +3027,9 @@
 - 2026-11-04 22:35 Released lead-mail-a-verified's worker (idle since its done report on 8fbd4549) while its audit runs
 - 2026-11-04 22:35 Automatically (auto_advance): Released lead-mail-a-verified's worker, idle since its done report on 8fbd4549, while its audit runs (ended pid 97777 (Worker: Lead mail: a verified tell_lead channel between project leads)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-04 22:35 Planned lead-mail-a-lead: Lead mail: a lead can't seal an inbox line as another project's lead (review audit)
+- 2026-11-04 22:38 Audit of lead-mail-a-verified: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-11-04 22:39 Dismissed lead-mail-a-verified:F2: Already a task: lead-mail-a-lead (audited, runs after this merge) ties a .lead seal's name to the caller's own project.
+- 2026-11-04 22:41 Planned remote-lead-tools-to: Remote: lead tools to fetch GitHub and merge its commits into main (review audit)
+- 2026-11-04 22:42 Planned remote-push-remote-one: Remote: push_remote, one click in the app approves each push (review audit)
+- 2026-11-04 22:48 Merged lead-mail-a-verified: Lead mail: a verified tell_lead channel between project leads
+- 2026-11-04 22:48 Flaky in lead-mail-a-verified's merge: aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
