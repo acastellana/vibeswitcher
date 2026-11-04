@@ -1029,7 +1029,8 @@ extension LeadVault {
         }
 
         /// Why `caller` may not seal a message as `sender`'s (nil: it may). The user's words are the app's to seal;
-        /// a lead's, a lead's (or the app's, passing them on); VibeSwitcher's, the app's, but for the reports a
+        /// a lead's, a lead's (or the app's, passing them on), and one under another project's lead's name
+        /// (`LeadMail.sender`) only that project's own lead's; VibeSwitcher's, the app's, but for the reports a
         /// worker's or verifier's tool server sends its lead (`worker <task>`, `verifier <task>`), which the
         /// session holding that role seals about itself, and auto_advance's (`LeadAdvance.sender`), which the lead's
         /// own tool server runs: a lead's session seals those only for an agent in that same session (`agentSession`),
@@ -1041,10 +1042,14 @@ extension LeadVault {
             switch sender {
             case .user:
                 return "Only VibeSwitcher seals a message as the user's."
-            case .lead:
-                guard case .session(let session) = caller,
-                      state.teams.values.contains(where: { $0.members.contains { $0.role == .lead && $0.session == session } })
-                else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
+            case .lead(let name):
+                guard case .session(let session) = caller else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
+                let led = state.teams.values.filter { $0.members.contains { $0.role == .lead && $0.session == session } }
+                guard !led.isEmpty else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
+                // Another project's lead's name (tell_lead's, `LeadMail.sender`): only the project's own lead seals it.
+                if LeadMail.isPeer(name), !led.contains(where: { LeadMail.sender(LeadMail.project(of: $0.root)) == sender }) {
+                    return "A lead seals a message as from \"the lead of\" a project only for the project it leads itself."
+                }
                 return nil
             case .system(let about) where about == LeadAdvance.sender:
                 guard case .session(let session) = caller, agentSession == session,

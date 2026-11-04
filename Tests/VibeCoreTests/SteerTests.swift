@@ -268,6 +268,32 @@ struct SteerTests {
         }
     }
 
+    @Test func aLeadSealsAnotherProjectsLeadsLineOnlyUnderItsOwnProjectsName() {
+        let book = LeadVault.Book()
+        let mine = "/tmp/steer-team", theirs = "/tmp/steer-other-project"
+        let team = team(book, root: mine)
+        guard case .grant(let grant) = book.answer(.issue(role: .lead, root: theirs, task: nil, auditing: nil), from: .app) else {
+            Issue.record("no lead grant for \(theirs)"); return
+        }
+        _ = book.answer(.bind(grant: grant, root: theirs, session: "other-lead"), from: .app)
+        func seals(_ sender: SteerMessage.Sender, _ caller: LeadVault.Caller) -> Bool {
+            if case .seal = book.answer(.seal(message("x", from: sender)), from: caller) { return true }
+            return false
+        }
+        // The name tell_lead gives each lead's messages: its own project's.
+        let myName = LeadMail.sender(LeadMail.project(of: mine)), theirName = LeadMail.sender(LeadMail.project(of: theirs))
+        #expect(myName == .lead("the lead of steer-team") && theirName == .lead("the lead of steer-other-project"))
+        // Each lead seals its own project's name, and not the other's, nor a project no lead it is leads.
+        #expect(seals(myName, .session(team.lead)) && seals(theirName, .session("other-lead")))
+        #expect(!seals(theirName, .session(team.lead)) && !seals(myName, .session("other-lead")))
+        #expect(!seals(LeadMail.sender("wallet-manager"), .session(team.lead)) && !seals(.lead(LeadMail.senderPrefix), .session(team.lead)))
+        // Its own team's lines stay its to seal, and the app still seals any lead's (passing them on).
+        #expect(seals(.lead("lead of demo"), .session(team.lead)) && seals(.lead("lead"), .session(team.lead)))
+        #expect(seals(theirName, .app) && seals(myName, .app))
+        // A worker seals no lead's line, a peer's included.
+        #expect(!seals(myName, .session(team.worker)) && !seals(theirName, .session(team.worker)) && !seals(myName, .unknown))
+    }
+
     @Test func autoAdvancesReportsAreSealedOnlyByALeadsSessionForItsOwnAgent() {
         let book = LeadVault.Book()
         let team = team(book)
