@@ -589,6 +589,8 @@ struct LeadTeamPane: View, Equatable {
     var hosted: [MacLine.Session] = []
     /// Where the lead's records are kept (`LeadController.recordsDirs`).
     var recordsDir: String? = LeadWorkflow.defaultRecordsDir
+    /// The messages between this project's lead and others' (`LeadController.mail`).
+    var mail = LeadMailFeed([], project: "")
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Counts 5-second ticks while it's on screen (a `.task`, so a re-render of the window doesn't restart it).
     @State private var tick = 0
@@ -602,7 +604,7 @@ struct LeadTeamPane: View, Equatable {
     static func == (a: LeadTeamPane, b: LeadTeamPane) -> Bool {
         a.root == b.root && a.board.isSame(as: b.board) && a.decisions == b.decisions && a.seen == b.seen && a.rows == b.rows
             && a.notices == b.notices && a.summaries === b.summaries && a.keepAwake === b.keepAwake && a.hosted == b.hosted
-            && a.recordsDir == b.recordsDir
+            && a.recordsDir == b.recordsDir && a.mail == b.mail
     }
 
     /// The Mac-wide line's inputs read and the line made on a queue of its own: the load (`MacLoad.steady`), the limits' file
@@ -645,7 +647,7 @@ struct LeadTeamPane: View, Equatable {
     var body: some View {
         LeadTeamView(root: root, board: board, seen: seen, open: open, answer: answer, notices: notices, decisions: decisions,
                      summary: { summaries.line($0) }, decisionSummary: { summaries.line($0) }, keepingAwake: keepAwake.held.contains(root),
-                     mac: mac, rows: teamRows, recordsDir: recordsDir, linesVersion: summaries.version)
+                     mac: mac, rows: teamRows, recordsDir: recordsDir, mail: mail, linesVersion: summaries.version)
             .onAppear(perform: request)
             .onChange(of: tick) { request() }
             .onChange(of: hosted) { macReads.make(hosted, reread: false) { mac = $0 } }

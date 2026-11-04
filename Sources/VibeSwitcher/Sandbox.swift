@@ -756,6 +756,42 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// More on the fake lead's board, for what the phone and the Lead view show of it: a proposal whose timer runs, a
     /// blocking question the lead revised, the merged tasks' merges, a task the risk check raised to audit, one
     /// reverted, an all-done card with its receipts, and two results.
+    /// Made-up messages between the sandbox's lead and other projects' leads, oldest first: two sent, one received,
+    /// one refused for a credential's shape, one that found no lead.
+    static func leadMail(now: Double) -> [LeadMail.Record] {
+        [
+            LeadMail.Record(at: now - 3_400, from: "sandbox-lead", to: "example-api", kind: .question,
+                            text: "Does /v2/sessions still return the host id as a string? The sidebar's new grouping reads it.",
+                            outcome: .delivered, detail: "Delivered to the lead of example-api while it works: it gets it at its next step."),
+            LeadMail.Record(at: now - 2_900, from: "example-api", to: "sandbox-lead", kind: .answer,
+                            text: "Yes, a string, and it stays one through v2. v3 (next month) makes it a UUID object; I'll report when that lands.",
+                            outcome: .delivered, detail: "Delivered: typed in as the lead of sandbox-lead's next prompt."),
+            LeadMail.Record(at: now - 1_500, from: "sandbox-lead", to: "example-api", kind: .report,
+                            text: "Here's the staging token so you can try it: [masked]",
+                            outcome: .refused, detail: "Refused, not sent: the text holds something shaped like a credential (API key): never send one to another lead; leave it out."),
+            LeadMail.Record(at: now - 600, from: "sandbox-lead", to: "example-docs", kind: .report,
+                            text: "The sidebar grouping merged: the screenshots in the guide's Sessions page are out of date.",
+                            outcome: .noLead, detail: "Not sent: no lead is running for example-docs on this Mac right now."),
+            LeadMail.Record(at: now - 120, from: "sandbox-lead", to: "example-api", kind: .report,
+                            text: "The grouping is on main; it reads the host id as a string, as you said.",
+                            outcome: .waiting, detail: "Sent: the lead of example-api is between turns, so it waits in its inbox and VibeSwitcher wakes it to read it."),
+        ]
+    }
+
+    /// `leadmail`: the made-up messages written to the fake lead's record, as tell_lead keeps them, and its Team tab shown.
+    func leadMail(_ done: @escaping (String?) -> Void) {
+        guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
+        let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+        do {
+            for record in Driver.leadMail(now: Date().timeIntervalSince1970) { try LeadMail.append(record, root: root) }
+        } catch {
+            return done("couldn't write the lead's mail record: \(error)")
+        }
+        UserDefaults.standard.set("team", forKey: "inspectorTab")
+        leads.refresh()
+        done(nil)
+    }
+
     func extras(_ done: @escaping (String?) -> Void) {
         guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
         let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
@@ -968,6 +1004,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("unfold", "shows the selected lead's team under its row in the sidebar"),
         ("replaced [N]", "shows the selected window session as a lead another session replaced, with N characters (default 200000) typed into it: the header's one line it makes"),
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
+        ("leadmail", "writes made-up messages between the fake lead and other projects' leads (start the lead first) to its private lead-mail record, one of them refused, and shows its Team tab: they're under Between leads"),
         ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
@@ -1026,6 +1063,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
             let page = QualityPage(Driver.statisticsQuality(range: StatisticsRange.week.interval(now: Date())))
             return AnyView(Form { ComparedSectionView(page: page.compared, methodShown: true) }.formStyle(.grouped)
                 .frame(width: StatisticsWindowController.size.width, height: 720))
+        }),
+        // The Team tab's Between leads on made-up messages, one refused and one opened whole.
+        ("lead-mail", { _ in
+            let records = Driver.leadMail(now: Date().timeIntervalSince1970)
+            return AnyView(ScrollView { LeadMailList(feed: LeadMailFeed(records, project: "sandbox-lead"), openItems: [1]).padding(14) }
+                .frame(width: 360, height: 620))
         }),
         ("lead-team", { driver in
             let team = Driver.leadTeam()
@@ -1778,6 +1821,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settle { reply(true, "\(row.title) shown replaced, \(replaced.draft.count) characters typed into it") }
         case "ask": ask(rest, answer: false) { problem in reply(problem == nil, problem ?? "the lead asks you") }
         case "answer": ask("", answer: true) { problem in reply(problem == nil, problem ?? "its questions answered") }
+        case "leadmail": leadMail { problem in reply(problem == nil, problem ?? "5 messages between leads in the fake lead's record, one refused; its Team tab shows them under Between leads") }
         case "extras": extras { problem in reply(problem == nil, problem ?? "the lead's board has a proposal, a revised question, an all-done card and results") }
         case "phone": servePhone(reply)
         case "dictation": dictate(rest, reply)

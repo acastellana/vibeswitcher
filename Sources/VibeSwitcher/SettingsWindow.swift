@@ -208,10 +208,12 @@ struct GeneralSettings: View {
                     ForEach(KeepAwakeMode.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 BatteryHoldRow(preferences: preferences)
+                Toggle("Let project leads message each other", isOn: $preferences.leadMail)
+                    .accessibilityHint("Off, a lead's message to another project's lead is refused and nothing is sent")
             } header: {
                 Text("Project lead")
             } footer: {
-                SettingsFooter("The Team tab says in plain words what each task's agent is doing and what long decisions mean, written by a small Claude model (claude -p with haiku, no tools) from the task's title, checkpoints and last steps: at most every 3 minutes per task, while the tab is open. Off, it shows the latest checkpoint or activity. While a worker, verifier or merge runs, the Mac doesn't go to sleep on its own (the display still does); on battery only if set to Always. On battery, the lead starts no workers or audits and merges nothing only while the charge is under the level set here (work in flight finishes); above it, it works as on power. 0 never pauses.")
+                SettingsFooter("The Team tab says in plain words what each task's agent is doing and what long decisions mean, written by a small Claude model (claude -p with haiku, no tools) from the task's title, checkpoints and last steps: at most every 3 minutes per task, while the tab is open. Off, it shows the latest checkpoint or activity. While a worker, verifier or merge runs, the Mac doesn't go to sleep on its own (the display still does); on battery only if set to Always. On battery, the lead starts no workers or audits and merges nothing only while the charge is under the level set here (work in flight finishes); above it, it works as on power. 0 never pauses. Leads of different projects can message each other (tell_lead): every message, sent or refused, is in the lead's Team tab, under Between leads. Off, none is sent.")
             }
             MacLimitsSection()
             BoostSection(preferences: preferences, watch: boost).id(SettingsSection.boost)

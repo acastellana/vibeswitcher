@@ -46,6 +46,7 @@ struct LeadFiles {
     private var boards: [String: (stamp: Stamp, board: LeadBoard)] = [:]
     private var decisionLists: [String: (stamp: Stamp, decisions: [LeadDecision])] = [:]
     private var workflows: [String: (stamp: Stamp, recordsDir: String?)] = [:]
+    private var mailLists: [String: (stamp: Stamp, mail: [LeadMail.Record])] = [:]
     /// How many times a file was read (for tests).
     private(set) var fileReads = 0
     /// The lead each board names, for what the 3 s refresh needs of it (which lead sessions are replaced, which one
@@ -72,6 +73,19 @@ struct LeadFiles {
         return decisions
     }
 
+    /// The project's lead mail (`LeadMail.load`, oldest first): read again only when its file changed.
+    mutating func mail(_ root: String) -> [LeadMail.Record] {
+        guard let stamp = Stamp(LeadMail.file(root: root).path) else {
+            mailLists[root] = nil
+            return []
+        }
+        if let kept = mailLists[root], kept.stamp == stamp { return kept.mail }
+        fileReads += 1
+        let mail = LeadMail.load(root: root)
+        mailLists[root] = (stamp, mail)
+        return mail
+    }
+
     /// Where the lead's records are kept (`BoardStore.recordsDir`, from its workflow.md).
     mutating func recordsDir(_ root: String) -> String? {
         let store = BoardStore(root: root)
@@ -88,6 +102,7 @@ struct LeadFiles {
         boards = boards.filter { roots.contains($0.key) }
         decisionLists = decisionLists.filter { roots.contains($0.key) }
         workflows = workflows.filter { roots.contains($0.key) }
+        mailLists = mailLists.filter { roots.contains($0.key) }
     }
 }
 
@@ -354,6 +369,9 @@ final class LeadController: ObservableObject {
     /// Where each running lead's records are kept (`BoardStore.recordsDir`, nil: in .vibeswitcher), by repository
     /// root, read with its board: the Team tab says so without reading workflow.md as it draws.
     @Published private(set) var recordsDirs: [String: String?] = [:]
+    /// Each running lead's messages to and from other projects' leads (`LeadMail`), newest first, by repository root:
+    /// read with its board and made into the Team tab's feed off the main thread.
+    @Published private(set) var mail: [String: LeadMailFeed] = [:]
     /// The Team rows as last made, for the Team tab and the sidebar (see `TeamRowsCache`).
     let teamRows = TeamRowsCache()
     /// The Team view's plain-language lines.
@@ -1344,16 +1362,18 @@ final class LeadController: ObservableObject {
             for root in roots { loaded[root] = files.board(root) }
             let decisions = Dictionary(uniqueKeysWithValues: roots.map { ($0, files.decisions($0)) })
             let records = Dictionary(uniqueKeysWithValues: roots.map { ($0, files.recordsDir($0)) })
+            let mail = Dictionary(uniqueKeysWithValues: roots.map { ($0, LeadMailFeed(files.mail($0), project: LeadMail.project(of: $0))) })
             let refusals = Dictionary(uniqueKeysWithValues: roots.compactMap { root in LeadVault.BaseMoveRefusal.load(root: root).map { (root, $0) } })
             files.keep(roots)
             let teams = Dictionary(uniqueKeysWithValues: loaded.map { root, board in
                 (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: sessions, observer: observer))
             })
             let finished = Set(loaded.flatMap { root, board in LeadTeams.finished(Array(hosted.values), root: root, board: board) })
-            return (fired, loaded, decisions, teams, records, refusals, finished)
-        }) { [weak self] fired, loaded, decisions, teams, records, refusals, finished in
+            return (fired, loaded, decisions, teams, records, refusals, finished, mail)
+        }) { [weak self] fired, loaded, decisions, teams, records, refusals, finished, mail in
             guard let self else { return }
             if records != self.recordsDirs { self.recordsDirs = records }
+            if mail != self.mail { self.mail = mail }
             self.refreshed(roots: roots, fired: fired, loaded: loaded, decisions: decisions, teams: teams, refusals: refusals,
                            finished: finished)
             self.refreshing = false

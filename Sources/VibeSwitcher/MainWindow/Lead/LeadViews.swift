@@ -753,6 +753,8 @@ struct LeadTeamView: View {
     /// Where the lead's records are kept (`BoardStore.recordsDir`, read with the board, never as it draws; nil: in
     /// .vibeswitcher).
     var recordsDir: String? = LeadWorkflow.defaultRecordsDir
+    /// The messages between this project's lead and other projects' leads (`LeadMailFeed`), newest first.
+    var mail = LeadMailFeed([], project: "")
     /// Changes whenever a line `summary` or `decisionSummary` gives may have (`TeamSummaryModel.version`): the lines are
     /// looked up again only then, or when the rows or decisions do (`Lines`). nil: on every draw (pictures).
     var linesVersion: Int?
@@ -813,7 +815,7 @@ struct LeadTeamView: View {
                 glancing(rows).equatable()
                 TeamRecords(root: root, board: board, recordsDir: recordsDir, clock: clock,
                             minute: Int((clock ?? Date()).timeIntervalSince1970 / 60), showEarlierResults: showEarlierResults,
-                            showEarlierQuestions: showEarlierQuestions).equatable()
+                            showEarlierQuestions: showEarlierQuestions, mail: mail).equatable()
             }
             .padding(14)
             .coordinateSpace(name: TeamExposure.space)
@@ -917,10 +919,12 @@ struct TeamRecords: View, Equatable {
     let minute: Int
     let showEarlierResults: Bool
     let showEarlierQuestions: Bool
+    /// The messages between leads (shown when there are any).
+    var mail = LeadMailFeed([], project: "")
 
     static func == (a: TeamRecords, b: TeamRecords) -> Bool {
         a.root == b.root && a.board.isSame(as: b.board) && a.recordsDir == b.recordsDir && a.clock == b.clock && a.minute == b.minute
-            && a.showEarlierResults == b.showEarlierResults && a.showEarlierQuestions == b.showEarlierQuestions
+            && a.showEarlierResults == b.showEarlierResults && a.showEarlierQuestions == b.showEarlierQuestions && a.mail == b.mail
     }
 
     var body: some View {
@@ -940,6 +944,11 @@ struct TeamRecords: View, Equatable {
             if !board.updates.isEmpty {
                 teamSection("Results") {
                     ResultsList(updates: board.updates, showEarlier: showEarlierResults)
+                }
+            }
+            if !mail.items.isEmpty {
+                teamSection("Between leads") {
+                    LeadMailList(feed: mail)
                 }
             }
             teamSection("Files") {
