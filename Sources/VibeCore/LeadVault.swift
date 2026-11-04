@@ -1078,12 +1078,13 @@ extension LeadVault {
             return String(name[of.upperBound...])
         }
 
-        /// `text` lowercased, without its whitespace and its invisible (format and control) characters.
+        /// `text` lowercased, without its whitespace, its invisible (format and control) characters and its combining
+        /// marks.
         static func folded(_ text: String) -> String {
             var kept = String.UnicodeScalarView()
+            let dropped: Set<Unicode.GeneralCategory> = [.format, .control, .nonspacingMark, .enclosingMark, .spacingMark]
             for scalar in text.lowercased().unicodeScalars {
-                let category = scalar.properties.generalCategory
-                if scalar.properties.isWhitespace || category == .format || category == .control { continue }
+                if scalar.properties.isWhitespace || dropped.contains(scalar.properties.generalCategory) { continue }
                 kept.append(scalar)
             }
             return String(kept)

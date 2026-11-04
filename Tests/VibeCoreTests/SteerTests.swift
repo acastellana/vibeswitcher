@@ -289,7 +289,8 @@ struct SteerTests {
         #expect(!seals(LeadMail.sender("wallet-manager"), .session(team.lead)) && !seals(.lead(LeadMail.senderPrefix), .session(team.lead)))
         // Nor the other's name spelled a little differently: a reader takes each for the lead of steer-other-project.
         for near in ["The lead of steer-other-project", " the lead of steer-other-project", "\u{200B}the lead of steer-other-project",
-                     "the lead of\u{00A0}steer-other-project", "THE LEAD OF STEER-OTHER-PROJECT", "lead of steer-other-project"] {
+                     "the lead of\u{00A0}steer-other-project", "THE LEAD OF STEER-OTHER-PROJECT", "lead of steer-other-project",
+                     "the lead of\u{0301} steer-other-project", "the lead\u{2060} of steer-other-project"] {
             #expect(!seals(.lead(near), .session(team.lead)), "\(near.debugDescription)")
         }
         // Its own team's lines stay its to seal (as its tools name it, `lead of <project>`, or plainly `lead`), and
