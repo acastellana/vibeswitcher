@@ -3023,3 +3023,7 @@
 - 2026-11-04 22:17 Automatically (auto_advance): Started a worker on lead-mail-a-verified (Lead mail: a verified tell_lead channel between project leads).
 - 2026-11-04 22:18 Planned lead-mail-block-raw: Lead mail: block raw cross-session messaging in VibeSwitcher's roles (review audit)
 - 2026-11-04 22:18 Planned lead-mail-show-it: Lead mail: show it in the app, with an on/off switch
+- 2026-11-04 22:35 Automatically (auto_advance): Started the audit of lead-mail-a-verified at 8fbd4549 (Its review is audit).
+- 2026-11-04 22:35 Released lead-mail-a-verified's worker (idle since its done report on 8fbd4549) while its audit runs
+- 2026-11-04 22:35 Automatically (auto_advance): Released lead-mail-a-verified's worker, idle since its done report on 8fbd4549, while its audit runs (ended pid 97777 (Worker: Lead mail: a verified tell_lead channel between project leads)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-04 22:35 Planned lead-mail-a-lead: Lead mail: a lead can't seal an inbox line as another project's lead (review audit)
