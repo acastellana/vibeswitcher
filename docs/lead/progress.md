@@ -3043,3 +3043,10 @@
 - 2026-11-04 22:48 Automatically (auto_advance): Started a worker on lead-mail-a-lead (Lead mail: a lead can't seal an inbox line as another project's lead), its after tasks done (lead-mail-a-verified).
 - 2026-11-04 22:48 Started a worker on remote-lead-tools-to
 - 2026-11-04 22:48 Automatically (auto_advance): Started a worker on remote-lead-tools-to (Remote: lead tools to fetch GitHub and merge its commits into main).
+- 2026-11-04 22:58 Automatically (auto_advance): Started the audit of lead-mail-block-raw at 79e81d56 (Its review is audit).
+- 2026-11-04 22:58 Released lead-mail-block-raw's worker (idle since its done report on 79e81d56) while its audit runs
+- 2026-11-04 22:58 Automatically (auto_advance): Released lead-mail-block-raw's worker, idle since its done report on 79e81d56, while its audit runs (ended pid 94974 (Worker: Lead mail: block raw cross-session messaging in VibeSwitcher's roles)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-04 23:02 Audit of lead-mail-block-raw: complete, clean
+- 2026-11-04 23:02 Automatically (auto_advance): Started the audit of lead-mail-show-it at 3bc1679c (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-11-04 23:02 Released lead-mail-show-it's worker (idle since its done report on 3bc1679c) while its audit runs
+- 2026-11-04 23:02 Automatically (auto_advance): Released lead-mail-show-it's worker, idle since its done report on 3bc1679c, while its audit runs (ended pid 95099 (Worker: Lead mail: show it in the app, with an on/off switch)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
