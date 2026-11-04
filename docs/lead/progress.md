@@ -3084,3 +3084,7 @@
 - 2026-11-05 00:01 Update: Today: lead mail made safe, GitHub sync tools, remotes locked — **Landed (2026-11-04)**, each audited and merged on a full test run:
 - 2026-11-05 00:03 Merged workers-and-verifiers-3: Workers and verifiers can't change the repository's remotes
 - 2026-11-05 00:03 Flaky in workers-and-verifiers-3's merge: slowAppLookupsAndLedgerWritesDontHoldTheMainThread() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-05 00:03 Automatically (auto_advance): Merged workers-and-verifiers-3 (Workers and verifiers can't change the repository's remotes) into main at 0e6f50be, on its passing audit and the full test run. (Its first test run failed on slowAppLookupsAndLedgerWritesDontHoldTheMainThread() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/workers-and-verifiers-3/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswit….)
+- 2026-11-05 00:03 Automatically (auto_advance): Cleaned up workers-and-verifiers-3 (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-05 00:03 Started a worker on main-thread-freezes-with
+- 2026-11-05 00:03 Automatically (auto_advance): Started a worker on main-thread-freezes-with (Main-thread freezes with a long lead chat open (SwiftUI accessibility combine)).
