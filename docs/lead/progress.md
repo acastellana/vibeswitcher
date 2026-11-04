@@ -3033,3 +3033,13 @@
 - 2026-11-04 22:42 Planned remote-push-remote-one: Remote: push_remote, one click in the app approves each push (review audit)
 - 2026-11-04 22:48 Merged lead-mail-a-verified: Lead mail: a verified tell_lead channel between project leads
 - 2026-11-04 22:48 Flaky in lead-mail-a-verified's merge: aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-04 22:48 Automatically (auto_advance): Merged lead-mail-a-verified (Lead mail: a verified tell_lead channel between project leads) into main at 3eaede93, on its passing audit and the full test run. (Its first test run failed on aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/lead-mail-a-verified/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswit….)
+- 2026-11-04 22:48 Automatically (auto_advance): Cleaned up lead-mail-a-verified (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-04 22:48 Started a worker on lead-mail-block-raw
+- 2026-11-04 22:48 Automatically (auto_advance): Started a worker on lead-mail-block-raw (Lead mail: block raw cross-session messaging in VibeSwitcher's roles), its after tasks done (lead-mail-a-verified).
+- 2026-11-04 22:48 Started a worker on lead-mail-show-it (auto → Claude: Claude weekly 7%, 4 points ahead of pace, not tight; Codex usage not known (its last reading's windows have reset))
+- 2026-11-04 22:48 Automatically (auto_advance): Started a worker on lead-mail-show-it (Lead mail: show it in the app, with an on/off switch), its after tasks done (lead-mail-a-verified); its agent is auto, so it went to Claude: Claude weekly 7%, 4 points ahead of pace, not tight; Codex usage not known (its last reading's windows have reset).
+- 2026-11-04 22:48 Started a worker on lead-mail-a-lead
+- 2026-11-04 22:48 Automatically (auto_advance): Started a worker on lead-mail-a-lead (Lead mail: a lead can't seal an inbox line as another project's lead), its after tasks done (lead-mail-a-verified).
+- 2026-11-04 22:48 Started a worker on remote-lead-tools-to
+- 2026-11-04 22:48 Automatically (auto_advance): Started a worker on remote-lead-tools-to (Remote: lead tools to fetch GitHub and merge its commits into main).
