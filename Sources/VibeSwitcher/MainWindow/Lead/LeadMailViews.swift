@@ -115,10 +115,9 @@ struct LeadMailList: View {
                 Text(item.kind).font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(item.refused ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.accentColor))
                     .fixedSize()
+                // Sent by this project's lead, or received by it: the other project's name has the room.
                 Text(item.received ? "from \(item.from)" : "to \(item.to)").font(.system(size: 11.5, weight: .medium))
-                    .lineLimit(1).truncationMode(.middle)
-                Text(item.received ? "→ this lead" : "from this lead").font(.system(size: 10.5)).foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                    .lineLimit(1).truncationMode(.middle).layoutPriority(1)
                 Spacer(minLength: 4)
                 Text(Self.time(item.at)).font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.tertiary).fixedSize()
             }
