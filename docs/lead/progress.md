@@ -3050,3 +3050,6 @@
 - 2026-11-04 23:02 Automatically (auto_advance): Started the audit of lead-mail-show-it at 3bc1679c (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
 - 2026-11-04 23:02 Released lead-mail-show-it's worker (idle since its done report on 3bc1679c) while its audit runs
 - 2026-11-04 23:02 Automatically (auto_advance): Released lead-mail-show-it's worker, idle since its done report on 3bc1679c, while its audit runs (ended pid 95099 (Worker: Lead mail: show it in the app, with an on/off switch)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-04 23:04 Audit of lead-mail-show-it: complete, clean, round 1: 1 Nit open
+- 2026-11-04 23:15 Merged lead-mail-block-raw: Lead mail: block raw cross-session messaging in VibeSwitcher's roles (in a batch: lead-mail-block-raw, lead-mail-show-it landed on one test run)
+- 2026-11-04 23:15 Merged lead-mail-show-it: Lead mail: show it in the app, with an on/off switch (in a batch: lead-mail-block-raw, lead-mail-show-it landed on one test run)
