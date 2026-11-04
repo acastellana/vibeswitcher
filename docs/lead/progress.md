@@ -3056,3 +3056,13 @@
 - 2026-11-04 23:15 Automatically (auto_advance): Merged lead-mail-block-raw at a4de0322 (its passing audit), lead-mail-show-it at 086442e2 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
 - 2026-11-04 23:15 Automatically (auto_advance): Cleaned up lead-mail-block-raw (freed 1.2 GB of build output and temporary folders). It stays done.
 - 2026-11-04 23:15 Automatically (auto_advance): Cleaned up lead-mail-show-it (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-04 23:23 Automatically (auto_advance): Started the audit of lead-mail-a-lead at aabfb6ae (Its review is audit).
+- 2026-11-04 23:23 Released lead-mail-a-lead's worker (idle since its done report on aabfb6ae) while its audit runs
+- 2026-11-04 23:23 Automatically (auto_advance): Released lead-mail-a-lead's worker, idle since its done report on aabfb6ae, while its audit runs (ended pid 95369 (Worker: Lead mail: a lead can't seal an inbox line as another project's lead)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-04 23:23 Planned lead-mail-a-lead-2: Lead mail: a lead seals lines only for its own team's sessions (review audit)
+- 2026-11-04 23:24 Automatically (auto_advance): Started the audit of remote-lead-tools-to at 8ca77abe (Its review is audit).
+- 2026-11-04 23:24 Released remote-lead-tools-to's worker (idle since its done report on 8ca77abe) while its audit runs
+- 2026-11-04 23:24 Automatically (auto_advance): Released remote-lead-tools-to's worker, idle since its done report on 8ca77abe, while its audit runs (ended pid 95553 (Worker: Remote: lead tools to fetch GitHub and merge its commits into main)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-04 23:24 Planned workers-and-verifiers-3: Workers and verifiers can't change the repository's remotes (review audit)
+- 2026-11-04 23:24 Started a worker on workers-and-verifiers-3 (auto → Claude: Claude weekly 11%, 8 points ahead of pace, not tight; Codex 10%)
+- 2026-11-04 23:24 Automatically (auto_advance): Started a worker on workers-and-verifiers-3 (Workers and verifiers can't change the repository's remotes); its agent is auto, so it went to Claude: Claude weekly 11%, 8 points ahead of pace, not tight; Codex 10%.
