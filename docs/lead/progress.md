@@ -3091,3 +3091,5 @@
 - 2026-11-05 00:10 Automatically (auto_advance): Started the audit of lead-mail-a-lead-2 at 9d9ef590 (Its review is audit).
 - 2026-11-05 00:10 Released lead-mail-a-lead-2's worker (idle since its done report on 9d9ef590) while its audit runs
 - 2026-11-05 00:10 Automatically (auto_advance): Released lead-mail-a-lead-2's worker, idle since its done report on 9d9ef590, while its audit runs (ended pid 79274 (Worker: Lead mail: a lead seals lines only for its own team's sessions)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-05 00:18 Audit of lead-mail-a-lead-2: complete, clean, round 1: 1 Pre-existing open
+- 2026-11-05 00:18 Dismissed lead-mail-a-lead-2:F1: Copying a sealed note into another project's board needs a file write that lead sessions are denied (Edit/Write and shell writes in LeadLaunch.readOnly/fileWrites), and that prompts for a worker writing outside its worktree; not worth a task now.
