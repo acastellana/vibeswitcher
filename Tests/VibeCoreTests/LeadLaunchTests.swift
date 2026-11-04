@@ -121,6 +121,25 @@ struct LeadLaunchTests {
         #expect(WorkingPolicy.load(from: policy) == "- Be brief.")
     }
 
+    /// No role reaches another session by Claude Code's raw cross-session messaging: anyone on the Mac can send one and
+    /// claim any name. A lead uses tell_lead (`LeadMail`). Bare tool names, as `Edit` and `Write` are denied: the whole
+    /// tool, out of the session's context. Nothing allows them back.
+    @Test func noRoleMayMessageOtherSessionsRaw() throws {
+        let root = try root()
+        for role in [LeadLaunch.Role.lead, .worker, .verifier] {
+            let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "fix", base: "claude",
+                                                prompt: "p", start: "s", server: "/App/vibeswitcher-mcp", name: "\(role.rawValue)-fix",
+                                                branch: "project-lead", records: "docs/lead")
+            let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
+            let permissions = settings?["permissions"] as? [String: Any]
+            let deny = permissions?["deny"] as? [String] ?? [], allow = permissions?["allow"] as? [String] ?? []
+            for tool in ["SendMessage", "ListAgents"] {
+                #expect(deny.contains(tool), "\(role): \(tool)")
+                #expect(!allow.contains { $0 == tool || $0.hasPrefix(tool + "(") }, "\(role): \(tool) allowed")
+            }
+        }
+    }
+
     @Test func everyRoleMayUseItsToolsByTheServersWholeNameInAnyPermissionMode() throws {
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
             let launch = try LeadLaunch.prepare(role: role, root: try root(), task: "x", base: "claude", prompt: "p", start: "Go.",

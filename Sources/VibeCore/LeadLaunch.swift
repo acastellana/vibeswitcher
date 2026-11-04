@@ -90,14 +90,23 @@ public enum LeadLaunch {
                             "Bash(vmmap:*)", "Bash(malloc_history:*)", "Bash(dtrace:*)", "Bash(dtruss:*)",
                             "Bash(sudo dtrace:*)", "Bash(sudo dtruss:*)"]
 
+    /// Claude Code's raw cross-session messaging (another session on the Mac, by its name). Anyone on the Mac can send
+    /// one and claim any name, and a role that could reach every session could steer them: a lead tells another
+    /// project's lead with `tell_lead` (`LeadMail`: the sender filled in by the vault, guarded, recorded), and a worker
+    /// or verifier reaches only its own lead, through its tools. Bare tool names, as `readOnly`'s: "To match all uses of a
+    /// tool, use only the tool name without parentheses", and as a deny rule it "removes the tool from Claude's context
+    /// entirely" (code.claude.com/docs/en/permissions, "Match all uses of a tool", "Manage permissions").
+    static let crossSession = ["SendMessage", "ListAgents"]
+
     /// What each role may not do. `records`: the workflow's `records_dir`, which only the lead's tool server writes
     /// (and commits to the base branch): a worker editing it would conflict with those commits.
     public static func deny(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
         switch role {
         case .lead:
-            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + outsideReads + userSettings + killsByName
+            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + outsideReads + userSettings + killsByName + crossSession
         case .verifier:
             return readOnly + gitWrites + gitAround + fileWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers
+                + crossSession
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
             // the brief gives, or `git rebase <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
@@ -121,7 +130,7 @@ public enum LeadLaunch {
                 rules += ["Edit(\(records)/**)", "Write(\(records)/**)", "Bash(git add \(records)*)", "Bash(git rm \(records)*)",
                           "Bash(git rm * \(records)*)"]
             }
-            return rules + gitAround + privateFiles + outsideReads + userSettings + killsByName + debuggers
+            return rules + gitAround + privateFiles + outsideReads + userSettings + killsByName + debuggers + crossSession
         }
     }
 
