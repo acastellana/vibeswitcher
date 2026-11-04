@@ -110,8 +110,11 @@ final class FakeRuntime: LeadRuntime {
         case .agent(let agent): name = "agent:\(agent.pid)"
         }
         steered.append((name, sender, text))
+        if let onSteer { return try onSteer(target, sender, text) }
         return delivery
     }
+    /// Set: how each message is delivered (a scratch inbox, say), in place of answering `delivery`.
+    var onSteer: ((LeadTarget, SteerMessage.Sender, String) throws -> LeadDelivery.Delivered)?
     /// Called at each read of the sessions, before the answer (a test's way into the moment a tool counts them).
     var onSessions: (() -> Void)?
     func sessions() throws -> [LeadSessionInfo] {

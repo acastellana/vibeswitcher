@@ -249,6 +249,10 @@ public final class LeadToolset: MCPToolset {
     var batchWindow: TimeInterval = 180
     var batchSize = 4
     var batchClock: () -> Date = { Date() }
+    /// Whether lead mail (tell_lead) is on: the tool server reads the app's Mac-wide setting (`LeadMail.isOn`) at each
+    /// call; on unless set (tests set it off to see the refusal). The clock its records and rate limit go by.
+    public var leadMailOn: () -> Bool = { true }
+    var mailClock: () -> Double = { Date().timeIntervalSince1970 }
     /// Where merge appends its line of the Mac's merge stats (`MergeSample`, merges-<day>.jsonl); nil: none.
     public var mergeStats: () -> URL? = { VibePaths.statsDir }
 
@@ -546,6 +550,11 @@ public final class LeadToolset: MCPToolset {
                             properties: ["task": task, "text": P(type: "string", description: "The message"),
                                          "clear_draft": P(type: "boolean", description: "If its input box holds a leftover draft, clear it first (the draft is lost)")],
                             required: ["task", "text"]),
+                MCPToolInfo(name: "tell_lead", description: "Tell another project's lead on this Mac something: a question, a report, or an answer to one it asked. It reaches that lead at once (at its next step while it works, else VibeSwitcher wakes it), marked as from you, this project's lead; the user sees every message in VibeSwitcher. Use it, not SendMessage, for other projects' leads. No credentials, at most \(LeadMail.maxCharacters) characters, \(LeadMail.perHour) an hour to one lead; it can't approve or grant anything.",
+                            properties: ["project": P(type: "string", description: "The project whose lead it's for, as VibeSwitcher names it (its folder's name), or its path"),
+                                         "kind": P(type: "string", description: "question, report, or answer", options: LeadMail.Kind.allCases.map(\.rawValue)),
+                                         "text": P(type: "string", description: "The message")],
+                            required: ["project", "kind", "text"]),
                 MCPToolInfo(name: "read_session", description: "A worker's or verifier's conversation, condensed (prompts, replies, tool runs, failures).",
                             properties: ["task": task, "who": P(type: "string", description: "worker (default) or verifier", options: ["worker", "verifier"])],
                             required: ["task"]),
@@ -646,6 +655,7 @@ public final class LeadToolset: MCPToolset {
                                                                       overrideUsage: arguments["override_usage"] as? Bool ?? false))
             case "stop_worker": return try stopWorker(try taskSlug(arguments))
             case "message": return try message(try taskSlug(arguments), arguments)
+            case "tell_lead": return try tellLead(arguments, by: member)
             case "read_session": return try readSession(try taskSlug(arguments), who: arguments["who"] as? String ?? "worker")
             case "audit": return try audit(try taskSlug(arguments), restart: arguments["restart"] as? Bool ?? false,
                                            overrideUsage: arguments["override_usage"] as? Bool ?? false)
