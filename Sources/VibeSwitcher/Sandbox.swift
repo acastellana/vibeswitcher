@@ -753,9 +753,6 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// More on the fake lead's board, for what the phone and the Lead view show of it: a proposal whose timer runs, a
-    /// blocking question the lead revised, the merged tasks' merges, a task the risk check raised to audit, one
-    /// reverted, an all-done card with its receipts, and two results.
     /// Made-up messages between the sandbox's lead and other projects' leads, oldest first: two sent, one received,
     /// one refused for a credential's shape, one that found no lead.
     static func leadMail(now: Double) -> [LeadMail.Record] {
@@ -792,6 +789,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
         done(nil)
     }
 
+    /// More on the fake lead's board, for what the phone and the Lead view show of it: a proposal whose timer runs, a
+    /// blocking question the lead revised, the merged tasks' merges, a task the risk check raised to audit, one
+    /// reverted, an all-done card with its receipts, and two results.
     func extras(_ done: @escaping (String?) -> Void) {
         guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
         let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
