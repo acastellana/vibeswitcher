@@ -270,7 +270,7 @@ struct SteerTests {
 
     @Test func aLeadSealsAnotherProjectsLeadsLineOnlyUnderItsOwnProjectsName() {
         let book = LeadVault.Book()
-        let mine = "/tmp/steer-team", theirs = "/tmp/steer-other-project"
+        let mine = "/nonexistent/steer-team", theirs = "/nonexistent/steer-other-project"  // made-up roots, never opened
         let team = team(book, root: mine)
         guard case .grant(let grant) = book.answer(.issue(role: .lead, root: theirs, task: nil, auditing: nil), from: .app) else {
             Issue.record("no lead grant for \(theirs)"); return
