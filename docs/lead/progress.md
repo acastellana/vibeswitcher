@@ -3072,3 +3072,15 @@
 - 2026-11-04 23:37 Automatically (auto_advance): Started the audit of workers-and-verifiers-3 at bdf0c625 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-04 23:46 Merged lead-mail-a-lead: Lead mail: a lead can't seal an inbox line as another project's lead (in a batch: lead-mail-a-lead, remote-lead-tools-to landed on one test run)
 - 2026-11-04 23:46 Merged remote-lead-tools-to: Remote: lead tools to fetch GitHub and merge its commits into main (in a batch: lead-mail-a-lead, remote-lead-tools-to landed on one test run)
+- 2026-11-04 23:46 Automatically (auto_advance): Merged lead-mail-a-lead at fd4138e4 (its passing audit), remote-lead-tools-to at be8cc1e3 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-04 23:46 Automatically (auto_advance): Cleaned up lead-mail-a-lead (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-04 23:46 Automatically (auto_advance): Cleaned up remote-lead-tools-to (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-04 23:46 Started a worker on remote-push-remote-one
+- 2026-11-04 23:46 Automatically (auto_advance): Started a worker on remote-push-remote-one (Remote: push_remote, one click in the app approves each push), its after tasks done (remote-lead-tools-to).
+- 2026-11-04 23:46 Started a worker on lead-mail-a-lead-2
+- 2026-11-04 23:46 Automatically (auto_advance): Started a worker on lead-mail-a-lead-2 (Lead mail: a lead seals lines only for its own team's sessions), its after tasks done (lead-mail-a-lead).
+- 2026-11-04 23:47 Audit of workers-and-verifiers-3: complete, clean, round 1: 1 Nit open
+- 2026-11-04 23:58 Planned main-thread-freezes-with: Main-thread freezes with a long lead chat open (SwiftUI accessibility combine)
+- 2026-11-05 00:01 Update: Today: lead mail made safe, GitHub sync tools, remotes locked — **Landed (2026-11-04)**, each audited and merged on a full test run:
+- 2026-11-05 00:03 Merged workers-and-verifiers-3: Workers and verifiers can't change the repository's remotes
+- 2026-11-05 00:03 Flaky in workers-and-verifiers-3's merge: slowAppLookupsAndLedgerWritesDontHoldTheMainThread() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
