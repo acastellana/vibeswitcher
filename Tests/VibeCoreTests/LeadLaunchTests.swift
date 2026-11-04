@@ -140,6 +140,36 @@ struct LeadLaunchTests {
         }
     }
 
+    /// No role changes the repository's remotes: .git/config is the main checkout's too, so a worker's `git remote
+    /// set-url origin <elsewhere>` would send the user's own `git push origin main` there, and have the lead's first
+    /// fetch_remote pin it. Listing them stays open.
+    @Test func noRoleMayChangeTheRemotes() throws {
+        let root = try root()
+        let writes = ["add", "rename", "remove", "rm", "set-head", "set-branches", "set-url", "prune", "update"]
+        for role in [LeadLaunch.Role.lead, .worker, .verifier] {
+            let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "fix", base: "claude",
+                                                prompt: "p", start: "s", server: "/App/vibeswitcher-mcp", name: "\(role.rawValue)-fix",
+                                                branch: "project-lead", records: "docs/lead")
+            let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
+            let deny = (settings?["permissions"] as? [String: Any])?["deny"] as? [String] ?? []
+            for sub in writes {
+                for option in ["", "-v ", "--verbose "] {
+                    #expect(deny.contains("Bash(git remote \(option)\(sub):*)"), "\(role): git remote \(option)\(sub)")
+                }
+            }
+            // Reading them: no rule names `git remote` alone, `-v`, `show` or `get-url`.
+            let remote = deny.filter { $0.hasPrefix("Bash(git remote") }
+            #expect(remote.count == writes.count * 3, "\(role): \(remote)")
+            for read in ["git remote", "git remote -v", "git remote --verbose", "git remote show", "git remote show origin",
+                         "git remote get-url origin", "git remote -v show origin"] {
+                #expect(!remote.contains { rule in
+                    let prefix = String(rule.dropFirst("Bash(".count).dropLast(":*)".count))
+                    return read == prefix || read.hasPrefix(prefix + " ")
+                }, "\(role): \(read) denied")
+            }
+        }
+    }
+
     @Test func everyRoleMayUseItsToolsByTheServersWholeNameInAnyPermissionMode() throws {
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
             let launch = try LeadLaunch.prepare(role: role, root: try root(), task: "x", base: "claude", prompt: "p", start: "Go.",

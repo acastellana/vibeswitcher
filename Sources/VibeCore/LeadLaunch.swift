@@ -30,6 +30,13 @@ public enum LeadLaunch {
                             "Bash(git --exec-path:*)", "Bash(git update-ref:*)", "Bash(git symbolic-ref:*)", "Bash(git config:*)",
                             "Bash(git fetch:*)", "Bash(git pull:*)", "Bash(git replace:*)", "Bash(git filter-branch:*)",
                             "Bash(env git:*)", "Bash(command git:*)", "Bash(/usr/bin/git:*)", "Bash(xcrun git:*)"]
+    /// `git remote`'s subcommands that write (.git/config, which a worktree shares with the main checkout, or the
+    /// remote-tracking refs), each also after `-v`/`--verbose`, which git takes before them (`git remote -v set-url`,
+    /// git 2.39). A changed origin would send the user's own `git push origin main` elsewhere, and the lead's first
+    /// fetch_remote pins the URL it finds. Listing them (`git remote`, `-v`, `show`, `get-url`) stays open.
+    static let remoteWrites: [String] = ["", "-v ", "--verbose "].flatMap { option in
+        ["add", "rename", "remove", "rm", "set-head", "set-branches", "set-url", "prune", "update"].map { "Bash(git remote \(option)\($0):*)" }
+    }
     /// Shell commands that write files, for the roles that only read.
     static let fileWrites = ["Bash(sed -i:*)", "Bash(perl -i:*)", "Bash(perl -pi:*)", "Bash(perl -e:*)", "Bash(tee:*)", "Bash(dd:*)",
                              "Bash(truncate:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(rm:*)", "Bash(ln:*)", "Bash(touch:*)", "Bash(install:*)",
@@ -103,9 +110,10 @@ public enum LeadLaunch {
     public static func deny(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
         switch role {
         case .lead:
-            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + outsideReads + userSettings + killsByName + crossSession
+            return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName
+                + crossSession
         case .verifier:
-            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers
+            return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers
                 + crossSession
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
@@ -130,7 +138,7 @@ public enum LeadLaunch {
                 rules += ["Edit(\(records)/**)", "Write(\(records)/**)", "Bash(git add \(records)*)", "Bash(git rm \(records)*)",
                           "Bash(git rm * \(records)*)"]
             }
-            return rules + gitAround + privateFiles + outsideReads + userSettings + killsByName + debuggers + crossSession
+            return rules + gitAround + remoteWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers + crossSession
         }
     }
 
