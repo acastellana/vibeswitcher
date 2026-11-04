@@ -3018,3 +3018,8 @@
 - 2026-11-03 10:49 Update: Codex workers now get lead messages mid-turn — **What changed:** a lead's `message()` to a Codex worker that is mid-turn is now typed into its composer, and Codex takes it at its next step. Before, it sat in the hook inbox, which only Claude drain…
 - 2026-11-03 19:50 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-11-03 20:51 Update: Today: Statistics finished, installer quit fixed, Codex mid-turn messages fixed — **Landed:**
+- 2026-11-04 22:17 Planned lead-mail-a-verified: Lead mail: a verified tell_lead channel between project leads (review audit)
+- 2026-11-04 22:17 Started a worker on lead-mail-a-verified
+- 2026-11-04 22:17 Automatically (auto_advance): Started a worker on lead-mail-a-verified (Lead mail: a verified tell_lead channel between project leads).
+- 2026-11-04 22:18 Planned lead-mail-block-raw: Lead mail: block raw cross-session messaging in VibeSwitcher's roles (review audit)
+- 2026-11-04 22:18 Planned lead-mail-show-it: Lead mail: show it in the app, with an on/off switch

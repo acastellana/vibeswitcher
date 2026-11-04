@@ -203,3 +203,7 @@ The user (2026-11-02, about 21:30) asked for more information and for how well t
 
 The user chose estimate only over a $60–100 pilot.
 
+## 2026-11-04 22:18:21 Lead-to-lead messaging goes through a VibeSwitcher channel, tell_lead. - VibeSwitcher fills in the sender from the vault's role binding, never from server arguments. - Delivery is immediate. - Secret-shaped text is refused, and messages are capped in size and rate. - Each message is logged privately in .vibeswitcher/; the app shows them and the user can turn the channel off. - Raw Claude Code SendMessage and ListAgents are denied to every role VibeSwitcher starts. - Raw cross-session messages are unverified information, never approval. - docs/lead/ never holds message content or another project's name.
+
+The user wants lead-to-lead messaging kept and made truly safe, and chose immediate delivery with full visibility and an off switch (4D5835E0). Raw cross-session messages can be spoofed (any session can take a --name), workers can use them, the user can't see them, and nothing guards secrets. Repo records are pushed to GitHub, so message content stays out of them.
+
