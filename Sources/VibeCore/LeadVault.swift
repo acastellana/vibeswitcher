@@ -1029,9 +1029,8 @@ extension LeadVault {
         }
 
         /// Why `caller` may not seal a message as `sender`'s (nil: it may). The user's words are the app's to seal;
-        /// a lead's, a lead's (or the app's, passing them on), and one whose name says it's a project's lead
-        /// (`claimedProject`: tell_lead's `LeadMail.sender`, a lead's `lead of <project>`) only that project's own
-        /// lead's; VibeSwitcher's, the app's, but for the reports a
+        /// a lead's, the app's (passing them on) or a lead's own, under its own project's name only (`leadNames`), so a
+        /// lead's Bash can't sign a line as another project's lead; VibeSwitcher's, the app's, but for the reports a
         /// worker's or verifier's tool server sends its lead (`worker <task>`, `verifier <task>`), which the
         /// session holding that role seals about itself, and auto_advance's (`LeadAdvance.sender`), which the lead's
         /// own tool server runs: a lead's session seals those only for an agent in that same session (`agentSession`),
@@ -1047,11 +1046,8 @@ extension LeadVault {
                 guard case .session(let session) = caller else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
                 let led = state.teams.values.filter { $0.members.contains { $0.role == .lead && $0.session == session } }
                 guard !led.isEmpty else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
-                // A name that says whose lead it is (tell_lead's `the lead of <project>`, a lead's own `lead of
-                // <project>`, however it's spelled): only that project's own lead seals it.
-                if let claimed = Book.claimedProject(name),
-                   !led.contains(where: { Book.folded(LeadMail.project(of: $0.root)) == claimed }) {
-                    return "A lead seals a message as from the lead of a project only for the project it leads itself."
+                guard led.contains(where: { Book.leadNames(root: $0.root).contains(name) }) else {
+                    return "A lead seals a message as a lead's only under its own project's name (lead of <project>, or tell_lead's the lead of <project>)."
                 }
                 return nil
             case .system(let about) where about == LeadAdvance.sender:
@@ -1069,25 +1065,12 @@ extension LeadVault {
             }
         }
 
-        /// The project a lead's name says it's the lead of, read as its receiver would read it: case, spaces and
-        /// invisible characters aside, so `The lead of X`, `lead of X` and `the lead of\u{200B} X` all name `X`
-        /// (folded, see `folded`); nil when it names none (`lead`).
-        static func claimedProject(_ name: String) -> String? {
-            let name = folded(name)
-            guard let of = name.range(of: "leadof") else { return nil }
-            return String(name[of.upperBound...])
-        }
-
-        /// `text` lowercased, without its whitespace, its invisible (format and control) characters and its combining
-        /// marks.
-        static func folded(_ text: String) -> String {
-            var kept = String.UnicodeScalarView()
-            let dropped: Set<Unicode.GeneralCategory> = [.format, .control, .nonspacingMark, .enclosingMark, .spacingMark]
-            for scalar in text.lowercased().unicodeScalars {
-                if scalar.properties.isWhitespace || dropped.contains(scalar.properties.generalCategory) { continue }
-                kept.append(scalar)
-            }
-            return String(kept)
+        /// The names a lead's own messages carry, by its project (`LeadMail.project`): `lead of <project>` to its team
+        /// (`LeadToolset`'s messages and notes), `the lead of <project>` to another project's lead (tell_lead's
+        /// `LeadMail.sender`). Exactly these: a receiver reads whatever name is sealed, look-alikes included.
+        static func leadNames(root: String) -> Set<String> {
+            let project = LeadMail.project(of: root)
+            return ["lead of " + project, LeadMail.senderPrefix + project]
         }
 
         private func isLead(_ caller: Caller, _ root: String) -> Bool {

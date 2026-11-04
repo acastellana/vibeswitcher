@@ -287,16 +287,18 @@ struct SteerTests {
         #expect(seals(myName, .session(team.lead)) && seals(theirName, .session("other-lead")))
         #expect(!seals(theirName, .session(team.lead)) && !seals(myName, .session("other-lead")))
         #expect(!seals(LeadMail.sender("wallet-manager"), .session(team.lead)) && !seals(.lead(LeadMail.senderPrefix), .session(team.lead)))
-        // Nor the other's name spelled a little differently: a reader takes each for the lead of steer-other-project.
+        // Nor the other's name spelled a little differently, or worded otherwise: a reader takes each for the lead of
+        // steer-other-project (a look-alike letter, an invisible character, another wording), or for its own lead.
         for near in ["The lead of steer-other-project", " the lead of steer-other-project", "\u{200B}the lead of steer-other-project",
                      "the lead of\u{00A0}steer-other-project", "THE LEAD OF STEER-OTHER-PROJECT", "lead of steer-other-project",
-                     "the lead of\u{0301} steer-other-project", "the lead\u{2060} of steer-other-project"] {
+                     "the lead of\u{0301} steer-other-project", "the lead\u{2060} of steer-other-project",
+                     "the l\u{0435}ad of steer-other-project", "steer-other-project's lead", "the lead for steer-other-project",
+                     "lead", "your lead", "lead of demo", "The lead of steer-team", "lead of steer-team "] {
             #expect(!seals(.lead(near), .session(team.lead)), "\(near.debugDescription)")
         }
-        // Its own team's lines stay its to seal (as its tools name it, `lead of <project>`, or plainly `lead`), and
-        // the app still seals any lead's (passing them on).
-        #expect(seals(.lead("lead of steer-team"), .session(team.lead)) && seals(.lead("lead"), .session(team.lead)))
-        #expect(seals(.lead("The lead of steer-team"), .session(team.lead)) && !seals(.lead("lead of demo"), .session(team.lead)))
+        // Its own team's lines stay its to seal, as its tools name it (`lead of <project>`), and the app still seals
+        // any lead's (passing them on).
+        #expect(seals(.lead("lead of steer-team"), .session(team.lead)) && seals(.lead("lead"), .app))
         #expect(seals(theirName, .app) && seals(myName, .app))
         // A worker seals no lead's line, a peer's included.
         #expect(!seals(myName, .session(team.worker)) && !seals(theirName, .session(team.worker)) && !seals(myName, .unknown))
