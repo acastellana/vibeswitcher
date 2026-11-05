@@ -3126,3 +3126,4 @@
 - 2026-11-05 09:23 Automatically (auto_advance): Started a worker on tests-long-synchronous (Tests: long synchronous waits starve Swift's shared thread pool), its after tasks done (dictation-test-hangs-in).
 - 2026-11-05 09:33 Merged main-thread-freezes-with: Main-thread freezes with a long lead chat open (SwiftUI accessibility combine) (no audit: review none) (in a batch: main-thread-freezes-with, remote-push-remote-one landed on one test run)
 - 2026-11-05 09:33 Merged remote-push-remote-one: Remote: push_remote, one click in the app approves each push (in a batch: main-thread-freezes-with, remote-push-remote-one landed on one test run)
+- 2026-11-05 09:34 Update: Lead ↔ GitHub: fetch, merge and a one-click push are in — **What changed** (each audited and merged on a full test run):
