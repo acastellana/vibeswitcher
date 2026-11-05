@@ -3048,3 +3048,7 @@
 - 2026-11-05 23:20 Automatically (auto_advance): Started the audit of wallet-requests-reach-a at 05032546 (Its review is audit).
 - 2026-11-05 23:20 Released wallet-requests-reach-a's worker (idle since its done report on 05032546) while its audit runs
 - 2026-11-05 23:20 Automatically (auto_advance): Released wallet-requests-reach-a's worker, idle since its done report on 05032546, while its audit runs (ended pid 18717 (Worker: Wallet requests reach a Wallet Manager on this Mac through a local folder pair)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-05 23:33 Audit of wallet-requests-marked: complete, clean
+- 2026-11-05 23:33 Audit of wallet-requests-reach-a: complete, clean, round 1: 2 Nit open
+- 2026-11-05 23:33 Incident: The user's Allow on a verifier's Read permission prompt didn't reach the session, twice on 2026-11-05: the user answered "I allowed it" and "allowed in both", y… (in wallet-requests-reach-a); planned turn-this-incident-into-4 to turn it into a check
+- 2026-11-05 23:48 Merged wallet-requests-marked: Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker

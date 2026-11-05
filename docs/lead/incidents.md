@@ -66,3 +66,10 @@ Evidence: Here: wallet-requests-marked's audit at 6d0d8cc5, 2026-11-05 15:14: th
 Task: wallet-requests-marked
 Check: task turn-this-incident-into-3 turns it into a check that runs before merge.
 
+## 2026-11-05 23:33:26 The user's Allow on a verifier's Read permission prompt didn't reach the session, twice on 2026-11-05: the user answered "I allowed it" and "allowed in both", yet the verifiers stayed on the prompt (136 and 164 minutes in all) until the user answered it with the keyboard in the session's Terminal view.
+
+Evidence: wallet-requests-marked's first audit: stopped 15:14 on "Allow: Read 4-marked-no-peer-main-dark.png"; the user answered question 7A3D6D24 "I allowed it" about 15:25; the verifier's transcript had no tool result and its state no event until the audit was replaced at 20:42. Second audit of the same task stopped 20:44, and wallet-requests-reach-a's stopped 23:24; the user answered A0CDD1C6 "Done: allowed in both" about 23:28; ~/.vibeswitcher/state/ttys008.json and ttys011.json still read lastEvent Notification, notificationType permission_prompt, toolName Read, lastEventAt 20:44 and 23:24 at 23:30. After the user answered in each session's Terminal view with the keyboard (question A0056E73), both state files read lastEvent PostToolUse at 23:33. Where the first Allow clicks were made (the Chat view's buttons, a notification) isn't known yet: the user has been asked. The witness said of the same prompts "VibeSwitcher couldn't decline it (that prompt isn't on its screen, or it changed while the keys went in)", so the app's own keys for this prompt don't match what the session shows.
+
+Task: wallet-requests-reach-a
+Check: task turn-this-incident-into-4 turns it into a check that runs before merge.
+
