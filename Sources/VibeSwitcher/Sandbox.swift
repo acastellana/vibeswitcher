@@ -270,6 +270,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             return buttons.count - 1
         }
         controller.answersTrust = false
+        // Push requests from the sandbox's own vault book (its fake lead holds no grant in the host's): `push`.
+        controller.pushes.vault = pushVault.vault(folder: state.appendingPathComponent("push/vault"), as: { .app })
         // The fake Claude needs nothing installed.
         controller.preflight = { _ in nil }
         return controller
@@ -645,6 +647,76 @@ private final class Driver: NSObject, NSApplicationDelegate {
         """
     }()
 
+    /// The sandbox's stand-in for the session host's vault for push requests: the fake lead's session asks through
+    /// it, and the app reads and settles through it as itself, as with the host's.
+    let pushVault = LeadVault.Book()
+
+    /// The fake lead asks to push (push_remote's request, `LeadPush`): its folder made a scratch repository with a
+    /// scratch bare remote as origin (in the sandbox's state, never GitHub, never the network), three commits ahead of
+    /// it, and the request filed in `pushVault` as the lead's session files it. `click` or `decline` settles it as the
+    /// card's buttons do: Push pushes to that bare remote.
+    func pushRequest(_ how: String, _ done: @escaping (String?) -> Void) {
+        guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
+        let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+        if how == "click" || how == "decline" {
+            guard let request = leads.pushes.open[root] else { return done("no push request open: push first") }
+            leads.pushes.settle(root, request, push: how == "click")
+            return waitFor({ [weak self] in self?.leads.pushes.notices[root] != nil }) { [weak self] met in
+                self?.settle { done(met ? nil : "the click didn't settle") }
+            }
+        }
+        let origin = state.appendingPathComponent("push/origin.git").path
+        let book = pushVault, folder = state.appendingPathComponent("push/vault")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let fail = { (text: String) in DispatchQueue.main.async { done(text) } }
+            func git(_ args: [String], in dir: String) -> Git.Result {
+                Shell.run(executable: "/usr/bin/git", args: ["-c", "user.name=Sandbox", "-c", "user.email=sandbox@example.invalid", "-c", "commit.gpgsign=false"] + args,
+                          in: dir, env: Git.environment, timeout: 60, grace: 1)
+            }
+            let fileManager = FileManager.default
+            if !fileManager.fileExists(atPath: origin) {
+                try? fileManager.createDirectory(atPath: (origin as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+                guard git(["init", "-q", "--bare", "-b", "main", origin], in: (origin as NSString).deletingLastPathComponent).status == 0 else { return fail("couldn't make the bare remote") }
+            }
+            if !fileManager.fileExists(atPath: root + "/.git") {
+                try? "# Sandbox lead\n".write(toFile: root + "/README.md", atomically: true, encoding: .utf8)
+                for args in [["init", "-q", "-b", "main"], ["add", "README.md"], ["commit", "-q", "-m", "Start the sandbox project"],
+                             ["remote", "add", "origin", origin], ["push", "-q", "origin", "main"]] {
+                    let run = git(args, in: root)
+                    guard run.status == 0 else { return fail("git \(args.joined(separator: " ")) failed: \(run.error)") }
+                }
+            }
+            for (file, subject) in [("landing.md", "Landing page copy for the launch"), ("hero.md", "Landing hero image and its dark variant"),
+                                    ("stats.md", "Cache the stats endpoint")] {
+                try? "\(subject) \(UUID().uuidString)\n".write(toFile: root + "/" + file, atomically: true, encoding: .utf8)
+                guard git(["add", file], in: root).status == 0, git(["commit", "-q", "-m", subject], in: root).status == 0 else { return fail("couldn't commit \(file)") }
+            }
+            let tip = git(["rev-parse", "refs/remotes/origin/main"], in: root).output
+            let head = git(["rev-parse", "HEAD"], in: root).output
+            let ahead = Int(git(["rev-list", "--count", "\(tip)..\(head)"], in: root).output) ?? 0
+            let subjects = git(["log", "--format=%h %s", "\(tip)..\(head)"], in: root).output.split(separator: "\n").map(String.init)
+            guard case .success(let url) = LeadRemote.url(root: root, remote: "origin") else { return fail("origin's URL can't be read") }
+            do {
+                let app = book.vault(folder: folder, as: { .app })
+                if (try? app.current(.lead, root: root, task: nil)) == nil {
+                    try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "sandbox-lead")
+                }
+                let lead = book.vault(folder: folder, as: { .session("sandbox-lead") })
+                try lead.setGuardedSettings([LeadRemote.urlKey("origin"): LeadVault.hash(url)], root: root)
+                try lead.requestPush(LeadPush.Request(commit: head, remote: "origin", branch: "main", url: url, ahead: ahead, subjects: subjects), root: root)
+            } catch {
+                return fail("the push request wasn't filed: \(error)")
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.leads.refresh()
+                self.waitFor({ [weak self] in self?.leads.pushes.open[root]?.commit == head }) { [weak self] met in
+                    self?.settle { done(met ? nil : "the card didn't read the request") }
+                }
+            }
+        }
+    }
+
     /// A fake project lead: a session labelled as a lead, its board (tasks in every state, a question it withdrew)
     /// in its folder, and a conversation of short replies between tool calls, with a worker's FYI and a worker's question.
     func startLead(transcript: String? = nil, _ done: @escaping (String?) -> Void) {
@@ -987,6 +1059,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("runblock [yes]", "the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as Run does once you confirm (tell it {\"op\": \"realShell\"} first to see its output)"),
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("new [codex|shell] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell"),
+        ("push [click|decline]", "the fake lead asks to push (push_remote): its folder a scratch repository and a scratch bare remote as origin (never GitHub), three commits ahead; its card, with Push and Decline, is under the lead's chat. click or decline settles it as those buttons do"),
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),
         ("scroll top|middle|bottom", "scrolls the shown chat"),
@@ -1819,6 +1892,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
             replaced.draft = String(repeating: "split the layer out, then the next one\n", count: (Int(rest) ?? 200_000) / 39 + 1)
             model.replacedLeads[id] = replaced
             settle { reply(true, "\(row.title) shown replaced, \(replaced.draft.count) characters typed into it") }
+        case "push": pushRequest(rest) { problem in
+            reply(problem == nil, problem ?? (rest.isEmpty ? "the lead asks to push main to origin (a scratch bare remote): its card is under the lead's chat" : "settled as \(rest)"))
+        }
         case "ask": ask(rest, answer: false) { problem in reply(problem == nil, problem ?? "the lead asks you") }
         case "answer": ask("", answer: true) { problem in reply(problem == nil, problem ?? "its questions answered") }
         case "leadmail": leadMail { problem in reply(problem == nil, problem ?? "5 messages between leads in the fake lead's record, one refused; its Team tab shows them under Between leads") }

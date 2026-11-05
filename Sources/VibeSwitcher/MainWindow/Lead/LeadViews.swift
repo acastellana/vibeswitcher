@@ -1112,3 +1112,90 @@ struct BaseMoveCard: View {
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.orange.opacity(0.35)))
     }
 }
+
+/// A push the lead asks for (push_remote, see `PushRequests`): the commits, where they go, and Push or Decline. Only
+/// this click pushes, and only the commit shown.
+struct PushRequestPrompt: View {
+    @ObservedObject var pushes: PushRequests
+    let root: String
+
+    var body: some View {
+        if let request = pushes.open[root] {
+            PushRequestCard(request: request, pushing: pushes.settling.contains(root),
+                            push: { pushes.settle(root, request, push: true) }, decline: { pushes.settle(root, request, push: false) })
+                .padding(.horizontal, 12).padding(.vertical, 8)
+        } else if let notice = pushes.notices[root] {
+            PushNoticeCard(notice: notice, dismiss: { pushes.dismiss(root) })
+                .padding(.horizontal, 12).padding(.vertical, 8)
+        }
+    }
+}
+
+struct PushRequestCard: View {
+    let request: LeadPush.Request
+    var pushing = false
+    let push: () -> Void
+    let decline: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.circle.fill").foregroundStyle(.blue).accessibilityHidden(true)
+                Text("The lead asks to push \(request.branch) to \(request.remote)").font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text("\(request.short) · \(LeadToolset.commits(request.ahead)) ahead").font(.system(size: 10.5).monospaced()).foregroundStyle(.tertiary)
+            }
+            Text("To \(request.target) at \(request.url)").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
+            if !request.subjects.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(request.subjects.prefix(6).enumerated()), id: \.offset) { _, line in
+                        let sha = line.prefix { $0 != " " }
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(sha).font(.system(size: 11).monospaced()).foregroundStyle(.secondary)
+                            Text(line.dropFirst(sha.count).trimmingCharacters(in: .whitespaces)).font(.system(size: 11.5)).lineLimit(1).truncationMode(.tail)
+                        }
+                    }
+                    if request.ahead > 6 {
+                        Text("and \(request.ahead - 6) more").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                    }
+                }
+                .textSelection(.enabled)
+            }
+            Text("Push sends exactly \(request.short) to \(request.target) as a fast-forward, never forced, even if \(request.branch) moves on meanwhile. Decline pushes nothing. The lead hears either way.")
+                .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button(request.ahead == 1 ? "Push 1 Commit" : "Push \(request.ahead) Commits", action: push)
+                    .buttonStyle(.borderedProminent).controlSize(.small).disabled(pushing)
+                Button("Decline", action: decline).controlSize(.small).disabled(pushing)
+                if pushing {
+                    ProgressView().controlSize(.small).accessibilityLabel("Pushing")
+                    Text("Pushing…").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.blue.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.blue.opacity(0.35)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Push request: \(request.branch) at \(request.short), \(LeadToolset.commits(request.ahead)), to \(request.target)")
+    }
+}
+
+/// What came of your click on a push request.
+struct PushNoticeCard: View {
+    let notice: PushRequests.Notice
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: notice.ok ? "checkmark.circle" : "exclamationmark.triangle").foregroundStyle(notice.ok ? .green : .orange)
+                .accessibilityHidden(true)
+            Text(notice.text).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            Spacer()
+            Button("Dismiss", action: dismiss).controlSize(.small)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.secondary.opacity(0.06)))
+    }
+}

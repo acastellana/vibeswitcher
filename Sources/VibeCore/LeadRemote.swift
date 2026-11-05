@@ -66,11 +66,64 @@ public enum LeadRemote {
         }
         let url = Git.run(["remote", "get-url", remote], in: root)
         guard url.ok, !url.output.isEmpty else { return .failure(Failure("git remote get-url \(remote) failed: \(Worktrees.said(url))")) }
+        // `::` anywhere: git takes what's before it as a remote helper's name when it's all scheme characters
+        // (`file::/x` runs git-remote-file), which `transport(of:)` would read as the file transport.
+        if let helper = url.output.range(of: "::") {
+            return .failure(Failure("Not synced: \(remote)'s URL goes by \(url.output[..<helper.lowerBound])::, a remote helper (a program git would run), and these tools use only \(transports.joined(separator: ", ")) (the URL is the repository's git config, the user's to change)."))
+        }
         let kind = transport(of: url.output)
-        guard transports.contains(kind), !url.output.hasPrefix("-") else {
+        guard transports.contains(kind), !url.output.hasPrefix("-"), !url.output.contains(where: \.isNewline) else {
             return .failure(Failure("Not fetched: \(remote)'s URL goes by \(kind), and fetch_remote uses only \(transports.joined(separator: ", ")) (the URL is the repository's git config, the user's to change)."))
         }
         return .success(url.output)
+    }
+
+    /// The git that talks to the remote (fetch_remote's fetch, the app's push), run where the repository's own config
+    /// isn't read at all: in a scratch git folder made for this one run (`scratch`, private to you, removed after),
+    /// whose config VibeSwitcher writes, with the repository's objects as its object store (`GIT_OBJECT_DIRECTORY`). A
+    /// URL given on the command line is still rewritten by `url.*.insteadOf` and `pushInsteadOf`, sent through
+    /// `http.*` (a proxy, `curloptResolve`, CA files, extra headers) and read as the name of a `remote.<url>` section
+    /// when the repository's config says so, and any session writes that config, also between a check of it and
+    /// git reading it again: so the transport git doesn't read it, rather than having it checked first. The user's
+    /// global and system config still apply (theirs, as their credential helpers are), and the guarded git's defaults
+    /// (`GitGuard`: no hooks, no fsmonitor, no transport but the ones `args` open).
+    /// `refs`: refs to write in the scratch folder first (what a fetch tells the remote it has); `read`: refs to read
+    /// back after it ran (what a fetch fetched), by name, nil for one it doesn't hold.
+    static func transportGit(_ args: [String], root: String, scratch: URL, refs: [String: String] = [:], read: [String] = [],
+                             timeout: TimeInterval) -> (run: Git.Result, read: [String: String]) {
+        let refused = { (text: String) in (Git.Result(status: 128, output: "", error: text), [String: String]()) }
+        guard let common = GitGuard.gitDirs(of: root)?.common else { return refused("\(root) isn't a checkout VibeSwitcher's git can vouch for.") }
+        let format = Git.run(["rev-parse", "--show-object-format"], in: root).output
+        let dir = scratch.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        do {
+            for folder in ["objects", "refs/heads", "refs/tags", "refs/remotes"] { try VibePaths.ensurePrivate(dir.appendingPathComponent(folder), within: scratch) }
+            try VibePaths.writePrivate(Data("ref: refs/heads/scratch\n".utf8), to: dir.appendingPathComponent("HEAD"))
+            let config = format == "sha256" ? "[core]\n\trepositoryformatversion = 1\n\tbare = true\n[extensions]\n\tobjectformat = sha256\n"
+                                            : "[core]\n\trepositoryformatversion = 0\n\tbare = true\n"
+            try VibePaths.writePrivate(Data(config.utf8), to: dir.appendingPathComponent("config"))
+            for (ref, commit) in refs where ref.hasPrefix("refs/") && !ref.contains("..") {
+                try VibePaths.ensurePrivate(dir.appendingPathComponent(ref).deletingLastPathComponent(), within: scratch)
+                try VibePaths.writePrivate(Data((commit + "\n").utf8), to: dir.appendingPathComponent(ref))
+            }
+        } catch {
+            return refused("Couldn't make a scratch git folder at \(dir.path): \(error)")
+        }
+        let env = Git.environment.merging(["GIT_DIR": dir.path, "GIT_OBJECT_DIRECTORY": (common as NSString).appendingPathComponent("objects")]) { $1 }
+        let front = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.allow=never", "-c", "submodule.recurse=false"]
+        var run = Shell.run(executable: "/usr/bin/git", args: front + args, in: scratch.path, env: env, timeout: timeout, grace: 5)
+        if run.timedOut || run.cancelled {
+            run.output = ""
+            let stopped = run.cancelled ? "git was stopped: cancelled." : "git was stopped: it ran past \(Worktrees.duration(timeout))."
+            run.error = run.error.isEmpty ? stopped : stopped + "\n" + run.error
+        }
+        var found: [String: String] = [:]
+        for ref in read {
+            let value = Shell.run(executable: "/usr/bin/git", args: front + ["rev-parse", "--verify", "--quiet", ref + "^{commit}"], in: scratch.path,
+                                  env: env, timeout: 30, grace: 1)
+            if value.status == 0, !value.output.isEmpty { found[ref] = value.output }
+        }
+        return (run, found)
     }
 
     /// The user's own credential helpers (global and system config, in git's order), as `-c` pairs: after an empty
@@ -101,27 +154,47 @@ public enum LeadRemote {
     /// could name any program for a local remote), and no tags, submodules, pruning or maintenance come along. `--refmap=`
     /// leaves out the repository's own `remote.<name>.fetch` refspecs, which git would otherwise apply to the fetched
     /// ref too: a mirror's `+refs/*:refs/*` would write the base branch itself.
-    static func fetchArguments(remote: String, branch: String, helpers: [String]) -> [String] {
+    /// The URL is given, not the remote's name: the one the vault pinned (`urlKey`), checked by the caller, so git
+    /// doesn't read `remote.<name>.url` again after the check (a worker's `git remote set-url` in between).
+    static func fetchArguments(url: String, remote: String, branch: String, helpers: [String]) -> [String] {
         let open = transports.flatMap { ["-c", "protocol.\($0).allow=always"] }
         return open + ["-c", "credential.helper="] + helpers
             + ["fetch", "--no-tags", "--no-recurse-submodules", "--no-prune", "--no-auto-maintenance", "--no-write-fetch-head",
-               "--upload-pack=git-upload-pack", "--refmap=", "--quiet", remote, "+refs/heads/\(branch):\(trackingRef(remote: remote, branch: branch))"]
+               "--upload-pack=git-upload-pack", "--refmap=", "--quiet", "--", url, "+refs/heads/\(branch):\(trackingRef(remote: remote, branch: branch))"]
     }
 
-    /// Fetches `remote`'s `branch` (`fetchArguments`) and returns the remote-tracking ref's commit.
-    public static func fetch(root: String, remote: String, branch: String, timeout: TimeInterval = fetchTimeout) -> Result<String, Failure> {
+    /// Fetches `branch` from `url` (`remote`'s, as the caller checked it against the vault's pin: `fetchArguments`)
+    /// and returns the remote-tracking ref's commit.
+    /// `scratch`: where its scratch git folder goes (`transportGit`).
+    public static func fetch(root: String, remote: String, url: String, branch: String, scratch: URL,
+                             timeout: TimeInterval = fetchTimeout) -> Result<String, Failure> {
         guard Git.run(["check-ref-format", "--branch", branch], in: root).ok, !branch.hasPrefix("-") else {
             return .failure(Failure("The base branch \"\(branch)\" isn't a branch's name."))
         }
-        if case .failure(let error) = url(root: root, remote: remote) { return .failure(error) }
+        guard isName(remote), !url.contains("::"), transports.contains(transport(of: url)), !url.hasPrefix("-") else {
+            return .failure(Failure("Not fetched: \(url) isn't a URL fetch_remote uses."))
+        }
         // A remote helper named by the repository's config (`remote.<name>.vcs`) is a program of its choosing.
         let vcs = Git.run(["config", "--get", "remote.\(remote).vcs"], in: root).output
         guard vcs.isEmpty else { return .failure(Failure("Not fetched: \(remote) is set to go through a remote helper (remote.\(remote).vcs = \(vcs)), which fetch_remote doesn't run.")) }
-        let fetched = Git.run(fetchArguments(remote: remote, branch: branch, helpers: credentialHelpers(root: root)), in: root, timeout: timeout)
+        // What this repository has, for the remote to send only what's new: the remote-tracking ref and the branch.
+        let ref = trackingRef(remote: remote, branch: branch)
+        var known: [String: String] = [:]
+        for (name, local) in [(ref, ref), ("refs/heads/\(branch)", "refs/heads/\(branch)")] {
+            let commit = Git.run(["rev-parse", "--verify", "--quiet", local + "^{commit}"], in: root).output
+            if !commit.isEmpty { known[name] = commit }
+        }
+        let (fetched, read) = transportGit(fetchArguments(url: url, remote: remote, branch: branch, helpers: credentialHelpers(root: root)),
+                                           root: root, scratch: scratch, refs: known, read: [ref], timeout: timeout)
         guard fetched.ok else { return .failure(Failure("git fetch \(remote) \(branch) failed: \(Worktrees.said(fetched))")) }
-        let tip = Git.run(["rev-parse", "--verify", "--quiet", trackingRef(remote: remote, branch: branch) + "^{commit}"], in: root)
-        guard tip.ok, !tip.output.isEmpty else { return .failure(Failure("Fetched, but \(remote)/\(branch) can't be read.")) }
-        return .success(tip.output)
+        guard let tip = read[ref], Git.run(["cat-file", "-e", tip + "^{commit}"], in: root).ok else {
+            return .failure(Failure("Fetched, but \(remote)/\(branch) can't be read."))
+        }
+        // The fetch wrote the remote's objects into this repository's object store, its ref in the scratch folder:
+        // the remote-tracking ref is set here, to that commit.
+        let set = Git.run(["update-ref", "-m", "fetch_remote: \(url)", ref, tip], in: root)
+        guard set.ok else { return .failure(Failure("Fetched \(tip.prefix(8)), but \(ref) couldn't be set: \(Worktrees.said(set))")) }
+        return .success(tip)
     }
 
     /// What a merge of the remote's tip into the base would be.
@@ -315,23 +388,12 @@ extension LeadToolset {
         try checkSettings(workflow, not: "Not fetched", keys: ["remote"])
         let (remote, base) = (workflow.remoteName, workflow.base)
         let label = "\(remote)/\(base)"
-        let url: String
-        switch LeadRemote.url(root: root, remote: remote) {
-        case .success(let found): url = found
-        case .failure(let error): throw Problem(text: error.description)
-        }
         // The URL as the lead took it: the first fetch takes it, configure (remote) takes it again.
-        let pinned: String?
-        do { pinned = try vault.guardedSettings(root: root)?[LeadRemote.urlKey(remote)] } catch {
-            throw Problem(text: "Not fetched: the session host couldn't say which URL of \(remote)'s you took (\(error)).")
-        }
-        if let pinned, pinned != LeadVault.hash(url) {
-            throw Problem(text: "Not fetched: \(remote)'s URL is now \(url), not the one you fetched from before. Any session can change it (git remote set-url), so a worker's repository could stand in for the remote. "
-                          + "Ask the user whether they changed it; if they did, configure(remote: \"\(remote)\") takes the URL it has now, and fetch_remote fetches from it.")
-        }
-        if pinned == nil { try vault.setGuardedSettings([LeadRemote.urlKey(remote): LeadVault.hash(url)], root: root) }
+        let (url, first) = try pinnedURL(remote, not: "Not fetched", first: true)
         let tip: String
-        switch LeadRemote.fetch(root: root, remote: remote, branch: base) {
+        let scratch = vault.scratch(root: root, "remote-git")
+        try vault.ensurePrivate(scratch)
+        switch LeadRemote.fetch(root: root, remote: remote, url: url, branch: base, scratch: scratch) {
         case .success(let fetched): tip = fetched
         case .failure(let error): throw Problem(text: error.description)
         }
@@ -346,7 +408,7 @@ extension LeadToolset {
         }
         let standing = "\(base) is \(Self.commits(incoming.ahead)) ahead of \(label) and \(Self.commits(incoming.behind)) behind it"
         try? store.appendProgress("Fetched \(label) at \(tip.prefix(8)): \(standing)")
-        var lines = ["Fetched \(label) (\(tip.prefix(8))) from \(url)\(pinned == nil ? " (its first fetch: this URL is now the one fetch_remote takes; configure(remote) takes another)" : ""): \(standing)."]
+        var lines = ["Fetched \(label) (\(tip.prefix(8))) from \(url)\(first ? " (its first fetch: this URL is now the one fetch_remote takes; configure(remote) takes another)" : ""): \(standing)."]
         if !incoming.subjects.isEmpty {
             lines.append("Incoming, newest first\(incoming.behind > incoming.subjects.count ? " (the first \(incoming.subjects.count))" : ""):")
             lines += incoming.subjects.map { "- \($0)" }
@@ -355,7 +417,7 @@ extension LeadToolset {
         return MCPToolResult(text: lines.joined(separator: "\n"))
     }
 
-    static func commits(_ count: Int) -> String { "\(count) commit\(count == 1 ? "" : "s")" }
+    public static func commits(_ count: Int) -> String { "\(count) commit\(count == 1 ? "" : "s")" }
 
     static func outlook(_ outlook: LeadRemote.Outlook, base: String, label: String) -> String {
         switch outlook {

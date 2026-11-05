@@ -45,7 +45,7 @@ struct PrivateWriteLintTests {
         "Sources/VibeSwitcher/MainWindow/Lead/BoardBench.swift": (2, "a bench's scratch home"),
         "Sources/VibeSwitcher/MainWindow/Lead/TeamChurnBench.swift": (7, "a bench's scratch home"),
         "Sources/VibeSwitcher/PowerBench.swift": (4, "a bench's scratch home"),
-        "Sources/VibeSwitcher/Sandbox.swift": (13, "the sandbox's state folder and scratch home (scripts/sandbox-app.sh), and its shots in the worktree's .build (wallet-page's too); the vault driver's fake passage, its peers and the fake vault's inbox, in the state folder"),
+        "Sources/VibeSwitcher/Sandbox.swift": (16, "the sandbox's state folder and scratch home (scripts/sandbox-app.sh), and its shots in the worktree's .build (wallet-page's too); the vault driver's fake passage, its peers and the fake vault's inbox, in the state folder; `push`'s scratch bare remote's folder (state) and the fake lead's scratch repository's files (scratch home), a git checkout"),
     ]
 
     static let raw = try! Regex(#"\.write\(to(File)?:|createFile\(|createDirectory\("#)

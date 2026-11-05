@@ -195,6 +195,13 @@ public struct LeadVault: Sendable {
         case approve(root: String, task: String, commit: String)
         /// Whether you approved merging the task at exactly this commit.
         case approved(root: String, task: String, commit: String)
+        /// The repository's lead only: a push it asks you for (`LeadPush`), replacing an open one.
+        case requestPush(root: String, push: LeadPush.Request)
+        /// The open push request (`Reply.push`): the app, or the repository's lead.
+        case pushRequest(root: String)
+        /// The app only, on your click (Push or Decline): the open request with this id, handed over and taken off.
+        /// Nothing records an approval: the app pushes it itself (`LeadPush.settle`).
+        case settlePush(root: String, id: String)
         /// The workers and verifiers the vault knows of (`RosterEntry`), never a lead: the app's of every team (nil),
         /// or a repository's lead's of its own.
         case roster(root: String?)
@@ -237,6 +244,8 @@ public struct LeadVault: Sendable {
         case unaudited(review: LeadTask.Review?, reported: String?, evidence: LeadDoneEvidence? = nil)
         /// A session's id, lower case (`Request.walletSession`).
         case session(String)
+        /// A push request (`Request.pushRequest`, `settlePush`), or none.
+        case push(LeadPush.Request?)
     }
 
     /// The host said no, or couldn't be asked.
@@ -472,7 +481,7 @@ public struct LeadVault: Sendable {
         try VibePaths.writePrivate(data, to: url)
     }
 
-    static func hash(_ text: String) -> String {
+    public static func hash(_ text: String) -> String {
         SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
@@ -524,6 +533,8 @@ extension LeadVault {
             /// The evidence each task's worker gave with that done, by task (optional: older vaults, and dones from
             /// before evidence was asked for, have none).
             var evidence: [String: LeadDoneEvidence]?
+            /// The push the lead asked you for and you haven't clicked on yet (optional: older vaults have none).
+            var push: LeadPush.Request?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`, with the role and task each held.
@@ -931,6 +942,23 @@ extension LeadVault {
                 return .ok
             case .approved(let root, let task, let commit):
                 return .approved(team(root)?.approvals?[task]?.contains(commit.lowercased()) == true)
+            case .requestPush(let root, var push):
+                // The lead asks; only your click in the app pushes (`settlePush`).
+                guard isLead(caller, root) else { return .refused("Only the repository's lead asks to push.") }
+                if let invalid = LeadPush.invalid(push) { return .refused(invalid) }
+                push.commit = push.commit.lowercased()
+                change(root, &changed) { $0.push = push }
+                return .ok
+            case .pushRequest(let root):
+                guard caller == .app || isLead(caller, root) else { return .refused("Only VibeSwitcher or the repository's lead reads its push request.") }
+                return .push(team(root)?.push)
+            case .settlePush(let root, let id):
+                // Your click, in the app's own process: not the lead that asked, nor any session, whatever it writes
+                // or answers anywhere.
+                guard caller == .app else { return .refused("Only VibeSwitcher settles a push request, when you click Push or Decline in it.") }
+                guard let push = team(root)?.push, push.id == id else { return .push(nil) }
+                change(root, &changed) { $0.push = nil }
+                return .push(push)
             case .setReview(let root, let task, let review):
                 // A worker that lowered its own task's level would merge with no verdict: the lead's word only.
                 guard isLead(caller, root) else { return .refused("Only the repository's lead sets a task's review level.") }

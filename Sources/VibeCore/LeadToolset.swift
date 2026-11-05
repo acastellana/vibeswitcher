@@ -573,6 +573,7 @@ public final class LeadToolset: MCPToolset {
                             required: ["task", "reason"]),
                 MCPToolInfo(name: "fetch_remote", description: "Fetch the project's remote (workflow.md's remote, origin unless set): only the base branch, into its remote-tracking ref (origin/main); nothing else moves. Says how far the base is ahead and behind, the incoming commits, and whether merge_remote would fast-forward, merge cleanly (the lead's records by union) or stop on a conflict. It takes no arguments: the remote and branch come from workflow.md, never a URL or refspec."),
                 MCPToolInfo(name: "merge_remote", description: "Merge the remote-tracking branch fetch_remote fetched into the base: in a scratch worktree, a fast-forward when the base has nothing of its own, else a true merge commit (so the remote's tip stays an ancestor and a later push is a fast-forward); the lead's records merge by union. The test command runs on the result, and the base fast-forwards to it only when it passes and the base hasn't moved; the main checkout's uncommitted files stay as they are. A conflict outside the records stops it with the files named; it never picks a side. The remote's commits count as the user's work."),
+                MCPToolInfo(name: "push_remote", description: "Ask the user to push the base branch to the project's remote (workflow.md's remote): it records a push request of the base's head now, with the commits it's ahead of what fetch_remote fetched, and pushes nothing. Only the user's click on Push in VibeSwitcher pushes it (Decline doesn't): that very commit, as a fast-forward of the remote's branch, never forced, even if the base moves on meanwhile. It never waits: the outcome (pushed, rejected, an auth or network error) comes as a VibeSwitcher message. Refused before fetch_remote, when the remote has commits the base lacks (merge_remote first), or when nothing is ahead. A newer request replaces an open one. It takes no arguments: the remote, its URL and the branch come from workflow.md and the URL fetch_remote took, never from the call."),
                 MCPToolInfo(name: "cleanup", description: "End a task's sessions and remove its worktree and branch (after merging, or force to abandon it).",
                             properties: ["task": task, "force": P(type: "boolean", description: "Also discard unmerged work")], required: ["task"]),
                 MCPToolInfo(name: "accept_git_hooks", description: "Let the tool server's git (merges, cleanups, start_worker, auto_advance) run the repository's git hooks as they are now. It runs only hooks you accepted, from a copy, never the hooks folder a worker can write: status, merge and the rest tell you when that folder isn't as you accepted it. Read each hook first; accept only the user's own.",
@@ -682,6 +683,7 @@ public final class LeadToolset: MCPToolset {
                 let merged = try mergeRemote()
                 records.flush(base: base)
                 return withGitNotice(merged)
+            case "push_remote": return withGitNotice(try pushRemote())
             case "cleanup": return withGitNotice(try cleanup(try taskSlug(arguments), force: arguments["force"] as? Bool ?? false))
             case "accept_git_hooks": return try acceptGitHooks(arguments)
             case "ask_user": return try askUser(arguments)
@@ -4961,7 +4963,7 @@ public final class LeadToolset: MCPToolset {
                      "- regression_command: " + (workflow.regressionCommand.map { "`\($0)` (merge runs it after test_command)" } ?? "not set: the incidents' checks (record_incident) run only as part of test_command"),
                      "- init_command: " + (workflow.initCommand.map { "`\($0)`" } ?? "not set" + (detectedInit.map { " (suggested from the repository: `\($0)`)" } ?? "")),
                      "- base_branch: " + (raw.baseBranch ?? "not set: \(fallback) (the branch the lead first started on)"),
-                     "- remote: " + (workflow.remote ?? "not set: \(LeadRemote.defaultRemote)") + " (fetch_remote and merge_remote sync the base branch with it)",
+                     "- remote: " + (workflow.remote ?? "not set: \(LeadRemote.defaultRemote)") + " (fetch_remote and merge_remote sync the base branch with it; push_remote asks the user to push it there)",
                      "- verifier_model: " + (workflow.verifierModel ?? "not set: audits run on \(auditModel(workflow)), another model than the workers' (\(runtime.workerModel(root: root) ?? "Claude's default"))"),
                      "- max_workers: \(workflow.maxWorkers)",
                      "- disk_warning_gb: \(Self.gb(workflow.diskWarningGB)) (the lead is told below this much free space)",

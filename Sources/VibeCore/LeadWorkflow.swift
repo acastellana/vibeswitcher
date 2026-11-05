@@ -594,7 +594,7 @@ public struct LeadWorkflow: Equatable, Sendable {
 
 /// What each role is told (appended to Claude Code's own system prompt).
 public enum LeadPrompts {
-    public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, dismiss_finding, record_decision, archive_decisions, record_incident, merge, revert, cleanup, fetch_remote, merge_remote, configure"
+    public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, dismiss_finding, record_decision, archive_decisions, record_incident, merge, revert, cleanup, fetch_remote, merge_remote, push_remote, configure"
 
     /// What workers and verifiers are told about putting load on the Mac: a verifier once ran four times its
     /// contract's load on a Mac other sessions and the user were using, and a turn that ended left its burners running.

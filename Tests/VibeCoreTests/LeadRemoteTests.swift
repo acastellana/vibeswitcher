@@ -141,10 +141,10 @@ struct LeadRemoteTests: LeadTeamFixture {
 
         // The fetch drops every credential helper read before its own -c (the repository's could name any program),
         // then takes the user's own (global and system) back.
-        let arguments = LeadRemote.fetchArguments(remote: "origin", branch: "main", helpers: ["-c", "credential.helper=osxkeychain"])
+        let arguments = LeadRemote.fetchArguments(url: scene.origin, remote: "origin", branch: "main", helpers: ["-c", "credential.helper=osxkeychain"])
         let reset = try #require(arguments.firstIndex(of: "credential.helper="))
         #expect(arguments[reset - 1] == "-c" && arguments[reset + 2] == "credential.helper=osxkeychain" && arguments.firstIndex(of: "fetch")! > reset + 2)
-        #expect(arguments.suffix(2) == ["origin", "+refs/heads/main:refs/remotes/origin/main"] && arguments.contains("--upload-pack=git-upload-pack"))
+        #expect(arguments.suffix(3) == ["--", scene.origin, "+refs/heads/main:refs/remotes/origin/main"] && arguments.contains("--upload-pack=git-upload-pack"))
         #expect(LeadRemote.transport(of: "ext::sh -c x") == "ext" && LeadRemote.transport(of: "git@github.com:o/r.git") == "ssh"
                 && LeadRemote.transport(of: "https://github.com/o/r") == "https" && LeadRemote.transport(of: "/srv/o.git") == "file")
 

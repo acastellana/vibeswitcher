@@ -380,6 +380,10 @@ final class LeadController: ObservableObject {
     let allDone: AllDoneWatch
     /// The leads' bases, when they moved other than through merges (see `BaseMoves`).
     let baseMoves: BaseMoves
+    /// The pushes the leads ask you for (push_remote), each a card you click Push or Decline on (see `PushRequests`).
+    let pushes: PushRequests
+    /// The roots with a push request open: it counts with the lead's questions (the sidebar's badge, `leadsAsking`).
+    @Published private(set) var pushesOpen: Set<String> = []
     /// The Mac kept awake while a team works.
     let keepAwake: KeepAwake
 
@@ -540,6 +544,7 @@ final class LeadController: ObservableObject {
         let reads = LeadReads()
         self.reads = reads
         baseMoves = BaseMoves(vault: vault, reads: reads)
+        pushes = PushRequests(vault: vault)
         allDone = AllDoneWatch(reads: reads)
         self.claudeCommand = claudeCommand
         installer = ToolInstaller(host: host)
@@ -571,6 +576,23 @@ final class LeadController: ObservableObject {
         }
         // A move it asks about is a card in the lead's chat, no alert: you commit on the base yourself. Only a merge it
         // refused waits on you (`AlertRules.baseMoved`, at each refresh).
+        pushes.onChange = { [weak self] in
+            guard let self else { return }
+            let open = Set(self.pushes.open.keys)
+            if open != self.pushesOpen { self.pushesOpen = open }
+            self.store.leadsAsking = self.asking(self.boards)
+        }
+        pushes.onAsk = { [weak self] root, request in
+            guard let self else { return }
+            let project = (root as NSString).lastPathComponent
+            self.alert(.broken(title: "\(project)'s lead asks to push \(request.branch)",
+                               body: "\(LeadToolset.commits(request.ahead)) to \(request.target). Push or Decline in its chat.",
+                               leadTTY: self.boards[root]?.leadTTY, key: "push-\(request.id)"))
+        }
+        // The outcome of your click, to the lead, as VibeSwitcher's (the progress log has it: `LeadPush.settle`).
+        pushes.onSettled = { [weak self] root, request, outcome in
+            self?.deliver(LeadPush.message(request, outcome), from: .system("VibeSwitcher, on the user's click"), root: root)
+        }
         baseMoves.onTaken = { [weak self] root, move, taker in
             guard let self else { return }
             let span = "\(move.count) on \(move.branch) (\(move.from.prefix(8)) → \(move.to.prefix(8)))"
@@ -631,7 +653,15 @@ final class LeadController: ObservableObject {
     /// A lead row's open questions for you and how many of them block (as `LeadBoard.openQuestions` and
     /// `blockingQuestions` count them); nil if the row isn't a lead with a board.
     func questions(for row: WindowRow) -> (open: Int, blocking: Int)? {
-        lead(for: row).flatMap { questionCounts[$0.root] }
+        lead(for: row).flatMap { lead in
+            let push = pushesOpen.contains(lead.root) ? 1 : 0
+            return questionCounts[lead.root].map { ($0.open + push, $0.blocking) } ?? (push > 0 ? (push, 0) : nil)
+        }
+    }
+
+    /// The roots whose lead needs you: a question open on its board, or a push request.
+    private func asking(_ boards: [String: LeadBoard]) -> Set<String> {
+        LeadTeams.asking(boards).union(pushesOpen.map { ($0 as NSString).standardizingPath })
     }
 
     /// Counts the questions of each board whose questions changed since `old`.
@@ -1394,10 +1424,11 @@ final class LeadController: ObservableObject {
         let previous = boards
         if loaded != boards { boards = loaded }
         // A lead with a question for you open needs you, its terminal idle or not.
-        store.leadsAsking = LeadTeams.asking(loaded)
+        store.leadsAsking = asking(loaded)
         teamRows.keep { key in roots.contains { key == $0 || key.hasSuffix("|" + $0) } }
         if read != decisions { decisions = read }
         baseMoves.look(roots)
+        pushes.look(roots)
         for (root, board) in loaded {
             for event in AlertRules.look(previous: previous[root], board: board, project: (root as NSString).lastPathComponent,
                                          seen: &seenQuestions, launchedAt: launchedAt) {
