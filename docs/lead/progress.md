@@ -3120,3 +3120,9 @@
 - 2026-11-05 09:08 Automatically (auto_advance): Started a worker on 178-s-main-thread (178 s main-thread freeze inside SwiftUI accessibility combine (lead window)).
 - 2026-11-05 09:10 Audit of dictation-test-hangs-in: complete, clean, round 1: 1 Nit open, 2 Pre-existing open
 - 2026-11-05 09:23 Merged dictation-test-hangs-in: Full-suite hangs: dictation test timeout, and a run stuck at 0% CPU
+- 2026-11-05 09:23 Automatically (auto_advance): Merged dictation-test-hangs-in (Full-suite hangs: dictation test timeout, and a run stuck at 0% CPU) into main at 1f8b25fd, on its passing audit and the full test run.
+- 2026-11-05 09:23 Automatically (auto_advance): Cleaned up dictation-test-hangs-in (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-05 09:23 Started a worker on tests-long-synchronous
+- 2026-11-05 09:23 Automatically (auto_advance): Started a worker on tests-long-synchronous (Tests: long synchronous waits starve Swift's shared thread pool), its after tasks done (dictation-test-hangs-in).
+- 2026-11-05 09:33 Merged main-thread-freezes-with: Main-thread freezes with a long lead chat open (SwiftUI accessibility combine) (no audit: review none) (in a batch: main-thread-freezes-with, remote-push-remote-one landed on one test run)
+- 2026-11-05 09:33 Merged remote-push-remote-one: Remote: push_remote, one click in the app approves each push (in a batch: main-thread-freezes-with, remote-push-remote-one landed on one test run)
