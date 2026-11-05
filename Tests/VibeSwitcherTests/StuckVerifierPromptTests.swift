@@ -72,6 +72,75 @@ struct StuckVerifierPromptTests {
         #expect(reports.count == 1)
     }
 
+    /// The incident of 2026-11-05: a verifier stopped on the prompt to Read one of the worker's evidence screenshots
+    /// (outside its worktree), VibeSwitcher couldn't decline it (it knew only a command's prompt), and three audits
+    /// hung, one for 155 minutes. The fake draws the Read prompt as Claude Code 2.1.318's bundle builds it (no capture
+    /// of the real screen exists). After the wait it's declined with the reason, the verifier goes on without that
+    /// file, and the lead is told once. The same prompt in a worker's session is the lead's to answer: never declined.
+    @Test func aVerifiersReadPromptNoOneAnswersIsDeclinedAfterTheWaitAndAWorkersNever() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        let file = "/Users/x/dev/repo/.vibeswitcher/evidence/wallet-requests-marked/7C0E0F5B-1D2A/4-marked-no-peer-main-dark.png"
+        h.tell(["op": "permission", "file": file])
+        try await h.paneShows { $0.contains("Read file") && $0.contains("Do you want to proceed?") && $0.contains("allow reading from") }
+
+        let session = h.session.id.uuidString
+        let since = Date()
+        let started = since.addingTimeInterval(-300).timeIntervalSince1970
+        // What the witness has of it: the call as the transcript holds it, as it told the lead on 2026-11-05.
+        let pending = PendingPrompt(text: PendingPrompt.text(toolName: "Read", input: ["file_path": file]), since: since.timeIntervalSince1970)
+        #expect(pending.text == "Allow: Read 4-marked-no-peer-main-dark.png\n{\"file_path\":\"\(file)\"}", "\(pending.text)")
+        let seen = [session: LeadWitness.Seen(live: true, status: .needsInput, since: since, detail: "Read: 4-marked-no-peer-main-dark.png",
+                                              pending: pending, started: started, boundAt: started, toolsAt: started + 2)]
+        var told: Set<String> = []
+        func look(_ board: LeadBoard, _ after: TimeInterval) -> WitnessWork {
+            WitnessWork(board: board, seen: seen, now: since.addingTimeInterval(after), advancing: false, budgetMinutes: 60,
+                        firstSeen: { _ in nil }, told: { told.contains($0) })
+        }
+        var task = LeadTask(slug: "wallet-requests-marked", title: "t", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
+
+        // A worker waiting on it, however long: nothing to decline.
+        task.status = .running
+        task.worker = session
+        var working = LeadBoard()
+        working.tasks = [task]
+        for after in [5.0, LeadWitness.promptWait + 1, 9_300] { #expect(look(working, after).stuckPrompts.isEmpty, "\(after)s") }
+
+        // The verifier: nothing before the wait, declined past it.
+        task.status = .review
+        task.worker = nil
+        task.verifier = session
+        var board = LeadBoard()
+        board.tasks = [task]
+        for after in [5.0, 60, 119] {
+            let work = look(board, after)
+            #expect(work.stuckPrompts.isEmpty && work.messages.isEmpty, "\(after)s: \(work.messages.map { $0.text() })")
+        }
+        // Still asking (its state is written after its screen is drawn: waited for, not read once).
+        try await h.waitFor { h.agent["mode"] as? String == "permission" }
+        var reports: [String] = []
+        let work = look(board, LeadWitness.promptWait + 1)
+        #expect(work.stuckPrompts.count == 1 && work.messages.isEmpty)
+        for stuck in work.stuckPrompts where told.insert(stuck.key).inserted {
+            PromptDecline.handle(stuck, host: h.host) { text in reports.append(text()) }
+        }
+        try await h.waitFor { h.agent["declined"] as? String == LeadWitness.declineReason }
+        #expect(h.agent["mode"] as? String == "working")
+        let transcript = try String(contentsOf: h.transcript, encoding: .utf8)
+        #expect(transcript.contains("the user said:\\n" + LeadWitness.declineReason), "\(transcript.suffix(600))")
+        #expect(!transcript.contains("\"ran Read"), "a Yes went in: \(transcript.suffix(400))")
+        // The lead: one report, saying it was declined and what was asked.
+        try await h.waitFor { !reports.isEmpty }
+        #expect(reports.count == 1)
+        #expect(reports.first?.contains("VibeSwitcher declined it, telling it: “\(LeadWitness.declineReason)”") == true, "\(reports)")
+        #expect(reports.first?.contains("Allow: Read 4-marked-no-peer-main-dark.png") == true && reports.first?.contains(file) == true, "\(reports)")
+        for after in [300.0, 9_300] {
+            let again = look(board, after)
+            #expect(again.stuckPrompts.isEmpty && again.messages.isEmpty, "\(after)s")
+        }
+        #expect(reports.count == 1)
+    }
+
     /// A No row that takes no text (the older "No, and tell Claude what to do differently (esc)" row), where the
     /// reason's letters are keys: the "k" in "check" moves the cursor up. Enter never goes on a Yes row; Esc declines
     /// it instead, and the lead is told so.

@@ -127,6 +127,28 @@ cost, the receipts of the 2026-10-31 batch give 8 tasks, 2.9 h and ~$86.
 
 ## Entries
 
+### IM-14: No audit waits on an evidence read (turn-this-incident-into-3, planned)
+
+- **Change:** a verifier's settings let it read the image files in its own task's evidence folder
+  (`<repo>/.vibeswitcher/evidence/<task>/<report>/`) without a prompt, and nothing else outside its worktree. The
+  witness also declines a verifier's Read prompt that no one answers, as it declines a command's.
+- **Hypothesis:** no audit waits on an evidence read: witness reports of a verifier waiting on a Read prompt drop
+  from 3 in one day to 0 over the week after the merge, because the verifier is no longer asked about the screenshots
+  its brief names, and a Read prompt that still shows is declined after 2 minutes (not the one auto mode shows for
+  its first read outside the working directories, nor a Glob's or Grep's: nothing is typed there and the lead is told
+  it waits; count those apart). Guard: no verifier reads a file
+  outside its worktree other than its task's evidence images without a prompt (0 incidents about it).
+- **Metric:** witness reports of a verifier waiting on a Read prompt, across projects where the lead reports them
+  (the lead's reports and incidents.md titles in the range). Guard: incidents about a verifier reading what it
+  shouldn't.
+- **Baseline:** 3 on 2026-11-05 (one here, two in another project on one task's audit, the first sitting 155 minutes
+  until the audit was restarted).
+- **Check:** 2026-11-12, window one week from the merge.
+- **Status:** measuring
+- **Result:** (pending)
+- **Verdict:** (pending)
+- **Why:** (pending)
+
 ### IM-13: Usage-aware worker routing (usage-aware-worker, planned)
 
 - **Change:** a task with `agent: auto` (or `agent_default: auto`) starts on Codex when Claude's usage is tight (a
