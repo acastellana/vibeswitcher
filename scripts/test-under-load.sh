@@ -366,7 +366,7 @@ if [[ ${#command[@]} -eq 0 ]]; then
     # On this run's slot's share of the cores, VS_HEAVY_CORES from the vs-heavy it runs under (scripts/lib/swift-jobs.sh),
     # as test.sh's and build-app.sh's builds: left to itself SwiftPM compiles on every core, beside the busy loops.
     heavy_swift build --build-tests > /dev/null 2>&1 8>&- || { echo "the build failed: run swift build --build-tests"; exit 1; }
-    bin=$(swift build $(swiftpm_sandbox) --show-bin-path 2>/dev/null 8>&-)
+    bin=$(swift build $(swiftpm_options) --show-bin-path 2>/dev/null 8>&-)
     [[ -d $bin ]] || { echo "no build folder at ${bin:-?} (swift build --show-bin-path)"; exit 1; }
     helper="$(dirname "$(xcrun --find swift)")/../libexec/swift/pm/swiftpm-testing-helper"
     [[ -x $helper ]] || { echo "no test runner at $helper"; exit 1; }
@@ -375,7 +375,7 @@ if [[ ${#command[@]} -eq 0 ]]; then
     # <Target>.xctest per test target. Which is in $bin says which; the package's test targets (swift package describe)
     # say what must be there, and a bundle missing or unexpected stops the run rather than drop or add tests.
     command -v jq > /dev/null || { echo "no jq on PATH (macOS 15 and later have /usr/bin/jq): the package's test targets can't be read"; exit 1; }
-    describe=$(swift package $(swiftpm_sandbox) describe --type json 2>/dev/null 8>&-) || { echo "swift package describe failed: the test targets are unknown"; exit 1; }
+    describe=$(swift package $(swiftpm_options) describe --type json 2>/dev/null 8>&-) || { echo "swift package describe failed: the test targets are unknown"; exit 1; }
     package=$(jq -r '.name' <<< "$describe")
     targets=$(jq -r '.targets[] | select(.type == "test") | .name' <<< "$describe" | sort)
     [[ -n $package && -n $targets ]] || { echo "swift package describe names no package or no test target; nothing to run"; exit 1; }

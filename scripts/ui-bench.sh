@@ -23,6 +23,7 @@ set -euo pipefail
 [[ ${1-} == -h || ${1-} == --help ]] && { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
+source scripts/lib/swift-jobs.sh
 source scripts/lib/bench-defaults.sh
 # Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
 unset VIBESWITCHER_HOME
@@ -72,7 +73,7 @@ if [[ -n $base && ! ( -f $base && -x $base ) ]]; then
     git archive "$commit" | tar -x -C "$folder"
     # In the tests UI_BENCH_SWIFT stands in for swift.
     [[ -z ${UI_BENCH_SWIFT:-} ]] || swift() { "$UI_BENCH_SWIFT" "$@"; }
-    swift build --package-path "$folder" > "$logs/build-base.log" 2>&1 || { echo "the base didn't build: $logs/build-base.log"; exit 1; }
+    swift build $(swiftpm_options) --package-path "$folder" > "$logs/build-base.log" 2>&1 || { echo "the base didn't build: $logs/build-base.log"; exit 1; }
     base=$folder/.build/debug/VibeSwitcher
 fi
 # Neither may write the real ~/Library/Preferences/VibeSwitcher.plist (scripts/lib/bench-defaults.sh).
