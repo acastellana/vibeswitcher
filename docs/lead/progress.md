@@ -3018,3 +3018,6 @@
 - 2026-11-05 15:54 Started a worker on turn-this-incident-into-3
 - 2026-11-05 15:54 Automatically (auto_advance): Started a worker on turn-this-incident-into-3 (Turn this incident into a check: A verifier stops on a permission prompt to Read the worker's…).
 - 2026-11-05 15:54 Review of turn-this-incident-into-3: audit
+- 2026-11-05 16:31 Planned accountusagetests-don-t: AccountUsageTests don't depend on today's date (two fail on main since 2026-11-05 12:00)
+- 2026-11-05 16:31 Started a worker on accountusagetests-don-t
+- 2026-11-05 16:31 Automatically (auto_advance): Started a worker on accountusagetests-don-t (AccountUsageTests don't depend on today's date (two fail on main since 2026-11-05 12:00)).
