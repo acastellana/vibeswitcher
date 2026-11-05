@@ -3010,3 +3010,6 @@
 - 2026-11-05 14:36 Planned wallet-requests-marked: Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker (review audit)
 - 2026-11-05 14:36 Started a worker on wallet-requests-marked
 - 2026-11-05 14:36 Automatically (auto_advance): Started a worker on wallet-requests-marked (Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker).
+- 2026-11-05 15:06 Automatically (auto_advance): Started the audit of wallet-requests-marked at 6d0d8cc5 (Its review is audit).
+- 2026-11-05 15:06 Released wallet-requests-marked's worker (idle since its done report on 6d0d8cc5) while its audit runs
+- 2026-11-05 15:06 Automatically (auto_advance): Released wallet-requests-marked's worker, idle since its done report on 6d0d8cc5, while its audit runs (ended pid 6021 (Worker: Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
