@@ -3,8 +3,9 @@
 # 12-core Mac with 3 slots; see Resources/bin/vs-heavy). Left to itself SwiftPM compiles on every core: on 2026-11-01 a
 # merge's build ran 9 swift-frontends at ~900 % CPU inside one slot, beside two other slots' jobs, at load 62–84.
 #
-# heavy_swift VERB [ARGS...]: `swift VERB --build-system native -j 2 -Xswiftc -jD ARGS...` (`swiftpm_options`) with D = VS_HEAVY_CORES ÷ 2 rounded up, when
-# VS_HEAVY_CORES is a whole number above 0; else `swift VERB --build-system native ARGS...` as before (SwiftPM's default, every core). SwiftPM's
+# heavy_swift VERB [ARGS...]: `swift VERB --build-system native -j 2 -Xswiftc -jD ARGS...` (`swiftpm_options`) with
+# D = VS_HEAVY_CORES ÷ 2 rounded up, when VS_HEAVY_CORES is a whole number above 0; else `swift VERB --build-system
+# native ARGS...` as before (SwiftPM's default, every core). SwiftPM's
 # -j N alone isn't N cores: it builds N modules at once and gives each module's swiftc -jN too, N frontends each, and
 # swift test compiles the test targets side by side: with -j 4, 12 swift-frontends at ~1100 % CPU (measured 2026-11-01,
 # 12 cores). Two modules at once, each with D frontends (the -Xswiftc -j comes after SwiftPM's and wins), keeps it near

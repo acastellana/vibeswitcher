@@ -752,7 +752,7 @@ struct TestLockTests {
         #expect(run.process.terminationStatus == 0, "\(lines(run.output))")
         // In a worktree the lead made, scripts/lib/module-cache.sh puts its cache's path first.
         let said = lines(log + ".args").map { $0.replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression) }
-        #expect(said == ["A build -j 2 -Xswiftc -j2", "A test -j 2 -Xswiftc -j2 --filter X"], "\(lines(log + ".args"))")
+        #expect(said == ["A build --build-system native -j 2 -Xswiftc -j2", "A test --build-system native -j 2 -Xswiftc -j2 --filter X"], "\(lines(log + ".args"))")
     }
 
     /// Inside Codex's sandbox (CODEX_SANDBOX set in its commands) swift build and swift test leave SwiftPM's own sandbox
@@ -765,7 +765,7 @@ struct TestLockTests {
         run.process.waitUntilExit()
         #expect(run.process.terminationStatus == 0, "\(lines(run.output))")
         let said = lines(log + ".args").map { $0.replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression) }
-        #expect(said == ["A build --disable-sandbox -j 2 -Xswiftc -j2", "A test --disable-sandbox -j 2 -Xswiftc -j2 --filter X"],
+        #expect(said == ["A build --build-system native --disable-sandbox -j 2 -Xswiftc -j2", "A test --build-system native --disable-sandbox -j 2 -Xswiftc -j2 --filter X"],
                 "\(lines(log + ".args"))")
         // The security tests' scratch host can't listen there (Unix sockets refused): skipped, saying so, not failed.
         #expect(lines(run.output).contains("security socket/signing tests: skipped inside Codex's sandbox, which refuses their scratch host's socket"),
