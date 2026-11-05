@@ -3059,3 +3059,5 @@
 - 2026-11-05 23:48 Started a worker on spec-note-a-tab
 - 2026-11-05 23:48 Automatically (auto_advance): Started a worker on spec-note-a-tab (Spec note: a tab or CR near-miss of the fork marker is refused by the format check), its after tasks done (wallet-requests-marked).
 - 2026-11-06 00:14 Merged spec-note-a-tab: Spec note: a tab or CR near-miss of the fork marker is refused by the format check (no audit: review none)
+- 2026-11-06 00:14 Automatically (auto_advance): Merged spec-note-a-tab (Spec note: a tab or CR near-miss of the fork marker is refused by the format check) into main at 417d0553, review none: on its worker's done report on ed6c6e0f and the full test run.
+- 2026-11-06 00:14 Automatically (auto_advance): Cleaned up spec-note-a-tab; ended pid 17640 (Worker: Spec note: a tab or CR near-miss of the fork marker is refused by the format check) (freed 1.3 GB of build output and temporary folders). It stays done.
