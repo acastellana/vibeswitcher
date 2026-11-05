@@ -38,6 +38,8 @@ swiftpm_sandbox() {
 # Every SwiftPM command the scripts run: the native build system, then `swiftpm_sandbox`'s, unquoted. Pinned since the
 # Command Line Tools of 2026-11-05 (Swift 6.4.2) made swiftbuild the default: it compiles SwiftTerm's .metal file, which
 # needs Xcode's Metal Toolchain component (a download), and puts its products in .build/out, not .build/<triple>.
+# The native one warns it's deprecated, on stderr, which module-cache.sh's swift puts in its output: a
+# --show-bin-path's caller takes the last line.
 swiftpm_options() {
     echo --build-system native
     swiftpm_sandbox

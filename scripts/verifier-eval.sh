@@ -203,7 +203,7 @@ else
 fi
 echo "building vibeswitcher-mcp…"
 swift build $(swiftpm_options) --product vibeswitcher-mcp > /dev/null 2>&1 || { echo "the build failed: run swift build --product vibeswitcher-mcp"; exit 2; }
-mcp="$(swift build $(swiftpm_options) --show-bin-path)/vibeswitcher-mcp"
+mcp="$(swift build $(swiftpm_options) --show-bin-path | tail -n 1)/vibeswitcher-mcp"
 
 out=${case_out:-.build/verifier-eval/$name-$checklist-$(date +%Y%m%d-%H%M%S)}
 mkdir -p "$out"

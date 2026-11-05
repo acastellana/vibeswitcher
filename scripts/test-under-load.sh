@@ -366,7 +366,7 @@ if [[ ${#command[@]} -eq 0 ]]; then
     # On this run's slot's share of the cores, VS_HEAVY_CORES from the vs-heavy it runs under (scripts/lib/swift-jobs.sh),
     # as test.sh's and build-app.sh's builds: left to itself SwiftPM compiles on every core, beside the busy loops.
     heavy_swift build --build-tests > /dev/null 2>&1 8>&- || { echo "the build failed: run swift build --build-tests"; exit 1; }
-    bin=$(swift build $(swiftpm_options) --show-bin-path 2>/dev/null 8>&-)
+    bin=$(swift build $(swiftpm_options) --show-bin-path 2>/dev/null 8>&- | tail -n 1)
     [[ -d $bin ]] || { echo "no build folder at ${bin:-?} (swift build --show-bin-path)"; exit 1; }
     helper="$(dirname "$(xcrun --find swift)")/../libexec/swift/pm/swiftpm-testing-helper"
     [[ -x $helper ]] || { echo "no test runner at $helper"; exit 1; }

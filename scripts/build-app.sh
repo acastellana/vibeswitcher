@@ -98,7 +98,7 @@ scratch_tmpdir vs-build
 # another holds the lock, saying for whom, and builds on its slot's share of the cores, `-j $VS_HEAVY_CORES`
 # (scripts/lib/swift-jobs.sh).
 Resources/bin/vs-heavy --as scripts/build-app.sh bash -c 'heavy_swift build -c release'
-BIN="$(swift build $(swiftpm_options) -c release --show-bin-path)"
+BIN="$(swift build $(swiftpm_options) -c release --show-bin-path | tail -n 1)"
 APP="build/VibeSwitcher.app"
 
 rm -rf "$APP"
