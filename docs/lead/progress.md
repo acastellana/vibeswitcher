@@ -3041,3 +3041,7 @@
 - 2026-11-05 17:31 Started a worker on wallet-requests-marked
 - 2026-11-05 20:42 Released wallet-requests-marked's worker (idle since its done report on c7a9f5c5) while its audit runs
 - 2026-11-05 20:42 Automatically (auto_advance): Released wallet-requests-marked's worker, idle since its done report on c7a9f5c5, while its audit runs (ended pid 88140 (Worker: Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-05 22:30 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-05 22:33 Planned wallet-requests-reach-a: Wallet requests reach a Wallet Manager on this Mac through a local folder pair (review audit)
+- 2026-11-05 22:33 Started a worker on wallet-requests-reach-a
+- 2026-11-05 22:33 Automatically (auto_advance): Started a worker on wallet-requests-reach-a (Wallet requests reach a Wallet Manager on this Mac through a local folder pair).
