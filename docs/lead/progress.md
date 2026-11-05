@@ -3035,3 +3035,4 @@
 - 2026-11-05 17:12 Started a worker on fix
 - 2026-11-05 17:12 Automatically (auto_advance): Started a worker on fix (The stuck-verifier-prompt test waits on the fake's state instead of reading it once), its after tasks done (turn-this-incident-into-3).
 - 2026-11-05 17:13 Update: Merged: audits no longer hang on reading a worker's screenshots (needs the new build installed) — **What changed.** Three audits stopped on 2026-11-05 on a permission prompt to read a worker's evidence screenshot, one here and two in another project (one sat 155 minutes). Now:
+- 2026-11-05 17:30 Merged fix: The stuck-verifier-prompt test waits on the fake's state instead of reading it once (no audit: review none)
