@@ -3030,3 +3030,8 @@
 - 2026-11-05 17:02 Audit of turn-this-incident-into-3: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
 - 2026-11-05 17:02 Planned fix: Fix StuckVerifierPromptTests.swift:47: The worker reports that the existing test aVerifie…
 - 2026-11-05 17:12 Merged turn-this-incident-into-3: A verifier reads its task's evidence screenshots without a prompt, and a Read prompt no one answers is declined
+- 2026-11-05 17:12 Automatically (auto_advance): Merged turn-this-incident-into-3 (A verifier reads its task's evidence screenshots without a prompt, and a Read prompt no one answers is declined) into main at 836173cb, on its passing audit and the full test run.
+- 2026-11-05 17:12 Automatically (auto_advance): Cleaned up turn-this-incident-into-3 (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-05 17:12 Started a worker on fix
+- 2026-11-05 17:12 Automatically (auto_advance): Started a worker on fix (The stuck-verifier-prompt test waits on the fake's state instead of reading it once), its after tasks done (turn-this-incident-into-3).
+- 2026-11-05 17:13 Update: Merged: audits no longer hang on reading a worker's screenshots (needs the new build installed) — **What changed.** Three audits stopped on 2026-11-05 on a permission prompt to read a worker's evidence screenshot, one here and two in another project (one sat 155 minutes). Now:
