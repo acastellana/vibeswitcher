@@ -44,7 +44,8 @@ struct StuckVerifierPromptTests {
             #expect(work.stuckPrompts.isEmpty, "\(after)s")
             #expect(work.messages.isEmpty, "\(after)s: \(work.messages.map { $0.text() })")
         }
-        #expect(h.agent["mode"] as? String == "permission")
+        // Still asking (its state is written after its screen is drawn: waited for, not read once).
+        try await h.waitFor { h.agent["mode"] as? String == "permission" }
 
         // Past it: declined, as the app does (each stuck prompt told once).
         var reports: [String] = []
@@ -54,9 +55,11 @@ struct StuckVerifierPromptTests {
         for stuck in work.stuckPrompts where told.insert(stuck.key).inserted {
             PromptDecline.handle(stuck, host: h.host) { text in reports.append(text()) }
         }
-        // The verifier gets the reason as the prompt's No, and its turn goes on.
-        try await h.waitFor { h.agent["declined"] as? String == LeadWitness.declineReason }
-        #expect(h.agent["mode"] as? String == "working")
+        // The verifier gets the reason as the prompt's No, and its turn goes on (one read of its state holds both).
+        try await h.waitFor {
+            let agent = h.agent
+            return agent["declined"] as? String == LeadWitness.declineReason && agent["mode"] as? String == "working"
+        }
         let transcript = try String(contentsOf: h.transcript, encoding: .utf8)
         #expect(transcript.contains("the user said:\\n" + LeadWitness.declineReason), "\(transcript.suffix(600))")
         // The lead: one report, naming the command.
@@ -124,8 +127,10 @@ struct StuckVerifierPromptTests {
         for stuck in work.stuckPrompts where told.insert(stuck.key).inserted {
             PromptDecline.handle(stuck, host: h.host) { text in reports.append(text()) }
         }
-        try await h.waitFor { h.agent["declined"] as? String == LeadWitness.declineReason }
-        #expect(h.agent["mode"] as? String == "working")
+        try await h.waitFor {
+            let agent = h.agent
+            return agent["declined"] as? String == LeadWitness.declineReason && agent["mode"] as? String == "working"
+        }
         let transcript = try String(contentsOf: h.transcript, encoding: .utf8)
         #expect(transcript.contains("the user said:\\n" + LeadWitness.declineReason), "\(transcript.suffix(600))")
         #expect(!transcript.contains("\"ran Read"), "a Yes went in: \(transcript.suffix(400))")
@@ -157,8 +162,11 @@ struct StuckVerifierPromptTests {
         PromptDecline.handle(stuck, host: h.host) { text in reports.append(text()) }
         try await h.waitFor { !reports.isEmpty }
         #expect(reports.count == 1 && reports.first?.contains("with Esc") == true && reports.first?.contains(command) == true, "\(reports)")
-        try await h.waitFor { h.agent["mode"] as? String == "idle" }
-        #expect(h.agent["reply"] as? String == "Denied.", "\(h.agent)")
+        // Declined without a reason: its turn over, in one read of its state (idle alone is its state before the prompt too).
+        try await h.waitFor {
+            let agent = h.agent
+            return agent["mode"] as? String == "idle" && agent["reply"] as? String == "Denied."
+        }
         let transcript = try String(contentsOf: h.transcript, encoding: .utf8)
         #expect(!transcript.contains("\"ran " + command), "a Yes went in: \(transcript.suffix(400))")
     }
@@ -178,8 +186,10 @@ struct StuckVerifierPromptTests {
         PromptDecline.handle(stuck, host: h.host) { text in reports.append(text()) }
         try await h.waitFor { !reports.isEmpty }
         #expect(reports.count == 1 && reports.first?.contains("with Esc") == true, "\(reports)")
-        try await h.waitFor { h.agent["mode"] as? String == "idle" }
-        #expect(h.agent["reply"] as? String == "Denied.", "\(h.agent)")
+        try await h.waitFor {
+            let agent = h.agent
+            return agent["mode"] as? String == "idle" && agent["reply"] as? String == "Denied."
+        }
         let transcript = try String(contentsOf: h.transcript, encoding: .utf8)
         #expect(!transcript.contains("\"ran " + command), "a Yes went in: \(transcript.suffix(400))")
     }
