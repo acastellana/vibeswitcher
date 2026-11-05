@@ -418,7 +418,11 @@ are updated together.
   where `<network>` is `testnet` or `mainnet`. A near-miss, a first line that equals `LOCAL FORK ONLY` once spaces,
   tabs and carriage returns at its ends are dropped and case is ignored, but isn't exactly it, is refused outright,
   local fork or not, with the fixed reason
-  `malformed local-fork marker: the first line must be exactly LOCAL FORK ONLY`. The marker can only refuse: it never
+  `malformed local-fork marker: the first line must be exactly LOCAL FORK ONLY`. Only a near-miss made of spaces or case
+  gets that reason: a tab or a carriage return in `reason` never reaches the marker check, because wallet-request v1
+  allows no control character there but the line feed, so a request holding one is refused earlier, by the
+  [format check](#the-format-check) (its result's only check, `format`), not with the malformed-marker reason; either
+  way it is `rejected`. The marker can only refuse: it never
   allows or changes anything. No field, rule or vector changes: a marked request is a valid v1 request, and
   VibeSwitcher files, shows and sends it like any other. VibeSwitcher never offers the browser wallet (its Sign in
   browser wallet, which signs without the Wallet Manager's checks) for a marked request or a near-miss, whatever its
