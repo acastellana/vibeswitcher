@@ -3113,3 +3113,5 @@
 - 2026-11-05 06:32 Automatically (auto_advance): Merge of main-thread-freezes-with failed: Tests fail rebased onto main: security socket/signing tests: skipped, the build failed (above): they need its vibeswitcher-host Sent its worker the output; it's back at work.
 - 2026-11-05 07:25 Automatically (auto_advance): Didn't start dictation-test-hangs-in: dictation-test-hangs-in's worker is still running. Send it what to do with message, or stop_worker first.
 - 2026-11-05 08:23 Planned tests-long-synchronous: Tests: long synchronous waits starve Swift's shared thread pool
+- 2026-11-05 08:36 Released dictation-test-hangs-in's worker (idle since its done report on 36aae175) while its audit runs
+- 2026-11-05 08:36 Automatically (auto_advance): Started the audit of dictation-test-hangs-in at 36aae175 (It touches sensitive_paths (scripts/build-app.sh), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
