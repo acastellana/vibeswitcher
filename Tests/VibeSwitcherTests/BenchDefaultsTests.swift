@@ -29,10 +29,11 @@ struct BenchDefaultsTests {
         process.environment = environment
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        let ended = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in ended.signal() }
         try process.run()
-        if ended.wait(timeout: .now() + hangGuard) == .timedOut {
+        // Awaited, never waited for on the main thread: a new build's first launch can take minutes on a loaded Mac
+        // (the system's check of its binary), and the main thread held that long stalls every main-actor test in the
+        // suite past its own waits (ClaudeDictationTests' 90 s, 2026-11-05).
+        if !(await until { !process.isRunning }) {
             process.terminate()
             Issue.record("the bench hung")
             return
