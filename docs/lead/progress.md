@@ -3013,3 +3013,4 @@
 - 2026-11-05 15:06 Automatically (auto_advance): Started the audit of wallet-requests-marked at 6d0d8cc5 (Its review is audit).
 - 2026-11-05 15:06 Released wallet-requests-marked's worker (idle since its done report on 6d0d8cc5) while its audit runs
 - 2026-11-05 15:06 Automatically (auto_advance): Released wallet-requests-marked's worker, idle since its done report on 6d0d8cc5, while its audit runs (ended pid 6021 (Worker: Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-05 15:38 Planned spec-note-a-tab: Spec note: a tab or CR near-miss of the fork marker is refused by the format check
