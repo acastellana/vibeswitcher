@@ -127,6 +127,30 @@ cost, the receipts of the 2026-10-31 batch give 8 tasks, 2.9 h and ~$86.
 
 ## Entries
 
+### IM-15: Marked wallet requests never go to the browser wallet (wallet-requests-marked, planned)
+
+- **Change:** a wallet request whose `reason` has the first line `LOCAL FORK ONLY` (or nearly: spaces, tabs and
+  carriage returns at its ends dropped, case ignored) is never offered Sign in browser wallet, whatever its `from`:
+  `WalletBrowser.canSign` is false for it, so the card has no browser button, no signing page is made, and
+  `vs-wallet request` says it waits for the Wallet Manager. It is filed, shown and sent to the Wallet Manager like any
+  other. The spec records the marker ([wallet-request.md](../protocol/wallet-request.md), History, 2026-11-05).
+- **Hypothesis:** no marked request is ever offered the browser wallet, because the card, the desk's signing page and
+  vs-wallet's output all ask the one rule. Unmarked requests from an 0x address are offered it as before.
+- **Metric:** the tests that hold the rule stay green in every merge's full suite:
+  `aRequestMarkedLocalForkOnlyCantBeSignedInTheBrowser`, `aNearlyRightMarkerIsRefusedTheBrowserToo`,
+  `aMarkedRequestsCardNeverHasTheBrowserAction`, `aMarkedRequestIsNeverOpenedInTheBrowserWallet` and
+  `aMarkedRequestWithoutAWalletManagerWaitsForItNeverTheBrowserWallet`. Guards: incidents of a marked request opened
+  in the browser wallet stay at 0; `aReasonWithoutTheMarkerAsItsFirstLineStaysSignable` stays green (an unmarked
+  request keeps the browser wallet).
+- **Baseline:** before the change, a marked request from an 0x address was offered the browser wallet: the five tests
+  fail on the commit before it (139 issues in the app's two suites, 46 in the core's two). 0 incidents, since no
+  project puts the marker on a request yet.
+- **Check:** 2026-11-12, window from this change's merge to 2026-11-12.
+- **Status:** measuring
+- **Result:** (pending)
+- **Verdict:** (pending)
+- **Why:** (pending)
+
 ### IM-14: No audit waits on an evidence read (turn-this-incident-into-3, planned)
 
 - **Change:** a verifier's settings let it read the image files in its own task's evidence folder

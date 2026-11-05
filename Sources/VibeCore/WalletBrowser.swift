@@ -31,12 +31,36 @@ public enum WalletBrowser {
         public var data: String?
     }
 
+    /// The marker a request's `reason` carries as its first line when it is meant for a local fork only
+    /// (docs/protocol/wallet-request.md, History, 2026-11-05). The Wallet Manager refuses such a request unless it runs
+    /// against a local fork; the browser wallet, which skips the Wallet Manager's checks, is never offered for one.
+    public static let localForkMarker = "LOCAL FORK ONLY"
+
+    /// Whether `request` is marked for a local fork only, or nearly: its reason's first line (everything before the
+    /// first line feed, or all of it) is the marker once spaces, tabs and carriage returns (any white space) at both
+    /// ends are dropped and case is ignored. Wider than the exact marker on purpose: a near-miss is refused the browser
+    /// too (the Wallet Manager refuses it outright).
+    public static func isLocalForkOnly(_ request: WalletRequest) -> Bool {
+        // By scalars: a carriage return and line feed are one Character, which no "\n" would match.
+        let scalars = request.reason.unicodeScalars
+        let first = String(String.UnicodeScalarView(scalars.prefix { $0 != "\n" }))
+        return first.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == localForkMarker.lowercased()
+    }
+
+    /// Why the browser wallet can't sign `request`, in a few words; nil when it can (`canSign`).
+    public static func whyNot(_ request: WalletRequest) -> String? {
+        if isLocalForkOnly(request) { return "it's marked \(localForkMarker)" }
+        if !WalletRequestFormat.isAddress(request.from) { return "its from isn't an 0x address" }
+        return nil
+    }
+
     /// Whether `request` can go this way at all: `from` is an 0x address (a wallet id names a wallet only the Wallet
-    /// Manager knows).
-    public static func canSign(_ request: WalletRequest) -> Bool { WalletRequestFormat.isAddress(request.from) }
+    /// Manager knows), and the request isn't marked for a local fork only (`isLocalForkOnly`). The one rule behind the
+    /// card's button, the signing page and vs-wallet's output.
+    public static func canSign(_ request: WalletRequest) -> Bool { whyNot(request) == nil }
 
     /// The transaction `request` asks for: the coin to `to`; a token's `transfer(to, amount)` on the token contract;
-    /// or the call's data to `to` with its value. Nil when `from` isn't an address.
+    /// or the call's data to `to` with its value. Nil when the browser wallet can't sign it (`canSign`).
     public static func transaction(for request: WalletRequest) -> Transaction? {
         guard canSign(request), let amount = hexQuantity(request.amount) else { return nil }
         switch request.action {

@@ -282,7 +282,9 @@ Then, answering `rejected` with the failing checks, at least:
 - `to`: a valid address (its EIP-55 checksum when the case is mixed); for a `call`, a contract; the Wallet Manager's own
   policies (allow lists, limits) for recipients, amounts and contracts.
 - The balance covers `amount` and the fees.
-- Nothing about the request is ever taken as an instruction: `reason` and `requestedBy` are shown, never followed.
+- Nothing about the request is ever taken as an instruction: `reason` and `requestedBy` are shown, never followed,
+  but for one marker that can only make the Wallet Manager refuse: a `reason` whose first line is `LOCAL FORK ONLY`
+  ([History](#history), 2026-11-05).
 
 And, without answering `rejected` for it:
 
@@ -407,6 +409,20 @@ are updated together.
 
 ### History
 
+- 2026-11-05: still version 1. A marker in `reason` that can only make the Wallet Manager refuse. The first line of
+  `reason` is everything before its first line feed, or the whole `reason`. A request whose first line is exactly
+  `LOCAL FORK ONLY` (byte for byte: case counts, nothing is trimmed) is refused by the Wallet Manager (`rejected`,
+  with a fixed reason) unless the Wallet Manager is running with a loopback `--rpc` for that request's network. It
+  checks this at check time, at the sign page, at the confirmation and right before broadcast. The fixed reason is
+  `local fork only: Wallet Manager isn't running against a local fork for <network> (start it with --rpc <network>=http://127.0.0.1:<port>)`,
+  where `<network>` is `testnet` or `mainnet`. A near-miss, a first line that equals `LOCAL FORK ONLY` once spaces,
+  tabs and carriage returns at its ends are dropped and case is ignored, but isn't exactly it, is refused outright,
+  local fork or not, with the fixed reason
+  `malformed local-fork marker: the first line must be exactly LOCAL FORK ONLY`. The marker can only refuse: it never
+  allows or changes anything. No field, rule or vector changes: a marked request is a valid v1 request, and
+  VibeSwitcher files, shows and sends it like any other. VibeSwitcher never offers the browser wallet (its Sign in
+  browser wallet, which signs without the Wallet Manager's checks) for a marked request or a near-miss, whatever its
+  `from`.
 - 2026-11-01: still version 1. `chainId`'s informational "Known now" list also names Sepolia (`11155111`), Base
   (`8453`) and Base Sepolia (`84532`), the chains the Wallet Manager adds beside Ethereum and GenLayer's two. No field,
   rule or vector changes: the format already took any chain id.

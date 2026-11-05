@@ -191,7 +191,13 @@ final class WalletDesk: ObservableObject {
     /// A button on a card: Send to Wallet Manager (only while it waits), Retry (after Passage couldn't reach the Wallet Manager or
     /// stopped unsure), Discard. `then` runs on the main thread once it's done and the cards are redrawn.
     func act(_ action: WalletCardModel.Action, on id: String, then: @escaping () -> Void = {}) {
-        guard let card = cards.first(where: { $0.id == id }), card.actions.contains(action), let shown = drawn[id] else { return then() }
+        guard let card = cards.first(where: { $0.id == id }), let shown = drawn[id] else { return then() }
+        guard card.actions.contains(action) else {
+            // Sign in browser wallet on a request the browser wallet can't sign (one marked LOCAL FORK ONLY, a wallet id):
+            // its card never offers it, and a press that comes all the same does nothing, and says why.
+            if action == .browser, let why = WalletBrowser.whyNot(shown) { log("browser on \(id) not done: \(why)") }
+            return then()
+        }
         if action == .settings {
             openSettings()
             return then()
@@ -465,7 +471,9 @@ final class WalletDesk: ObservableObject {
         guard let name = names[request.requestedBy.session.lowercased()] else {
             return log("browser on \(id) not done: its session isn't one the session host runs")
         }
-        guard let page = WalletSignPage.html(for: request, requestedBy: name) else { return log("browser on \(id) not done: its from isn't an 0x address") }
+        guard let page = WalletSignPage.html(for: request, requestedBy: name) else {
+            return log("browser on \(id) not done: \(WalletBrowser.whyNot(request) ?? "no page could be made for it")")
+        }
         let server = WalletSignServer(page: page)
         let url: URL
         do {

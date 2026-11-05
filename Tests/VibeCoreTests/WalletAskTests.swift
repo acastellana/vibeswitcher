@@ -147,6 +147,37 @@ struct WalletAskTests {
         #expect(ready.output.contains("until the user presses Send to Wallet Manager") && !ready.output.contains("isn't set up"))
     }
 
+    /// A request marked LOCAL FORK ONLY (its reason's first line), from an 0x address, with no Wallet Manager set up:
+    /// filed like any other, and the output says the browser wallet can't sign it and that it waits for the Wallet
+    /// Manager. Never that the browser wallet is the way.
+    @Test(arguments: [WalletAsk.WalletManager.noPeer, .noPassage])
+    func aMarkedRequestWithoutAWalletManagerWaitsForItNeverTheBrowserWallet(walletManager: WalletAsk.WalletManager) throws {
+        let address = Self.with("--from", "0x00000000000000000000000000000000000000aa")
+        for reason in ["LOCAL FORK ONLY", "LOCAL FORK ONLY\nDeploy the example contract to the fork.", " local fork only "] {
+            let ran = run(Self.with("--reason", reason, in: address), walletManager: walletManager)
+            #expect(ran.status == 0, "\(ran.error)")
+            // Filed as it was asked: the marker is the reason's, untouched.
+            let request = try #require(WalletAsk.filed(in: ran.folder).requests.first { $0.reason == reason })
+            #expect(request.from == "0x00000000000000000000000000000000000000aa")
+            #expect(ran.output.contains("Filed wallet request \(request.id): its card is up in this session's chat"), "\(ran.output)")
+            #expect(ran.output.contains("The Wallet Manager isn't set up yet (\(walletManager.why!))"), "\(ran.output)")
+            #expect(ran.output.contains("the browser wallet can't sign a request marked LOCAL FORK ONLY"), "\(ran.output)")
+            #expect(ran.output.contains("it waits on its card until the user sets up the Wallet Manager in Settings › Wallet and sends it"),
+                    "\(ran.output)")
+            #expect(!ran.output.contains("is the way to sign") && !ran.output.contains("Sign in browser wallet"), "\(ran.output)")
+            #expect(ran.output.contains("It expires at "))
+        }
+        // The marker on line 2 isn't one: the browser wallet is the way, as for any request from an 0x address.
+        let unmarked = run(Self.with("--reason", "Deploy the example contract.\nLOCAL FORK ONLY", in: address), walletManager: walletManager)
+        #expect(unmarked.status == 0 && unmarked.output.contains("so the browser wallet is the way to sign"), "\(unmarked.output)")
+        // Set up: filed and worded as any other, for Send to Wallet Manager.
+        let ready = run(Self.with("--reason", "LOCAL FORK ONLY", in: address))
+        #expect(ready.status == 0 && ready.output.contains("until the user presses Send to Wallet Manager"), "\(ready.output)")
+        #expect(!ready.output.contains("browser wallet"), "\(ready.output)")
+        // The help says so.
+        #expect(run(["help"]).output.contains("A request whose reason's first line is LOCAL FORK ONLY is never offered the browser wallet"))
+    }
+
     /// Settings › Wallet as the CLI reads it: no peer; a peer and a Passage (on the PATH, an absolute path set, Passage.app);
     /// a peer and none.
     @Test func theWalletManagerIsReadyWithAPeerAndAPassage() throws {

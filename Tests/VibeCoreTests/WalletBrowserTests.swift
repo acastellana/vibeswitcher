@@ -44,6 +44,64 @@ struct WalletBrowserTests {
         #expect(!WalletBrowser.canSign(Self.request(from: "example-hardware")))
     }
 
+    static func request(reason: String, from: String = from) -> WalletRequest {
+        var request = request(from: from)
+        request.reason = reason
+        return request
+    }
+
+    /// A reason whose first line is the marker LOCAL FORK ONLY: the browser wallet, which skips the Wallet Manager's
+    /// checks, can't sign it, whatever its `from`. The first line is everything before the first line feed, or all of it.
+    @Test(arguments: [
+        ("the marker alone, as the whole reason", "LOCAL FORK ONLY"),
+        ("the marker, a line feed and more text", "LOCAL FORK ONLY\nDeploy the example contract to the fork."),
+        ("the marker and a line feed, nothing after", "LOCAL FORK ONLY\n"),
+    ])
+    func aRequestMarkedLocalForkOnlyCantBeSignedInTheBrowser(name: String, reason: String) {
+        let marked = Self.request(reason: reason)
+        #expect(WalletRequestFormat.isAddress(marked.from))
+        #expect(!WalletBrowser.canSign(marked), "\(name)")
+        #expect(WalletBrowser.transaction(for: marked) == nil, "\(name)")
+        // A wallet id: no browser either way.
+        #expect(!WalletBrowser.canSign(Self.request(reason: reason, from: "example-hardware")), "\(name)")
+    }
+
+    /// Fail closed on the first line: spaces, tabs and a carriage return at its ends are dropped and case is ignored, so
+    /// a marker that is nearly right is refused the browser too.
+    @Test(arguments: [
+        ("spaces at both ends, in lower case", " local fork only "),
+        ("in lower case", "local fork only"),
+        ("in mixed case", "Local Fork Only"),
+        ("a space before it", " LOCAL FORK ONLY"),
+        ("spaces after it, then more lines", "LOCAL FORK ONLY   \nDeploy the example contract to the fork."),
+        ("tabs at both ends", "\tLOCAL FORK ONLY\t"),
+        ("a carriage return after it", "LOCAL FORK ONLY\r"),
+        ("a carriage return and line feed after it, then more text", "LOCAL FORK ONLY\r\nDeploy the example contract to the fork."),
+        ("a carriage return before it", "\rLOCAL FORK ONLY"),
+        ("spaces, a tab and a carriage return around it, in lower case", " \tlocal fork only \r\nmore"),
+    ])
+    func aNearlyRightMarkerIsRefusedTheBrowserToo(name: String, reason: String) {
+        let marked = Self.request(reason: reason)
+        #expect(!WalletBrowser.canSign(marked), "\(name)")
+        #expect(WalletBrowser.transaction(for: marked) == nil, "\(name)")
+    }
+
+    /// Not the first line, or only part of it: not marked, so it stays signable from an 0x address (and only from one).
+    @Test(arguments: [
+        ("the marker on line 2", "Deploy the example contract.\nLOCAL FORK ONLY"),
+        ("the marker on line 2, after an empty first line", "\nLOCAL FORK ONLY"),
+        ("the marker with more after it on the first line", "LOCAL FORK ONLY please"),
+        ("the marker with more before it on the first line", "This is LOCAL FORK ONLY"),
+        ("the marker with a full stop", "LOCAL FORK ONLY."),
+        ("a reason that doesn't have it", "Pay the example invoice."),
+    ])
+    func aReasonWithoutTheMarkerAsItsFirstLineStaysSignable(name: String, reason: String) {
+        let unmarked = Self.request(reason: reason)
+        #expect(WalletBrowser.canSign(unmarked), "\(name)")
+        #expect(WalletBrowser.transaction(for: unmarked) != nil, "\(name)")
+        #expect(!WalletBrowser.canSign(Self.request(reason: reason, from: "example-hardware")), "\(name)")
+    }
+
     /// One table names the six chains and links their EIP-3091 explorers, for the card, the messages and the page.
     @Test func knownChainsHaveTheirNamesAndExplorers() {
         let expected: [(Int64, String, String, String)] = [

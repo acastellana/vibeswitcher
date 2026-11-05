@@ -35,8 +35,12 @@ struct WalletCardModel: Equatable, Identifiable {
     var state: State
     /// The Wallet Manager's checks, when it sent any (with a rejection, but also along with other answers).
     var checks: [Check] = []
-    /// `from` is an 0x address, so the browser's wallet could sign it (`WalletBrowser.canSign`).
+    /// The browser's wallet could sign it (`WalletBrowser.canSign`): `from` is an 0x address, and it isn't marked for a
+    /// local fork only.
     var browserSignable = false
+    /// The reason's first line marks it for a local fork only (`WalletBrowser.isLocalForkOnly`): never the browser
+    /// wallet, whatever its `from`. Only the detail's wording reads this; `browserSignable` is already false for one.
+    var localForkOnly = false
     /// Sent, with no word from the Wallet Manager for 5 minutes: the card asks whether it's running.
     var notPickedUp = false
     /// The Wallet Manager isn't set up in Settings › Wallet (no peer chosen, no Passage found): the line that says so,
@@ -139,6 +143,9 @@ struct WalletCardModel: Equatable, Identifiable {
 
     /// The line under Sign in browser wallet.
     static let browserNote = "Skips the Wallet Manager's checks: read the wallet's own popup"
+    /// A waiting card's line for a request marked for a local fork only, while the Wallet Manager isn't set up.
+    static let localForkOnlyDetail = "Nothing has left this Mac. It needs the Wallet Manager: it's marked local fork only, "
+        + "so the browser wallet isn't offered for it."
     /// Added to a Sent card's line after `notPickedUpAfter` with no word from the Wallet Manager.
     static let notPickedUpNote = "Delivered to the Wallet Manager's Mac, but it hasn't picked it up yet. Is the Wallet Manager running?"
     static let notPickedUpAfter: TimeInterval = 5 * 60
@@ -160,10 +167,10 @@ struct WalletCardModel: Equatable, Identifiable {
     }
 
     /// Whether Sign in browser wallet shows: only while the request has never reached the Wallet Manager (waiting,
-    /// unreachable, not sent), from an 0x address that isn't known to be a Safe. Once it's used the card is `inBrowser`
-    /// or after, where neither it nor Send shows again.
+    /// unreachable, not sent), from an 0x address that isn't known to be a Safe, and never for one marked for a local
+    /// fork only. Once it's used the card is `inBrowser` or after, where neither it nor Send shows again.
     var offersBrowser: Bool {
-        guard browserSignable, wallet != .safe else { return false }
+        guard browserSignable, !localForkOnly, wallet != .safe else { return false }
         switch state {
         case .waiting, .unreachable, .notSent: return true
         default: return false
@@ -262,9 +269,11 @@ struct WalletCardModel: Equatable, Identifiable {
     }
 
     var detail: String {
-        // Waiting with no Wallet Manager set up: the browser wallet is the way, or, for a wallet id, there is none yet.
+        // Waiting with no Wallet Manager set up: the browser wallet is the way, or, for a request marked for a local fork
+        // only or a wallet id, there is none yet.
         if state == .waiting, setupNeeded != nil {
-            return offersBrowser ? "Nothing has left this Mac. Sign it in your browser wallet, or discard it."
+            if offersBrowser { return "Nothing has left this Mac. Sign it in your browser wallet, or discard it." }
+            return localForkOnly ? Self.localForkOnlyDetail
                 : "Nothing has left this Mac. It needs the Wallet Manager: a browser wallet can't use a wallet id."
         }
         let line = Self.detail(state, wallet: wallet)
