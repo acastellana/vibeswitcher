@@ -3039,3 +3039,5 @@
 - 2026-11-05 17:30 Automatically (auto_advance): Merged fix (The stuck-verifier-prompt test waits on the fake's state instead of reading it once) into main at 4df695ac, review none: on its worker's done report on dec3dc4e and the full test run.
 - 2026-11-05 17:30 Automatically (auto_advance): Cleaned up fix; ended pid 23379 (Worker: The stuck-verifier-prompt test waits on the fake's state instead of reading it once) (freed 1.3 GB of build output and temporary folders). It stays done.
 - 2026-11-05 17:31 Started a worker on wallet-requests-marked
+- 2026-11-05 20:42 Released wallet-requests-marked's worker (idle since its done report on c7a9f5c5) while its audit runs
+- 2026-11-05 20:42 Automatically (auto_advance): Released wallet-requests-marked's worker, idle since its done report on c7a9f5c5, while its audit runs (ended pid 88140 (Worker: Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
