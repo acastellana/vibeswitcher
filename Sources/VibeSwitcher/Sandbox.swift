@@ -129,8 +129,9 @@ enum Sandbox {
     // MARK: Windows
 
     /// AppKit pulls a titled window that's off every screen back until a corner of it shows (to -1240, -684 on a
-    /// 1728-wide screen): in the sandbox a window stays where it's put, off screen (`hide`).
-    private static func keepWindowsWherePut() {
+    /// 1728-wide screen): in the sandbox a window stays where it's put, off screen (`hide`); so does the team-churn
+    /// bench's with `--occluded`.
+    static func keepWindowsWherePut() {
         guard let constrain = class_getInstanceMethod(NSWindow.self, #selector(NSWindow.constrainFrameRect(_:to:))) else {
             refuse("couldn't keep the sandbox's windows off screen")
         }

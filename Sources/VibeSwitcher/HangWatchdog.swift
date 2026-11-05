@@ -70,7 +70,55 @@ final class HangWatchdog: @unchecked Sendable {
         var sampleWritten = false
         /// The caught stacks' call graph, as last written.
         var stacks = ""
+        /// The main thread's priority while it was late (`Priorities`), as last written.
+        var priorities: Priorities?
     }
+
+    /// The main thread's scheduling priority and the task's role, read with each caught stack: a main thread demoted
+    /// (App Nap, a background role: a low current priority) tells a starved stall from one where it kept its priority
+    /// and was outrun, which the reports of 2026-11-05 couldn't (their verdict was starved at loads of 16-40).
+    struct Priorities: Equatable {
+        var low: Int32
+        var high: Int32
+        var bases: Set<Int32>
+        var roles: Set<Int32>
+        var reads = 0
+
+        init(_ first: ThreadStack.Priority) {
+            low = first.current
+            high = first.current
+            bases = [first.base]
+            roles = [first.role]
+            reads = 1
+        }
+
+        mutating func add(_ read: ThreadStack.Priority) {
+            low = min(low, read.current)
+            high = max(high, read.current)
+            bases.insert(read.base)
+            roles.insert(read.role)
+            reads += 1
+        }
+
+        /// "Main thread's priority while stuck: 4–46 (base 46) over 120 reads; task role 2 (background application)".
+        var line: String {
+            func name(_ role: Int32) -> String {
+                switch role {
+                case 1: return "1 (foreground application)"
+                case 2: return "2 (background application)"
+                case 6: return "6 (non-UI)"
+                case 7: return "7 (default)"
+                default: return "\(role)"
+                }
+            }
+            let range = low == high ? "\(low)" : "\(low)–\(high)"
+            return "Main thread's priority while stuck: \(range) (base \(bases.sorted().map(String.init).joined(separator: "/"))) over \(reads) reads; "
+                + "task role \(roles.sorted().map(name).joined(separator: ", "))"
+        }
+    }
+
+    /// The main thread's priorities read since it was late (with `caught`).
+    private var latePriorities: Priorities?
 
     init(folder: URL = VibePaths.root.appendingPathComponent("debug", isDirectory: true), threshold: TimeInterval = 2,
          early: TimeInterval = 0.5, catchEvery: TimeInterval = 0.1, samples: Bool = true) {
@@ -125,12 +173,16 @@ final class HangWatchdog: @unchecked Sendable {
         let stuck = report.map { $0.end == nil } ?? false
         let sampled = report?.sampleDone == true && report?.sampleWritten == false
         lock.unlock()
+        if late != nil, let read = stack?.priority {
+            if latePriorities == nil { latePriorities = Priorities(read) } else { latePriorities?.add(read) }
+        }
         if let late, caught.count < Self.maxCaught, let stack {
             let frames = stack.frames()
             if !frames.isEmpty { caught.append((Date().timeIntervalSince(late), frames)) }
         } else if late == nil, !stuck {
             // Late, but it answered before it was a stall: nothing to keep.
             caught = []
+            latePriorities = nil
         }
         switch event {
         case .stalled(let since)?: record(since: since, state: state)
@@ -141,6 +193,7 @@ final class HangWatchdog: @unchecked Sendable {
             lock.unlock()
             writeReport()
             caught = []
+            latePriorities = nil
             Breadcrumbs.shared.flush()
         case nil:
             if sampled { writeReport(withStacks: false) }
@@ -208,6 +261,7 @@ final class HangWatchdog: @unchecked Sendable {
     private func writeReport(withStacks: Bool = true) {
         lock.lock()
         if withStacks, !caught.isEmpty { report?.stacks = AppHealth.caughtGraph(caught) }
+        if withStacks, let latePriorities { report?.priorities = latePriorities }
         if report?.sampleDone == true { report?.sampleWritten = true }
         let report = self.report
         lock.unlock()
@@ -229,7 +283,8 @@ final class HangWatchdog: @unchecked Sendable {
             overlap += "\n"
         }
         let stacks = report.stacks.isEmpty ? "No stacks caught while stuck.\n" : report.stacks + "\n"
-        let text = Redaction.secrets(in: report.text + "\n" + overlap + stacks + "\nLatest events:\n"
+        let priorities = report.priorities.map { $0.line + "\n" } ?? ""
+        let text = Redaction.secrets(in: report.text + "\n" + overlap + priorities + stacks + "\nLatest events:\n"
             + Breadcrumbs.shared.lines.joined(separator: "\n") + "\n")
         let header = AppHealth.hangHeader(since: report.since, duration: duration, sampleInside: inside, load: report.load, cpus: report.cpus,
                                           spread: report.spread, verdict: AppHealth.verdict(report.spread, sampleInside: inside))

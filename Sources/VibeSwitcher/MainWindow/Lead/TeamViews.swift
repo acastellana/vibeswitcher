@@ -519,8 +519,10 @@ struct DecisionFeedView: View {
                     let look = DecisionFeed.look(openDecisions.contains(item.decision.id) ? .fresh : item.phase)
                     row(item.decision, dim: false)
                         .opacity(look.opacity)
+                        // Stepped with the feed's clock, not animated: a step a second is 1/60 of the fade (1.3 % opacity,
+                        // 0.05 pt of blur), too small to see, and a second's linear animation started on every tick kept
+                        // SwiftUI animating the window at its frame rate for the whole minute (the team-churn bench's ticks).
                         .blur(radius: look.blur)
-                        .animation(reduceMotion ? nil : .linear(duration: 1), value: look.opacity)
                 }
                 let earlier = split.earlier.filter { !kept.contains($0) }
                 if !earlier.isEmpty {

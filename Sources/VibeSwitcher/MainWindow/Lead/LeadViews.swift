@@ -875,26 +875,41 @@ struct TeamGlance: View, Equatable {
     }
 
     var body: some View {
-        // The decisions still to fade: from the first one's fade to the last one's end (DecisionFeed's times).
-        let now = (clock ?? Date()).timeIntervalSince1970
-        let fades = decisions.map { $0.at + DecisionFeed.shown }.filter { $0 + DecisionFeed.fade > now }
-        let fadeStart = fades.min().map { Date(timeIntervalSince1970: $0) }
-        let fadeEnd = fades.max().map { Date(timeIntervalSince1970: $0 + DecisionFeed.fade) }
-        // Only what tells time is drawn again as the clock ticks: every 10 s, every second while a decision fades (never
-        // with Reduce Motion: it folds instead).
-        TimelineView(.fading(from: fadeStart, until: fadeEnd, every: 10, reduceMotion: reduceMotion)) { context in
-            content(now: clock ?? context.date)
+        // Only what tells time is drawn again as the clock ticks: every 10 s (the questions' countdowns, the tasks'
+        // times); the decisions alone every second while one fades (`decisionFeed`).
+        TimelineView(.fading(from: nil, until: nil, every: 10, reduceMotion: reduceMotion)) { context in
+            content(now: clock ?? context.date, live: clock == nil)
         }
     }
 
-    @ViewBuilder func content(now: Date) -> some View {
+    /// The decision feed on a clock of its own: every 10 s, and every second while a decision fades (never with Reduce
+    /// Motion: it folds instead). Ticking the whole glance each second drew the questions and every task row again
+    /// with the feed, 157–250 ms of the main thread a second over a minute's fade (the team-churn bench's ticks phase).
+    /// Drawn as of `now` alone unless `live` (pictures, and a glance given its clock).
+    @ViewBuilder private func decisionFeed(now: Date, live: Bool) -> some View {
+        if !live {
+            DecisionFeedView(decisions: decisions, now: now, summary: { decisionLines[$0.id] }, openDecisions: openDecisions, showEarlier: showEarlier)
+        } else {
+            // The decisions still to fade: from the first one's fade to the last one's end (DecisionFeed's times).
+            let at = now.timeIntervalSince1970
+            let fades = decisions.map { $0.at + DecisionFeed.shown }.filter { $0 + DecisionFeed.fade > at }
+            let fadeStart = fades.min().map { Date(timeIntervalSince1970: $0) }
+            let fadeEnd = fades.max().map { Date(timeIntervalSince1970: $0 + DecisionFeed.fade) }
+            TimelineView(.fading(from: fadeStart, until: fadeEnd, every: 10, reduceMotion: reduceMotion)) { context in
+                DecisionFeedView(decisions: decisions, now: context.date, summary: { decisionLines[$0.id] }, openDecisions: openDecisions,
+                                 showEarlier: showEarlier)
+            }
+        }
+    }
+
+    @ViewBuilder func content(now: Date, live: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             let stack = board.questionStack(now: now.timeIntervalSince1970)
             if !stack.isEmpty {
                 // The withdrawn ones are in the history below.
                 LeadQuestionStack(questions: stack, notices: notices, answer: answer, showsWithdrawn: false)
             }
-            DecisionFeedView(decisions: decisions, now: now, summary: { decisionLines[$0.id] }, openDecisions: openDecisions, showEarlier: showEarlier)
+            decisionFeed(now: now, live: live)
                 .padding(.horizontal, -8)
             teamSection("Tasks") {
                 if board.tasks.isEmpty {
