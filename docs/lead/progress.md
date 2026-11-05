@@ -3021,3 +3021,4 @@
 - 2026-11-05 16:31 Planned accountusagetests-don-t: AccountUsageTests don't depend on today's date (two fail on main since 2026-11-05 12:00)
 - 2026-11-05 16:31 Started a worker on accountusagetests-don-t
 - 2026-11-05 16:31 Automatically (auto_advance): Started a worker on accountusagetests-don-t (AccountUsageTests don't depend on today's date (two fail on main since 2026-11-05 12:00)).
+- 2026-11-05 16:53 Merged accountusagetests-don-t: AccountUsageTests don't depend on today's date (two fail on main since 2026-11-05 12:00) (no audit: review none)
