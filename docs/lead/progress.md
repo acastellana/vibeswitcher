@@ -3052,3 +3052,9 @@
 - 2026-11-05 23:33 Audit of wallet-requests-reach-a: complete, clean, round 1: 2 Nit open
 - 2026-11-05 23:33 Incident: The user's Allow on a verifier's Read permission prompt didn't reach the session, twice on 2026-11-05: the user answered "I allowed it" and "allowed in both", y… (in wallet-requests-reach-a); planned turn-this-incident-into-4 to turn it into a check
 - 2026-11-05 23:48 Merged wallet-requests-marked: Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker
+- 2026-11-05 23:48 Automatically (auto_advance): Merged wallet-requests-marked (Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker) into main at 6337415c, on its passing audit and the full test run.
+- 2026-11-05 23:48 Started a worker on wallet-requests-reach-a
+- 2026-11-05 23:48 Automatically (auto_advance): Merge of wallet-requests-reach-a failed: Conflicts with main: the branch needs bringing up to date. Sent its worker the output; it's back at work.
+- 2026-11-05 23:48 Automatically (auto_advance): Cleaned up wallet-requests-marked (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-05 23:48 Started a worker on spec-note-a-tab
+- 2026-11-05 23:48 Automatically (auto_advance): Started a worker on spec-note-a-tab (Spec note: a tab or CR near-miss of the fork marker is refused by the format check), its after tasks done (wallet-requests-marked).
