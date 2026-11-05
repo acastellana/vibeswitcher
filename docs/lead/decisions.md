@@ -211,3 +211,11 @@ The user wants lead-to-lead messaging kept and made truly safe, and chose immedi
 
 The user wants the lead to handle the GitHub sync and chose "ask me each time: one click in the app" for pushes (F6BE148C). Raw fetch and push can move main or reach any URL, so the shape is fixed in audited code. Pushing is outward-facing, so only the user's click in the app approves it.
 
+## 2026-11-05 00:30:32 Security contracts list every path to the protected property (every writer of the data, every channel, every trust on first use), not only the new feature's own path, and each path gets an acceptance check.
+
+Lead mail's first contract made tell_lead unforgeable but missed direct inbox seals under another name, honest-name seals into another team, and the remote URL's trust on first use. That cost 3 follow-up tasks and audits (retrospective, 2026-11-05).
+
+## 2026-11-05 00:30:33 After record_incident, in the same turn, set auto_advance: false on the planned task, sharpen its contract, then set auto_advance back to true.
+
+turn-this-incident-into-9 auto-started on the generic brief before the sharpened contract landed (2026-11-03). If it happens again despite this, make a product task so incident tasks wait for the lead's contract.
+
