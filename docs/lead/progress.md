@@ -3133,3 +3133,5 @@
 - 2026-11-05 10:48 Automatically (auto_advance): Started the audit of tests-long-synchronous at ce37e9d7 (The risk check raised it to audit: it changes test or build infrastructure the suite relies on (Tests/VibeCoreTests/TestSupport.swift, Tests/VibeHostTests/TestSupport.swift, Tests/VibeSwitcherTests/TestSupport.swift, scripts/lib/swift-jobs.sh, …)).
 - 2026-11-05 11:15 Audit of 178-s-main-thread: complete, clean, round 1: 2 Nit open
 - 2026-11-05 11:26 Merged 178-s-main-thread: Background main-thread starvation: App Nap / QoS, and the fade tick's cost
+- 2026-11-05 11:26 Automatically (auto_advance): Merged 178-s-main-thread (Background main-thread starvation: App Nap / QoS, and the fade tick's cost) into main at 3174952f, on its passing audit and the full test run.
+- 2026-11-05 11:26 Automatically (auto_advance): Cleaned up 178-s-main-thread (freed 2.9 GB of build output and temporary folders). It stays done.
