@@ -3116,3 +3116,7 @@
 - 2026-11-05 08:36 Released dictation-test-hangs-in's worker (idle since its done report on 36aae175) while its audit runs
 - 2026-11-05 08:36 Automatically (auto_advance): Started the audit of dictation-test-hangs-in at 36aae175 (It touches sensitive_paths (scripts/build-app.sh), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-05 08:43 Planned 178-s-main-thread: 178 s main-thread freeze inside SwiftUI accessibility combine (lead window)
+- 2026-11-05 09:08 Started a worker on 178-s-main-thread
+- 2026-11-05 09:08 Automatically (auto_advance): Started a worker on 178-s-main-thread (178 s main-thread freeze inside SwiftUI accessibility combine (lead window)).
+- 2026-11-05 09:10 Audit of dictation-test-hangs-in: complete, clean, round 1: 1 Nit open, 2 Pre-existing open
+- 2026-11-05 09:23 Merged dictation-test-hangs-in: Full-suite hangs: dictation test timeout, and a run stuck at 0% CPU
