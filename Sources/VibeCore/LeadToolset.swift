@@ -179,6 +179,8 @@ public final class LeadToolset: MCPToolset {
     var usageWake: (Date, @escaping @Sendable () -> Void) -> Void = { date, body in
         DispatchQueue.global().asyncAfter(wallDeadline: .now() + max(0, date.timeIntervalSinceNow), execute: body)
     }
+    /// The clock the accounts' usage is read by: a limit holds until its reset by it (see `accountUsage`). Faked in tests.
+    var usageClock: () -> Date = { Date() }
     /// Codex workers can be started (see `LeadLaunch.codexWorkersUsable`); tests of the Codex launch set it.
     var codexWorkers = LeadLaunch.codexWorkersUsable
     /// Where the Codex account's usage is read (see `CodexUsage`), for auto tasks' routing: the Mac's Codex home
@@ -1465,7 +1467,9 @@ public final class LeadToolset: MCPToolset {
     /// The account's usage as known now: what's kept (`usageStore`), with the limits the team's `sessions` stopped at
     /// kept first (a session whose turn ended on a refusal: `LeadSessionInfo.usageLimit`). A model-only refusal from a
     /// session the board doesn't name (its model unknown) isn't kept: unknown usage is no back-off.
-    func accountUsage(sessions: [LeadSessionInfo]?, now: Date = Date()) -> AccountUsage {
+    /// `now`: `usageClock`'s when not given.
+    func accountUsage(sessions: [LeadSessionInfo]?, now: Date? = nil) -> AccountUsage {
+        let now = now ?? usageClock()
         if let sessions {
             let board = store.load()
             let refusals = sessions.compactMap { info -> AccountUsage.Limit? in
@@ -1481,7 +1485,8 @@ public final class LeadToolset: MCPToolset {
     /// when known, Codex's (or why it isn't known), and the next auto task's route (the first planned auto task's, else
     /// one on the project's model). Codex's and the route only when they say something: either account's usage is
     /// known, an open task is auto, or agent_default is auto (status stays bounded on a board that uses neither).
-    func usageLines(sessions: [LeadSessionInfo]?, now: Date = Date()) -> [String] {
+    func usageLines(sessions: [LeadSessionInfo]?, now: Date? = nil) -> [String] {
+        let now = now ?? usageClock()
         var lines: [String] = []
         let claude = accountUsage(sessions: sessions, now: now)
         if let line = claude.statusText(now: now) { lines.append(line) }
@@ -1500,7 +1505,8 @@ public final class LeadToolset: MCPToolset {
 
     /// The limit that holds back a session on `model` now, if any (see `AccountUsage.hold`).
     func usageHold(model: String?, sessions: [LeadSessionInfo]?) -> AccountUsage.Limit? {
-        accountUsage(sessions: sessions).hold(model: model)
+        let now = usageClock()
+        return accountUsage(sessions: sessions, now: now).hold(model: model, now: now)
     }
 
     /// Why `what` isn't started on `model`: the account's usage is at `AccountUsage.threshold` or more of a limit on it;
@@ -1550,8 +1556,9 @@ public final class LeadToolset: MCPToolset {
 
     /// Where an auto task's worker would start now, and why (see `UsageRouting.route`): from Claude's usage on its
     /// model and Codex's as its newest session file says. Unknown usage on either side: Claude.
-    func workerRoute(for task: LeadTask, sessions: [LeadSessionInfo]?, now: Date = Date()) -> UsageRouting.Route {
-        UsageRouting.route(claude: accountUsage(sessions: sessions, now: now), codex: codexUsage.read(now: now), model: workerModel(for: task),
+    func workerRoute(for task: LeadTask, sessions: [LeadSessionInfo]?, now: Date? = nil) -> UsageRouting.Route {
+        let now = now ?? usageClock()
+        return UsageRouting.route(claude: accountUsage(sessions: sessions, now: now), codex: codexUsage.read(now: now), model: workerModel(for: task),
                            codexWorkers: codexWorkers, now: now)
     }
 

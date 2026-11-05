@@ -10,6 +10,12 @@ struct AccountUsageTests: LeadTeamFixture {
     let vault: LeadVault
     init() { vault = Self.newVault(in: temp) }
 
+    /// The time every test here reads the usage at, never the wall clock's: 2026-11-01 05:00 UTC, after `fableRefusal`
+    /// was said and before its reset (1793876400, 2026-11-05 11:00 UTC). On 2026-11-05 at noon that reset passed, and
+    /// the tests that read the fixture by the real time lost the limit they expect to hold.
+    static let now = Date(timeIntervalSince1970: 1_793_509_200)
+    static let tomorrow = now.timeIntervalSince1970 + 86_400
+
     /// A verifier's last turn, 2026-11-01 04:32: Fable's weekly allowance spent, the account's weekly limit not.
     static let fableRefusal = """
     {"isSidechain":false,"type":"assistant","timestamp":"2026-11-01T04:32:20Z","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"git diff main...HEAD --stat"}}]}}
@@ -30,7 +36,7 @@ struct AccountUsageTests: LeadTeamFixture {
     }
 
     /// `AccountUsage.fromRefusal`, as an optional whatever it returns.
-    func refusal(_ limit: UsageLimit, model: String?) -> AccountUsage.Limit? { AccountUsage.fromRefusal(limit, model: model) }
+    func refusal(_ limit: UsageLimit, model: String?) -> AccountUsage.Limit? { AccountUsage.fromRefusal(limit, model: model, now: Self.now) }
 
     func tail(_ lines: String) throws -> UsageLimit {
         let file = temp.url("transcript-\(UUID().uuidString).jsonl")
@@ -49,9 +55,17 @@ struct AccountUsageTests: LeadTeamFixture {
         return root
     }
 
-    /// The status line's reading kept, as a role session's status line keeps it.
-    func recordStatusLine(weekly: Double, resets: Double = Date().timeIntervalSince1970 + 86_400) {
-        UsageStatusLine.run(input: Data(Self.statusLine(weekly: weekly, resets: resets).utf8), store: usageStore, home: temp.url("no-home").path) { _ in }
+    /// The status line's reading kept at `now`, as a role session's status line keeps it.
+    func recordStatusLine(weekly: Double, resets: Double = AccountUsageTests.tomorrow) {
+        UsageStatusLine.run(input: Data(Self.statusLine(weekly: weekly, resets: resets).utf8), store: usageStore, home: temp.url("no-home").path,
+                            now: Self.now) { _ in }
+    }
+
+    /// The fixture's lead, reading the usage at `now` (`LeadToolset.usageClock`).
+    func lead(_ root: String, _ runtime: FakeRuntime, at now: Date) throws -> LeadToolset {
+        let lead = try lead(root, runtime)
+        lead.usageClock = { now }
+        return lead
     }
 
     // MARK: Reading
@@ -101,7 +115,7 @@ struct AccountUsageTests: LeadTeamFixture {
     /// `UsageStatusLine.run`, what it showed.
     func statusLineShows(_ input: String, home: String, userOnly: Bool = false, runner: @escaping UsageStatusLine.Runner) -> [Data] {
         var shown: [Data] = []
-        UsageStatusLine.run(input: Data(input.utf8), userOnly: userOnly, store: usageStore, home: home, runner: runner) { shown.append($0) }
+        UsageStatusLine.run(input: Data(input.utf8), userOnly: userOnly, store: usageStore, home: home, now: Self.now, runner: runner) { shown.append($0) }
         return shown
     }
 
@@ -115,7 +129,7 @@ struct AccountUsageTests: LeadTeamFixture {
     @Test func theStatusLineShowsTheUsersOwnStatusLineFirstThenKeepsTheUsage() throws {
         let home = temp.url("home").path
         try settings("my-line", in: home)
-        let resets = Date().timeIntervalSince1970 + 86_400
+        let resets = Self.tomorrow
         let input = Self.statusLine(weekly: 42, resets: resets)
         // Your own status line's output, byte for byte (not UTF-8 here), and nothing else; it got the same input.
         let bytes = Data([0x6D, 0xFF, 0x0A, 0x00, 0x1B, 0x5B, 0x30, 0x6D])
@@ -136,7 +150,7 @@ struct AccountUsageTests: LeadTeamFixture {
         }
         #expect(plain == [Data("5h 12% · weekly 43%".utf8)], "\(plain)")
         // An older reading never replaces a newer one.
-        usageStore.record([AccountUsage.Limit(name: "seven_day", usedPercent: 10, resetsAt: resets, at: Date().timeIntervalSince1970 - 600)])
+        usageStore.record([AccountUsage.Limit(name: "seven_day", usedPercent: 10, resetsAt: resets, at: Self.now.timeIntervalSince1970 - 600)], now: Self.now)
         #expect(usageStore.load().limits.first { $0.name == "seven_day" }?.usedPercent == 43)
         // Not JSON: nothing kept, nothing fails, and your status line still runs on it.
         #expect(statusLineShows("garbage", home: temp.url("bare").path) { _, _, _ in Data() } == [Data()])
@@ -260,7 +274,7 @@ struct AccountUsageTests: LeadTeamFixture {
 
     @Test func statusShowsTheUsageWhenKnownAndNothingWhenNot() throws {
         let root = try repo()
-        let lead = try lead(root, FakeRuntime())
+        let lead = try lead(root, FakeRuntime(), at: Self.now)
         #expect(!call(lead, "status").text.contains("Account usage"))
         recordStatusLine(weekly: 62)
         let text = call(lead, "status").text
@@ -271,7 +285,7 @@ struct AccountUsageTests: LeadTeamFixture {
     @Test func atEightyPercentOfTheWeeklyLimitNoWorkerStartsUnlessTheLeadOverrides() throws {
         let root = try repo()
         let runtime = FakeRuntime()
-        let lead = try lead(root, runtime)
+        let lead = try lead(root, runtime, at: Self.now)
         _ = call(lead, "add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
         recordStatusLine(weekly: 79)
         _ = call(lead, "add_task", ["title": "Two", "goal": "g", "acceptance": ["a"]])
@@ -291,7 +305,7 @@ struct AccountUsageTests: LeadTeamFixture {
     @Test func aVerifierStoppedAtTheFableLimitHoldsBackFableAuditsNotASonnetWorker() throws {
         let root = try repo()
         let runtime = FakeRuntime()
-        let lead = try lead(root, runtime)
+        let lead = try lead(root, runtime, at: Self.now)
         for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
         _ = call(lead, "add_task", ["title": "Three", "goal": "g", "acceptance": ["a"], "model": "sonnet"])
         #expect(!call(lead, "start_worker", ["task": "one"]).isError)
@@ -311,6 +325,13 @@ struct AccountUsageTests: LeadTeamFixture {
         runtime.usageLimits = [:]
         try runtime.kill(verifier)
         #expect(call(lead, "audit", ["task": "two"]).isError)
+        // Up to its reset, by the lead's clock, and no longer.
+        let reset = Date(timeIntervalSince1970: 1_793_876_400)
+        lead.usageClock = { reset.addingTimeInterval(-1) }
+        #expect(call(lead, "audit", ["task": "two"]).isError)
+        lead.usageClock = { reset }
+        #expect(lead.usageHold(model: "fable", sessions: nil) == nil)
+        lead.usageClock = { Self.now }
         // A worker on sonnet isn't held back by Fable's limit.
         let sonnet = call(lead, "start_worker", ["task": "three"])
         #expect(!sonnet.isError, "\(sonnet.text)")
@@ -323,7 +344,7 @@ struct AccountUsageTests: LeadTeamFixture {
     @Test func movingAuditsToAnotherModelAfterTheFableLimitLetsThemStart() throws {
         let root = try repo()
         let runtime = FakeRuntime()
-        let lead = try lead(root, runtime)
+        let lead = try lead(root, runtime, at: Self.now)
         for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
         #expect(!call(lead, "start_worker", ["task": "one"]).isError)
         #expect(!call(lead, "start_worker", ["task": "two"]).isError)
@@ -336,7 +357,7 @@ struct AccountUsageTests: LeadTeamFixture {
         #expect(!moved.isError, "\(moved.text)")
         #expect(!usageStore.load().limits.contains { $0.model == "opus" }, "\(usageStore.load().limits)")
         // Fable stays held back.
-        #expect(usageStore.load().current().hold(model: "fable") != nil)
+        #expect(usageStore.load().current(now: Self.now).hold(model: "fable", now: Self.now) != nil)
     }
 
     /// The blind check's case: a worker on Claude's default model (not known here) stopped at a model-only limit holds
@@ -344,7 +365,7 @@ struct AccountUsageTests: LeadTeamFixture {
     @Test func aModelOnlyRefusalOnAnUnknownModelHoldsNothingBack() throws {
         let root = try repo()
         let runtime = FakeRuntime()
-        let lead = try lead(root, runtime)
+        let lead = try lead(root, runtime, at: Self.now)
         for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
         #expect(!call(lead, "start_worker", ["task": "one"]).isError)
         let worker = try #require(BoardStore(root: root).load().task("one")?.worker)
@@ -357,7 +378,7 @@ struct AccountUsageTests: LeadTeamFixture {
     @Test func aTasksModelGoesToItsWorkersCommandAndTheDefaultIsUnchanged() throws {
         let root = try repo()
         let runtime = FakeRuntime()
-        let lead = try lead(root, runtime)
+        let lead = try lead(root, runtime, at: Self.now)
         let added = call(lead, "add_task", ["title": "Mechanical", "goal": "g", "acceptance": ["a"], "model": "sonnet"])
         #expect(added.text.contains("Its worker runs on sonnet."), "\(added.text)")
         _ = call(lead, "add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"]])
@@ -387,13 +408,15 @@ extension LeadAdvanceTests {
     /// again, armed once; the reading by then under 80 %) the tasks start, with nothing else nudging it.
     @Test func nearALimitAutoAdvanceStartsNothingAndTellsTheLeadOnce() throws {
         let (root, runtime, lead) = try team()
-        let resets = Date().timeIntervalSince1970 + 86_400
+        // Read at a fixed time (`LeadToolset.usageClock`), never the wall clock's.
+        let now = AccountUsageTests.now, resets = AccountUsageTests.tomorrow
+        lead.usageClock = { now }
         let armed = Armed()
         lead.usageWake = { date, body in armed.add(date, body) }
         let status = { (weekly: Double) in
             #"{"rate_limits":{"seven_day":{"used_percentage":\#(weekly),"resets_at":\#(resets)}}}"#
         }
-        UsageStatusLine.run(input: Data(status(91).utf8), store: usageStore, home: temp.url("no-home").path) { _ in }
+        UsageStatusLine.run(input: Data(status(91).utf8), store: usageStore, home: temp.url("no-home").path, now: now) { _ in }
         let advancing = Advancing(lead)
         defer { advancing.stop() }
         _ = lead.call("add_task", ["title": "First", "goal": "g", "acceptance": ["a"]])
@@ -410,7 +433,7 @@ extension LeadAdvanceTests {
         let wakes = armed.taken
         #expect(wakes.map(\.0.timeIntervalSince1970) == [resets + 1])
         // The reset: the next reading is under the threshold, and the armed look starts them.
-        UsageStatusLine.run(input: Data(status(30).utf8), store: usageStore, home: temp.url("no-home").path) { _ in }
+        UsageStatusLine.run(input: Data(status(30).utf8), store: usageStore, home: temp.url("no-home").path, now: now) { _ in }
         wakes.first?.1()
         #expect(advancing.until { task("first", root)?.status == .running && task("second", root)?.status == .running })
     }
