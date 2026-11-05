@@ -3014,3 +3014,7 @@
 - 2026-11-05 15:06 Released wallet-requests-marked's worker (idle since its done report on 6d0d8cc5) while its audit runs
 - 2026-11-05 15:06 Automatically (auto_advance): Released wallet-requests-marked's worker, idle since its done report on 6d0d8cc5, while its audit runs (ended pid 6021 (Worker: Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-05 15:38 Planned spec-note-a-tab: Spec note: a tab or CR near-miss of the fork marker is refused by the format check
+- 2026-11-05 15:54 Incident: A verifier stops on a permission prompt to Read the worker's evidence screenshots (<repo>/.vibeswitcher/evidence/<task>/<report>/*.png, outside its worktree), V… (in wallet-requests-marked); planned turn-this-incident-into-3 to turn it into a check
+- 2026-11-05 15:54 Started a worker on turn-this-incident-into-3
+- 2026-11-05 15:54 Automatically (auto_advance): Started a worker on turn-this-incident-into-3 (Turn this incident into a check: A verifier stops on a permission prompt to Read the worker's…).
+- 2026-11-05 15:54 Review of turn-this-incident-into-3: audit

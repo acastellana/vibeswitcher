@@ -59,3 +59,10 @@ Evidence: Reported by another project's lead. (1) 2026-10-31 ~16:2x: vault-struc
 
 Check: task turn-this-incident-into-8 turns it into a check that runs before merge.
 
+## 2026-11-05 15:54:03 A verifier stops on a permission prompt to Read the worker's evidence screenshots (<repo>/.vibeswitcher/evidence/<task>/<report>/*.png, outside its worktree), VibeSwitcher can't decline that prompt, and the audit hangs until the user allows it or the lead restarts it. Three times on 2026-11-05: once here and twice in another project, one of them for 155 minutes.
+
+Evidence: Here: wallet-requests-marked's audit at 6d0d8cc5, 2026-11-05 15:14: the witness reported "The verifier … has waited 2 min for input no one answers. It waited on: Allow: Read 4-marked-no-peer-main-dark.png {file_path: …/.vibeswitcher/evidence/wallet-requests-marked/<report id>/4-marked-no-peer-main-dark.png} VibeSwitcher couldn't decline it (that prompt isn't on its screen, or it changed while the keys went in)"; it went on only after the user chose Allow (question 7A3D6D24). Another project's lead reported the same prompt twice the same day on one task's audit, the first sitting 155 minutes until the audit was restarted. Cause as read in the code: a verifier's settings (LeadLaunch.prepare: allow, deny, the PermissionRequest hook for Bash only) give it no read access to the evidence folder in the main checkout, while its prompt names the screenshots there; and the witness's decline (LeadWitness.stuckPrompts) only handles a "Do you want to …?" prompt, not a Read prompt.
+
+Task: wallet-requests-marked
+Check: task turn-this-incident-into-3 turns it into a check that runs before merge.
+
