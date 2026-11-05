@@ -203,3 +203,7 @@ The user (2026-11-02, about 21:30) asked for more information and for how well t
 
 The user chose estimate only over a $60–100 pilot.
 
+## 2026-11-05 14:37:03 Wallet-request v1 gains a reason marker, at the Wallet Manager lead's request (2026-11-05): a request whose `reason` has the exact first line `LOCAL FORK ONLY` is refused by the Wallet Manager unless it runs against a loopback RPC for that network. VibeSwitcher's part (task wallet-requests-marked, audited): the spec gets a dated note, still version 1 with no format or vector change, and a marked request is never offered Sign in browser wallet, whatever its `from`. VibeSwitcher reads no other meaning into `reason`.
+
+Another project runs a local-fork rehearsal that files real-looking requests; the marker keeps them off real networks. The browser wallet signs without the Wallet Manager's checks, so a marked request from an 0x address would bypass that guard. Accepted without a new field because the marker can only refuse, so the rule that a reason is never followed as an instruction holds in effect, and the spec's sentence is amended to say so.
+

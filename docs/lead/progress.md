@@ -3007,3 +3007,6 @@
 - 2026-11-04 02:37 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-11-05 03:17 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-11-05 10:02 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-05 14:36 Planned wallet-requests-marked: Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker (review audit)
+- 2026-11-05 14:36 Started a worker on wallet-requests-marked
+- 2026-11-05 14:36 Automatically (auto_advance): Started a worker on wallet-requests-marked (Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker).
