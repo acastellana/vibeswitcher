@@ -793,10 +793,11 @@ final class Harness {
     static let wait: TimeInterval = 90
 
     func waitFor(sourceLocation: SourceLocation = #_sourceLocation, _ condition: () -> Bool) async throws {
-        let met = await VibeSwitcherTests.until(timeout: Self.wait, condition)
+        let held = MainThreadHeld()
+        let met = await VibeSwitcherTests.until(timeout: Self.wait) { held.look(); return condition() }
         if !met {
             let tail = ((try? String(contentsOf: transcript, encoding: .utf8)) ?? "").split(separator: "\n").suffix(3).joined(separator: "\n")
-            Issue.record("never happened; the terminal shows:\n\(screen)\nthe agent: \(agent)\nthe chat: \(chat.state) \(chat.log.entries.map(\.kind))\nthe transcript ends: \(tail)",
+            Issue.record("never happened\(held.said); the terminal shows:\n\(screen)\nthe agent: \(agent)\nthe chat: \(chat.state) \(chat.log.entries.map(\.kind))\nthe transcript ends: \(tail)",
                          sourceLocation: sourceLocation)
             throw HarnessError.timedOut
         }
@@ -995,6 +996,28 @@ final class Harness {
 }
 
 enum HarnessError: Error { case timedOut }
+
+/// The longest the main thread went between two looks of a wait (every 20 ms while it's free): held that long by
+/// something else on it, the app's terminal, the dictation's reads and the wait itself stood still meanwhile. On
+/// 2026-11-05 a full suite's ClaudeDictationTests timed out showing "Voice: processing…" long gone in the fake agent:
+/// another main-actor test held the main thread (BenchDefaultsTests waiting there for a new build's first launch).
+@MainActor
+final class MainThreadHeld {
+    private var last: Date?
+    private(set) var longest: TimeInterval = 0
+
+    func look(now: Date = Date()) {
+        if let last { longest = max(longest, now.timeIntervalSince(last)) }
+        last = now
+    }
+
+    /// Said with a failed wait when the main thread was held over `noted` at once: the wait's time ran out on another
+    /// test, not this one's.
+    static let noted: TimeInterval = 5
+    var said: String {
+        longest > Self.noted ? String(format: " (the main thread was held %.0f s at once meanwhile, by something else there)", longest) : ""
+    }
+}
 
 /// A failed expectation that names the harness describes it in one word (its object graph has cycles).
 extension Harness: CustomStringConvertible {
