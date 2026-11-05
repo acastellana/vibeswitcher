@@ -20,6 +20,7 @@ import VibeCore
 /// accessibility turned on in every hosting view of the window, the window's tree walked after each upsert (each
 /// element's role and children, as a client reads them), and the lead's transcript 75 turns (300 entries, the project-b
 /// lead's 290-odd); the elements reached are printed with the phases.
+/// `--transcript PATH`: the lead's conversation is a copy of PATH's (a real one's, to see what its rows cost) instead.
 /// `--rows N`: N of the board's tasks under way (20 by default, the rest merged), a Team list of N rows and the fold.
 /// `--main-blocks MS`: the main queue held as a loaded Mac holds it (load 60–150, 10-28): another thread posts it a block
 /// that spins MS ms every 100 ms. The blocks' own CPU is left out of every number printed.
@@ -66,15 +67,22 @@ enum TeamChurnBench {
         }
         // The first number that isn't an option's.
         let seconds = arguments.prefix { !$0.hasPrefix("--modal") }.enumerated()
-            .lazy.filter { $0.offset == 0 || !["--rows", "--main-blocks"].contains(arguments[$0.offset - 1]) }.compactMap { Double($0.element) }.first ?? 20
+            .lazy.filter { $0.offset == 0 || !["--rows", "--main-blocks", "--transcript"].contains(arguments[$0.offset - 1]) }.compactMap { Double($0.element) }.first ?? 20
         let app = NSApplication.shared
         app.setActivationPolicy(arguments.contains("--onscreen") ? .accessory : .prohibited)
         VibePaths.ensurePrivateDirectories()
         let modal = arguments.firstIndex(of: "--modal").flatMap { arguments.indices.contains($0 + 1) ? Double(arguments[$0 + 1]) : nil }
+        let conversation = arguments.firstIndex(of: "--transcript").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+        // Never the made-up conversation in its place: a run would be read as the real one's.
+        if let conversation, FileManager.default.contents(atPath: conversation) == nil {
+            FileHandle.standardError.write(Data("team churn: can't read --transcript \(conversation)\n".utf8))
+            exit(1)
+        }
         let without = arguments.firstIndex(of: "--modal-without").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
         let bench = Bench(seconds: seconds, onscreen: arguments.contains("--onscreen"), ax: arguments.contains("--ax"), modal: modal,
                           modalWithout: Set((without ?? "").split(separator: ",").map(String.init)),
-                          underWay: value(after: "--rows").map(Int.init) ?? 20, mainBlock: value(after: "--main-blocks").map { $0 / 1000 } ?? 0)
+                          underWay: value(after: "--rows").map(Int.init) ?? 20, mainBlock: value(after: "--main-blocks").map { $0 / 1000 } ?? 0,
+                          conversation: conversation)
         bench.start()
         app.run()
         exit(0)
@@ -147,6 +155,8 @@ enum TeamChurnBench {
         let underWay: Int
         /// `--main-blocks`: how long each block posted to the main queue spins (s; 0: none), and the main thread's CPU in them.
         let mainBlock: TimeInterval
+        /// `--transcript`: the conversation copied for the lead's (nil: a made-up one).
+        let conversation: String?
         private let blockLock = NSLock()
         private var blockSpent: TimeInterval = 0
         let started = Date()
@@ -169,7 +179,8 @@ enum TeamChurnBench {
         static let workers = 6, others = 4, period = 2.0
         var leadID: UUID?
 
-        init(seconds: Double, onscreen: Bool, ax: Bool, modal: Double?, modalWithout: Set<String>, underWay: Int, mainBlock: TimeInterval) {
+        init(seconds: Double, onscreen: Bool, ax: Bool, modal: Double?, modalWithout: Set<String>, underWay: Int, mainBlock: TimeInterval,
+             conversation: String? = nil) {
             self.seconds = seconds
             self.onscreen = onscreen
             self.ax = ax
@@ -177,6 +188,7 @@ enum TeamChurnBench {
             self.modalWithout = modalWithout
             self.underWay = underWay
             self.mainBlock = mainBlock
+            self.conversation = conversation
             weak var weakSelf: Bench?
             store = SessionStore(scanner: SessionScanner(
                 processes: { weakSelf?.processes() ?? [:] },
@@ -236,7 +248,8 @@ enum TeamChurnBench {
             let folder = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects/\(RecentProjects.claudeSlug(for: root))")
             try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
             transcript = (folder as NSString).appendingPathComponent("\(UUID().uuidString.lowercased()).jsonl")
-            FileManager.default.createFile(atPath: transcript, contents: TeamChurnBench.transcript(turns: ax ? 75 : 23, now: started))
+            FileManager.default.createFile(atPath: transcript, contents: conversation.flatMap { FileManager.default.contents(atPath: $0) }
+                                           ?? TeamChurnBench.transcript(turns: ax ? 75 : 23, now: started))
             try? TeamChurnBench.churnScript.write(toFile: (NSHomeDirectory() as NSString).appendingPathComponent("churn.sh"),
                                                  atomically: true, encoding: .utf8)
             // Wired as the app delegate wires them.
