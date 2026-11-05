@@ -3127,3 +3127,5 @@
 - 2026-11-05 09:33 Merged main-thread-freezes-with: Main-thread freezes with a long lead chat open (SwiftUI accessibility combine) (no audit: review none) (in a batch: main-thread-freezes-with, remote-push-remote-one landed on one test run)
 - 2026-11-05 09:33 Merged remote-push-remote-one: Remote: push_remote, one click in the app approves each push (in a batch: main-thread-freezes-with, remote-push-remote-one landed on one test run)
 - 2026-11-05 09:34 Update: Lead ↔ GitHub: fetch, merge and a one-click push are in — **What changed** (each audited and merged on a full test run):
+- 2026-11-05 10:43 Released 178-s-main-thread's worker (idle since its done report on c98fbe3b) while its audit runs
+- 2026-11-05 10:43 Automatically (auto_advance): Started the audit of 178-s-main-thread at c98fbe3b (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
