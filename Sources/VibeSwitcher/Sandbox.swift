@@ -1087,7 +1087,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             return card
         }
         let hash = "0x" + String(repeating: "0", count: 61) + "abc"
-        return [
+        let cards: [(state: String, card: WalletCardModel)] = [
             ("waiting-for-you", with(.waiting)),
             ("sent", with(.sent)),
             ("unreachable", with(.unreachable(message: "the Wallet Manager peer is offline"))),
@@ -1118,7 +1118,20 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 (card.from, card.wallet, card.browserSignable, card.setupNeeded) = ("example-hardware", nil, false, WalletCardModel.noPeerNote)
                 return card
             }()),
+            // Contract calls, mapped from made-up requests as a filed one is: a Safe's approveHash marked for a local
+            // fork only (its badge beside the line), and a call nothing here decodes.
+            ("safe-approve-hash", call("0xd4d9bdcd2ff4171f9c0e4a6b5d3f2817e6a9b0c1d2e3f405162738495a6b7c8d9e0f1a2b",
+                                       reason: "LOCAL FORK ONLY\nApprove the example Safe transaction on the forked Safe.")),
+            ("unknown-call", call("0x12345678" + String(repeating: "0", count: 63) + "1", reason: "Send 0 GEN, harmless")),
         ]
+        func call(_ data: String, reason: String) -> WalletCardModel {
+            let request = WalletRequest(createdAt: Date(timeIntervalSince1970: 1_793_448_000), expiresAt: Date(timeIntervalSince1970: 1_793_534_400),
+                                        requestedBy: .init(project: "example", session: "example", label: "Local test"), workspace: "example",
+                                        from: "0x0000000000000000000000000000000000000001", chainId: 4221, action: .call,
+                                        to: "0x16F7fFed6fc5113b34188d79c632760d7A20915b", asset: "native", amount: "0", data: data, reason: reason)
+            return WalletCardModel(request: request, requestedBy: "example-agent", label: "Local test", state: .waiting)
+        }
+        return cards
     }()
 
     /// The Wallet Manager peers the sandbox's fake `passage peers` lists: made up.
