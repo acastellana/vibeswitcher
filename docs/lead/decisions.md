@@ -219,3 +219,7 @@ Lead mail's first contract made tell_lead unforgeable but missed direct inbox se
 
 turn-this-incident-into-9 auto-started on the generic brief before the sharpened contract landed (2026-11-03). If it happens again despite this, make a product task so incident tasks wait for the lead's contract.
 
+## 2026-11-06 22:04:23 verifier_model is opus until the Fable limit resets on 2026-11-11 at 18:00. Then run configure(verifier_model: "") to go back to Fable.
+
+The user chose to switch reviews to Opus rather than wait (AFB3AD43), after the account hit its Fable limit on 2026-11-06.
+
