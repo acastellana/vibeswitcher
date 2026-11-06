@@ -386,6 +386,9 @@ final class LeadController: ObservableObject {
     @Published private(set) var pushesOpen: Set<String> = []
     /// The Mac kept awake while a team works.
     let keepAwake: KeepAwake
+    /// App Nap exemption, enabled by the app and sandbox independently of the idle-sleep setting.
+    var teamActivity: TeamActivity?
+    private var heavyActivity = false
 
     private let host: HostClient
     private let store: SessionStore
@@ -1377,6 +1380,7 @@ final class LeadController: ObservableObject {
     /// then the boards and decisions are read off the main thread, shown, and the lead told what it needs to know, on
     /// the main thread.
     func refresh() {
+        teamActivity?.update(working: TeamActivity.working(hosted: host.sessions, sessions: store.sessions, heavy: heavyActivity))
         startPending()
         keepRunningLeads()
         markReplaced()
@@ -1534,9 +1538,13 @@ final class LeadController: ObservableObject {
         guard let watch = heavySlots else { return then() }
         heavySlotsQueue.async { [weak self] in
             let text = watch.look()
+            let active = !(TestLock.standard()?.holders().isEmpty ?? true)
             DispatchQueue.main.async {
                 defer { then() }
-                guard let self, let text else { return }
+                guard let self else { return }
+                self.heavyActivity = active
+                self.teamActivity?.update(working: TeamActivity.working(hosted: self.host.sessions, sessions: self.store.sessions, heavy: active))
+                guard let text else { return }
                 for root in self.leadRoots { self.deliver(text, from: .system("witness"), root: root) }
             }
         }

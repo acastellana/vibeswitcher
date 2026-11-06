@@ -95,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             let preset = presets.first { $0.agent == .claude && $0.place == .window } ?? presets.first { $0.agent == .claude }
             return preset.flatMap(LaunchPlan.command(for:)) ?? "claude"
         }
+        controller.teamActivity = TeamActivity()
         controller.alert = { [weak self] event in self?.notifier?.post(event) }
         controller.select = { [weak self] id in self?.showMainWindow(select: id) }
         controller.keepAwake.mode = { [weak self] in self?.preferences.keepAwake ?? .never }

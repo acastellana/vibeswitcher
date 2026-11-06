@@ -265,6 +265,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     lazy var leads: LeadController = {
         // A lead `startlead` starts runs a fake Claude, never a real one (its arguments after the fake's own are ignored).
         let controller = LeadController(host: host, store: store) { [weak self] folder in self?.leadCommand(folder) ?? "exec /bin/cat" }
+        controller.teamActivity = TeamActivity()
         // A lead's questions to you would be alerts: none in the sandbox.
         controller.confirm = { [weak self] title, text, buttons in
             self?.refuse("a lead's question (\(title) \(text))")
