@@ -3146,3 +3146,6 @@
 - 2026-11-06 22:40 Started a worker on turn-this-incident-into-10
 - 2026-11-06 22:40 Automatically (auto_advance): Started a worker on turn-this-incident-into-10 (Turn this incident into a check: Hung test runs hold a Mac-wide heavy slot, and the merge gat…).
 - 2026-11-06 22:40 Review of turn-this-incident-into-10: audit
+- 2026-11-06 22:41 Planned a-worker-s-brief: A worker's brief carries the contract as it is when the worker starts, not the incident's first draft
+- 2026-11-06 22:41 Started a worker on a-worker-s-brief (auto → Codex: Claude weekly 77%, 46 points ahead of pace; Codex 39%)
+- 2026-11-06 22:41 Automatically (auto_advance): Started a worker on a-worker-s-brief (A worker's brief carries the contract as it is when the worker starts, not the incident's first draft); its agent is auto, so it went to Codex: Claude weekly 77%, 46 points ahead of pace; Codex 39%.
