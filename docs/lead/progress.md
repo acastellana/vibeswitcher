@@ -3088,3 +3088,4 @@
 - 2026-11-06 10:54 Planned walletdesktests-waits: WalletDeskTests waits for the session to be told instead of reading the count once
 - 2026-11-06 10:55 Started a worker on walletdesktests-waits
 - 2026-11-06 10:55 Automatically (auto_advance): Started a worker on walletdesktests-waits (WalletDeskTests waits for the session to be told instead of reading the count once).
+- 2026-11-06 11:20 Merged walletdesktests-waits: WalletDeskTests waits for the session to be told instead of reading the count once (no audit: review none)
