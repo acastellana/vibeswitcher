@@ -51,7 +51,7 @@ public struct ToolchainSnapshot: Codable, Equatable, Sendable {
 /// Used on a serial background queue: saves a baseline at first launch, then emits one report for each change.
 /// The last note is saved too, so the window still explains an update after a restart or denied notifications.
 public final class ToolchainWatch: @unchecked Sendable {
-    public static let interval: TimeInterval = 10 * 60
+    public static let interval = 10 * 60
     public static var file: URL { VibePaths.root.appendingPathComponent("toolchain.json") }
     private struct State: Codable {
         var snapshot: ToolchainSnapshot
