@@ -3,21 +3,26 @@ import Foundation
 /// Carries wallet requests to the Wallet Manager's Mac and their results back (docs/protocol/wallet-request.md, "The life of a
 /// request"): checks a request, records it (`WalletRequestStore`), sends it with `PassageLink`, takes the Wallet Manager peer's results
 /// for outstanding requests from the inbox, and keeps `passage listen` running exactly while one is outstanding.
+/// With a `WalletLocalLink` for its link, the same over a folder pair to a Wallet Manager on this Mac (a watch on the
+/// folder for `passage listen`): every rule here is the one rule for both.
 /// Every call may block on passage: call it off the main thread. Any thread.
 public final class WalletCourier: @unchecked Sendable {
     /// How a `send` went: refused here before passage ran, or passage's own outcome.
     public enum SendOutcome: Equatable, Sendable {
         /// The request wasn't sent: it breaks the format (key material included), it's expired, or its id is taken.
         case refused(String)
+        /// What the link said: passage's outcome, or the transport on one Mac's in the same terms.
         case passage(PassageLink.SendOutcome)
     }
 
     /// How long after `expiresAt` results are still taken: one in flight when it expired still lands.
     public static let resultGrace: TimeInterval = 3600
+    /// The name of the queue `looks` is, when there is one.
+    static let looksLabel = "dev.vibeswitcher.wallet-looks"
     /// The shortest time between two starts of `passage listen`, so one that ends at once isn't started in a loop.
     public static let restartDelay: TimeInterval = 60
 
-    public let link: PassageLink
+    public let link: any WalletTransport
     public let store: WalletRequestStore
     private let log: @Sendable (String) -> Void
     private let now: @Sendable () -> Date
@@ -25,10 +30,17 @@ public final class WalletCourier: @unchecked Sendable {
     private var records: [String: WalletRequestStore.Record] = [:]
     /// Inbox paths already taken, or ignored and logged by this courier: each is looked at once.
     private var handled: Set<String> = []
-    private var listener: PassageListener?
+    private var listener: (any WalletListening)?
     private var listenerStarted: Date?
     private var endNoted = false
+    /// Set by `retire`: it listens and looks no more.
+    private var retired = false
+    /// What the last look for results failed with, if it did (`WalletTransport.logsARepeatedFailureOnce`).
+    private var lastFailure: String?
     private var hearTaken: (@Sendable ([WalletResult]) -> Void)?
+    /// Where a look the listener asks for runs when the link wants a queue of the courier's own for them
+    /// (`WalletTransport.looksOnAQueueOfItsOwn`); nil: GCD's shared utility queue, as `passage listen`'s lines always did.
+    let looks: DispatchQueue?
     /// One poll at a time (`poll`): the asks made, the asks a finished run covered, and whether one runs.
     private let polls = NSCondition()
     private var pollsAsked = 0
@@ -36,10 +48,11 @@ public final class WalletCourier: @unchecked Sendable {
     private var polling = false
 
     /// Loads the records `store` holds, and starts `passage listen` if any is outstanding.
-    public init(link: PassageLink, store: WalletRequestStore = WalletRequestStore(),
+    public init(link: any WalletTransport, store: WalletRequestStore = WalletRequestStore(),
                 log: @escaping @Sendable (String) -> Void = { Breadcrumbs.shared.note("wallet: " + $0) },
                 now: @escaping @Sendable () -> Date = { Date() }) {
         self.link = link
+        looks = link.looksOnAQueueOfItsOwn ? DispatchQueue(label: Self.looksLabel, qos: .utility) : nil
         self.store = store
         self.log = log
         self.now = now
@@ -57,7 +70,7 @@ public final class WalletCourier: @unchecked Sendable {
         syncListener()
     }
 
-    deinit { listener?.stop() }
+    deinit { listener?.stop(grace: 5) }
 
     /// The records it keeps and the inbox paths it has looked at (the soak bench's counters).
     public var kept: (records: Int, handled: Int) { lock.withLock { (records.count, handled.count) } }
@@ -110,6 +123,12 @@ public final class WalletCourier: @unchecked Sendable {
         }
         guard !request.isExpired(now: now()) else { return .refused("the request expired at \(WalletRequestFormat.string(request.expiresAt))") }
         if let why = request.implausibleTime(now: now()) { return .refused(why) }
+        // Known not to be reachable (the transport on one Mac: its folders, its liveness file): nothing is recorded or
+        // written, and a record an earlier send left stays as it is.
+        if let why = link.notReachable() {
+            log("request \(request.id) to \(link.destination): not reachable: \(why)")
+            return .passage(.peerNotListening(why))
+        }
         lock.lock()
         let resend = records[request.id] != nil
         if let known = records[request.id] {
@@ -139,7 +158,7 @@ public final class WalletCourier: @unchecked Sendable {
             try VibePaths.ensurePrivate(outbox)
             try VibePaths.writePrivate(bytes, to: file)
             written = true
-            outcome = link.send(file: file, id: request.id)
+            outcome = link.deliver(file: file, id: request.id)
         } catch {
             outcome = .unexpected("couldn't write the request file: \(error)")
         }
@@ -161,7 +180,7 @@ public final class WalletCourier: @unchecked Sendable {
             }
         }
         lock.unlock()
-        log("request \(request.id) to \(link.walletPeer): \(outcome)")
+        log("request \(request.id) to \(link.destination): \(outcome)")
         syncListener()
         return .passage(outcome)
     }
@@ -226,7 +245,7 @@ public final class WalletCourier: @unchecked Sendable {
         polling = true
         polls.unlock()
         guard start else { return }
-        DispatchQueue.global(qos: .utility).async { [self] in _ = drainPolls() }
+        (looks ?? DispatchQueue.global(qos: .utility)).async { [self] in _ = drainPolls() }
     }
 
     /// Polls until every ask made so far is covered; `polling` is set by the caller.
@@ -247,11 +266,18 @@ public final class WalletCourier: @unchecked Sendable {
     }
 
     private func pollOnce() -> [WalletResult] {
+        if lock.withLock({ retired }) { return [] }
         let entries: [PassageLink.InboxEntry]
-        switch link.inbox() {
-        case let .success(list): entries = list
+        switch link.arrivals() {
+        case let .success(list):
+            entries = list
+            lock.withLock { lastFailure = nil }
         case let .failure(failure):
-            log("\(failure)")
+            let repeated = lock.withLock { () -> Bool in
+                defer { lastFailure = "\(failure)" }
+                return link.logsARepeatedFailureOnce && lastFailure == "\(failure)"
+            }
+            if !repeated { log("\(failure)") }
             return []
         }
         lock.lock()
@@ -265,14 +291,19 @@ public final class WalletCourier: @unchecked Sendable {
                 handled.insert(entry.path)
                 log("ignored \(entry.path): \(why)")
             }
-            guard entry.peerID == link.walletPeer else { ignore("from peer \(entry.peerID), not the Wallet Manager peer \(link.walletPeer)"); continue }
-            guard let id = WalletResult.id(fromFileName: entry.name) else { ignore("not a wallet result (\(entry.name))"); continue }
+            let id: String
+            do {
+                id = try link.requestID(of: entry)
+            } catch {
+                ignore("\(error)")
+                continue
+            }
             guard let record = records[id] else { ignore("a result for an unknown request id \(id)"); continue }
             guard !record.finished else { ignore("a result for request \(id), already finished (\(record.results.last!.status.rawValue))"); continue }
             guard isOutstanding(record, at: time) else { ignore("a result for request \(id), expired"); continue }
             let result: WalletResult
             do {
-                result = try WalletResult.parse(link.read(entry))
+                result = try WalletResult.parse(link.bytes(of: entry))
             } catch {
                 ignore("refused: \(error)")
                 continue
@@ -319,8 +350,14 @@ public final class WalletCourier: @unchecked Sendable {
     public var listenerPID: Int32? {
         lock.lock()
         defer { lock.unlock() }
-        return listener.flatMap { $0.isRunning ? $0.pid : nil }
+        return listener.flatMap { $0.isRunning ? $0.process?.pid : nil }
     }
+
+    /// Whether it listens now: `passage listen` runs, or the folder is watched.
+    public var isListening: Bool { lock.withLock { listener?.isRunning == true } }
+
+    /// " (pid 123)" for a listener that is a process.
+    private func pidText(_ listener: any WalletListening) -> String { listener.process.map { " (pid \($0.pid))" } ?? "" }
 
     /// Starts `passage listen` when a request is outstanding and none runs (not twice within `restartDelay`), and stops
     /// it, by its pid, when none is. Each result it hears is taken by `poll`.
@@ -329,23 +366,24 @@ public final class WalletCourier: @unchecked Sendable {
         let time = now()
         dropPastWindowLocked(at: time)
         let wanted = !outstandingLocked(at: time).isEmpty
-        var stopping: PassageListener?
+        var stopping: (any WalletListening)?
         if let running = listener, !running.isRunning {
-            if !endNoted { log("passage listen (pid \(running.pid)) ended: \(running.exitStatus.map(String.init) ?? "?")") }
+            if !endNoted { log("\(link.listening)\(pidText(running)) ended: \(running.exitStatus.map(String.init) ?? "?")") }
             endNoted = true
             if !wanted { listener = nil }
         }
-        if wanted, listener?.isRunning != true, listenerStarted.map({ time.timeIntervalSince($0) >= Self.restartDelay }) ?? true {
+        if wanted, !retired, listener?.isRunning != true, listenerStarted.map({ time.timeIntervalSince($0) >= Self.restartDelay }) ?? true {
             do {
-                listener = try link.listen { [weak self] in self?.heardListenLine() }
+                let started = try link.watch { [weak self] in self?.heardListenLine() }
+                listener = started
                 listenerStarted = time
                 endNoted = false
                 // Its pid and start time, so a crash that orphans it doesn't leave it running past the next launch.
-                ListenRecord.save(pid: listener!.pid, executable: link.executable, in: store.folder, log: log)
-                log("passage listen started (pid \(listener!.pid)): \(outstandingLocked(at: time).count) request(s) outstanding")
+                if let process = started.process { ListenRecord.save(pid: process.pid, executable: process.executable, in: store.folder, log: log) }
+                log("\(link.listening) started\(pidText(started)): \(outstandingLocked(at: time).count) request(s) outstanding")
             } catch {
                 listenerStarted = time
-                log("couldn't start passage listen: \(error)")
+                log("couldn't start \(link.listening): \(error)")
             }
         } else if !wanted, let running = listener {
             stopping = running
@@ -354,9 +392,9 @@ public final class WalletCourier: @unchecked Sendable {
         }
         lock.unlock()
         if let stopping {
-            stopping.stop()
-            ListenRecord.clear(pid: stopping.pid, in: store.folder)
-            log("passage listen (pid \(stopping.pid)) stopped: no request outstanding")
+            stopping.stop(grace: 5)
+            if let process = stopping.process { ListenRecord.clear(pid: process.pid, in: store.folder) }
+            log("\(link.listening)\(pidText(stopping)) stopped: no request outstanding")
         }
     }
 
@@ -367,8 +405,17 @@ public final class WalletCourier: @unchecked Sendable {
         listener = nil
         listenerStarted = nil
         lock.unlock()
-        running?.stop()
-        if let running { ListenRecord.clear(pid: running.pid, in: store.folder) }
+        running?.stop(grace: 5)
+        if let process = running?.process { ListenRecord.clear(pid: process.pid, in: store.folder) }
+    }
+
+    /// Stops it for good (Settings › Wallet no longer has its Wallet Manager chosen): what it listens with is stopped,
+    /// none is started again, and no look for results starts after this returns (one under way ends by itself). Its
+    /// records stay in the store for the courier made when it's chosen again. The desk retires only the courier of the
+    /// transport on one Mac, so nothing reads its folders once the user chose otherwise.
+    public func retire() {
+        lock.withLock { retired = true }
+        close()
     }
 
     // MARK: A listener a crash left

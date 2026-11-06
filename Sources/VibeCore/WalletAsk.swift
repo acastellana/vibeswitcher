@@ -191,6 +191,11 @@ public enum WalletAsk {
     /// Whether the Wallet Manager can be reached from here, as Settings › Wallet has it: requests are filed either way;
     /// without it, the browser wallet is the way to sign one (from an 0x address).
     public enum WalletManager: Equatable {
+        /// What Settings › Wallet keeps in place of a Passage peer's id (`walletPeerID`) when the Wallet Manager on this
+        /// Mac is chosen: requests then go through the folder pair (`WalletLocalLink`), with no Passage. Never a peer
+        /// id (8 hex digits).
+        public static let onThisMac = "this-mac"
+
         case ready
         /// No Wallet Manager peer is chosen in Settings › Wallet.
         case noPeer
@@ -207,9 +212,11 @@ public enum WalletAsk {
         }
 
         /// As the app's defaults have it: the peer chosen (`walletPeerID`) and Passage (`walletPassagePath`; empty:
-        /// `passage` on `path`, the session's PATH, else Passage.app in `apps`).
+        /// `passage` on `path`, the session's PATH, else Passage.app in `apps`). The Wallet Manager on this Mac chosen
+        /// (`onThisMac`) is set up as it is: it needs no Passage.
         public static func from(peer: String, passagePath: String, path: String?, apps: [URL] = PassageCommand.appLocations) -> WalletManager {
             guard !peer.isEmpty else { return .noPeer }
+            guard peer != onThisMac else { return .ready }
             let found = PassageCommand.resolve(setting: passagePath, onPath: { onPath("passage", path: path) }, apps: apps)
             return found == nil ? .noPassage : .ready
         }

@@ -52,6 +52,10 @@ struct WalletCardModel: Equatable, Identifiable {
     /// A message about this request (its outcome) couldn't reach the asking agent: its session ended. Said on the card
     /// (`agentMissedNote`) until the request's results window is over.
     var agentMissed = false
+    /// The Wallet Manager on this Mac is the one chosen in Settings › Wallet: the lines that name the way there say
+    /// the folder on this Mac, not Passage, and those that say where it's checked and signed say this Mac, not the
+    /// Wallet Manager's (`detailOnThisMac`).
+    var onThisMac = false
 
     /// `setupNeeded`'s line for each way the Wallet Manager isn't set up.
     static let noPeerNote = "No Wallet Manager chosen: choose its Mac in Settings › Wallet"
@@ -276,8 +280,42 @@ struct WalletCardModel: Equatable, Identifiable {
             return localForkOnly ? Self.localForkOnlyDetail
                 : "Nothing has left this Mac. It needs the Wallet Manager: a browser wallet can't use a wallet id."
         }
-        let line = Self.detail(state, wallet: wallet)
-        return state == .sent && notPickedUp ? line + " " + Self.notPickedUpNote : line
+        let line = (onThisMac ? Self.detailOnThisMac(state, wallet: wallet) : nil) ?? Self.detail(state, wallet: wallet)
+        return state == .sent && notPickedUp ? line + " " + (onThisMac ? Self.notPickedUpOnThisMacNote : Self.notPickedUpNote) : line
+    }
+
+    /// `notPickedUpNote` for a Wallet Manager on this Mac.
+    static let notPickedUpOnThisMacNote = "Delivered to the Wallet Manager's folder on this Mac, but it hasn't picked it up yet. Is the Wallet Manager running?"
+    /// What `unreachable` says with no reason given, for a Wallet Manager on this Mac.
+    static let notRunningOnThisMacNote = "The Wallet Manager isn't running with its local transport on this Mac"
+
+    /// The lines that name the way to the Wallet Manager or where it is, when it's the one on this Mac (no Passage: a
+    /// folder pair, `WalletLocalLink`, whose own words say why it can't be reached; and no other Mac: it's signed here,
+    /// in the Wallet Manager). Nil for a state whose line is the same either way.
+    static func detailOnThisMac(_ state: State, wallet: Wallet?) -> String? {
+        let checking = "The Wallet Manager on this Mac has it and is checking it."
+        switch state {
+        case .sent: return "Sent to the Wallet Manager on this Mac. Waiting for it to answer."
+        case .unreachable(let message): return (message ?? notRunningOnThisMacNote) + ". Nothing was sent."
+        case .unsure(let message):
+            return "It may have reached the Wallet Manager on this Mac" + (message.map { " (\($0))" } ?? "")
+                + ": its answer shows here if it did. Retry sends the same request again (the Wallet Manager"
+                + " ignores a repeat); Discard stops waiting for it here, though the Wallet Manager may still act on it."
+        case .received:
+            switch wallet {
+            case nil: return checking + " It's signed in the Wallet Manager, not in VibeSwitcher."
+            case .hardware: return checking + " Sign it in the Wallet Manager, on the hardware wallet."
+            case .hot: return checking
+            case .safe: return checking + " Sign it in the Wallet Manager to propose it to the Safe."
+            }
+        // A Safe's line names no Mac: the same either way.
+        case .proposed: return wallet == .safe ? nil : "Proposed: waiting for you to sign it in the Wallet Manager on this Mac."
+        case .signedNotSubmitted: return "Signed in the Wallet Manager on this Mac; waiting for it to be submitted to the chain."
+        case .signed: return wallet == .safe ? nil : "Signed in the Wallet Manager on this Mac and submitted."
+        case .rejected(let reason): return "The Wallet Manager on this Mac refused it: \(reason)"
+        case .failed(let message): return "The Wallet Manager on this Mac couldn't finish it: \(message)"
+        case .waiting, .notSent, .expired, .inBrowser, .sentFromBrowser, .rejectedInWallet, .browserNoAnswer: return nil
+        }
     }
 
     /// "Requested by"'s line: the session's name, and the agent's own label beside it when it gave one.

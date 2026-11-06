@@ -309,6 +309,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let desk = WalletDesk(folder: state.appendingPathComponent("wallet/asked", isDirectory: true),
                              store: WalletRequestStore(folder: state.appendingPathComponent("wallet/requests", isDirectory: true)),
                              inbox: externalPassage?.inbox ?? walletPassage.appendingPathComponent("inbox", isDirectory: true),
+                             local: walletLocal,
                              config: { [weak self] in WalletDesk.Config(passage: passage, peer: self?.walletPeer ?? "") },
                              now: { clock.now() })
         desk.findPassage = { nil }
@@ -336,8 +337,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
         if preferences.walletPeerID.isEmpty { preferences.walletPeerID = Driver.walletPeers[0].peerID }
         return desk
     }()
-    /// The Wallet Manager peer the wallet desk sends to: the first made-up one, or none after `wallet-peer none`.
+    /// The Wallet Manager peer the wallet desk sends to: the first made-up one, or none after `wallet-peer none`, or
+    /// the Wallet Manager on this Mac after `wallet-peer this-mac`.
     var walletPeer = Driver.walletPeers[0].peerID
+    /// The folder pair to a Wallet Manager on this Mac, under a home of the sandbox's own in its state folder (never
+    /// the real ~/Library/Application Support). `wallet-peer this-mac` plays the Wallet Manager there.
+    var walletLocal: WalletLocalLink { WalletLocalLink(home: state.appendingPathComponent("wallet/home", isDirectory: true).path) }
     /// The fake Wallet Manager's next result number, per request.
     var walletSequence: [String: Int64] = [:]
     /// The wallet desk's clock: the real one, moved ahead by `wallet-later`.
@@ -976,7 +981,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint, transaction (tx HASH [EXPLORER URL], once signed and submitted) and the Wallet Manager's checks"),
         ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
         ("wallet-click send|retry|discard|browser|settings", "presses that button on the newest wallet request card in the selected chat (send goes to the sandbox's fake passage, never the real one; browser serves the local page but never opens a browser: wallet-page shows it; settings opens Settings › Wallet)"),
-        ("wallet-peer none|chosen", "no Wallet Manager peer chosen for the wallet desk (as with None in Settings › Wallet: cards offer the browser wallet and Open Settings instead of Send), or the made-up one again; the cards redraw"),
+        ("wallet-peer none|chosen|this-mac|this-mac-stopped", "no Wallet Manager peer chosen for the wallet desk (as with None in Settings › Wallet: cards offer the browser wallet and Open Settings instead of Send), or the made-up one again; this-mac: the Wallet Manager on this Mac chosen (in Settings › Wallet too), and a stand-in for it started with its local transport in the sandbox's own home, taking requests: Send writes into its folder and wallet-answer answers from it; this-mac-stopped: chosen, and the stand-in no longer taking requests (Send reads not reachable); the cards redraw"),
         ("wallet-page [NAME]", "draws the local Sign in browser wallet page as served (the one wallet-click browser opened, else one for a made-up request), in a web view of the sandbox's own with no wallet extension, light and dark: NAME-light.png, NAME-dark.png (default wallet-page)"),
         ("wallet-answer received|proposed|signed|submitted|rejected|failed", "the fake Wallet Manager's Mac answers the newest card's request: the card shows it, and the asking fake session gets it as a message"),
         ("wallet [STATE]", "shows a made-up wallet request card as the sheet, in STATE: " + Driver.walletCards.map(\.state).joined(separator: ", ") + " (all: every state, one under another); settings wallet shows its Settings tab"),
@@ -1191,6 +1196,14 @@ private final class Driver: NSObject, NSApplicationDelegate {
         if status == .failed { result.message = "The hardware wallet was disconnected." }
         do {
             let data = try result.encoded()
+            // The Wallet Manager on this Mac answers in its folder, under a dot-name and renamed; the desk's watch on
+            // the folder takes it, and the poll below only waits for that.
+            if walletPeer == WalletAsk.WalletManager.onThisMac {
+                try VibePaths.writePrivate(data, to: walletLocal.fromFolder.appendingPathComponent("wallet-result-\(card.id)-\(sequence).json"))
+                return walletDesk.poll { [weak self] in
+                    self?.settle { reply(true, "the Wallet Manager on this Mac said \(status.rawValue): the card is now \(self?.walletCard.map { WalletCardModel.title($0.state) } ?? "gone")") }
+                }
+            }
             let peer = Driver.walletPeers[0].peerID
             let dir = walletPassage.appendingPathComponent("inbox/\(peer)", isDirectory: true)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -1832,8 +1845,24 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "wallet-page": walletPage(rest.isEmpty ? "wallet-page" : rest, reply)
         case "wallet-click": walletClick(rest, reply)
         case "wallet-peer":
-            guard rest == "none" || rest == "chosen" else { return reply(false, "wallet-peer none|chosen") }
-            walletPeer = rest == "none" ? "" : Driver.walletPeers[0].peerID
+            guard ["none", "chosen", "this-mac", "this-mac-stopped"].contains(rest) else { return reply(false, "wallet-peer none|chosen|this-mac|this-mac-stopped") }
+            if rest.hasPrefix("this-mac") {
+                // The Wallet Manager's side, as it makes it: the pair, owner-only, and .listening (this process's id)
+                // while it takes requests.
+                let (to, listening) = (walletLocal.toFolder, walletLocal.toFolder.appendingPathComponent(WalletLocalLink.listeningName))
+                do {
+                    try VibePaths.ensurePrivate(to)
+                    try VibePaths.ensurePrivate(walletLocal.fromFolder)
+                    if rest == "this-mac" { try VibePaths.writePrivate(Data("\(getpid())\n".utf8), to: listening) } else { try? FileManager.default.removeItem(at: listening) }
+                } catch {
+                    return reply(false, "the stand-in Wallet Manager couldn't make its folders: \(error)")
+                }
+                walletPeer = WalletAsk.WalletManager.onThisMac
+                preferences.walletPeerID = walletPeer
+            } else {
+                walletPeer = rest == "none" ? "" : Driver.walletPeers[0].peerID
+                if rest == "chosen" { preferences.walletPeerID = walletPeer }
+            }
             walletDesk.refresh(polling: false) { [weak self] in
                 self?.settle { reply(true, "Wallet Manager peer: \(rest)\n" + (self?.walletCardText().1 ?? "")) }
             }

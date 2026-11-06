@@ -202,6 +202,30 @@ struct WalletAskTests {
         #expect(Manager.from(peer: "0a1b2c3d", passagePath: "", path: dirs.path, apps: none) == .noPassage)
     }
 
+    /// The Wallet Manager on this Mac chosen in Settings › Wallet counts as set up, with no Passage anywhere: the
+    /// request waits for Send to Wallet Manager, and nothing points to the browser wallet.
+    @Test func theWalletManagerOnThisMacCountsAsSetUpWithNoPassage() throws {
+        let none = [scratch.url("missing/Passage.app")]
+        typealias Manager = WalletAsk.WalletManager
+        #expect(Manager.onThisMac == "this-mac")
+        // Never a peer id: a build that knows no local transport refuses it as one.
+        #expect(PassageLink(executable: "/", walletPeer: Manager.onThisMac) == nil)
+        let chosen = Manager.from(peer: Manager.onThisMac, passagePath: "", path: nil, apps: none)
+        #expect(chosen == .ready)
+        #expect(Manager.from(peer: Manager.onThisMac, passagePath: "/opt/example/passage", path: "/nowhere", apps: none) == .ready)
+        // From a wallet id, from an 0x address, and one marked LOCAL FORK ONLY (never the browser wallet's): each waits
+        // on its card for the Wallet Manager.
+        let address = Self.with("--from", "0x00000000000000000000000000000000000000aa")
+        let marked = Self.with("--reason", "LOCAL FORK ONLY\nFund the example account on the fork.", in: address)
+        for arguments in [Self.valid, address, marked] {
+            let ran = run(arguments, walletManager: chosen)
+            #expect(ran.status == 0, "\(ran.error)")
+            #expect(filed(ran.folder).count == 1)
+            #expect(ran.output.contains("until the user presses Send to Wallet Manager"), "\(ran.output)")
+            #expect(!ran.output.contains("isn't set up") && !ran.output.contains("browser wallet"), "\(ran.output)")
+        }
+    }
+
     /// vs-wallet's help and the session note say the browser wallet works without a Wallet Manager.
     @Test func helpAndTheSessionNoteSayTheBrowserWalletWorksWithoutAWalletManager() {
         #expect(run(["help"]).output.contains("It works with no Wallet Manager set up; a wallet id (not 0x) needs the Wallet Manager."))

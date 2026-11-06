@@ -79,6 +79,13 @@ public enum VibePaths {
     public static var presetsFile: URL { root.appendingPathComponent("presets.json") }
     /// Transaction requests sent to the Wallet Manager's Mac and what it answered, one `<id>.json` each (see `WalletRequestStore`).
     public static var walletRequestsDir: URL { root.appendingPathComponent("wallet-requests") }
+    /// The folders from the home folder down to the Wallet Manager's local transport on this Mac (`WalletLocalLink`):
+    /// the Wallet Manager's own, which it makes when started with its local transport. VibeSwitcher never makes them.
+    public static let walletLocalTransportParts = ["Library", "Application Support", "wallet-manager", "local-transport"]
+    /// `<home>/Library/Application Support/wallet-manager/local-transport`, holding `to-wm` and `from-wm`.
+    public static func walletLocalTransport(home: String = VibePaths.home) -> URL {
+        walletLocalTransportParts.reduce(URL(fileURLWithPath: home, isDirectory: true)) { $0.appendingPathComponent($1, isDirectory: true) }
+    }
     /// Where `walletRequestsDir` was while the feature was called vault requests (until 2026-10-31); carried over
     /// once at launch (`WalletRequestStore.carryOver`).
     public static var formerVaultRequestsDir: URL { root.appendingPathComponent("vault-requests") }

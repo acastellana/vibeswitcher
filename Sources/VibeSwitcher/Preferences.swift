@@ -96,8 +96,9 @@ final class Preferences: ObservableObject {
     /// The language the spoken briefing is written and read in (an ElevenLabs language code, see `BriefingLanguage`);
     /// the Mac's first preferred language until you pick one.
     @Published var briefingLanguage: String { didSet { defaults.set(briefingLanguage, forKey: "briefingLanguage") } }
-    /// The Passage peer that is the Wallet Manager's Mac (its peer id); empty until you choose one, and until then
-    /// wallet requests can be signed only in the browser wallet (from an 0x address).
+    /// The Passage peer that is the Wallet Manager's Mac (its peer id), or `WalletAsk.WalletManager.onThisMac` for the
+    /// Wallet Manager on this Mac; empty until you choose one, and until then wallet requests can be signed only in
+    /// the browser wallet (from an 0x address).
     @Published var walletPeerID: String { didSet { defaults.set(walletPeerID, forKey: "walletPeerID") } }
     /// The `passage` command wallet requests go through; empty: `passage` on the PATH.
     @Published var walletPassagePath: String { didSet { defaults.set(walletPassagePath, forKey: "walletPassagePath") } }

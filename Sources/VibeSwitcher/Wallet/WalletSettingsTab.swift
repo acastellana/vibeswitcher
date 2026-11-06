@@ -8,8 +8,9 @@ struct WalletPeerChoice: Equatable, Hashable, Identifiable {
     var id: String { peerID }
 }
 
-/// Settings › Wallet: which Passage peer is the Wallet Manager's Mac, and which `passage` carries requests there. Until a peer is
-/// chosen, requests still show as cards, and the browser wallet signs those from an 0x address.
+/// Settings › Wallet: which Passage peer is the Wallet Manager's Mac, and which `passage` carries requests there; or the
+/// Wallet Manager on this Mac, which needs no Passage (`WalletLocalLink`). Until one is chosen, requests still show as
+/// cards, and the browser wallet signs those from an 0x address.
 /// Settings › Wallet's peers, read from `passage peers --no-discovery --json` off the main thread: again each time the
 /// tab shows and when the passage path settles (`typed`); the latest read wins (one for a path typed since is dropped). With
 /// them, which Passage was used.
@@ -96,16 +97,24 @@ struct WalletSettingsTab: View {
 
     static let noPeerNote = "No Wallet Manager chosen: requests still show as cards, and one from an 0x address can be signed in the browser wallet."
 
+    /// The picker's value for the Wallet Manager on this Mac (kept in `walletPeerID`, where a peer's id would be).
+    static let onThisMac = WalletAsk.WalletManager.onThisMac
+    static let onThisMacTitle = "Wallet Manager on this Mac"
+    /// The line under the picker with it chosen: what it needs.
+    static let onThisMacNote = "Requests go to the Wallet Manager on this Mac once you press Send to Wallet Manager on their card: "
+        + "it needs the Wallet Manager started with its local transport, and no Passage. Nothing is sent before that."
+
     /// The picker's rows: the peers given, and the saved one still, when it isn't among them (so a peer that's away
     /// isn't dropped from your settings by opening them).
     static func choices(_ peers: [WalletPeerChoice], saved: String) -> [WalletPeerChoice] {
-        guard !saved.isEmpty, !peers.contains(where: { $0.peerID == saved }) else { return peers }
+        guard !saved.isEmpty, saved != onThisMac, !peers.contains(where: { $0.peerID == saved }) else { return peers }
         return peers + [WalletPeerChoice(peerID: saved, name: "Not found now (\(saved))")]
     }
 
     /// The line under the picker: what requests can do until a peer is chosen, else where they go.
     static func status(_ peers: [WalletPeerChoice], saved: String) -> String {
         guard !saved.isEmpty else { return noPeerNote }
+        guard saved != onThisMac else { return onThisMacNote }
         let name = peers.first { $0.peerID == saved }?.name ?? saved
         return "Requests go to \(name) once you press Send to Wallet Manager on their card. Nothing is sent before that."
     }
@@ -127,8 +136,9 @@ struct WalletSettingsTab: View {
     var body: some View {
         Form {
             Section {
-                Picker("Wallet Manager peer", selection: $preferences.walletPeerID) {
+                Picker("Wallet Manager", selection: $preferences.walletPeerID) {
                     Text("None").tag("")
+                    Text(Self.onThisMacTitle).tag(Self.onThisMac)
                     ForEach(Self.choices(peers, saved: preferences.walletPeerID)) { peer in
                         Text(peer.name).tag(peer.peerID)
                     }
@@ -137,8 +147,8 @@ struct WalletSettingsTab: View {
                     .font(.callout)
                     .foregroundStyle(preferences.walletPeerID.isEmpty ? SessionStatus.needsInput.color : .secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if peers.isEmpty {
-                    Text("No Passage peers found. Pair the Wallet Manager's Mac in Passage first.")
+                if peers.isEmpty, preferences.walletPeerID != Self.onThisMac {
+                    Text("No Passage peers found. Pair the Wallet Manager's Mac in Passage first, or choose \(Self.onThisMacTitle).")
                         .font(.callout).foregroundStyle(.secondary)
                 }
             } header: {
@@ -146,7 +156,8 @@ struct WalletSettingsTab: View {
             } footer: {
                 SettingsFooter("An agent asks for a transaction with vs-wallet request (on every session's PATH; vs-wallet help says how), "
                     + "and the request shows as a card in its chat. Only when you press Send to Wallet Manager does it go "
-                    + "through Passage to the Wallet Manager on its Mac, which checks it; you sign there on the hardware wallet. "
+                    + "through Passage to the Wallet Manager on its Mac (or, with \(Self.onThisMacTitle) chosen, through a "
+                    + "folder only you can use), which checks it; you sign there on the hardware wallet. "
                     + "VibeSwitcher never signs. The Wallet Manager's answers go back to the agent as messages.")
             }
             Section {

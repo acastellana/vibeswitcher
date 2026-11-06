@@ -22,6 +22,10 @@ import VibeCore
 /// Manager set up: with no peer chosen or no Passage found, cards still show, Send gives way to a line saying what's
 /// missing and Open Settings (`openSettings`, Settings › Wallet), and Send comes back once Settings has what it needs.
 ///
+/// With the Wallet Manager on this Mac chosen there (`WalletAsk.WalletManager.onThisMac`), the same cards and the
+/// same Send go through the folder pair (`WalletLocalLink`) and never through Passage: nothing runs `passage`, and
+/// with a Passage peer chosen nothing touches the folders. Its results show as the watch on the folder hears them.
+///
 /// Its state lives on a queue of its own (`work`), where Passage runs (a send blocks for seconds); `cards` is
 /// published on the main thread.
 final class WalletDesk: ObservableObject {
@@ -36,13 +40,16 @@ final class WalletDesk: ObservableObject {
     struct Config: Equatable {
         /// The `passage` command: an absolute path (`passage`, Passage.app or its binary), or empty to find it.
         var passage: String
-        /// The Wallet Manager peer's ID; empty: none chosen.
+        /// The Wallet Manager peer's ID; empty: none chosen; `WalletAsk.WalletManager.onThisMac`: the Wallet Manager on
+        /// this Mac, through `localLink` and no Passage.
         var peer: String
     }
 
     let folder: URL
     let store: WalletRequestStore
     let inbox: URL
+    /// The folder pair to a Wallet Manager on this Mac, used only while Settings › Wallet has it chosen.
+    let localLink: WalletLocalLink
     /// The messages not delivered yet: `undelivered/` beside the store's records.
     let outbox: WalletOutbox
     /// Settings › Wallet, read on the main thread.
@@ -93,7 +100,10 @@ final class WalletDesk: ObservableObject {
     /// What Passage said when it stopped unsure, per request.
     private var unsureWhy: [String: String] = [:]
     private var courier: WalletCourier?
-    private var courierFor: (passage: PassageCommand, peer: String)?
+    /// What `courier` was made for: the Passage it runs (nil for the Wallet Manager on this Mac) and the peer setting.
+    private var courierFor: (passage: PassageCommand?, peer: String)?
+    /// Whether the Wallet Manager on this Mac is the one chosen, from the last time a courier was asked for.
+    private var onThisMac = false
     /// Passage found with no path set, once found.
     private var foundPassage: PassageCommand?
     /// The requests that went to the browser wallet, as their marks say (read from `folder`, written through).
@@ -118,11 +128,12 @@ final class WalletDesk: ObservableObject {
     private var overCap: Set<String> = []
 
     init(folder: URL = WalletAsk.folder, store: WalletRequestStore = WalletRequestStore(), inbox: URL = PassageLink.defaultInbox,
-         config: @escaping () -> Config, now: @escaping @Sendable () -> Date = { Date() },
+         local: WalletLocalLink = WalletLocalLink(), config: @escaping () -> Config, now: @escaping @Sendable () -> Date = { Date() },
          log: @escaping @Sendable (String) -> Void = { Breadcrumbs.shared.note("wallet: " + $0) }) {
         self.folder = folder
         self.store = store
         self.inbox = inbox
+        self.localLink = local
         self.outbox = WalletOutbox(folder: store.folder.appendingPathComponent("undelivered", isDirectory: true))
         self.config = config
         self.now = now
@@ -168,8 +179,10 @@ final class WalletDesk: ObservableObject {
             self.names = names
             reload()
             redeliver()
+            // The folder on this Mac is looked at each tick (the watch on it is what shows a result at once; this is
+            // for a watch that ended): listing it runs nothing.
             if (try? courier(config)) != nil, polling, !(courier?.outstanding.isEmpty ?? true),
-               polledAt.map({ now().timeIntervalSince($0) >= 60 }) ?? true {
+               polledAt.map({ now().timeIntervalSince($0) >= (onThisMac ? Self.localLookEvery : 60) }) ?? true {
                 polledAt = now()
                 courier?.poll()
             }
@@ -246,6 +259,13 @@ final class WalletDesk: ObservableObject {
     /// The courier made last, for `close` from the main thread while `work` may be busy with a send.
     private let liveLock = NSLock()
     private var live: WalletCourier?
+
+    /// Whether a courier listens for results now: `passage listen` runs, or the folder on this Mac is watched (a
+    /// test's look). Waits for `work`.
+    var isListening: Bool { work.sync { courier?.isListening ?? false } }
+
+    /// The least time between two looks at the folder on this Mac that a refresh asks for.
+    static let localLookEvery: TimeInterval = 10
 
     private var watch: DispatchSourceFileSystemObject?
     private var timer: DispatchSourceTimer?
@@ -369,6 +389,16 @@ final class WalletDesk: ObservableObject {
     /// is none (no peer chosen, no passage), and notes what's missing for the cards (`setupNeeded`).
     @discardableResult
     private func courier(_ config: Config) throws -> WalletCourier {
+        onThisMac = config.peer == WalletAsk.WalletManager.onThisMac
+        // The Wallet Manager on this Mac: the folder pair, and no Passage looked for or run.
+        if onThisMac {
+            setupNeeded = nil
+            if let courier, courierFor?.passage == nil, courierFor?.peer == config.peer { return courier }
+            return adopt(localLink, for: (nil, config.peer))
+        }
+        // No longer chosen, whatever is in its place (none, a peer, a peer with no Passage to run): its courier and
+        // its watch on the folder go now, so nothing reads from-wm from here on.
+        retireLocal()
         guard !config.peer.isEmpty else {
             setupNeeded = WalletCardModel.noPeerNote
             throw WalletAsk.Refusal("no Wallet Manager peer is chosen in Settings › Wallet")
@@ -390,6 +420,26 @@ final class WalletDesk: ObservableObject {
         guard let link = PassageLink(command: passage, walletPeer: config.peer, inboxFolder: inbox) else {
             throw WalletAsk.Refusal("the Wallet Manager peer \(config.peer) isn't a Passage peer ID")
         }
+        return adopt(link, for: (passage, config.peer))
+    }
+
+    /// Drops the courier of the Wallet Manager on this Mac, if that is the one there is: its watch on the folder is
+    /// stopped here, on `work` (a cancel: nothing to wait for), and it looks for no more results. Its records stay in
+    /// the store; the cards read them from there (`storedRecord`) until a courier is made again.
+    private func retireLocal() {
+        guard let local = courier, let made = courierFor, made.passage == nil, made.peer == WalletAsk.WalletManager.onThisMac else { return }
+        // What a look under way still takes is told as ever (`taken`); none starts after this.
+        local.retire()
+        courier = nil
+        courierFor = nil
+        liveLock.lock()
+        live = nil
+        liveLock.unlock()
+        log("the Wallet Manager on this Mac is no longer chosen in Settings › Wallet: its folder is no longer watched or read")
+    }
+
+    /// A courier over `link`, in place of the one there was.
+    private func adopt(_ link: any WalletTransport, for made: (passage: PassageCommand?, peer: String)) -> WalletCourier {
         // The one it replaces stops its `passage listen` on a thread of its own: that may take seconds, and `work`
         // carries on meanwhile.
         // What it still takes meanwhile isn't told again: only the new one's results reach the cards and the agents.
@@ -397,14 +447,14 @@ final class WalletDesk: ObservableObject {
             replaced.onTaken(nil)
             DispatchQueue.global(qos: .utility).async { replaced.close() }
         }
-        let made = WalletCourier(link: link, store: store, log: log, now: now)
-        made.onTaken { [weak self] results in self?.work.async { self?.taken(results) } }
-        courier = made
-        courierFor = (passage, config.peer)
+        let fresh = WalletCourier(link: link, store: store, log: log, now: now)
+        fresh.onTaken { [weak self] results in self?.work.async { self?.taken(results) } }
+        courier = fresh
+        courierFor = made
         liveLock.lock()
-        live = made
+        live = fresh
         liveLock.unlock()
-        return made
+        return fresh
     }
 
     private func send(_ request: WalletRequest, config: Config) {
@@ -447,6 +497,7 @@ final class WalletDesk: ObservableObject {
             (said, notGone) = (text(what), .notSent(reason: "passage didn't take the command" + (what.isEmpty ? "" : " (\(what))")))
         case .passage(.refusedAsSecret(let what)):
             (said, notGone) = (text(what), .notSent(reason: "Passage refused it as looking like a secret" + (what.isEmpty ? "" : " (\(what))")))
+        case .passage(.notSent(let what)): (said, notGone) = (text(what), .notSent(reason: what))
         }
         // A record that stayed (sent, or unsure: this send or an earlier one may have reached the Wallet Manager) decides the card.
         if courier.record(id) != nil { unsureWhy[id] = said } else { local[id] = notGone }
@@ -764,6 +815,7 @@ final class WalletDesk: ObservableObject {
                 cards.append(WalletCardModel(request: request, requestedBy: name, label: by.label, state: request.isExpired(now: time) ? .expired : .waiting))
             }
             cards[cards.count - 1].setupNeeded = setupNeeded
+            cards[cards.count - 1].onThisMac = onThisMac
             cards[cards.count - 1].agentMissed = undelivered?[request.id]?.contains { $0.ended && isTrusted($0, of: request.id) } ?? false
             sessions[request.id] = by.session.lowercased()
         }

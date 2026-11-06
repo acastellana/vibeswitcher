@@ -127,6 +127,27 @@ cost, the receipts of the 2026-10-31 batch give 8 tasks, 2.9 h and ~$86.
 
 ## Entries
 
+### IM-16: Wallet requests reach a Wallet Manager on the same Mac (wallet-requests-reach-a, planned)
+
+- **Change:** Settings › Wallet offers "Wallet Manager on this Mac": Send on a card writes the request into an
+  owner-only folder pair the Wallet Manager reads, and its results come back through it, with no Passage
+  ([Transport on one Mac](../protocol/wallet-request.md#transport-on-one-mac)). Planned 2026-11-05.
+- **Hypothesis:** if requests can go through the folder pair, then a request filed on the Mac where the Wallet
+  Manager runs reaches it: cards delivered on the first real local-fork run move from 0 (no Passage peer is the Mac
+  itself, so such cards showed Open Settings in place of Send) to every card the user sends (about 62 in that run),
+  because the transport no longer needs a second Mac; cards sent through a Passage peer keep working as before.
+- **Metric:** cards delivered in the first real local-fork run, of the cards the user sent, as the other project's
+  lead reports them (the Wallet Manager's count of requests it received from this Mac). Guard: no request delivered
+  twice or to both transports; no wallet incident in [incidents.md](../lead/incidents.md).
+- **Baseline:** 0 delivered: before the change no card filed on the Wallet Manager's Mac could be sent at all
+  (Settings › Wallet had no peer to choose there). The script has no source for this; the number is the other
+  project's report.
+- **Check:** 2026-11-12, the first real local-fork run after the build is installed.
+- **Status:** measuring
+- **Result:** (pending)
+- **Verdict:** (pending)
+- **Why:** (pending)
+
 ### IM-15: Marked wallet requests never go to the browser wallet (wallet-requests-marked, planned)
 
 - **Change:** a wallet request whose `reason` has the first line `LOCAL FORK ONLY` (or nearly: spaces, tabs and
