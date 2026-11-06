@@ -35,6 +35,8 @@ final class WalletDesk: ObservableObject {
     @Published private(set) var sessions: [String: String] = [:]
     /// The request each card was drawn from: a button sends only that one (a file rewritten since isn't sent unseen).
     private(set) var drawn: [String: WalletRequest] = [:]
+    /// The cards the user took off the strip with Dismiss, by request id (`dismissedFile`, kept across launches).
+    @Published private(set) var dismissed: Set<String> = []
 
     /// Where Passage is and which peer is the Wallet Manager's Mac: Settings › Wallet (read on the main thread).
     struct Config: Equatable {
@@ -126,6 +128,8 @@ final class WalletDesk: ObservableObject {
     private var outboxUnasked = false
     /// The cards not shown last time, over `maxCards` (logged when that changes).
     private var overCap: Set<String> = []
+    /// `dismissed`, with when each was dismissed: read from `dismissedFile` at the first publish, written through.
+    private var dismissedAt: [String: Date]?
 
     init(folder: URL = WalletAsk.folder, store: WalletRequestStore = WalletRequestStore(), inbox: URL = PassageLink.defaultInbox,
          local: WalletLocalLink = WalletLocalLink(), config: @escaping () -> Config, now: @escaping @Sendable () -> Date = { Date() },
@@ -164,11 +168,26 @@ final class WalletDesk: ObservableObject {
     }
     #endif
 
-    /// The cards of one session's requests.
+    /// The cards of one session's requests that its strip shows (`shows`): those that need the user.
     func cards(for session: UUID) -> [WalletCardModel] {
         let id = session.uuidString.lowercased()
-        return cards.filter { sessions[$0.id] == id }
+        return cards.filter { sessions[$0.id] == id && Self.shows($0, dismissed: dismissed) }
     }
+
+    /// Whether the strip shows `card`: its state needs the user (`State.showsOnStrip`), or it was sent and the
+    /// Wallet Manager hasn't picked it up in 5 minutes (`notPickedUp`: the card asks whether it runs); and it isn't
+    /// one they dismissed. Only a card that offers Dismiss can be dismissed, so an entry in `dismissedFile` (any
+    /// process of the user's can write it) never hides a card that waits for Send or Retry.
+    static func shows(_ card: WalletCardModel, dismissed: Set<String>) -> Bool {
+        guard card.state.showsOnStrip || (card.state == .sent && card.notPickedUp) else { return false }
+        return !(dismissed.contains(card.id) && WalletCardModel.actions(for: card.state).contains(.dismiss))
+    }
+
+    /// The record of the cards dismissed: `dismissed.json` beside the request records (0600). Not a record's name, so
+    /// the store passes it by.
+    var dismissedFile: URL { store.folder.appendingPathComponent("dismissed.json") }
+    /// How long a dismissal is kept: past a request's results window and its record's 30 days, it has no card anyway.
+    static let dismissedKept: TimeInterval = 60 * 86_400
 
     /// Reads the filed requests again, takes the Wallet Manager's new results while any is outstanding, and redraws the cards.
     /// `then` runs on the main thread once the cards are published.
@@ -215,6 +234,13 @@ final class WalletDesk: ObservableObject {
             openSettings()
             return then()
         }
+        if action == .dismiss {
+            // Only the strip forgets it: the request's files stay, and nothing more is told.
+            return work.async { [self] in
+                dismiss(id)
+                publish(then: then)
+            }
+        }
         let config = self.config()
         let names = sessionNames()
         work.async { [self] in
@@ -236,7 +262,7 @@ final class WalletDesk: ObservableObject {
                 send(request, config: config)
             case .browser: browse(request)
             case .discard: discard(request)
-            case .settings: break
+            case .settings, .dismiss: break
             }
             publish(then: then)
         }
@@ -772,8 +798,36 @@ final class WalletDesk: ObservableObject {
         }
     }
 
+    /// `dismissedAt` from `dismissedFile`, once: only request ids, and only those dismissed within `dismissedKept`.
+    private func loadDismissed() -> [String: Date] {
+        if let dismissedAt { return dismissedAt }
+        var loaded: [String: Date] = [:]
+        if let data = try? Data(contentsOf: dismissedFile), data.count <= Self.maxDismissedBytes,
+           let read = try? JSONDecoder().decode([String: Date].self, from: data) {
+            let time = now()
+            loaded = read.filter { WalletRequestFormat.isID($0.key) && time.timeIntervalSince($0.value) < Self.dismissedKept }
+        }
+        dismissedAt = loaded
+        return loaded
+    }
+
+    static let maxDismissedBytes = 1 << 20
+
+    private func dismiss(_ id: String) {
+        var all = loadDismissed()
+        all[id] = now()
+        dismissedAt = all
+        do {
+            try VibePaths.ensurePrivate(store.folder)
+            try VibePaths.writePrivate(JSONEncoder().encode(all), to: dismissedFile)
+        } catch {
+            log("dismissed \(id), not kept for the next launch: \(error)")
+        }
+    }
+
     private func publish(then: @escaping () -> Void = {}) {
         let time = now()
+        let dismissed = Set(loadDismissed().keys)
         var cards: [WalletCardModel] = []
         var sessions: [String: String] = [:]
         var drawn: [String: WalletRequest] = [:]
@@ -821,7 +875,7 @@ final class WalletDesk: ObservableObject {
         }
         // At most `maxCards`: past that the oldest finished ones give way first, then the oldest. Their files stay; a
         // card shows again once others go.
-        let shown = Self.capped(cards)
+        let shown = Self.capped(cards, hidden: Set(cards.filter { !Self.shows($0, dismissed: dismissed) }.map(\.id)))
         if shown.count < cards.count {
             let hidden = Set(cards.map(\.id)).subtracting(shown.map(\.id))
             if !hidden.isSubset(of: overCap) { log("\(hidden.count) card(s) not shown: over \(Self.maxCards)") }
@@ -835,6 +889,7 @@ final class WalletDesk: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             if self?.cards != cards { self?.cards = cards }
             if self?.sessions != sessions { self?.sessions = sessions }
+            if self?.dismissed != dismissed { self?.dismissed = dismissed }
             self?.drawn = drawn
             then()
         }
@@ -843,12 +898,17 @@ final class WalletDesk: ObservableObject {
     /// The most cards shown at once, across sessions.
     static let maxCards = 30
 
-    /// `cards` (oldest first) cut to `limit`: the oldest finished ones go first, then the oldest; the order kept.
-    static func capped(_ cards: [WalletCardModel], limit: Int = maxCards) -> [WalletCardModel] {
+    /// `cards` (oldest first) cut to `limit`: the oldest of those the strip doesn't show (`hidden`) go first, then the
+    /// oldest finished ones, then the oldest; the order kept.
+    static func capped(_ cards: [WalletCardModel], limit: Int = maxCards, hidden: Set<String> = []) -> [WalletCardModel] {
         guard cards.count > limit else { return cards }
         var excess = cards.count - limit
         var dropped = Set<String>()
-        for card in cards where excess > 0 && card.state.isFinished {
+        for card in cards where excess > 0 && hidden.contains(card.id) {
+            dropped.insert(card.id)
+            excess -= 1
+        }
+        for card in cards where excess > 0 && !dropped.contains(card.id) && card.state.isFinished {
             dropped.insert(card.id)
             excess -= 1
         }

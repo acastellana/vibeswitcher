@@ -285,7 +285,7 @@ struct WalletCard: View {
             if !main.isEmpty {
                 HStack(spacing: 8) {
                     ForEach(main, id: \.self) { action in
-                        if action == main.first && leads {
+                        if action == main.first && leads && action != .dismiss {
                             Button(action.title) { act(action) }.buttonStyle(.borderedProminent)
                         } else {
                             Button(action.title) { act(action) }.buttonStyle(.bordered)

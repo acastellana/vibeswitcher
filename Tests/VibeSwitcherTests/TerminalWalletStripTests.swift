@@ -83,6 +83,8 @@ struct TerminalWalletStripTests {
         _ = await until { sent }
         #expect(s.fake.sends.count == 1)
         #expect(s.fake.sends.first?.hasSuffix("--name wallet-request-\(request.id).json") == true)
-        #expect(s.desk.cards(for: session).first?.state == .sent)
+        #expect(s.desk.cards.first?.state == .sent)
+        // Sent, it leaves the strip (WalletStripTests).
+        #expect(await until { s.desk.cards(for: session).isEmpty })
     }
 }

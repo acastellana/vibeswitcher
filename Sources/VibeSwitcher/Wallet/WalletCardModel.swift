@@ -124,6 +124,17 @@ struct WalletCardModel: Equatable, Identifiable {
             case .waiting, .sent, .unreachable, .unsure, .received, .proposed, .signedNotSubmitted, .inBrowser: return false
             }
         }
+
+        /// Whether the strip shows a card in this state: only while it needs the user, to act (Send, Retry) or to see
+        /// what went wrong. Handled ones leave it: sent and in the Wallet Manager's hands, or finished well. A card
+        /// comes back when a later result for it needs the user again (a rejection, a failure). The asking session is
+        /// told every outcome either way.
+        var showsOnStrip: Bool {
+            switch self {
+            case .waiting, .unreachable, .unsure, .notSent, .rejected, .failed, .expired, .rejectedInWallet, .browserNoAnswer: return true
+            case .sent, .received, .proposed, .signedNotSubmitted, .signed, .inBrowser, .sentFromBrowser: return false
+            }
+        }
     }
 
     /// What you can do on the card.
@@ -133,6 +144,9 @@ struct WalletCardModel: Equatable, Identifiable {
         case browser
         /// Opens Settings › Wallet, where Send or Retry would be while the Wallet Manager isn't set up (`setupNeeded`).
         case settings
+        /// Takes a finished card off the strip for good (`WalletDesk.dismissed`): the request's record stays, and
+        /// nothing more is told to the asking session.
+        case dismiss
 
         var title: String {
             switch self {
@@ -141,6 +155,7 @@ struct WalletCardModel: Equatable, Identifiable {
             case .retry: return "Retry"
             case .browser: return "Sign in browser wallet"
             case .settings: return "Open Settings"
+            case .dismiss: return "Dismiss"
             }
         }
     }
@@ -165,8 +180,10 @@ struct WalletCardModel: Equatable, Identifiable {
         case .waiting: return [.send, .discard]
         case .unreachable, .unsure: return [.retry, .discard]
         case .notSent: return [.discard]
-        case .inBrowser, .rejectedInWallet, .browserNoAnswer: return [.discard]
-        case .sent, .received, .proposed, .signedNotSubmitted, .signed, .rejected, .failed, .expired, .sentFromBrowser: return []
+        case .inBrowser: return [.discard]
+        // Finished, and shown so you see what went wrong: Dismiss takes it off the strip.
+        case .rejected, .failed, .expired, .rejectedInWallet, .browserNoAnswer: return [.dismiss]
+        case .sent, .received, .proposed, .signedNotSubmitted, .signed, .sentFromBrowser: return []
         }
     }
 
