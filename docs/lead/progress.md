@@ -3115,3 +3115,5 @@
 - 2026-11-06 20:36 Started a worker on each-wallet-card-leads
 - 2026-11-06 20:36 Automatically (auto_advance): Started a worker on each-wallet-card-leads (Each wallet card leads with one plain line saying what it does).
 - 2026-11-06 20:52 Automatically (auto_advance): Started the audit of each-wallet-card-leads at 1c59acff (Its review is audit).
+- 2026-11-06 20:54 Audit of each-wallet-card-leads: complete, clean
+- 2026-11-06 21:05 Merged each-wallet-card-leads: Each wallet card leads with one plain line saying what it does
