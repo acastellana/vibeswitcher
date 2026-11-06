@@ -37,6 +37,17 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private lazy var sync = makeSync()
     private var chatHost = MainWindowController.makeHost()
     private lazy var endedHost = NSHostingView(rootView: AnyView(EmptyView()))
+    /// A shell session's wallet cards, under its terminal (a session with a chat has them there). Sized by its cards:
+    /// none, zero high.
+    private lazy var walletHost: NSHostingView<AnyView> = {
+        let host = NSHostingView(rootView: AnyView(EmptyView()))
+        host.sizingOptions = [.intrinsicContentSize]
+        host.setContentHuggingPriority(.defaultHigh, for: .vertical)
+        host.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
+        host.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        host.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return host
+    }()
     private let sidebarHost = NSHostingController(rootView: AnyView(EmptyView()))
     private let inspectorHost = NSHostingController(rootView: AnyView(EmptyView()))
     private var headerHost = MainWindowController.makeHost()
@@ -68,13 +79,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         headerHost.rootView = AnyView(SessionHeaderView(model: model, host: host, actions: actions))
         endedHost.rootView = AnyView(EndedBar(model: model, actions: actions))
         chatHost.rootView = makeChat()
+        if let wallet {
+            walletHost.rootView = AnyView(TerminalWalletStrip(model: model, desk: wallet) { [weak self] in
+                guard let self, self.chatHost.isHidden else { return }
+                self.pane.focus()
+            })
+        }
     }
 
     private func unmountViews() {
         guard mounted else { return }
         mounted = false
         for host in [sidebarHost, inspectorHost] { host.rootView = AnyView(EmptyView()) }
-        for host in [headerHost, endedHost, chatHost] { host.rootView = AnyView(EmptyView()) }
+        for host in [headerHost, endedHost, chatHost, walletHost] { host.rootView = AnyView(EmptyView()) }
         // Made again each time the window's views come down: AppKit keeps, on a hosting view, what each of its layouts
         // read (a dependency set that grows with every conversation and session shown, holding the SwiftUI responders
         // and text layouts it saw) until the view itself goes. These two had most of it.
@@ -257,11 +274,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             body.addSubview(view)
         }
         chatHost.isHidden = true
-        let stack = NSStackView(views: [header, divider, body, endedBar])
+        let stack = NSStackView(views: [header, divider, body, walletHost, endedBar])
         stack.orientation = .vertical
         stack.spacing = 0
         stack.alignment = .leading
-        for view in [header, divider, body, endedBar] {
+        for view in [header, divider, body, walletHost, endedBar] {
             view.translatesAutoresizingMaskIntoConstraints = false
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }

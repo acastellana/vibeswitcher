@@ -334,6 +334,8 @@ struct WalletCard: View {
 struct WalletRequestStrip: View {
     @ObservedObject var desk: WalletDesk
     let session: UUID
+    /// After a card's button was pressed (under a terminal: the keyboard goes back to it).
+    var acted: () -> Void = {}
 
     var body: some View {
         let cards = desk.cards(for: session)
@@ -341,7 +343,10 @@ struct WalletRequestStrip: View {
             ScrollView {
                 LazyVStack(spacing: 10) {
                     ForEach(cards) { card in
-                        WalletCard(card: card) { action in desk.act(action, on: card.id) }
+                        WalletCard(card: card) { action in
+                            desk.act(action, on: card.id)
+                            acted()
+                        }
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 10)
