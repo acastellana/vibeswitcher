@@ -3107,3 +3107,6 @@
 - 2026-11-06 13:30 Automatically (auto_advance): Started the audit of handled-wallet-cards at 4f63bf0f (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
 - 2026-11-06 13:57 Audit of handled-wallet-cards: complete, clean, round 1: 2 Nit open
 - 2026-11-06 14:19 Merged handled-wallet-cards: Handled wallet cards leave the strip instead of piling up
+- 2026-11-06 14:19 Automatically (auto_advance): Merged handled-wallet-cards (Handled wallet cards leave the strip instead of piling up) into main at ae3248a1, on its passing audit and the full test run.
+- 2026-11-06 14:19 Automatically (auto_advance): Cleaned up handled-wallet-cards; ended pid 86047 (Worker: Handled wallet cards leave the strip instead of piling up) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-06 14:20 Update: Merged: handled wallet cards clear themselves (install to use) — **What changed.** The wallet card strip shows only cards that need you. A card leaves once it's sent and the Wallet Manager has it, and once a request finishes well (signed, submitted, proposed). It s…
