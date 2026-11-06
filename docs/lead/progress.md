@@ -3141,3 +3141,8 @@
 - 2026-11-06 22:03 Asked the user to push main at 553e8792 (54 commits) to origin/main
 - 2026-11-06 22:03 Pushed main at 553e8792 (54 commits) to origin/main, on the user's click
 - 2026-11-06 22:04 Workflow: verifier_model = `opus`
+- 2026-11-06 22:39 Workflow: merge_batching = `always`
+- 2026-11-06 22:39 Incident: Hung test runs hold a Mac-wide heavy slot, and the merge gate, for 30–60 minutes at 0% CPU, until their outer timeout. This happened 5 times between 2026-11-05 … (in tests-long-synchronous); planned turn-this-incident-into-10 to turn it into a check
+- 2026-11-06 22:40 Started a worker on turn-this-incident-into-10
+- 2026-11-06 22:40 Automatically (auto_advance): Started a worker on turn-this-incident-into-10 (Turn this incident into a check: Hung test runs hold a Mac-wide heavy slot, and the merge gat…).
+- 2026-11-06 22:40 Review of turn-this-incident-into-10: audit

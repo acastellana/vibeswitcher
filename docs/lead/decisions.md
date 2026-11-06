@@ -223,3 +223,7 @@ turn-this-incident-into-9 auto-started on the generic brief before the sharpened
 
 The user chose to switch reviews to Opus rather than wait (AFB3AD43), after the account hit its Fable limit on 2026-11-06.
 
+## 2026-11-06 22:35:21 Ideas from Anthropic, OpenAI and METR posts (2026-11-06) stay parked as triggered ideas, not tasks: (2) VibeSwitcher mechanically checks that a branch's new tests fail without its non-test changes and pass with them. Build it when a merged test turns out not to exercise its change, or a merge is reverted for a defect its tests should have caught. (3) A per-contract path-glob field, a PreToolUse reminder on edits outside it, and a deterministic diff-vs-globs check at done. Build it when a worker touches something out of scope that nobody catches. Also parked: - (1)/(6) measure verifier recall with planted bugs, and randomly audit 5–10% of review-none merges; - (4) rerun verifier-eval when verifier_model changes; - (7) mid-task mechanical checks about every 30 min; - (8) a chaos corpus for the orchestrator as regression_command; - an audit of how agent text is rendered in the chat.
+
+The user agreed (2026-11-06). This week's evidence shows no failure these would have caught: workers always ran the reverse-apply check, a verifier reproduced it once, there were no reverts, and every out-of-boundary edit was declared and accepted. They cost usage and heavy slots while usage is ahead of pace and load spikes are the live problem. The policy is incident first, then the check.
+

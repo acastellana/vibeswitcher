@@ -69,3 +69,16 @@ Likely cause, from reading the code:
 
 Check: task turn-this-incident-into-9 turns it into a check that runs before merge.
 
+## 2026-11-06 22:39:58 Hung test runs hold a Mac-wide heavy slot, and the merge gate, for 30–60 minutes at 0% CPU, until their outer timeout. This happened 5 times between 2026-11-05 and 2026-11-06.
+
+Evidence: The five runs:
+- 2026-11-05: the merge test of c92b6242 (remote-push-remote-one) hung 45 min.
+- 2026-11-05: the merge test of 3501a204 (main-thread-freezes-with) sat idle 21+ min, then was stopped at 45.
+- 2026-11-05: main-thread-freezes-with's worker's full run sat at 0% CPU for 11+ min; wallet-manager's lead reported it.
+- 2026-11-05: tests-long-synchronous's first verifier run, vs-heavy pid 96473, idle 33 min.
+- 2026-11-06 22:39: tests-long-synchronous's verifier run, vs-heavy 86975 → swift-test 87373 → swiftpm-testing-helper 87433, at 0.0% CPU for 30+ min while the Mac's load was 4.2.
+Each time the witness noticed ("held long, idle N min"), but nothing ended the run before test_timeout_min (45) or vs-heavy --timeout (1h). Merges and other projects' work queued behind it.
+
+Task: tests-long-synchronous
+Check: task turn-this-incident-into-10 turns it into a check that runs before merge.
+
