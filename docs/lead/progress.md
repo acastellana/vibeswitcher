@@ -3111,3 +3111,6 @@
 - 2026-11-06 14:19 Automatically (auto_advance): Cleaned up handled-wallet-cards; ended pid 86047 (Worker: Handled wallet cards leave the strip instead of piling up) (freed 1.3 GB of build output and temporary folders). It stays done.
 - 2026-11-06 14:20 Update: Merged: handled wallet cards clear themselves (install to use) — **What changed.** The wallet card strip shows only cards that need you. A card leaves once it's sent and the Wallet Manager has it, and once a request finishes well (signed, submitted, proposed). It s…
 - 2026-11-06 18:16 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-06 20:36 Planned each-wallet-card-leads: Each wallet card leads with one plain line saying what it does (review audit)
+- 2026-11-06 20:36 Started a worker on each-wallet-card-leads
+- 2026-11-06 20:36 Automatically (auto_advance): Started a worker on each-wallet-card-leads (Each wallet card leads with one plain line saying what it does).
