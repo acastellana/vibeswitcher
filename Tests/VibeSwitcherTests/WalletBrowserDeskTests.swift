@@ -301,7 +301,7 @@ struct WalletBrowserDeskTests {
         #expect(await until { s.base.told.messages.count == 1 })
         _ = await until { s.desk.cards.first?.state != .inBrowser }
         #expect(s.desk.cards.first?.state == .rejectedInWallet)
-        #expect(s.desk.cards.first?.actions == [.discard])
+        #expect(s.desk.cards.first?.actions == [.dismiss])
         #expect(s.base.told.messages[0].text.contains("rejected it in their browser wallet"))
         await acted(s.desk, .send, request.id)
         #expect(s.base.fake.sends.isEmpty)
@@ -374,7 +374,7 @@ struct WalletBrowserDeskTests {
         clock.now = clock.now.addingTimeInterval(1)
         await refreshed(s.desk)
         #expect(s.desk.cards.first?.state == .browserNoAnswer)
-        #expect(s.desk.cards.first?.actions == [.discard])
+        #expect(s.desk.cards.first?.actions == [.dismiss])
         #expect(await until { s.base.told.messages.count == 1 })
         #expect(s.base.told.messages[0].text.contains("no answer came back"))
         // Stopped: nothing served, nothing taken.
@@ -615,7 +615,7 @@ struct WalletBrowserDeskTests {
         #expect(posted?.status == 204)
         #expect(await until { s.desk.cards.first?.state == .rejectedInWallet })
         await refreshed(s.desk)
-        #expect(s.desk.cards.first?.actions == [.discard])
+        #expect(s.desk.cards.first?.actions == [.dismiss])
         await acted(s.desk, .send, request.id)
         #expect(s.base.fake.sends.isEmpty)
     }

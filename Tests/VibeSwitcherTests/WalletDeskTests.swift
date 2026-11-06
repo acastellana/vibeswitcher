@@ -482,7 +482,7 @@ struct WalletDeskTests {
         clock.now = request.expiresAt.addingTimeInterval(1)
         await refreshed(s.desk)
         #expect(s.desk.cards.first?.state == .expired)
-        #expect(s.desk.cards.first?.actions == [])
+        #expect(s.desk.cards.first?.actions == [.dismiss])
         await acted(s.desk, .send, request.id)
         #expect(s.fake.sends.isEmpty)
         // Past the time any answer could come, its card goes.
