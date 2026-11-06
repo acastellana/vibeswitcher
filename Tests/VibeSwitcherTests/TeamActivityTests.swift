@@ -73,6 +73,28 @@ struct TeamActivityTests {
         #expect(!TeamActivity.options.contains(.latencyCritical))
     }
 
+    @Test func liveIdleMembersAllowDelayedRelease() {
+        for role in ["Worker: Fix", "Verifier: Fix"] {
+            var team = KeepAwakeTests.Team()
+            var member = team.hosted[team.worker]!
+            member.label = role
+            var time: TimeInterval = 0
+            var ends = 0
+            let activity = TeamActivity(now: { time }, begin: { NSObject() }, end: { _ in ends += 1 })
+            team.sessions[team.worker]?.status = .working
+            activity.update(working: TeamActivity.working(hosted: [member], sessions: Array(team.sessions.values), heavy: false))
+            for status in [SessionStatus.needsInput, .idle, .done, .unknown] {
+                team.sessions[team.worker]?.status = status
+                let working = TeamActivity.working(hosted: [member], sessions: Array(team.sessions.values), heavy: false)
+                #expect(!working)
+                activity.update(working: working)
+            }
+            time += 180
+            activity.update(working: TeamActivity.working(hosted: [member], sessions: Array(team.sessions.values), heavy: false))
+            #expect(ends == 1)
+        }
+    }
+
     @Test func releasesWhenOwnerGoesAway() {
         var ends = 0
         var activity: TeamActivity? = TeamActivity(begin: { NSObject() }, end: { _ in ends += 1 })
