@@ -427,6 +427,11 @@ final class LeadController: ObservableObject {
     private var powerTimer: Heartbeat.Subscription?
     /// The working policy in Settings › Project lead, told to each running lead once when it changes and once when
     /// this build first runs (see `LeadWitness.PolicyWatch`); none until the app starts it (`watchPolicy`).
+    @Published private(set) var toolchainNote: String?
+    private var toolchainWatch: ToolchainWatch?
+    private var pendingToolchainReports: [String] = []
+    private var toolchainTimer: Heartbeat.Subscription?
+    private let toolchainQueue = DispatchQueue(label: "VibeSwitcher.toolchain", qos: .utility)
     var policyWatch: LeadWitness.PolicyWatch?
     private var policyTimer: Heartbeat.Subscription?
     /// The Mac-wide test and build slots, looked at once a minute: one held long is told to every running lead (see
@@ -573,6 +578,7 @@ final class LeadController: ObservableObject {
         hostWelcome = host.$state.receive(on: DispatchQueue.main).sink { [weak self] _ in
             self?.startPending()
             self?.keepRunningLeads()
+            self?.tellToolchainReports()
         }
         // A move it asks about is a card in the lead's chat, no alert: you commit on the base yourself. Only a merge it
         // refused waits on you (`AlertRules.baseMoved`, at each refresh).
@@ -1475,6 +1481,43 @@ final class LeadController: ObservableObject {
         power = PowerLook(read: read, file: file)
         powerLimit = limit
         powerTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtPower() }
+    }
+
+    /// The first check runs at app start; further checks run every ten minutes, off the main thread.
+    func watchToolchain(_ watch: ToolchainWatch = ToolchainWatch()) {
+        toolchainWatch = watch
+        lookAtToolchain()
+        toolchainTimer = Heartbeat.shared.every(ToolchainWatch.interval) { [weak self] in self?.lookAtToolchain() }
+    }
+
+    func lookAtToolchain(then: @escaping () -> Void = {}) {
+        guard let watch = toolchainWatch else { return then() }
+        toolchainQueue.async { [weak self] in
+            let report = watch.look()
+            let note = watch.note
+            DispatchQueue.main.async {
+                defer { then() }
+                guard let self else { return }
+                self.toolchainNote = note
+                guard let report else { return }
+                self.tellUser("Developer tools", report)
+                self.pendingToolchainReports.append(report)
+                self.tellToolchainReports()
+            }
+        }
+    }
+
+    /// At startup the tools may be read before the host's welcome names the running leads. Keep the news until it does.
+    private func tellToolchainReports() {
+        switch host.state {
+        case .connected, .outdated: break
+        default: return
+        }
+        let reports = pendingToolchainReports
+        pendingToolchainReports.removeAll()
+        for report in reports {
+            for root in leadRoots { deliver(report, from: .system("witness"), root: root) }
+        }
     }
 
     /// Looks at the Mac-wide test and build slots once a minute from now on: a slot held long is told to every

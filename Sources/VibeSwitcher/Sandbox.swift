@@ -1104,6 +1104,16 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     /// The sheets `sheet NAME` shows: a sheet a change adds or touches goes here, so a worker can photograph it.
     static let sheets: [(name: String, make: (Driver) -> AnyView)] = [
+        ("toolchain-note", { _ in
+            let before = ToolchainSnapshot(developerDir: "/Library/Developer/CommandLineTools", swift: "Apple Swift version 6.4.1",
+                                           sdkPath: "/Library/Developer/CommandLineTools/SDKs/MacOSX27.sdk", sdkVersion: "27",
+                                           commandLineTools: "27.0", xcodeExists: true)
+            var after = before
+            after.swift = "Apple Swift version 6.4.2"
+            after.sdkVersion = "27.2"
+            after.commandLineTools = "27.2"
+            return AnyView(ToolchainNoteView(note: LeadWitness.toolchainText(before: before, after: after)!))
+        }),
         ("new-project", { driver in
             AnyView(NewProjectSheet(model: NewProjectModel(location: driver.home + "/projects"),
                                     created: { [weak driver] folder, _ in driver?.refuse("starting a lead in \(folder)") },
