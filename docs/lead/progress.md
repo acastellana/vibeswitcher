@@ -3199,3 +3199,5 @@
 - 2026-11-07 00:31 Merged a-worker-s-brief: A worker's brief carries the contract as it is when the worker starts, not the incident's first draft (in a batch: a-worker-s-brief, fetch-github-by-itself landed on one test run)
 - 2026-11-07 00:31 Merged fetch-github-by-itself: Fetch GitHub by itself and tell the lead when the other Mac pushed (in a batch: a-worker-s-brief, fetch-github-by-itself landed on one test run)
 - 2026-11-07 00:31 Automatically (auto_advance): Cleaned up a-worker-s-brief; ended pid 41864 (Worker: A worker's brief carries the contract as it is when the worker starts, not the incident's first draft) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-07 00:31 Automatically (auto_advance): Cleaned up fetch-github-by-itself (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-07 00:45 Merged warn-when-the-mac: Warn when the Mac's developer tools change
