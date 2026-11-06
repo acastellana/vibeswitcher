@@ -3098,3 +3098,6 @@
 - 2026-11-06 11:43 Automatically (auto_advance): The verifier on an-agent-can-open ended without a verdict (exited 129 after pid 1982 (vibeswitcher-mcp) closed it): closed its session and started the audit again on the same commit, 21e75064. If this one ends without a verdict too, it's left to you.
 - 2026-11-06 11:46 Audit of an-agent-can-open: complete, clean, round 1: 2 Nit open
 - 2026-11-06 11:56 Merged an-agent-can-open: An agent can open a New Shell running a command, with the user's one click
+- 2026-11-06 11:56 Automatically (auto_advance): Merged an-agent-can-open (An agent can open a New Shell running a command, with the user's one click) into main at 08557f8a, on its passing audit and the full test run.
+- 2026-11-06 11:56 Automatically (auto_advance): Cleaned up an-agent-can-open (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-06 11:56 Update: Merged: agents can open a New Shell running a command, on your one click (install to use) — **What changed.** An agent runs `vs-shell run [--cwd DIR] [--label TEXT] -- COMMAND…`. A card in its chat shows the folder and the exact command with Run and Decline. Run opens an ordinary New Shell s…
