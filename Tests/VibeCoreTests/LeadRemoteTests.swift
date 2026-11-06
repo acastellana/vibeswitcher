@@ -83,9 +83,9 @@ struct LeadRemoteTests: LeadTeamFixture {
         #expect(!lead.call("fetch_remote", [:]).isError)
         let tip = try pushed(scene, "b.txt", "bee\n", message: "Other Mac")
         let finished = DispatchSemaphore(value: 0)
-        lead.keepRecords { work in
+        lead.keepRecords { [weak lead] work in
             work()
-            finished.signal()
+            if lead?.store.load().reports?.last?.text.contains(tip) == true { finished.signal() }
             return true
         }
         #expect(finished.wait(timeout: .now() + 60) == .success)
