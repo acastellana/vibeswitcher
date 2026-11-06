@@ -3170,3 +3170,4 @@
 - 2026-11-06 23:36 Automatically (auto_advance): Sent tests-long-synchronous's worker the open Important findings tests-long-synchronous:F1 from its audit at ce37e9d7.
 - 2026-11-06 23:37 Dismissed tests-long-synchronous:F5: A time-bomb fixture (a fixed resets_at in the past), already fixed on a-worker-s-brief (b90ef4d); it isn't this branch's.
 - 2026-11-06 23:38 Planned test-under-load-s: test-under-load's default mode builds inside a scratch home (review audit)
+- 2026-11-06 23:42 The worker on a-worker-s-brief answered findings: a-worker-s-brief:F1 fixed at b90ef4db: 45491a6 rechecks settled and startable statuses on the refreshed task, including refusing a task newly blocked during startup. Regression workerStartupRechecksTheRefreshedTaskStatus fails in all 7 cases (21 issues) with the guard removed and passes in all 7 after restoration. Chosen agent/model remain unchanged as requested.
