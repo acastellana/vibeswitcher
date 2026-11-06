@@ -3177,3 +3177,6 @@
 - 2026-11-06 23:50 Automatically (auto_advance): Started a worker on start-a-fresh-lead (Start a fresh lead session each day, at a quiet moment); its agent is auto, so it went to Codex: Claude weekly 78%, 46 points ahead of pace; Codex 42%.
 - 2026-11-06 23:50 Released warn-when-the-mac's worker (idle since its done report on e5b40e7d) while its audit runs
 - 2026-11-06 23:50 Automatically (auto_advance): Started the audit of warn-when-the-mac at e5b40e7d (A Codex worker worked on it, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-06 23:56 Started a worker on a-message-typed-into (auto → Codex: Claude weekly 78%, 46 points ahead of pace; Codex 43%)
+- 2026-11-06 23:56 Automatically (auto_advance): Started a worker on a-message-typed-into (A message typed into a working Codex mustn't also wait in its inbox); its agent is auto, so it went to Codex: Claude weekly 78%, 46 points ahead of pace; Codex 43%.
+- 2026-11-06 23:56 Automatically (auto_advance): Started the audit of a-worker-s-brief at 97fd8b47 (A Codex worker worked on it, so a Claude verifier audits it whatever its review says).
