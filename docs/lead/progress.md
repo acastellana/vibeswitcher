@@ -3089,3 +3089,5 @@
 - 2026-11-06 10:55 Started a worker on walletdesktests-waits
 - 2026-11-06 10:55 Automatically (auto_advance): Started a worker on walletdesktests-waits (WalletDeskTests waits for the session to be told instead of reading the count once).
 - 2026-11-06 11:20 Merged walletdesktests-waits: WalletDeskTests waits for the session to be told instead of reading the count once (no audit: review none)
+- 2026-11-06 11:20 Automatically (auto_advance): Merged walletdesktests-waits (WalletDeskTests waits for the session to be told instead of reading the count once) into main at c1ff2bb2, review none: on its worker's done report on 37c89ce2 and the full test run.
+- 2026-11-06 11:20 Automatically (auto_advance): Cleaned up walletdesktests-waits; ended pid 80560 (Worker: WalletDeskTests waits for the session to be told instead of reading the count once) (freed 1.3 GB of build output and temporary folders). It stays done.
