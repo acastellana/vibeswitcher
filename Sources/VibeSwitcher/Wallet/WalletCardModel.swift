@@ -28,6 +28,8 @@ struct WalletCardModel: Equatable, Identifiable {
     var calldataBytes: Int? = nil
     /// A contract call's calldata in words (`WalletCall`); nil for a transfer.
     var call: WalletCall? = nil
+    /// A token transfer's token contract (the request's `asset`), for `line`; nil for the native coin or a call.
+    var token: String? = nil
     /// Who asked: the session's name as VibeSwitcher knows it (the window's), never as the request says.
     var requestedBy: String
     /// The label the agent gave (`--label`): shown beside the name as the agent's own words; empty when it gave none.
@@ -335,6 +337,19 @@ struct WalletCardModel: Equatable, Identifiable {
         }
     }
 
+    /// The card's lead line: what the transaction does, in VibeSwitcher's words, worked out from the request's fields and
+    /// calldata only (`WalletCall.line`), never from its reason or label: "Send 12.5 GEN to 0x1234…abcd". Addresses are
+    /// shortened (`WalletCall.short`); the rows below keep them whole. The same request always gives the same line.
+    var line: String {
+        let to = WalletCall.short(self.to)
+        if let call { return call.line + (amount == "0" ? "" : ", sending \(amount) \(asset)") }
+        if let token { return "Send \(amount) base units of token \(WalletCall.short(token)) to \(to)" }
+        return "Send \(amount) \(asset) to \(to)"
+    }
+
+    /// The badge beside `line` for a request marked for a local fork only (`localForkOnly`).
+    static let localForkBadge = "Local fork only"
+
     /// "Requested by"'s line: the session's name, and the agent's own label beside it when it gave one.
     var requestedByText: String {
         requestedByLabel.isEmpty || requestedByLabel == requestedBy ? requestedBy : "\(requestedBy) (the agent's label: \(requestedByLabel))"
@@ -345,7 +360,7 @@ struct WalletCardModel: Equatable, Identifiable {
 
     /// The card as text, for Copy.
     var text: String {
-        var lines = ["Wallet request: \(Self.title(state))", "Workspace: \(workspace)", "From: \(from)" + (wallet.map { " (\($0.title))" } ?? "")]
+        var lines = ["Wallet request: \(Self.title(state))", line + (localForkOnly ? " [\(Self.localForkBadge)]" : ""), "Workspace: \(workspace)", "From: \(from)" + (wallet.map { " (\($0.title))" } ?? "")]
         if let call {
             lines.append("Contract: \(to)")
             lines.append("Call: \(call.headline)" + (call.function.map { " (\($0))" } ?? ""))
