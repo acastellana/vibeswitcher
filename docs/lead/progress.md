@@ -3081,3 +3081,5 @@
 - 2026-11-06 10:10 Planned wallet-cards-show-for: Wallet cards show for a shell session (it has no Chat view, so they were invisible)
 - 2026-11-06 10:10 Started a worker on wallet-cards-show-for
 - 2026-11-06 10:10 Automatically (auto_advance): Started a worker on wallet-cards-show-for (Wallet cards show for a shell session (it has no Chat view, so they were invisible)).
+- 2026-11-06 10:46 Merged wallet-cards-show-for: Wallet cards show for a shell session (it has no Chat view, so they were invisible) (no audit: review none)
+- 2026-11-06 10:46 Flaky in wallet-cards-show-for's merge: aRestoredSessionsEndIsLoggedWithItsSignal(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
