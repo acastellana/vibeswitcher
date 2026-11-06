@@ -3072,3 +3072,6 @@
 - 2026-11-06 01:39 Automatically (auto_advance): Released wallet-requests-reach-a's worker, idle since its done report on c0e14733, while its audit runs (ended pid 26169 (Worker: Wallet requests reach a Wallet Manager on this Mac through a local folder pair)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-06 01:39 Audit of wallet-requests-reach-a: complete, clean, round 3: 2 Nit closed
 - 2026-11-06 01:49 Merged wallet-requests-reach-a: Wallet requests reach a Wallet Manager on this Mac through a local folder pair
+- 2026-11-06 01:49 Automatically (auto_advance): Merged wallet-requests-reach-a (Wallet requests reach a Wallet Manager on this Mac through a local folder pair) into main at 98ecc8fb, on its passing audit and the full test run.
+- 2026-11-06 01:49 Automatically (auto_advance): Cleaned up wallet-requests-reach-a (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-06 01:50 Update: Merged: wallet requests can reach a Wallet Manager on this Mac (install, then choose it in Settings › Wallet) — **What changed.** Settings › Wallet has a new choice, "Wallet Manager on this Mac". With it, Send to Wallet Manager on a card writes the request into an owner-only folder the Wallet Manager reads, and…
