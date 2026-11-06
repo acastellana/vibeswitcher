@@ -312,6 +312,59 @@ struct LeadToolsetTests: LeadTeamFixture {
 
     func call(_ tools: LeadToolset, _ name: String, _ arguments: [String: Any] = [:]) -> MCPToolResult { tools.call(name, arguments) }
 
+    @Test(arguments: [false, true])
+    func incidentWorkerBriefUsesTheContractAtLaunch(updateDuringStart: Bool) throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.power = { nil }
+        #expect(!lead.call("record_incident", ["what": "Original incident", "evidence": "Original log"]).isError)
+        let slug = try #require(BoardStore(root: root).load().tasks.last?.slug)
+        let replace = {
+            let result = lead.call("update_task", ["task": slug, "title": "Current title", "goal": "Current goal",
+                "acceptance": ["Current acceptance"], "boundaries": ["Current boundaries"], "context": "Current context",
+                "review": "audit", "budget_min": 17])
+            #expect(!result.isError, "\(result.text)")
+        }
+        if updateDuringStart {
+            // A lead update lands after start_worker's first board read, while it checks the host.
+            runtime.onSessions = { runtime.onSessions = nil; replace() }
+        } else {
+            replace()
+        }
+        let started = lead.call("start_worker", ["task": slug])
+        #expect(!started.isError, "\(started.text)")
+        let prompt = try String(contentsOf: vault.runFolder(root: root, name: "worker-\(slug)").appendingPathComponent("prompt.md"), encoding: .utf8)
+        for current in ["# Task: Current title", "Current goal", "Current acceptance", "Current boundaries", "Current context", "17 min"] {
+            #expect(prompt.contains(current), "Missing \(current)")
+        }
+        #expect(!prompt.contains("Original incident") && !prompt.contains("Original log"))
+        #expect(prompt.contains(LeadPrompts.Policy.workerCheck(.audit)))
+    }
+
+    @Test(arguments: [LeadTask.Status.kept, .blocked, .folded, .abandoned, .done, .reverted, .review])
+    func workerStartupRechecksTheRefreshedTaskStatus(status: LeadTask.Status) throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.power = { nil }
+        #expect(!lead.call("add_task", ["title": "Held task", "goal": "g", "acceptance": ["a"]]).isError)
+        runtime.onSessions = {
+            runtime.onSessions = nil
+            do {
+                try BoardStore(root: root).update { board in
+                    let index = try #require(board.taskIndex("held-task"))
+                    board.tasks[index].status = status
+                }
+            } catch { Issue.record(error) }
+        }
+        let result = lead.call("start_worker", ["task": "held-task"])
+        #expect(result.isError, "\(result.text)")
+        #expect(runtime.spawned.isEmpty)
+        let task = try #require(BoardStore(root: root).load().task("held-task"))
+        #expect(task.status == status && task.worker == nil)
+    }
+
     @Test func aLeadStartedOnASymlinkedFolderNamesItsProjectAsTheVaultDoes() throws {
         let root = try repo()
         let alias = temp.url("alias").path
@@ -1253,4 +1306,3 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
     }
 }
-

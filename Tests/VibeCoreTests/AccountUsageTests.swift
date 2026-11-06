@@ -38,6 +38,14 @@ struct AccountUsageTests: LeadTeamFixture {
         return try #require(TranscriptTail.read(url: file)?.usageLimit, "no usage limit read")
     }
 
+    /// A live refusal for startup tests; the historical transcript above keeps its original parsing expectations.
+    func activeFableRefusal(now: Date = Date()) throws -> UsageLimit {
+        var limit = try tail(Self.fableRefusal)
+        limit.at = now.timeIntervalSince1970
+        limit.resetsAt = now.timeIntervalSince1970 + 86_400
+        return limit
+    }
+
     func repo() throws -> String {
         let url = temp.url("usage")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -301,7 +309,7 @@ struct AccountUsageTests: LeadTeamFixture {
         #expect(!call(lead, "audit", ["task": "one"]).isError)
         let verifier = try #require(BoardStore(root: root).load().task("one")?.verifier)
         // Its transcript's last line, as the host reads it: the Fable limit.
-        runtime.usageLimits[verifier] = try tail(Self.fableRefusal)
+        runtime.usageLimits[verifier] = try activeFableRefusal()
         let status = call(lead, "status").text
         #expect(status.contains("the fable limit (seven_day_overage_included): reached (Claude refused a request at it)"), "\(status)")
         let refused = call(lead, "audit", ["task": "two"])
@@ -329,7 +337,7 @@ struct AccountUsageTests: LeadTeamFixture {
         #expect(!call(lead, "start_worker", ["task": "two"]).isError)
         #expect(!call(lead, "audit", ["task": "one"]).isError)
         let verifier = try #require(BoardStore(root: root).load().task("one")?.verifier)
-        runtime.usageLimits[verifier] = try tail(Self.fableRefusal)
+        runtime.usageLimits[verifier] = try activeFableRefusal()
         #expect(call(lead, "audit", ["task": "two"]).isError)
         #expect(!call(lead, "configure", ["verifier_model": "opus"]).isError)
         let moved = call(lead, "audit", ["task": "two"])
@@ -348,7 +356,7 @@ struct AccountUsageTests: LeadTeamFixture {
         for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
         #expect(!call(lead, "start_worker", ["task": "one"]).isError)
         let worker = try #require(BoardStore(root: root).load().task("one")?.worker)
-        runtime.usageLimits[worker] = try tail(Self.fableRefusal)
+        runtime.usageLimits[worker] = try activeFableRefusal()
         let started = call(lead, "start_worker", ["task": "two"])
         #expect(!started.isError, "\(started.text)")
         #expect(usageStore.load().limits.isEmpty, "\(usageStore.load().limits)")

@@ -1729,11 +1729,21 @@ public final class LeadToolset: MCPToolset {
         }
         // Named before its grant goes to the new one.
         let noTools = noToolsBefore(task, .worker, sessions: sessions)
-        // The brief of the agent it starts on (a Codex worker's has its Codex part).
-        var briefed = task
+        // Host checks and worktree setup can take time; update_task may have replaced the contract since
+        // the first board read. Write the brief from the board now, for manual and automatic starts alike.
+        guard var briefed = try store.read().task(slug), briefed.id == task.id else {
+            throw Problem(text: "No task \(slug) to start anymore.")
+        }
+        if Self.settledStates.contains(briefed.status) { throw Self.settledRefusal(briefed, "No worker started") }
+        guard [.planned, .failed, .blocked, .running].contains(briefed.status),
+              briefed.status != .blocked || task.status == .blocked else {
+            throw Problem(text: "No worker started: \(slug) became \(briefed.status.rawValue) during startup. Check the task before starting it again.")
+        }
+        if let when, !when(briefed) { throw LeadAdvance.NotDue() }
+        // Keep the agent/model this launch selected; the contract, review and budget are current.
         briefed.agent = codex ? .codex : nil
         briefed.model = launchModel
-        let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(task.title)", trust: true,
+        let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(briefed.title)", trust: true,
                                  prompt: LeadPrompts.worker(task: briefed, root: root, workflow: workflow),
                                  start: "Start on your task (it's in your instructions)." + finish + " Call progress at each milestone. When done, call report.",
                                  model: launchModel, branch: base, agent: agent)

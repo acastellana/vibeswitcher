@@ -151,6 +151,47 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(!report.isError, "\(report.text)")
     }
 
+    @Test(arguments: [false, true])
+    func autoStartedIncidentWorkerBriefUsesTheUpdatedContract(updateDuringStart: Bool) throws {
+        let (root, runtime, lead) = try team()
+        #expect(!lead.call("record_incident", ["what": "Original incident", "evidence": "Original log"]).isError)
+        let slug = try #require(BoardStore(root: root).load().tasks.last?.slug)
+        #expect(!lead.call("update_task", ["task": slug, "auto_advance": false]).isError)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        advancing.settle()
+        #expect(task(slug, root)?.status == .planned)
+        let replace = {
+            #expect(!lead.call("update_task", ["task": slug, "title": "Current title", "goal": "Current goal",
+                "acceptance": ["Current acceptance"], "boundaries": ["Current boundaries"], "context": "Current context",
+                "review": "audit", "budget_min": 17]).isError)
+        }
+        if updateDuringStart {
+            runtime.calls.lock()
+            runtime.onSessions = {
+                // Wait for the start itself, after its board read, rather than the loop's earlier room check.
+                if let lock = FileLock.attempt(root + "/.vibeswitcher/run/start-worker.lock") {
+                    lock.release()
+                    return
+                }
+                runtime.onSessions = nil
+                replace()
+            }
+            runtime.calls.unlock()
+        } else {
+            replace()
+        }
+        #expect(!lead.call("update_task", ["task": slug, "auto_advance": true]).isError)
+        advancing.settle()
+        #expect(advancing.until { task(slug, root)?.status == .running })
+        let prompt = try String(contentsOf: vault.runFolder(root: root, name: "worker-\(slug)").appendingPathComponent("prompt.md"), encoding: .utf8)
+        for current in ["# Task: Current title", "Current goal", "Current acceptance", "Current boundaries", "Current context", "17 min"] {
+            #expect(prompt.contains(current), "Missing \(current)")
+        }
+        #expect(!prompt.contains("Original incident") && !prompt.contains("Original log"))
+        #expect(prompt.contains(LeadPrompts.Policy.workerCheck(.audit)))
+    }
+
     // MARK: time budget
 
     /// An over_budget report waits on the lead (see `LeadBudget`): the loop neither audits nor merges it, and never
