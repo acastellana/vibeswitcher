@@ -65,7 +65,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         choose: { [weak self] menu, index, typing in self?.sync.choose(index, typing: typing, drawn: menu) },
         moveTab: { [weak self] tab in self?.sync.moveTab(to: tab) },
         showTerminal: { [weak self] in self?.model.showsChat = false },
-        dismissMenu: { [weak self] in self?.sync.cancel() }, wallet: wallet)
+        dismissMenu: { [weak self] in self?.sync.cancel() }, wallet: wallet, shells: shells)
         .environment(\.holdLeadQuestion) { [weak leads] question in leads?.hold(question) }
         .environment(\.dictation, dictation))
     }
@@ -125,13 +125,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let dictation: DictationController?
     /// The wallet requests agents filed, as cards in their chats (none in the benches).
     private let wallet: WalletDesk?
+    /// The shells agents asked for, as cards in their chats (none in the benches).
+    private let shells: ShellDesk?
     /// Boost mode as decided, for the toolbar's mark (none in the benches).
     private let boost: BoostWatch?
 
     init(store: SessionStore, host: HostClient, model: WindowModel, actions: WindowActions, leads: LeadController,
          briefing: BriefingModel? = nil, dictation: DictationController? = nil, wallet: WalletDesk? = nil,
-         boost: BoostWatch? = nil) {
+         boost: BoostWatch? = nil, shells: ShellDesk? = nil) {
         self.wallet = wallet
+        self.shells = shells
         self.boost = boost
         self.leads = leads
         self.briefing = briefing

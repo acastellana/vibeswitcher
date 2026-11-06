@@ -337,6 +337,36 @@ private final class Driver: NSObject, NSApplicationDelegate {
         if preferences.walletPeerID.isEmpty { preferences.walletPeerID = Driver.walletPeers[0].peerID }
         return desk
     }()
+    /// The shells fake agents ask for (`shell-ask`), stamped by the sandbox's vault as the host would for the selected
+    /// fake session. Run starts a shell session in the sandbox's own host (its own home), never the user's.
+    lazy var shellDesk: ShellDesk = {
+        let desk = ShellDesk(folder: state.appendingPathComponent("shell/asked", isDirectory: true))
+        desk.sessionNames = { [weak self] in
+            guard let self else { return [:] }
+            let titles = Dictionary(model.allRows.compactMap { row in row.hostID.map { ($0, row.title) } }, uniquingKeysWith: { first, _ in first })
+            return Dictionary(fakeList.map { ($0.id.uuidString.lowercased(), titles[$0.id] ?? $0.label) }, uniquingKeysWith: { first, _ in first })
+        }
+        let book = walletVault
+        desk.verifyStamps = { [folder = state] stamps in try book.vault(folder: folder.appendingPathComponent("wallet/vault"), as: { .app }).verifyWallet(stamps) }
+        desk.deliver = { [weak self] session, text, then in
+            guard let id = UUID(uuidString: session) else { return then(.ended) }
+            guard let self else { return then(.notYet) }
+            leads.tell(text, from: .system("from New Shell"), session: id, then: then)
+        }
+        desk.atOnce = { [weak self] in self?.preferences.letAgentsOpenShells ?? false }
+        desk.launch = { [weak self] request, then in
+            guard let self else { return then(.failure(ShellAsk.Refusal("the sandbox is quitting"))) }
+            host.spawn(ShellAsk.spawnRequest(request, cols: 100, rows: 32)) { [weak self] result in
+                switch result {
+                case .success(let session):
+                    self?.model.select(hostID: session.id)
+                    then(.success((session.id, session.label)))
+                case .failure(let error): then(.failure(ShellAsk.Refusal(error.message)))
+                }
+            }
+        }
+        return desk
+    }()
     /// The Wallet Manager peer the wallet desk sends to: the first made-up one, or none after `wallet-peer none`, or
     /// the Wallet Manager on this Mac after `wallet-peer this-mac`.
     var walletPeer = Driver.walletPeers[0].peerID
@@ -472,6 +502,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         Breadcrumbs.shared.note("sandbox: quitting")
         // Its fake `passage listen`, ended by its pid.
         walletDesk.close()
+        shellDesk.close()
         Breadcrumbs.shared.flush()
         RunnableCommand.Script.removeAll()
     }
@@ -905,7 +936,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             projectCreated: { [weak self] folder, _ in self?.refuse("starting a lead in the new project \(folder)") })
         windowActions = actions
         let controller = MainWindowController(store: store, host: host, model: model, actions: actions, leads: leads, briefing: briefing,
-                                              dictation: dictation, wallet: walletDesk, boost: boostWatch)
+                                              dictation: dictation, wallet: walletDesk, boost: boostWatch, shells: shellDesk)
         controller.onBoostMark = { [weak self] in self?.showSettings(.general, reveal: .boost) }
         controller.pane.configure = { [weak self, weak controller] view in
             guard let self else { return }
@@ -978,6 +1009,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
         ("soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. every other cycle a worker shaped like a real one (a task on the lead's board, a transcript of MB MB of tool calls, default 4, its steer inbox, its chat and its terminal fed a build's output) ended by the role sweep, its footprint once removed, and RESULT soak-worker-growth-mb. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet, workers. With no MINUTES: the log so far"),
         ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m] [--data 0x…] [--reason TEXT]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh); --data makes it a contract call (an approve's calldata, say)"),
+        ("shell-ask [COMMAND]", "the selected fake session's agent asks for a new shell running COMMAND (a made-up program unless given) in its folder, as vs-shell run does: its card shows in that chat, waiting for Run"),
+        ("shell-click run|decline|dismiss", "presses that button on the newest shell request card in the selected chat (run starts the shell session in the sandbox's own host and selects it)"),
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint, transaction (tx HASH [EXPLORER URL], once signed and submitted) and the Wallet Manager's checks"),
         ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
         ("wallet-click send|retry|discard|browser|settings", "presses that button on the newest wallet request card in the selected chat (send goes to the sandbox's fake passage, never the real one; browser serves the local page but never opens a browser: wallet-page shows it; settings opens Settings › Wallet)"),
@@ -1147,6 +1180,36 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     /// The newest card of the selected session's chat.
     private var walletCard: WalletCardModel? { model.selectedRow?.hostID.flatMap { walletDesk.cards(for: $0).last } }
+
+    /// `shell-ask [COMMAND]`: the selected fake session's agent asks for a shell, as `vs-shell run` does (`ShellAsk.run`,
+    /// the sandbox's vault placing it in that session, as the host would from its process).
+    private func shellAsk(_ command: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard let row = model.selectedRow, let id = row.hostID, let fake = fakeList.first(where: { $0.id == id }) else {
+            return reply(false, "no fake session selected: chat NAME first")
+        }
+        let line = command.isEmpty
+            ? "printf 'Example program: deploying to the local test network\\n'; printf 'Continue? [y/N] '; read answer; echo \"you said $answer\""
+            : command
+        let vault = walletVault.vault(folder: state.appendingPathComponent("wallet/vault"), as: { .session(id.uuidString) }, userOpened: true)
+        let ran = ShellAsk.run(["run", "--label", "Local test", "--", line], cwd: fake.cwd, folder: shellDesk.folder, vault: vault,
+                               atOnce: preferences.letAgentsOpenShells)
+        guard ran.status == 0 else { return reply(false, ran.error) }
+        shellDesk.refresh { [weak self] in self?.settle { reply(true, ran.output) } }
+    }
+
+    /// `shell-click run|decline|dismiss`: that button on the newest shell card in the selected session's chat.
+    private func shellClick(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
+        let actions: [String: ShellDesk.Action] = ["run": .run, "decline": .decline, "dismiss": .dismiss]
+        guard let action = actions[what] else { return reply(false, "shell-click run, decline or dismiss") }
+        guard let card = model.selectedRow?.hostID.flatMap({ shellDesk.cards(for: $0).last }) else {
+            return reply(false, "no shell request in this chat: shell-ask first")
+        }
+        shellDesk.act(action, on: card.id) { [weak self] in
+            guard let self else { return }
+            let now = shellDesk.cards.first { $0.id == card.id }
+            settle { reply(true, "\(what): the card is now \(now.map { ShellCard.title($0.state) } ?? "gone")") }
+        }
+    }
 
     /// `wallet-card`: the newest card as lines a script reads (`state Received`, `check chain failed …`).
     private func walletCardText() -> (Bool, String) {
@@ -1834,6 +1897,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             default: return reply(false, "boost off|on|away|present|battery|battery-on|battery-low|veto|mark")
             }
             boostWatch.look { [weak self] in self?.settle { reply(true, self?.boostWatch.state?.text ?? "not decided") } }
+        case "shell-ask": shellAsk(rest, reply)
+        case "shell-click": shellClick(rest, reply)
         case "wallet-ask": walletAsk(Array(words.dropFirst()), reply)
         case "wallet-card": let (ok, text) = walletCardText(); reply(ok, text)
         case "wallet-later":

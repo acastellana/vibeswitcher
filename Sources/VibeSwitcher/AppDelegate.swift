@@ -42,6 +42,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         desk.verifyMessages = { try LeadVault.standard.verify($0) }
         return desk
     }()
+    /// The shells agents ask for (`vs-shell run`), as cards in their chats: nothing starts until you press Run (or
+    /// Settings › Agents lets agents open shells without asking); what became of each goes back to the asking session.
+    private lazy var shellDesk: ShellDesk = {
+        let desk = ShellDesk()
+        desk.sessionNames = { [weak self] in
+            guard let self else { return [:] }
+            return WalletDesk.names(hosted: hostClient.sessions.filter(\.isLive), rows: windowModel.allRows)
+        }
+        desk.verifyStamps = { try LeadVault.standard.verifyWallet($0) }
+        desk.deliver = { [weak self] session, text, then in
+            guard let id = UUID(uuidString: session) else { return then(.ended) }
+            guard let self else { return then(.notYet) }
+            leadController.tell(text, from: .system("from New Shell"), session: id, then: then)
+        }
+        desk.atOnce = { [weak self] in self?.preferences.letAgentsOpenShells ?? false }
+        desk.launch = { [weak self] request, then in
+            guard let self else { return then(.failure(ShellAsk.Refusal("VibeSwitcher is quitting"))) }
+            // In the window's session host only, never a Terminal tab: the card said this window.
+            hostClient.spawn(ShellAsk.spawnRequest(request)) { [weak self] result in
+                switch result {
+                case .success(let session):
+                    self?.showMainWindow(select: session.id)
+                    then(.success((session.id, session.label)))
+                case .failure(let error):
+                    then(.failure(ShellAsk.Refusal(error.message)))
+                }
+            }
+        }
+        return desk
+    }()
     /// Settings › Wallet's peers: `passage peers --no-discovery --json`, read off the main thread each time the tab shows
     /// and when the passage path changes.
     /// Settings › Wallet's peers, and its passage path once typing paused (`settledPath`): what the wallet desk runs.
@@ -192,6 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         // Requests filed or sent while the feature was called vault requests, carried over once.
         do { try WalletRequestStore.carryOver() } catch { Breadcrumbs.shared.note("wallet: couldn't carry over vault-requests: \(error)") }
         walletDesk.start()
+        shellDesk.start()
         // A peer or Passage path chosen in Settings › Wallet: the cards redraw now (Send comes back on waiting ones),
         // not at the next look. After the change lands (@Published sends before it does). The path only once typing
         // paused (`WalletPeerList.typed`): a half-typed one is never run.
@@ -206,7 +237,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .removeDuplicates()
             .dropFirst()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.walletDesk.refresh(polling: false) }
+            .sink { [weak self] _ in
+                self?.walletDesk.refresh(polling: false)
+                self?.shellDesk.refresh()
+            }
             .store(in: &cancellables)
         appHealth = AppHealthWatcher(memory: AppHealthWatcher.memoryReader(relief: { [footprintRelief] in footprintRelief.last })) { [weak self] text in
             self?.leadController.tellAppHealth(text) ?? false
@@ -735,7 +769,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         if mainWindow == nil {
             let controller = MainWindowController(store: store, host: hostClient, model: windowModel, actions: windowActions,
                                                   leads: leadController, briefing: briefing, dictation: dictation, wallet: walletDesk,
-                                                  boost: boostWatch)
+                                                  boost: boostWatch, shells: shellDesk)
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
             controller.onBoostMark = { [weak self] in self?.showSettings(tab: .general, reveal: .boost) }
             controller.onStatistics = { [weak self] in self?.showStatistics() }
@@ -930,6 +964,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         store.saveLedger()
         phoneAccess.shutdown()
         walletDesk.close()
+        shellDesk.close()
         // Script blocks written for Run and not run yet.
         RunnableCommand.Script.removeAll()
     }

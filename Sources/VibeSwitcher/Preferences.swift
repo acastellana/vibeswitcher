@@ -103,6 +103,10 @@ final class Preferences: ObservableObject {
     /// The `passage` command wallet requests go through; empty: `passage` on the PATH.
     @Published var walletPassagePath: String { didSet { defaults.set(walletPassagePath, forKey: "walletPassagePath") } }
 
+    /// Settings › Agents › Let agents open shells without asking: a shell an agent asks for (`vs-shell run`) starts at
+    /// once instead of waiting on its card for Run. Off until you turn it on.
+    @Published var letAgentsOpenShells: Bool { didSet { defaults.set(letAgentsOpenShells, forKey: "letAgentsOpenShells") } }
+
     /// `defaults`, `presetsFile` and `reduceMotion` are for tests and offscreen renders; the app uses the standard ones.
     init(defaults: UserDefaults = .standard, presetsFile: URL = VibePaths.presetsFile, reduceMotion: Bool = Motion.isReduced) {
         self.defaults = defaults
@@ -145,6 +149,7 @@ final class Preferences: ObservableObject {
         projectsFolder = defaults.string(forKey: "projectsFolder") ?? ProjectCreation.defaultLocation
         walletPeerID = defaults.string(forKey: "walletPeerID") ?? ""
         walletPassagePath = defaults.string(forKey: "walletPassagePath") ?? ""
+        letAgentsOpenShells = defaults.bool(forKey: "letAgentsOpenShells")
         boostMode = BoostMode(rawValue: defaults.string(forKey: "boostMode") ?? "") ?? .off
         boostOnBattery = defaults.bool(forKey: "boostOnBattery")
         boostLimits = defaults.data(forKey: "boostLimits").flatMap { try? JSONDecoder().decode(BoostLimits.self, from: $0) } ?? BoostLimits()

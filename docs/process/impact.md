@@ -127,6 +127,27 @@ cost, the receipts of the 2026-10-31 batch give 8 tasks, 2.9 h and ~$86.
 
 ## Entries
 
+### IM-17: An agent opens a New Shell with the user's one click (an-agent-can-open, planned)
+
+- **Change:** `vs-shell run [--cwd DIR] [--label TEXT] -- COMMAND…`, on every session's PATH, files a request the session
+  host stamps for the asking session; a card in that session's chat shows the folder and the exact command, and Run
+  starts an ordinary New Shell session whose shell is given the command at launch. Settings › Agents › Let agents open
+  shells without asking (off by default) starts them with no click. Planned 2026-11-06.
+- **Hypothesis:** if an agent can put a command on a card, then the user no longer has to open New Shell (⌥⌘N) and paste
+  a command an agent gives them: most shell requests filed in a week are run from their card (more run than declined),
+  because one click replaces opening a shell, finding the folder and pasting.
+- **Metric:** shell requests run vs. declined (and expired) over a week: the app log's `shell: <id> started as`,
+  `shell: <id> declined` and `shell: <id> expired unanswered` lines (`~/.vibeswitcher/debug/app.log`). Guard: no
+  shell started without a Run while the setting is off (every `started as` line follows a Run, none a `starts at once`
+  line with the setting off); no incident about a shell request in [incidents.md](../lead/incidents.md).
+- **Baseline:** 0 run: before the change no agent could open a shell; the user opened New Shell and pasted by hand
+  (2026-11-06, another project's lead asking for it).
+- **Check:** 2026-11-13, window the week after the build is installed.
+- **Status:** measuring
+- **Result:** (pending)
+- **Verdict:** (pending)
+- **Why:** (pending)
+
 ### IM-16: Wallet requests reach a Wallet Manager on the same Mac (wallet-requests-reach-a, planned)
 
 - **Change:** Settings › Wallet offers "Wallet Manager on this Mac": Send on a card writes the request into an

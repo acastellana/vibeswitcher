@@ -97,7 +97,7 @@ struct SettingsView: View {
                     .onChange(of: selection.reveal) { reveal(in: proxy) }
             }
                 .tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
-            AgentsSettings(setup: setup)
+            AgentsSettings(setup: setup, preferences: preferences)
                 .tabItem { Label("Agents", systemImage: "waveform.path.ecg") }.tag(SettingsTab.agents)
             ScrollView { PhoneAccessView(access: phoneAccess).frame(maxWidth: .infinity) }
                 .tabItem { Label("Phone", systemImage: "iphone") }.tag(SettingsTab.phone)
@@ -243,10 +243,23 @@ struct GeneralSettings: View {
 
 /// Hooks per agent, Codex's trust of them, and the permissions the Terminal integration needs.
 struct AgentsSettings: View {
+    /// What the shells setting allows, said plainly (`vs-shell run`, `ShellDesk`).
+    static let openShellsHelp = "An agent can ask for a new shell session that runs a command in a folder (vs-shell run). Off, "
+        + "its card shows the exact command and nothing runs until you press Run. On, any agent in a session you opened can start "
+        + "a terminal session running any command as you, with no click; wallet requests from it still wait for your Send."
+
     @ObservedObject var setup: SetupModel
+    @ObservedObject var preferences: Preferences
 
     var body: some View {
         Form {
+            Section {
+                Toggle("Let agents open shells without asking", isOn: $preferences.letAgentsOpenShells)
+            } header: {
+                Text("Shells")
+            } footer: {
+                SettingsFooter(Self.openShellsHelp)
+            }
             Section {
                 ForEach(Agent.allCases, id: \.self) { agent in
                     LabeledContent {
