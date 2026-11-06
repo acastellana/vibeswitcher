@@ -3152,3 +3152,16 @@
 - 2026-11-06 22:48 Released a-worker-s-brief's worker (idle since its done report on 11beeec0) while its audit runs
 - 2026-11-06 22:48 Automatically (auto_advance): Started the audit of a-worker-s-brief at 11beeec0 (A Codex worker worked on it, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-06 22:53 Audit of a-worker-s-brief: complete, clean, round 1: 1 Pre-existing open
+- 2026-11-06 22:59 Planned wake-the-lead-only: Wake the lead only for what it can act on (review audit)
+- 2026-11-06 22:59 Planned warn-when-the-mac: Warn when the Mac's developer tools change
+- 2026-11-06 22:59 Planned fetch-github-by-itself: Fetch GitHub by itself and tell the lead when the other Mac pushed (review audit)
+- 2026-11-06 23:00 Planned resume-work-cut-off: Resume work cut off by the Mac sleeping
+- 2026-11-06 23:00 Planned start-a-fresh-lead: Start a fresh lead session each day, at a quiet moment (review audit)
+- 2026-11-06 23:11 Started a worker on a-worker-s-brief (auto → Codex: Claude weekly 78%, 46 points ahead of pace; Codex 39%)
+- 2026-11-06 23:11 Automatically (auto_advance): Merge of a-worker-s-brief failed: Tests fail rebased onto main: anUntrackedNestedClaudeMdIsInstructionsNotALeftover(), aCommittedSettingsChangeWithLeftoversIsStillHeldBack(), aVerifierStoppedAtTheFableLimitHoldsBackFableAuditsNotASonnetWorker(), movingAuditsToAnot Sent its worker the output; it's back at work.
+- 2026-11-06 23:11 Started a worker on wake-the-lead-only (auto → Codex: Claude weekly 78%, 46 points ahead of pace; Codex 39%)
+- 2026-11-06 23:11 Automatically (auto_advance): Started a worker on wake-the-lead-only (Wake the lead only for what it can act on); its agent is auto, so it went to Codex: Claude weekly 78%, 46 points ahead of pace; Codex 39%.
+- 2026-11-06 23:11 Started a worker on warn-when-the-mac (auto → Codex: Claude weekly 78%, 46 points ahead of pace; Codex 39%)
+- 2026-11-06 23:11 Automatically (auto_advance): Started a worker on warn-when-the-mac (Warn when the Mac's developer tools change); its agent is auto, so it went to Codex: Claude weekly 78%, 46 points ahead of pace; Codex 39%.
+- 2026-11-06 23:11 Started a worker on fetch-github-by-itself (auto → Codex: Claude weekly 78%, 46 points ahead of pace; Codex 39%)
+- 2026-11-06 23:11 Automatically (auto_advance): Started a worker on fetch-github-by-itself (Fetch GitHub by itself and tell the lead when the other Mac pushed); its agent is auto, so it went to Codex: Claude weekly 78%, 46 points ahead of pace; Codex 39%.
