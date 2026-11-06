@@ -3165,3 +3165,4 @@
 - 2026-11-06 23:11 Automatically (auto_advance): Started a worker on warn-when-the-mac (Warn when the Mac's developer tools change); its agent is auto, so it went to Codex: Claude weekly 78%, 46 points ahead of pace; Codex 39%.
 - 2026-11-06 23:11 Started a worker on fetch-github-by-itself (auto → Codex: Claude weekly 78%, 46 points ahead of pace; Codex 39%)
 - 2026-11-06 23:11 Automatically (auto_advance): Started a worker on fetch-github-by-itself (Fetch GitHub by itself and tell the lead when the other Mac pushed); its agent is auto, so it went to Codex: Claude weekly 78%, 46 points ahead of pace; Codex 39%.
+- 2026-11-06 23:19 Planned a-message-typed-into: A message typed into a working Codex mustn't also wait in its inbox
