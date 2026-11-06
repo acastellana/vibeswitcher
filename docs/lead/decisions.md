@@ -215,3 +215,11 @@ Another project's local-fork rehearsal files its requests on the Mac where the W
 
 The user asked on 2026-11-06 why they had to open New Shell and paste a command another project's lead gave them, "or do it yourself". Agents' own shells have no terminal, so interactive long-running programs (local-fork runs that file wallet requests) need a hosted shell session. The click is the default because the command runs as the user in a session with a real terminal; the no-click option is the user's to turn on.
 
+## 2026-11-06 11:43:13 Fable's weekly limit is reached until Nov 11, 18:00, and audits run on Fable, so the one-click shell feature (an-agent-can-open, built and reported done) can't be audited. Switch audits to Opus until the reset, as you chose on Nov 1 in the same situation? Workers also run Opus 5.5 now, so the verifier would be the same model as the worker, which is weaker than our usual rule of a different model. → Audits on Opus until Nov 11, 18:00
+
+The lead proposed it with a 15 min timer and the user didn't answer in time, so it went ahead (question 6B9DC8CB). Why it was asked: The shell feature is ready for audit and nothing else on the board can move it.
+
+## 2026-11-06 11:43:23 Audits run on Opus (configure verifier_model: opus) from 2026-11-06 11:43 until the Fable limit resets on 2026-11-11 at 18:00; then the lead switches back with configure(verifier_model: ""). Workers also run Opus 5.5 in this window, so verifier and worker are the same model: the lead reads audit verdicts on security-relevant tasks with extra care.
+
+Question 6B9DC8CB went ahead on its timer with the lead's proposal, as on 2026-11-01 in the same situation. The account reached Fable's weekly limit, and an audited task (an-agent-can-open) was waiting.
+
