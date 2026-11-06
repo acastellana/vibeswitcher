@@ -4013,6 +4013,7 @@ public final class LeadToolset: MCPToolset {
     static let overBudgetStatus = "over_budget"
 
     private func report(_ arguments: [String: Any]) throws -> MCPToolResult {
+        let reportedAt = Date().timeIntervalSince1970
         let slug = try taskSlug(arguments)
         let summary = try text(arguments, "summary", missing: "Say what changed and how you checked it, or what blocks you.")
         let kind = (arguments["status"] as? String)?.trimmingCharacters(in: .whitespaces).lowercased()
@@ -4070,6 +4071,17 @@ public final class LeadToolset: MCPToolset {
             if done, standing == nil { board.tasks[index].noteWaits { $0.reportedDone(at: Date().timeIntervalSince1970) } }
             board.tasks[index].auditNeeded = needed
             board.tasks[index].blocker = done ? nil : (summary.isEmpty ? "The worker is blocked." : summary)
+        }
+        // A Codex done report supersedes earlier instructions from its own lead, including stale merge
+        // output queued before the worker was restarted. Claude's hook delivery stays as it is. Messages
+        // from other senders, or sent after this report began, still wait for their delivery.
+        if done, store.load().task(slug)?.runningAgent == .codex, let agent = runtime.currentAgent() {
+            try exclusively("deliver-\(slug)") {
+                for message in SteerInbox.pending(tty: agent.tty) where message.agentPid == agent.pid
+                    && message.from == .lead("lead of \(project)") && message.at < reportedAt {
+                    SteerInbox.withdraw(id: message.id, tty: agent.tty)
+                }
+            }
         }
         let stands = standing.map { verdict in
             "No new commit since its audit at \(verdict.commit.prefix(8)), which "

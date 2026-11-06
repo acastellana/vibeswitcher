@@ -245,6 +245,17 @@ extension LeadDelivery {
                                clear: (() -> Bool)? = nil, enter: (() -> Bool)? = nil, turnStarted: (() -> Bool)? = nil,
                                pause: () -> Void = {}, root: URL = VibePaths.root) throws -> Delivered {
         let post = { try SteerInbox.post(SteerMessage(text: text, from: sender, agentPid: agent.pid), tty: agent.tty, root: root) }
+        // A previous attempt may have queued this message when Codex's box wasn't available. Snapshot
+        // only those copies: another message posted while typing must still wait for its own delivery.
+        let waiting = agent.agent == .codex ? SteerInbox.pending(tty: agent.tty, root: root).filter {
+            $0.agentPid == agent.pid && $0.from == sender && $0.text == text
+        } : []
+        func retireCopies(_ delivered: Delivered) -> Delivered {
+            if delivered == .typed || delivered == .typedWhileWorking {
+                for message in waiting { SteerInbox.withdraw(id: message.id, tty: agent.tty, root: root) }
+            }
+            return delivered
+        }
         // Codex's hooks hand it nothing from the inbox (only Claude's do, see `vibeswitcher-hook`): mid-turn it takes
         // a message typed into its box as steering, as the chat's composer sends it. Typed only into an empty box,
         // never after a ^C (mid-turn that stops its turn); else it waits, typed in once the turn ends (`flush`).
@@ -259,7 +270,7 @@ extension LeadDelivery {
                 guard typeInto(prompt) else { break }
                 // Mid-turn a started turn says nothing: whether it went in is read off its box alone.
                 switch submitted(prompt, screen: screen, enter: enter, turnStarted: nil, pause: pause) {
-                case .typed: return .typedWhileWorking
+                case .typed: return retireCopies(.typedWhileWorking)
                 case let other: return other
                 }
             case .draft(let draft):
@@ -301,7 +312,7 @@ extension LeadDelivery {
         func type() -> Delivered? {
             let prompt = typed(text, from: sender)
             guard typeInto(prompt) else { return nil }
-            return submitted(prompt, screen: screen, enter: enter, turnStarted: turnStarted, pause: pause)
+            return retireCopies(submitted(prompt, screen: screen, enter: enter, turnStarted: turnStarted, pause: pause))
         }
         switch box(in: shown) {
         case .empty:

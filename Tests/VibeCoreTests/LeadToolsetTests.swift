@@ -911,6 +911,40 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(runtime.steered.count == 2)
     }
 
+    @Test(arguments: [true, false])
+    func aDoneReportSupersedesOlderCodexLeadMessagesButKeepsNewAndOtherSenders(codex: Bool) throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = call(lead, "add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
+        let issued = try issued(.worker, task: "one", root: root, runtime)
+        let session = try #require(issued.runtime.currentAgent()?.session)
+        let agent = LeadAgent(pid: 6000, tty: "tty" + UUID().uuidString.prefix(8), session: session, agent: codex ? .codex : .claude)
+        let seat = FakeSeat(runtime, agent: agent)
+        let worker = LeadToolset(root: root, runtime: seat, vault: vault(for: seat))
+        try BoardStore(root: root).update { board in
+            board.tasks[0].worker = agent.session
+            board.tasks[0].agent = codex ? .codex : .claude
+            board.tasks[0].status = .running
+        }
+        let inbox = VibePaths.root
+        let sender = SteerMessage.Sender.lead("lead of \(lead.project)")
+        let old = SteerMessage(text: "The merge failed: earlier output", from: sender, agentPid: agent.pid, at: 1)
+        let later = SteerMessage(text: "A new merge failure", from: sender, agentPid: agent.pid,
+                                 at: Date().timeIntervalSince1970 + 3600)
+        let other = SteerMessage(text: "A user request", from: .system("another sender"), agentPid: agent.pid, at: 1)
+        for message in [old, later, other] { try SteerInbox.post(message, tty: agent.tty, root: inbox) }
+        // Blocked isn't completion: genuinely undelivered messages still wait.
+        #expect(!call(worker, "report", ["status": "blocked", "summary": "waiting"]).isError)
+        #expect(SteerInbox.pending(tty: agent.tty, root: inbox).map(\.id) == [old, later, other].map(\.id))
+        #expect(!call(worker, "report", doneReport("fixed the latest failure")).isError)
+        #expect(SteerInbox.pending(tty: agent.tty, root: inbox).map(\.id) == (codex ? [later, other] : [old, later, other]).map(\.id))
+        var typed: [String] = []
+        _ = LeadDelivery.flush(agent, betweenTurns: true, inputIsEmpty: { true },
+                               typeInto: { typed.append($0); return true }, root: inbox)
+        if codex { #expect(!typed.contains { $0.contains(old.text) }) }
+    }
+
     /// A task "fix" whose worker committed b.txt and reported `report`; the lead's tools and the verifier prompt reader.
     func reportedFix(_ root: String, _ runtime: FakeRuntime, report: String = "added b.txt") throws -> LeadToolset {
         let lead = try lead(root, runtime)
