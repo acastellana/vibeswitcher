@@ -211,6 +211,8 @@ public final class LeadToolset: MCPToolset {
     var toolsPoll: TimeInterval = 0.25
     /// Moves finished work on by itself (see `LeadAdvance`), once `startAdvancing` is called (the lead's server).
     var advancing: LeadAdvance?
+    /// Pinned-remote fetches, started with the lead server's background record lifecycle.
+    var remotePolling: LeadRemotePoller?
     /// The risk check's model pass (see `LeadRisk`): a prompt in, the answer out, or nil (no Claude, an error, out of
     /// time). The lead's tool server sets headless Claude (`ClaudeHeadless.risk`); nil (tests that don't fake it):
     /// the deterministic triggers only.
@@ -464,9 +466,14 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// The lead's server commits the decision and progress logs every few minutes while it holds the role
-    /// (`LeadRecords`), besides after each merge.
+    /// (`LeadRecords`), besides after each merge, and polls its already-pinned remote (`LeadRemotePoller`).
     public func keepRecords(run: @escaping (@escaping () -> Void) -> Bool = { $0(); return true }) {
         guard role == .lead else { return }
+        if remotePolling == nil {
+            let poller = LeadRemotePoller(lead: self)
+            remotePolling = poller
+            poller.start(run: run)
+        }
         records.start(run: run) { [weak self] in
             guard let self, (try? self.authenticate()) != nil else { return nil }
             return self.base
@@ -3988,7 +3995,7 @@ public final class LeadToolset: MCPToolset {
     // MARK: Worker and verifier
 
     /// False when no lead is running to tell (it ended; a new one reads the board when it starts).
-    private func tellLead(_ text: String, about: String) throws -> Bool {
+    func tellLead(_ text: String, about: String) throws -> Bool {
         // On the board first: the lead's status lists it even if the message never reaches the lead.
         try store.update { board in
             board.reports = ((board.reports ?? []) + [LeadReport(about: about, text: text)]).suffix(LeadBoard.keptReports)

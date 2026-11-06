@@ -1060,7 +1060,7 @@ extension LeadVault {
         /// a lead's, the app's (passing them on) or a lead's own, under its own project's name only (`leadNames`), so a
         /// lead's Bash can't sign a line as another project's lead; VibeSwitcher's, the app's, but for the reports a
         /// worker's or verifier's tool server sends its lead (`worker <task>`, `verifier <task>`), which the
-        /// session holding that role seals about itself, and auto_advance's (`LeadAdvance.sender`), which the lead's
+        /// session holding that role seals about itself, and the automatic loops' (`LeadAdvance.sender`, `LeadRemotePoller.sender`), which the lead's
         /// own tool server runs: a lead's session seals those only for an agent in that same session (`agentSession`),
         /// itself. So a worker's Bash can't seal a line as its lead's, the witness's, auto_advance's or another
         /// worker's (it can only say, as itself, what its report tool says), and a lead can't pass auto_advance's
@@ -1096,10 +1096,10 @@ extension LeadVault {
                     return "A lead seals its line (lead of <project>) only for a session of its own team: another project's lead takes tell_lead."
                 }
                 return nil
-            case .system(let about) where about == LeadAdvance.sender:
+            case .system(let about) where about == LeadAdvance.sender || about == LeadRemotePoller.sender:
                 guard case .session(let session) = caller, agentSession == session,
                       state.teams.values.contains(where: { $0.members.contains { $0.role == .lead && $0.session == session } })
-                else { return "Only VibeSwitcher, or a project lead's own tool server about its loop's work and for that lead, seals a message as auto_advance's." }
+                else { return "Only VibeSwitcher, or a project lead's own tool server about its loop's work and for that lead, seals a message as its automatic loop's." }
                 return nil
             case .system(let about):
                 let words = about.split(separator: " ", maxSplits: 1).map(String.init)

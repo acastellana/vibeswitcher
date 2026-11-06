@@ -73,6 +73,142 @@ struct LeadRemoteTests: LeadTeamFixture {
         Git.run(["merge-base", "--is-ancestor", commit, other], in: root).ok
     }
 
+    // MARK: Automatic fetching (clock-driven, scratch bare remotes only)
+
+    @Test func automaticFetchStartsWithTheLeadServerBackgroundLifecycle() throws {
+        let scene = try makeScene()
+        let runtime = FakeRuntime()
+        let lead = try lead(scene.root, runtime)
+        lead.power = { nil }
+        #expect(!lead.call("fetch_remote", [:]).isError)
+        let tip = try pushed(scene, "b.txt", "bee\n", message: "Other Mac")
+        let finished = DispatchSemaphore(value: 0)
+        lead.keepRecords { work in
+            work()
+            finished.signal()
+            return true
+        }
+        #expect(finished.wait(timeout: .now() + 60) == .success)
+        #expect(lead.store.load().reports?.last?.text.contains(tip) == true)
+    }
+
+    @Test func automaticFetchReportsCanBeSealedOnlyByTheLeadForItself() throws {
+        let scene = try makeScene()
+        let runtime = FakeRuntime()
+        let lead = try lead(scene.root, runtime)
+        let session = try #require(runtime.me.session)
+        let worker = try lead.vault.issue(role: .worker, root: scene.root, task: "t")
+        try lead.vault.bind(worker, root: scene.root, session: "worker")
+        let agents = [runtime.me.pid: session, Int32(5999): "worker"]
+        let message = SteerMessage(text: "Incoming remote", from: .system(LeadRemotePoller.sender), agentPid: runtime.me.pid)
+        let own = book.vault(folder: vault.folder, as: { .session(session) }, agentSession: { agents[$0] })
+        _ = try own.seal(message)
+        let other = book.vault(folder: vault.folder, as: { .session("worker") }, agentSession: { agents[$0] })
+        #expect(throws: (any Error).self) { try other.seal(message) }
+        let toWorker = SteerMessage(text: message.text, from: message.from, agentPid: 5999)
+        #expect(throws: (any Error).self) { try own.seal(toWorker) }
+    }
+
+    @Test(arguments: ["fast-forward", "clean", "conflict"])
+    func automaticFetchReportsNewTipsOnceWithMergeOutlook(_ mode: String) throws {
+        let scene = try makeScene()
+        let runtime = FakeRuntime()
+        let lead = try lead(scene.root, runtime)
+        lead.power = { nil }
+        #expect(!lead.call("fetch_remote", [:]).isError) // The lead alone pins the URL.
+        let start = Date(timeIntervalSince1970: 10_000)
+        let poller = LeadRemotePoller(lead: lead)
+        poller.tick(now: start)
+        #expect(runtime.steered.isEmpty) // Nothing new.
+        _ = try pushed(scene, "b.txt", "bee\n", message: "Other Mac one")
+        let tip = try pushed(scene, "a.txt", "theirs\n", message: "Other Mac two")
+        if mode != "fast-forward" {
+            try commit(mode == "conflict" ? "a.txt" : "local.txt", "ours\n", in: scene.root, message: "Local")
+        }
+        let before = head(scene.root)
+        let due = start.addingTimeInterval(LeadRemotePoller.interval)
+        poller.tick(now: due.addingTimeInterval(-1))
+        #expect(runtime.steered.isEmpty)
+        poller.tick(now: due)
+        let text = try #require(runtime.steered.first?.text)
+        #expect(runtime.steered.count == 1)
+        #expect(text.contains("2 commits from the other Mac") && text.contains(tip))
+        let expected = mode == "fast-forward" ? "fast-forward main" : mode == "clean" ? "it merges cleanly" : "conflicts in a.txt"
+        #expect(text.contains(expected), "\(text)")
+        #expect(head(scene.root) == before)
+        #expect(lead.vault.head(root: scene.root, branch: "refs/remotes/origin/main") == tip)
+        // Reconstruct the poller to prove the persisted tip survives server restarts.
+        LeadRemotePoller(lead: lead).tick(now: due.addingTimeInterval(LeadRemotePoller.interval))
+        #expect(runtime.steered.count == 1)
+        let progress = read(BoardStore(root: scene.root).recordPath("progress.md"))
+        #expect(progress.components(separatedBy: "Automatically fetched origin/main at \(tip.prefix(8))").count == 2)
+        let next = try pushed(scene, "next.txt", "next\n", message: "Other Mac three")
+        poller.tick(now: due.addingTimeInterval(2 * LeadRemotePoller.interval))
+        #expect(runtime.steered.count == 2 && runtime.steered.last?.text.contains(next) == true)
+    }
+
+    @Test func automaticFetchSkipsUnpinnedChangedURLBatteryAndLoad() throws {
+        let scene = try makeScene()
+        let runtime = FakeRuntime()
+        let lead = try lead(scene.root, runtime)
+        lead.power = { nil }
+        let poller = LeadRemotePoller(lead: lead)
+        let tip = try pushed(scene, "b.txt", "bee\n", message: "Remote one")
+        let before = Git.run(["rev-parse", "refs/remotes/origin/main"], in: scene.root).output
+        let now = Date()
+        poller.tick(now: now)
+        #expect(Git.run(["rev-parse", "refs/remotes/origin/main"], in: scene.root).output == before)
+        #expect(try lead.vault.guardedSettings(root: scene.root)?[LeadRemote.urlKey("origin")] == nil)
+        #expect(!lead.call("fetch_remote", [:]).isError)
+        let next = try pushed(scene, "c.txt", "sea\n", message: "Remote two")
+        var battery = PowerState(onBattery: true, percent: 10)
+        battery.heldUnder = 50
+        lead.power = { battery }
+        poller.tick(now: now)
+        lead.power = { nil }
+        runtime.load = 1_000_000
+        poller.tick(now: now)
+        runtime.load = 0
+        git(["remote", "set-url", "origin", scene.other], in: scene.root)
+        poller.tick(now: now)
+        #expect(runtime.steered.isEmpty)
+        #expect(Git.run(["rev-parse", "refs/remotes/origin/main"], in: scene.root).output == tip)
+        git(["remote", "set-url", "origin", scene.origin], in: scene.root)
+        poller.tick(now: now)
+        #expect(runtime.steered.count == 1 && runtime.steered[0].text.contains(next))
+    }
+
+    @Test func automaticFetchBacksOffFailuresUpToTwelveHoursAndRecovers() throws {
+        let scene = try makeScene()
+        let runtime = FakeRuntime()
+        let lead = try lead(scene.root, runtime)
+        lead.power = { nil }
+        #expect(!lead.call("fetch_remote", [:]).isError)
+        let tip = try pushed(scene, "b.txt", "bee\n", message: "Remote one")
+        let offline = scene.origin + ".offline"
+        try FileManager.default.moveItem(atPath: scene.origin, toPath: offline)
+        let start = Date(timeIntervalSince1970: 10_000)
+        var now = start
+        let poller = LeadRemotePoller(lead: lead)
+        // Read the private scheduler record, and drive every retry with an injected clock.
+        for hours in [4, 8, 12, 12] {
+            poller.tick(now: now)
+            let folder = lead.vault.scratch(root: scene.root, "remote-poll")
+            let file = try #require(FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil).first { $0.pathExtension == "json" })
+            let state = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+            #expect(state["interval"] as? Double == Double(hours * 3600))
+            now = now.addingTimeInterval(Double(hours * 3600))
+        }
+        try FileManager.default.moveItem(atPath: offline, toPath: scene.origin)
+        LeadRemotePoller(lead: lead).tick(now: now.addingTimeInterval(-1))
+        #expect(runtime.steered.isEmpty)
+        poller.tick(now: now)
+        #expect(runtime.steered.count == 1 && runtime.steered[0].text.contains(tip))
+        let next = try pushed(scene, "c.txt", "sea\n", message: "Remote two")
+        poller.tick(now: now.addingTimeInterval(LeadRemotePoller.interval))
+        #expect(runtime.steered.count == 2 && runtime.steered[1].text.contains(next))
+    }
+
     // MARK: fetch_remote
 
     @Test func fetchReportsAheadBehindAndTheIncomingSubjectsAndMovesOnlyTheTrackingRef() throws {
