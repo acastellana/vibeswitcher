@@ -49,6 +49,7 @@ struct TeamActivityTests {
         let workerID = UUID(uuidString: team.worker)!
         let index = hosted.firstIndex { $0.id == workerID }!
         hosted[index].label = "Worker: Fix"
+        team.sessions[team.worker]?.status = .working
         look()
         #expect(begins == 1)
         time += 600

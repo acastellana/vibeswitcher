@@ -26,10 +26,16 @@ final class TeamActivity {
 
     static func working(hosted: [HostSession], sessions: [Session], heavy: Bool) -> Bool {
         if heavy { return true }
-        let census = HostCensus.count(hosted.map { ($0.label, $0.cwd, $0.isLive) })
-        if census.contains(where: { $0.role != .lead && $0.sessions > 0 }) { return true }
-        let leads = Set(hosted.filter { $0.isLive && LeadTeams.role(label: $0.label) == .lead }.map(\.id))
-        return sessions.contains { $0.hostID.map(leads.contains) == true && $0.status == .working }
+        let observed = Dictionary(sessions.compactMap { session in session.hostID.map { ($0, session.status) } },
+                                  uniquingKeysWith: { first, _ in first })
+        return hosted.contains { host in
+            guard host.isLive, let role = LeadTeams.role(label: host.label) else { return false }
+            guard let status = observed[host.id] else {
+                // A new team session may precede its first scan; a lead without a turn stays idle.
+                return role != .lead
+            }
+            return status == .working || (role != .lead && status == .background)
+        }
     }
 
     private func release() {
