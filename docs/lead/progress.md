@@ -3075,3 +3075,9 @@
 - 2026-11-06 01:49 Automatically (auto_advance): Merged wallet-requests-reach-a (Wallet requests reach a Wallet Manager on this Mac through a local folder pair) into main at 98ecc8fb, on its passing audit and the full test run.
 - 2026-11-06 01:49 Automatically (auto_advance): Cleaned up wallet-requests-reach-a (freed 1.4 GB of build output and temporary folders). It stays done.
 - 2026-11-06 01:50 Update: Merged: wallet requests can reach a Wallet Manager on this Mac (install, then choose it in Settings › Wallet) — **What changed.** Settings › Wallet has a new choice, "Wallet Manager on this Mac". With it, Send to Wallet Manager on a card writes the request into an owner-only folder the Wallet Manager reads, and…
+- 2026-11-06 10:07 Planned an-agent-can-open: An agent can open a New Shell running a command, with the user's one click (review audit)
+- 2026-11-06 10:07 Started a worker on an-agent-can-open
+- 2026-11-06 10:07 Automatically (auto_advance): Started a worker on an-agent-can-open (An agent can open a New Shell running a command, with the user's one click).
+- 2026-11-06 10:10 Planned wallet-cards-show-for: Wallet cards show for a shell session (it has no Chat view, so they were invisible)
+- 2026-11-06 10:10 Started a worker on wallet-cards-show-for
+- 2026-11-06 10:10 Automatically (auto_advance): Started a worker on wallet-cards-show-for (Wallet cards show for a shell session (it has no Chat view, so they were invisible)).

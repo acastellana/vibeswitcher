@@ -211,3 +211,7 @@ Another project runs a local-fork rehearsal that files real-looking requests; th
 
 Another project's local-fork rehearsal files its requests on the Mac where the Wallet Manager runs, and VibeSwitcher had no way to deliver them there: Passage has no peer that is the Mac itself. The user chose building the path over moving the sessions to the other Mac or rehearsing with made-up data. A folder pair adds no listening endpoint, and gives a same-user process nothing it couldn't already do with the Passage command line or Passage's inbox folder.
 
+## 2026-11-06 10:07:50 Agents can ask for a New Shell session running a command (`vs-shell run`, task an-agent-can-open, audited). It starts on the user's one click on a card that shows the exact command and folder; a Settings option, off by default, lets it start without the click. The command is passed to the shell at launch, never typed as keystrokes.
+
+The user asked on 2026-11-06 why they had to open New Shell and paste a command another project's lead gave them, "or do it yourself". Agents' own shells have no terminal, so interactive long-running programs (local-fork runs that file wallet requests) need a hosted shell session. The click is the default because the command runs as the user in a session with a real terminal; the no-click option is the user's to turn on.
+
