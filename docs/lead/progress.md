@@ -3117,3 +3117,6 @@
 - 2026-11-06 20:52 Automatically (auto_advance): Started the audit of each-wallet-card-leads at 1c59acff (Its review is audit).
 - 2026-11-06 20:54 Audit of each-wallet-card-leads: complete, clean
 - 2026-11-06 21:05 Merged each-wallet-card-leads: Each wallet card leads with one plain line saying what it does
+- 2026-11-06 21:05 Automatically (auto_advance): Merged each-wallet-card-leads (Each wallet card leads with one plain line saying what it does) into main at b92264ca, on its passing audit and the full test run.
+- 2026-11-06 21:05 Automatically (auto_advance): Cleaned up each-wallet-card-leads; ended pid 92687 (Worker: Each wallet card leads with one plain line saying what it does) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-06 21:05 Update: Merged: each wallet card opens with one line saying what it does (install to use) — **What changed.** Every wallet card and the browser wallet's page open with one line, worked out by VibeSwitcher from the transaction's own fields and calldata (never from the agent's reason): "Send 1…
