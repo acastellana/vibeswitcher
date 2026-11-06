@@ -3166,3 +3166,7 @@
 - 2026-11-06 23:11 Started a worker on fetch-github-by-itself (auto → Codex: Claude weekly 78%, 46 points ahead of pace; Codex 39%)
 - 2026-11-06 23:11 Automatically (auto_advance): Started a worker on fetch-github-by-itself (Fetch GitHub by itself and tell the lead when the other Mac pushed); its agent is auto, so it went to Codex: Claude weekly 78%, 46 points ahead of pace; Codex 39%.
 - 2026-11-06 23:19 Planned a-message-typed-into: A message typed into a working Codex mustn't also wait in its inbox
+- 2026-11-06 23:36 Audit of tests-long-synchronous: incomplete, clean, round 1: 1 Important open, 2 Nit open, 2 Pre-existing open
+- 2026-11-06 23:36 Automatically (auto_advance): Sent tests-long-synchronous's worker the open Important findings tests-long-synchronous:F1 from its audit at ce37e9d7.
+- 2026-11-06 23:37 Dismissed tests-long-synchronous:F5: A time-bomb fixture (a fixed resets_at in the past), already fixed on a-worker-s-brief (b90ef4d); it isn't this branch's.
+- 2026-11-06 23:38 Planned test-under-load-s: test-under-load's default mode builds inside a scratch home (review audit)
