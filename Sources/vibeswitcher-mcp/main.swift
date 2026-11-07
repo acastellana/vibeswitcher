@@ -146,6 +146,9 @@ MCPLog.start(role: startedAs)
 MCPLog.note("started: pid \(getpid()), parent \(getppid()), as \(startedAs), \(MCPServer.describe(BinaryWatch.identity(of: Bundle.main.executablePath ?? CommandLine.arguments[0])))"
             + (handover.map { ", switched in place from the \(MCPServer.describe($0.binary)) before it" } ?? ", fresh") + "; \(MCPLog.descriptors())")
 atexit { MCPLog.note("exiting: \(MCPLog.descriptors())") }
+// This process's build, read now (`ServerBuild.running` is read once): an install replacing the bundle later must not
+// pass for the code this process runs, which the merges' receipts name and status compares with the base.
+MCPLog.note("source: build \(ServerBuild.running?.label ?? "none (not in an app bundle)")")
 // A write to a pipe or socket whose reader has gone fails (EPIPE) instead of ending the process unseen: noted, and
 // served on. Caught, not ignored: what a call starts gets SIGPIPE at its default.
 signal(SIGPIPE) { _ in }
