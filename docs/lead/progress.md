@@ -3281,3 +3281,6 @@
 - 2026-11-07 12:00 Automatically (auto_advance): Merged test-under-load-s (test-under-load's default mode builds inside a scratch home) into main at 090522d5, on its passing audit and the full test run.
 - 2026-11-07 12:00 Automatically (auto_advance): Cleaned up test-under-load-s (freed 1.3 GB of build output and temporary folders). It stays done.
 - 2026-11-07 12:15 Released resume-work-cut-off's worker (idle since its done report on d0b3ab37) while its audit runs
+- 2026-11-07 12:20 Audit of resume-work-cut-off: incomplete, clean, round 1: 3 Important open, 1 Nit open
+- 2026-11-07 12:20 Started a worker on resume-work-cut-off (auto → Codex: Claude weekly 82%, 43 points ahead of pace; Codex 57%)
+- 2026-11-07 12:20 Automatically (auto_advance): Sent resume-work-cut-off's worker the open Important findings resume-work-cut-off:F1, resume-work-cut-off:F2, resume-work-cut-off:F3 from its audit at d0b3ab37 (in a new worker: its last one was released during the audit).
