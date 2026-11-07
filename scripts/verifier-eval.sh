@@ -187,6 +187,7 @@ read -r _ commit places description <<< "$line"
 patch_file=$data/$name.patch.gz
 
 source scripts/lib/scratch.sh
+source scripts/lib/swift-jobs.sh
 scratch_tmpdir vs-verifier-eval
 
 # The case's base, and its patch when its commit won't stay.
@@ -201,8 +202,8 @@ else
     base=$(git rev-parse "$commit^")
 fi
 echo "building vibeswitcher-mcp…"
-swift build --product vibeswitcher-mcp > /dev/null 2>&1 || { echo "the build failed: run swift build --product vibeswitcher-mcp"; exit 2; }
-mcp="$(swift build --show-bin-path)/vibeswitcher-mcp"
+swift build $(swiftpm_options) --product vibeswitcher-mcp > /dev/null 2>&1 || { echo "the build failed: run swift build --product vibeswitcher-mcp"; exit 2; }
+mcp="$(swift build $(swiftpm_options) --show-bin-path | tail -n 1)/vibeswitcher-mcp"
 
 out=${case_out:-.build/verifier-eval/$name-$checklist-$(date +%Y%m%d-%H%M%S)}
 mkdir -p "$out"

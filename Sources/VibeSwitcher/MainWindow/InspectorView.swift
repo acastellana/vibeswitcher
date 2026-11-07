@@ -58,7 +58,8 @@ struct InspectorView: View {
                         if let id = UUID(uuidString: session) { model.select(hostID: id) }
                     }, answer: { question, text in leads.answer(question, root: lead.root, with: text) }, notices: leads.answerNotices,
                                  summaries: leads.summaries, keepAwake: leads.keepAwake, hosted: cache.hosted(host.sessions),
-                                 recordsDir: leads.recordsDirs[lead.root] ?? LeadWorkflow.defaultRecordsDir)
+                                 recordsDir: leads.recordsDirs[lead.root] ?? LeadWorkflow.defaultRecordsDir,
+                                 mail: leads.mail[lead.root] ?? LeadMailFeed([], project: ""))
                         .equatable()
                 } else if tab == "activity" {
                     ActivityView(session: row.session).id(row.id)

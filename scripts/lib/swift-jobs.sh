@@ -3,8 +3,9 @@
 # 12-core Mac with 3 slots; see Resources/bin/vs-heavy). Left to itself SwiftPM compiles on every core: on 2026-11-01 a
 # merge's build ran 9 swift-frontends at ~900 % CPU inside one slot, beside two other slots' jobs, at load 62–84.
 #
-# heavy_swift VERB [ARGS...]: `swift VERB -j 2 -Xswiftc -jD ARGS...` with D = VS_HEAVY_CORES ÷ 2 rounded up, when
-# VS_HEAVY_CORES is a whole number above 0; else `swift VERB ARGS...` as before (SwiftPM's default, every core). SwiftPM's
+# heavy_swift VERB [ARGS...]: `swift VERB --build-system native -j 2 -Xswiftc -jD ARGS...` (`swiftpm_options`) with
+# D = VS_HEAVY_CORES ÷ 2 rounded up, when VS_HEAVY_CORES is a whole number above 0; else `swift VERB --build-system
+# native ARGS...` as before (SwiftPM's default, every core). SwiftPM's
 # -j N alone isn't N cores: it builds N modules at once and gives each module's swiftc -jN too, N frontends each, and
 # swift test compiles the test targets side by side: with -j 4, 12 swift-frontends at ~1100 % CPU (measured 2026-11-01,
 # 12 cores). Two modules at once, each with D frontends (the -Xswiftc -j comes after SwiftPM's and wins), keeps it near
@@ -23,9 +24,9 @@ heavy_swift() {
     shift
     if [[ ${VS_HEAVY_CORES:-} =~ ^[0-9]+$ ]] && (( 10#$VS_HEAVY_CORES >= 1 )); then
         cores=$(( 10#$VS_HEAVY_CORES ))
-        swift "$verb" $(swiftpm_sandbox) -j 2 -Xswiftc "-j$(( (cores + 1) / 2 ))" "$@"
+        swift "$verb" $(swiftpm_options) -j 2 -Xswiftc "-j$(( (cores + 1) / 2 ))" "$@"
     else
-        swift "$verb" $(swiftpm_sandbox) "$@"
+        swift "$verb" $(swiftpm_options) "$@"
     fi
 }
 # "--disable-sandbox" inside Codex's sandbox (CODEX_SANDBOX set), else nothing: for a SwiftPM command run outside
@@ -33,6 +34,15 @@ heavy_swift() {
 swiftpm_sandbox() {
     [[ -n ${CODEX_SANDBOX:-} ]] && echo --disable-sandbox
     return 0
+}
+# Every SwiftPM command the scripts run: the native build system, then `swiftpm_sandbox`'s, unquoted. Pinned since the
+# Command Line Tools of 2026-11-05 (Swift 6.4.2) made swiftbuild the default: it compiles SwiftTerm's .metal file, which
+# needs Xcode's Metal Toolchain component (a download), and puts its products in .build/out, not .build/<triple>.
+# The native one warns it's deprecated, on stderr, which module-cache.sh's swift puts in its output: a
+# --show-bin-path's caller takes the last line.
+swiftpm_options() {
+    echo --build-system native
+    swiftpm_sandbox
 }
 # Inside Codex's sandbox there's no network either, and a new worktree's first build clones the package's dependencies
 # (SwiftTerm, swift-argument-parser) from GitHub: "Could not resolve host: github.com". There, a checkout whose .build
@@ -51,4 +61,4 @@ swiftpm_offline_dependencies() {
     mkdir -p .build && cp -cR "$main/repositories" "$main/checkouts" "$main/workspace-state.json" .build/ \
         && echo "SwiftPM dependencies: the main checkout's, cloned into .build (Codex's sandbox has no network to fetch them)"
 }
-export -f heavy_swift swiftpm_sandbox
+export -f heavy_swift swiftpm_sandbox swiftpm_options

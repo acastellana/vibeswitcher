@@ -17,6 +17,7 @@ struct PrivateWriteLintTests {
         "Sources/VibeCore/Steer.swift": (1, "the steer folder, 0700 attributes"),
         "Sources/VibeCore/TeamSummaries.swift": (1, "its folder, 0700 attributes"),
         "Sources/VibeCore/TranscriptReader.swift": (2, "converted transcripts in a 0700 folder"),
+        "Sources/VibeCore/LeadRemote.swift": (3, "merge_remote's scratch folder in the vault (0700 attributes) and the lead's records merged in its scratch worktree, a git checkout"),
         "Sources/VibeCore/Worktrees.swift": (9, "merge and revert scratch and check logs in the vault's 0700 folders; worktrees and hash copies are git checkouts"),
         "Sources/VibeHost/VaultStorage.swift": (1, "the host's vault: its own 0600 rules"),
         "Sources/VibeHost/HostLog.swift": (1, "the host's log: its own 0600 rules"),
@@ -44,7 +45,7 @@ struct PrivateWriteLintTests {
         "Sources/VibeSwitcher/MainWindow/Lead/BoardBench.swift": (2, "a bench's scratch home"),
         "Sources/VibeSwitcher/MainWindow/Lead/TeamChurnBench.swift": (7, "a bench's scratch home"),
         "Sources/VibeSwitcher/PowerBench.swift": (4, "a bench's scratch home"),
-        "Sources/VibeSwitcher/Sandbox.swift": (13, "the sandbox's state folder and scratch home (scripts/sandbox-app.sh), and its shots in the worktree's .build (wallet-page's too); the vault driver's fake passage, its peers and the fake vault's inbox, in the state folder"),
+        "Sources/VibeSwitcher/Sandbox.swift": (16, "the sandbox's state folder and scratch home (scripts/sandbox-app.sh), and its shots in the worktree's .build (wallet-page's too); the vault driver's fake passage, its peers and the fake vault's inbox, in the state folder; `push`'s scratch bare remote's folder (state) and the fake lead's scratch repository's files (scratch home), a git checkout"),
     ]
 
     static let raw = try! Regex(#"\.write\(to(File)?:|createFile\(|createDirectory\("#)

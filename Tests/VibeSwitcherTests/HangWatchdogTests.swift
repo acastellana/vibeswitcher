@@ -44,6 +44,10 @@ struct HangWatchdogTests {
         // The 1-minute load when it got stuck, in the header and in words.
         #expect(lines[0].contains(" load=") && lines[0].contains(" cpus=\(ProcessInfo.processInfo.activeProcessorCount)"), "\(lines[0])")
         #expect(lines.contains { $0.hasPrefix("Main thread stuck since ") && $0.contains("; 1-minute load ") }, "\(log)")
+        // The main thread's priority and the task's role while it was late: demoted (App Nap, a background role) or not.
+        let priority = try #require(lines.first { $0.hasPrefix("Main thread's priority while stuck: ") }, "\(log)")
+        let read = try #require(priority.firstMatch(of: #/stuck: (\d+)(?:–(\d+))? \(base [\d/]+\) over (\d+) reads; task role \d/#), "\(priority)")
+        #expect(Int(read.1)! > 0 && Int(read.3)! > 1, "\(priority)")
         let caught = try #require(lines.first { $0.hasPrefix(AppHealth.caughtTitle) }, "\(log)")
         // Caught from about 0.5 s into it (well before the 2 s it takes to be a stall), on to its end.
         let range = try #require(caught.firstMatch(of: #/from ([\d.]+) s to ([\d.]+) s/#))

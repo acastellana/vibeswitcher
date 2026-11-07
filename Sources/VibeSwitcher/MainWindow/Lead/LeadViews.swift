@@ -753,6 +753,8 @@ struct LeadTeamView: View {
     /// Where the lead's records are kept (`BoardStore.recordsDir`, read with the board, never as it draws; nil: in
     /// .vibeswitcher).
     var recordsDir: String? = LeadWorkflow.defaultRecordsDir
+    /// The messages between this project's lead and other projects' leads (`LeadMailFeed`), newest first.
+    var mail = LeadMailFeed([], project: "")
     /// Changes whenever a line `summary` or `decisionSummary` gives may have (`TeamSummaryModel.version`): the lines are
     /// looked up again only then, or when the rows or decisions do (`Lines`). nil: on every draw (pictures).
     var linesVersion: Int?
@@ -813,7 +815,7 @@ struct LeadTeamView: View {
                 glancing(rows).equatable()
                 TeamRecords(root: root, board: board, recordsDir: recordsDir, clock: clock,
                             minute: Int((clock ?? Date()).timeIntervalSince1970 / 60), showEarlierResults: showEarlierResults,
-                            showEarlierQuestions: showEarlierQuestions).equatable()
+                            showEarlierQuestions: showEarlierQuestions, mail: mail).equatable()
             }
             .padding(14)
             .coordinateSpace(name: TeamExposure.space)
@@ -873,26 +875,41 @@ struct TeamGlance: View, Equatable {
     }
 
     var body: some View {
-        // The decisions still to fade: from the first one's fade to the last one's end (DecisionFeed's times).
-        let now = (clock ?? Date()).timeIntervalSince1970
-        let fades = decisions.map { $0.at + DecisionFeed.shown }.filter { $0 + DecisionFeed.fade > now }
-        let fadeStart = fades.min().map { Date(timeIntervalSince1970: $0) }
-        let fadeEnd = fades.max().map { Date(timeIntervalSince1970: $0 + DecisionFeed.fade) }
-        // Only what tells time is drawn again as the clock ticks: every 10 s, every second while a decision fades (never
-        // with Reduce Motion: it folds instead).
-        TimelineView(.fading(from: fadeStart, until: fadeEnd, every: 10, reduceMotion: reduceMotion)) { context in
-            content(now: clock ?? context.date)
+        // Only what tells time is drawn again as the clock ticks: every 10 s (the questions' countdowns, the tasks'
+        // times); the decisions alone every second while one fades (`decisionFeed`).
+        TimelineView(.fading(from: nil, until: nil, every: 10, reduceMotion: reduceMotion)) { context in
+            content(now: clock ?? context.date, live: clock == nil)
         }
     }
 
-    @ViewBuilder func content(now: Date) -> some View {
+    /// The decision feed on a clock of its own: every 10 s, and every second while a decision fades (never with Reduce
+    /// Motion: it folds instead). Ticking the whole glance each second drew the questions and every task row again
+    /// with the feed, 157–250 ms of the main thread a second over a minute's fade (the team-churn bench's ticks phase).
+    /// Drawn as of `now` alone unless `live` (pictures, and a glance given its clock).
+    @ViewBuilder private func decisionFeed(now: Date, live: Bool) -> some View {
+        if !live {
+            DecisionFeedView(decisions: decisions, now: now, summary: { decisionLines[$0.id] }, openDecisions: openDecisions, showEarlier: showEarlier)
+        } else {
+            // The decisions still to fade: from the first one's fade to the last one's end (DecisionFeed's times).
+            let at = now.timeIntervalSince1970
+            let fades = decisions.map { $0.at + DecisionFeed.shown }.filter { $0 + DecisionFeed.fade > at }
+            let fadeStart = fades.min().map { Date(timeIntervalSince1970: $0) }
+            let fadeEnd = fades.max().map { Date(timeIntervalSince1970: $0 + DecisionFeed.fade) }
+            TimelineView(.fading(from: fadeStart, until: fadeEnd, every: 10, reduceMotion: reduceMotion)) { context in
+                DecisionFeedView(decisions: decisions, now: context.date, summary: { decisionLines[$0.id] }, openDecisions: openDecisions,
+                                 showEarlier: showEarlier)
+            }
+        }
+    }
+
+    @ViewBuilder func content(now: Date, live: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             let stack = board.questionStack(now: now.timeIntervalSince1970)
             if !stack.isEmpty {
                 // The withdrawn ones are in the history below.
                 LeadQuestionStack(questions: stack, notices: notices, answer: answer, showsWithdrawn: false)
             }
-            DecisionFeedView(decisions: decisions, now: now, summary: { decisionLines[$0.id] }, openDecisions: openDecisions, showEarlier: showEarlier)
+            decisionFeed(now: now, live: live)
                 .padding(.horizontal, -8)
             teamSection("Tasks") {
                 if board.tasks.isEmpty {
@@ -917,10 +934,12 @@ struct TeamRecords: View, Equatable {
     let minute: Int
     let showEarlierResults: Bool
     let showEarlierQuestions: Bool
+    /// The messages between leads (shown when there are any).
+    var mail = LeadMailFeed([], project: "")
 
     static func == (a: TeamRecords, b: TeamRecords) -> Bool {
         a.root == b.root && a.board.isSame(as: b.board) && a.recordsDir == b.recordsDir && a.clock == b.clock && a.minute == b.minute
-            && a.showEarlierResults == b.showEarlierResults && a.showEarlierQuestions == b.showEarlierQuestions
+            && a.showEarlierResults == b.showEarlierResults && a.showEarlierQuestions == b.showEarlierQuestions && a.mail == b.mail
     }
 
     var body: some View {
@@ -940,6 +959,11 @@ struct TeamRecords: View, Equatable {
             if !board.updates.isEmpty {
                 teamSection("Results") {
                     ResultsList(updates: board.updates, showEarlier: showEarlierResults)
+                }
+            }
+            if !mail.items.isEmpty {
+                teamSection("Between leads") {
+                    LeadMailList(feed: mail)
                 }
             }
             teamSection("Files") {
@@ -1101,5 +1125,92 @@ struct BaseMoveCard: View {
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.orange.opacity(0.08)))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.orange.opacity(0.35)))
+    }
+}
+
+/// A push the lead asks for (push_remote, see `PushRequests`): the commits, where they go, and Push or Decline. Only
+/// this click pushes, and only the commit shown.
+struct PushRequestPrompt: View {
+    @ObservedObject var pushes: PushRequests
+    let root: String
+
+    var body: some View {
+        if let request = pushes.open[root] {
+            PushRequestCard(request: request, pushing: pushes.settling.contains(root),
+                            push: { pushes.settle(root, request, push: true) }, decline: { pushes.settle(root, request, push: false) })
+                .padding(.horizontal, 12).padding(.vertical, 8)
+        } else if let notice = pushes.notices[root] {
+            PushNoticeCard(notice: notice, dismiss: { pushes.dismiss(root) })
+                .padding(.horizontal, 12).padding(.vertical, 8)
+        }
+    }
+}
+
+struct PushRequestCard: View {
+    let request: LeadPush.Request
+    var pushing = false
+    let push: () -> Void
+    let decline: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.circle.fill").foregroundStyle(.blue).accessibilityHidden(true)
+                Text("The lead asks to push \(request.branch) to \(request.remote)").font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text("\(request.short) · \(LeadToolset.commits(request.ahead)) ahead").font(.system(size: 10.5).monospaced()).foregroundStyle(.tertiary)
+            }
+            Text("To \(request.target) at \(request.url)").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
+            if !request.subjects.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(request.subjects.prefix(6).enumerated()), id: \.offset) { _, line in
+                        let sha = line.prefix { $0 != " " }
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(sha).font(.system(size: 11).monospaced()).foregroundStyle(.secondary)
+                            Text(line.dropFirst(sha.count).trimmingCharacters(in: .whitespaces)).font(.system(size: 11.5)).lineLimit(1).truncationMode(.tail)
+                        }
+                    }
+                    if request.ahead > 6 {
+                        Text("and \(request.ahead - 6) more").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                    }
+                }
+                .textSelection(.enabled)
+            }
+            Text("Push sends exactly \(request.short) to \(request.target) as a fast-forward, never forced, even if \(request.branch) moves on meanwhile. Decline pushes nothing. The lead hears either way.")
+                .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button(request.ahead == 1 ? "Push 1 Commit" : "Push \(request.ahead) Commits", action: push)
+                    .buttonStyle(.borderedProminent).controlSize(.small).disabled(pushing)
+                Button("Decline", action: decline).controlSize(.small).disabled(pushing)
+                if pushing {
+                    ProgressView().controlSize(.small).accessibilityLabel("Pushing")
+                    Text("Pushing…").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.blue.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.blue.opacity(0.35)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Push request: \(request.branch) at \(request.short), \(LeadToolset.commits(request.ahead)), to \(request.target)")
+    }
+}
+
+/// What came of your click on a push request.
+struct PushNoticeCard: View {
+    let notice: PushRequests.Notice
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: notice.ok ? "checkmark.circle" : "exclamationmark.triangle").foregroundStyle(notice.ok ? .green : .orange)
+                .accessibilityHidden(true)
+            Text(notice.text).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            Spacer()
+            Button("Dismiss", action: dismiss).controlSize(.small)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.secondary.opacity(0.06)))
     }
 }

@@ -30,6 +30,13 @@ public enum LeadLaunch {
                             "Bash(git --exec-path:*)", "Bash(git update-ref:*)", "Bash(git symbolic-ref:*)", "Bash(git config:*)",
                             "Bash(git fetch:*)", "Bash(git pull:*)", "Bash(git replace:*)", "Bash(git filter-branch:*)",
                             "Bash(env git:*)", "Bash(command git:*)", "Bash(/usr/bin/git:*)", "Bash(xcrun git:*)"]
+    /// `git remote`'s subcommands that write (.git/config, which a worktree shares with the main checkout, or the
+    /// remote-tracking refs), each also after `-v`/`--verbose`, which git takes before them (`git remote -v set-url`,
+    /// git 2.39). A changed origin would send the user's own `git push origin main` elsewhere, and the lead's first
+    /// fetch_remote pins the URL it finds. Listing them (`git remote`, `-v`, `show`, `get-url`) stays open.
+    static let remoteWrites: [String] = ["", "-v ", "--verbose "].flatMap { option in
+        ["add", "rename", "remove", "rm", "set-head", "set-branches", "set-url", "prune", "update"].map { "Bash(git remote \(option)\($0):*)" }
+    }
     /// Shell commands that write files, for the roles that only read.
     static let fileWrites = ["Bash(sed -i:*)", "Bash(perl -i:*)", "Bash(perl -pi:*)", "Bash(perl -e:*)", "Bash(tee:*)", "Bash(dd:*)",
                              "Bash(truncate:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(rm:*)", "Bash(ln:*)", "Bash(touch:*)", "Bash(install:*)",
@@ -90,14 +97,24 @@ public enum LeadLaunch {
                             "Bash(vmmap:*)", "Bash(malloc_history:*)", "Bash(dtrace:*)", "Bash(dtruss:*)",
                             "Bash(sudo dtrace:*)", "Bash(sudo dtruss:*)"]
 
+    /// Claude Code's raw cross-session messaging (another session on the Mac, by its name). Anyone on the Mac can send
+    /// one and claim any name, and a role that could reach every session could steer them: a lead tells another
+    /// project's lead with `tell_lead` (`LeadMail`: the sender filled in by the vault, guarded, recorded), and a worker
+    /// or verifier reaches only its own lead, through its tools. Bare tool names, as `readOnly`'s: "To match all uses of a
+    /// tool, use only the tool name without parentheses", and as a deny rule it "removes the tool from Claude's context
+    /// entirely" (code.claude.com/docs/en/permissions, "Match all uses of a tool", "Manage permissions").
+    static let crossSession = ["SendMessage", "ListAgents"]
+
     /// What each role may not do. `records`: the workflow's `records_dir`, which only the lead's tool server writes
     /// (and commits to the base branch): a worker editing it would conflict with those commits.
     public static func deny(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
         switch role {
         case .lead:
-            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + outsideReads + userSettings + killsByName
+            return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName
+                + crossSession
         case .verifier:
-            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers
+            return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers
+                + crossSession
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
             // the brief gives, or `git rebase <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
@@ -121,7 +138,7 @@ public enum LeadLaunch {
                 rules += ["Edit(\(records)/**)", "Write(\(records)/**)", "Bash(git add \(records)*)", "Bash(git rm \(records)*)",
                           "Bash(git rm * \(records)*)"]
             }
-            return rules + gitAround + privateFiles + outsideReads + userSettings + killsByName + debuggers
+            return rules + gitAround + remoteWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers + crossSession
         }
     }
 

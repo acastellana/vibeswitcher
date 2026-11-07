@@ -752,7 +752,7 @@ struct TestLockTests {
         #expect(run.process.terminationStatus == 0, "\(lines(run.output))")
         // In a worktree the lead made, scripts/lib/module-cache.sh puts its cache's path first.
         let said = lines(log + ".args").map { $0.replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression) }
-        #expect(said == ["A build -j 2 -Xswiftc -j2", "A test -j 2 -Xswiftc -j2 --filter X"], "\(lines(log + ".args"))")
+        #expect(said == ["A build --build-system native -j 2 -Xswiftc -j2", "A test --build-system native -j 2 -Xswiftc -j2 --filter X"], "\(lines(log + ".args"))")
     }
 
     /// Inside Codex's sandbox (CODEX_SANDBOX set in its commands) swift build and swift test leave SwiftPM's own sandbox
@@ -765,7 +765,7 @@ struct TestLockTests {
         run.process.waitUntilExit()
         #expect(run.process.terminationStatus == 0, "\(lines(run.output))")
         let said = lines(log + ".args").map { $0.replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression) }
-        #expect(said == ["A build --disable-sandbox -j 2 -Xswiftc -j2", "A test --disable-sandbox -j 2 -Xswiftc -j2 --filter X"],
+        #expect(said == ["A build --build-system native --disable-sandbox -j 2 -Xswiftc -j2", "A test --build-system native --disable-sandbox -j 2 -Xswiftc -j2 --filter X"],
                 "\(lines(log + ".args"))")
         // The security tests' scratch host can't listen there (Unix sockets refused): skipped, saying so, not failed.
         #expect(lines(run.output).contains("security socket/signing tests: skipped inside Codex's sandbox, which refuses their scratch host's socket"),
@@ -774,7 +774,8 @@ struct TestLockTests {
 
     /// heavy_swift (scripts/lib/swift-jobs.sh, which test.sh and build-app.sh run swift through): with VS_HEAVY_CORES a
     /// whole number N above 0, two modules at once with N ÷ 2 (rounded up) frontends each, else swift as before, on every
-    /// core; build-app.sh's release build goes through it under vs-heavy.
+    /// core; build-app.sh's release build goes through it under vs-heavy. Always on SwiftPM's native build system
+    /// (`swiftpm_options`): swiftbuild, the default since Swift 6.4.2, needs the Metal Toolchain for SwiftTerm.
     @Test func heavySwiftBoundsTheJobsOnlyWhenGivenAShare() throws {
         let (bin, log) = try fakes()
         func run(_ cores: String?, codex: String? = nil) throws -> String {
@@ -794,17 +795,17 @@ struct TestLockTests {
             #expect(process.terminationStatus == 0)
             return lines(log + ".args").last ?? ""
         }
-        #expect(try run(nil) == "unset build -c release")
-        #expect(try run("") == " build -c release")
-        #expect(try run("x") == "x build -c release")
-        #expect(try run("0") == "0 build -c release")
-        #expect(try run("4") == "4 build -j 2 -Xswiftc -j2 -c release")
-        #expect(try run("5") == "5 build -j 2 -Xswiftc -j3 -c release")
-        #expect(try run("1") == "1 build -j 2 -Xswiftc -j1 -c release")
+        #expect(try run(nil) == "unset build --build-system native -c release")
+        #expect(try run("") == " build --build-system native -c release")
+        #expect(try run("x") == "x build --build-system native -c release")
+        #expect(try run("0") == "0 build --build-system native -c release")
+        #expect(try run("4") == "4 build --build-system native -j 2 -Xswiftc -j2 -c release")
+        #expect(try run("5") == "5 build --build-system native -j 2 -Xswiftc -j3 -c release")
+        #expect(try run("1") == "1 build --build-system native -j 2 -Xswiftc -j1 -c release")
         // Inside Codex's sandbox, SwiftPM's own goes (a sandbox inside it is refused); an empty CODEX_SANDBOX is none.
-        #expect(try run("4", codex: "seatbelt") == "4 build --disable-sandbox -j 2 -Xswiftc -j2 -c release")
-        #expect(try run(nil, codex: "seatbelt") == "unset build --disable-sandbox -c release")
-        #expect(try run("4", codex: "") == "4 build -j 2 -Xswiftc -j2 -c release")
+        #expect(try run("4", codex: "seatbelt") == "4 build --build-system native --disable-sandbox -j 2 -Xswiftc -j2 -c release")
+        #expect(try run(nil, codex: "seatbelt") == "unset build --build-system native --disable-sandbox -c release")
+        #expect(try run("4", codex: "") == "4 build --build-system native -j 2 -Xswiftc -j2 -c release")
         let buildApp = try String(contentsOf: Self.repo.appendingPathComponent("scripts/build-app.sh"), encoding: .utf8)
         #expect(buildApp.contains("source scripts/lib/swift-jobs.sh"))
         #expect(buildApp.contains("Resources/bin/vs-heavy --as scripts/build-app.sh bash -c 'heavy_swift build -c release'"))

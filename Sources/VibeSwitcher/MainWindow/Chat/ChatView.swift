@@ -57,6 +57,7 @@ struct ChatContainer: View {
                     if let id = task.worker.flatMap(UUID.init(uuidString:)) { model.select(hostID: id) }
                 }
                 BaseMovePrompt(moves: leads.baseMoves, root: lead.root)
+                PushRequestPrompt(pushes: leads.pushes, root: lead.root)
             } else if let todos = chat.log.todos, todos.contains(where: { $0.status != .done }) {
                 TodoPanel(todos: todos)
             }

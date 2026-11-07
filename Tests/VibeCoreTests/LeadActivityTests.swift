@@ -538,6 +538,29 @@ struct LeadMessageToolTests: LeadTeamFixture {
         #expect(lead.call("message", ["task": "one", "text": "go on"]).text.contains("while it works"))
     }
 
+    /// wallet-manager, 2026-11-03: a working Codex worker was told five times it got the message "at its next step",
+    /// and it never did. What it's told now says where the message is (see `CodexMidTurnMessageTests`).
+    @Test func messageToAWorkingCodexSaysWhereTheMessageIs() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = lead.call("add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
+        _ = lead.call("start_worker", ["task": "one"])
+        runtime.delivery = .typedWhileWorking
+        let typed = lead.call("message", ["task": "one", "text": "go on"]).text
+        #expect(typed.contains("Typed into") && typed.contains("while it works") && typed.contains("next step"))
+        runtime.delivery = .atTurnEnd(draft: "half-written note")
+        let draft = lead.call("message", ["task": "one", "text": "go on"]).text
+        #expect(draft.contains("half-written note") && draft.contains("once its turn ends") && !draft.contains("at its next step"))
+        #expect(!draft.contains("clear_draft"))
+        runtime.delivery = .atTurnEnd(draft: nil)
+        let unread = lead.call("message", ["task": "one", "text": "go on"]).text
+        #expect(unread.contains("once its turn ends") && unread.contains("doesn't have it yet") && !unread.contains("at its next step"))
+        // Not submitted: it doesn't claim it was between turns (it may have been mid-turn).
+        runtime.delivery = .notSubmitted("go on")
+        #expect(!lead.call("message", ["task": "one", "text": "go on"]).text.contains("between turns"))
+    }
+
     @Test func stopWorkerMarksTheStopAndStatusSaysSo() throws {
         let root = try repo()
         let runtime = FakeRuntime()

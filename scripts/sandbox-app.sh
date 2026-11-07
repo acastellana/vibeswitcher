@@ -25,6 +25,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
+source scripts/lib/swift-jobs.sh
 
 repo=$(pwd -P)
 dir=$repo/.build/sandbox
@@ -128,9 +129,9 @@ run_sandbox() {
     quit_sandbox >/dev/null
     if [[ -z $binary ]]; then
         scratch_tmpdir vs-sandbox
-        Resources/bin/vs-heavy --as scripts/sandbox-app.sh swift build --product vibeswitcher-host
-        Resources/bin/vs-heavy --as scripts/sandbox-app.sh swift build --product VibeSwitcher
-        binary=$(swift build --show-bin-path)/VibeSwitcher
+        Resources/bin/vs-heavy --as scripts/sandbox-app.sh swift build $(swiftpm_options) --product vibeswitcher-host
+        Resources/bin/vs-heavy --as scripts/sandbox-app.sh swift build $(swiftpm_options) --product VibeSwitcher
+        binary=$(swift build $(swiftpm_options) --show-bin-path | tail -n 1)/VibeSwitcher
     fi
     [[ -x $binary && -x $(dirname "$binary")/vibeswitcher-host ]] || { echo "no VibeSwitcher with vibeswitcher-host beside it at $binary"; exit 1; }
     local base=${given_tmpdir%/}

@@ -110,8 +110,11 @@ final class FakeRuntime: LeadRuntime {
         case .agent(let agent): name = "agent:\(agent.pid)"
         }
         steered.append((name, sender, text))
+        if let onSteer { return try onSteer(target, sender, text) }
         return delivery
     }
+    /// Set: how each message is delivered (a scratch inbox, say), in place of answering `delivery`.
+    var onSteer: ((LeadTarget, SteerMessage.Sender, String) throws -> LeadDelivery.Delivered)?
     /// Called at each read of the sessions, before the answer (a test's way into the moment a tool counts them).
     var onSessions: (() -> Void)?
     func sessions() throws -> [LeadSessionInfo] {
@@ -308,6 +311,23 @@ struct LeadToolsetTests: LeadTeamFixture {
     }
 
     func call(_ tools: LeadToolset, _ name: String, _ arguments: [String: Any] = [:]) -> MCPToolResult { tools.call(name, arguments) }
+
+    @Test func aLeadStartedOnASymlinkedFolderNamesItsProjectAsTheVaultDoes() throws {
+        let root = try repo()
+        let alias = temp.url("alias").path
+        try FileManager.default.createSymbolicLink(atPath: alias, withDestinationPath: root)
+        let runtime = FakeRuntime()
+        let grant = try vault.startLead(root: root, branch: Worktrees.currentBranch(root: root) ?? "main")
+        try vault.bind(grant, root: root, session: try #require(runtime.me.session))
+        let tools = LeadToolset(root: alias, runtime: runtime, vault: vault(for: runtime))
+        // The project is the folder the link leads to, as the vault's names have it (`LeadMail.project`), not the link's.
+        #expect(tools.project == LeadMail.project(of: alias) && tools.project == (root as NSString).lastPathComponent, "\(tools.project)")
+        // So the lead's own lines, under the name its tools give them, are sealed as its own.
+        let line = SteerMessage(text: "x", from: .lead("lead of \(tools.project)"), agentPid: 42, at: 1)
+        guard case .seal = book.answer(.seal(line), from: .session(try #require(runtime.me.session)), agentSession: runtime.me.session) else {
+            Issue.record("the lead's own line wasn't sealed for its own session"); return
+        }
+    }
 
     @Test func eachRoleSeesItsOwnTools() throws {
         let root = try repo()

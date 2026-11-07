@@ -3148,3 +3148,143 @@
 - 2026-11-07 17:31 Folded turn-this-incident-into-5 into the-app-ships-no: that task carries its work
 - 2026-11-07 17:34 Started a worker on the-app-ships-no
 - 2026-11-07 17:34 Automatically (auto_advance): Started a worker on the-app-ships-no (The app ships no test bundles, and a failed install leaves the old app working).
+- 2026-11-03 09:26 Incident: Lead messages to a working Codex worker sat undelivered for about 40 min. The worker reported blocked "no answer received" while the answer was in its inbox.; planned turn-this-incident-into-9 to turn it into a check
+- 2026-11-03 09:26 Started a worker on turn-this-incident-into-9
+- 2026-11-03 09:26 Automatically (auto_advance): Started a worker on turn-this-incident-into-9 (Turn this incident into a check: Lead messages to a working Codex worker sat undelivered for …).
+- 2026-11-03 09:26 Review of turn-this-incident-into-9: audit
+- 2026-11-03 09:52 Automatically (auto_advance): Started the audit of turn-this-incident-into-9 at 0a64152b (Its review is audit).
+- 2026-11-03 09:52 Released turn-this-incident-into-9's worker (idle since its done report on 0a64152b) while its audit runs
+- 2026-11-03 09:52 Automatically (auto_advance): Released turn-this-incident-into-9's worker, idle since its done report on 0a64152b, while its audit runs (ended pid 40415 (Worker: Turn this incident into a check: Lead messages to a working Codex worker sat undelivered for …)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-03 09:56 Audit of turn-this-incident-into-9: incomplete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-11-03 09:56 Started a worker on turn-this-incident-into-9
+- 2026-11-03 09:56 Automatically (auto_advance): Sent turn-this-incident-into-9's worker the open Important findings turn-this-incident-into-9:F1 from its audit at 0a64152b (in a new worker: its last one was released during the audit).
+- 2026-11-03 10:40 The worker on turn-this-incident-into-9 answered findings: turn-this-incident-into-9:F1 fixed at 9e389e05: c6fc0ce (+6388d2b fail-fast): CodexMidTurnHostRunTests.aWorkingFakeCodexGetsTheLeadsMessageInItsComposerAndTakesItIntoItsTurn. A fake Codex (bash run as `codex`, so ProcessTable/LeadAgent.running finds it as .codex) runs on a TestHost pty and draws Codex 0.160's working screen: a status row, a composer with the faint placeholder, a footer. Its hooks' last event is PreToolUse, folded by HookState.reduce, so LeadObserver reads .working. The message i…
+- 2026-11-03 10:40 Automatically (auto_advance): Started the audit of turn-this-incident-into-9 at 9e389e05 (Its review is audit).
+- 2026-11-03 10:40 Released turn-this-incident-into-9's worker (idle since its done report on 9e389e05) while its audit runs
+- 2026-11-03 10:40 Automatically (auto_advance): Released turn-this-incident-into-9's worker, idle since its done report on 9e389e05, while its audit runs (ended pid 9870 (Worker: Codex workers get lead messages mid-turn)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-03 10:42 Audit of turn-this-incident-into-9: complete, clean, round 2: 1 Important closed, 1 Nit open
+- 2026-11-03 10:49 Merged turn-this-incident-into-9: Codex workers get lead messages mid-turn
+- 2026-11-03 10:49 Automatically (auto_advance): Merged turn-this-incident-into-9 (Codex workers get lead messages mid-turn) into main at 409db84a, on its passing audit and the full test run.
+- 2026-11-03 10:49 Automatically (auto_advance): Cleaned up turn-this-incident-into-9 (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-03 10:49 Update: Codex workers now get lead messages mid-turn — **What changed:** a lead's `message()` to a Codex worker that is mid-turn is now typed into its composer, and Codex takes it at its next step. Before, it sat in the hook inbox, which only Claude drain…
+- 2026-11-03 19:50 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-03 20:51 Update: Today: Statistics finished, installer quit fixed, Codex mid-turn messages fixed — **Landed:**
+- 2026-11-04 22:17 Planned lead-mail-a-verified: Lead mail: a verified tell_lead channel between project leads (review audit)
+- 2026-11-04 22:17 Started a worker on lead-mail-a-verified
+- 2026-11-04 22:17 Automatically (auto_advance): Started a worker on lead-mail-a-verified (Lead mail: a verified tell_lead channel between project leads).
+- 2026-11-04 22:18 Planned lead-mail-block-raw: Lead mail: block raw cross-session messaging in VibeSwitcher's roles (review audit)
+- 2026-11-04 22:18 Planned lead-mail-show-it: Lead mail: show it in the app, with an on/off switch
+- 2026-11-04 22:35 Automatically (auto_advance): Started the audit of lead-mail-a-verified at 8fbd4549 (Its review is audit).
+- 2026-11-04 22:35 Released lead-mail-a-verified's worker (idle since its done report on 8fbd4549) while its audit runs
+- 2026-11-04 22:35 Automatically (auto_advance): Released lead-mail-a-verified's worker, idle since its done report on 8fbd4549, while its audit runs (ended pid 97777 (Worker: Lead mail: a verified tell_lead channel between project leads)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-04 22:35 Planned lead-mail-a-lead: Lead mail: a lead can't seal an inbox line as another project's lead (review audit)
+- 2026-11-04 22:38 Audit of lead-mail-a-verified: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-11-04 22:39 Dismissed lead-mail-a-verified:F2: Already a task: lead-mail-a-lead (audited, runs after this merge) ties a .lead seal's name to the caller's own project.
+- 2026-11-04 22:41 Planned remote-lead-tools-to: Remote: lead tools to fetch GitHub and merge its commits into main (review audit)
+- 2026-11-04 22:42 Planned remote-push-remote-one: Remote: push_remote, one click in the app approves each push (review audit)
+- 2026-11-04 22:48 Merged lead-mail-a-verified: Lead mail: a verified tell_lead channel between project leads
+- 2026-11-04 22:48 Flaky in lead-mail-a-verified's merge: aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-04 22:48 Automatically (auto_advance): Merged lead-mail-a-verified (Lead mail: a verified tell_lead channel between project leads) into main at 3eaede93, on its passing audit and the full test run. (Its first test run failed on aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/lead-mail-a-verified/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswit….)
+- 2026-11-04 22:48 Automatically (auto_advance): Cleaned up lead-mail-a-verified (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-04 22:48 Started a worker on lead-mail-block-raw
+- 2026-11-04 22:48 Automatically (auto_advance): Started a worker on lead-mail-block-raw (Lead mail: block raw cross-session messaging in VibeSwitcher's roles), its after tasks done (lead-mail-a-verified).
+- 2026-11-04 22:48 Started a worker on lead-mail-show-it (auto → Claude: Claude weekly 7%, 4 points ahead of pace, not tight; Codex usage not known (its last reading's windows have reset))
+- 2026-11-04 22:48 Automatically (auto_advance): Started a worker on lead-mail-show-it (Lead mail: show it in the app, with an on/off switch), its after tasks done (lead-mail-a-verified); its agent is auto, so it went to Claude: Claude weekly 7%, 4 points ahead of pace, not tight; Codex usage not known (its last reading's windows have reset).
+- 2026-11-04 22:48 Started a worker on lead-mail-a-lead
+- 2026-11-04 22:48 Automatically (auto_advance): Started a worker on lead-mail-a-lead (Lead mail: a lead can't seal an inbox line as another project's lead), its after tasks done (lead-mail-a-verified).
+- 2026-11-04 22:48 Started a worker on remote-lead-tools-to
+- 2026-11-04 22:48 Automatically (auto_advance): Started a worker on remote-lead-tools-to (Remote: lead tools to fetch GitHub and merge its commits into main).
+- 2026-11-04 22:58 Automatically (auto_advance): Started the audit of lead-mail-block-raw at 79e81d56 (Its review is audit).
+- 2026-11-04 22:58 Released lead-mail-block-raw's worker (idle since its done report on 79e81d56) while its audit runs
+- 2026-11-04 22:58 Automatically (auto_advance): Released lead-mail-block-raw's worker, idle since its done report on 79e81d56, while its audit runs (ended pid 94974 (Worker: Lead mail: block raw cross-session messaging in VibeSwitcher's roles)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-04 23:02 Audit of lead-mail-block-raw: complete, clean
+- 2026-11-04 23:02 Automatically (auto_advance): Started the audit of lead-mail-show-it at 3bc1679c (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-11-04 23:02 Released lead-mail-show-it's worker (idle since its done report on 3bc1679c) while its audit runs
+- 2026-11-04 23:02 Automatically (auto_advance): Released lead-mail-show-it's worker, idle since its done report on 3bc1679c, while its audit runs (ended pid 95099 (Worker: Lead mail: show it in the app, with an on/off switch)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-04 23:04 Audit of lead-mail-show-it: complete, clean, round 1: 1 Nit open
+- 2026-11-04 23:15 Merged lead-mail-block-raw: Lead mail: block raw cross-session messaging in VibeSwitcher's roles (in a batch: lead-mail-block-raw, lead-mail-show-it landed on one test run)
+- 2026-11-04 23:15 Merged lead-mail-show-it: Lead mail: show it in the app, with an on/off switch (in a batch: lead-mail-block-raw, lead-mail-show-it landed on one test run)
+- 2026-11-04 23:15 Automatically (auto_advance): Merged lead-mail-block-raw at a4de0322 (its passing audit), lead-mail-show-it at 086442e2 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-04 23:15 Automatically (auto_advance): Cleaned up lead-mail-block-raw (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-11-04 23:15 Automatically (auto_advance): Cleaned up lead-mail-show-it (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-04 23:23 Automatically (auto_advance): Started the audit of lead-mail-a-lead at aabfb6ae (Its review is audit).
+- 2026-11-04 23:23 Released lead-mail-a-lead's worker (idle since its done report on aabfb6ae) while its audit runs
+- 2026-11-04 23:23 Automatically (auto_advance): Released lead-mail-a-lead's worker, idle since its done report on aabfb6ae, while its audit runs (ended pid 95369 (Worker: Lead mail: a lead can't seal an inbox line as another project's lead)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-04 23:23 Planned lead-mail-a-lead-2: Lead mail: a lead seals lines only for its own team's sessions (review audit)
+- 2026-11-04 23:24 Automatically (auto_advance): Started the audit of remote-lead-tools-to at 8ca77abe (Its review is audit).
+- 2026-11-04 23:24 Released remote-lead-tools-to's worker (idle since its done report on 8ca77abe) while its audit runs
+- 2026-11-04 23:24 Automatically (auto_advance): Released remote-lead-tools-to's worker, idle since its done report on 8ca77abe, while its audit runs (ended pid 95553 (Worker: Remote: lead tools to fetch GitHub and merge its commits into main)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-04 23:24 Planned workers-and-verifiers-3: Workers and verifiers can't change the repository's remotes (review audit)
+- 2026-11-04 23:24 Started a worker on workers-and-verifiers-3 (auto → Claude: Claude weekly 11%, 8 points ahead of pace, not tight; Codex 10%)
+- 2026-11-04 23:24 Automatically (auto_advance): Started a worker on workers-and-verifiers-3 (Workers and verifiers can't change the repository's remotes); its agent is auto, so it went to Claude: Claude weekly 11%, 8 points ahead of pace, not tight; Codex 10%.
+- 2026-11-04 23:32 Audit of remote-lead-tools-to: complete, clean, round 1: 3 Nit open
+- 2026-11-04 23:34 Audit of lead-mail-a-lead: complete, clean, round 1: 1 Nit open
+- 2026-11-04 23:37 Released workers-and-verifiers-3's worker (idle since its done report on bdf0c625) while its audit runs
+- 2026-11-04 23:37 Automatically (auto_advance): Started the audit of workers-and-verifiers-3 at bdf0c625 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-04 23:46 Merged lead-mail-a-lead: Lead mail: a lead can't seal an inbox line as another project's lead (in a batch: lead-mail-a-lead, remote-lead-tools-to landed on one test run)
+- 2026-11-04 23:46 Merged remote-lead-tools-to: Remote: lead tools to fetch GitHub and merge its commits into main (in a batch: lead-mail-a-lead, remote-lead-tools-to landed on one test run)
+- 2026-11-04 23:46 Automatically (auto_advance): Merged lead-mail-a-lead at fd4138e4 (its passing audit), remote-lead-tools-to at be8cc1e3 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-04 23:46 Automatically (auto_advance): Cleaned up lead-mail-a-lead (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-04 23:46 Automatically (auto_advance): Cleaned up remote-lead-tools-to (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-04 23:46 Started a worker on remote-push-remote-one
+- 2026-11-04 23:46 Automatically (auto_advance): Started a worker on remote-push-remote-one (Remote: push_remote, one click in the app approves each push), its after tasks done (remote-lead-tools-to).
+- 2026-11-04 23:46 Started a worker on lead-mail-a-lead-2
+- 2026-11-04 23:46 Automatically (auto_advance): Started a worker on lead-mail-a-lead-2 (Lead mail: a lead seals lines only for its own team's sessions), its after tasks done (lead-mail-a-lead).
+- 2026-11-04 23:47 Audit of workers-and-verifiers-3: complete, clean, round 1: 1 Nit open
+- 2026-11-04 23:58 Planned main-thread-freezes-with: Main-thread freezes with a long lead chat open (SwiftUI accessibility combine)
+- 2026-11-05 00:01 Update: Today: lead mail made safe, GitHub sync tools, remotes locked — **Landed (2026-11-04)**, each audited and merged on a full test run:
+- 2026-11-05 00:03 Merged workers-and-verifiers-3: Workers and verifiers can't change the repository's remotes
+- 2026-11-05 00:03 Flaky in workers-and-verifiers-3's merge: slowAppLookupsAndLedgerWritesDontHoldTheMainThread() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-05 00:03 Automatically (auto_advance): Merged workers-and-verifiers-3 (Workers and verifiers can't change the repository's remotes) into main at 0e6f50be, on its passing audit and the full test run. (Its first test run failed on slowAppLookupsAndLedgerWritesDontHoldTheMainThread() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/workers-and-verifiers-3/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswit….)
+- 2026-11-05 00:03 Automatically (auto_advance): Cleaned up workers-and-verifiers-3 (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-05 00:03 Started a worker on main-thread-freezes-with
+- 2026-11-05 00:03 Automatically (auto_advance): Started a worker on main-thread-freezes-with (Main-thread freezes with a long lead chat open (SwiftUI accessibility combine)).
+- 2026-11-05 00:10 Automatically (auto_advance): Started the audit of lead-mail-a-lead-2 at 9d9ef590 (Its review is audit).
+- 2026-11-05 00:10 Released lead-mail-a-lead-2's worker (idle since its done report on 9d9ef590) while its audit runs
+- 2026-11-05 00:10 Automatically (auto_advance): Released lead-mail-a-lead-2's worker, idle since its done report on 9d9ef590, while its audit runs (ended pid 79274 (Worker: Lead mail: a lead seals lines only for its own team's sessions)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-05 00:18 Audit of lead-mail-a-lead-2: complete, clean, round 1: 1 Pre-existing open
+- 2026-11-05 00:18 Dismissed lead-mail-a-lead-2:F1: Copying a sealed note into another project's board needs a file write that lead sessions are denied (Edit/Write and shell writes in LeadLaunch.readOnly/fileWrites), and that prompts for a worker writing outside its worktree; not worth a task now.
+- 2026-11-05 00:30 Merged lead-mail-a-lead-2: Lead mail: a lead seals lines only for its own team's sessions
+- 2026-11-05 00:30 Automatically (auto_advance): Merged lead-mail-a-lead-2 (Lead mail: a lead seals lines only for its own team's sessions) into main at 007279e2, on its passing audit and the full test run.
+- 2026-11-05 00:30 Automatically (auto_advance): Cleaned up lead-mail-a-lead-2 (freed 2.9 GB of build output and temporary folders). It stays done.
+- 2026-11-05 00:30 Update: Lead mail is complete: verified lead-to-lead messages, visible and switchable — **What changed**, five merges, each audited:
+- 2026-11-05 00:30 Update: Retrospective: lead mail and remote tools — **Went well:**
+- 2026-11-05 01:16 Hung in main-thread-freezes-with's merge: the tests stopped after 45 min; started and never finished: claudeCodeStoppingTheStatusLineStopsYourCommandToo(), aBigInputToAStatusLineThatDoesntReadItStillShowsItsOutput(), anOutputWhoseReaderHasGoneStillKeepsTheUsage(), aParserKeepsOnlyItsShortScrollback(), aSignalDeathAndAnExitCodeAreToldApart(), theResizeLogHoldsABurstOnItsClock(), aFailingTestsHostIsEn… (/Users/albert/dev/vibeswitcher/.vibeswitcher/flakes/2026-11-05-main-thread-freezes-with-676892da-hung.log)
+- 2026-11-05 01:16 Automatically (auto_advance): Didn't merge main-thread-freezes-with: Not merged: the tests hung after 45 min on main-thread-freezes-with rebased onto main; they were stopped, with everything started under them. main-thread-freezes-with stays as it was. Started and never finished: claudeCodeStoppingTheStatusLineStopsYourCommandToo(), aBigInputToAStatusLineThatDoesntReadItStillShowsItsOutput(), anOutputWhoseReaderHasGoneStillKeepsTheUsage(), aParserKeepsOnlyItsShortScrollback(), aSignalDeathAndAnExitCodeAreToldApart(), theResizeLogHoldsABurstOnItsClock(), aFailingTestsHostIsEn…. Those and the output's last 60 lines, readable by the worker who fixes it: /Users/alb…
+- 2026-11-05 02:07 Hung in main-thread-freezes-with's merge: the tests stopped after 45 min; no test in its output started and never finished (/Users/albert/dev/vibeswitcher/.vibeswitcher/flakes/2026-11-05-main-thread-freezes-with-676892da-hung.log)
+- 2026-11-05 03:02 Hung in main-thread-freezes-with's merge: the tests stopped after 45 min; no test in its output started and never finished (/Users/albert/dev/vibeswitcher/.vibeswitcher/flakes/2026-11-05-main-thread-freezes-with-676892da-hung.log)
+- 2026-11-05 03:47 Hung in main-thread-freezes-with's merge: the tests stopped after 45 min; no test in its output started and never finished (/Users/albert/dev/vibeswitcher/.vibeswitcher/flakes/2026-11-05-main-thread-freezes-with-676892da-hung.log)
+- 2026-11-05 04:35 Released remote-push-remote-one's worker (idle since its done report on c92b6242) while its audit runs
+- 2026-11-05 04:35 Automatically (auto_advance): Started the audit of remote-push-remote-one at c92b6242 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-05 04:39 Audit of remote-push-remote-one: complete, clean, round 1: 1 Nit open
+- 2026-11-05 05:10 Planned dictation-test-hangs-in: Dictation test hangs in full-suite runs: afterARunHeardAFlatOneSaysClaudeDidntCatchAnything
+- 2026-11-05 05:49 Hung in remote-push-remote-one's merge: the tests stopped after 45 min; started and never finished: otherRequestsKeepTheirFifteenSecondsDuringAHandover(), aHostThatGoesAwayIsLoggedAsAFailure(), aHandoverAfterTheWaitIsLoggedAsHandedOver(), aProbePastFifteenSecondsIsWaitedFor(), theMarkFollowsBoostOnAndOff(), choosingAFolderOfAProjectWhoseLeadRunsShowsThatLead(), aNewLeadWhileOneRunsIsAskedForAndThe… (/Users/albert/dev/vibeswitcher/.vibeswitcher/flakes/2026-11-05-remote-push-remote-one-c92b6242-hung.log)
+- 2026-11-05 05:49 Automatically (auto_advance): Didn't merge remote-push-remote-one: Not merged: the tests hung after 45 min on remote-push-remote-one rebased onto main; they were stopped, with everything started under them. remote-push-remote-one stays as it was. Started and never finished: otherRequestsKeepTheirFifteenSecondsDuringAHandover(), aHostThatGoesAwayIsLoggedAsAFailure(), aHandoverAfterTheWaitIsLoggedAsHandedOver(), aProbePastFifteenSecondsIsWaitedFor(), theMarkFollowsBoostOnAndOff(), choosingAFolderOfAProjectWhoseLeadRunsShowsThatLead(), aNewLeadWhileOneRunsIsAskedForAndThe…. Those and the output's last 60 lines, readable by the worker who fixes it: /Users/albert/…
+- 2026-11-05 06:30 Started a worker on dictation-test-hangs-in
+- 2026-11-05 06:32 Automatically (auto_advance): Merge of main-thread-freezes-with failed: Tests fail rebased onto main: security socket/signing tests: skipped, the build failed (above): they need its vibeswitcher-host Sent its worker the output; it's back at work.
+- 2026-11-05 07:25 Automatically (auto_advance): Didn't start dictation-test-hangs-in: dictation-test-hangs-in's worker is still running. Send it what to do with message, or stop_worker first.
+- 2026-11-05 08:23 Planned tests-long-synchronous: Tests: long synchronous waits starve Swift's shared thread pool
+- 2026-11-05 08:36 Released dictation-test-hangs-in's worker (idle since its done report on 36aae175) while its audit runs
+- 2026-11-05 08:36 Automatically (auto_advance): Started the audit of dictation-test-hangs-in at 36aae175 (It touches sensitive_paths (scripts/build-app.sh), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-05 08:43 Planned 178-s-main-thread: 178 s main-thread freeze inside SwiftUI accessibility combine (lead window)
+- 2026-11-05 09:08 Started a worker on 178-s-main-thread
+- 2026-11-05 09:08 Automatically (auto_advance): Started a worker on 178-s-main-thread (178 s main-thread freeze inside SwiftUI accessibility combine (lead window)).
+- 2026-11-05 09:10 Audit of dictation-test-hangs-in: complete, clean, round 1: 1 Nit open, 2 Pre-existing open
+- 2026-11-05 09:23 Merged dictation-test-hangs-in: Full-suite hangs: dictation test timeout, and a run stuck at 0% CPU
+- 2026-11-05 09:23 Automatically (auto_advance): Merged dictation-test-hangs-in (Full-suite hangs: dictation test timeout, and a run stuck at 0% CPU) into main at 1f8b25fd, on its passing audit and the full test run.
+- 2026-11-05 09:23 Automatically (auto_advance): Cleaned up dictation-test-hangs-in (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-05 09:23 Started a worker on tests-long-synchronous
+- 2026-11-05 09:23 Automatically (auto_advance): Started a worker on tests-long-synchronous (Tests: long synchronous waits starve Swift's shared thread pool), its after tasks done (dictation-test-hangs-in).
+- 2026-11-05 09:33 Merged main-thread-freezes-with: Main-thread freezes with a long lead chat open (SwiftUI accessibility combine) (no audit: review none) (in a batch: main-thread-freezes-with, remote-push-remote-one landed on one test run)
+- 2026-11-05 09:33 Merged remote-push-remote-one: Remote: push_remote, one click in the app approves each push (in a batch: main-thread-freezes-with, remote-push-remote-one landed on one test run)
+- 2026-11-05 09:34 Update: Lead ↔ GitHub: fetch, merge and a one-click push are in — **What changed** (each audited and merged on a full test run):
+- 2026-11-05 10:43 Released 178-s-main-thread's worker (idle since its done report on c98fbe3b) while its audit runs
+- 2026-11-05 10:43 Automatically (auto_advance): Started the audit of 178-s-main-thread at c98fbe3b (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-05 10:48 Raised tests-long-synchronous to audit (the risk check, at ce37e9d7): it changes test or build infrastructure the suite relies on (Tests/VibeCoreTests/TestSupport.swift, Tests/VibeHostTests/TestSupport.swift, Tests/VibeSwitcherTests/TestSupport.swift, scripts/lib/swift-jobs.sh, …)
+- 2026-11-05 10:48 Automatically (auto_advance): Started the audit of tests-long-synchronous at ce37e9d7 (The risk check raised it to audit: it changes test or build infrastructure the suite relies on (Tests/VibeCoreTests/TestSupport.swift, Tests/VibeHostTests/TestSupport.swift, Tests/VibeSwitcherTests/TestSupport.swift, scripts/lib/swift-jobs.sh, …)).
+- 2026-11-05 11:15 Audit of 178-s-main-thread: complete, clean, round 1: 2 Nit open
+- 2026-11-05 11:26 Merged 178-s-main-thread: Background main-thread starvation: App Nap / QoS, and the fade tick's cost
+- 2026-11-05 11:26 Automatically (auto_advance): Merged 178-s-main-thread (Background main-thread starvation: App Nap / QoS, and the fade tick's cost) into main at 3174952f, on its passing audit and the full test run.
+- 2026-11-05 11:26 Automatically (auto_advance): Cleaned up 178-s-main-thread (freed 2.9 GB of build output and temporary folders). It stays done.
+- 2026-11-05 12:51 Workflow: cleared verifier_model
+- 2026-11-06 00:01 Update: Today: build toolchain recovered, push button, test hangs fixed, freeze cost cut — **Landed (2026-11-05):**

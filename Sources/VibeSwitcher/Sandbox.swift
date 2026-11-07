@@ -129,8 +129,9 @@ enum Sandbox {
     // MARK: Windows
 
     /// AppKit pulls a titled window that's off every screen back until a corner of it shows (to -1240, -684 on a
-    /// 1728-wide screen): in the sandbox a window stays where it's put, off screen (`hide`).
-    private static func keepWindowsWherePut() {
+    /// 1728-wide screen): in the sandbox a window stays where it's put, off screen (`hide`); so does the team-churn
+    /// bench's with `--occluded`.
+    static func keepWindowsWherePut() {
         guard let constrain = class_getInstanceMethod(NSWindow.self, #selector(NSWindow.constrainFrameRect(_:to:))) else {
             refuse("couldn't keep the sandbox's windows off screen")
         }
@@ -270,6 +271,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             return buttons.count - 1
         }
         controller.answersTrust = false
+        // Push requests from the sandbox's own vault book (its fake lead holds no grant in the host's): `push`.
+        controller.pushes.vault = pushVault.vault(folder: state.appendingPathComponent("push/vault"), as: { .app })
         // The fake Claude needs nothing installed.
         controller.preflight = { _ in nil }
         return controller
@@ -681,6 +684,76 @@ private final class Driver: NSObject, NSApplicationDelegate {
         """
     }()
 
+    /// The sandbox's stand-in for the session host's vault for push requests: the fake lead's session asks through
+    /// it, and the app reads and settles through it as itself, as with the host's.
+    let pushVault = LeadVault.Book()
+
+    /// The fake lead asks to push (push_remote's request, `LeadPush`): its folder made a scratch repository with a
+    /// scratch bare remote as origin (in the sandbox's state, never GitHub, never the network), three commits ahead of
+    /// it, and the request filed in `pushVault` as the lead's session files it. `click` or `decline` settles it as the
+    /// card's buttons do: Push pushes to that bare remote.
+    func pushRequest(_ how: String, _ done: @escaping (String?) -> Void) {
+        guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
+        let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+        if how == "click" || how == "decline" {
+            guard let request = leads.pushes.open[root] else { return done("no push request open: push first") }
+            leads.pushes.settle(root, request, push: how == "click")
+            return waitFor({ [weak self] in self?.leads.pushes.notices[root] != nil }) { [weak self] met in
+                self?.settle { done(met ? nil : "the click didn't settle") }
+            }
+        }
+        let origin = state.appendingPathComponent("push/origin.git").path
+        let book = pushVault, folder = state.appendingPathComponent("push/vault")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let fail = { (text: String) in DispatchQueue.main.async { done(text) } }
+            func git(_ args: [String], in dir: String) -> Git.Result {
+                Shell.run(executable: "/usr/bin/git", args: ["-c", "user.name=Sandbox", "-c", "user.email=sandbox@example.invalid", "-c", "commit.gpgsign=false"] + args,
+                          in: dir, env: Git.environment, timeout: 60, grace: 1)
+            }
+            let fileManager = FileManager.default
+            if !fileManager.fileExists(atPath: origin) {
+                try? fileManager.createDirectory(atPath: (origin as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+                guard git(["init", "-q", "--bare", "-b", "main", origin], in: (origin as NSString).deletingLastPathComponent).status == 0 else { return fail("couldn't make the bare remote") }
+            }
+            if !fileManager.fileExists(atPath: root + "/.git") {
+                try? "# Sandbox lead\n".write(toFile: root + "/README.md", atomically: true, encoding: .utf8)
+                for args in [["init", "-q", "-b", "main"], ["add", "README.md"], ["commit", "-q", "-m", "Start the sandbox project"],
+                             ["remote", "add", "origin", origin], ["push", "-q", "origin", "main"]] {
+                    let run = git(args, in: root)
+                    guard run.status == 0 else { return fail("git \(args.joined(separator: " ")) failed: \(run.error)") }
+                }
+            }
+            for (file, subject) in [("landing.md", "Landing page copy for the launch"), ("hero.md", "Landing hero image and its dark variant"),
+                                    ("stats.md", "Cache the stats endpoint")] {
+                try? "\(subject) \(UUID().uuidString)\n".write(toFile: root + "/" + file, atomically: true, encoding: .utf8)
+                guard git(["add", file], in: root).status == 0, git(["commit", "-q", "-m", subject], in: root).status == 0 else { return fail("couldn't commit \(file)") }
+            }
+            let tip = git(["rev-parse", "refs/remotes/origin/main"], in: root).output
+            let head = git(["rev-parse", "HEAD"], in: root).output
+            let ahead = Int(git(["rev-list", "--count", "\(tip)..\(head)"], in: root).output) ?? 0
+            let subjects = git(["log", "--format=%h %s", "\(tip)..\(head)"], in: root).output.split(separator: "\n").map(String.init)
+            guard case .success(let url) = LeadRemote.url(root: root, remote: "origin") else { return fail("origin's URL can't be read") }
+            do {
+                let app = book.vault(folder: folder, as: { .app })
+                if (try? app.current(.lead, root: root, task: nil)) == nil {
+                    try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "sandbox-lead")
+                }
+                let lead = book.vault(folder: folder, as: { .session("sandbox-lead") })
+                try lead.setGuardedSettings([LeadRemote.urlKey("origin"): LeadVault.hash(url)], root: root)
+                try lead.requestPush(LeadPush.Request(commit: head, remote: "origin", branch: "main", url: url, ahead: ahead, subjects: subjects), root: root)
+            } catch {
+                return fail("the push request wasn't filed: \(error)")
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.leads.refresh()
+                self.waitFor({ [weak self] in self?.leads.pushes.open[root]?.commit == head }) { [weak self] met in
+                    self?.settle { done(met ? nil : "the card didn't read the request") }
+                }
+            }
+        }
+    }
+
     /// A fake project lead: a session labelled as a lead, its board (tasks in every state, a question it withdrew)
     /// in its folder, and a conversation of short replies between tool calls, with a worker's FYI and a worker's question.
     func startLead(transcript: String? = nil, _ done: @escaping (String?) -> Void) {
@@ -787,6 +860,42 @@ private final class Driver: NSObject, NSApplicationDelegate {
         waitFor({ [weak self] in self?.store.sessions.first { $0.tty == lead.tty }?.leadAsks == !answer }) { met in
             done(met ? nil : "the lead's session didn't read its board's question")
         }
+    }
+
+    /// Made-up messages between the sandbox's lead and other projects' leads, oldest first: two sent, one received,
+    /// one refused for a credential's shape, one that found no lead.
+    static func leadMail(now: Double) -> [LeadMail.Record] {
+        [
+            LeadMail.Record(at: now - 3_400, from: "sandbox-lead", to: "example-api", kind: .question,
+                            text: "Does /v2/sessions still return the host id as a string? The sidebar's new grouping reads it.",
+                            outcome: .delivered, detail: "Delivered to the lead of example-api while it works: it gets it at its next step."),
+            LeadMail.Record(at: now - 2_900, from: "example-api", to: "sandbox-lead", kind: .answer,
+                            text: "Yes, a string, and it stays one through v2. v3 (next month) makes it a UUID object; I'll report when that lands.",
+                            outcome: .delivered, detail: "Delivered: typed in as the lead of sandbox-lead's next prompt."),
+            LeadMail.Record(at: now - 1_500, from: "sandbox-lead", to: "example-api", kind: .report,
+                            text: "Here's the staging token so you can try it: [masked]",
+                            outcome: .refused, detail: "Refused, not sent: the text holds something shaped like a credential (API key): never send one to another lead; leave it out."),
+            LeadMail.Record(at: now - 600, from: "sandbox-lead", to: "example-docs", kind: .report,
+                            text: "The sidebar grouping merged: the screenshots in the guide's Sessions page are out of date.",
+                            outcome: .noLead, detail: "Not sent: no lead is running for example-docs on this Mac right now."),
+            LeadMail.Record(at: now - 120, from: "sandbox-lead", to: "example-api", kind: .report,
+                            text: "The grouping is on main; it reads the host id as a string, as you said.",
+                            outcome: .waiting, detail: "Sent: the lead of example-api is between turns, so it waits in its inbox and VibeSwitcher wakes it to read it."),
+        ]
+    }
+
+    /// `leadmail`: the made-up messages written to the fake lead's record, as tell_lead keeps them, and its Team tab shown.
+    func leadMail(_ done: @escaping (String?) -> Void) {
+        guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
+        let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+        do {
+            for record in Driver.leadMail(now: Date().timeIntervalSince1970) { try LeadMail.append(record, root: root) }
+        } catch {
+            return done("couldn't write the lead's mail record: \(error)")
+        }
+        UserDefaults.standard.set("team", forKey: "inspectorTab")
+        leads.refresh()
+        done(nil)
     }
 
     /// More on the fake lead's board, for what the phone and the Lead view show of it: a proposal whose timer runs, a
@@ -988,6 +1097,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("notify prepare|allow|deny", "a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare reads its screen as posting the banner does (whether it gets Allow and Deny); allow or deny runs that banner's action (`PromptActions.handle`), a failure shown as the chat card's notice"),
         ("new [codex|shell] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell"),
+        ("push [click|decline]", "the fake lead asks to push (push_remote): its folder a scratch repository and a scratch bare remote as origin (never GitHub), three commits ahead; its card, with Push and Decline, is under the lead's chat. click or decline settles it as those buttons do"),
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),
         ("scroll top|middle|bottom", "scrolls the shown chat"),
@@ -1005,6 +1115,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("unfold", "shows the selected lead's team under its row in the sidebar"),
         ("replaced [N]", "shows the selected window session as a lead another session replaced, with N characters (default 200000) typed into it: the header's one line it makes"),
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
+        ("leadmail", "writes made-up messages between the fake lead and other projects' leads (start the lead first) to its private lead-mail record, one of them refused, and shows its Team tab: they're under Between leads"),
         ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
@@ -1065,6 +1176,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
             let page = QualityPage(Driver.statisticsQuality(range: StatisticsRange.week.interval(now: Date())))
             return AnyView(Form { ComparedSectionView(page: page.compared, methodShown: true) }.formStyle(.grouped)
                 .frame(width: StatisticsWindowController.size.width, height: 720))
+        }),
+        // The Team tab's Between leads on made-up messages, one refused and one opened whole.
+        ("lead-mail", { _ in
+            let records = Driver.leadMail(now: Date().timeIntervalSince1970)
+            return AnyView(ScrollView { LeadMailList(feed: LeadMailFeed(records, project: "sandbox-lead"), openItems: [1]).padding(14) }
+                .frame(width: 360, height: 620))
         }),
         ("lead-team", { driver in
             let team = Driver.leadTeam()
@@ -1872,8 +1989,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
             replaced.draft = String(repeating: "split the layer out, then the next one\n", count: (Int(rest) ?? 200_000) / 39 + 1)
             model.replacedLeads[id] = replaced
             settle { reply(true, "\(row.title) shown replaced, \(replaced.draft.count) characters typed into it") }
+        case "push": pushRequest(rest) { problem in
+            reply(problem == nil, problem ?? (rest.isEmpty ? "the lead asks to push main to origin (a scratch bare remote): its card is under the lead's chat" : "settled as \(rest)"))
+        }
         case "ask": ask(rest, answer: false) { problem in reply(problem == nil, problem ?? "the lead asks you") }
         case "answer": ask("", answer: true) { problem in reply(problem == nil, problem ?? "its questions answered") }
+        case "leadmail": leadMail { problem in reply(problem == nil, problem ?? "5 messages between leads in the fake lead's record, one refused; its Team tab shows them under Between leads") }
         case "extras": extras { problem in reply(problem == nil, problem ?? "the lead's board has a proposal, a revised question, an all-done card and results") }
         case "phone": servePhone(reply)
         case "dictation": dictate(rest, reply)

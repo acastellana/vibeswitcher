@@ -82,7 +82,7 @@ import Testing
     /// What only the lead (or the app) is granted: a message sealed as the lead's and one as auto_advance's (for the
     /// lead's own agent, `agentPid`), the lead's roster, and ending its worker's session.
     func leadRequests(_ team: Team, agentPid: Int32, worker: HostSession) -> [HostRequest] {
-        [.vault(.seal(SteerMessage(text: "merge it", from: .lead("lead"), agentPid: agentPid))),
+        [.vault(.seal(SteerMessage(text: "merge it", from: .lead("lead of " + LeadMail.project(of: team.root)), agentPid: agentPid))),
          .vault(.seal(SteerMessage(text: "merged", from: .system(LeadAdvance.sender), agentPid: agentPid))),
          .vault(.roster(root: team.root)),
          .kill(id: worker.id)]

@@ -296,10 +296,11 @@ final class HostRuntime: LeadRuntime {
             agent = known
         case .session(let id):
             hosted = try HostCall.sessions(socket: socket)
-            guard let tty = hosted.first(where: { $0.id.uuidString == id && $0.isLive })?.tty, let pid = Self.agentPid(on: tty) else {
+            guard let tty = hosted.first(where: { $0.id.uuidString == id && $0.isLive })?.tty,
+                  let found = ProcessTable.trySnapshot().flatMap({ LeadAgent.running(on: tty, session: id, in: $0) }) else {
                 throw HostCall.Failure(description: "That session isn't running an agent.")
             }
-            agent = LeadAgent(pid: pid, tty: tty, session: id)
+            agent = found
         }
         let session = hosted.first { hosted in hosted.isLive && (agent.session.map { $0 == hosted.id.uuidString } ?? (hosted.tty == agent.tty)) }
         // Not a window session: only its hooks can take the message.
@@ -382,7 +383,7 @@ final class HostRuntime: LeadRuntime {
     /// The oldest agent process on a terminal (the session's own, not a tool it runs); nil when there's none, or the
     /// process table couldn't be read in time.
     static func agentPid(on tty: String) -> Int32? {
-        ProcessTable.trySnapshot()?.values.filter { $0.tty == tty && $0.agent != nil }.min { $0.startTime < $1.startTime }?.pid
+        ProcessTable.trySnapshot().flatMap { LeadAgent.running(on: tty, session: nil, in: $0) }?.pid
     }
 }
 
@@ -436,6 +437,8 @@ let toolset = MCPHostedToolset(attempt: {
     // The risk check's model pass (see `LeadRisk`): headless Claude, as the all-done summary's, from the diff's stat,
     // the contract and REVIEW.md only.
     toolset.riskModel = ClaudeHeadless.risk
+    // tell_lead goes only while the Mac-wide setting is on (the app's defaults; on unless set), read at each call.
+    toolset.leadMailOn = { LeadMail.isOn(UserDefaults(suiteName: LeadMail.defaultsDomain)) }
     // No tools: that's the host's answer, unless it couldn't be asked by then either.
     if toolset.tools.isEmpty && !hostAnswers(.standard) { return nil }
     // The lead's decision and progress logs go into the repository every few minutes (and after each merge), each

@@ -171,8 +171,10 @@ public struct TeamMessage: Equatable, Sendable {
         if line.hasPrefix(SteerReply.systemMarker + " ("), line.hasSuffix("):") {
             return .vibeSwitcher(String(line.dropFirst(SteerReply.systemMarker.count + 2).dropLast(2)))
         }
-        if line.hasPrefix(SteerReply.leadMarker), let end = line.range(of: ", another Claude session, not the user)") {
-            return .lead(String(line[line.index(line.startIndex, offsetBy: SteerReply.leadMarker.count)..<end.lowerBound]))
+        for marker in [SteerReply.leadMarker, SteerReply.peerLeadMarker] {
+            if line.hasPrefix(marker), let end = line.range(of: ", another Claude session, not the user)") {
+                return .lead(String(line[line.index(line.startIndex, offsetBy: marker.count)..<end.lowerBound]))
+            }
         }
         // Worded otherwise, but from them as the agent reads it.
         if line.hasPrefix(SteerReply.systemMarker) { return .vibeSwitcher("") }

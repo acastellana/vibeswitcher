@@ -57,6 +57,12 @@ extension LeadDelivery {
         /// Typed, but the box kept it (what it shows) and no turn started, one more Enter too (see `submitted`). It's
         /// in the box, not the inbox.
         case notSubmitted(String)
+        /// Typed into a working agent that takes typed input as steering (Codex): it gets it at its next step.
+        case typedWhileWorking
+        /// A working agent that takes messages only typed into its box (Codex: its hooks hand it nothing) whose box
+        /// couldn't take it now: the draft it holds (never cleared mid-turn: a ^C there stops the turn), or nil when
+        /// its screen couldn't be read or typed into. The message waits in the inbox and is typed in once its turn ends.
+        case atTurnEnd(draft: String?)
     }
 
     /// What Claude Code's input box shows: nothing typed, a draft, or no box at all (a dialog is on screen: a
@@ -239,6 +245,38 @@ extension LeadDelivery {
                                clear: (() -> Bool)? = nil, enter: (() -> Bool)? = nil, turnStarted: (() -> Bool)? = nil,
                                pause: () -> Void = {}, root: URL = VibePaths.root) throws -> Delivered {
         let post = { try SteerInbox.post(SteerMessage(text: text, from: sender, agentPid: agent.pid), tty: agent.tty, root: root) }
+        // Codex's hooks hand it nothing from the inbox (only Claude's do, see `vibeswitcher-hook`): mid-turn it takes
+        // a message typed into its box as steering, as the chat's composer sends it. Typed only into an empty box,
+        // never after a ^C (mid-turn that stops its turn); else it waits, typed in once the turn ends (`flush`).
+        if agent.agent == .codex, case .working = activity {
+            guard let screen, let typeInto, let shown = screen() else {
+                try post()
+                return .atTurnEnd(draft: nil)
+            }
+            switch box(in: shown) {
+            case .empty:
+                let prompt = typed(text, from: sender)
+                guard typeInto(prompt) else { break }
+                // Mid-turn a started turn says nothing: whether it went in is read off its box alone.
+                switch submitted(prompt, screen: screen, enter: enter, turnStarted: nil, pause: pause) {
+                case .typed: return .typedWhileWorking
+                case let other: return other
+                }
+            case .draft(let draft):
+                // This very message, typed before and not submitted (auto_advance tries again with clear_draft): it's
+                // in the box, and a copy in the inbox too would go in twice. The whole of it, not `holds`'s first 40
+                // characters: the marker (`[VibeSwitcher · from lead of …, not the user]`) fills those, so another of
+                // the lead's messages left there would pass for this one, and this one would go nowhere. Codex's box
+                // shows all of its text (`codexBox` reads up to 8 rows, and more isn't a box).
+                if isWhole(draft, typed(text, from: sender)) { return .notSubmitted(draft) }
+                try post()
+                return .atTurnEnd(draft: draft)
+            case .dialog:
+                break
+            }
+            try post()
+            return .atTurnEnd(draft: nil)
+        }
         switch activity {
         case .working, .unknown:
             try post()
@@ -331,6 +369,12 @@ extension LeadDelivery {
         guard let held = left() else { return .typed }
         guard let enter, enter() else { return .notSubmitted(held) }
         return left().map { .notSubmitted($0) } ?? .typed
+    }
+
+    /// Whether the box's `draft` is all of the typed `prompt`, however the box wraps it, and nothing else.
+    static func isWhole(_ draft: String, _ prompt: String) -> Bool {
+        let squeezed = { (text: String) in text.filter { !$0.isWhitespace } }
+        return squeezed(draft) == squeezed(prompt)
     }
 
     /// Whether the box's `draft` is the typed `prompt`: its start (the box wraps it), or Claude's stand-in for a long

@@ -7,6 +7,37 @@ import VibeCore
 /// what that would wait for), then resumed, and the addresses named afterwards with `dladdr`. In-process only: no
 /// other process is looked at, nothing is attached.
 final class ThreadStack: @unchecked Sendable {
+    /// A thread's scheduling priority now and its base (`THREAD_EXTENDED_INFO`: 47 a foreground app's main thread, 46
+    /// a background app's, 31 the default, 4 a throttled one's), and this process's task role (`TASK_CATEGORY_POLICY`:
+    /// 1 foreground application, 2 background, 6 non-UI, 7 default, 0 unspecified), read in process as `thread_info`
+    /// reads a thread's CPU time: nothing attached.
+    struct Priority: Equatable, Sendable {
+        var current: Int32
+        var base: Int32
+        var role: Int32
+    }
+
+    static func priority(of thread: thread_act_t) -> Priority? {
+        var info = thread_extended_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<thread_extended_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { thread_info(thread, thread_flavor_t(THREAD_EXTENDED_INFO), $0, &count) }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        var role = task_category_policy_data_t()
+        count = mach_msg_type_number_t(MemoryLayout<task_category_policy_data_t>.size / MemoryLayout<integer_t>.size)
+        var defaulted: boolean_t = 0
+        _ = withUnsafeMutablePointer(to: &role) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_policy_get(mach_task_self_, task_policy_flavor_t(TASK_CATEGORY_POLICY), $0, &count, &defaulted)
+            }
+        }
+        return Priority(current: info.pth_curpri, base: info.pth_priority, role: role.role.rawValue)
+    }
+
+    /// The watched thread's (`priority(of:)`).
+    var priority: Priority? { Self.priority(of: thread) }
+
     private let thread: thread_act_t
     private let capacity = 256
     private let buffer: UnsafeMutablePointer<UInt>

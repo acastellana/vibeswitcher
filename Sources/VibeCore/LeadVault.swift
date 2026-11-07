@@ -174,7 +174,7 @@ public struct LeadVault: Sendable {
         /// The app, or the repository's lead.
         case setHead(root: String, branch: String, commit: String)
         /// A message sealed for its sender (see `Book.maySeal`): the user's for the app only, the lead's for the app or
-        /// a lead, VibeSwitcher's for the app, a worker's or verifier's tool server about itself, or (auto_advance's
+        /// a lead (its own team's sessions, or tell_lead's for another project's lead), VibeSwitcher's for the app, a worker's or verifier's tool server about itself, or (auto_advance's
         /// reports) the lead's tool server for its own agent.
         case seal(SteerMessage)
         /// Which of these carry a valid seal.
@@ -195,6 +195,13 @@ public struct LeadVault: Sendable {
         case approve(root: String, task: String, commit: String)
         /// Whether you approved merging the task at exactly this commit.
         case approved(root: String, task: String, commit: String)
+        /// The repository's lead only: a push it asks you for (`LeadPush`), replacing an open one.
+        case requestPush(root: String, push: LeadPush.Request)
+        /// The open push request (`Reply.push`): the app, or the repository's lead.
+        case pushRequest(root: String)
+        /// The app only, on your click (Push or Decline): the open request with this id, handed over and taken off.
+        /// Nothing records an approval: the app pushes it itself (`LeadPush.settle`).
+        case settlePush(root: String, id: String)
         /// The workers and verifiers the vault knows of (`RosterEntry`), never a lead: the app's of every team (nil),
         /// or a repository's lead's of its own.
         case roster(root: String?)
@@ -237,6 +244,8 @@ public struct LeadVault: Sendable {
         case unaudited(review: LeadTask.Review?, reported: String?, evidence: LeadDoneEvidence? = nil)
         /// A session's id, lower case (`Request.walletSession`).
         case session(String)
+        /// A push request (`Request.pushRequest`, `settlePush`), or none.
+        case push(LeadPush.Request?)
     }
 
     /// The host said no, or couldn't be asked.
@@ -472,7 +481,7 @@ public struct LeadVault: Sendable {
         try VibePaths.writePrivate(data, to: url)
     }
 
-    static func hash(_ text: String) -> String {
+    public static func hash(_ text: String) -> String {
         SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
@@ -524,6 +533,8 @@ extension LeadVault {
             /// The evidence each task's worker gave with that done, by task (optional: older vaults, and dones from
             /// before evidence was asked for, have none).
             var evidence: [String: LeadDoneEvidence]?
+            /// The push the lead asked you for and you haven't clicked on yet (optional: older vaults have none).
+            var push: LeadPush.Request?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`, with the role and task each held.
@@ -854,7 +865,7 @@ extension LeadVault {
                 change(root, &changed) { $0.heads[branch] = commit }
                 return .ok
             case .seal(let message):
-                if let refusal = maySeal(message.from, caller: caller, agentSession: agentSession) { return .refused(refusal) }
+                if let refusal = maySeal(message, caller: caller, agentSession: agentSession) { return .refused(refusal) }
                 return .seal(SteerInbox.seal(message, key: SymmetricKey(data: state.senderKey)))
             case .verify(let messages):
                 let key = SymmetricKey(data: state.senderKey)
@@ -931,6 +942,23 @@ extension LeadVault {
                 return .ok
             case .approved(let root, let task, let commit):
                 return .approved(team(root)?.approvals?[task]?.contains(commit.lowercased()) == true)
+            case .requestPush(let root, var push):
+                // The lead asks; only your click in the app pushes (`settlePush`).
+                guard isLead(caller, root) else { return .refused("Only the repository's lead asks to push.") }
+                if let invalid = LeadPush.invalid(push) { return .refused(invalid) }
+                push.commit = push.commit.lowercased()
+                change(root, &changed) { $0.push = push }
+                return .ok
+            case .pushRequest(let root):
+                guard caller == .app || isLead(caller, root) else { return .refused("Only VibeSwitcher or the repository's lead reads its push request.") }
+                return .push(team(root)?.push)
+            case .settlePush(let root, let id):
+                // Your click, in the app's own process: not the lead that asked, nor any session, whatever it writes
+                // or answers anywhere.
+                guard caller == .app else { return .refused("Only VibeSwitcher settles a push request, when you click Push or Decline in it.") }
+                guard let push = team(root)?.push, push.id == id else { return .push(nil) }
+                change(root, &changed) { $0.push = nil }
+                return .push(push)
             case .setReview(let root, let task, let review):
                 // A worker that lowered its own task's level would merge with no verdict: the lead's word only.
                 guard isLead(caller, root) else { return .refused("Only the repository's lead sets a task's review level.") }
@@ -1029,22 +1057,44 @@ extension LeadVault {
         }
 
         /// Why `caller` may not seal a message as `sender`'s (nil: it may). The user's words are the app's to seal;
-        /// a lead's, a lead's (or the app's, passing them on); VibeSwitcher's, the app's, but for the reports a
+        /// a lead's, the app's (passing them on) or a lead's own, under its own project's name only (`leadNames`), so a
+        /// lead's Bash can't sign a line as another project's lead; VibeSwitcher's, the app's, but for the reports a
         /// worker's or verifier's tool server sends its lead (`worker <task>`, `verifier <task>`), which the
         /// session holding that role seals about itself, and auto_advance's (`LeadAdvance.sender`), which the lead's
         /// own tool server runs: a lead's session seals those only for an agent in that same session (`agentSession`),
         /// itself. So a worker's Bash can't seal a line as its lead's, the witness's, auto_advance's or another
         /// worker's (it can only say, as itself, what its report tool says), and a lead can't pass auto_advance's
         /// word on to anyone else.
-        private func maySeal(_ sender: SteerMessage.Sender, caller: Caller, agentSession: String?) -> String? {
+        ///
+        /// A lead's own line is sealed for its recipient too (`agentSession`, the session the message's agent runs in):
+        /// `lead of <project>` only for a session of that project's team, which its delivery marks as that session's
+        /// own lead's; tell_lead's `the lead of <project>` only for another project's lead. So a lead can't post its
+        /// honest name into another team's worker's or verifier's inbox and pass for that team's lead. A board note
+        /// (`LeadNote`, agent pid 0) is no agent's: no inbox line for pid 0 reaches one.
+        private func maySeal(_ message: SteerMessage, caller: Caller, agentSession: String?) -> String? {
             if caller == .app { return nil }
-            switch sender {
+            switch message.from {
             case .user:
                 return "Only VibeSwitcher seals a message as the user's."
-            case .lead:
-                guard case .session(let session) = caller,
-                      state.teams.values.contains(where: { $0.members.contains { $0.role == .lead && $0.session == session } })
-                else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
+            case .lead(let name):
+                guard case .session(let session) = caller else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
+                let leads = { (team: Team, session: String) in team.members.contains { $0.role == .lead && $0.session == session } }
+                let led = state.teams.values.filter { leads($0, session) }
+                guard !led.isEmpty else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
+                let named = led.filter { Book.leadNames(root: $0.root).contains(name) }
+                guard !named.isEmpty else {
+                    return "A lead seals a message as a lead's only under its own project's name (lead of <project>, or tell_lead's the lead of <project>)."
+                }
+                if LeadMail.isPeer(name) {
+                    guard let to = agentSession, state.teams.values.contains(where: { leads($0, to) && !leads($0, session) }) else {
+                        return "A lead seals tell_lead's name (the lead of <project>) only for another project's lead."
+                    }
+                    return nil
+                }
+                if message.agentPid == 0 { return nil }
+                guard let to = agentSession, named.contains(where: { team in team.members.contains { $0.session == to } }) else {
+                    return "A lead seals its line (lead of <project>) only for a session of its own team: another project's lead takes tell_lead."
+                }
                 return nil
             case .system(let about) where about == LeadAdvance.sender:
                 guard case .session(let session) = caller, agentSession == session,
@@ -1059,6 +1109,14 @@ extension LeadVault {
                 else { return "Only VibeSwitcher seals a message as its own (a worker or verifier, only its report about its own task)." }
                 return nil
             }
+        }
+
+        /// The names a lead's own messages carry, by its project (`LeadMail.project`): `lead of <project>` to its team
+        /// (`LeadToolset`'s messages and notes), `the lead of <project>` to another project's lead (tell_lead's
+        /// `LeadMail.sender`). Exactly these: a receiver reads whatever name is sealed, look-alikes included.
+        static func leadNames(root: String) -> Set<String> {
+            let project = LeadMail.project(of: root)
+            return ["lead of " + project, LeadMail.senderPrefix + project]
         }
 
         private func isLead(_ caller: Caller, _ root: String) -> Bool {

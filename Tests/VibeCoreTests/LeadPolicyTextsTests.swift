@@ -202,6 +202,11 @@ struct LeadPolicyTextsTests {
             }
             // git under another name too, and nothing a worker may run (its allow rules).
             #expect(lead.contains("`env git`") && worker.contains("`/usr/bin/git`"))
+            // The remotes' writes, both spellings of removing one (`noRoleMayChangeTheRemotes`).
+            for command in ["git remote set-url", "git remote rm", "git remote remove", "git remote -v add"] {
+                #expect(lead.contains("`\(command)`") && worker.contains("`\(command)`"), "missing \(command)")
+            }
+            #expect(!worker.contains("`git remote -v`,") && !worker.contains("`git remote show`"))
             let listed = LeadLaunch.deniedGit(.worker, base: workflow.base, records: workflow.recordsDir)
             for allowed in ["git merge \(workflow.base)", "git commit", "git add", "git rebase --continue"] { #expect(!listed.contains(allowed)) }
             #expect(lead.contains("Workers are refused these git commands, so no brief may need one: " + LeadPrompts.deniedGit(workflow) + "."))

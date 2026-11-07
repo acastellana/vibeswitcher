@@ -106,7 +106,14 @@ struct BriefingKeyTests {
         // A slow shell: a refresh meanwhile is dropped at once, and a second reader waits for that shell's value.
         shell.held = true
         let first = Task.detached { key.read() }
-        shell.entered.wait()
+        // Awaited, never waited for on the main thread: the read runs on Swift's shared pool, which a full suite's
+        // blocked tests can keep busy, and a main thread held meanwhile holds up every main-actor test (2026-11-05).
+        guard await until({ shell.entered.wait(timeout: .now()) == .success }) else {
+            shell.held = false
+            shell.gate.signal()
+            Issue.record("the first read never reached the shell")
+            return
+        }
         clock.advance(BriefingKey.refreshInterval * 2)
         #expect(!key.refresh())
         let second = Task.detached { key.read() }

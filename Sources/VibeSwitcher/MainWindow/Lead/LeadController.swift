@@ -46,6 +46,7 @@ struct LeadFiles {
     private var boards: [String: (stamp: Stamp, board: LeadBoard)] = [:]
     private var decisionLists: [String: (stamp: Stamp, decisions: [LeadDecision])] = [:]
     private var workflows: [String: (stamp: Stamp, recordsDir: String?)] = [:]
+    private var mailLists: [String: (stamp: Stamp, mail: [LeadMail.Record])] = [:]
     /// How many times a file was read (for tests).
     private(set) var fileReads = 0
     /// The lead each board names, for what the 3 s refresh needs of it (which lead sessions are replaced, which one
@@ -72,6 +73,19 @@ struct LeadFiles {
         return decisions
     }
 
+    /// The project's lead mail (`LeadMail.load`, oldest first): read again only when its file changed.
+    mutating func mail(_ root: String) -> [LeadMail.Record] {
+        guard let stamp = Stamp(LeadMail.file(root: root).path) else {
+            mailLists[root] = nil
+            return []
+        }
+        if let kept = mailLists[root], kept.stamp == stamp { return kept.mail }
+        fileReads += 1
+        let mail = LeadMail.load(root: root)
+        mailLists[root] = (stamp, mail)
+        return mail
+    }
+
     /// Where the lead's records are kept (`BoardStore.recordsDir`, from its workflow.md).
     mutating func recordsDir(_ root: String) -> String? {
         let store = BoardStore(root: root)
@@ -88,6 +102,7 @@ struct LeadFiles {
         boards = boards.filter { roots.contains($0.key) }
         decisionLists = decisionLists.filter { roots.contains($0.key) }
         workflows = workflows.filter { roots.contains($0.key) }
+        mailLists = mailLists.filter { roots.contains($0.key) }
     }
 }
 
@@ -354,6 +369,9 @@ final class LeadController: ObservableObject {
     /// Where each running lead's records are kept (`BoardStore.recordsDir`, nil: in .vibeswitcher), by repository
     /// root, read with its board: the Team tab says so without reading workflow.md as it draws.
     @Published private(set) var recordsDirs: [String: String?] = [:]
+    /// Each running lead's messages to and from other projects' leads (`LeadMail`), newest first, by repository root:
+    /// read with its board and made into the Team tab's feed off the main thread.
+    @Published private(set) var mail: [String: LeadMailFeed] = [:]
     /// The Team rows as last made, for the Team tab and the sidebar (see `TeamRowsCache`).
     let teamRows = TeamRowsCache()
     /// The Team view's plain-language lines.
@@ -362,6 +380,10 @@ final class LeadController: ObservableObject {
     let allDone: AllDoneWatch
     /// The leads' bases, when they moved other than through merges (see `BaseMoves`).
     let baseMoves: BaseMoves
+    /// The pushes the leads ask you for (push_remote), each a card you click Push or Decline on (see `PushRequests`).
+    let pushes: PushRequests
+    /// The roots with a push request open: it counts with the lead's questions (the sidebar's badge, `leadsAsking`).
+    @Published private(set) var pushesOpen: Set<String> = []
     /// The Mac kept awake while a team works.
     let keepAwake: KeepAwake
 
@@ -524,6 +546,7 @@ final class LeadController: ObservableObject {
         let reads = LeadReads()
         self.reads = reads
         baseMoves = BaseMoves(vault: vault, reads: reads)
+        pushes = PushRequests(vault: vault)
         allDone = AllDoneWatch(reads: reads)
         self.claudeCommand = claudeCommand
         installer = ToolInstaller(host: host)
@@ -560,6 +583,23 @@ final class LeadController: ObservableObject {
         }
         // A move it asks about is a card in the lead's chat, no alert: you commit on the base yourself. Only a merge it
         // refused waits on you (`AlertRules.baseMoved`, at each refresh).
+        pushes.onChange = { [weak self] in
+            guard let self else { return }
+            let open = Set(self.pushes.open.keys)
+            if open != self.pushesOpen { self.pushesOpen = open }
+            self.store.leadsAsking = self.asking(self.boards)
+        }
+        pushes.onAsk = { [weak self] root, request in
+            guard let self else { return }
+            let project = (root as NSString).lastPathComponent
+            self.alert(.broken(title: "\(project)'s lead asks to push \(request.branch)",
+                               body: "\(LeadToolset.commits(request.ahead)) to \(request.target). Push or Decline in its chat.",
+                               leadTTY: self.boards[root]?.leadTTY, key: "push-\(request.id)"))
+        }
+        // The outcome of your click, to the lead, as VibeSwitcher's (the progress log has it: `LeadPush.settle`).
+        pushes.onSettled = { [weak self] root, request, outcome in
+            self?.deliver(LeadPush.message(request, outcome), from: .system("VibeSwitcher, on the user's click"), root: root)
+        }
         baseMoves.onTaken = { [weak self] root, move, taker in
             guard let self else { return }
             let span = "\(move.count) on \(move.branch) (\(move.from.prefix(8)) → \(move.to.prefix(8)))"
@@ -620,7 +660,15 @@ final class LeadController: ObservableObject {
     /// A lead row's open questions for you and how many of them block (as `LeadBoard.openQuestions` and
     /// `blockingQuestions` count them); nil if the row isn't a lead with a board.
     func questions(for row: WindowRow) -> (open: Int, blocking: Int)? {
-        lead(for: row).flatMap { questionCounts[$0.root] }
+        lead(for: row).flatMap { lead in
+            let push = pushesOpen.contains(lead.root) ? 1 : 0
+            return questionCounts[lead.root].map { ($0.open + push, $0.blocking) } ?? (push > 0 ? (push, 0) : nil)
+        }
+    }
+
+    /// The roots whose lead needs you: a question open on its board, or a push request.
+    private func asking(_ boards: [String: LeadBoard]) -> Set<String> {
+        LeadTeams.asking(boards).union(pushesOpen.map { ($0 as NSString).standardizingPath })
     }
 
     /// Counts the questions of each board whose questions changed since `old`.
@@ -1351,16 +1399,18 @@ final class LeadController: ObservableObject {
             for root in roots { loaded[root] = files.board(root) }
             let decisions = Dictionary(uniqueKeysWithValues: roots.map { ($0, files.decisions($0)) })
             let records = Dictionary(uniqueKeysWithValues: roots.map { ($0, files.recordsDir($0)) })
+            let mail = Dictionary(uniqueKeysWithValues: roots.map { ($0, LeadMailFeed(files.mail($0), project: LeadMail.project(of: $0))) })
             let refusals = Dictionary(uniqueKeysWithValues: roots.compactMap { root in LeadVault.BaseMoveRefusal.load(root: root).map { (root, $0) } })
             files.keep(roots)
             let teams = Dictionary(uniqueKeysWithValues: loaded.map { root, board in
                 (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: sessions, observer: observer))
             })
             let finished = Set(loaded.flatMap { root, board in LeadTeams.finished(Array(hosted.values), root: root, board: board) })
-            return (fired, loaded, decisions, teams, records, refusals, finished)
-        }) { [weak self] fired, loaded, decisions, teams, records, refusals, finished in
+            return (fired, loaded, decisions, teams, records, refusals, finished, mail)
+        }) { [weak self] fired, loaded, decisions, teams, records, refusals, finished, mail in
             guard let self else { return }
             if records != self.recordsDirs { self.recordsDirs = records }
+            if mail != self.mail { self.mail = mail }
             self.refreshed(roots: roots, fired: fired, loaded: loaded, decisions: decisions, teams: teams, refusals: refusals,
                            finished: finished)
             self.refreshing = false
@@ -1381,10 +1431,11 @@ final class LeadController: ObservableObject {
         let previous = boards
         if loaded != boards { boards = loaded }
         // A lead with a question for you open needs you, its terminal idle or not.
-        store.leadsAsking = LeadTeams.asking(loaded)
+        store.leadsAsking = asking(loaded)
         teamRows.keep { key in roots.contains { key == $0 || key.hasSuffix("|" + $0) } }
         if read != decisions { decisions = read }
         baseMoves.look(roots)
+        pushes.look(roots)
         for (root, board) in loaded {
             for event in AlertRules.look(previous: previous[root], board: board, project: (root as NSString).lastPathComponent,
                                          seen: &seenQuestions, launchedAt: launchedAt) {

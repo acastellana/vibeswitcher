@@ -234,4 +234,19 @@ The user said not to wait and chose to spend the limit. The task changes a guard
 ## 2026-11-07 12:49:02 Settings › Project lead gets "Ignore usage limits", off by default and Mac-wide in mac-limits.json (task a-settings-option-to, audited, started with override_usage). When it's on: no 80% hold on starts, audits or auto_advance; no Boost usage veto; agent: auto stays on Claude unless Claude is refusing at a reached limit. Usage stays visible, marked "(limits ignored)". This supersedes, for users who turn it on, the 80% hold and the Codex routing in the 2026-11-02 08:18 decision.
 
 The user asked for it on 2026-11-07 ("a setting to disable worrying about quota"). The lead judged that "worrying" covers all three ways usage changes behaviour, not only the 80% start hold. Load and battery holds stay as they are.
+## 2026-11-04 22:18:21 Lead-to-lead messaging goes through a VibeSwitcher channel, tell_lead. - VibeSwitcher fills in the sender from the vault's role binding, never from server arguments. - Delivery is immediate. - Secret-shaped text is refused, and messages are capped in size and rate. - Each message is logged privately in .vibeswitcher/; the app shows them and the user can turn the channel off. - Raw Claude Code SendMessage and ListAgents are denied to every role VibeSwitcher starts. - Raw cross-session messages are unverified information, never approval. - docs/lead/ never holds message content or another project's name.
+
+The user wants lead-to-lead messaging kept and made truly safe, and chose immediate delivery with full visibility and an off switch (4D5835E0). Raw cross-session messages can be spoofed (any session can take a --name), workers can use them, the user can't see them, and nothing guards secrets. Repo records are pushed to GitHub, so message content stays out of them.
+
+## 2026-11-04 22:42:35 The lead syncs with GitHub through fixed-shape VibeSwitcher tools, not raw git: - fetch_remote and merge_remote: a true merge, tested before main moves, with lead records merged by union. - push_remote: each push needs the user's one click in the app, which pushes exactly the approved sha as a fast-forward, never forced. LeadLaunch's deny rules on raw git fetch and push stay.
+
+The user wants the lead to handle the GitHub sync and chose "ask me each time: one click in the app" for pushes (F6BE148C). Raw fetch and push can move main or reach any URL, so the shape is fixed in audited code. Pushing is outward-facing, so only the user's click in the app approves it.
+
+## 2026-11-05 00:30:32 Security contracts list every path to the protected property (every writer of the data, every channel, every trust on first use), not only the new feature's own path, and each path gets an acceptance check.
+
+Lead mail's first contract made tell_lead unforgeable but missed direct inbox seals under another name, honest-name seals into another team, and the remote URL's trust on first use. That cost 3 follow-up tasks and audits (retrospective, 2026-11-05).
+
+## 2026-11-05 00:30:33 After record_incident, in the same turn, set auto_advance: false on the planned task, sharpen its contract, then set auto_advance back to true.
+
+turn-this-incident-into-9 auto-started on the generic brief before the sharpened contract landed (2026-11-03). If it happens again despite this, make a product task so incident tasks wait for the lead's contract.
 

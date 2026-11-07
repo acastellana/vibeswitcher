@@ -352,12 +352,12 @@ import Testing
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
         #expect(try build(["VIBESWITCHER_HEAVY_NCPU": "12", "VIBESWITCHER_HEAVY_SLOTS": "3", "VS_HEAVY_CORES": nil])
-                == "build -j 2 -Xswiftc -j2 --build-tests")
+                == "build --build-system native -j 2 -Xswiftc -j2 --build-tests")
         // vs-heavy's command itself: the slot held (VIBESWITCHER_TEST_LOCK) and started by this process.
         let inner: [String: String?] = ["TEST_UNDER_LOAD_INNER": "\(ProcessInfo.processInfo.processIdentifier)",
                      "VIBESWITCHER_TEST_LOCK": locks.appendingPathComponent("test-build.lock").path]
-        #expect(try build(inner.merging(["VS_HEAVY_CORES": "5"]) { $1 }) == "build -j 2 -Xswiftc -j3 --build-tests")
-        #expect(try build(inner.merging(["VS_HEAVY_CORES": nil]) { $1 }) == "build --build-tests")
+        #expect(try build(inner.merging(["VS_HEAVY_CORES": "5"]) { $1 }) == "build --build-system native -j 2 -Xswiftc -j3 --build-tests")
+        #expect(try build(inner.merging(["VS_HEAVY_CORES": nil]) { $1 }) == "build --build-system native --build-tests")
     }
 
     /// The test process's home is the one its environment names. Under the harness (each run on a home of its own),

@@ -412,6 +412,17 @@ struct ClaudeDictationTests {
 
     // MARK: - Against FakeClaude's /voice
 
+    /// A harness wait that times out says when the main thread was held for seconds at once meanwhile (another
+    /// main-actor test blocking it, 2026-11-05), and says nothing of the kind for its own 20 ms looks.
+    @Test func aTimedOutWaitSaysTheMainThreadWasHeld() {
+        let held = MainThreadHeld()
+        let start = Date()
+        for look in 0...50 { held.look(now: start.addingTimeInterval(Double(look) * 0.02)) }
+        #expect(held.said == "")
+        held.look(now: start.addingTimeInterval(1 + 12))
+        #expect(held.said == " (the main thread was held 12 s at once meanwhile, by something else there)", "\(held.said)")
+    }
+
     /// The harness's session, as the window gives it to dictation, a message sent over a dictation cancelling it as the
     /// window wires it; `now`: the runs' clock; `shown`: told the spaces in Claude's box of each read once a run has
     /// handled it.
