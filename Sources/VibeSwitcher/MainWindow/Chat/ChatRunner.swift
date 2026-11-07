@@ -17,6 +17,57 @@ enum RunRefusal {
     static func notWritten(_ error: Error) -> String {
         "Not run: its script file couldn't be written (\(error.localizedDescription))."
     }
+
+    // A shell request card's Run (`ShellDesk.run`): it starts a new shell session, so its reasons are about that start.
+    static let shellGone = "Not run: this shell request is gone (dismissed, or its session ended)."
+    static let shellAnswered = "Not run: this shell request was already answered meanwhile."
+    static let shellExpired = "Not run: this shell request expired (30 minutes without an answer). The agent can ask again."
+    static func shellNotRecorded(_ error: Error) -> String {
+        "Not run: its answer couldn't be written (\(error.localizedDescription)), so the shell wasn't started."
+    }
+    static func shellNotStarted(_ why: String) -> String { "Not run: the shell session didn't start (\(why))." }
+}
+
+/// What a Run button shows: Run; Sent for a moment once it went; Not run for a while after a refusal, with why in its
+/// tooltip. A code block's Run (`RunButton`) and a shell request card's (`ShellCard`) show the same.
+enum RunShown: Equatable {
+    case ready, sent
+    case refused(String)
+
+    init(_ outcome: RunOutcome) {
+        switch outcome {
+        case .ran: self = .sent
+        case .refused(let reason): self = .refused(reason)
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .ready: return "Run"
+        case .sent: return "Sent"
+        case .refused: return "Not run"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .ready: return "play.fill"
+        case .sent: return "checkmark"
+        case .refused: return "exclamationmark.circle"
+        }
+    }
+
+    /// Why it didn't run, when it didn't.
+    var reason: String? { if case .refused(let reason) = self { return reason } else { return nil } }
+
+    /// How long it shows before Run is back.
+    var lasts: TimeInterval {
+        switch self {
+        case .ready: return 0
+        case .sent: return 1.5
+        case .refused: return 4
+        }
+    }
 }
 
 /// Runs a code block's command in the selected session (Run, next to Copy). One object for the chat's lifetime: what
@@ -44,28 +95,19 @@ final class ChatRunner: ObservableObject {
 struct RunButton: View {
     @ObservedObject var runner: ChatRunner
     let runnable: RunnableCommand.Runnable
-    @State private var shown: Shown = .ready
+    @State private var shown: RunShown = .ready
     /// Which click `shown` is for: an earlier click's timer doesn't put back a later one's.
     @State private var click = 0
-
-    enum Shown: Equatable {
-        case ready, sent
-        case refused(String)
-    }
 
     var body: some View {
         if let way = runner.way {
             Button {
                 Self.run(runnable, way: way, with: runner,
                          confirm: { Self.confirmation($0, way: way).runModal() == .alertFirstButtonReturn }) { outcome in
-                    switch outcome {
-                    case .ran?: show(.sent, for: 1.5)
-                    case .refused(let reason)?: show(.refused(reason), for: 4)
-                    case nil: break
-                    }
+                    if let outcome { show(RunShown(outcome)) }
                 }
             } label: {
-                Label(label, systemImage: symbol).font(.system(size: 10.5))
+                Label(shown.label, systemImage: shown.symbol).font(.system(size: 10.5))
             }
             .buttonStyle(.borderless)
             .chatRowControl()
@@ -73,38 +115,23 @@ struct RunButton: View {
         }
     }
 
-    private var label: String {
-        switch shown {
-        case .ready: return "Run"
-        case .sent: return "Sent"
-        case .refused: return "Not run"
-        }
-    }
-
-    private var symbol: String {
-        switch shown {
-        case .ready: return "play.fill"
-        case .sent: return "checkmark"
-        case .refused: return "exclamationmark.circle"
-        }
-    }
-
     private func help(_ way: RunnableCommand.Way) -> String {
-        if case .refused(let reason) = shown { return reason }
+        if let reason = shown.reason { return reason }
         let typed = runnable.typed(way)
         return way == .shell ? "Runs it at this terminal's shell prompt: \(typed)" : "Runs it in this session: \(typed)"
     }
 
-    private func show(_ state: Shown, for seconds: TimeInterval) {
+    private func show(_ state: RunShown) {
         click += 1
         let mine = click
         shown = state
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { if click == mine { shown = .ready } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + state.lasts) { if click == mine { shown = .ready } }
     }
 
     /// Asks first when it must (`confirm`), checks the session is still the one asked about and takes commands the
     /// same way, writes a script's file and has the runner type it. `done`: nil when cancelled; refused with why not
-    /// (also told through `runner.refused`; the script's file goes then, unless an earlier Run left it there).
+    /// (also told through `runner.refused`; the script's file goes then, unless an earlier Run left it there). A refusal
+    /// says why in words and makes no sound, as a shell request card's Run (`ShellDesk.run`).
     static func run(_ runnable: RunnableCommand.Runnable, way: RunnableCommand.Way, with runner: ChatRunner,
                     confirm: (RunnableCommand.Runnable) -> Bool, done: @escaping (RunOutcome?) -> Void = { _ in }) {
         let session = runner.session()
@@ -112,7 +139,6 @@ struct RunButton: View {
         var wrote: URL?
         func refuse(_ reason: String) {
             if let wrote { try? FileManager.default.removeItem(at: wrote) }
-            NSSound.beep()
             runner.refused(reason)
             done(.refused(reason))
         }

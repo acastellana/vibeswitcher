@@ -3,12 +3,16 @@ import Foundation
 import VibeCore
 
 /// The shells agents asked for (`ShellAsk`, `vs-shell run`), as cards in the asking session's chat: who asks, the
-/// folder, the exact command, Run and Decline. Nothing starts until the user presses Run (`act(.run)`), unless
+/// folder, the exact command, Run and Decline. Nothing starts until the user presses Run (`run`), unless
 /// Settings › Agents lets agents open shells without asking (`atOnce`): then a request starts as it's first seen, and its
 /// card records that. Run starts an ordinary New Shell session (`launch`, with `ShellAsk.spawnRequest`). A request
 /// unanswered for 30 minutes expires. What became of each (started, with the new session's name; declined; expired;
 /// couldn't start) goes to the asking session as a message (`deliver`), again at a later look until it reached it or the
 /// session is gone.
+///
+/// Run follows the chat's one Run rule (`RunOutcome`, `RunRefusal`, `RunShown`): it ends in ran, or in a "Not run: …"
+/// line that the card shows (`refused`) and its button's tooltip says, never in a bare sound. What it doesn't share is
+/// the typing: the command is given to the new session's shell at launch, never typed into any terminal.
 ///
 /// Only a request the session host stamped (`verifyStamps`) for a session it runs (`sessionNames`) gets a card, and
 /// only such a request is ever started: what's written into the folder some other way is never shown nor run. What
@@ -36,6 +40,9 @@ final class ShellDesk: ObservableObject {
     enum Action { case run, decline, dismiss }
 
     @Published private(set) var cards: [Card] = []
+    /// Why a card's last Run didn't go, by request id ("Not run: …", `RunRefusal`), shown on the card for a while
+    /// (`RunShown.lasts`).
+    @Published private(set) var refused: [String: String] = [:]
 
     let folder: URL
     /// The sessions the host runs, by lower-case id: the window's name for each (main thread).
@@ -59,6 +66,8 @@ final class ShellDesk: ObservableObject {
     /// On main: requests seen this run (one first seen while `atOnce` is on starts then), and messages under way.
     private var seen: Set<String> = []
     private var telling: Set<String> = []
+    /// Which Run each `refused` line is for: an earlier one's timer doesn't clear a later one's.
+    private var refusals = 0
     private var watch: DispatchSourceFileSystemObject?
     private var timer: DispatchSourceTimer?
 
@@ -121,13 +130,35 @@ final class ShellDesk: ObservableObject {
         }
     }
 
-    /// A button on a card: Run or Decline while it waits, Dismiss once answered.
+    /// A card's Run: starts its shell session once, then answers what came of it (main thread, once the cards are
+    /// redrawn): ran, or refused with why not in the chat's Run words (`RunRefusal`), which the card shows (`refused`).
+    func run(_ id: String, done: @escaping (RunOutcome) -> Void = { _ in }) {
+        let finish: (RunOutcome) -> Void = { [self] outcome in
+            refusals += 1
+            if case .refused(let reason) = outcome {
+                log("\(id): \(reason)")
+                let mine = refusals
+                refused[id] = reason
+                DispatchQueue.main.asyncAfter(deadline: .now() + RunShown.refused(reason).lasts) { [weak self] in
+                    if self?.refusals == mine { self?.refused[id] = nil }
+                }
+            } else {
+                refused[id] = nil
+            }
+            done(outcome)
+        }
+        guard let card = cards.first(where: { $0.id == id }) else { return finish(.refused(RunRefusal.shellGone)) }
+        guard card.isOpen else { return finish(.refused(RunRefusal.shellAnswered)) }
+        start(card.request, auto: false, done: finish)
+    }
+
+    /// A button on a card: Run (`run`) or Decline while it waits, Dismiss once answered.
     func act(_ action: Action, on id: String, then: @escaping () -> Void = {}) {
+        if action == .run { return run(id) { _ in then() } }
         guard let card = cards.first(where: { $0.id == id }) else { return then() }
         switch action {
         case .run:
-            guard card.isOpen else { return then() }
-            start(card.request, auto: false, then: then)
+            break
         case .decline:
             guard card.isOpen else { return then() }
             log("\(id) declined")
@@ -210,19 +241,22 @@ final class ShellDesk: ObservableObject {
         if drawn != cards { cards = drawn }
     }
 
-    /// Writes that it's starting (so it never starts twice), then starts it; the outcome is written and told.
-    private func start(_ request: ShellRequest, auto: Bool, then: @escaping () -> Void = {}) {
+    /// Writes that it's starting (so it never starts twice), then starts it; the outcome is written and told. `done`
+    /// once redrawn: ran when its session started, else refused with why not.
+    private func start(_ request: ShellRequest, auto: Bool, done: @escaping (RunOutcome) -> Void = { _ in }) {
         let time = now()
         work.async { [self] in
-            // Answered meanwhile (another click, Decline, expiry): nothing starts.
-            guard ShellAsk.answer(request.id, in: folder) == nil, time < request.expiresAt else {
-                return DispatchQueue.main.async { [self] in refresh(then: then) }
+            let redraw = { [self] (outcome: RunOutcome) in
+                DispatchQueue.main.async { [self] in refresh { done(outcome) } }
             }
+            // Answered meanwhile (another click, Decline, expiry): nothing starts.
+            guard ShellAsk.answer(request.id, in: folder) == nil else { return redraw(.refused(RunRefusal.shellAnswered)) }
+            guard time < request.expiresAt else { return redraw(.refused(RunRefusal.shellExpired)) }
             do {
                 try ShellAsk.record(ShellAsk.Answer(state: .starting, at: time, auto: auto), for: request.id, in: folder)
             } catch {
                 log("\(request.id) not started: couldn't record it (\(error))")
-                return DispatchQueue.main.async { [self] in refresh(then: then) }
+                return redraw(.refused(RunRefusal.shellNotRecorded(error)))
             }
             DispatchQueue.main.async { [self] in
                 launch(request) { [self] result in
@@ -230,10 +264,12 @@ final class ShellDesk: ObservableObject {
                     case .success(let shell):
                         log("\(request.id) started as \(shell.id)")
                         answer(request, ShellAsk.Answer(state: .started, at: now(), auto: auto, shell: shell.id.uuidString.lowercased(),
-                                                        name: shell.name), then: then)
+                                                        name: shell.name)) { done(.ran) }
                     case .failure(let why):
                         log("\(request.id) didn't start: \(why)")
-                        answer(request, ShellAsk.Answer(state: .failed, at: now(), auto: auto, why: why.description), then: then)
+                        answer(request, ShellAsk.Answer(state: .failed, at: now(), auto: auto, why: why.description)) {
+                            done(.refused(RunRefusal.shellNotStarted(why.description)))
+                        }
                     }
                 }
             }

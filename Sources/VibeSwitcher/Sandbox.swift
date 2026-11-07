@@ -379,6 +379,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         desk.atOnce = { [weak self] in self?.preferences.letAgentsOpenShells ?? false }
         desk.launch = { [weak self] request, then in
             guard let self else { return then(.failure(ShellAsk.Refusal("the sandbox is quitting"))) }
+            guard !shellLaunchFails else { return then(.failure(ShellAsk.Refusal("the sandbox's session host refused it: shell-fail on"))) }
             host.spawn(ShellAsk.spawnRequest(request, cols: 100, rows: 32)) { [weak self] result in
                 switch result {
                 case .success(let session):
@@ -390,6 +391,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
         return desk
     }()
+    /// `shell-fail on`: the sandbox's shell launches fail, as a refusing session host's would.
+    var shellLaunchFails = false
     /// The Wallet Manager peer the wallet desk sends to: the first made-up one, or none after `wallet-peer none`, or
     /// the Wallet Manager on this Mac after `wallet-peer this-mac`.
     var walletPeer = Driver.walletPeers[0].peerID
@@ -1151,7 +1154,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. every other cycle a worker shaped like a real one (a task on the lead's board, a transcript of MB MB of tool calls, default 4, its steer inbox, its chat and its terminal fed a build's output) ended by the role sweep, its footprint once removed, and RESULT soak-worker-growth-mb. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet, workers. With no MINUTES: the log so far"),
         ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m] [--data 0x…] [--reason TEXT]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh); --data makes it a contract call (an approve's calldata, say)"),
         ("shell-ask [COMMAND]", "the selected fake session's agent asks for a new shell running COMMAND (a made-up program unless given) in its folder, as vs-shell run does: its card shows in that chat, waiting for Run"),
-        ("shell-click run|decline|dismiss", "presses that button on the newest shell request card in the selected chat (run starts the shell session in the sandbox's own host and selects it)"),
+        ("shell-click run|decline|dismiss", "presses that button on the newest shell request card in the selected chat (run starts the shell session in the sandbox's own host and selects it, and prints ran or the card's \"Not run: …\" line)"),
+        ("shell-fail on|off", "on: the sandbox's own host refuses to start the shells a card's Run asks for, so the Run says why it didn't go; off: they start again"),
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint, transaction (tx HASH [EXPLORER URL], once signed and submitted) and the Wallet Manager's checks"),
         ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
         ("wallet-click send|retry|discard|browser|settings|dismiss", "presses that button on the newest wallet request card of the selected session, on its strip or not (dismiss takes a finished one off the strip; send goes to the sandbox's fake passage, never the real one; browser serves the local page but never opens a browser: wallet-page shows it; settings opens Settings › Wallet)"),
@@ -1380,10 +1384,17 @@ private final class Driver: NSObject, NSApplicationDelegate {
         guard let card = model.selectedRow?.hostID.flatMap({ shellDesk.cards(for: $0).last }) else {
             return reply(false, "no shell request in this chat: shell-ask first")
         }
-        shellDesk.act(action, on: card.id) { [weak self] in
+        let said: (String) -> Void = { [weak self] outcome in
             guard let self else { return }
             let now = shellDesk.cards.first { $0.id == card.id }
-            settle { reply(true, "\(what): the card is now \(now.map { ShellCard.title($0.state) } ?? "gone")") }
+            settle { reply(true, "\(what)\(outcome): the card is now \(now.map { ShellCard.title($0.state) } ?? "gone")") }
+        }
+        guard action == .run else { return shellDesk.act(action, on: card.id) { said("") } }
+        shellDesk.run(card.id) { outcome in
+            switch outcome {
+            case .ran: said(" ran")
+            case .refused(let reason): said(" (\(reason))")
+            }
         }
     }
 
@@ -2118,6 +2129,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
             boostWatch.look { [weak self] in self?.settle { reply(true, self?.boostWatch.state?.text ?? "not decided") } }
         case "shell-ask": shellAsk(rest, reply)
         case "shell-click": shellClick(rest, reply)
+        case "shell-fail":
+            guard rest == "on" || rest == "off" else { return reply(false, "shell-fail on|off") }
+            shellLaunchFails = rest == "on"
+            reply(true, "shell requests' Runs \(shellLaunchFails ? "fail to start" : "start")")
         case "wallet-ask": walletAsk(Array(words.dropFirst()), reply)
         case "wallet-card": let (ok, text) = walletCardText(); reply(ok, text)
         case "wallet-later":
