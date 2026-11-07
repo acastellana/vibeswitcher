@@ -429,4 +429,38 @@ struct LeadReceiptTests: LeadTeamFixture {
             + "worker 10 tokens (in 1, out 2, cache read 3, cache write 4; claude-opus-5-5) · est. $1.50 · 2 audit rounds, 1 re-roll, 1 merge rerun · "
             + "9 tests in the merge's run · 1 question to you, 4.0 min waiting · 3 commits abcdef12..12345678; rollback point abcdef12", "\(receipt.line)")
     }
+
+    /// Each receipt stamps `verifier.sameModel` from the models its worker and verifier were started on
+    /// (`launchedModels`), by family: Opus → Opus is the same model (an audit that wasn't independent), Opus → Fable not.
+    @Test func theVerifierTokensSayWhetherItRanOnTheWorkersModel() throws {
+        func receipt(worker: String?, verifier: String?, answered: [String] = ["claude-opus-5-5"]) -> LeadReceipt {
+            var task = LeadTask(slug: "t", title: "T", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""), status: .done)
+            task.worker = "w"
+            task.verifier = "v"
+            if let worker { task.launched(["w"], on: worker) }
+            if let verifier { task.launched(["v"], on: verifier) }
+            let usage = LeadReceipts.Usage(worker: LeadTokens(output: 1, sessions: 1, models: answered), verifier: LeadTokens(output: 1, sessions: 1, models: answered))
+            return LeadReceipt(task, ending: .merged, questions: [], usage: usage, now: 100)
+        }
+        let opusOpus = receipt(worker: "opus", verifier: "claude-opus-5-5")
+        #expect(opusOpus.verifier?.sameModel == true && opusOpus.worker?.sameModel == nil)
+        #expect(opusOpus.line.contains("on the worker's model"), "\(opusOpus.line)")
+        let opusFable = receipt(worker: "opus", verifier: "fable")
+        #expect(opusFable.verifier?.sameModel == false && !opusFable.line.contains("on the worker's model"))
+        // A worker on Claude's default ("") goes by the model that answered in its transcripts.
+        #expect(receipt(worker: nil, verifier: "opus").verifier?.sameModel == true)
+        #expect(receipt(worker: nil, verifier: "fable").verifier?.sameModel == false)
+        // Neither side known: not said.
+        #expect(receipt(worker: nil, verifier: "fable", answered: []).verifier?.sameModel == nil)
+        // A Codex worker is never the Claude verifier's model.
+        #expect(receipt(worker: "codex:gpt-6.1-sol", verifier: "opus").verifier?.sameModel == false)
+        // It's kept in the board's JSON as verifier.sameModel; receipts from before it decode with none.
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(opusOpus)) as? [String: Any]
+        #expect((json?["verifier"] as? [String: Any])?["sameModel"] as? Bool == true)
+        var old = try #require(json)
+        var verifier = try #require(old["verifier"] as? [String: Any])
+        verifier["sameModel"] = nil
+        old["verifier"] = verifier
+        #expect(try JSONDecoder().decode(LeadReceipt.self, from: JSONSerialization.data(withJSONObject: old)).verifier?.sameModel == nil)
+    }
 }

@@ -203,6 +203,9 @@ struct StatisticsModelTests {
         #expect(try figure("Cost per merged task").value == "$4.50")
         #expect(try figure("Implementation (worker)").value == "$6.00 · 67%")
         #expect(try figure("Verification (verifier)").value == "$3.00 · 33%")
+        // The verifier-model split and the sampled audits: none in the fixture's figures.
+        #expect(try figure("Important per audit, by verifier model").value == "–")
+        #expect(try figure("Sampled audits of review none").value == "–" && figure("Sampled audits of review none").detail == "none sampled in the range")
         // Not kept: said so, never 0.
         #expect(try figure("Waiting for its audit").value == "Not recorded")
         #expect(try figure("Merge reruns").value == "Not recorded")
@@ -211,6 +214,27 @@ struct StatisticsModelTests {
             #expect(figure.help?.isEmpty == false, "\(figure.label)")
             #expect(figure.spoken.hasPrefix("\(figure.label): \(figure.value)"))
         }
+    }
+
+    @Test func thePageShowsSampledAuditsWithTheirNAndAuditsSplitBySameModel() throws {
+        var all = QualityFigures()
+        all.merged = 20
+        all.audited = 10
+        all.sampledAudits = 4
+        all.sampledImportant = 1
+        all.sameModelAudited = 3
+        all.sameModelImportant = 1
+        all.otherModelAudited = 7
+        all.otherModelImportant = 7
+        let page = QualityPage(SetupQuality(all: all, byAgent: [], byModel: [], weeks: []), calendar: Self.utc)
+        func figure(_ label: String) throws -> StatisticsPage.Figure {
+            try #require(page.sections.flatMap(\.figures).first { $0.label == label })
+        }
+        let sampled = try figure("Sampled audits of review none")
+        #expect(sampled.value == "25%" && sampled.detail == "n = 4: 1 raised an Important finding")
+        let split = try figure("Important per audit, by verifier model")
+        #expect(split.value == "same 0.3 · other 1", "\(split.value)")
+        #expect(split.detail == "same model as the worker: 1 over 3 audited merges · another model: 7 over 7 audited merges")
     }
 
     @Test func theBreakdownSplitsClaudeCodexAndModels() throws {

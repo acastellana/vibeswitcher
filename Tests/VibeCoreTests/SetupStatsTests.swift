@@ -655,6 +655,50 @@ struct SetupStatsTests {
         #expect(quality.byModel[1].figures.rerolls == 1 && quality.byModel[1].figures.neededNobody == 0)
     }
 
+    /// The sampled audits of review none (`LeadAuditSample`): their Important rate with its n; and audited merges split
+    /// by whether their verifier ran on the worker's model (`LeadTokens.sameModel`).
+    @Test func itCountsSampledAuditsAndSplitsAuditsBySameModel() async throws {
+        let root = temp.url("quality-sampled")
+        let at = Self.date(2026, 10, 20, 12).timeIntervalSince1970
+        func audited(_ slug: String, important: Int, sameModel: Bool?, sampled: Bool? = nil) -> LeadTask {
+            var task = Self.merged(slug, at: at, model: "opus")
+            var ledger = LeadAuditLedger()
+            ledger.rounds = 1
+            ledger.passed = true
+            ledger.findings = (0..<important).map { Self.finding("F\($0 + 1)", .important, .fixed, closedBy: "verifier") }
+            task.audits = ledger
+            var verifier = Self.tokens(cost: 1)
+            verifier.sameModel = sameModel
+            task.receipt = LeadReceipt(ending: .merged, startedAt: at - 3600, endedAt: at, worked: 3600, worker: Self.tokens(cost: 1),
+                                       verifier: verifier, rounds: 1)
+            if let sampled { task.auditSample = LeadAuditSample(seed: 7, percent: sampled ? 100 : 0, commit: "c", at: at - 100) }
+            return task
+        }
+        var board = LeadBoard()
+        // Opus → Opus: a (2 Important) and b (0); Opus → Fable: c (1) and d (sampled, 1); e's receipt doesn't say.
+        // Sampled: d (Important) and f (clean); g drawn and not sampled; h sampled two weeks before the range.
+        var h = audited("h", important: 1, sameModel: nil, sampled: true)
+        h.auditSample?.at = Self.date(2026, 10, 6).timeIntervalSince1970
+        board.tasks = [audited("a", important: 2, sameModel: true), audited("b", important: 0, sameModel: true),
+                       audited("c", important: 1, sameModel: false), audited("d", important: 1, sameModel: false, sampled: true),
+                       audited("e", important: 3, sameModel: nil), audited("f", important: 0, sameModel: nil, sampled: true),
+                       audited("g", important: 1, sameModel: nil, sampled: false), h]
+        let project = try project("sampled", board: board, in: root)
+        let stats = await collector(home: root.appendingPathComponent("home"), now: Self.date(2026, 10, 21))
+            .collect(projects: [project.path], range: Self.fixtureDay)
+        let all = try #require(stats.quality?.all)
+        #expect(all.sampledAudits == 2 && all.sampledImportant == 1 && all.sampledImportantRate == 0.5)
+        #expect(all.sameModelAudited == 2 && all.sameModelImportant == 2 && all.sameModelImportantPerAudited == 1)
+        #expect(all.otherModelAudited == 2 && all.otherModelImportant == 2 && all.otherModelImportantPerAudited == 1)
+        // By model: all on opus here, so opus's split is everyone's.
+        #expect(stats.quality?.byModel.first?.figures.sampledAudits == 2)
+        #expect(stats.quality?.byAgent.last?.figures.sampledAudits == 0)
+        // None sampled, no receipt saying: no rate, never 0.
+        let bare = await collector(home: root.appendingPathComponent("home"), now: Self.date(2026, 10, 21))
+            .collect(projects: [project.path], range: DateInterval(start: Self.date(2026, 9, 1), end: Self.date(2026, 9, 2)))
+        #expect(bare.quality?.all.sampledImportantRate == nil && bare.quality?.all.sameModelImportantPerAudited == nil)
+    }
+
     @Test func itKeepsAnEightWeekTrend() async throws {
         let (project, home, _) = try qualityLayout()
         let stats = await collector(home: home, now: Self.date(2026, 10, 21)).collect(projects: [project.path], range: Self.fixtureDay)
