@@ -58,18 +58,18 @@ enum TestHosts {
             kill(pid, SIGTERM)
             // Its 10 s even in a cancelled test (past its time limit), where `eventually` would end at once: the host
             // ends as any other does, its log saying who signalled it, not cut off by a SIGKILL straight away.
-            let deadline = Date().addingTimeInterval(10)
-            while host.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+            let deadline = MacTime.real.awake() + 10
+            while host.isRunning, MacTime.real.awake() < deadline { Thread.sleep(forTimeInterval: 0.02) }
             if host.isRunning { kill(pid, SIGKILL) }
         }
         // Bounded, not `waitUntilExit`: a child something else reaped (a waitpid on a stale, reused pid) is never seen
         // to end by its `Process`, and waiting on it held a full run at 0 % CPU until vs-heavy's timeout (2026-11-06).
         // Gone from the process table (no zombie left) for 2 s while its `Process` still says running: reaped elsewhere.
-        let killed = Date().addingTimeInterval(hangGuard)
-        var goneSince: Date?
-        while host.isRunning, Date() < killed {
+        let killed = MacTime.real.awake() + hangGuard
+        var goneSince: TimeInterval?
+        while host.isRunning, MacTime.real.awake() < killed {
             if kill(pid, 0) != 0, errno == ESRCH {
-                if let since = goneSince { if Date().timeIntervalSince(since) > 2 { break } } else { goneSince = Date() }
+                if let since = goneSince { if MacTime.real.awake() - since > 2 { break } } else { goneSince = MacTime.real.awake() }
             } else {
                 goneSince = nil
             }

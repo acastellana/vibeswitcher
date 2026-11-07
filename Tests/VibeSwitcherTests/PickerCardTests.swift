@@ -471,11 +471,11 @@ while True:
         // after a minute (the test's own checks fail then, it doesn't hang).
         let read = sync.hostScreen
         hostRead = read
-        func answer(_ id: UUID, by deadline: Date, _ done: @escaping ([String]?) -> Void) {
+        func answer(_ id: UUID, by deadline: TimeInterval, _ done: @escaping ([String]?) -> Void) {
             read(id) { [weak self] lines in
                 guard let self else { return done(lines) }
                 if let wanted = self.awaited.first {
-                    guard let lines, wanted(lines) || Date() > deadline else {
+                    guard let lines, wanted(lines) || MacTime.real.awake() > deadline else {
                         return DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { answer(id, by: deadline, done) }
                     }
                     self.awaited.removeFirst()
@@ -492,7 +492,7 @@ while True:
         sync.hostScreen = { [weak self] id, done in
             self?.hostReads += 1
             self?.readsUnderWay += 1
-            answer(id, by: Date().addingTimeInterval(60)) { lines in
+            answer(id, by: MacTime.real.awake() + 60) { lines in
                 self?.readsUnderWay -= 1
                 done(lines)
             }
@@ -530,9 +530,9 @@ while True:
         h.chat.show(path: h.transcript.path, key: h.key)
         #expect(await until(timeout: 90) { h.chat.state == .ready })
         // The idle screen drawn: the replay is listening.
-        let deadline = Date().addingTimeInterval(90)
+        let deadline = MacTime.real.awake() + 90
         var idle = false
-        while !idle, Date() < deadline {
+        while !idle, MacTime.real.awake() < deadline {
             idle = await h.hostLines().contains { $0.contains("manual mode on") }
             if !idle { try await Task.sleep(nanoseconds: 50_000_000) }
         }
@@ -643,8 +643,8 @@ while True:
 
     /// `beat` each second for `seconds`.
     func beats(for seconds: TimeInterval) async throws {
-        let end = Date().addingTimeInterval(seconds)
-        while Date() < end {
+        let end = MacTime.real.awake() + seconds
+        while MacTime.real.awake() < end {
             await beat()
             try await Task.sleep(nanoseconds: 1_000_000_000)
         }
@@ -670,12 +670,12 @@ while True:
     /// `heartbeat`: the window's 1 s reading of the screen goes on meanwhile (`MainWindowController.followChat`).
     func typed(_ expected: String, timeout: TimeInterval = 10, heartbeat: Bool = false,
                sourceLocation: SourceLocation = #_sourceLocation) async throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        var beaten = Date.distantPast
+        let deadline = MacTime.real.awake() + timeout
+        var beaten = -TimeInterval.infinity
         var met = keys == expected
-        while !met, Date() < deadline {
-            if heartbeat, Date().timeIntervalSince(beaten) >= 1 {
-                beaten = Date()
+        while !met, MacTime.real.awake() < deadline {
+            if heartbeat, MacTime.real.awake() - beaten >= 1 {
+                beaten = MacTime.real.awake()
                 await beat()
             }
             try await Task.sleep(nanoseconds: 20_000_000)

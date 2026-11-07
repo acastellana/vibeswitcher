@@ -92,12 +92,12 @@ struct LeadAdvanceTests: LeadTeamFixture {
         /// it does. Awaited: it looks at the count of passes every 10 ms, the pool thread free between looks.
         @discardableResult
         func until(_ condition: () -> Bool) async -> Bool {
-            let deadline = Date().addingTimeInterval(60)
+            let deadline = MacTime.real.awake() + 60
             while true {
                 if condition() { return true }
                 let seen = passes
                 while passes == seen {
-                    guard Date() < deadline, !Task.isCancelled else { return false }
+                    guard MacTime.real.awake() < deadline, !Task.isCancelled else { return false }
                     try? await Task.sleep(nanoseconds: 10_000_000)
                 }
             }
@@ -107,8 +107,8 @@ struct LeadAdvanceTests: LeadTeamFixture {
         func settle() async {
             let before = passes
             lead.advancing?.trigger()
-            let deadline = Date().addingTimeInterval(60)
-            while passes == before, Date() < deadline, !Task.isCancelled { try? await Task.sleep(nanoseconds: 10_000_000) }
+            let deadline = MacTime.real.awake() + 60
+            while passes == before, MacTime.real.awake() < deadline, !Task.isCancelled { try? await Task.sleep(nanoseconds: 10_000_000) }
         }
 
         /// No more passes, the one under way ended: nothing writes the test's folders after it.
@@ -771,9 +771,9 @@ struct LeadAdvanceTests: LeadTeamFixture {
 
     /// Waits for `path` to be there (60 s at most): what a fake test command touches when it starts.
     func appears(_ path: String) async -> Bool {
-        let deadline = Date().addingTimeInterval(60)
+        let deadline = MacTime.real.awake() + 60
         while !FileManager.default.fileExists(atPath: path) {
-            guard Date() < deadline else { return false }
+            guard MacTime.real.awake() < deadline else { return false }
             await pause(0.05)
         }
         return true

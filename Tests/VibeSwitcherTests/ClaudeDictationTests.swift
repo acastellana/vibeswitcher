@@ -41,7 +41,8 @@ struct ClaudeDictationTests {
     func controller(key: String? = nil, session: @escaping (String) -> ClaudeVoiceSession?,
                     settings: ClaudeVoiceSettings = ClaudeVoiceSettings(),
                     microphone: DictationTests.FakeMicrophone = DictationTests.FakeMicrophone(),
-                    now: @escaping () -> Date = Date.init) -> (DictationController, DictationTests.FakeHTTP) {
+                    now: @escaping () -> Date = Date.init, time: MacTime = .real,
+                    schedule: @escaping (TimeInterval, @escaping () -> Void) -> () -> Void = DictationController.after) -> (DictationController, DictationTests.FakeHTTP) {
         let http = DictationTests.FakeHTTP()
         var transcription = OpenAITranscription(client: http)
         transcription.boundary = { "BOUNDARY" }
@@ -49,7 +50,7 @@ struct ClaudeDictationTests {
         defaults.set(true, forKey: DictationController.privacyNotedKey)
         let controller = DictationController(keyStore: AppProof.MemorySecret(key), recorder: DictationTests.FakeRecorder(), microphone: microphone,
                                              transcription: transcription, defaults: defaults, findKey: { nil }, background: { $0() },
-                                             now: now)
+                                             schedule: schedule, now: now, time: time)
         controller.claudeSession = session
         controller.claudeSettings = { _ in settings }
         return (controller, http)
@@ -382,6 +383,24 @@ struct ClaudeDictationTests {
             }
             now = end
         }
+    }
+
+    @Test func turningOnClaudeKeepsWatchingAfterTheMacSleeps() {
+        let timers = Timers()
+        var wall = Date(timeIntervalSinceReferenceDate: 0), awake: TimeInterval = 0
+        let time = MacTime(wall: { wall }, awake: { awake })
+        var shown = Self.screen()
+        let session = ClaudeVoiceSession(keys: { _ in true }, screen: { $0(shown) }, command: { _ in true })
+        let (controller, _) = controller(session: { _ in session }, time: time, schedule: timers.schedule)
+        controller.turnOnClaude("row")
+        wall += 250
+        awake += 0.1
+        timers.advance(by: ClaudeVoiceRun.readEvery * 2)
+        #expect(controller.notices["row"]?.text == "Turning on Claude's dictation…")
+        shown = Self.screen(above: "Voice mode enabled")
+        awake += 0.1
+        timers.advance(by: ClaudeVoiceRun.readEvery * 2)
+        #expect(controller.notices["row"]?.text.contains("Claude's dictation is on") == true)
     }
 
     /// A hold's first read slower than `firstRepeatWithin` (a loaded Mac): its second Space still goes within Claude's

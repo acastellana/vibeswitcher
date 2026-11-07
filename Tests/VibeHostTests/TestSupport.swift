@@ -29,7 +29,8 @@ private let fakeTheDisk: @convention(c) () -> Void = {
 }
 
 /// How long a wait may go on before the test calls it hung. Every wait ends as soon as what it waits for happens;
-/// this is only a guard, sized for a Mac running several suites at once (load 100+), never a measure of speed.
+/// This counts awake time through `MacTime`, so a sleep cannot exhaust a wait at the wake.
+/// This is only a guard, sized for a Mac running several suites at once (load 100+), never a measure of speed.
 let hangGuard: TimeInterval = 300
 
 /// The longest a test that talks to a scratch host process may run, its hang guards included: each wait is bounded,
@@ -54,10 +55,10 @@ let keepRunning = "sleep 3600"
 /// end at once, so a test whose host stopped answering ends there rather than waiting out one hang guard after
 /// another. Awaited, so the test gives back its pool thread between looks (see `offPool`); `condition` runs on the
 /// caller's actor, as the caller's own code would.
-func eventually(timeout: TimeInterval = hangGuard, isolation: isolated (any Actor)? = #isolation,
+func eventually(timeout: TimeInterval = hangGuard, time: MacTime = .real, isolation: isolated (any Actor)? = #isolation,
                 _ condition: () -> Bool) async -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline, !Task.isCancelled {
+    let deadline = time.awake() + timeout
+    while time.awake() < deadline, !Task.isCancelled {
         if condition() { return true }
         try? await Task.sleep(nanoseconds: 20_000_000)
     }
@@ -85,10 +86,10 @@ func offPool<T>(_ work: @escaping () throws -> T) async throws -> T {
 }
 
 /// `eventually` for a condition that itself awaits (a request and its reply, each look a round trip).
-func eventuallyAsync(timeout: TimeInterval = hangGuard, isolation: isolated (any Actor)? = #isolation,
+func eventuallyAsync(timeout: TimeInterval = hangGuard, time: MacTime = .real, isolation: isolated (any Actor)? = #isolation,
                      _ condition: () async -> Bool) async -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline, !Task.isCancelled {
+    let deadline = time.awake() + timeout
+    while time.awake() < deadline, !Task.isCancelled {
         if await condition() { return true }
         try? await Task.sleep(nanoseconds: 20_000_000)
     }
@@ -97,9 +98,9 @@ func eventuallyAsync(timeout: TimeInterval = hangGuard, isolation: isolated (any
 
 /// `eventually`, blocking its thread: only where the caller can't await, a read the conditions `eventually` polls make
 /// (one host round trip: a screen, a reply), a `defer`, or a callback the product calls synchronously. Bounded by `timeout`.
-func eventuallyBlocking(timeout: TimeInterval = hangGuard, _ condition: () -> Bool) -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline, !Task.isCancelled {
+func eventuallyBlocking(timeout: TimeInterval = hangGuard, time: MacTime = .real, _ condition: () -> Bool) -> Bool {
+    let deadline = time.awake() + timeout
+    while time.awake() < deadline, !Task.isCancelled {
         if condition() { return true }
         Thread.sleep(forTimeInterval: 0.02)
     }
@@ -114,11 +115,11 @@ func eventuallyBlocking(timeout: TimeInterval = hangGuard, _ condition: () -> Bo
 @discardableResult
 func waitForEnd(_ process: Process, within timeout: TimeInterval = hangGuard) -> Bool {
     let pid = process.processIdentifier
-    let deadline = Date().addingTimeInterval(timeout)
-    var goneSince: Date?
-    while process.isRunning, Date() < deadline {
+    let deadline = MacTime.real.awake() + timeout
+    var goneSince: TimeInterval?
+    while process.isRunning, MacTime.real.awake() < deadline {
         if kill(pid, 0) != 0, errno == ESRCH {
-            if let since = goneSince { if Date().timeIntervalSince(since) > 2 { break } } else { goneSince = Date() }
+            if let since = goneSince { if MacTime.real.awake() - since > 2 { break } } else { goneSince = MacTime.real.awake() }
         } else {
             goneSince = nil
         }
@@ -136,12 +137,12 @@ func waitForEnd(_ process: Process, within timeout: TimeInterval = hangGuard) ->
 /// killed and waited for (10 s more), so that what the caller reads of it next (`terminationStatus`) is there.
 func exited(_ process: Process, within timeout: TimeInterval = hangGuard) async -> Bool {
     await offPool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+        let deadline = MacTime.real.awake() + timeout
+        while process.isRunning, MacTime.real.awake() < deadline { Thread.sleep(forTimeInterval: 0.01) }
         guard process.isRunning else { return true }
         kill(process.processIdentifier, SIGKILL)
-        let killed = Date().addingTimeInterval(10)
-        while process.isRunning, Date() < killed { Thread.sleep(forTimeInterval: 0.01) }
+        let killed = MacTime.real.awake() + 10
+        while process.isRunning, MacTime.real.awake() < killed { Thread.sleep(forTimeInterval: 0.01) }
         return false
     }
 }

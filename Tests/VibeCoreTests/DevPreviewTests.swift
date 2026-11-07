@@ -403,8 +403,8 @@ final class Once: @unchecked Sendable {
 
 /// Whether `condition` holds within `timeout` seconds (a hang guard), checked every 50 ms.
 func until(timeout: TimeInterval = hangGuard, _ condition: () -> Bool) async -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
+    let deadline = MacTime.real.awake() + timeout
+    while MacTime.real.awake() < deadline {
         if condition() { return true }
         try? await Task.sleep(nanoseconds: 50_000_000)
     }

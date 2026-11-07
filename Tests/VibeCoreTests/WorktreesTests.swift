@@ -1002,9 +1002,9 @@ struct ShellTests {
 
         /// Waits until all of `pids` have ended, or `limit` has passed; whether they all have.
         func wait(for pids: Set<Int32>, within limit: TimeInterval) -> Bool {
-            let deadline = Date().addingTimeInterval(limit)
+            let deadline = MacTime.real.awake() + limit
             while !pids.isSubset(of: ended.keys) {
-                let left = deadline.timeIntervalSinceNow
+                let left = deadline - MacTime.real.awake()
                 guard left > 0 else { return false }
                 var timeout = timespec(tv_sec: Int(left), tv_nsec: Int(left.truncatingRemainder(dividingBy: 1) * 1e9))
                 var event = kevent()

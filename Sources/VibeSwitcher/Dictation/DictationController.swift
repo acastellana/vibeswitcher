@@ -136,6 +136,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     private var serial = 0
     /// The clock Claude's runs keep (tests give their own).
     private let now: () -> Date
+    /// The turn-on watch counts awake time: Claude needs a chance to answer after the Mac wakes.
     private let time: MacTime
     /// A Claude run in this launch heard something (its level cursor coloured, or text taken): the microphone works, so
     /// a later run that hears nothing isn't said to be the microphone's doing.
@@ -483,7 +484,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
                 return self.turnedOn(rowID, Notice(rowID: rowID, text: "/voice hold couldn't be typed into the session."))
             }
             Breadcrumbs.shared.note("dictation: turning on Claude's (\(Self.turnOnCommand) typed)")
-            self.watchTurnOn(rowID, session, since: before, conversation: conversation, until: self.time.wall().addingTimeInterval(Self.turnOnWait))
+            self.watchTurnOn(rowID, session, since: before, conversation: conversation, until: self.time.awake() + Self.turnOnWait)
         }
     }
 
@@ -494,7 +495,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     /// Claude's answer to `/voice hold`: its first dictation message after the command's newest echo once the
     /// conversation changed since the click (`conversation`), or one shown more often than at the click.
     private func watchTurnOn(_ rowID: String, _ session: ClaudeVoiceSession, since before: [ClaudeVoiceScreen.Signal: Int],
-                             conversation: [String], until deadline: Date) {
+                             conversation: [String], until deadline: TimeInterval) {
         _ = schedule(ClaudeVoiceRun.readEvery * 2) { [weak self] in
             session.screen { [weak self] screen in
                 guard let self, self.turningOn.contains(rowID) else { return }
@@ -504,7 +505,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
                         ?? Notice(rowID: rowID, text: "Claude's dictation is on: hold the mic (or \(shortcuts) in the box) and speak.", info: true)
                     return self.turnedOn(rowID, notice)
                 }
-                guard self.time.wall() < deadline else {
+                guard self.time.awake() < deadline else {
                     return self.turnedOn(rowID, Notice(rowID: rowID, text: "Claude didn't say whether its dictation is on: have a look at the terminal."))
                 }
                 self.watchTurnOn(rowID, session, since: before, conversation: conversation, until: deadline)

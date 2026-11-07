@@ -84,8 +84,8 @@ struct SandboxIsolationTests {
 
     /// Whether `condition` holds within the hang guard, checked every 50 ms (a file the sandbox writes as it goes).
     func eventually(time: MacTime = .real, _ condition: () -> Bool) async -> Bool {
-        let deadline = time.wall().addingTimeInterval(hangGuard)
-        while time.wall() < deadline {
+        let deadline = time.awake() + hangGuard
+        while time.awake() < deadline {
             if condition() { return true }
             await pause(0.05)
         }

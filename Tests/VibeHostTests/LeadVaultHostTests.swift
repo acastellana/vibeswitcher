@@ -112,9 +112,9 @@ struct LeadVaultHostTests {
         let fd = output.fileHandleForReading.fileDescriptor
         let flags = fcntl(fd, F_GETFL)
         _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
-        let deadline = Date().addingTimeInterval(hangGuard)
+        let deadline = MacTime.real.awake() + hangGuard
         var buffer = [UInt8](repeating: 0, count: 65_536)
-        while !answeredAll(), Date() < deadline {
+        while !answeredAll(), MacTime.real.awake() < deadline {
             let count = read(fd, &buffer, buffer.count)
             if count > 0 { received.append(contentsOf: buffer[0..<count]) } else if count == 0 { break } else { await pause(0.02) }
         }

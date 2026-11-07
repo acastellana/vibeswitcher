@@ -1,3 +1,4 @@
+import VibeCore
 import Foundation
 import Testing
 
@@ -192,9 +193,9 @@ struct InstallRelaunchTests {
             for pid in (try? running()) ?? [] { kill(pid, SIGKILL) }
             if old.isRunning { kill(oldPid, SIGKILL) }
             waitForEnd(old)
-            let deadline = Date().addingTimeInterval(hangGuard)
+            let deadline = MacTime.real.awake() + hangGuard
             var left = (try? running()) ?? []
-            while !left.isEmpty, Date() < deadline {
+            while !left.isEmpty, MacTime.real.awake() < deadline {
                 Thread.sleep(forTimeInterval: 0.02)
                 left = (try? running()) ?? []
             }

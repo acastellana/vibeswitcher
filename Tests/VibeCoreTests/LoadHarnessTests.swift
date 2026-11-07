@@ -94,9 +94,9 @@ import Testing
     /// Waits until `condition` holds, looking every 50 ms for at most `seconds`: the event is a file a run writes.
     @discardableResult
     func until(_ seconds: TimeInterval = 120, _ condition: () -> Bool) async -> Bool {
-        let deadline = Date().addingTimeInterval(seconds)
+        let deadline = MacTime.real.awake() + seconds
         while !condition() {
-            guard Date() < deadline else { return false }
+            guard MacTime.real.awake() < deadline else { return false }
             await pause(0.05)
         }
         return true

@@ -287,9 +287,9 @@ struct ReplacedLeadRoutingTests {
 
     /// The session's screen once it shows `text` (or as it is when the hang guard runs out).
     func shows(_ text: String, _ id: UUID, _ host: HostClient) async -> String {
-        let deadline = Date().addingTimeInterval(hangGuard)
+        let deadline = MacTime.real.awake() + hangGuard
         var shown = ""
-        while Date() < deadline {
+        while MacTime.real.awake() < deadline {
             shown = await screen(id, host) ?? ""
             if shown.contains(text) { break }
             try? await Task.sleep(nanoseconds: 20_000_000)

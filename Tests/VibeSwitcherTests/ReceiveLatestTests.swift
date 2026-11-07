@@ -1,3 +1,4 @@
+import VibeCore
 import Combine
 import Foundation
 import Testing
@@ -22,8 +23,8 @@ import Testing
 
     /// Runs the main run loop in its default mode until `done` (a guard of 10 s, for a test that would hang).
     func runDefault(until done: () -> Bool) {
-        let limit = Date().addingTimeInterval(10)
-        while !done(), Date() < limit { _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05)) }
+        let limit = MacTime.real.awake() + 10
+        while !done(), MacTime.real.awake() < limit { _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05)) }
     }
 
     @Test func onlyTheNewestValueWaitsForTheDefaultMode() {
