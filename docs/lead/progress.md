@@ -3301,3 +3301,6 @@
 - 2026-11-07 19:06 Automatically (auto_advance): Merged the-app-ships-no (The app ships no test bundles, and a failed install leaves the old app working) into main at 4e1f8201, on its passing audit and the full test run.
 - 2026-11-07 19:06 Automatically (auto_advance): Cleaned up the-app-ships-no (freed 2.0 GB of build output and temporary folders). It stays done.
 - 2026-11-07 19:06 Update: Merged: a failed install now leaves your app working — **What changed.** `scripts/build-app.sh --install` copies the new app to `VibeSwitcher.app.installing`, checks it with `codesign -v`, and swaps it in only then. If a copy, check or rename fails, the c…
+- 2026-11-07 19:40 Automatically (auto_advance): Started the audit of sweep-the-repository-and at cc9ad2f2 (Its review is audit).
+- 2026-11-07 19:40 Released sweep-the-repository-and's worker (idle since its done report on cc9ad2f2) while its audit runs
+- 2026-11-07 19:40 Automatically (auto_advance): Released sweep-the-repository-and's worker, idle since its done report on cc9ad2f2, while its audit runs (ended pid 15573 (Worker: Sweep the repository and its history for secrets)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
