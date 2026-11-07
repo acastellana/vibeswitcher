@@ -830,12 +830,15 @@ struct ReceiptView {
         var tokens: Int?
         /// Of them, Codex's (`LeadTokens.codex`); nil when not said.
         var codex: Int?
+        /// The verifier's: it ran on the worker's model (`LeadTokens.sameModel`); nil when not said.
+        var sameModel: Bool?
 
         init(_ role: [String: Any]) {
             cost = number(role["cost"])
             let parts = ["input", "output", "cacheRead", "cacheWrite"].compactMap { whole(role[$0]) }
             tokens = parts.isEmpty ? nil : parts.reduce(0, &+)
             codex = whole(role["codex"])
+            sameModel = role["sameModel"] as? Bool
         }
     }
 

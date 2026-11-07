@@ -100,6 +100,22 @@ struct QualityPage: Equatable {
         figures.append(Figure(label: "Important findings per audited task", value: f.importantPerAudited.map { StatisticsPage.number($0) } ?? none,
                               detail: audited ? "\(f.importantFindings) over \(count(f.audited, "audited merge"))" : noAudit,
                               help: "The Important findings the audits raised and most finders confirmed, per audited merge."))
+        let same = f.sameModelAudited, other = f.otherModelAudited
+        figures.append(Figure(label: "Important per audit, by verifier model",
+                              value: same + other == 0 ? none : [("same", f.sameModelImportantPerAudited), ("other", f.otherModelImportantPerAudited)]
+                                  .map { "\($0.0) \($0.1.map { StatisticsPage.number($0) } ?? none)" }.joined(separator: " · "),
+                              detail: same + other == 0 ? (audited ? "no receipt says which model verified" : noAudit)
+                                  : "same model as the worker: \(f.sameModelImportant) over \(count(same, "audited merge")) · "
+                                      + "another model: \(f.otherModelImportant) over \(count(other, "audited merge"))",
+                              help: "The Important findings per audited merge, split by whether its verifier ran on its worker's model (an audit that "
+                                  + "wasn't independent, as the receipt records it) or on another. Merges whose receipt doesn't say are in neither."))
+        figures.append(Figure(label: "Sampled audits of review none", value: f.sampledImportantRate.map(percent) ?? none,
+                              detail: f.sampledAudits > 0 ? "n = \(f.sampledAudits): \(f.sampledImportant) raised an Important finding"
+                                  : "none sampled in the range",
+                              meter: f.sampledImportantRate.map(share),
+                              help: "auto_advance audits a random share (audit_sample_percent, 10 by default) of the review none tasks that report done. "
+                                  + "Of those drawn in the range that ended with an audit, the share whose audits raised an Important finding: what the "
+                                  + "unaudited path would have let through. A small n: a tripwire, not a statistic."))
         if let o = f.findings {
             let parts = [(o.fixed, "fixed by the worker"), (o.disagreementAccepted, "disagreement accepted by the verifier"),
                          (o.dismissedByLead, "dismissed by the lead"), (o.movedToTask, "moved to a task"),

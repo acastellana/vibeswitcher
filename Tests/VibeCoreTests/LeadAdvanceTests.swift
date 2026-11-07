@@ -144,6 +144,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         lead.macLimits = { MacLimits(maxSessions: 6) }
         lead.roomWaits = roomWaits
         lead.power = { nil }
+        lead.auditSampleSeed = { unsampledSeed }
         return lead
     }
 
@@ -306,6 +307,91 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(lead.call("status", [:]).text.contains("audited: it has code that"))
         // Nothing merged or tested before its verdict.
         #expect((try? String(contentsOfFile: log, encoding: .utf8)) == nil)
+    }
+
+    // MARK: The audit sample
+
+    /// The first seed whose draw is under `percent` (or not): what a test's injected random source gives.
+    func seed(drawnUnder percent: Double, _ under: Bool = true) -> Int {
+        (0...).first { (LeadAuditSample.draw(seed: $0) < percent) == under }!
+    }
+
+    /// auto_advance's audit sample (see `LeadAuditSample`): a review none task its seeded draw samples is audited before
+    /// merge, the draw and its seed kept on the task, and its score says sampled and how its audit went.
+    @Test func aSampledReviewNoneTaskIsAuditedNotMergedAndItsDrawIsKept() async throws {
+        let (root, runtime, lead) = try team()
+        let seed = seed(drawnUnder: 10)
+        lead.auditSampleSeed = { seed }
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]])
+        #expect(await advancing.until { task("add-b", root)?.status == .running })
+        try work("add-b", file: "b.txt", root: root, runtime)
+        let reported = head("agent/add-b", root)
+        #expect(await advancing.until { vault.current(.verifier, root: root, task: "add-b")?.auditing == reported
+            && reports(runtime).contains { $0.contains("Started the audit of add-b") } })
+        let started = try #require(reports(runtime).first { $0.contains("Started the audit of add-b") })
+        #expect(started.contains("Sampled for audit: draw") && started.contains("(seed \(seed))"), "\(started)")
+        let sample = try #require(task("add-b", root)?.auditSample)
+        #expect(sample == LeadAuditSample(seed: seed, percent: 10, commit: reported, at: sample.at))
+        #expect(sample.sampled && sample.draw == LeadAuditSample.draw(seed: seed) && sample.draw < 10)
+        // Audit from here on: the vault's review too, so no merge takes it unaudited.
+        #expect(task("add-b", root)?.review == .audit && task("add-b", root)?.merged == nil)
+        #expect(try vault.unaudited(root: root, task: "add-b").review == .audit)
+        #expect(progress(root).contains("Sampled add-b for audit from review none"))
+        #expect((try? String(contentsOfFile: log, encoding: .utf8)) == nil)
+        #expect(task("add-b", root)?.score?.sampled == true && task("add-b", root)?.score?.sampleVerdict == nil)
+        // Its audit raises an Important finding: the score says so.
+        let finding: [String: Any] = ["severity": "Important", "file": "b.txt", "line": 1, "evidence": "b.txt says bee, the contract wants b",
+                                      "failure_scenario": "cat b.txt gives bee where the contract wants b", "status": "open"]
+        let verdict = try seat("verify-add-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "one problem",
+                                                                                "tests": "passed", "findings": [finding]])
+        #expect(!verdict.isError, "\(verdict.text)")
+        #expect(await advancing.until { task("add-b", root)?.score?.sampleVerdict == .important })
+        #expect(task("add-b", root)?.score?.line.contains("sampled from review none: important") == true)
+        // Drawn once: the same draw stands through the rounds.
+        #expect(task("add-b", root)?.auditSample == sample)
+    }
+
+    /// One the draw doesn't sample merges as before, its draw kept; with audit_sample_percent 0 nothing is drawn.
+    @Test(arguments: [false, true])
+    func anUnsampledReviewNoneTaskMergesAsBeforeWithItsDrawKept(off: Bool) async throws {
+        let (root, runtime, lead) = try team(off ? ["audit_sample_percent": 0] : [:])
+        // Off: even a seed under 10 draws nothing.
+        let seed = seed(drawnUnder: 10, off)
+        lead.auditSampleSeed = { seed }
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]])
+        #expect(await advancing.until { task("add-b", root)?.status == .running })
+        try work("add-b", file: "b.txt", root: root, runtime)
+        let reported = head("agent/add-b", root)
+        #expect(await advancing.until { task("add-b", root)?.status == .done && reports(runtime).contains { $0.contains("Merged add-b") } })
+        #expect(task("add-b", root)?.merged?.unaudited == true && vault.current(.verifier, root: root, task: "add-b") == nil)
+        if off {
+            #expect(task("add-b", root)?.auditSample == nil && task("add-b", root)?.score?.sampled == nil)
+        } else {
+            let sample = try #require(task("add-b", root)?.auditSample)
+            #expect(sample.seed == seed && !sample.sampled && sample.draw >= 10 && sample.commit == reported && sample.percent == 10)
+            #expect(task("add-b", root)?.score?.sampled == false && task("add-b", root)?.review != .audit)
+        }
+        #expect(!progress(root).contains("Sampled add-b"))
+    }
+
+    /// audit_sample_percent is a workflow setting configure sets (0 to 100), a guard rail as the risk check's are.
+    @Test func auditSamplePercentIsASettingConfigureSets() throws {
+        let (_, _, lead) = try team()
+        #expect(LeadWorkflow.load(from: lead.workflowPath).auditSamplePercent == 10)
+        #expect(LeadWorkflow.configurable.contains("audit_sample_percent") && LeadVault.guardedKeys.contains("audit_sample_percent"))
+        #expect(lead.call("configure", ["audit_sample_percent": 101]).isError)
+        #expect(lead.call("configure", ["audit_sample_percent": -1]).isError)
+        let set = lead.call("configure", ["audit_sample_percent": 25])
+        #expect(!set.isError, "\(set.text)")
+        #expect(set.text.contains("audit_sample_percent: 25"), "\(set.text)")
+        #expect(LeadWorkflow.load(from: lead.workflowPath).auditSamplePercent == 25)
+        #expect(!lead.call("configure", ["audit_sample_percent": 0]).isError)
+        #expect(LeadWorkflow.load(from: lead.workflowPath).auditSamplePercent == 0)
+        #expect(lead.call("configure", [:]).text.contains("audit_sample_percent: 0 (no review none task is sampled for audit)"))
     }
 
     // MARK: Its reports reach the lead as VibeSwitcher's

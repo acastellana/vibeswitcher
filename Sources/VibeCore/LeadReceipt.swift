@@ -68,6 +68,25 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
                   questions: asked.count, waitingOnUser: asked.reduce(0) { $0 + $1.waitingOnUser(now: now) },
                   onto: merged?.onto, commit: merged?.commit, commits: commits)
         waits = task.waits.map { $0.closed(at: now) }
+        verifier?.sameModel = Self.sameModel(task, worker: usage.worker, verifier: usage.verifier)
+    }
+
+    /// Whether `task`'s verifier ran on its worker's model, so its audit wasn't independent (32 % of audits from
+    /// 2026-11-01 were Opus → Opus while the Fable quota was out): from the models its sessions were started on
+    /// (`LeadTask.launchedModels`), by family (opus, fable…; Codex as one); a session started on Claude's default ("")
+    /// goes by the model that answered most in its role's transcripts (`LeadTokens.models`). True when any of its
+    /// verifiers (several finders) ran on the worker's; nil when either side's model isn't known.
+    static func sameModel(_ task: LeadTask, worker: LeadTokens?, verifier: LeadTokens?) -> Bool? {
+        func family(_ model: String?) -> String? {
+            guard let name = model?.trimmingCharacters(in: .whitespaces).lowercased(), !name.isEmpty else { return nil }
+            return name.hasPrefix("codex") ? "codex" : SetupStatsMath.family(name) ?? name
+        }
+        let launched = task.launchedModels ?? [:]
+        guard let workerModel = family(task.worker.flatMap { launched[$0] }) ?? family(worker?.models.first) else { return nil }
+        let sessions = [task.verifier].compactMap { $0 } + (task.panel?.sessions ?? [])
+        var verifiers = sessions.compactMap { family(launched[$0]) }
+        if verifiers.isEmpty, let answered = family(verifier?.models.first) { verifiers = [answered] }
+        return verifiers.isEmpty ? nil : verifiers.contains(workerModel)
     }
 
     /// Seconds from its first worker's start to its end.
@@ -90,7 +109,9 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
         // A time that wasn't counted (boards from before the witness counted it) is left out, not shown as 0.
         let time = [worked.map { "\(LeadToolset.age($0)) worked" }, wall.map { "\(LeadToolset.age($0)) wall" }].compactMap { $0 }
         if !time.isEmpty { parts.append(time.joined(separator: ", ")) }
-        let roles = [("worker", worker), ("verifier", verifier)].compactMap { name, tokens in tokens.map { "\(name) \($0.text)" } }
+        let roles = [("worker", worker), ("verifier", verifier)].compactMap { name, tokens in
+            tokens.map { "\(name) \($0.text)" + ($0.sameModel == true ? " on the worker's model" : "") }
+        }
         parts.append(roles.isEmpty ? "tokens unknown (no transcripts of its sessions found)" : roles.joined(separator: ", "))
         if !roles.isEmpty { parts.append(cost.map { "est. \(Self.dollars($0))" } ?? "cost unknown" + Self.unpricedNote([worker, verifier])) }
         var runs = ["\(rounds) audit round\(rounds == 1 ? "" : "s")"]
@@ -167,9 +188,12 @@ public struct LeadTokens: Codable, Equatable, Sendable {
     /// Of `total`, the tokens Codex sessions spent (a Codex worker's, read from its rollouts: `LeadReceipts.codex`);
     /// nil when none was read (receipts from before they were, and Claude-only roles). They aren't in `cost`.
     public var codex: Int?
+    /// The verifier's only: it ran on the worker's model (`LeadReceipt.sameModel`), an audit that wasn't independent;
+    /// false, another model; nil: not known, or receipts from before it was stamped.
+    public var sameModel: Bool?
 
     public init(input: Int = 0, output: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, cacheWrite1h: Int = 0, sessions: Int = 0,
-                models: [String] = [], cost: Double? = 0, unpriced: [String]? = nil, codex: Int? = nil) {
+                models: [String] = [], cost: Double? = 0, unpriced: [String]? = nil, codex: Int? = nil, sameModel: Bool? = nil) {
         self.input = input
         self.output = output
         self.cacheRead = cacheRead
@@ -180,6 +204,7 @@ public struct LeadTokens: Codable, Equatable, Sendable {
         self.cost = cost
         self.unpriced = unpriced
         self.codex = codex
+        self.sameModel = sameModel
     }
 
     public var total: Int { input + output + cacheRead + cacheWrite }

@@ -195,6 +195,9 @@ protocol LeadTeamFixture {
     var vault: LeadVault { get }
 }
 
+/// A seed whose audit sample draw (`LeadAuditSample.draw`) is 99 or more: under no audit_sample_percent but 100.
+let unsampledSeed = (0...).first { LeadAuditSample.draw(seed: $0) >= 99 }!
+
 private let booksLock = NSLock()
 nonisolated(unsafe) private var books: [String: LeadVault.Book] = [:]
 
@@ -232,6 +235,8 @@ extension LeadTeamFixture {
         lead.roomWaits = roomWaits
         // The account's usage kept in the vault's folder (removed with it), never the Mac's.
         lead.usageStore = usageStore
+        // auto_advance's audit sample never draws these leads' review none tasks: a test that wants a draw injects its seed.
+        lead.auditSampleSeed = { unsampledSeed }
         return lead
     }
 

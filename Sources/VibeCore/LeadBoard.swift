@@ -681,6 +681,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The risk check raised it from review none to audit (see `LeadRisk`): why, on which commit, and by what. For
     /// showing (status's "audited: <reason>", its score); the vault's review audit is what merge goes by.
     public var riskRaised: LeadRiskRaise?
+    /// auto_advance's audit sample draw for it (see `LeadAuditSample`), made once at its first done report on review
+    /// none's path, with its seed; sampled: its review became audit. nil: none drawn (sampling off, or never on that path).
+    public var auditSample: LeadAuditSample?
     /// The tasks (their slugs) that must be done before it starts by itself (add_task's and update_task's `after`; see
     /// `LeadAdvance`); nil or empty: none.
     public var after: [String]?

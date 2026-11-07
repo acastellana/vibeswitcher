@@ -5,7 +5,8 @@ import Foundation
 /// of task time was finished work waiting for the lead, often overnight, and about 1.15 of 5 worker slots were used.
 /// Each pass looks at the board and the vault as they are and takes the steps that are due:
 /// - a review none task whose worker reported done on its branch's head merges (merge's full test run is its check),
-///   unless the risk check (`LeadRisk`) raises it to audit from what its branch changes: then it's audited instead;
+///   unless the risk check (`LeadRisk`) raises it to audit from what its branch changes, or the audit sample
+///   (`LeadAuditSample`, audit_sample_percent of them at random) draws it: then it's audited instead;
 /// - an audit task reported done gets its audit, and a passing verdict on its head merges;
 /// - a verdict that left Important findings open sends its worker the open ids to answer with answer_findings (once
 ///   per verdict), or starts a worker to get them when its own has ended; a verdict the round cap says to reconsider
@@ -486,25 +487,61 @@ public final class LeadAdvance: @unchecked Sendable {
         if vault.current(.verifier, root: root, task: slug)?.auditing == head { return auditAgain(slug, head: head, busy: busy) }
         // The risk check runs here too (`LeadRisk`): a review none task whose change it flags is audited, not merged.
         if let needed = lead.advanceReviewNeeded(slug, commit: head) {
-            let finders = lead.workflow.auditFinders
-            guard !busy, hasRoom(slug, need: finders) else {
-                // Raised: the lead hears why now, though its audit waits for the Mac's room.
-                if let raised = lead.store.load().task(slug)?.riskRaised {
-                    once("risk|\(slug)|\(raised.commit)", "\(slug) is audited, not merged: \(raised.reason) (the risk check raised it from review none). Its audit starts once the Mac has room.")
-                }
-                return roomWait("audit(\(slug))", need: finders)
-            }
-            if usageHeld(model: lead.auditModel(lead.workflow)) { return }
-            step("audit|\(slug)|\(head)") {
-                guard let before = due(slug, [.review]) else { throw NotDue() }
-                _ = try lead.advanceAudit(slug)
-                return "Started the audit of \(slug) at \(head.prefix(8)) (\(needed.trimmingCharacters(in: CharacterSet(charactersIn: "."))))." + releasedText(slug, worker: before.worker)
-            }
-            return
+            // One the sample drew is audit from then on: its audit says why, however long it waits for room.
+            let sampled = lead.store.load().task(slug)?.auditSample.flatMap { $0.sampled ? $0 : nil }
+            return audit(slug, head: head, busy: busy, why: sampled.map { "Sampled for audit: \($0.text)." } ?? needed)
         }
         // review none: on its worker's done report on this head (one on an older commit waits for its next report).
         guard (try? vault.unaudited(root: root, task: slug))?.reported == head else { return }
+        // A random share of them is audited anyway (audit_sample_percent, see `LeadAuditSample`): drawn once per task.
+        if let sample = sample(slug, head: head), sample.sampled {
+            return audit(slug, head: head, busy: busy, why: "Sampled for audit: \(sample.text).")
+        }
         toMerge(Ready(slug: slug, head: head, audited: false), busy: busy, batching: batching)
+    }
+
+    /// Starts `slug`'s audit at `head` (`why`: what sends it there) once the Mac has room for its finders.
+    private func audit(_ slug: String, head: String, busy: Bool, why needed: String) {
+        let finders = lead.workflow.auditFinders
+        guard !busy, hasRoom(slug, need: finders) else {
+            // Raised: the lead hears why now, though its audit waits for the Mac's room.
+            if let raised = lead.store.load().task(slug)?.riskRaised {
+                once("risk|\(slug)|\(raised.commit)", "\(slug) is audited, not merged: \(raised.reason) (the risk check raised it from review none). Its audit starts once the Mac has room.")
+            }
+            return roomWait("audit(\(slug))", need: finders)
+        }
+        if usageHeld(model: lead.auditModel(lead.workflow)) { return }
+        step("audit|\(slug)|\(head)") {
+            guard let before = due(slug, [.review]) else { throw NotDue() }
+            _ = try lead.advanceAudit(slug)
+            return "Started the audit of \(slug) at \(head.prefix(8)) (\(needed.trimmingCharacters(in: CharacterSet(charactersIn: "."))))." + releasedText(slug, worker: before.worker)
+        }
+    }
+
+    /// `slug`'s audit sample: the one drawn at its first done report on review none's path, or, when none was and
+    /// audit_sample_percent isn't 0, one drawn now from `lead.auditSampleSeed` and recorded on the task with its seed.
+    /// A sampled task's review becomes audit (the vault's too, so no merge takes it unaudited) and the lead's progress
+    /// log says so. nil: sampling is off and nothing was drawn, or the task isn't due.
+    private func sample(_ slug: String, head: String) -> LeadAuditSample? {
+        guard let task = due(slug, [.review]) else { return nil }
+        if let drawn = task.auditSample { return drawn }
+        let percent = lead.workflow.auditSamplePercent
+        guard percent > 0 else { return nil }
+        let drawn = LeadAuditSample(seed: lead.auditSampleSeed(), percent: percent, commit: head)
+        var kept: LeadAuditSample?
+        try? lead.store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            if let earlier = board.tasks[index].auditSample { kept = earlier; return }
+            board.tasks[index].auditSample = drawn
+            if drawn.sampled { board.tasks[index].review = .audit }
+            kept = drawn
+        }
+        guard let kept else { return nil }
+        if kept == drawn, drawn.sampled {
+            try? lead.vault.setReview(.audit, root: lead.root, task: slug)
+            try? lead.store.appendProgress("Sampled \(slug) for audit from review none (at \(head.prefix(8))): \(drawn.text)")
+        }
+        return kept
     }
 
     /// A task ready to merge: merged now, or, while batching, kept for the pass's batch (`mergeReady`); one a batch fell
@@ -927,5 +964,61 @@ extension LeadToolset {
         let advance = LeadAdvance(lead: self, run: run)
         advancing = advance
         advance.start()
+    }
+}
+
+/// auto_advance's audit sample: a random share (audit_sample_percent, 10 by default) of the review none tasks whose
+/// worker reported done is audited before merge anyway, so how often the unaudited path lets a problem through is
+/// known, not assumed zero (216 merges went unaudited by 2026-11-07). One draw per task, at its first done report on
+/// that path, kept on it (`LeadTask.auditSample`) with its seed: the draw is the seed's first SplitMix64 output, so
+/// anyone can check it. At about 15 sampled audits a month it's a tripwire, not a statistic.
+public struct LeadAuditSample: Codable, Equatable, Sendable {
+    /// How a sampled task's audits went (`LeadTaskScore.sampleVerdict`): an Important finding raised (the unaudited
+    /// path would have let it through), passed with none, or a verdict that didn't pass with none raised.
+    public enum Verdict: String, Codable, Sendable { case important, clean, failed }
+
+    public static let defaultPercent = 10
+
+    /// The random source's seed (under 2^53, so every JSON reader keeps it exact) and the draw it gives, in 0..<100.
+    public var seed: Int
+    public var draw: Double
+    /// audit_sample_percent when it was drawn; sampled: the draw was under it.
+    public var percent: Int
+    public var sampled: Bool
+    /// The commit its worker reported done on, and when it was drawn.
+    public var commit: String
+    public var at: Double
+
+    public init(seed: Int, percent: Int, commit: String, at: Double = Date().timeIntervalSince1970) {
+        self.seed = seed
+        draw = Self.draw(seed: seed)
+        self.percent = percent
+        sampled = draw < Double(percent)
+        self.commit = commit
+        self.at = at
+    }
+
+    /// A seed from the system's random source.
+    public static func randomSeed() -> Int { Int.random(in: 0..<(1 << 53)) }
+
+    /// `seed`'s draw, in 0..<100: SplitMix64's first output for it, its top 53 bits as a fraction.
+    public static func draw(seed: Int) -> Double {
+        var z = UInt64(truncatingIfNeeded: seed) &+ 0x9E37_79B9_7F4A_7C15
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        z ^= z >> 31
+        return Double(z >> 11) / Double(UInt64(1) << 53) * 100
+    }
+
+    /// "draw 4.21 under audit_sample_percent 10 (seed 123456)", or "… not under …".
+    public var text: String {
+        "draw \(String(format: "%.2f", draw)) \(sampled ? "under" : "not under") audit_sample_percent \(percent) (seed \(seed))"
+    }
+
+    /// How `audits` went for a sampled task; nil while none is recorded.
+    public static func verdict(_ audits: LeadAuditLedger?) -> Verdict? {
+        guard let audits, audits.rounds > 0 else { return nil }
+        if audits.findings.contains(where: { $0.severity == .important && $0.status != .unconfirmed }) { return .important }
+        return audits.passed == true ? .clean : .failed
     }
 }

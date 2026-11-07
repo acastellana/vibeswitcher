@@ -219,6 +219,9 @@ public final class LeadToolset: MCPToolset {
     /// time). The lead's tool server sets headless Claude (`ClaudeHeadless.risk`); nil (tests that don't fake it):
     /// the deterministic triggers only.
     public var riskModel: ((String) -> String?)?
+    /// The random source of auto_advance's audit sample (see `LeadAuditSample`): a seed, from which the draw follows.
+    /// Tests inject theirs; set before `startAdvancing`.
+    public var auditSampleSeed: () -> Int = LeadAuditSample.randomSeed
     /// The model pass's answers by task and commit (nil: keep, an error or a timeout), so a merge after auto_advance's
     /// look, or a pass after another, doesn't ask again.
     private var riskAnswers: [String: String?] = [:]
@@ -657,6 +660,7 @@ public final class LeadToolset: MCPToolset {
                                                               options: LeadWorkflow.MergeBatching.allCases.map(\.rawValue)),
                                          "risk_lines": P(type: "integer", description: "The risk check's size trigger: a review none task whose branch changes more lines than this (added and removed) is audited instead of merged when it reports done (default 400; 0: no size trigger)"),
                                          "risk_model": P(type: "boolean", description: "Whether the risk check also asks headless Claude, from the diff's stat, the contract and the base branch's REVIEW.md (no code), to raise a review none task to audit (default true); it only raises, and a timeout or error leaves the deterministic triggers' result"),
+                                         "audit_sample_percent": P(type: "integer", description: "The share of review none tasks, in percent (0 to 100), that auto_advance audits anyway when their worker reports done (default 10; 0: off): a seeded random draw, recorded on the task, so the unaudited path's escape rate is known, not assumed zero"),
                                          "watch_app_logs": P(type: "boolean", description: "Whether you get VibeSwitcher's own health digests (default false; only for the project that builds VibeSwitcher): its freezes, crashes and error lines as it logs them, and a daily trend, each as a witness report to turn into tasks where it's a real bug")]),
             ]
         }
@@ -3895,6 +3899,12 @@ public final class LeadToolset: MCPToolset {
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 0 else { throw Problem(text: "risk_lines must be a whole number of lines, 0 (no size trigger) or more.") }
                 value = String(count)
+            case "audit_sample_percent":
+                guard !value.isEmpty else { break }
+                guard let percent = Int(value), (0...100).contains(percent) else {
+                    throw Problem(text: "audit_sample_percent must be a whole number from 0 (no sampling) to 100.")
+                }
+                value = String(percent)
             case "task_budget_min":
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 0 else { throw Problem(text: "task_budget_min must be a whole number of minutes, 0 (no budget) or more.") }
@@ -3974,6 +3984,7 @@ public final class LeadToolset: MCPToolset {
                                           "records_dir": after.recordsDir ?? "", "auto_advance": String(after.autoAdvance),
                                           "merge_batching": after.mergeBatching.rawValue,
                                           "risk_lines": String(after.riskLines), "risk_model": String(after.riskModel),
+                                          "audit_sample_percent": String(after.auditSamplePercent),
                                           "watch_app_logs": String(after.watchAppLogs), "agent_default": after.agentDefault.rawValue]
             // A limit cleared reads back as its default.
             let defaults = ["disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
@@ -3983,6 +3994,7 @@ public final class LeadToolset: MCPToolset {
                             "auto_advance": String(LeadWorkflow().autoAdvance), "watch_app_logs": String(LeadWorkflow().watchAppLogs),
                             "merge_batching": LeadWorkflow().mergeBatching.rawValue,
                             "risk_lines": String(LeadWorkflow().riskLines), "risk_model": String(LeadWorkflow().riskModel),
+                            "audit_sample_percent": String(LeadWorkflow().auditSamplePercent),
                             "agent_default": LeadWorkflow().agentDefault.rawValue]
             for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
                 throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
@@ -5074,6 +5086,9 @@ public final class LeadToolset: MCPToolset {
         lines.append("- merge_batching: \(workflow.mergeBatching.rawValue) (\(workflow.mergeBatching.meaning))")
         lines.append("- risk_lines: " + (workflow.riskLines > 0 ? "\(workflow.riskLines) (a review none task changing more lines is audited instead of merged)" : "0 (no size trigger)"))
         lines.append("- risk_model: " + (workflow.riskModel ? "true (headless Claude may raise a review none task to audit, from the diff's stat, the contract and REVIEW.md)" : "false (the risk check's deterministic triggers only)"))
+        lines.append("- audit_sample_percent: " + (workflow.auditSamplePercent > 0
+            ? "\(workflow.auditSamplePercent) (auto_advance audits that share of review none tasks anyway, at random, when they report done)"
+            : "0 (no review none task is sampled for audit)"))
         if workflow.watchAppLogs {
             lines.append("- watch_app_logs: true (VibeSwitcher's own freezes, crashes, error lines and daily trend come to you as witness reports)")
         }

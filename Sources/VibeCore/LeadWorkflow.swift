@@ -73,6 +73,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     public var riskLines = LeadRisk.defaultLines
     /// The risk check's model pass (`risk_model:`; false: the deterministic triggers only).
     public var riskModel = true
+    /// The share of review none tasks auto_advance audits anyway, at random, when their worker reports done
+    /// (`audit_sample_percent:`, 0 to 100; 0: off; see `LeadAuditSample`): a tripwire on what the unaudited path lets
+    /// through, not a statistic.
+    public var auditSamplePercent = LeadAuditSample.defaultPercent
     /// This project's lead gets VibeSwitcher's own health digests (`watch_app_logs:`, see `AppHealth`): its freezes,
     /// crashes and error lines, and a daily trend. Off for every project but the one that builds VibeSwitcher.
     public var watchAppLogs = false
@@ -146,6 +150,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "merge_batching": workflow.mergeBatching = MergeBatching(text: value) ?? .off
                 case "risk_lines": workflow.riskLines = Int(value).map { max(0, $0) } ?? LeadRisk.defaultLines
                 case "risk_model": workflow.riskModel = flag(value) ?? true
+                case "audit_sample_percent": workflow.auditSamplePercent = Int(value).map { min(100, max(0, $0)) } ?? LeadAuditSample.defaultPercent
                 case "watch_app_logs": workflow.watchAppLogs = flag(value) ?? false
                 default: break
                 }
@@ -415,7 +420,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "remote", "verifier_model", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "stall_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
-                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "watch_app_logs", "agent_default"]
+                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "watch_app_logs", "agent_default"]
 
     /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
     /// time (`BoardStore.prepare`), the lead's `configure` after.
@@ -595,6 +600,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     # Whether the risk check also asks headless Claude (the diff's stat, the contract and REVIEW.md; no code): it can
     # only raise a task to audit. Empty: true.
     risk_model: true
+    # The share of review none tasks, in percent, that auto_advance audits anyway when their worker reports done: a
+    # seeded random draw, recorded on the task, tells how often the unaudited path lets problems through. 0: off.
+    # Empty: 10.
+    audit_sample_percent: 10
     ---
     Notes for the lead: conventions, priorities, what not to touch. The lead reads this at the start of every session.
     """

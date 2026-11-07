@@ -21,6 +21,11 @@ import Foundation
 ///   summed, of the merges whose working time is known. Parallelism: the worker hours of the receipts that ended in
 ///   the range over the wall-clock hours from start to end of any of them.
 /// - Cost: the receipts of the merges whose cost is known, worker (implementation) and verifier (verification).
+/// - A sampled audit: a review none task auto_advance's audit sample sent to audit (`LeadAuditSample`), drawn in the
+///   range, ended (merged, folded or abandoned) with an audit recorded; its Important rate is the share whose audits
+///   raised an Important finding, said with its n (a tripwire on the unaudited path, not a statistic).
+/// - Same model: an audited merge whose receipt says its verifier ran on its worker's model (`LeadTokens.sameModel`);
+///   audited merges whose receipt doesn't say are in neither split.
 /// - Who: Codex when a Codex worker worked on it (`codexWorked`, or agent codex), else Claude; the model is the one
 ///   its worker session was started on (`launchedModels`), by family.
 ///
@@ -150,6 +155,18 @@ public struct QualityFigures: Equatable, Sendable {
     public var importantPerAudited: Double? { audited > 0 ? Double(importantFindings) / Double(audited) : nil }
     /// Nil when no merge's audits are kept.
     public var findings: FindingOutcomes?
+    /// The sampled audits (see `SetupQuality`), and those that raised an Important finding.
+    public var sampledAudits = 0
+    public var sampledImportant = 0
+    public var sampledImportantRate: Double? { sampledAudits > 0 ? Double(sampledImportant) / Double(sampledAudits) : nil }
+    /// The audited merges whose verifier ran on the worker's model, and on another (`LeadTokens.sameModel`), with
+    /// their Important findings (as `importantFindings` counts them).
+    public var sameModelAudited = 0
+    public var sameModelImportant = 0
+    public var otherModelAudited = 0
+    public var otherModelImportant = 0
+    public var sameModelImportantPerAudited: Double? { sameModelAudited > 0 ? Double(sameModelImportant) / Double(sameModelAudited) : nil }
+    public var otherModelImportantPerAudited: Double? { otherModelAudited > 0 ? Double(otherModelImportant) / Double(otherModelAudited) : nil }
     /// Nil when the merges recorder has no line for any of the merges.
     public var mergeFirstTry: MergeFirstTry?
     public var rerolls = 0
@@ -317,11 +334,18 @@ enum SetupQualityMath {
         var verifier: Double?
     }
 
+    /// A sampled audit (see `SetupQuality`): who worked, and whether its audits raised an Important finding.
+    struct Sampled {
+        var codex: Bool
+        var model: String?
+        var important: Bool
+    }
+
     /// The figures of `sources` for `window`; `merges` the recorder's lines by project name and task slug, oldest
     /// first (nil: no recorder file for those days); `weeks` the trend's.
     static func quality(_ sources: [QualitySource], window: SetupStatsCollector.Window, weeks: [DateInterval],
                         mergeLines: [String: [String: [RecorderLine]]]?) -> SetupQuality {
-        var merges: [Merge] = [], ended: [Ended] = []
+        var merges: [Merge] = [], ended: [Ended] = [], sampled: [Sampled] = []
         var questions: [LeadQuestion] = [], untasked: [LeadQuestion] = []
         // Every task's worker (made unique as merges' are), for the flake ledger's entries; and those entries in the range.
         var who: [String: (codex: Bool, model: String?)] = [:], flakes: [String]?
@@ -350,6 +374,9 @@ enum SetupQualityMath {
                     ended.append(Ended(codex: view.codex, model: model, start: receipt.startedAt ?? view.startedAt, end: receipt.endedAt!,
                                        worked: worked, verifier: receipt.waits?.verifierTime))
                 }
+                if let sample = task.auditSample, sample.sampled, window.within(sample.at), let verdict = LeadAuditSample.verdict(task.audits) {
+                    sampled.append(Sampled(codex: view.codex, model: model, important: verdict == .important))
+                }
                 guard LeadScorecard.counts(task), let at = task.merged?.at else { continue }
                 let lines = mergeLines.map { $0[source.name]?[slug] ?? [] }
                 let first = lines.flatMap { $0.first }
@@ -374,6 +401,9 @@ enum SetupQualityMath {
             let tasks = Set(mine.map(\.task.slug))
             var f = figures(mine, ended: ended.filter { keep($0.codex, $0.model) },
                             questions: about.filter { tasks.contains($0.task ?? "") } + extra, now: window.now)
+            let samples = sampled.filter { keep($0.codex, $0.model) }
+            f.sampledAudits = samples.count
+            f.sampledImportant = samples.filter(\.important).count
             // A flake whose task isn't on the board any more is no agent's: in everyone's only.
             f.flakesCaught = flakes?.filter { slug in everyone || who[slug].map { keep($0.codex, $0.model) } == true }.count
             return f
@@ -417,7 +447,18 @@ enum SetupQualityMath {
         for merge in merges {
             let task = merge.task
             let score = LeadTaskScore(task, questions: [], now: now)
-            if score.roundsToPass != nil { f.importantFindings += score.importantFindings }
+            if score.roundsToPass != nil {
+                f.importantFindings += score.importantFindings
+                switch merge.view.receipt?.verifier?.sameModel ?? task.receipt?.verifier?.sameModel {
+                case true?:
+                    f.sameModelAudited += 1
+                    f.sameModelImportant += score.importantFindings
+                case false?:
+                    f.otherModelAudited += 1
+                    f.otherModelImportant += score.importantFindings
+                case nil: break
+                }
+            }
             if let audits = task.audits {
                 var o = outcomes ?? FindingOutcomes()
                 let disagreed = Set((task.answers ?? []).filter { $0.kind == .disagree }.map { $0.id.uppercased() })
