@@ -4615,7 +4615,7 @@ public final class LeadToolset: MCPToolset {
             return "its record of a run under load (\(loadResult)) can't be read."
         }
         guard run.passed else {
-            return "its last run under load didn't pass (\(clip(run.result, 200))): fix what failed (a test waits on the event it checks, never a sleep)."
+            return "its last run under load didn't pass (\(clip(run.result, 200))): fix what failed (a test waits on the event it checks, not on a fixed delay)."
         }
         let stale = tests.filter { path in blobs[path].map { run.files[path] != $0 } ?? false }
         guard stale.isEmpty else {
