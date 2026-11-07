@@ -50,6 +50,7 @@ enum Sandbox {
         isOn = true
         // Before anything reads a default (AppKit included).
         redirectDefaults(to: (statePath as NSString).appendingPathComponent("defaults"))
+        redirectPasteboard()
         keepWindowsWherePut()
         // Before anything makes the shared application: this is the one.
         let app = SandboxApplication.shared
@@ -126,6 +127,18 @@ enum Sandbox {
         guard UserDefaults.standard === SandboxDefaults.suite else { refuse("couldn't give the sandbox defaults of its own") }
     }
 
+    /// `NSPasteboard.general`, in place of the user's clipboard: a pasteboard of the sandbox's own, so a Copy or a Paste
+    /// in it (the `drag`, `copy` and `paste` commands, SwiftTerm's own Copy and Paste) never reads or sets yours.
+    private static func redirectPasteboard() {
+        SandboxPasteboard.own = NSPasteboard.withUniqueName()
+        guard let general = class_getClassMethod(NSPasteboard.self, #selector(getter: NSPasteboard.general)),
+              let own = class_getClassMethod(SandboxPasteboard.self, #selector(SandboxPasteboard.sandboxGeneral)) else {
+            refuse("couldn't give the sandbox a pasteboard of its own")
+        }
+        method_setImplementation(general, method_getImplementation(own))
+        guard NSPasteboard.general === SandboxPasteboard.own else { refuse("couldn't give the sandbox a pasteboard of its own") }
+    }
+
     // MARK: Windows
 
     /// AppKit pulls a titled window that's off every screen back until a corner of it shows (to -1240, -684 on a
@@ -180,6 +193,12 @@ enum Sandbox {
         let name = String(kept).trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
         return name.isEmpty ? "shot" : name
     }
+}
+
+/// Holds the sandbox's pasteboard for the replaced `NSPasteboard.general`.
+private final class SandboxPasteboard: NSObject {
+    nonisolated(unsafe) static var own: NSPasteboard?
+    @objc class func sandboxGeneral() -> NSPasteboard { own! }
 }
 
 /// Holds the sandbox's defaults for the replaced `UserDefaults.standard`.
@@ -514,7 +533,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// with a short conversation already in its transcript and the hook state a Claude session leaves. `agent` .codex:
     /// the same fake, told apart as Codex; nil: a shell's `cat`, with no agent at all.
     func startFake(label: String, slug named: String? = nil, transcript firstLines: String = Driver.firstTurn, agent: Agent? = .claude,
-                   title: String? = nil, _ done: @escaping (String?) -> Void) {
+                   title: String? = nil, zsh: Bool = false, _ done: @escaping (String?) -> Void) {
         let fakeClaude = agent == nil ? nil : self.fakeClaude
         fakeCount += 1
         let number = fakeCount
@@ -535,6 +554,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
             // A terminal title as Claude Code sets one (OSC 0), when given: 2.1.311 titles its sessions "worker-<slug>".
             let titled = title.map { "printf '\\033]0;%s\\007' '\($0)'; " } ?? ""
             command = titled + "exec /usr/bin/python3 -I -u '\(fakeClaude)' '\(transcript)' '\(controlFile)' '\(agentState)'"
+        } else if zsh {
+            // As a Shell preset's session runs (`$SHELL -l -i`), on the sandbox's home: its own dotfiles, none of yours.
+            command = "echo \"{\\\"pid\\\": $$}\" > '\(agentState)'; exec /bin/zsh -l -i"
         } else {
             command = "printf 'A scratch terminal of the VibeSwitcher sandbox.\\n'; echo \"{\\\"pid\\\": $$}\" > '\(agentState)'; exec /bin/cat"
         }
@@ -1056,11 +1078,16 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("status", "the sandbox's pid, host, fake sessions, windows and anything it refused"),
         ("chat [TEXT]", "selects the fake session whose title contains TEXT (the first one) and shows its chat"),
         ("terminal", "shows the selected session's terminal instead of its chat"),
+        ("drag [option|shift|command]…", "drags the mouse across the shown terminal's first two lines, through the window as a click does (with those keys held), to the view the window's hit test finds there: says which view the click hit, who has the keyboard, the program's mouse mode and what's selected"),
+        ("copy", "presses ⌘C as the menu does (to the first responder that takes Copy): says who took it and what the pasteboard holds (the sandbox's own, never yours)"),
+        ("paste TEXT", "puts TEXT on the sandbox's pasteboard and presses ⌘V as the menu does: says who took it and the terminal's last lines"),
+        ("keys TEXT", "types TEXT and Return into the shown terminal (a sandbox session's: e.g. a command for its zsh)"),
+        ("mouse on|off", "the shown session's program asks for mouse reporting (DECSET 1002 and 1006, as Claude Code's fullscreen does), or stops"),
         ("type TEXT", "types TEXT into the chat's composer (through its text view, as the keyboard does)"),
         ("send", "presses Return in the composer: the message goes to the fake session"),
         ("runblock [yes]", "the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as Run does once you confirm (tell it {\"op\": \"realShell\"} first to see its output)"),
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
-        ("new [codex|shell] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell"),
+        ("new [codex|shell|zsh] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell (cat), or an interactive zsh on the sandbox's home"),
         ("push [click|decline]", "the fake lead asks to push (push_remote): its folder a scratch repository and a scratch bare remote as origin (never GitHub), three commits ahead; its card, with Push and Decline, is under the lead's chat. click or decline settles it as those buttons do"),
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),
@@ -1833,6 +1860,18 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "terminal":
             model.showsChat = false
             reply(true, "terminal shown")
+        case "drag": dragInTerminal(Set(words.dropFirst()), reply)
+        case "copy": pressMenuKey("c", reply)
+        case "paste":
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(rest, forType: .string)
+            pressMenuKey("v", reply)
+        case "mouse": mouseReporting(rest == "on", reply)
+        case "keys":
+            // Typed into the shown terminal, then Return, as the keyboard sends them (a sandbox session only: they all are).
+            guard let (terminal, _) = shownTerminal() else { return reply(false, "no terminal shown: select a session and show its terminal (terminal)") }
+            terminal.send(txt: rest + "\r")
+            settle { reply(true, "typed \(rest.count) characters and Return\n\(self.terminalState(terminal))") }
         case "type":
             guard let composer = composer() else { return reply(false, "no composer: show a fake session's chat first (chat)") }
             composer.window?.makeFirstResponder(composer)
@@ -1857,8 +1896,14 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 }
             }
         case "new":
-            // "new codex LABEL" and "new shell LABEL": a Codex row, a plain shell's.
+            // "new codex LABEL", "new shell LABEL" and "new zsh LABEL": a Codex row, a plain shell's (`cat`), a real zsh's.
             let words = rest.split(separator: " ", maxSplits: 1).map(String.init)
+            if words.first == "zsh" {
+                let label = words.dropFirst().joined()
+                return startFake(label: label.isEmpty ? "Scratch zsh \(fakeCount + 1)" : label, agent: nil, zsh: true) { problem in
+                    reply(problem == nil, problem ?? "started")
+                }
+            }
             let kinded = words.first == "codex" || words.first == "shell"
             let agent: Agent? = words.first == "shell" ? nil : words.first == "codex" ? .codex : .claude
             let label = kinded ? words.dropFirst().joined() : rest
@@ -2014,6 +2059,111 @@ private final class Driver: NSObject, NSApplicationDelegate {
             reply(true, Self.commands.map { "\($0.name): \($0.help)" }.joined(separator: "\n"))
         default:
             reply(false, "no command \(words[0]); these are:\n" + Self.commands.map { "  \($0.name): \($0.help)" }.joined(separator: "\n"))
+        }
+    }
+
+    // MARK: The terminal's mouse and Edit menu
+
+    /// The shown terminal, its window and what it reads as now.
+    private func shownTerminal() -> (HostTerminalView, NSWindow)? {
+        guard let terminal = window?.pane.currentView, let shown = terminal.window, !terminal.isHiddenOrHasHiddenAncestor else { return nil }
+        return (terminal, shown)
+    }
+
+    private func terminalState(_ terminal: HostTerminalView) -> String {
+        let shown = terminal.window
+        let responder = shown?.firstResponder.map { String(describing: type(of: $0)) } ?? "none"
+        let selected = terminal.selection.active ? "“\(terminal.selection.getSelectedText())”" : "nothing"
+        return "keyboard: \(shown?.firstResponder === terminal ? "the terminal" : responder); mouse mode \(terminal.getTerminal().mouseMode); selected: \(selected)"
+    }
+
+    /// A drag from the first line's start to the second line's 30th column, given to the view the window's hit test finds
+    /// there, as the window gives a click (so whatever covers the terminal takes it, as it would yours).
+    private func dragInTerminal(_ keys: Set<String>, _ reply: @escaping (Bool, String) -> Void) {
+        guard let (terminal, shown) = shownTerminal() else { return reply(false, "no terminal shown: select a session and show its terminal (terminal)") }
+        var flags: NSEvent.ModifierFlags = []
+        if keys.contains("option") { flags.insert(.option) }
+        if keys.contains("shift") { flags.insert(.shift) }
+        if keys.contains("command") { flags.insert(.command) }
+        let screen = terminal.getTerminal()
+        let cell = NSSize(width: terminal.bounds.width / CGFloat(max(screen.cols, 1)), height: terminal.bounds.height / CGFloat(max(screen.rows, 1)))
+        func point(col: Int, row: Int) -> NSPoint {
+            terminal.convert(NSPoint(x: (CGFloat(col) + 0.5) * cell.width, y: terminal.bounds.height - (CGFloat(row) + 0.5) * cell.height), to: nil)
+        }
+        let start = point(col: 0, row: 0)
+        let hit = shown.contentView?.superview?.hitTest(start)
+        let hitName = hit.map { $0 === terminal ? "the terminal" : $0.isDescendant(of: terminal) ? "inside the terminal (\(type(of: $0)))" : String(describing: type(of: $0)) } ?? "nothing"
+        let before = terminalState(terminal)
+        var number = 0
+        func send(_ type: NSEvent.EventType, _ location: NSPoint) {
+            number += 1
+            guard let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                                                 windowNumber: shown.windowNumber, context: nil, eventNumber: number, clickCount: 1,
+                                                 pressure: type == .leftMouseUp ? 0 : 1) else { return }
+            // To the view the click hits, as the window hands it on: the window itself drops a made-up click in an app
+            // that isn't active (the sandbox never is).
+            guard let target = hit else { return }
+            switch type {
+            case .leftMouseDown: target.mouseDown(with: event)
+            case .leftMouseDragged: target.mouseDragged(with: event)
+            default: target.mouseUp(with: event)
+            }
+        }
+        send(.leftMouseDown, start)
+        for col in stride(from: 5, through: 30, by: 5) { send(.leftMouseDragged, point(col: col, row: col < 30 ? 0 : 1)) }
+        send(.leftMouseUp, point(col: 30, row: 1))
+        settle { reply(true, "the click hit \(hitName)\nbefore: \(before)\nafter: \(self.terminalState(terminal))") }
+    }
+
+    /// ⌘KEY as the menu bar takes it: the window's own key equivalents first, then the menu's item, sent up the
+    /// responder chain from the first responder to the first that takes the action and enables it (the sandbox's
+    /// window is never key, so AppKit's own lookup would start nowhere).
+    private func pressMenuKey(_ key: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard let (terminal, shown) = shownTerminal() else { return reply(false, "no terminal shown: select a session and show its terminal (terminal)") }
+        let menu = NSApp.mainMenu ?? MainMenu.build()
+        func find(_ menu: NSMenu) -> NSMenuItem? {
+            for item in menu.items {
+                if item.keyEquivalent == key, item.keyEquivalentModifierMask == .command { return item }
+                if let sub = item.submenu, let found = find(sub) { return found }
+            }
+            return nil
+        }
+        guard let item = find(menu), let action = item.action else { return reply(false, "no menu item for ⌘\(key)") }
+        var responder: NSResponder? = shown.firstResponder
+        var chain: [String] = []
+        while let next = responder, !next.responds(to: action) {
+            chain.append(String(describing: type(of: next)))
+            responder = next.nextResponder
+        }
+        guard let target = responder else { return reply(false, "⌘\(key) (\(item.title)): nothing in the chain takes it: \(chain.joined(separator: " → "))") }
+        let enabled = (target as? NSMenuItemValidation)?.validateMenuItem(item)
+            ?? (target as? NSUserInterfaceValidations)?.validateUserInterfaceItem(item) ?? true
+        let who = target === terminal ? "the terminal" : String(describing: type(of: target))
+        guard enabled else { return reply(true, "⌘\(key) (\(item.title)): \(who) takes it, disabled now\n\(terminalState(terminal))") }
+        NSApp.sendAction(action, to: target, from: item)
+        let id = window?.pane.current
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self else { return }
+            let lines = id.map { self.window?.pane.screenLines($0).suffix(3).joined(separator: " ⏎ ") ?? "" } ?? ""
+            reply(true, "⌘\(key) (\(item.title)) went to \(who)\npasteboard: “\(NSPasteboard.general.string(forType: .string) ?? "")”\n"
+                + "\(self.terminalState(terminal))\nlast lines: \(lines)")
+        }
+    }
+
+    /// The shown session's program turns mouse reporting on or off: a fake Claude prints it; a shell's view reads it
+    /// as if its program had.
+    private func mouseReporting(_ on: Bool, _ reply: @escaping (Bool, String) -> Void) {
+        guard let (terminal, _) = shownTerminal() else { return reply(false, "no terminal shown: select a session and show its terminal (terminal)") }
+        let codes = on ? "\u{1b}[?1002h\u{1b}[?1006h" : "\u{1b}[?1002l\u{1b}[?1006l"
+        if let fake = fakeList.first(where: { $0.id == window?.pane.current }), fake.control != nil {
+            let file = state.appendingPathComponent("mouse-\(on ? "on" : "off")")
+            try? VibePaths.writePrivate(Data(codes.utf8), to: file)
+            tellFake(fake, #"{"op": "print", "file": "\#(file.path)"}"#)
+        } else {
+            terminal.feed(text: codes)
+        }
+        waitFor({ (terminal.getTerminal().mouseMode != .off) == on }) { done in
+            reply(done, "mouse mode \(terminal.getTerminal().mouseMode)")
         }
     }
 
