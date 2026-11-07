@@ -3322,3 +3322,4 @@
 - 2026-11-07 13:35 Released fix-the-flaky-test-19's worker (idle since its done report on 9053475c) while its audit runs
 - 2026-11-07 13:36 Planned test-waits-count-awake: Test waits count awake time, not wall-clock, everywhere a Mac sleep can trip them
 - 2026-11-07 13:44 Audit of fix-the-flaky-test-19: complete, clean, round 1: 1 Nit open
+- 2026-11-07 13:54 Merged fix-the-flaky-test-19: Fix the flaky test heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared()
