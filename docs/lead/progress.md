@@ -3386,3 +3386,24 @@
 - 2026-11-07 20:04 Merged chat-view-copying-text: Chat view: copying text and the hover time work on the first try (in a batch: chat-view-copying-text, chat-the-run-buttons landed on one test run)
 - 2026-11-07 20:04 Merged chat-the-run-buttons: Chat: one Run for code blocks in every session kind, working every time (in a batch: chat-view-copying-text, chat-the-run-buttons landed on one test run)
 - 2026-11-07 20:04 Flaky in the batch chat-view-copying-text, chat-the-run-buttons: aPlainShellTakesARunOnlyAtItsPrompt(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-07 20:04 Automatically (auto_advance): Merged chat-view-copying-text at 25cb467a (its passing audit), chat-the-run-buttons at 7c7e0c95 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-07 20:04 Automatically (auto_advance): Cleaned up chat-view-copying-text (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-07 20:04 Automatically (auto_advance): Cleaned up chat-the-run-buttons; ended pid 45816 (Worker: Chat: the Run buttons on code blocks work every time) (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-07 20:06 Workflow: cleared verifier_model, sensitive_paths = `.claude/, .mcp.json, CLAUDE.md, CLAUDE.local.md, AGENTS.md, REVIEW.md, .github/, .env, .env.*, *.entitlements, *.pem, Sources/VibeHost/, Sources/vibeswitcher-host/, Sources/vibeswitcher-mcp/, Sources/VibeCore/LeadVault*.swift, Sources/VibeCore/LeadLaunch.swift, Sources/VibeCore/LeadAdvance.swift, Sources/VibeCore/LeadRisk.swift, Sources/VibeCore/LeadToolset.swift, Sources/VibeCore/LeadWorkflow.swift, Sources/VibeCore/LeadBoard.swift, Sources/VibeCore/LeadAuditVote.swift, Sources/VibeCore/LeadWitness.swift, Sources/VibeCore/ReadOnlyCommand.swift, Sources/VibeCore/MCPServer.swift, Sources/VibeCore/Steer.swift, Sources/VibeCore/Worktrees.swift, Sources/VibeCore/MergeRerun.swift, Sources/VibeCore/TestLock.swift, Sources/VibeCore/Redaction.swift, Sources/VibeCore/HookInstaller.swift, Sources/VibeCore/RemoteAccess.swift, Sources/VibeSwitcher/RemoteServer.swift, Sources/VibeSwitcher/PhoneAccess.swift, Sources/VibeSwitcher/Sandbox.swift, scripts/build-app.sh, scripts/setup-signing.sh, scripts/verifier-eval*`
+- 2026-11-07 20:07 Planned verifier-isolation: Verifier isolation: branch code it runs can't act as it, and worker notes can't reach it (review audit)
+- 2026-11-07 20:07 Started a worker on verifier-isolation
+- 2026-11-07 20:07 Automatically (auto_advance): Started a worker on verifier-isolation (Verifier isolation: branch code it runs can't act as it, and worker notes can't reach it).
+- 2026-11-07 20:07 Planned merge-gate-a-removed: Merge gate: a removed test raises the task to audit, and the load proof is a result, not a word (review audit)
+- 2026-11-07 20:07 Planned review-sampling-audit-10: Review sampling: audit 10% of review-none merges at random, and mark same-model audits (review audit)
+- 2026-11-07 20:07 Started a worker on review-sampling-audit-10 (auto → Claude: Claude weekly 3%, 30 points behind pace, not tight; Codex 59%)
+- 2026-11-07 20:07 Automatically (auto_advance): Started a worker on review-sampling-audit-10 (Review sampling: audit 10% of review-none merges at random, and mark same-model audits); its agent is auto, so it went to Claude: Claude weekly 3%, 30 points behind pace, not tight; Codex 59%.
+- 2026-11-07 20:07 Planned flake-ledger-its-own: Flake ledger: its own uncapped file, linked to fixes, alerting on recurrence; reruns compared with the base (review audit)
+- 2026-11-07 20:07 Update: Chat: selection across messages, hover time and Run unified — **What changed (main 25cb467a and 7c7e0c95):**
+- 2026-11-07 20:07 Planned shellcard-s-run-follows: ShellCard's Run follows the one Run rule
+- 2026-11-07 20:09 Planned review-rules-have-a: Review rules have a floor the user sets and the lead can only raise (review audit)
+- 2026-11-07 20:21 Started a worker on speech-to-text-find
+- 2026-11-07 20:21 Automatically (auto_advance): Merge of speech-to-text-find failed: Tests fail rebased onto main:   81609 /tmp/vs-test.9y9QLC/tmp/vsho-19122A9F/old/vibeswitcher-mcp Sent its worker the output; it's back at work.
+- 2026-11-07 20:21 Started a worker on shellcard-s-run-follows (auto → Claude: Claude weekly 4%, 30 points behind pace, not tight; Codex 59%)
+- 2026-11-07 20:21 Automatically (auto_advance): Started a worker on shellcard-s-run-follows (ShellCard's Run follows the one Run rule); its agent is auto, so it went to Claude: Claude weekly 4%, 30 points behind pace, not tight; Codex 59%.
+- 2026-11-07 20:21 Started a worker on review-rules-have-a
+- 2026-11-07 20:21 Automatically (auto_advance): Started a worker on review-rules-have-a (Review rules have a floor the user sets and the lead can only raise).
