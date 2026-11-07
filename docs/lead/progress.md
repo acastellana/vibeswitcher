@@ -3360,3 +3360,4 @@
 - 2026-11-07 18:48 Automatically (auto_advance): Merged terminal-panes-text-can (Terminal panes: text can be selected, copied and pasted again) into main at 5f860e4f, on its passing audit and the full test run.
 - 2026-11-07 18:48 Automatically (auto_advance): Cleaned up terminal-panes-text-can (freed 2.3 GB of build output and temporary folders). It stays done.
 - 2026-11-07 18:48 Update: Shell panes: selection, copy and paste hold while output streams — **What changed (main 5f860e4f):**
+- 2026-11-07 19:04 Planned claude-dictation-held: Claude dictation: held-Space repeats survive main-thread stalls (review audit)
