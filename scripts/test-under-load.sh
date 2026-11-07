@@ -614,7 +614,7 @@ else
             sed -E 's/\x1B\[[0-9;]*m//g' "$logs/run-$run.log" | grep -E "^=== |^[^ ]+ Test run with [0-9]+ tests? " | sed 's/^/    /'
         fi
         # What the run left in its TMPDIR, by prefix (the name without its UUID or random tail).
-        left=$(ls -A "$(tmpdir "$run")")
+        left=$(tmpdir_leftovers "$(tmpdir "$run")")
         if [[ -n $left ]]; then
             failed=1
             echo "    left in TMPDIR ($(wc -l <<< "$left" | tr -d ' ') entries), by prefix:"

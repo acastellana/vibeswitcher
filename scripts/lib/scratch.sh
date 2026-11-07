@@ -34,6 +34,11 @@ with_tmpdir() {
     TMPDIR=$dir "$@"
 }
 
+# Entries a test run left in its temporary folder (test-under-load.sh).
+tmpdir_leftovers() {
+    ls -A "$1"
+}
+
 scratch_exit() {
     local status=$? hook
     # /bin/bash 3.2 calls an empty array unbound.
