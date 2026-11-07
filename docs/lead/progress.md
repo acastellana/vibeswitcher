@@ -3356,3 +3356,4 @@
 - 2026-11-07 18:33 Review of chat-the-run-buttons: audit
 - 2026-11-07 18:35 Audit of terminal-panes-text-can: complete, suspect, round 1: 4 Nit open
 - 2026-11-07 18:36 Audit of terminal-panes-text-can: complete, clean, round 2: 4 Nit (3 open)
+- 2026-11-07 18:48 Merged terminal-panes-text-can: Terminal panes: text can be selected, copied and pasted again
