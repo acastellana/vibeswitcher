@@ -3138,3 +3138,8 @@
 - 2026-11-07 14:31 Merged permission-prompt: Permission-prompt notifications get Allow and Deny actions
 - 2026-11-07 14:31 Automatically (auto_advance): Merged permission-prompt (Permission-prompt notifications get Allow and Deny actions) into main at 82eb19a9, on its passing audit and the full test run.
 - 2026-11-07 14:55 Merged a-settings-option-to: A Settings option to stop holding work for Claude's usage limits
+- 2026-11-07 14:55 Automatically (auto_advance): Merged a-settings-option-to (A Settings option to stop holding work for Claude's usage limits) into main at dec6d134, on its passing audit and the full test run.
+- 2026-11-07 14:56 Automatically (auto_advance): Cleaned up permission-prompt (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-07 14:56 Automatically (auto_advance): Cleaned up a-settings-option-to (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-07 14:56 Update: Merged: permission banners get Allow and Deny (install to use) — **What changed.** When a session stops on a permission prompt, its notification now has **Allow** and **Deny** buttons. They require an unlocked Mac and don't bring the app forward. They answer the wa…
+- 2026-11-07 14:56 Update: Merged: Settings › Project lead › Ignore usage limits (install to use) — **What changed.** A new toggle, **Ignore usage limits**, off by default and shared by every project on this Mac (mac-limits.json). When it's on:
