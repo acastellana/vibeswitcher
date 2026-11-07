@@ -252,7 +252,7 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(ledger(root).reruns.count == 1 && rerun.task == "add-b" && rerun.passed && !rerun.filtered && rerun.tests == ["flaky()"], "\(rerun)")
         #expect(rerun.base == .skipped && rerun.baseNote == "a whole rerun isn't run on the base", "\(rerun)")
         let status = lead.call("status", [:]).text
-        #expect(status.contains("Merge reruns in the last 7 days (record only, nothing here decides a merge): 1 merge went to a rerun, 1 merged on it. "
+        #expect(status.contains("Merge reruns in the last 7 days (record only, nothing here decides a merge): 1 merge went to a rerun, 1 passed it. "
                                 + "Filtered reruns (the failing tests only): none ran; whole reruns: 1 of 1 passed (100%). "
                                 + "The failing tests run once on the base: branch red/base green (the branch's) 0, red on the base too (flaky) 0, not paired 1"), "\(status)")
         #expect(status.contains("Flaky tests in the last 7 days (1 flake: each failed a merge's test run, passed its rerun"), "\(status)")
@@ -565,7 +565,7 @@ struct MergeGateTests: LeadTeamFixture {
                          LeadRerunRecord(task: "c", commit: "3", at: now - 3, tests: ["x()"], filtered: true, passed: false, base: .green),
                          LeadRerunRecord(task: "d", commit: "4", at: now - 4, tests: ["y()"], filtered: false, passed: false, base: .skipped),
                          LeadRerunRecord(task: "old", commit: "5", at: now - 8 * 86_400, tests: ["y()"], filtered: false, passed: true)]
-        #expect(ledger.rerunLine(now: now) == "Merge reruns in the last 7 days (record only, nothing here decides a merge): 4 merges went to a rerun, 2 merged on it. "
+        #expect(ledger.rerunLine(now: now) == "Merge reruns in the last 7 days (record only, nothing here decides a merge): 4 merges went to a rerun, 2 passed it. "
                 + "Filtered reruns (the failing tests only): 2 of 3 passed (67%); whole reruns: 0 of 1 passed (0%). "
                 + "The failing tests run once on the base: branch red/base green (the branch's) 2, red on the base too (flaky) 1, not paired 1 (skipped, hung, or tests the base lacks).")
         #expect(FlakeLedger().rerunLine(now: now) == nil)

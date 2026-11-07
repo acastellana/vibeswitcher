@@ -247,6 +247,11 @@ struct MergeBatchTests: LeadTeamFixture {
         #expect(first.count == 4, "\(ran())")
         #expect(first[0].contains("break.txt") && !first[1].contains("break.txt") && first[2].contains("break.txt") && !first[3].contains("break.txt"), "\(first)")
         #expect(first[3].contains("w.txt x.txt z.txt"), "\(first)")
+        // One rerun record, the whole stack's, paired with one base run (green: main has no break.txt, so the
+        // failure is the stack's); the bisect's failing prefix reran without a record or a base run of its own.
+        let reruns = FlakeLedgerStore(root: root).load().reruns
+        #expect(reruns.count == 1 && reruns.first?.task == "add-z" && reruns.first?.passed == false && reruns.first?.base == .green, "\(reruns)")
+        #expect(ran().filter { $0.contains("--filter") && !$0.contains("break.txt") }.count == 1, "one base run: \(ran())")
         #expect(landed(root) == ["add-w's work", "add-x's work", "add-z's work"])
         let breaker = try #require(board(root).task("add-break"))
         // Failed, then back at work once its worker has the output.

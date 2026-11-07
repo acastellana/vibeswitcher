@@ -145,7 +145,9 @@ extension LeadToolset {
         var onto = current
 
         /// Tests the stack's first `count` tasks, `top` the last of them (the flake ledger's rerun record names it).
-        func run(_ count: Int, top: String) -> BatchRun {
+        /// A rerun is recorded, with its paired base run, only for a round's whole stack (`recorded`): a bisect's runs
+        /// would count one failure again for each prefix tried, and run the base again each time.
+        func run(_ count: Int, top: String, recorded: Bool) -> BatchRun {
             runs += 1
             var plan: MergeRerun.Plan?
             var tests: Int?
@@ -157,13 +159,13 @@ extension LeadToolset {
                                    rerun: { output in
                                        plan = MergeRerun.plan(after: output, workflow: workflow)
                                        return plan?.command
-                                   }, baseline: baseline(on: under, plan: { plan }, pairing: pairing),
+                                   }, baseline: recorded ? baseline(on: under, plan: { plan }, pairing: pairing) : nil,
                                    tested: { tests = LeadReceipt.testCount($0) },
                                    begun: { at in
                                        load = LoadRecorder.averages()?.first
                                        if begun == nil { begun = (at, LoadRecorder.averages() ?? []) }
                                    })
-            if let plan {
+            if recorded, let plan {
                 switch check {
                 case .passedOnRerun(let tip, _, let again):
                     recordRerun(plan, task: top, commit: tip, base: under, passed: MergeRerun.unshown(plan, rerun: again).isEmpty, load: load, pairing: pairing)
@@ -403,7 +405,7 @@ extension LeadToolset {
             pending = []
             guard !stacked.isEmpty else { break }
             let count = stacked.count
-            let whole = run(count, top: stacked[count - 1].task.slug)
+            let whole = run(count, top: stacked[count - 1].task.slug, recorded: true)
             if case .stopped(_, let text) = whole.outcome {
                 stopped = text
                 break
@@ -418,7 +420,7 @@ extension LeadToolset {
             var passing: BatchRun?
             while hi - lo > 1 {
                 let mid = (lo + hi) / 2
-                let tried = run(mid, top: stacked[mid - 1].task.slug)
+                let tried = run(mid, top: stacked[mid - 1].task.slug, recorded: false)
                 switch tried.outcome {
                 case .stopped(_, let text):
                     stopped = text

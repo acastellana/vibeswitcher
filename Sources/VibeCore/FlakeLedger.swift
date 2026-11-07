@@ -46,7 +46,7 @@ public struct LeadRerunRecord: Codable, Equatable, Sendable {
     public var tests: [String]
     /// The rerun ran only them (`--filter`); false: the whole test command.
     public var filtered: Bool
-    /// The rerun passed, so the merge went ahead on it.
+    /// The rerun passed (the merge then went ahead, unless the lead's word or a cancel meanwhile stopped it).
     public var passed: Bool
     /// The Mac's 1-minute load average when the merge's run started.
     public var load: Double?
@@ -168,7 +168,7 @@ public struct FlakeLedger: Equatable, Sendable {
         let filtered = recent.filter(\.filtered), whole = recent.filter { !$0.filtered }
         let red = recent.filter { $0.base == .red }.count, green = recent.filter { $0.base == .green }.count
         let unpaired = recent.count - red - green
-        return "Merge reruns in the last \(Int(LeadBoard.flakeWindow / 86_400)) days (record only, nothing here decides a merge): \(recent.count) merge\(recent.count == 1 ? "" : "s") went to a rerun, \(recent.filter(\.passed).count) merged on it. "
+        return "Merge reruns in the last \(Int(LeadBoard.flakeWindow / 86_400)) days (record only, nothing here decides a merge): \(recent.count) merge\(recent.count == 1 ? "" : "s") went to a rerun, \(recent.filter(\.passed).count) passed it. "
             + "Filtered reruns (the failing tests only): \(rate(filtered)); whole reruns: \(rate(whole)). "
             + "The failing tests run once on the base: branch red/base green (the branch's) \(green), red on the base too (flaky) \(red)"
             + (unpaired > 0 ? ", not paired \(unpaired) (skipped, hung, or tests the base lacks)" : "") + "."
