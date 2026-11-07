@@ -3377,3 +3377,12 @@
 - 2026-11-07 19:47 Automatically (auto_advance): Started the audit of chat-the-run-buttons at 53362199 (Its review is audit).
 - 2026-11-07 19:48 Audit of chat-view-copying-text: complete, suspect, round 1: 6 Nit open
 - 2026-11-07 19:49 Audit of chat-view-copying-text: complete, clean, round 2: 6 Nit (4 open)
+- 2026-11-07 19:50 Audit of chat-the-run-buttons: complete, clean, round 1: 6 Nit open
+- 2026-11-07 19:51 Raised speech-to-text-find to audit (the risk check, at 845c7426): it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift)
+- 2026-11-07 19:51 Automatically (auto_advance): Started the audit of speech-to-text-find at 845c7426 (The risk check raised it to audit: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift)).
+- 2026-11-07 19:51 Released speech-to-text-find's worker (idle since its done report on 845c7426) while its audit runs
+- 2026-11-07 19:51 Automatically (auto_advance): Released speech-to-text-find's worker, idle since its done report on 845c7426, while its audit runs (ended pid 46055 (Worker: Speech to text: find and fix what makes dictation unreliable)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-07 19:55 Audit of speech-to-text-find: complete, clean, round 1: 1 Nit open
+- 2026-11-07 20:04 Merged chat-view-copying-text: Chat view: copying text and the hover time work on the first try (in a batch: chat-view-copying-text, chat-the-run-buttons landed on one test run)
+- 2026-11-07 20:04 Merged chat-the-run-buttons: Chat: one Run for code blocks in every session kind, working every time (in a batch: chat-view-copying-text, chat-the-run-buttons landed on one test run)
+- 2026-11-07 20:04 Flaky in the batch chat-view-copying-text, chat-the-run-buttons: aPlainShellTakesARunOnlyAtItsPrompt(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
