@@ -364,10 +364,18 @@ if [[ ${#command[@]} -eq 0 ]]; then
         exit 1
     fi
 
+    # SwiftPM compiles the manifest too, before target module-cache options apply. Keep its cache writes
+    # in a writable scratch home, as test.sh does (a Codex worker cannot write the real ~/.cache).
+    mkdir -p "$tool_scratch/home" || exit 1
+    export HOME=$tool_scratch/home CFFIXED_USER_HOME=$tool_scratch/home
     echo "building…"
     # On this run's slot's share of the cores, VS_HEAVY_CORES from the vs-heavy it runs under (scripts/lib/swift-jobs.sh),
     # as test.sh's and build-app.sh's builds: left to itself SwiftPM compiles on every core, beside the busy loops.
-    heavy_swift build --build-tests > /dev/null 2>&1 8>&- || { echo "the build failed: run swift build --build-tests"; exit 1; }
+    if ! heavy_swift build --build-tests > "$tool_scratch/build.log" 2>&1 8>&-; then
+        echo "the build failed (last 40 lines):"
+        tail -n 40 "$tool_scratch/build.log"
+        exit 1
+    fi
     bin=$(swift build $(swiftpm_options) --show-bin-path 2>/dev/null 8>&- | tail -n 1)
     [[ -d $bin ]] || { echo "no build folder at ${bin:-?} (swift build --show-bin-path)"; exit 1; }
     helper="$(dirname "$(xcrun --find swift)")/../libexec/swift/pm/swiftpm-testing-helper"

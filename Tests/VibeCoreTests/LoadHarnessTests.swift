@@ -329,12 +329,22 @@ import Testing
     /// and build-app.sh's: two modules at once, VS_HEAVY_CORES ÷ 2 (rounded up) frontends each; the bare
     /// `swift build --build-tests` without VS_HEAVY_CORES. A fake swift says what it was asked and fails the build, so
     /// the run ends there, before any busy loop. Through vs-heavy (12 cores, 3 slots: 4), and run as vs-heavy's inner
-    /// command directly, with VS_HEAVY_CORES 5 and with none.
+    /// command directly, with VS_HEAVY_CORES 5 and with none. Also checks the build has a scratch home,
+    /// cleans it on failure and shows the compiler's last lines from both stdout and stderr.
     @Test func itsBuildRunsOnItsSlotsShareOfTheCores() throws {
-        let bin = temp.url("fake-swift"), log = temp.url("swift-args")
+        let bin = temp.url("fake-swift"), log = temp.url("swift-args"), homes = temp.url("build-homes")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let swift = bin.appendingPathComponent("swift")
-        try "#!/bin/bash\necho \"$*\" >> '\(log.path)'\nexit 1\n".write(to: swift, atomically: true, encoding: .utf8)
+        try """
+        #!/bin/bash
+        echo "$*" >> '\(log.path)'
+        echo "$HOME|$CFFIXED_USER_HOME" > '\(homes.path)'
+        mkdir -p "$HOME/.cache/clang/ModuleCache" || exit 2
+        for ((i = 0; i < 50; i++)); do echo "compiler context $i"; done
+        echo 'fixture.swift:1: error: forced compiler failure' >&2
+        exit 1
+
+        """.write(to: swift, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: swift.path)
         let fake = try fakeMac(temp.url("load"))
         func build(_ environment: [String: String?]) throws -> String {
@@ -349,19 +359,30 @@ import Testing
             waitForEnd(process)
             #expect(process.terminationStatus != 0)
             #expect(output.contains("the build failed"), "\(output)")
+            #expect(output.contains("fixture.swift:1: error: forced compiler failure"), "\(output)")
+            #expect(output.contains("compiler context 49"), "\(output)")
+            #expect(!output.contains("compiler context 0\n"), "\(output)")
+            let buildHomes = try String(contentsOf: homes, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "|")
+            #expect(buildHomes.count == 2)
+            #expect(buildHomes[0] == buildHomes[1])
+            #expect(buildHomes[0].hasPrefix("/tmp/vs-loadtmp."), "\(buildHomes)")
+            #expect(buildHomes[0] != ProcessInfo.processInfo.environment["HOME"])
+            #expect(!FileManager.default.fileExists(atPath: buildHomes[0]), "the build home was not cleaned up")
             #expect(!output.contains("busy loops"), "\(output)")
             // In a worktree the lead made, scripts/lib/module-cache.sh puts its cache's path first.
             return ((try? String(contentsOf: log, encoding: .utf8)) ?? "")
                 .replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
+        let sandboxOption = (ProcessInfo.processInfo.environment["CODEX_SANDBOX"] ?? "").isEmpty ? "" : " --disable-sandbox"
         #expect(try build(["VIBESWITCHER_HEAVY_NCPU": "12", "VIBESWITCHER_HEAVY_SLOTS": "3", "VS_HEAVY_CORES": nil])
-                == "build --build-system native -j 2 -Xswiftc -j2 --build-tests")
+                == "build --build-system native\(sandboxOption) -j 2 -Xswiftc -j2 --build-tests")
         // vs-heavy's command itself: the slot held (VIBESWITCHER_TEST_LOCK) and started by this process.
         let inner: [String: String?] = ["TEST_UNDER_LOAD_INNER": "\(ProcessInfo.processInfo.processIdentifier)",
                      "VIBESWITCHER_TEST_LOCK": locks.appendingPathComponent("test-build.lock").path]
-        #expect(try build(inner.merging(["VS_HEAVY_CORES": "5"]) { $1 }) == "build --build-system native -j 2 -Xswiftc -j3 --build-tests")
-        #expect(try build(inner.merging(["VS_HEAVY_CORES": nil]) { $1 }) == "build --build-system native --build-tests")
+        #expect(try build(inner.merging(["VS_HEAVY_CORES": "5"]) { $1 }) == "build --build-system native\(sandboxOption) -j 2 -Xswiftc -j3 --build-tests")
+        #expect(try build(inner.merging(["VS_HEAVY_CORES": nil]) { $1 }) == "build --build-system native\(sandboxOption) --build-tests")
     }
 
     /// The test process's home is the one its environment names. Under the harness (each run on a home of its own),
