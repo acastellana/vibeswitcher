@@ -524,8 +524,11 @@ private extension String {
 extension HostTerminalView {
     func apply(_ appearance: TerminalAppearance, darkMode: Bool) {
         let size = CGFloat(appearance.fontSize)
-        font = (appearance.fontName.isEmpty ? nil : NSFont(name: appearance.fontName, size: size))
+        let wanted = (appearance.fontName.isEmpty ? nil : NSFont(name: appearance.fontName, size: size))
             ?? .monospacedSystemFont(ofSize: size, weight: .regular)
+        // Only a new font: SwiftTerm's setter drops the selection (and lays the screen out again), and this runs on
+        // every light/dark switch, the colours alone changing.
+        if font != wanted { font = wanted }
         let palette = appearance.palette(darkMode: darkMode)
         func color(_ hex: String) -> NSColor {
             let rgb = RGB(hex: hex) ?? RGB(red: 0.5, green: 0.5, blue: 0.5)

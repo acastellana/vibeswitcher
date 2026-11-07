@@ -16,7 +16,7 @@ struct TerminalSelectionTests {
     typealias Scene = TerminalClipboardSecurityTests.Scene
 
     /// Mouse gestures on a terminal view, as its window hands them on.
-    struct Mouse {
+    @MainActor struct Mouse {
         let terminal: HostTerminalView
         var window: NSWindow { terminal.window! }
 
@@ -125,6 +125,29 @@ struct TerminalSelectionTests {
         await prints((0..<5).map { "GET /page/\($0) 200" }, in: id, scene)
         #expect(mouse.terminal.validateUserInterfaceItem(copy))
         #expect(mouse.selected == "ready")
+    }
+
+    /// A light/dark switch re-applies the terminal's appearance: its colours change, the font doesn't, and the
+    /// selection stays (SwiftTerm's font setter drops it). A new font size does drop it, the screen laid out again.
+    @Test func aLightDarkSwitchKeepsTheSelection() throws {
+        let window = NSWindow(contentRect: NSRect(x: -30_000, y: -30_000, width: 640, height: 320), styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let terminal = HostTerminalView(frame: window.contentView!.bounds, font: nil, options: TerminalOptions())
+        window.contentView!.addSubview(terminal)
+        var appearance = TerminalAppearance()
+        terminal.apply(appearance, darkMode: false)
+        terminal.feed(text: "keep me\r\n")
+        let mouse = Mouse(terminal: terminal)
+        mouse.drag(row: try #require(mouse.row(of: "keep me")), from: 0, to: 3)
+        #expect(mouse.selected == "keep")
+        terminal.apply(appearance, darkMode: true)
+        terminal.apply(appearance, darkMode: false)
+        #expect(mouse.selected == "keep")
+        appearance.fontSize += 2
+        terminal.apply(appearance, darkMode: false)
+        #expect(mouse.selected == nil)
     }
 
     @Test func anOptionDragSelectsPastAProgramThatAskedForTheMouse() throws {
