@@ -27,7 +27,11 @@
 # SwiftPM's lock on .build. The bundles are whatever the build produced: Swift Build's (the default since Swift 6.4) one
 # per test target, run in turn, or the deprecated native build system's one for the package; a bundle missing, one not
 # the package's, or a run in which no test ran (a filter matching nothing) fails the run rather than pass it.
-# Logs: .build/test-under-load/run-N.log. Everything else (the TMPDIRs, the burner) is gone when it exits, Ctrl-C too.
+# Logs: .build/test-under-load/run-N.log. A suite run's record, .build/test-under-load/result.json (git-ignored, as all
+# of .build), is what a worker's done report is checked against (LeadToolset's checkLoadProof): the filter, the runs,
+# the load, whether all passed, the result line, HEAD, and the git blob of each test file as the run had it, so a test
+# changed since is seen as unproven. It's removed when a suite run starts and written when it ends; a run stopped
+# (Ctrl-C, its owner gone) leaves none. A `-- COMMAND` run neither writes nor removes it. Everything else (the TMPDIRs, the burner) is gone when it exits, Ctrl-C too.
 # scripts/test-under-load-selfcheck.sh shows the cleanup and the refusals work.
 #
 # scripts/test-under-load.sh [--load N] [--memory-floor PCT] [--max-load L] [--max-time S] [--wait S]
@@ -412,7 +416,7 @@ if [[ ${#command[@]} -eq 0 ]]; then
     failures="$bin/vibeswitcher-mcp"
     [[ -x $failures ]] || { echo "no $failures to name a failed run's tests with"; exit 1; }
     mkdir -p "$logs"
-    rm -f "$logs"/run-*.log
+    rm -f "$logs"/run-*.log "$logs/result.json"
 fi
 
 # Short: host tests put sockets under it, and a socket's path is limited to 104 bytes.
@@ -640,7 +644,25 @@ if [[ -e $scratch/memory-low ]]; then
     failed=1
     echo "STOPPED: free memory fell to $(cat "$scratch/memory-low") % (under $memory_stop %); the load and the runs were ended"
 fi
+result_line="failed: see the runs above and $logs/run-N.log"
 if [[ $failed -eq 0 && ${#command[@]} -eq 0 ]]; then
-    echo "all $runs runs passed and left nothing behind ($(printf '%s\n' ${counts[@]+"${counts[@]}"} | sort -un | paste -sd, - | sed 's/,/, /g') tests each)"
+    result_line="all $runs runs passed and left nothing behind ($(printf '%s\n' ${counts[@]+"${counts[@]}"} | sort -un | paste -sd, - | sed 's/,/, /g') tests each)"
+    echo "$result_line"
+fi
+if [[ ${#command[@]} -eq 0 ]]; then
+    # The test files as this run had them (tracked or not, ignored ones aside): any path naming a test or a spec, a
+    # superset of what the done check counts as a test file.
+    paths=$(git ls-files -co --exclude-standard 2>/dev/null | grep -iE 'test|spec' | while IFS= read -r path; do
+        [[ -f $path ]] && echo "$path"
+    done)
+    hashes=""
+    [[ -n $paths ]] && hashes=$(paste <(echo "$paths") <(git hash-object --stdin-paths <<< "$paths"))
+    jq -n --arg commit "$(git rev-parse -q --verify HEAD 2>/dev/null)" --arg filter "$filter" --argjson runs "$runs" \
+        --argjson load "$load" --argjson passed "$([[ $failed -eq 0 ]] && echo true || echo false)" --arg result "$result_line" \
+        --argjson counts "[$(IFS=,; echo "${counts[*]-}")]" --argjson finished "$(date +%s)" --arg hashes "$hashes" \
+        '{version: 1, commit: $commit, filter: $filter, runs: $runs, load: $load, passed: $passed, result: $result,
+          tests: $counts, finished: $finished,
+          files: ($hashes | split("\n") | map(select(length > 0) | split("\t") | {(.[0]): .[1]}) | add // {})}' \
+        > "$logs/result.json.new" && mv "$logs/result.json.new" "$logs/result.json"
 fi
 exit $failed

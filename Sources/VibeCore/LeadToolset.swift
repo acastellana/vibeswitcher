@@ -4107,7 +4107,7 @@ public final class LeadToolset: MCPToolset {
         let done = kind != "blocked"
         // Before anything is recorded: a done that doesn't show how each check was checked doesn't count as one.
         var evidence = done ? try Self.doneEvidence(arguments, acceptance: store.load().task(slug)?.contract.acceptance ?? [], base: workflow.base) : nil
-        if done { try checkLoadProof(slug, arguments) }
+        if done { try checkLoadProof(slug) }
         // Its screenshots as copies kept in .vibeswitcher, so board(task), the verifier and the lead still open them
         // once the worktree (where sandbox shots are) is cleaned up. Relative paths are the worktree's.
         if let given = evidence {
@@ -4534,10 +4534,25 @@ public final class LeadToolset: MCPToolset {
     /// The load harness a done report's new tests are proven under (see `LeadPrompts.newTests`), in the worktree.
     static let loadScript = "scripts/test-under-load.sh"
 
-    /// A done report on a branch that adds or changes tests, in a project with `loadScript`, gives their run under load
-    /// (the script named in its summary, evidence or blind check): on 2026-10-23 three new tests passed in their workers
-    /// and failed in loaded merge runs, each a ~30 min merge and a rework (decision 2026-10-23 14:16).
-    private func checkLoadProof(_ slug: String, _ arguments: [String: Any]) throws {
+    /// Where `loadScript` records a suite run in the worktree (git-ignored, as all of .build): its filter, runs, whether
+    /// they all passed, its result line, and the git blob of each test file as the run had it.
+    static let loadResult = ".build/test-under-load/result.json"
+
+    /// `loadResult` as the script writes it.
+    struct LoadResult: Decodable {
+        var filter: String
+        var runs: Int
+        var passed: Bool
+        var result: String
+        var files: [String: String]
+    }
+
+    /// A done report on a branch that adds or changes tests, in a project with `loadScript`, has their run under load
+    /// behind it: on 2026-10-23 three new tests passed in their workers and failed in loaded merge runs, each a ~30 min
+    /// merge and a rework (decision 2026-10-23 14:16). Not the report's words (until 2026-11-07 the script's name in
+    /// it was enough): the record the script writes at the end of a run (`loadResult`), which must have passed, on the
+    /// test files the branch has now, with a filter that takes each changed suite.
+    private func checkLoadProof(_ slug: String) throws {
         let worktree = Worktrees.path(root: root, slug: slug)
         guard FileManager.default.fileExists(atPath: (worktree as NSString).appendingPathComponent(Self.loadScript)),
               let head = branchHead(Worktrees.branch(slug)) else { return }
@@ -4546,15 +4561,53 @@ public final class LeadToolset: MCPToolset {
         let changed = Git.run(["diff", "--name-only", "--diff-filter=d", "\(workflow.base)...\(head)"], in: root)
         let tests = Self.testFiles(changed.output.split(whereSeparator: \.isNewline).map(String.init))
         guard changed.ok, !tests.isEmpty else { return }
-        let said = [arguments["summary"], arguments["evidence"], arguments["blind_check"]].map { value -> String in
-            guard let value else { return "" }
-            if let text = value as? String { return text }
-            return (try? JSONSerialization.data(withJSONObject: value)).flatMap { String(data: $0, encoding: .utf8) } ?? "\(value)"
-        }.joined(separator: "\n")
-        guard !said.contains("test-under-load") else { return }
+        // Each test file's blob on the reported commit: `<mode> blob <sha>\t<path>`.
+        let tree = Git.run(["ls-tree", head, "--"] + tests, in: root)
+        var blobs: [String: String] = [:]
+        for line in tree.output.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: "\t", maxSplits: 1)
+            guard parts.count == 2, let sha = parts[0].split(separator: " ").last else { continue }
+            blobs[String(parts[1])] = String(sha)
+        }
+        let record = FileManager.default.contents(atPath: (worktree as NSString).appendingPathComponent(Self.loadResult))
+        guard let problem = Self.loadProofProblem(record, tests: tests, blobs: blobs) else { return }
         throw Problem(text: "Not reported: your branch adds or changes tests (\(tests.prefix(5).joined(separator: ", "))\(tests.count > 5 ? ", …" : "")), "
-            + "and the report doesn't give their run under load. Run them once through `\(LeadPrompts.proofCommand)` and put its "
-            + "result line in your report (summary or evidence), then report again.")
+            + "and \(problem) Run them once through `\(LeadPrompts.proofCommand)` (each changed suite in its -f; it records the run "
+            + "in \(Self.loadResult)), put its result line in your report, then report again.")
+    }
+
+    /// What's wrong with `record` (`loadResult`'s contents, nil when there's none) as the proof of `tests`' run under
+    /// load, `blobs` being their git blobs on the reported commit; nil when it proves it.
+    static func loadProofProblem(_ record: Data?, tests: [String], blobs: [String: String]) -> String? {
+        guard let record else {
+            return "there's no record of their run under load: \(loadScript) writes \(loadResult) in your worktree at the end of a run, and there's none."
+        }
+        guard let run = try? JSONDecoder().decode(LoadResult.self, from: record) else {
+            return "its record of a run under load (\(loadResult)) can't be read."
+        }
+        guard run.passed else {
+            return "its last run under load didn't pass (\(clip(run.result, 200))): fix what failed (a test waits on the event it checks, never a sleep)."
+        }
+        let stale = tests.filter { path in blobs[path].map { run.files[path] != $0 } ?? false }
+        guard stale.isEmpty else {
+            return "\(LeadRisk.list(stale)) changed since its last run under load (\(loadResult) has them as they were then)."
+        }
+        let filter = run.filter.trimmingCharacters(in: .whitespaces)
+        guard !filter.isEmpty else { return nil }
+        let regex = try? NSRegularExpression(pattern: filter)
+        let missed = tests.filter { path in
+            let parts = path.split(separator: "/").map(String.init)
+            let suite = ((parts.last ?? path) as NSString).deletingPathExtension
+            // A suite file (FooTests.swift), not a helper beside the tests.
+            guard suite.hasSuffix("Tests") else { return false }
+            let id = (parts.count > 1 ? parts[parts.count - 2] + "." : "") + suite
+            let taken = regex?.firstMatch(in: id, range: NSRange(id.startIndex..., in: id)) != nil
+            return !taken && !filter.contains(suite)
+        }
+        guard missed.isEmpty else {
+            return "its last run under load (-f '\(clip(filter, 120))') doesn't take \(LeadRisk.list(missed))."
+        }
+        return nil
     }
 
     /// The test files among repository paths: under a Tests, tests, test, spec or __tests__ folder, or named as tests

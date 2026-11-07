@@ -173,8 +173,9 @@ struct LeadRuleChecksTests: LeadTeamFixture {
 
     // MARK: new tests proven under load (decision 2026-10-23 14:16)
 
-    /// A done report on a branch that adds or changes tests, in a project with the load harness, gives their run under
-    /// load: one that doesn't is refused, and nothing is recorded.
+    /// A done report on a branch that adds or changes tests, in a project with the load harness, has their run under
+    /// load behind it: the record the harness writes in the worktree, not the report's words. Without it, a done is
+    /// refused (saying how to run it) and nothing is recorded, whatever the report says; with it, it goes through.
     @Test func aDoneThatAddsTestsWithoutTheirRunUnderLoadIsRefused() throws {
         let root = try repo(loadScript: true)
         let runtime = FakeRuntime()
@@ -192,7 +193,19 @@ struct LeadRuleChecksTests: LeadTeamFixture {
         #expect((try? vault.unaudited(root: root, task: "add-b"))?.reported == nil)
         #expect(BoardStore(root: root).load().task("add-b")?.status == .running)
 
-        let proved = worker.call("report", doneReport("added b.txt and BeeTests; scripts/test-under-load.sh --load 24 -r 3 -f BeeTests: all 3 runs passed and left nothing behind"))
+        #expect(refused.text.contains("there's no record of their run under load") && refused.text.contains(LeadToolset.loadResult), "\(refused.text)")
+        // Its words alone aren't a run.
+        let said = worker.call("report", doneReport("added b.txt and BeeTests; scripts/test-under-load.sh --load 24 -r 3 -f BeeTests: all 3 runs passed and left nothing behind"))
+        #expect(said.isError && said.text.contains("there's no record of their run under load"), "\(said.text)")
+        #expect((try? vault.unaudited(root: root, task: "add-b"))?.reported == nil)
+
+        // The harness's record of a passing run of BeeTests, on the file as committed.
+        let blob = Git.run(["hash-object", "Tests/CoreTests/BeeTests.swift"], in: worktree).output
+        let record = (worktree as NSString).appendingPathComponent(LeadToolset.loadResult)
+        try FileManager.default.createDirectory(atPath: (record as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try #"{"version":1,"commit":"","filter":"BeeTests","runs":3,"load":24,"passed":true,"result":"all 3 runs passed and left nothing behind (1 tests each)","tests":[1,1,1],"finished":1,"files":{"Tests/CoreTests/BeeTests.swift":"\#(blob)"}}"#
+            .write(toFile: record, atomically: true, encoding: .utf8)
+        let proved = worker.call("report", doneReport("added b.txt and BeeTests; all 3 runs passed and left nothing behind"))
         #expect(!proved.isError, "\(proved.text)")
         #expect((try? vault.unaudited(root: root, task: "add-b"))?.reported == head("agent/add-b", root))
         // Again on the same commit (an answer, a note): its first done gave it.
@@ -209,6 +222,41 @@ struct LeadRuleChecksTests: LeadTeamFixture {
         try commit("Tests/CoreTests/BeeTests.swift", "// b\n", in: worktree)
         let report = try seat("worker-add-b", runtime).call("report", doneReport("added BeeTests"))
         #expect(!report.isError, "\(report.text)")
+    }
+
+    /// The record proves the branch's tests only when its run passed, on the test files the branch has now, and its
+    /// filter takes each changed suite (a helper beside them needn't be named).
+    @Test func aLoadRecordProvesOnlyAPassingRunOfTheseTestsAsTheyAreNow() {
+        let tests = ["Tests/VibeCoreTests/LeadRiskTests.swift", "Tests/VibeCoreTests/TestSupport.swift"]
+        let blobs = ["Tests/VibeCoreTests/LeadRiskTests.swift": "aaa", "Tests/VibeCoreTests/TestSupport.swift": "bbb"]
+        func record(filter: String = "LeadRisk", passed: Bool = true, files: [String: String] = blobs) -> Data {
+            let object: [String: Any] = ["version": 1, "commit": "c", "filter": filter, "runs": 3, "load": 24, "passed": passed,
+                                         "result": passed ? "all 3 runs passed" : "failed: see the runs above", "tests": [5, 5, 5],
+                                         "finished": 1, "files": files]
+            return try! JSONSerialization.data(withJSONObject: object)
+        }
+        #expect(LeadToolset.loadProofProblem(record(), tests: tests, blobs: blobs) == nil)
+        #expect(LeadToolset.loadProofProblem(record(filter: ""), tests: tests, blobs: blobs) == nil)
+        #expect(LeadToolset.loadProofProblem(record(filter: "VibeCoreTests.LeadRiskTests/aBranch"), tests: tests, blobs: blobs) == nil)
+        #expect(LeadToolset.loadProofProblem(record(filter: "LeadRiskTests/aBranch|Other"), tests: tests, blobs: blobs) == nil)
+        #expect(LeadToolset.loadProofProblem(nil, tests: tests, blobs: blobs)?.contains("there's no record") == true)
+        #expect(LeadToolset.loadProofProblem(Data("not json".utf8), tests: tests, blobs: blobs)?.contains("can't be read") == true)
+        let failed = LeadToolset.loadProofProblem(record(passed: false), tests: tests, blobs: blobs)
+        #expect(failed?.contains("didn't pass (failed: see the runs above)") == true, "\(failed ?? "nil")")
+        let stale = LeadToolset.loadProofProblem(record(files: ["Tests/VibeCoreTests/LeadRiskTests.swift": "old", "Tests/VibeCoreTests/TestSupport.swift": "bbb"]),
+                                                 tests: tests, blobs: blobs)
+        #expect(stale?.hasPrefix("Tests/VibeCoreTests/LeadRiskTests.swift changed since its last run under load") == true, "\(stale ?? "nil")")
+        let missing = LeadToolset.loadProofProblem(record(files: ["Tests/VibeCoreTests/LeadRiskTests.swift": "aaa"]), tests: tests, blobs: blobs)
+        #expect(missing?.contains("TestSupport.swift changed since") == true, "\(missing ?? "nil")")
+        let other = LeadToolset.loadProofProblem(record(filter: "LeadBoardTests"), tests: tests, blobs: blobs)
+        #expect(other == "its last run under load (-f 'LeadBoardTests') doesn't take Tests/VibeCoreTests/LeadRiskTests.swift.", "\(other ?? "nil")")
+    }
+
+    /// The record is in .build, which the repository ignores: `git add -A` can't commit it by accident.
+    @Test func theLoadRecordIsGitIgnored() {
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
+        let ignored = Git.run(["check-ignore", "--no-index", "-q", LeadToolset.loadResult], in: repo)
+        #expect(ignored.ok, "\(ignored.error)")
     }
 
     @Test func testFilesAreTheOnesUnderATestFolderOrNamedAsTests() {

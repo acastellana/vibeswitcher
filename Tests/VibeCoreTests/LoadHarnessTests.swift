@@ -24,10 +24,10 @@ import Testing
     /// The harness with `arguments`, not started; `fake` readings (load, memory, disk, owner name, burner, tick) go in
     /// its environment, `output` takes what it says.
     func process(_ arguments: [String], fake: [String: String] = [:], claudeCode: Bool = false, heldSlot: Bool = false,
-                 pathFirst: URL? = nil) -> Process {
+                 pathFirst: URL? = nil, repo: URL = Self.repo) -> Process {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [Self.repo.appendingPathComponent("scripts/test-under-load.sh").path] + arguments
+        process.arguments = [repo.appendingPathComponent("scripts/test-under-load.sh").path] + arguments
         var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("TEST_UNDER_LOAD_") }
         environment["CLAUDECODE"] = claudeCode ? "1" : nil
         // heldSlot: run under a holder of one of this folder's slots (`vs-heavy bash scripts/test-under-load.sh`, a
@@ -46,8 +46,8 @@ import Testing
 
     /// Runs the harness with `arguments` to its end.
     func harness(_ arguments: [String], fake: [String: String] = [:], claudeCode: Bool = false,
-                 pathFirst: URL? = nil) async throws -> (status: Int32, output: String) {
-        let process = process(arguments, fake: fake, claudeCode: claudeCode, pathFirst: pathFirst)
+                 pathFirst: URL? = nil, repo: URL = Self.repo) async throws -> (status: Int32, output: String) {
+        let process = process(arguments, fake: fake, claudeCode: claudeCode, pathFirst: pathFirst, repo: repo)
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -413,6 +413,95 @@ import Testing
                      "VIBESWITCHER_TEST_LOCK": locks.appendingPathComponent("test-build.lock").path]
         #expect(try build(inner.merging(["VS_HEAVY_CORES": "5"]) { $1 }) == "build --build-system native\(sandboxOption) -j 2 -Xswiftc -j3 --build-tests")
         #expect(try build(inner.merging(["VS_HEAVY_CORES": nil]) { $1 }) == "build --build-system native\(sandboxOption) --build-tests")
+    }
+
+    /// A suite run's record, .build/test-under-load/result.json, is what a worker's done report is checked against
+    /// (`LeadToolset.loadProofProblem`): the harness writes it at the end of a run, passed or failed, with its filter,
+    /// runs, result line and each test file's blob as the run had it (untracked ones too), and its output stays as it
+    /// was. Run in a scratch copy of the repository (its scripts and vs-heavy), with fake swift tools: a bundle whose
+    /// runner prints a result line, and fails while the file `fail` is there.
+    @Test func aSuiteRunRecordsItsResultForTheDoneCheck() async throws {
+        let copy = temp.url("repo"), tools = temp.url("toolchain"), bin = temp.url("bin"), developer = temp.url("developer")
+        let fm = FileManager.default
+        for folder in [copy.appendingPathComponent("Resources/bin"), copy.appendingPathComponent("Tests/FakeTests"),
+                       tools.appendingPathComponent("bin"), tools.appendingPathComponent("libexec/swift/pm"),
+                       bin.appendingPathComponent("FakePackageTests.xctest/Contents/MacOS"),
+                       developer.appendingPathComponent("Library/Developer/Frameworks/Testing.framework")] {
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        try fm.copyItem(at: Self.repo.appendingPathComponent("scripts"), to: copy.appendingPathComponent("scripts"))
+        try fm.copyItem(at: Self.repo.appendingPathComponent("Resources/bin/vs-heavy"), to: copy.appendingPathComponent("Resources/bin/vs-heavy"))
+        try ".build/\n".write(to: copy.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+        try "@Test func a() {}\n".write(to: copy.appendingPathComponent("Tests/FakeTests/FooTests.swift"), atomically: true, encoding: .utf8)
+        let git = { (arguments: [String]) in Git.run(arguments, in: copy.path) }
+        for arguments in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"], ["add", "-A"],
+                          ["commit", "-q", "-m", "first"]] {
+            #expect(git(arguments).ok, "\(arguments)")
+        }
+        // Untracked, as a worker's test before its commit.
+        try "@Test func b() {}\n".write(to: copy.appendingPathComponent("Tests/FakeTests/BarTests.swift"), atomically: true, encoding: .utf8)
+        let fail = temp.url("fail")
+        let scripts: [(URL, String)] = [
+            (tools.appendingPathComponent("bin/swift"), """
+                #!/bin/bash
+                case "$1 $*" in
+                    *--show-bin-path*) echo '\(bin.path)' ;;
+                    build*) exit 0 ;;
+                    package*) echo '{"name": "Fake", "targets": [{"name": "FakeTests", "type": "test"}]}' ;;
+                    *) exit 1 ;;
+                esac
+                """),
+            (tools.appendingPathComponent("bin/xcrun"), "#!/bin/bash\necho '\(tools.path)/bin/swift'\n"),
+            (tools.appendingPathComponent("bin/xcode-select"), "#!/bin/bash\necho '\(developer.path)'\n"),
+            (tools.appendingPathComponent("libexec/swift/pm/swiftpm-testing-helper"), """
+                #!/bin/bash
+                if [[ -e '\(fail.path)' ]]; then
+                    echo "✘ Test run with 2 tests in 1 suite failed after 0.01 seconds with 1 issue."
+                    exit 1
+                fi
+                echo "✔ Test run with 2 tests in 1 suite passed after 0.01 seconds."
+                """),
+            (bin.appendingPathComponent("FakePackageTests.xctest/Contents/MacOS/FakePackageTests"), "#!/bin/bash\n"),
+            (bin.appendingPathComponent("vibeswitcher-mcp"), "#!/bin/bash\necho 'FooTests/a() failed'\n"),
+        ]
+        for (url, text) in scripts {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+        let record = copy.appendingPathComponent(".build/test-under-load/result.json")
+        let fake = try fakeMac(temp.url("load"))
+        func run() async throws -> (output: String, result: [String: Any]) {
+            let run = try await harness(["--load", "1", "--max-time", "300", "-r", "2", "-f", "FooTests|BarTests"], fake: fake,
+                                        pathFirst: tools.appendingPathComponent("bin"), repo: copy)
+            let data = try #require(fm.contents(atPath: record.path), "no record; the harness said: \(run.output)")
+            let result = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+            return (run.output, result)
+        }
+
+        let passed = try await run()
+        #expect(passed.output.contains("run 1 (long TMPDIR): exit 0  ✔ Test run with 2 tests in 1 suite passed"), "\(passed.output)")
+        #expect(passed.output.contains("all 2 runs passed and left nothing behind (2 tests each)"), "\(passed.output)")
+        #expect(passed.result["filter"] as? String == "FooTests|BarTests" && passed.result["runs"] as? Int == 2)
+        #expect(passed.result["passed"] as? Bool == true && passed.result["load"] as? Int == 1)
+        #expect(passed.result["result"] as? String == "all 2 runs passed and left nothing behind (2 tests each)")
+        #expect(passed.result["tests"] as? [Int] == [2, 2])
+        #expect(passed.result["commit"] as? String == git(["rev-parse", "HEAD"]).output)
+        let files = try #require(passed.result["files"] as? [String: String])
+        // Every path naming a test (a superset of what the done check counts as one: scripts/test.sh too).
+        for path in ["Tests/FakeTests/FooTests.swift", "Tests/FakeTests/BarTests.swift"] {
+            #expect(files[path] == git(["hash-object", path]).output, "\(path): \(files)")
+        }
+        // What the done check makes of it, with the files committed as they were.
+        let tests = ["Tests/FakeTests/FooTests.swift", "Tests/FakeTests/BarTests.swift"]
+        #expect(LeadToolset.loadProofProblem(try Data(contentsOf: record), tests: tests, blobs: files) == nil)
+        // Ignored, so `git add -A` leaves it out.
+        #expect(git(["status", "--porcelain", "--ignored=no"]).output == "?? Tests/FakeTests/BarTests.swift")
+
+        try Data().write(to: fail)
+        let failed = try await run()
+        #expect(failed.output.contains("FooTests/a() failed") && !failed.output.contains("runs passed"), "\(failed.output)")
+        #expect(failed.result["passed"] as? Bool == false)
+        #expect(LeadToolset.loadProofProblem(try Data(contentsOf: record), tests: tests, blobs: files)?.contains("didn't pass") == true)
     }
 
     /// The test process's home is the one its environment names. Under the harness (each run on a home of its own),
