@@ -166,6 +166,10 @@ struct PhoneNeedsYouTests {
         let reads = Box<[String]>([])
         let (access, token, done) = try serve(store, reads: reads)
         defer { done() }
+        // The menu the screen read noted is as fresh at the state as when it was read: a real 5 s ran out while a
+        // loaded suite held the test up between the two.
+        let stopped = Date()
+        access.menuClock = { stopped }
 
         _ = try await get(access, "/api/screen?tty=\(own.tty)", token: token)
         let state = try await get(access, "/api/state", token: token)
