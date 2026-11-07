@@ -94,10 +94,12 @@ public struct AccountUsage: Equatable, Sendable {
 
     /// The limit that holds back a start on `model` (as `claude --model` names it; nil: Claude's default) at `now`: the
     /// most used of those at or past `threshold`, for every model or for its family; nil when none is (or none is known).
-    public func hold(model: String?, now: Date = Date(), threshold: Double = AccountUsage.threshold) -> Limit? {
+    /// `ignoring`: Settings' "Ignore usage limits" is on (`MacLimits.ignoreUsageLimits`): only a limit Claude refused a
+    /// request at holds (a session started into it would stop at once), whatever share of the others is used.
+    public func hold(model: String?, now: Date = Date(), threshold: Double = AccountUsage.threshold, ignoring: Bool = false) -> Limit? {
         let family = Self.family(model)
         return current(now: now).limits.first { limit in
-            limit.usedPercent >= threshold && (limit.model == nil || limit.model == family)
+            (ignoring ? limit.reached : limit.usedPercent >= threshold) && (limit.model == nil || limit.model == family)
         }
     }
 
@@ -133,17 +135,22 @@ public struct AccountUsage: Equatable, Sendable {
         return Limit(name: kind, model: scoped, usedPercent: 100, resetsAt: limit.resetsAt, at: limit.at ?? now.timeIntervalSince1970, reached: true)
     }
 
-    /// For the lead's status: each limit known, or nil when none is.
-    public func statusText(now: Date = Date()) -> String? {
+    /// For the lead's status: each limit known, or nil when none is. `ignored`: Settings' "Ignore usage limits" is on.
+    public func statusText(now: Date = Date(), ignored: Bool = false) -> String? {
         let known = current(now: now).limits
         guard !known.isEmpty else { return nil }
         let seconds = now.timeIntervalSince1970
-        return "Account usage (best effort: what sessions' status lines and refusals said): " + known.map { limit in
+        return "Account usage" + (ignored ? " " + Self.ignoredMark : "") + " (best effort: what sessions' status lines and refusals said): " + known.map { limit in
             let pace = UsageRouting.pace(limit, now: seconds)
             return limit.text + (limit.reached || pace.ahead == nil ? "" : ", " + pace.paceText)
         }.joined(separator: "; ")
-            + ". At \(Int(Self.threshold))% of a limit, start_worker and audit stop starting sessions on the models it holds back (override_usage: true overrides)."
+            + (ignored ? ". The user set Ignore usage limits in Settings › Project lead: start_worker, audit and auto_advance start at any share of a limit, "
+                + "Boost isn't held off for usage, and agent: auto stays on Claude; only a limit Claude refused a request at still holds back its model."
+                : ". At \(Int(Self.threshold))% of a limit, start_worker and audit stop starting sessions on the models it holds back (override_usage: true overrides).")
     }
+
+    /// What usage shown while Settings' "Ignore usage limits" is on is marked with.
+    public static let ignoredMark = "(limits ignored)"
 }
 
 /// Where the account's usage is kept between readings: `~/.vibeswitcher/account-usage.json` (0600), one reading per limit,
@@ -213,20 +220,23 @@ public enum UsageStatusLine {
 
     /// Shows (`show`) your own status line's output first, byte for byte, so nothing of ours that fails afterwards
     /// keeps it from showing; then keeps the usage `input` carries. With no status line of yours, shows the usage in a
-    /// few words. Never fails: input that isn't JSON keeps nothing (your status line still runs on it).
+    /// few words, marked `AccountUsage.ignoredMark` while Settings' "Ignore usage limits" is on (`ignored`: nil reads
+    /// mac-limits.json). Never fails: input that isn't JSON keeps nothing (your status line still runs on it).
     public static func run(input: Data, userOnly: Bool = false, store: AccountUsageStore = AccountUsageStore(), home: String = VibePaths.home,
                            now: Date = Date(), patience: TimeInterval = UsageStatusLine.patience, runner: Runner = runCommand,
-                           show: (Data) -> Void) {
+                           ignored: Bool? = nil, show: (Data) -> Void) {
         let object = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any]
         let command = userCommand(home: home, project: userOnly ? nil : projectFolder(object))
         if let command { show(runner(command, input, patience)) }
         let limits = object.map { AccountUsage.fromStatusLine($0, now: now) } ?? []
         store.record(limits, now: now)
         guard command == nil else { return }
-        show(Data(limits.map { limit in
+        var text = limits.map { limit in
             let name = limit.name == "seven_day" ? "weekly" : limit.name == "five_hour" ? "5h" : limit.name.replacingOccurrences(of: "_", with: " ")
             return "\(name) \(Int(limit.usedPercent.rounded()))%"
-        }.joined(separator: " · ").utf8))
+        }.joined(separator: " · ")
+        if !text.isEmpty, ignored ?? MacLimits.load().ignoreUsageLimits { text += " " + AccountUsage.ignoredMark }
+        show(Data(text.utf8))
     }
 
     /// The session's project folder, whose `.claude` settings Claude Code layers over yours: the input's

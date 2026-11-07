@@ -356,11 +356,17 @@ public enum UsageRouting {
     /// Whether Claude's usage is tight for a worker on `model` (nil: Claude's default): one of its current limits on
     /// that model (or on every model) at `claudeTightPercent` or more, or a weekly one more than
     /// `claudeWeeklyAheadPoints` ahead of pace; with the limit that says so (or the most used one), in words.
-    public static func claude(_ usage: AccountUsage, model: String?, now: Date = Date()) -> (tight: Bool, text: String) {
+    /// `ignoringLimits`: Settings' "Ignore usage limits" is on, and only a limit Claude refused a request at is tight.
+    public static func claude(_ usage: AccountUsage, model: String?, ignoringLimits: Bool = false, now: Date = Date()) -> (tight: Bool, text: String) {
         let seconds = now.timeIntervalSince1970
         let family = AccountUsage.family(model)
         let limits = usage.current(now: now).limits.filter { $0.model == nil || $0.model == family }
         guard !limits.isEmpty else { return (false, "Claude's usage not known") }
+        if ignoringLimits {
+            if let reached = limits.first(where: \.reached) { return (true, "Claude " + claudeText(reached, now: seconds)) }
+            let shown = limits.first { $0.name == "seven_day" } ?? limits[0]
+            return (false, "Claude " + claudeText(shown, now: seconds) + " " + AccountUsage.ignoredMark)
+        }
         if let full = limits.first(where: { $0.usedPercent >= claudeTightPercent }) { return (true, "Claude " + claudeText(full, now: seconds)) }
         let ahead = limits.filter { $0.name.hasPrefix("seven_day") }
             .compactMap { limit in pace(limit, now: seconds).ahead.map { (limit, $0) } }
@@ -393,10 +399,11 @@ public enum UsageRouting {
 
     /// Where an auto task's worker on `model` (Claude's; nil: its default) starts: Codex when Claude is tight and
     /// Codex has room, else Claude. `codexWorkers`: Codex workers can be started (see `LeadLaunch.codexWorkersUsable`).
+    /// `ignoringLimits`: Settings' "Ignore usage limits" is on: Claude is tight only at a limit it refused a request at.
     public static func route(claude usage: AccountUsage, codex reading: CodexReading, model: String?, codexWorkers: Bool = true,
-                             now: Date = Date()) -> Route {
+                             ignoringLimits: Bool = false, now: Date = Date()) -> Route {
         guard codexWorkers else { return Route(agent: .claude, why: "Claude: Codex workers are switched off") }
-        let claude = claude(usage, model: model, now: now)
+        let claude = claude(usage, model: model, ignoringLimits: ignoringLimits, now: now)
         let codex = codex(reading, now: now)
         let agent: LeadTask.WorkerAgent = claude.tight && codex.room ? .codex : .claude
         return Route(agent: agent, why: "\(agent.name): \(claude.text)" + (claude.tight ? "" : ", not tight") + "; \(codex.text)")

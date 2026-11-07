@@ -1489,7 +1489,7 @@ public final class LeadToolset: MCPToolset {
         let now = now ?? usageClock()
         var lines: [String] = []
         let claude = accountUsage(sessions: sessions, now: now)
-        if let line = claude.statusText(now: now) { lines.append(line) }
+        if let line = claude.statusText(now: now, ignored: macLimits().ignoreUsageLimits) { lines.append(line) }
         let codex = codexUsage.read(now: now)
         let tasks = store.load().tasks
         let auto = workflow.agentDefault == .auto || tasks.contains { $0.workerAgent == .auto && !Self.finishedStates.contains($0.status) }
@@ -1506,7 +1506,7 @@ public final class LeadToolset: MCPToolset {
     /// The limit that holds back a session on `model` now, if any (see `AccountUsage.hold`).
     func usageHold(model: String?, sessions: [LeadSessionInfo]?) -> AccountUsage.Limit? {
         let now = usageClock()
-        return accountUsage(sessions: sessions, now: now).hold(model: model, now: now)
+        return accountUsage(sessions: sessions, now: now).hold(model: model, now: now, ignoring: macLimits().ignoreUsageLimits)
     }
 
     /// Why `what` isn't started on `model`: the account's usage is at `AccountUsage.threshold` or more of a limit on it;
@@ -1515,7 +1515,9 @@ public final class LeadToolset: MCPToolset {
     /// another one).
     func usageRefusal(model: String?, sessions: [LeadSessionInfo]?, not: String, what: String, instead: String, codex: String? = nil) -> String? {
         guard let limit = usageHold(model: model, sessions: sessions) else { return nil }
-        return "\(not): the account's usage is near a limit, \(limit.text). " + Self.usageBackoff(limit, model: model)
+        let ignored = macLimits().ignoreUsageLimits
+            ? " The user set Ignore usage limits in Settings, which starts sessions at any share of a limit, but not into one Claude already refuses at." : ""
+        return "\(not): the account's usage is near a limit, \(limit.text). " + Self.usageBackoff(limit, model: model) + ignored
             + (limit.model == nil ? " Wait for the reset" + (codex.flatMap { codexWorkers ? ", or " + Self.codexInstead($0) : nil } ?? "") : " Wait for the reset, or \(instead)")
             + ", or call \(what) with override_usage: true if the user wants the rest of the limit spent."
     }
@@ -1559,7 +1561,7 @@ public final class LeadToolset: MCPToolset {
     func workerRoute(for task: LeadTask, sessions: [LeadSessionInfo]?, now: Date? = nil) -> UsageRouting.Route {
         let now = now ?? usageClock()
         return UsageRouting.route(claude: accountUsage(sessions: sessions, now: now), codex: codexUsage.read(now: now), model: workerModel(for: task),
-                           codexWorkers: codexWorkers, now: now)
+                           codexWorkers: codexWorkers, ignoringLimits: macLimits().ignoreUsageLimits, now: now)
     }
 
     /// Who runs a task's worker, as status and board name it: "Codex", "Claude", "auto (now Codex)" (its running worker's,

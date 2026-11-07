@@ -10,6 +10,8 @@ final class MacLimitsEditor: ObservableObject {
     @Published var loadThreshold: Double? { didSet { changed() } }
     /// Builds and full test runs at once, Mac-wide (vs-heavy's, merges', audits'), 1 to the cores.
     @Published var heavySlots: Int { didSet { changed() } }
+    /// "Ignore usage limits": no back-off for the Claude account's usage (see `MacLimits.ignoreUsageLimits`).
+    @Published var ignoreUsageLimits: Bool { didSet { changed() } }
     @Published private(set) var problem: String?
     private let file: URL
     private var loading = false
@@ -20,10 +22,12 @@ final class MacLimitsEditor: ObservableObject {
         maxSessions = limits.maxSessions
         loadThreshold = limits.loadThreshold
         heavySlots = limits.heavySlots
+        ignoreUsageLimits = limits.ignoreUsageLimits
     }
 
     /// The limits as the leads read them (a value out of range as it's kept).
-    var limits: MacLimits { MacLimits(maxSessions: maxSessions, loadThreshold: loadThreshold, heavySlots: heavySlots) }
+    var limits: MacLimits { MacLimits(maxSessions: maxSessions, loadThreshold: loadThreshold, heavySlots: heavySlots,
+                                     ignoreUsageLimits: ignoreUsageLimits) }
 
     /// The file as it is now.
     func reload() {
@@ -32,6 +36,7 @@ final class MacLimitsEditor: ObservableObject {
         maxSessions = limits.maxSessions
         loadThreshold = limits.loadThreshold
         heavySlots = limits.heavySlots
+        ignoreUsageLimits = limits.ignoreUsageLimits
         loading = false
     }
 
@@ -76,6 +81,10 @@ struct MacLimitsSection: View {
                     .multilineTextAlignment(.trailing).frame(width: 60)
             }
             BoostStepper(label: "Test and build slots at once", value: $editor.heavySlots, range: 1...MacLimits.heavySlotsCeiling)
+            Toggle("Ignore usage limits", isOn: $editor.ignoreUsageLimits)
+                .accessibilityLabel("Ignore usage limits: start workers and audits whatever share of a Claude limit is used")
+            Text("Leads start workers and audits at any share of a Claude limit (normally they stop at \(Int(AccountUsage.threshold)) %), Boost isn't held off for usage, and agent: auto stays on Claude until Claude refuses at a limit. A session that reaches a limit still stops, and the lead is told. Usage still shows, marked \(AccountUsage.ignoredMark).")
+                .font(.caption).foregroundStyle(.secondary)
             if let problem = editor.problem {
                 Text(problem).foregroundStyle(.red).font(.caption)
             }
@@ -121,7 +130,7 @@ struct BoostSection: View {
         } header: {
             Text("Project lead: Boost")
         } footer: {
-            SettingsFooter("Boost raises the Mac-wide limits to these for more throughput: leads start more workers and audits, and projects whose merge_batching is boost test merges in batches. Automatic boosts only while the Mac is on AC power and you're away (screen locked, or no input for 5 minutes), and drops back within \(BoostWatch.every) seconds of either changing: new starts stop above the normal limits, running work finishes. On battery it's off whatever the mode, unless Also on battery is on: then it runs on battery as on AC until the charge drops below \(Boost.batteryFloor) % (the battery hold above still pauses lead work below its limit). The usage watch keeps it off at \(MacLoad.number(Boost.vetoPercent)) % of an account limit. While boosted, room freed on the Mac goes first to the project you last worked in, and no project runs more than its workers' limit. The test and build slots go up to these for vs-heavy and the leads' merges and audits alike (never below the normal count), and VS_HEAVY_CORES follows: the \(MacLoad.processors) cores ÷ the slots (\(Self.coresPerSlot(preferences.boostLimits.heavySlots)) each).")
+            SettingsFooter("Boost raises the Mac-wide limits to these for more throughput: leads start more workers and audits, and projects whose merge_batching is boost test merges in batches. Automatic boosts only while the Mac is on AC power and you're away (screen locked, or no input for 5 minutes), and drops back within \(BoostWatch.every) seconds of either changing: new starts stop above the normal limits, running work finishes. On battery it's off whatever the mode, unless Also on battery is on: then it runs on battery as on AC until the charge drops below \(Boost.batteryFloor) % (the battery hold above still pauses lead work below its limit). The usage watch keeps it off at \(MacLoad.number(Boost.vetoPercent)) % of an account limit, unless Ignore usage limits is on. While boosted, room freed on the Mac goes first to the project you last worked in, and no project runs more than its workers' limit. The test and build slots go up to these for vs-heavy and the leads' merges and audits alike (never below the normal count), and VS_HEAVY_CORES follows: the \(MacLoad.processors) cores ÷ the slots (\(Self.coresPerSlot(preferences.boostLimits.heavySlots)) each).")
         }
     }
 }

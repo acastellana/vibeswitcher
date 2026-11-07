@@ -30,6 +30,8 @@ final class BoostWatch: ObservableObject {
     var away: () -> Bool = { !UserPresence.isPresent() }
     /// The account's usage as the usage watch keeps it. On the watch's queue.
     var usage: () -> AccountUsage = { AccountUsageStore().load() }
+    /// Settings' "Ignore usage limits" (`MacLimits.ignoreUsageLimits`): the usage watch holds nothing off. On the watch's queue.
+    var ignoringUsage: () -> Bool = { MacLimits.load().ignoreUsageLimits }
     /// The project a session's folder is in (`Boost.projectRoot`). On the watch's queue.
     var projectRoot: (String) -> String = { Boost.projectRoot(of: $0) }
     /// The folder of the session you're on (its project gets first claim on freed room while boosted); nil: none.
@@ -79,7 +81,7 @@ final class BoostWatch: ObservableObject {
             if let folder { favored = projectRoot(folder) }
             // Presence and the usage file only matter when boost could be on.
             let away = mode == .off ? false : self.away()
-            let veto = mode == .off ? nil : Boost.veto(usage(), now: now)
+            let veto = mode == .off ? nil : Boost.veto(usage(), now: now, ignoring: ignoringUsage())
             let decided = Boost.decide(mode: mode, onAC: ac, away: away, veto: veto, onBattery: onBattery, percent: charge, now: now)
             let next = BoostState(on: decided.on, why: decided.why, limits: limits, favored: favored, at: now.timeIntervalSince1970)
             var problem: String?? = .none
