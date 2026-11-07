@@ -3208,3 +3208,4 @@
 - 2026-11-07 00:46 Released a-message-typed-into's worker (idle since its done report on 335cbfb4) while its audit runs
 - 2026-11-07 00:46 Automatically (auto_advance): Released a-message-typed-into's worker, idle since its done report on 335cbfb4, while its audit runs (ended pid 35142 (Worker: A message typed into a working Codex mustn't also wait in its inbox)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-07 00:47 Audit of a-message-typed-into: complete, clean, round 1: 2 Nit open
+- 2026-11-07 01:00 Merged a-message-typed-into: A message typed into a working Codex mustn't also wait in its inbox
