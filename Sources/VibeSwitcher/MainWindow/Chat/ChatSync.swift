@@ -367,6 +367,21 @@ final class ChatSync {
         now == nil ? "That question is gone." : "That question changed; here it is now."
     }
 
+    /// Why an answer meant for `drawn` can't go in while the screen shows `onScreen`; nil when it can (the same
+    /// question: its cursor may have moved). The card's check, and a notification's Allow / Deny's (`PromptAnswer`).
+    static func refusal(drawn: ScreenMenu, onScreen: ScreenMenu?) -> String? {
+        guard let onScreen, onScreen.sameQuestion(as: drawn) else { return refusal(onScreen) }
+        return nil
+    }
+
+    /// The keys that choose option `index` of `menu` as the screen shows it (arrows from its cursor, then Enter; a
+    /// free-text answer replaces what its field holds): the card's, and a notification's Allow / Deny's.
+    static func keys(_ menu: ScreenMenu, choose index: Int, typing: String? = nil) -> [HostInput.Write] {
+        guard let typing else { return menu.keys(toChoose: index) }
+        // What's in the field already (typed in the terminal) is replaced.
+        return menu.keys(toChoose: index, typing: typing, replacing: typedIn(menu, index))
+    }
+
     /// The one line asking before an answer is typed into a Terminal tab (which comes to the front for it).
     static func confirmation(_ menu: ScreenMenu, index: Int, typing: String?) -> String {
         let what: String
@@ -472,20 +487,14 @@ final class ChatSync {
         // Read again right before: the question may have changed or gone, and an answer must not land on another one.
         readScreen()
         let shown = onScreenNow
-        guard let menu = shown, menu.sameQuestion(as: drawn) else {
+        guard let menu = shown, Self.refusal(drawn: drawn, onScreen: shown) == nil else {
             // The screen's last read not taken yet may be half a redraw: the card keeps what it drew, and the notice
             // is said again of the read that's taken (the confirm read's, `refused`).
             if paneSettling { refused = (target.id, drawn) }
             chat.answerNotice = Self.refusal(shown)
             return
         }
-        let writes: [HostInput.Write]
-        if let typing {
-            // What's in the field already (typed in the terminal) is replaced.
-            writes = menu.keys(toChoose: index, typing: typing, replacing: Self.typedIn(menu, index))
-        } else {
-            writes = menu.keys(toChoose: index)
-        }
+        let writes = Self.keys(menu, choose: index, typing: typing)
         write(writes, to: target.id)
         chat.answerNotice = nil
         setAnswering((menu, now().addingTimeInterval(ScreenMenu.duration(writes) + Self.answerWait)))
@@ -714,9 +723,146 @@ final class ChatSync {
     static let focusOut: [UInt8] = [0x1b, 0x5b, 0x4f]
 
     /// Keys for the session, as one unit: in order with the messages typed in (see `HostClient.send(_:writes:check:confirmed:)`).
+    /// Keys the host didn't confirm (an answer, Esc, the mode's shift+tab) are said on the card, not only logged.
     func write(_ writes: [HostInput.Write], to id: UUID) {
-        host.send(id, writes: writes) { ok in
-            if !ok { Breadcrumbs.shared.note("composer: the host didn't confirm \(writes.count) key writes") }
+        let main = onMain
+        host.send(id, writes: writes) { [weak self] ok in
+            guard !ok else { return }
+            Breadcrumbs.shared.note("composer: the host didn't confirm \(writes.count) key writes")
+            main { self?.chat.answerNotice = Self.keysLost }
+        }
+    }
+
+    /// What the card says when the session host didn't take keys sent to the session.
+    static let keysLost = "That didn't reach the session: the session host didn't take the keys. Nothing was answered; try again."
+}
+
+/// A permission prompt answered from outside the chat: a notification's Allow or Deny (`PromptActions`). It goes the
+/// card's way (`ChatSync.choose`): the session's screen read again right before, refused when it isn't the prompt the
+/// notification was posted for (`ChatSync.refusal(drawn:onScreen:)`), arrows from the cursor then Enter
+/// (`ChatSync.keys`); each key only while the screen still shows that prompt (a key on whatever comes next would answer
+/// that), and the answer confirmed once the screen has moved on from it. The session's screen is the host's (no pane
+/// need show it), read as a Terminal tab's is (`ChatSync.terminalMenu`).
+final class PromptAnswer {
+    enum Choice: String, Equatable { case allow, deny }
+
+    /// Why an answer didn't go in (or wasn't seen to).
+    enum Failure: Equatable, Error {
+        /// The screen shows another question (or a menu that isn't a permission prompt).
+        case changed
+        /// The screen shows no menu: answered or gone already.
+        case gone
+        /// The prompt has no row for it (no "No" row to deny with).
+        case noRow
+        /// The session host didn't take the keys (or its screen couldn't be read).
+        case hostFailed
+        /// The keys went in, and the screen still shows the prompt.
+        case stillShown
+        /// Nothing is known of the prompt the notification was about (VibeSwitcher restarted since).
+        case unknown
+
+        /// The notice's text: it says the prompt wasn't answered, and why.
+        var text: String {
+            switch self {
+            case .changed: return "Not answered: the prompt changed before your answer went in. Open the session to see what it asks now."
+            case .gone: return "Not answered: that prompt is no longer on the session's screen."
+            case .noRow: return "Not answered: that prompt has no row for this answer. Open the session to answer it."
+            case .hostFailed: return "Not answered: the session host didn't take the keys. Open the session to answer it."
+            case .stillShown: return "It may not have been answered: the prompt still shows. Open the session to check."
+            case .unknown: return "Not answered: VibeSwitcher no longer knows that prompt. Open the session to answer it."
+            }
+        }
+    }
+
+    /// The prompt a notification was posted for: the session host's session, and the menu its screen showed.
+    struct Prompt: Equatable {
+        var id: UUID
+        var menu: ScreenMenu
+    }
+
+    /// The session's screen text (nil: it couldn't be read), on the main thread.
+    var screen: (UUID, @escaping (String?) -> Void) -> Void
+    /// Keys for the session as one unit, each asked of `gate` right before it goes (`HostClient.send(_:writes:gate:confirmed:)`).
+    var send: (UUID, [HostInput.Write], @escaping (Int, @escaping (Bool) -> Void) -> Void, @escaping (Bool) -> Void) -> Void
+    /// How often the screen is read while waiting for it (to show the prompt, then to move on from it).
+    var lookEvery: TimeInterval = 0.1
+    /// How long the screen may take to move on from the prompt once the keys are in.
+    var confirmWait: TimeInterval = 5
+    var now: () -> Date = Date.init
+
+    init(host: HostClient) {
+        screen = { [weak host] id, done in
+            guard let host else { return done(nil) }
+            host.screen(id, completion: done)
+        }
+        send = { [weak host] id, writes, gate, confirmed in
+            guard let host else { return confirmed(false) }
+            host.send(id, writes: writes, gate: gate, confirmed: confirmed)
+        }
+    }
+
+    /// The permission prompt on a screen's text: a menu with a Yes row first and a No row (Claude Code's "Do you want to
+    /// proceed?", "Do you want to make this edit…"), not a question's, a picker's or the slash-command menu.
+    static func permissionMenu(_ text: String?) -> ScreenMenu? {
+        guard let menu = ChatSync.terminalMenu(text), !menu.picker, !menu.commands, !menu.multiSelect, menu.tabs.isEmpty,
+              menu.question.contains("Do you want"), menu.options.first?.lowercased().hasPrefix("yes") == true,
+              row(.deny, in: menu) != nil else { return nil }
+        return menu
+    }
+
+    /// The row answering `choice`: Yes (the first), or the No row (the last one starting "No").
+    static func row(_ choice: Choice, in menu: ScreenMenu) -> Int? {
+        switch choice {
+        case .allow: return menu.options.first?.lowercased().hasPrefix("yes") == true ? 0 : nil
+        case .deny: return menu.options.lastIndex { $0.lowercased() == "no" || $0.lowercased().hasPrefix("no,") || $0.lowercased().hasPrefix("no ") }
+        }
+    }
+
+    /// The permission prompt on `id`'s screen, read up to `tries` times `lookEvery` apart (the hook that tells of it can
+    /// come before the screen is drawn); nil when none shows.
+    func capture(_ id: UUID, tries: Int = 5, done: @escaping (ScreenMenu?) -> Void) {
+        screen(id) { [weak self] text in
+            if let menu = Self.permissionMenu(text) { return done(menu) }
+            guard let self, tries > 1 else { return done(nil) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + self.lookEvery) { self.capture(id, tries: tries - 1, done: done) }
+        }
+    }
+
+    /// Answers `prompt` with `choice`: nil once it's answered (the screen moved on from it), else why not. Nothing is
+    /// typed unless the screen shows that prompt right before each key.
+    func answer(_ prompt: Prompt, _ choice: Choice, done: @escaping (Failure?) -> Void) {
+        screen(prompt.id) { [weak self] text in
+            guard let self else { return done(.hostFailed) }
+            guard let text else { return done(.hostFailed) }
+            let shown = ChatSync.terminalMenu(text)
+            guard let menu = shown, ChatSync.refusal(drawn: prompt.menu, onScreen: shown) == nil else {
+                return done(shown == nil ? .gone : .changed)
+            }
+            guard let index = Self.row(choice, in: menu) else { return done(.noRow) }
+            var moved: Failure?
+            self.send(prompt.id, ChatSync.keys(menu, choose: index), { _, go in
+                // Each key only while that prompt still shows.
+                self.screen(prompt.id) { text in
+                    guard let text else { moved = .hostFailed; return go(false) }
+                    let now = ChatSync.terminalMenu(text)
+                    if ChatSync.refusal(drawn: prompt.menu, onScreen: now) == nil { return go(true) }
+                    moved = now == nil ? .gone : .changed
+                    go(false)
+                }
+            }, { ok in
+                guard ok else { return done(moved ?? .hostFailed) }
+                self.confirm(prompt, since: self.now(), done: done)
+            })
+        }
+    }
+
+    /// Reads the screen until it no longer shows `prompt` (answered), or `confirmWait` passes (`stillShown`).
+    private func confirm(_ prompt: Prompt, since: Date, done: @escaping (Failure?) -> Void) {
+        screen(prompt.id) { [weak self] text in
+            guard let self else { return done(.stillShown) }
+            if let text, ChatSync.refusal(drawn: prompt.menu, onScreen: ChatSync.terminalMenu(text)) != nil { return done(nil) }
+            guard self.now().timeIntervalSince(since) < self.confirmWait else { return done(.stillShown) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + self.lookEvery) { self.confirm(prompt, since: since, done: done) }
         }
     }
 }

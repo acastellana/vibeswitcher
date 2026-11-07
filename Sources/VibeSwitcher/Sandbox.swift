@@ -986,6 +986,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("send", "presses Return in the composer: the message goes to the fake session"),
         ("runblock [yes]", "the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as Run does once you confirm (tell it {\"op\": \"realShell\"} first to see its output)"),
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
+        ("notify prepare|allow|deny", "a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare reads its screen as posting the banner does (whether it gets Allow and Deny); allow or deny runs that banner's action (`PromptActions.handle`), a failure shown as the chat card's notice"),
         ("new [codex|shell] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell"),
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),
@@ -1808,6 +1809,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             composer.doCommand(by: #selector(NSResponder.insertNewline(_:)))
             reply(true, "sent")
         case "tell": tell(rest, reply)
+        case "notify": notify(rest, reply)
         case "runblock": runBlock(confirmed: rest == "yes", reply)
         case "clear":
             // Ended first, then removed (the host keeps an ended session's row until it's removed).
@@ -2074,6 +2076,33 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
         default:
             reply(false, "dictation key|nokey|note|ack|press|release|letgo|cancel|turnon")
+        }
+    }
+
+    /// The permission prompt banners' Allow and Deny, as the app's (`AppDelegate`), on the sandbox's host: a failure
+    /// is said on the chat card (the sandbox posts no banners).
+    private lazy var promptActions: PromptActions = {
+        let actions = PromptActions(answerer: PromptAnswer(host: host))
+        actions.notice = { [weak self] tty, _, body in self?.window?.answerFailed(tty: tty, text: body) }
+        return actions
+    }()
+
+    private func notify(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard let id = model.selectedRow?.hostID, let fake = fakeList.first(where: { $0.id == id }) else {
+            return reply(false, "select a fake session first (chat TEXT)")
+        }
+        switch what {
+        case "prepare":
+            promptActions.prepare(tty: fake.tty, id: id) { [weak self] ready in
+                let question = self?.promptActions.prompts[fake.tty]?.menu.question.split(separator: "\n").last.map(String.init) ?? ""
+                reply(true, ready ? "the banner gets Allow and Deny: \(question)" : "no permission prompt on screen: the banner gets no actions")
+            }
+        case "allow", "deny":
+            promptActions.handle(what == "allow" ? PromptActions.allowAction : PromptActions.denyAction, tty: fake.tty) { [weak self] failure in
+                self?.settle { reply(true, failure.map { "not answered (\($0)): \($0.text)" } ?? "answered") }
+            }
+        default:
+            reply(false, "notify prepare|allow|deny")
         }
     }
 

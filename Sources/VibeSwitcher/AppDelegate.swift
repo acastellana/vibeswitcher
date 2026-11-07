@@ -272,6 +272,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             guard let self, let session = self.store.sessions.first(where: { $0.tty == tty }) else { return }
             self.open(session, source: "notification")
         }
+        // A permission prompt's banner: Allow and Deny answer it the chat card's way; one that didn't go in is said in a
+        // banner and, when the window shows that session, on its card.
+        let promptActions = PromptActions(answerer: PromptAnswer(host: hostClient))
+        promptActions.notice = { [weak self] tty, title, body in
+            self?.notifier?.postAnswerFailed(tty: tty, title: title, body: body)
+            self?.mainWindow?.answerFailed(tty: tty, text: body)
+        }
+        notifier?.promptActions = promptActions
         store.onAttention = { [weak self] session in self?.notifier?.post(for: session) }
         // A lead's turn that ends on a question for you notifies (once per question, with the board's own alert).
         notifier?.leadQuestion = { [weak self] session in
