@@ -3295,3 +3295,10 @@
 - 2026-11-07 12:44 Audit of load-harness-xcrun-s: complete, clean, round 1: 1 Nit open
 - 2026-11-07 12:45 The worker on resume-work-cut-off answered findings: resume-work-cut-off:F5 fixed at 8e8f8068: Committed 8e8f8068: gate refusals release pending events' witness suppression and register a deduplicated automatic room-wait nudge. The minute room watcher retries with no new interruption, including missing-power retries; pending recovery markers survive overnight holds. Added fake-runtime regression coverage.
 - 2026-11-07 12:54 Merged load-harness-xcrun-s: Load harness: xcrun's xcrun_db cache isn't a leftover
+- 2026-11-07 12:54 Automatically (auto_advance): Merged load-harness-xcrun-s (Load harness: xcrun's xcrun_db cache isn't a leftover) into main at 9a98bcca, on its passing audit and the full test run.
+- 2026-11-07 12:54 Released resume-work-cut-off's worker (idle since its done report on 8e8f8068) while its audit runs
+- 2026-11-07 12:54 Automatically (auto_advance): Released resume-work-cut-off's worker, idle since its done report on 8e8f8068, while its audit runs (ended pid 22959 (Worker: Resume work cut off by the Mac sleeping)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-07 12:54 Automatically (auto_advance): Cleaned up load-harness-xcrun-s (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-07 12:55 Audit of resume-work-cut-off: incomplete, clean, round 3: 5 Important (1 open), 2 Nit (1 open)
+- 2026-11-07 12:56 Planned sleep-recovery-room-wait: Sleep-recovery room wait: no lock or file read on the main thread; retry when advanceSessions fails (review audit)
+- 2026-11-07 12:56 Audit of resume-work-cut-off: complete, clean, round 4: 5 Important closed, 2 Nit closed

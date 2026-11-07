@@ -235,3 +235,7 @@ The user's answer to FFC4FEF0 (2026-11-07): "Keep everything going past 80%, up 
 
 Rounds 1–2 fixed and verified F1–F4. F5 is one narrow gap: a gate-refused resume has nothing to wake it again. It has a precise fix and a test. A re-roll would throw away verified work, and merging with F5 open would put back the silent stuck worker the task exists to prevent.
 
+## 2026-11-07 12:56:02 resume-work-cut-off merges with F5 fixed, and its round-3 finding F6 (a once-a-minute main-thread lock and read, only while a sleep retry is pending) moves to its own follow-up task, sleep-recovery-room-wait, instead of a fourth round or a re-roll.
+
+F1–F5 are fixed and verified. F6 is a small cost on a rare path and has a precise fix. Each patch round has surfaced one new narrow issue, and a separate task keeps that cycle from blocking the verified behaviour.
+
