@@ -100,6 +100,39 @@ extension LeadAdvanceTests {
     }
 }
 
+extension LeadAdvanceTests {
+    /// The blind check's case: work auto_advance already holds at 85 % starts once the setting is turned on and the
+    /// app nudges the lead (`LeadController.nudgeLeads`), not at the limit's reset.
+    @Test func ignoringUsageLimitsTurnedOnReleasesWhatAutoAdvanceHolds() throws {
+        let (root, runtime, lead) = try team()
+        let now = AccountUsageTests.now
+        lead.usageClock = { now }
+        lead.usageWake = { _, _ in }
+        let ignoring = Flag()
+        lead.macLimits = { MacLimits(maxSessions: 6, ignoreUsageLimits: ignoring.value) }
+        let input = #"{"rate_limits":{"seven_day":{"used_percentage":85,"resets_at":\#(AccountUsageTests.tomorrow)}}}"#
+        UsageStatusLine.run(input: Data(input.utf8), store: usageStore, home: temp.url("no-home").path, now: now, ignored: false) { _ in }
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "First", "goal": "g", "acceptance": ["a"]])
+        #expect(advancing.until { reports(runtime).contains { $0.contains("The account's usage is near a limit") } }, "\(reports(runtime))")
+        advancing.settle()
+        #expect(task("first", root)?.status == .planned)
+        ignoring.value = true
+        LeadAdvance.nudge(root: root)
+        #expect(advancing.until { task("first", root)?.status == .running })
+    }
+
+    final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var on = false
+        var value: Bool {
+            get { lock.lock(); defer { lock.unlock() }; return on }
+            set { lock.lock(); on = newValue; lock.unlock() }
+        }
+    }
+}
+
 extension UsageRoutingTests {
     @Test func ignoringUsageLimitsAutoPicksClaudeUnlessClaudeRefusedAtALimit() throws {
         let now = Date(timeIntervalSince1970: 1_000_000)

@@ -465,6 +465,8 @@ final class LeadController: ObservableObject {
     @Published private(set) var keptLeads: [String: UUID] = [:]
     private var adopting: Set<UUID> = []
     private var hostWelcome: AnyCancellable?
+    /// Settings' "Ignore usage limits" changing (`MacLimitsEditor.usageLimitsChanged`): every running lead looks again.
+    private var usageSetting: NSObjectProtocol?
     /// The boards and decisions, and the teams' transcripts, read off the main thread (the boards written there too, to
     /// keep the order; `baseMoves` writes there as well).
     private let reads: LeadReads
@@ -550,6 +552,11 @@ final class LeadController: ObservableObject {
         hostWelcome = host.$state.receive(on: DispatchQueue.main).sink { [weak self] _ in
             self?.startPending()
             self?.keepRunningLeads()
+        }
+        // "Ignore usage limits" turned on releases what auto_advance holds for usage now, not at the limit's reset
+        // (its only armed look); turned off, the next pass holds again.
+        usageSetting = NotificationCenter.default.addObserver(forName: MacLimitsEditor.usageLimitsChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.nudgeLeads()
         }
         // A move it asks about is a card in the lead's chat, no alert: you commit on the base yourself. Only a merge it
         // refused waits on you (`AlertRules.baseMoved`, at each refresh).
@@ -1543,6 +1550,15 @@ final class LeadController: ObservableObject {
                 }
             }
         }
+    }
+
+    deinit {
+        if let usageSetting { NotificationCenter.default.removeObserver(usageSetting) }
+    }
+
+    /// Makes every running lead's tool server look again at what it held (see `LeadAdvance.nudge`).
+    func nudgeLeads() {
+        for root in leadRoots { LeadAdvance.nudge(root: root) }
     }
 
     /// VibeSwitcher's own health (see `AppHealthWatcher`): to the leads of the projects whose workflow.md has

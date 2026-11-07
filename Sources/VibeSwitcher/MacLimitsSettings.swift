@@ -11,7 +11,14 @@ final class MacLimitsEditor: ObservableObject {
     /// Builds and full test runs at once, Mac-wide (vs-heavy's, merges', audits'), 1 to the cores.
     @Published var heavySlots: Int { didSet { changed() } }
     /// "Ignore usage limits": no back-off for the Claude account's usage (see `MacLimits.ignoreUsageLimits`).
-    @Published var ignoreUsageLimits: Bool { didSet { changed() } }
+    @Published var ignoreUsageLimits: Bool {
+        didSet {
+            changed()
+            if !loading, ignoreUsageLimits != oldValue { NotificationCenter.default.post(name: Self.usageLimitsChanged, object: self) }
+        }
+    }
+    /// Posted once "Ignore usage limits" is saved changed: the leads look again at what they held for usage.
+    static let usageLimitsChanged = Notification.Name("VibeSwitcher.MacLimits.usageLimitsChanged")
     @Published private(set) var problem: String?
     private let file: URL
     private var loading = false
