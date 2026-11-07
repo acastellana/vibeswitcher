@@ -4996,7 +4996,7 @@ public final class LeadToolset: MCPToolset {
                 return "- \(wording) → \(question.answer ?? "")" + (saw < question.version ? " (to version \(saw) of \(question.version))" : "")
             }
         }
-        migrateFlakes()
+        if board.flakes != nil { migrateFlakes() }
         let ledger = flakeLedger.load(), now = Date().timeIntervalSince1970
         if let flakes = ledger.flakeLine(now: now) { lines.append("\n" + flakes) }
         if let reruns = ledger.rerunLine(now: now) { lines.append("\n" + reruns) }
