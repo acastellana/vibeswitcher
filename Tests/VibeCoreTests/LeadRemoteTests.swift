@@ -504,6 +504,73 @@ struct LeadRemoteTests: LeadTeamFixture {
         #expect(lead.call("merge_remote", [:]).text.contains("run fetch_remote first"))
     }
 
+    // MARK: A task that merges the remote
+
+    /// merge-github-s-main, 2026-11-06: merge_remote stopped on a code conflict, so a worker merged origin/main in
+    /// and resolved it, and its audit passed on that true merge. merge(task) then squashed the branch onto main (as
+    /// it does a branch that merged the base in): the other Mac's commits landed as copies, so origin/main wasn't an
+    /// ancestor of main and push_remote refused, and the lead's records were put back to main's copy, dropping the
+    /// other Mac's. A branch carrying what fetch_remote fetched lands as a true merge instead: the fetched commits
+    /// stay themselves, and the records are main's and the remote's, by union (the worker's own edits to them aren't
+    /// taken, as ever).
+    @Test func aTaskThatMergedTheRemoteInLandsWithTheRemotesCommitsAndRecords() throws {
+        let scene = try makeScene()
+        // The other Mac: work, a code change that conflicts with this Mac's, and lead records of its own.
+        _ = try pushed(scene, "b.txt", "bee\n", message: "Remote b")
+        _ = try pushed(scene, "a.txt", "theirs\n", message: "Remote a")
+        _ = try pushed(scene, "docs/lead/decisions.md", "## the other Mac's decision\n", append: true, message: "Remote decision")
+        _ = try pushed(scene, "docs/lead/incidents.md", "# Incidents\n\n## the other Mac's incident\n", message: "Remote incident")
+        let tip = try pushed(scene, "docs/lead/progress.md", "- the other Mac's progress\n", append: true, message: "Remote progress")
+        // This Mac, meanwhile.
+        try commit("a.txt", "ours\n", in: scene.root, message: "Local a")
+        try commit("docs/lead/progress.md", "- local progress\n", in: scene.root, append: true, message: LeadRecords.subject)
+        let runtime = FakeRuntime()
+        let lead = try lead(scene.root, runtime)
+        lead.power = { nil }
+        #expect(!lead.call("configure", ["auto_advance": false]).isError)
+        #expect(!lead.call("fetch_remote", [:]).isError)
+        #expect(lead.call("merge_remote", [:]).text.contains("conflicts with main in a.txt"))
+
+        // A worker merges origin/main in and resolves the conflicts (its records by hand, both sides' lines), as the
+        // task asked.
+        #expect(!lead.call("add_task", ["title": "Merge the remote", "goal": "origin/main merged", "acceptance": ["a"]]).isError)
+        #expect(!lead.call("start_worker", ["task": "merge-the-remote"]).isError)
+        let worktree = Worktrees.path(root: scene.root, slug: "merge-the-remote")
+        #expect(!Git.run(["merge", "-q", "--no-edit", "origin/main"], in: worktree).ok)
+        try "ours and theirs\n".write(toFile: worktree + "/a.txt", atomically: true, encoding: .utf8)
+        try "# Progress\n\n- first\n- local progress\n- the other Mac's progress\n- the worker's own line\n"
+            .write(toFile: worktree + "/docs/lead/progress.md", atomically: true, encoding: .utf8)
+        Git.run(["add", "a.txt", "docs/lead"], in: worktree)
+        #expect(Git.run(["commit", "-q", "--no-edit"], in: worktree).ok)
+        let branch = Git.run(["rev-parse", "HEAD"], in: worktree).output
+        #expect(isAncestor(tip, of: branch, in: scene.root))
+        #expect(!(try seat("worker-merge-the-remote", runtime)).call("report", doneReport("merged origin/main")).isError)
+        // The lead's records move main on before the merge, as they do.
+        let before = head(scene.root)
+        guard case .committed = lead.records.flush(base: "main") else { Issue.record("the records weren't committed"); return }
+        #expect(head(scene.root) != before)
+
+        let merged = lead.call("merge", ["task": "merge-the-remote"])
+        #expect(!merged.isError, "\(merged.text)")
+        let main = head(scene.root)
+        // The other Mac's commits are on main as themselves, on top of what main had: a push is a fast-forward.
+        #expect(isAncestor(tip, of: main, in: scene.root), "origin/main (\(tip.prefix(8))) isn't an ancestor of main (\(main.prefix(8)))")
+        #expect(isAncestor(before, of: main, in: scene.root) && main != before)
+        #expect(Git.run(["show", "\(main):a.txt"], in: scene.root).output == "ours and theirs")
+        #expect(Git.run(["show", "\(main):b.txt"], in: scene.root).output == "bee")
+        // The records: main's and the other Mac's, all of them; not the worker's own line.
+        let progress = Git.run(["show", "\(main):docs/lead/progress.md"], in: scene.root).output
+        for line in ["- first", "- local progress", "Started a worker on merge-the-remote", "- the other Mac's progress"] {
+            #expect(progress.contains(line), "\(line) missing from main's progress.md:\n\(progress)")
+        }
+        #expect(!progress.contains("the worker's own line") && !progress.contains("<<<<<<<"), "\(progress)")
+        #expect(Git.run(["show", "\(main):docs/lead/decisions.md"], in: scene.root).output.contains("## the other Mac's decision"))
+        #expect(Git.run(["show", "\(main):docs/lead/incidents.md"], in: scene.root).output.contains("## the other Mac's incident"))
+        // So push_remote asks for the push, rather than refusing it as no fast-forward.
+        let push = lead.call("push_remote", [:])
+        #expect(!push.text.contains("wouldn't be a fast-forward"), "\(push.text)")
+    }
+
     // MARK: Roles
 
     @Test func workersAndVerifiersHaveNeitherTool() throws {
