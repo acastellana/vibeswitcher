@@ -2815,13 +2815,16 @@ public final class LeadToolset: MCPToolset {
         // When its commands started (the slot taken) and the load then, for the merge stats line.
         let called = Date()
         var begun: (at: Date, load: [Double])?
+        // The failing tests' one run on the base after a rerun: record only (`MergeRerun.baseline`).
+        let pairing = MergeRerun.Pairing()
         let checked = Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
                                               scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
                                               timeout: workflow.testTimeout, lock: heavyLock(workflow), records: workflow.recordsDir,
                                               remote: fetchedTip(workflow), rerun: { output in
                                                   rerun = MergeRerun.plan(after: output, workflow: workflow)
                                                   return rerun?.command
-                                              }, tested: { testCount = LeadReceipt.testCount($0) },
+                                              }, baseline: baseline(on: current, plan: { rerun }, pairing: pairing),
+                                              tested: { testCount = LeadReceipt.testCount($0) },
                                               begun: { begun = ($0, LoadRecorder.averages() ?? []) })
         if let folder = mergeStats() {
             let start = begun?.at ?? called
@@ -2835,6 +2838,17 @@ public final class LeadToolset: MCPToolset {
         try? store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].noteMergeRun(loadWait: waited?.after ?? 0, called: called, begun: begun?.at, ended: ranUntil)
+        }
+        // A run that went to a rerun, in the flake ledger with its paired base run: record only.
+        if let plan = rerun {
+            switch checked {
+            case .passedOnRerun(_, _, let again):
+                recordRerun(plan, task: slug, commit: commit, base: current, passed: MergeRerun.unshown(plan, rerun: again).isEmpty,
+                            load: begun?.load.first, pairing: pairing)
+            case .failed:
+                recordRerun(plan, task: slug, commit: commit, base: current, passed: false, load: begun?.load.first, pairing: pairing)
+            default: break
+            }
         }
         switch checked {
         case .passed(let commit): tested = commit
@@ -2869,12 +2883,15 @@ public final class LeadToolset: MCPToolset {
             // merges again and again gets a task of its own (`planFlakeFixes`).
             var ledger = ""
             if let stuck = stall?.lastTest.map(Redaction.secrets(in:)) {
-                let planned = (try? store.update { board in
-                    planFlakeFixes(&board, flakes: [stuck], slug: slug, commit: commit, at: Date(), logged: [], log: nil, workflow: workflow)
-                }) ?? []
+                let plan = (try? store.update { board in
+                    planFlakeFixes(&board, flakes: [stuck], slug: slug, commit: commit, at: Date(), logged: [], log: nil,
+                                   load: begun?.load.first, workflow: workflow)
+                }) ?? FlakePlan()
+                let planned = plan.planned
                 ledger = "\(Self.clip(stuck, 200)), the last test it started, is recorded in the flake ledger"
                     + (planned.first.map { $0.noted ? " (the open task \($0.slug) names it: noted in its context)" : " (it hung or flaked \(LeadBoard.flakeLimit) times: planned \($0.slug) to fix it)" } ?? "")
                     + ". "
+                if !plan.recurred.isEmpty { ledger += tellRecurrences(plan.recurred, slug: slug).trimmingCharacters(in: .whitespaces) + " " }
             }
             try? store.appendProgress("Hung in \(slug)'s merge: the \(what) "
                                       + (stall.map { "made \(Redaction.secrets(in: $0.summary)), stopped \(Worktrees.duration(after)) in" } ?? "stopped after \(Worktrees.duration(after))")
@@ -2923,8 +2940,8 @@ public final class LeadToolset: MCPToolset {
             let usage = receiptUsage(task)
             let build = runningBuild()?.label
             let brought = Int(Git.run(["rev-list", "--count", "\(current)..\(tested)"], in: root).output)
-            let planned = try store.update { board -> [(test: String, slug: String, noted: Bool)] in
-                guard let index = board.taskIndex(slug) else { return [] }
+            let flakePlan = try store.update { board -> FlakePlan in
+                guard let index = board.taskIndex(slug) else { return FlakePlan() }
                 board.tasks[index].status = .done
                 board.tasks[index].merged = LeadMergeRecord(commit: tested, tested: workflow.testCommand != nil, onto: current,
                                                              regression: workflow.regressionCommand.map { _ in true }, audited: audited ? nil : false)
@@ -2933,8 +2950,11 @@ public final class LeadToolset: MCPToolset {
                                                          commits: brought)
                 board.tasks[index].receipt?.build = build
                 return planFlakeFixes(&board, flakes: flakes, slug: slug, commit: tested, at: flakedAt, logged: Set(flakeLines.keys),
-                                      log: flakeLog, workflow: workflow)
+                                      log: flakeLog, load: begun?.load.first, filtered: flaked?.plan.filtered, workflow: workflow)
             }
+            let planned = flakePlan.planned
+            // A fix-the-flaky-test task (or an open one a due flake was noted in) merging fixes its test.
+            noteFlakeFixes([(slug, tested)])
             // Nothing ran: say so, it isn't a pass.
             let untested = workflow.testCommand == nil
                 ? " (merged without tests: no test_command\(workflow.problem.map { "; \($0)" } ?? ""). Set one with configure.)" : ""
@@ -2966,6 +2986,7 @@ public final class LeadToolset: MCPToolset {
                 let readable = flakeLog.map { " Each flaky test's failing lines, readable by its fixer: \(MergeRerun.evidenceFile(root: root, log: $0))." } ?? ""
                 flakeNote += readable
                     + (due.isEmpty ? "" : " " + due.joined(separator: " "))
+                    + tellRecurrences(flakePlan.recurred, slug: slug)
                     + ")"
             }
             let caughtUp = tellToCatchUp(merged: slug, from: current, to: tested, base: base)
@@ -2976,27 +2997,100 @@ public final class LeadToolset: MCPToolset {
         }
     }
 
-    /// The flake ledger for `flakes` of `slug`'s merge (tested at `commit`), and a task for each test that flaked once
-    /// too often (once: `recordFlakes`), unless an open task names it already: its count goes in that task's context.
-    /// Each such test, the task that has it, and whether that's an open one's note (no new task).
+    /// What `planFlakeFixes` did: each test that flaked too often, the task that has it, and whether that's an open
+    /// one's note (no new task); and each test that flaked for the first time since a fix for it merged.
+    struct FlakePlan {
+        var planned: [(test: String, slug: String, noted: Bool)] = []
+        var recurred: [FlakeLedger.Recurrence] = []
+    }
+
+    /// The flake ledger's file (`FlakeLedgerStore`).
+    var flakeLedger: FlakeLedgerStore { FlakeLedgerStore(root: root) }
+
+    /// The flake ledger for `flakes` of `slug`'s merge (tested at `commit`, its run started at the 1-minute `load`, its
+    /// rerun `filtered` or whole), and a task for each test that flaked once too often (once: `recordFlakes`), unless an
+    /// open task names it already: its count goes in that task's context. Called under the board's lock: the board's
+    /// own flakes from before the ledger's file move there first (`FlakeLedgerStore.migrate`).
     func planFlakeFixes(_ board: inout LeadBoard, flakes: [String], slug: String, commit: String, at date: Date, logged: Set<String>,
-                        log: String?, workflow: LeadWorkflow) -> [(test: String, slug: String, noted: Bool)] {
-        guard !flakes.isEmpty else { return [] }
-        return board.recordFlakes(flakes, task: slug, commit: commit, now: date.timeIntervalSince1970, logged: logged, log: log).map { test, _, counted in
-            if let open = board.openTask(naming: test), let index = board.taskIndex(open.id) {
-                let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
-                let line = MergeRerun.flakeNote(test: test, flakes: counted, root: root)
-                board.tasks[index].contract.context = context.isEmpty ? line : context + "\n\n" + line
-                board.notePlanned(open.slug, for: test)
-                return (test, open.slug, true)
+                        log: String?, load: Double? = nil, filtered: Bool? = nil, workflow: LeadWorkflow) -> FlakePlan {
+        guard !flakes.isEmpty else { return FlakePlan() }
+        let ledgerStore = flakeLedger
+        do {
+            try ledgerStore.migrate(&board, tasks: { store.archived() })
+            return try ledgerStore.update { ledger in
+                let (due, recurred) = ledger.recordFlakes(flakes, task: slug, commit: commit, now: date.timeIntervalSince1970, logged: logged,
+                                                          log: log, load: load, filtered: filtered)
+                var plan = FlakePlan(recurred: recurred)
+                plan.planned = due.map { test, _, counted in
+                    if let open = board.openTask(naming: test), let index = board.taskIndex(open.id) {
+                        let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let line = MergeRerun.flakeNote(test: test, flakes: counted, root: root)
+                        board.tasks[index].contract.context = context.isEmpty ? line : context + "\n\n" + line
+                        ledger.notePlanned(open.slug, for: test)
+                        return (test, open.slug, true)
+                    }
+                    let title = "Fix the flaky test " + Self.clip(test, 60)
+                    let fix = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title,
+                                       contract: MergeRerun.fixContract(test: test, flakes: counted, workflow: workflow, root: root))
+                    board.tasks.append(fix)
+                    ledger.notePlanned(fix.slug, for: test)
+                    return (test, fix.slug, false)
+                }
+                return plan
             }
-            let title = "Fix the flaky test " + Self.clip(test, 60)
-            let fix = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title,
-                               contract: MergeRerun.fixContract(test: test, flakes: counted, workflow: workflow, root: root))
-            board.tasks.append(fix)
-            board.notePlanned(fix.slug, for: test)
-            return (test, fix.slug, false)
+        } catch {
+            try? store.appendProgress("The flake ledger couldn't record \(Self.clip(flakes.joined(separator: ", "), 300)) from \(slug)'s merge: \(error)")
+            return FlakePlan()
         }
+    }
+
+    /// Moves the board's flakes from before the ledger's file there, once (`FlakeLedgerStore.migrate`).
+    func migrateFlakes() {
+        guard store.load().flakes != nil else { return }
+        let archived = store.archived()
+        try? store.update { board in try? flakeLedger.migrate(&board, tasks: { archived }) }
+    }
+
+    /// `merged` landed: each test a merged task was planned to fix is recorded fixed by it (`FlakeLedger.noteFixed`).
+    func noteFlakeFixes(_ merged: [(slug: String, commit: String)]) {
+        migrateFlakes()
+        let now = Date().timeIntervalSince1970
+        try? flakeLedger.update { ledger in
+            for (slug, commit) in merged { ledger.noteFixed(slug, commit: commit, now: now) }
+        }
+    }
+
+    /// Tells the lead, once each (`FlakeLedger.recordFlakes` marks it), of each test that flaked in `slug`'s merge
+    /// though a task merged to fix it: the fix didn't hold. Its words, for the merge's result too.
+    func tellRecurrences(_ recurred: [FlakeLedger.Recurrence], slug: String) -> String {
+        guard !recurred.isEmpty else { return "" }
+        let text = recurred.map { test, fix in
+            "\(test) flaked again in \(slug)'s merge, though \(fix.fixedBy) merged to fix it (\(fix.commit.prefix(8)), \(LeadBoard.clock(fix.at)))."
+        }.joined(separator: " ") + " The fix didn't hold: reopen the work with add_task (its evidence is in the flake ledger's files), or record_decision why not."
+        for (test, fix) in recurred {
+            try? store.appendProgress("Flaked again: \(test) in \(slug)'s merge, after \(fix.fixedBy) merged to fix it")
+        }
+        _ = try? tellLead(text, about: "flake ledger")
+        return " " + text
+    }
+
+    /// Records a merge run that went to a rerun (`plan`), in the flake ledger: whether it passed, and the paired base
+    /// run (`pairing`). Record only.
+    func recordRerun(_ plan: MergeRerun.Plan, task: String, commit: String, base: String, passed: Bool, load: Double?, pairing: MergeRerun.Pairing) {
+        let paired = pairing.result
+        let record = LeadRerunRecord(task: task, commit: commit, at: Date().timeIntervalSince1970, tests: plan.tests, filtered: plan.filtered,
+                                     passed: passed, load: load, baseCommit: paired == nil ? nil : base, base: paired?.base, baseNote: paired?.note)
+        try? flakeLedger.append(record)
+    }
+
+    /// The paired base run of a merge's failing tests on `base` (`MergeRerun.baseline`), skipped while the Mac is over
+    /// load_threshold.
+    func baseline(on base: String, plan: @escaping () -> MergeRerun.Plan?, pairing: MergeRerun.Pairing) -> Worktrees.Baseline {
+        MergeRerun.baseline(commit: base, plan: plan, overLoad: { [self] in
+            let limit = macLimits().loadLimit
+            guard let load = runtime.steadyLoad(), load > limit else { return nil }
+            return "the Mac's load (\(MacLoad.number(load))) was over load_threshold (\(MacLoad.number(limit)))"
+        }, pairing: pairing)
     }
 
     /// The base moves only through merges and reverts: anything else that moved it from where the vault last saw it
@@ -4902,7 +4996,10 @@ public final class LeadToolset: MCPToolset {
                 return "- \(wording) → \(question.answer ?? "")" + (saw < question.version ? " (to version \(saw) of \(question.version))" : "")
             }
         }
-        if let flakes = board.flakeLine(now: Date().timeIntervalSince1970) { lines.append("\n" + flakes) }
+        migrateFlakes()
+        let ledger = flakeLedger.load(), now = Date().timeIntervalSince1970
+        if let flakes = ledger.flakeLine(now: now) { lines.append("\n" + flakes) }
+        if let reruns = ledger.rerunLine(now: now) { lines.append("\n" + reruns) }
         let reverted = recordReverts(base: workflow.base)
         if !reverted.isEmpty {
             lines.append("\nReverted on \(workflow.base) since they merged (\(reverted.count)): " + reverted.map { "\($0.slug) (by \($0.commit.prefix(8)))" }.joined(separator: ", ")

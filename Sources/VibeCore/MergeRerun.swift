@@ -4,8 +4,9 @@ import Foundation
 /// merge again by hand: each such retry built and ran the whole suite in a fresh worktree, and a worker was often sent
 /// back first. Now, when the test command fails, the failing tests run once more in the same worktree (its build
 /// already made), holding the same slot of the test lock; if they pass, the merge goes ahead and each is recorded as a
-/// flake (`LeadBoard.recordFlakes`). If they fail again, the merge is refused with the rerun's output, as before. Never
-/// more than one rerun.
+/// flake (`FlakeLedger.recordFlakes`). If they fail again, the merge is refused with the rerun's output, as before. Never
+/// more than one rerun. Then, record only, the failing tests run once on the base (`baseline`): the merge's rerun
+/// goes in the flake ledger with that pairing (`LeadRerunRecord`).
 ///
 /// What runs again: the failing tests only when the test command takes `swift test`'s options last (`filterable`:
 /// this repository's `bash scripts/test.sh`, or `swift test` itself), as `--filter` patterns; else (any other command,
@@ -25,6 +26,16 @@ public enum MergeRerun {
         public var filtered: Bool
         /// The script to run in the failed one's place: the test command (filtered or not), then regression_command.
         public var command: String
+        /// The filtered test command alone, run once on the base the branch was rebased onto to pair with the
+        /// branch's failure (`MergeRerun.baseline`); nil for a whole rerun, which isn't run twice.
+        public var baseCommand: String?
+
+        public init(tests: [String], filtered: Bool, command: String, baseCommand: String? = nil) {
+            self.tests = tests
+            self.filtered = filtered
+            self.command = command
+            self.baseCommand = baseCommand
+        }
     }
 
     /// The rerun after `workflow`'s merge checks failed with `output`; nil when there's none.
@@ -47,7 +58,7 @@ public enum MergeRerun {
                 + RecentProjects.shellQuote(patterns.compactMap { $0 }.joined(separator: "|"))
         }
         guard let command = again.mergeChecks else { return nil }
-        return Plan(tests: tests, filtered: filtered, command: command)
+        return Plan(tests: tests, filtered: filtered, command: command, baseCommand: filtered ? again.testCommand : nil)
     }
 
     /// Whether `command` ends in `swift test`'s options, so `--filter` can be added to it: one line, `swift test` (after
@@ -87,6 +98,68 @@ public enum MergeRerun {
                     || (line.hasPrefix("Test Case '") && line.contains(test.replacingOccurrences(of: ".", with: " ") + "]' passed"))
             }
         }
+    }
+
+    // MARK: The paired base run
+
+    /// What a merge's paired base run (`Worktrees.Baseline`) found, for its rerun's record: heard on the run's thread,
+    /// read once the run returns.
+    public final class Pairing: @unchecked Sendable {
+        private let lock = NSLock()
+        private var found: (base: LeadRerunRecord.Base, note: String?)?
+
+        public init() {}
+
+        public var result: (base: LeadRerunRecord.Base, note: String?)? {
+            lock.lock()
+            defer { lock.unlock() }
+            return found
+        }
+
+        public func note(_ base: LeadRerunRecord.Base, _ note: String? = nil) {
+            lock.lock()
+            found = (base, note)
+            lock.unlock()
+        }
+    }
+
+    /// The paired base run of `plan`'s failing tests on `commit`: run only for a filtered rerun (a whole one isn't
+    /// run twice), and skipped while `overLoad` says the Mac is over load_threshold (its words for why). Its result
+    /// goes to `pairing`; nothing else.
+    public static func baseline(commit: String, plan: @escaping () -> Plan?, overLoad: @escaping () -> String?, pairing: Pairing) -> Worktrees.Baseline {
+        Worktrees.Baseline(commit: commit, command: { _ in
+            guard let plan = plan() else { return nil }
+            guard let command = plan.baseCommand else {
+                pairing.note(.skipped, "a whole rerun isn't run on the base")
+                return nil
+            }
+            if let why = overLoad() {
+                pairing.note(.skipped, why)
+                return nil
+            }
+            return command
+        }, heard: { run in
+            guard let plan = plan() else { return }
+            switch run {
+            case .ran(let ok, let output):
+                let result = baseResult(plan, ok: ok, output: output)
+                pairing.note(result.base, result.note)
+            case .hung: pairing.note(.hung)
+            case .unchecked(let why): pairing.note(.skipped, why)
+            }
+        })
+    }
+
+    /// The paired base run's result from its exit and `output`: red when it failed naming one of `plan`'s tests;
+    /// green when it passed showing them pass; absent when it passed showing none (the base lacks them: a branch's new
+    /// tests); skipped when it failed naming none of them (a base that doesn't build is no evidence either way).
+    static func baseResult(_ plan: Plan, ok: Bool, output: String) -> (base: LeadRerunRecord.Base, note: String?) {
+        if !ok {
+            let failed = TestFailures(output: output).tests
+            return failed.contains(where: plan.tests.contains) ? (.red, nil)
+                : (.skipped, "the base's run failed naming none of the failing tests")
+        }
+        return unshown(plan, rerun: output).count == plan.tests.count ? (.absent, nil) : (.green, nil)
     }
 
     /// What a flake is recorded under when the failed run named no test.

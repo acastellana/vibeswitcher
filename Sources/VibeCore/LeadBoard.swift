@@ -1093,7 +1093,8 @@ public struct LeadReport: Codable, Equatable, Sendable {
     }
 }
 
-/// A test that failed a merge's test run and passed its rerun (`MergeRerun`): one entry in the board's flake ledger.
+/// A test that failed a merge's test run and passed its rerun (`MergeRerun`): one entry in the flake ledger
+/// (`FlakeLedgerStore`).
 public struct LeadFlake: Codable, Equatable, Sendable {
     /// As `TestFailures` names it (`MergeRerun.unnamed` when the run named none).
     public var test: String
@@ -1101,7 +1102,7 @@ public struct LeadFlake: Codable, Equatable, Sendable {
     public var task: String
     public var commit: String
     public var at: Double
-    /// The task planned to fix it, on the flake that made it due (`LeadBoard.recordFlakes`).
+    /// The task planned to fix it, on the flake that made it due (`FlakeLedger.recordFlakes`).
     public var planned: String?
     /// The file in the repository's ignored folder (relative to its root; absolute in older entries) that keeps its
     /// failure lines from the failing run (`MergeRerun.evidence`) with the merge's other flakes'
@@ -1109,6 +1110,12 @@ public struct LeadFlake: Codable, Equatable, Sendable {
     /// here would grow the board by kilobytes an entry. Optional: older entries have none, and a run that named no
     /// test's lines has none. (Entries that kept their lines here still decode; the lines are dropped on the next write.)
     public var log: String?
+    /// The Mac's 1-minute load average when the merge's run started, and whether the rerun that passed ran only the
+    /// failing tests (else the whole test command). Optional: entries before the ledger's file have neither.
+    public var load: Double?
+    public var filtered: Bool?
+    /// The fix task (`LeadFlakeFix.fixedBy`) this is the first flake since: the lead was told it flaked again.
+    public var recurred: String?
 
     public init(test: String, task: String, commit: String, at: Double, planned: String? = nil, log: String? = nil) {
         self.test = test
@@ -1140,8 +1147,8 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     /// Each moment the board cleared after merges (see `BatchSummary`), oldest first, with its summary once written.
     /// Optional: older boards have none.
     public var allDone: [LeadAllDone]?
-    /// The flake ledger: each test that failed a merge's test run and passed its rerun (`MergeRerun`), oldest first,
-    /// at most `keptFlakes`. Optional: older boards have none.
+    /// The flake ledger as boards kept it before it had a file of its own (`FlakeLedgerStore`), at most 200 entries:
+    /// moved there once (`FlakeLedgerStore.migrate`), then nil. Optional: boards since, and older ones, have none.
     public var flakes: [LeadFlake]?
     /// What the tasks moved to the archive (`BoardStore.archive`) add to the scorecard, so it counts every merge from
     /// this file alone. Optional: boards before the archive have none.
@@ -1152,7 +1159,6 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     public var archivedBatch: [LeadTask]?
 
     public static let keptReports = 50
-    public static let keptFlakes = 200
     /// A test that flakes `flakeLimit` times within `flakeWindow` becomes a task to fix it, once.
     public static let flakeLimit = 3
     public static let flakeWindow: Double = 7 * 86_400
@@ -1189,32 +1195,6 @@ public struct LeadBoard: Codable, Equatable, Sendable {
 
     // MARK: Flakes
 
-    /// Records each of `tests` as having flaked in `task`'s merge (tested at `commit`), those in `logged` with the `log`
-    /// that keeps their lines. Returns those that flaked `flakeLimit` times within `flakeWindow` since a task was
-    /// last planned for them, each with the merges it held up and those flakes (oldest first): the caller plans one task
-    /// each and marks it (`planned`), so a test makes one task, not one per flake. A flake recorded under
-    /// `MergeRerun.unnamed` names no test, and plans nothing.
-    public mutating func recordFlakes(_ tests: [String], task: String, commit: String, now: Double, logged: Set<String> = [],
-                                      log: String? = nil) -> [(test: String, merges: [String], flakes: [LeadFlake])] {
-        var ledger = flakes ?? []
-        var due: [(test: String, merges: [String], flakes: [LeadFlake])] = []
-        for test in tests {
-            ledger.append(LeadFlake(test: test, task: task, commit: commit, at: now, log: logged.contains(test) ? log : nil))
-            guard test != MergeRerun.unnamed else { continue }
-            let since = ledger.last { $0.test == test && $0.planned != nil }?.at ?? -.infinity
-            let counted = ledger.filter { $0.test == test && $0.at > since && now - $0.at <= Self.flakeWindow }
-            if counted.count >= Self.flakeLimit { due.append((test, counted.map(\.task), counted)) }
-        }
-        flakes = Array(ledger.suffix(Self.keptFlakes))
-        return due
-    }
-
-    /// Marks `test`'s latest flake as the one `slug` was planned for.
-    public mutating func notePlanned(_ slug: String, for test: String) {
-        guard let index = flakes?.lastIndex(where: { $0.test == test }) else { return }
-        flakes?[index].planned = slug
-    }
-
     /// The open task (planned, running, in review or blocked) whose title or goal names `test`, first on the board:
     /// a due flake goes there instead of a new task (twice on 2026-10-28 the ledger planned a fix for a test an open
     /// task was already fixing, and auto_advance started it). Named as `TestFailures` names it ("foo()",
@@ -1240,24 +1220,6 @@ public struct LeadBoard: Codable, Equatable, Sendable {
             }
         }
         return tasks.first { [.planned, .running, .review, .blocked].contains($0.status) && (namesIt($0.title) || namesIt($0.contract.goal)) }
-    }
-
-    /// For status: the tests that flaked within `flakeWindow` of `now`, the most flakes first, each with the merges
-    /// it held up and the task planned for it; nil when none did.
-    public func flakeLine(now: Double) -> String? {
-        let recent = (flakes ?? []).filter { now - $0.at <= Self.flakeWindow }
-        guard !recent.isEmpty else { return nil }
-        var order: [String] = []
-        for flake in recent.reversed() where !order.contains(flake.test) { order.append(flake.test) }
-        let counts = Dictionary(grouping: recent, by: \.test)
-        order.sort { counts[$0]!.count > counts[$1]!.count }
-        let shown = order.prefix(8).map { test -> String in
-            let flakes = counts[test]!
-            let planned = (self.flakes ?? []).last { $0.test == test && $0.planned != nil }?.planned
-            return "\(test) ×\(flakes.count) (\(flakes.map(\.task).joined(separator: ", ")))" + (planned.map { " → task \($0)" } ?? "")
-        }
-        return "Flaky tests in the last \(Int(Self.flakeWindow / 86_400)) days (\(recent.count) flake\(recent.count == 1 ? "" : "s"): each failed a merge's test run, passed its rerun, and the merge went ahead; "
-            + "\(Self.flakeLimit) of one test become a task to fix it): " + shown.joined(separator: "; ") + (order.count > 8 ? "; …" : "") + "."
     }
 
     // MARK: Questions

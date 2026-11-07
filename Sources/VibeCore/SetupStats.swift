@@ -896,6 +896,15 @@ struct BoardView {
         flakes = (board["flakes"] as? [Any]).map { entries in
             entries.compactMap { $0 as? [String: Any] }.map { ($0["test"] as? String ?? "", $0["task"] as? String ?? "", number($0["at"])) }
         }
+        // The flake ledger's own file, where boards' flakes moved (`FlakeLedgerStore`): its flakes after the board's
+        // (a board not moved yet still keeps some), each once.
+        let ledger = ((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent("flakes/ledger.jsonl")
+        if FileManager.default.fileExists(atPath: ledger) {
+            let kept = (board["flakes"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
+            let seen = Set(kept.map { "\($0["test"] as? String ?? "")\n\($0["task"] as? String ?? "")\n\($0["commit"] as? String ?? "")\n\(number($0["at"]) ?? 0)" })
+            let moved = FlakeLedgerStore.read(ledger).flakes.filter { !seen.contains("\($0.test)\n\($0.task)\n\($0.commit)\n\($0.at)") }
+            flakes = (flakes ?? []) + moved.map { ($0.test, $0.task, $0.at) }
+        }
     }
 }
 

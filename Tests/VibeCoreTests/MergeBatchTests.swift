@@ -312,10 +312,14 @@ struct MergeBatchTests: LeadTeamFixture {
         }
         let merged = lead.call("merge", ["tasks": ["add-x", "add-y", "add-z"]])
         #expect(!merged.isError, "\(merged.text)")
-        #expect(ran() == ["run  | a.txt c.txt x.txt y.txt z.txt ", #"run --filter /breaks\(\)(/|$) | a.txt c.txt x.txt y.txt z.txt "#], "\(ran())")
+        // The rerun, then the failing tests once on the stack's base (main), record only: green there.
+        #expect(ran() == ["run  | a.txt c.txt x.txt y.txt z.txt ", #"run --filter /breaks\(\)(/|$) | a.txt c.txt x.txt y.txt z.txt "#,
+                          #"run --filter /breaks\(\)(/|$) | a.txt c.txt "#], "\(ran())")
+        let rerun = FlakeLedgerStore(root: root).load().reruns
+        #expect(rerun.count == 1 && rerun.first?.task == "add-z" && rerun.first?.passed == true && rerun.first?.base == .green, "\(rerun)")
         #expect(merged.text.contains("recorded once in the flake ledger (under add-z)"), "\(merged.text)")
         #expect(landed(root) == ["add-x's work", "add-y's work", "add-z's work"])
-        let flakes = board(root).flakes ?? []
+        let flakes = FlakeLedgerStore(root: root).load().flakes
         #expect(flakes.count == 1 && flakes.first?.test == "breaks()" && flakes.first?.task == "add-z", "\(flakes)")
         #expect(board(root).task("add-x")?.receipt?.mergeReruns == 1)
     }
