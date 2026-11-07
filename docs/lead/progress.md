@@ -3343,3 +3343,5 @@
 - 2026-11-07 17:43 Started a worker on terminal-panes-text-can
 - 2026-11-07 18:09 Planned chat-view-copying-text: Chat view: copying text and the hover time work on the first try
 - 2026-11-07 18:09 Started a worker on chat-view-copying-text
+- 2026-11-07 18:14 Planned chat-quote-a-selection: Chat: quote a selection into the reply, and move between prompts by keyboard
+- 2026-11-07 18:14 Planned chat-day-separators-and: Chat: day separators, and how long each turn took on hover
