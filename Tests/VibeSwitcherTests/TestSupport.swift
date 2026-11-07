@@ -72,15 +72,6 @@ func isClientHost(_ pid: pid_t, pidFile: String, folder: String) -> Bool {
     return info.startTime <= written.addingTimeInterval(0.05)
 }
 
-/// The Mac's two clocks: the wall clock (`Date`), which goes on while the Mac sleeps, and the time it has been awake
-/// (`CLOCK_UPTIME_RAW`, mach_absolute_time: what Swift Testing times a test on, and Dispatch's timers), which doesn't.
-struct MacTime {
-    var wall: () -> Date
-    /// Seconds awake, from any start.
-    var awake: () -> TimeInterval
-    static let real = MacTime(wall: Date.init, awake: { TimeInterval(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) / 1e9 })
-}
-
 /// Whether `condition` holds within `timeout` seconds (a hang guard), checked every 20 ms. Awaiting lets the main
 /// thread run what's queued for it meanwhile. A cancelled test (past its time limit) waits no more: its sleep would
 /// throw at once, and the loop spin until the deadline. The timeout counts the time the Mac is awake: on the wall clock

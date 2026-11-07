@@ -136,6 +136,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     private var serial = 0
     /// The clock Claude's runs keep (tests give their own).
     private let now: () -> Date
+    private let time: MacTime
     /// A Claude run in this launch heard something (its level cursor coloured, or text taken): the microphone works, so
     /// a later run that hears nothing isn't said to be the microphone's doing.
     private(set) var claudeHeard = false
@@ -147,7 +148,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
          defaults: UserDefaults = .standard, findKey: @escaping @Sendable () -> FoundOpenAIKey? = { DictationKey.findLive() },
          background: @escaping (@escaping @Sendable () -> Void) -> Void = { DispatchQueue.global(qos: .userInitiated).async(execute: $0) },
          schedule: @escaping (TimeInterval, @escaping () -> Void) -> () -> Void = DictationController.after,
-         now: @escaping () -> Date = Date.init) {
+         now: @escaping () -> Date = Date.init, time: MacTime = .real) {
         self.keyStore = keyStore
         self.recorder = recorder
         self.microphone = microphone
@@ -158,6 +159,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         self.background = background
         self.schedule = schedule
         self.now = now
+        self.time = time
         let saved = defaults.string(forKey: Self.modelKey) ?? ""
         model = OpenAITranscription.models.contains(saved) ? saved : OpenAITranscription.defaultModel
         holdSpace = defaults.object(forKey: Self.holdSpaceKey) as? Bool ?? true
@@ -481,7 +483,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
                 return self.turnedOn(rowID, Notice(rowID: rowID, text: "/voice hold couldn't be typed into the session."))
             }
             Breadcrumbs.shared.note("dictation: turning on Claude's (\(Self.turnOnCommand) typed)")
-            self.watchTurnOn(rowID, session, since: before, conversation: conversation, until: Date().addingTimeInterval(Self.turnOnWait))
+            self.watchTurnOn(rowID, session, since: before, conversation: conversation, until: self.time.wall().addingTimeInterval(Self.turnOnWait))
         }
     }
 
@@ -502,7 +504,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
                         ?? Notice(rowID: rowID, text: "Claude's dictation is on: hold the mic (or \(shortcuts) in the box) and speak.", info: true)
                     return self.turnedOn(rowID, notice)
                 }
-                guard Date() < deadline else {
+                guard self.time.wall() < deadline else {
                     return self.turnedOn(rowID, Notice(rowID: rowID, text: "Claude didn't say whether its dictation is on: have a look at the terminal."))
                 }
                 self.watchTurnOn(rowID, session, since: before, conversation: conversation, until: deadline)
