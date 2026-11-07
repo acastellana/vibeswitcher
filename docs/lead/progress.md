@@ -3131,3 +3131,5 @@
 - 2026-11-07 12:47 Started a worker on permission-prompt
 - 2026-11-07 12:48 Planned a-settings-option-to: A Settings option to stop holding work for Claude's usage limits (review audit)
 - 2026-11-07 12:48 Started a worker on a-settings-option-to
+- 2026-11-07 13:38 Released a-settings-option-to's worker (idle since its done report on 4e4ee789) while its audit runs
+- 2026-11-07 13:38 Released permission-prompt's worker (idle since its done report on 59f47376) while its audit runs
