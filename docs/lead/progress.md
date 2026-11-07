@@ -3304,3 +3304,8 @@
 - 2026-11-07 19:40 Automatically (auto_advance): Started the audit of sweep-the-repository-and at cc9ad2f2 (Its review is audit).
 - 2026-11-07 19:40 Released sweep-the-repository-and's worker (idle since its done report on cc9ad2f2) while its audit runs
 - 2026-11-07 19:40 Automatically (auto_advance): Released sweep-the-repository-and's worker, idle since its done report on cc9ad2f2, while its audit runs (ended pid 15573 (Worker: Sweep the repository and its history for secrets)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-07 19:44 Audit of sweep-the-repository-and: complete, clean, round 1: 1 Nit open
+- 2026-11-07 20:07 Started a worker on sweep-the-repository-and
+- 2026-11-07 20:07 Automatically (auto_advance): Merge of sweep-the-repository-and failed: Tests fail rebased onto main: aProbePastFifteenSecondsIsWaitedFor(), otherRequestsKeepTheirFifteenSecondsDuringAHandover(), listenLinesDuringAPollAskForOneMoreRunNotAnotherProcess() Sent its worker the output; it's back at work.
+- 2026-11-07 20:09 Planned handover-tests-stop: Handover tests stop timing out on a loaded Mac
+- 2026-11-07 20:18 Merged sweep-the-repository-and: Sweep the repository and its history for secrets
