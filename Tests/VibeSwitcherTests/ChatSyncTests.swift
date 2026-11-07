@@ -85,6 +85,8 @@ struct ChatSyncTests {
         await h.tick()   // the one heartbeat: its read, then the confirm read that asks for
         #expect(h.chat.menu != nil, "the card waited for the next heartbeat")
         #expect(h.card?.question == "Which fruit?")
+        // The heartbeat's first read 0.3 s after the draw, the confirm read this long after it: under 1.2 s.
+        #expect((h.sync.confirmAfter ?? .infinity) < 0.9, "confirmAfter: \(String(describing: h.sync.confirmAfter))")
     }
 
     @Test func aClickInChatMovesTheTerminalAndTheCardKeepsUp() async throws {
