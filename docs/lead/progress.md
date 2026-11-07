@@ -3284,3 +3284,6 @@
 - 2026-11-07 12:20 Audit of resume-work-cut-off: incomplete, clean, round 1: 3 Important open, 1 Nit open
 - 2026-11-07 12:20 Started a worker on resume-work-cut-off (auto → Codex: Claude weekly 82%, 43 points ahead of pace; Codex 57%)
 - 2026-11-07 12:20 Automatically (auto_advance): Sent resume-work-cut-off's worker the open Important findings resume-work-cut-off:F1, resume-work-cut-off:F2, resume-work-cut-off:F3 from its audit at d0b3ab37 (in a new worker: its last one was released during the audit).
+- 2026-11-07 12:31 Planned load-harness-xcrun-s: Load harness: xcrun's xcrun_db cache isn't a leftover (review audit)
+- 2026-11-07 12:31 Started a worker on load-harness-xcrun-s
+- 2026-11-07 12:31 Automatically (auto_advance): Started a worker on load-harness-xcrun-s (Load harness: xcrun's xcrun_db cache isn't a leftover).
