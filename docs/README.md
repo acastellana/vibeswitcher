@@ -44,6 +44,8 @@ Written by the project lead, and only by it.
   records where the landed code differs from the sections above it.
 - [PUBLICATION-REVIEW.md](security/PUBLICATION-REVIEW.md): a scan of the repository and its history for
   secrets before the security fixes were published.
+- [SECRET-SWEEP-2026-11-07.md](security/SECRET-SWEEP-2026-11-07.md): every commit reachable from main swept for
+  secrets again; none real, and the private-key shape SecretShapeLint lacked.
 
 ### Evaluations and benches: [eval/](eval)
 
