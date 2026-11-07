@@ -635,7 +635,7 @@ struct PreviewProxyTests {
         let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
         let (proxy, port) = try await startProxy(target: target)
         defer { proxy.stop(); upstream.stop() }
-        let other = text(await exchange(port: port, "GET / HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\nTailscale-User-Login: someone@else.com\r\n\(Self.ours)\r\n"))
+        let other = text(await exchange(port: port, "GET / HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\nTailscale-User-Login: someone@else.example\r\n\(Self.ours)\r\n"))
         #expect(other.hasPrefix("HTTP/1.1 403"))
         let stale = text(await exchange(port: port, "GET / HTTP/1.1\r\n\(Self.me)Cookie: vs_preview_8444=OLD\r\n\r\n"))
         #expect(stale.hasPrefix("HTTP/1.1 403"))

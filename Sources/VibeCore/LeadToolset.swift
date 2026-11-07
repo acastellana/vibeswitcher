@@ -1528,18 +1528,29 @@ public final class LeadToolset: MCPToolset {
     /// The account's usage as known now: what's kept (`usageStore`), with the limits the team's `sessions` stopped at
     /// kept first (a session whose turn ended on a refusal: `LeadSessionInfo.usageLimit`). A model-only refusal from a
     /// session the board doesn't name (its model unknown) isn't kept: unknown usage is no back-off.
+    /// Each refusal is its session's account's (`UsageLimit.account`); one whose transcript didn't say is the account
+    /// logged in to when it's first kept, never re-kept for another after a /login (a stopped session stays live).
+    /// Every account's readings kept, whatever their age: `AccountUsage.current` (and `hold`, `statusText`) take the
+    /// active account's still current, and status shows the others'.
     /// `now`: `usageClock`'s when not given.
     func accountUsage(sessions: [LeadSessionInfo]?, now: Date? = nil) -> AccountUsage {
         let now = now ?? usageClock()
         if let sessions {
             let board = store.load()
+            let kept = usageStore.load().limits
+            let active = usageStore.activeAccount()?.id
             let refusals = sessions.compactMap { info -> AccountUsage.Limit? in
-                guard info.live, let limit = info.usageLimit else { return nil }
-                return AccountUsage.fromRefusal(limit, model: sessionModel(info.id, board), now: now)
+                guard info.live, let limit = info.usageLimit,
+                      var refusal = AccountUsage.fromRefusal(limit, model: sessionModel(info.id, board), now: now) else { return nil }
+                if refusal.account == nil {
+                    if kept.contains(where: { $0.sameRefusal(refusal) }) { return nil }
+                    refusal.account = active
+                }
+                return refusal
             }
             usageStore.record(refusals, now: now)
         }
-        return usageStore.load().current(now: now)
+        return usageStore.load()
     }
 
     /// status's lines on both accounts' usage, each limit with its pace, and where the next auto task would go: Claude's
@@ -1554,7 +1565,7 @@ public final class LeadToolset: MCPToolset {
         let codex = codexUsage.read(now: now)
         let tasks = store.load().tasks
         let auto = workflow.agentDefault == .auto || tasks.contains { $0.workerAgent == .auto && !Self.finishedStates.contains($0.status) }
-        guard auto || !claude.limits.isEmpty || codex.usage != nil else { return lines }
+        guard auto || !claude.current(now: now).limits.isEmpty || codex.usage != nil else { return lines }
         lines.append(codex.statusText(now: now))
         let planned = tasks.first { $0.status == .planned && $0.workerAgent == .auto }
         let next = planned ?? LeadTask(slug: "next", title: "next", contract: LeadContract(goal: "", acceptance: [], boundaries: [], context: ""))

@@ -22,6 +22,10 @@ import Foundation
 ///
 /// Best effort, failing safe: what isn't known (no subscriber windows, no status line run yet, a file that can't be
 /// read, a reading whose window has reset) means no back-off, never a stop.
+///
+/// Every reading is the account's it was read on (`Limit.account`, see `ClaudeAccount`), and only the account Claude
+/// Code is logged in to now holds work back (2026-11-07: after a /login to another account, the old account's Fable
+/// refusal held every Fable audit, and the weekly reading flipped between the two accounts' sessions).
 public struct AccountUsage: Equatable, Sendable {
     /// One limit as last read.
     public struct Limit: Codable, Equatable, Sendable {
@@ -38,18 +42,28 @@ public struct AccountUsage: Equatable, Sendable {
         public var at: Double
         /// Claude refused a request at it (rather than a status line's reading).
         public var reached: Bool
+        /// The Claude account it was read on (its `accountUuid`, see `ClaudeAccount`); nil: not known (a reading kept
+        /// before readings were, or no account to be read).
+        public var account: String?
 
-        public init(name: String, model: String? = nil, usedPercent: Double, resetsAt: Double? = nil, at: Double, reached: Bool = false) {
+        public init(name: String, model: String? = nil, usedPercent: Double, resetsAt: Double? = nil, at: Double, reached: Bool = false,
+                    account: String? = nil) {
             self.name = name
             self.model = model
             self.usedPercent = usedPercent
             self.resetsAt = resetsAt
             self.at = at
             self.reached = reached
+            self.account = account
         }
 
-        /// What it's kept under: one reading per limit and model.
-        public var key: String { model.map { "\(name)|\($0)" } ?? name }
+        /// What it's kept under: one reading per account, limit and model.
+        public var key: String { (account.map { "\($0)|" } ?? "") + (model.map { "\(name)|\($0)" } ?? name) }
+
+        /// The same refusal, whichever account it was kept for.
+        func sameRefusal(_ other: Limit) -> Bool {
+            reached && other.reached && name == other.name && model == other.model && resetsAt == other.resetsAt && at == other.at
+        }
 
         /// "the weekly limit", "the 5-hour limit", "the fable limit (seven_day_overage_included)".
         public var label: String {
@@ -77,9 +91,28 @@ public struct AccountUsage: Equatable, Sendable {
         }
     }
 
+    /// Every reading kept, whichever account's.
     public var limits: [Limit]
+    /// The account Claude Code is logged in to now (`ClaudeAccount.active`): new sessions start on it, so only its
+    /// readings hold work back (`current`); nil when not known, and then every reading does, as before readings had one.
+    public var account: String?
+    /// Each account's name as shown, masked (`ClaudeAccount.name`), by its id.
+    public var names: [String: String]
 
-    public init(limits: [Limit] = []) { self.limits = limits }
+    public init(limits: [Limit] = [], account: String? = nil, names: [String: String] = [:]) {
+        self.limits = limits
+        self.account = account
+        self.names = names
+    }
+
+    /// A reading is the active account's: its own, or any while that isn't known.
+    func applies(_ limit: Limit) -> Bool { account == nil || limit.account == account }
+
+    /// How `account` is named in status: its masked name when kept, else the start of its id; for nil, not known.
+    public func name(of account: String?) -> String {
+        guard let account else { return "an account not recorded" }
+        return names[account] ?? ClaudeAccount.name(email: nil, id: account)
+    }
 
     /// At this share of a limit (in percent) the lead's tools stop starting workers and audits on the models it holds
     /// back, unless the lead overrides.
@@ -87,9 +120,18 @@ public struct AccountUsage: Equatable, Sendable {
     /// How long a reading without a reset time is believed.
     static let untimed: Double = 3600
 
-    /// Its limits still holding at `now`, the most used first.
+    /// Its limits still holding at `now` on the active account (`account`), the most used first.
     public func current(now: Date = Date()) -> AccountUsage {
-        AccountUsage(limits: limits.filter { $0.current(at: now.timeIntervalSince1970) }.sorted { ($0.usedPercent, $1.key) > ($1.usedPercent, $0.key) })
+        AccountUsage(limits: Self.sorted(limits.filter { applies($0) && $0.current(at: now.timeIntervalSince1970) }), account: account, names: names)
+    }
+
+    /// The readings still current at `now` on other accounts than the active one: shown, holding nothing back.
+    public func elsewhere(now: Date = Date()) -> [Limit] {
+        Self.sorted(limits.filter { !applies($0) && $0.current(at: now.timeIntervalSince1970) })
+    }
+
+    private static func sorted(_ limits: [Limit]) -> [Limit] {
+        limits.sorted { ($0.usedPercent, $1.key) > ($1.usedPercent, $0.key) }
     }
 
     /// The limit that holds back a start on `model` (as `claude --model` names it; nil: Claude's default) at `now`: the
@@ -111,13 +153,14 @@ public struct AccountUsage: Equatable, Sendable {
     }
 
     /// The windows in a status line's input (`rate_limits`): each with a `used_percentage`, for every model.
-    public static func fromStatusLine(_ input: [String: Any], now: Date = Date()) -> [Limit] {
+    /// `account`: the account the session runs on (see `ClaudeAccount`).
+    public static func fromStatusLine(_ input: [String: Any], account: String? = nil, now: Date = Date()) -> [Limit] {
         guard let windows = input["rate_limits"] as? [String: Any] else { return [] }
         return windows.keys.sorted().compactMap { name in
             guard let window = windows[name] as? [String: Any], let used = (window["used_percentage"] as? NSNumber)?.doubleValue,
                   used.isFinite else { return nil }
             let resets = (window["resets_at"] as? NSNumber)?.doubleValue
-            return Limit(name: name, usedPercent: max(0, used), resetsAt: resets, at: now.timeIntervalSince1970)
+            return Limit(name: name, usedPercent: max(0, used), resetsAt: resets, at: now.timeIntervalSince1970, account: account)
         }
     }
 
@@ -132,18 +175,35 @@ public struct AccountUsage: Equatable, Sendable {
         let modelOnly = limit.apiError == "model_requires_usage_credits"
         let scoped = named ?? (modelOnly ? family(model) : nil)
         if modelOnly, scoped == nil { return nil }
-        return Limit(name: kind, model: scoped, usedPercent: 100, resetsAt: limit.resetsAt, at: limit.at ?? now.timeIntervalSince1970, reached: true)
+        return Limit(name: kind, model: scoped, usedPercent: 100, resetsAt: limit.resetsAt, at: limit.at ?? now.timeIntervalSince1970, reached: true,
+                     account: limit.account)
     }
 
-    /// For the lead's status: each limit known, or nil when none is. `ignored`: Settings' "Ignore usage limits" is on.
+    /// For the lead's status: each limit known on the active account, then those other accounts' sessions said (which
+    /// hold nothing back), each account named masked; nil when none is known. `ignored`: Settings' "Ignore usage
+    /// limits" is on.
     public func statusText(now: Date = Date(), ignored: Bool = false) -> String? {
         let known = current(now: now).limits
-        guard !known.isEmpty else { return nil }
+        let others = elsewhere(now: now)
+        guard !known.isEmpty || !others.isEmpty else { return nil }
         let seconds = now.timeIntervalSince1970
-        return "Account usage" + (ignored ? " " + Self.ignoredMark : "") + " (best effort: what sessions' status lines and refusals said): " + known.map { limit in
+        func text(_ limit: Limit) -> String {
             let pace = UsageRouting.pace(limit, now: seconds)
-            return limit.text + (limit.reached || pace.ahead == nil ? "" : ", " + pace.paceText)
-        }.joined(separator: "; ")
+            // While the active account isn't known, every reading holds: each says whose it is.
+            let whose = account == nil && limit.account != nil ? " [\(name(of: limit.account))]" : ""
+            return limit.text + whose + (limit.reached || pace.ahead == nil ? "" : ", " + pace.paceText)
+        }
+        var line = "Account usage" + (account.map { " for \(name(of: $0)), the account Claude Code is logged in to" } ?? "")
+            + (ignored ? " " + Self.ignoredMark : "") + " (best effort: what sessions' status lines and refusals said): "
+            + (known.isEmpty ? "nothing known" : known.map(text).joined(separator: "; "))
+        if !others.isEmpty {
+            var accounts: [String?] = []
+            for limit in others where !accounts.contains(limit.account) { accounts.append(limit.account) }
+            line += ". Other accounts' readings (they hold nothing back): " + accounts.map { account in
+                name(of: account) + ": " + others.filter { $0.account == account }.map(\.text).joined(separator: "; ")
+            }.joined(separator: " — ")
+        }
+        return line
             + (ignored ? ". The user set Ignore usage limits in Settings › Project lead: start_worker, audit and auto_advance start at any share of a limit, "
                 + "Boost isn't held off for usage, and agent: auto stays on Claude; only a limit Claude refused a request at still holds back its model."
                 : ". At \(Int(Self.threshold))% of a limit, start_worker and audit stop starting sessions on the models it holds back (override_usage: true overrides).")
@@ -157,26 +217,49 @@ public struct AccountUsage: Equatable, Sendable {
 /// the newest kept. Every project's lead reads it (the account is the Mac's). A file that can't be read is no usage known.
 public struct AccountUsageStore: Sendable {
     public var file: URL
+    /// The home whose Claude Code login says which account is active (`ClaudeAccount.active`).
+    public var home: String
 
-    public init(file: URL = AccountUsageStore.standardFile) { self.file = file }
+    public init(file: URL = AccountUsageStore.standardFile, home: String = VibePaths.home) {
+        self.file = file
+        self.home = home
+    }
 
     public static var standardFile: URL { VibePaths.root.appendingPathComponent("account-usage.json") }
     /// How old a reading must be before the same one read again replaces it.
     static let refresh: Double = 300
 
-    private struct Stored: Codable { var limits: [AccountUsage.Limit] }
-
-    /// What's kept (whatever its age; `AccountUsage.current` drops what has reset).
-    public func load() -> AccountUsage {
-        guard let data = try? Data(contentsOf: file), let stored = try? JSONDecoder().decode(Stored.self, from: data) else { return AccountUsage() }
-        return AccountUsage(limits: stored.limits)
+    /// `names`: each account's masked name (`ClaudeAccount.name`), by id, as read while it was active: never an email.
+    private struct Stored: Codable {
+        var limits: [AccountUsage.Limit]
+        var names: [String: String]?
     }
 
-    /// Keeps `limits`, each replacing an older reading of the same limit (never a newer one), and drops readings
-    /// that have reset. Nothing is written when nothing changes. Best effort: a write that fails is no reading kept.
+    /// The account Claude Code is logged in to now, as `home` says.
+    public func activeAccount() -> ClaudeAccount? { ClaudeAccount.active(home: home) }
+
+    /// What's kept (whatever its age; `AccountUsage.current` drops what has reset, and what isn't the active account's).
+    public func load() -> AccountUsage {
+        let active = activeAccount(), kept = stored()
+        var names = kept?.names ?? [:]
+        if let active { names[active.id] = active.name }
+        return AccountUsage(limits: kept?.limits ?? [], account: active?.id, names: names)
+    }
+
+    private func stored() -> Stored? {
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return try? JSONDecoder().decode(Stored.self, from: data)
+    }
+
+    /// Keeps `limits`, each replacing an older reading of the same limit on the same account (never a newer one), and
+    /// drops readings that have reset; with the active account's masked name, for status once it's no longer active.
+    /// Nothing is written when nothing changes. Best effort: a write that fails is no reading kept.
     public func record(_ limits: [AccountUsage.Limit], now: Date = Date()) {
         guard !limits.isEmpty else { return }
-        let before = load().limits
+        let old = stored()
+        let before = old?.limits ?? []
+        var names = old?.names ?? [:]
+        if let active = activeAccount() { names[active.id] = active.name }
         var kept = Dictionary(before.map { ($0.key, $0) }, uniquingKeysWith: { $0.at >= $1.at ? $0 : $1 })
         for limit in limits {
             guard let old = kept[limit.key] else { kept[limit.key] = limit; continue }
@@ -186,10 +269,13 @@ public struct AccountUsageStore: Sendable {
             if old.at <= limit.at, !same || limit.at - old.at >= Self.refresh { kept[limit.key] = limit }
         }
         let after = kept.values.filter { $0.current(at: now.timeIntervalSince1970) }.sorted { $0.key < $1.key }
-        guard after != before.sorted(by: { $0.key < $1.key }) else { return }
+        // Only the names of accounts still read on.
+        let used = Set(after.compactMap(\.account))
+        names = names.filter { used.contains($0.key) }
+        guard after != before.sorted(by: { $0.key < $1.key }) || names != (old?.names ?? [:]) else { return }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(Stored(limits: after)) else { return }
+        guard let data = try? encoder.encode(Stored(limits: after, names: names.isEmpty ? nil : names)) else { return }
         try? VibePaths.ensurePrivate(file.deletingLastPathComponent())
         try? VibePaths.writePrivate(data, to: file)
     }
@@ -229,7 +315,7 @@ public enum UsageStatusLine {
         let object = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any]
         let command = userCommand(home: home, project: userOnly ? nil : projectFolder(object))
         if let command { show(runner(command, input, patience)) }
-        let limits = object.map { AccountUsage.fromStatusLine($0, now: now) } ?? []
+        let limits = object.map { AccountUsage.fromStatusLine($0, account: sessionAccount($0, home: home, store: store), now: now) } ?? []
         store.record(limits, now: now)
         if let object { (contextStore ?? LeadContextStore(home: home)).record(object, now: now) }
         guard command == nil else { return }
@@ -239,6 +325,18 @@ public enum UsageStatusLine {
         }.joined(separator: " · ")
         if !text.isEmpty, ignored ?? MacLimits.load().ignoreUsageLimits { text += " " + AccountUsage.ignoredMark }
         show(Data(text.utf8))
+    }
+
+    /// The account the session whose status line this is runs on: its transcript's (`transcript_path`, its last
+    /// `session-owner` line, see `ClaudeAccount.owner`), else the one Claude Code is logged in to now. A session started
+    /// before a /login to another account goes on with the account it started on, and its readings are that one's.
+    static func sessionAccount(_ input: [String: Any], home: String, store: AccountUsageStore) -> String? {
+        if input["rate_limits"] == nil { return nil }
+        if let path = input["transcript_path"] as? String, let (url, _) = TranscriptReader.checkedURL(path, home: home),
+           let owner = ClaudeAccount.owner(transcript: url) {
+            return owner
+        }
+        return store.activeAccount()?.id
     }
 
     /// The session's project folder, whose `.claude` settings Claude Code layers over yours: the input's
@@ -394,5 +492,147 @@ public enum UsageStatusLine {
         var status: Int32 = 0
         while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
         return output
+    }
+}
+
+/// Which Claude account a session runs on, as Claude Code says it, so each usage reading is that account's (see
+/// `AccountUsage`). Identity only: the account's id (`accountUuid`) and its email masked for status (never in full);
+/// no token or credential is read (Claude Code keeps those in the Keychain, which VibeSwitcher doesn't touch).
+///
+/// What Claude Code 2.1.319 writes (looked at 2026-11-07):
+/// - `~/.claude.json`'s `oauthAccount` (`accountUuid`, `emailAddress`, …): the account it's logged in to now, which
+///   /login changes and new sessions start on.
+/// - A transcript's `session-owner` lines (`accountUuid`, `organizationUuid`, `sessionId`), written through the
+///   session: the account that session runs on. A session started before a /login to another account goes on with
+///   the one it started on.
+public struct ClaudeAccount: Equatable, Sendable {
+    /// Claude's `accountUuid`.
+    public var id: String
+    /// How status names it: its email masked (`name(email:id:)`).
+    public var name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    /// The account Claude Code is logged in to in `home` (its `.claude.json`'s `oauthAccount`); nil when it isn't
+    /// (an API key, no login, no file). Read again only once the file changed. A file that isn't JSON (caught half
+    /// written) is the account last read from it in this process: not knowing it would make every account's readings
+    /// hold (`AccountUsage.account`).
+    public static func active(home: String) -> ClaudeAccount? {
+        let file = URL(fileURLWithPath: home).appendingPathComponent(".claude.json").path
+        return logins.value(at: file) {
+            guard let data = FileManager.default.contents(atPath: file) else { return nil }
+            guard let config = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return lastRead.value(file) }
+            let account = read(config)
+            lastRead.set(file, account)
+            return account
+        }
+    }
+
+    static let logins = UnchangedFiles<ClaudeAccount?>()
+
+    /// The account each `.claude.json` last said, by path, for one read mid-write.
+    private static let lastRead = LastRead()
+
+    private final class LastRead: @unchecked Sendable {
+        private let lock = NSLock()
+        private var accounts: [String: ClaudeAccount?] = [:]
+        func value(_ file: String) -> ClaudeAccount? {
+            lock.lock()
+            defer { lock.unlock() }
+            return accounts[file] ?? nil
+        }
+        func set(_ file: String, _ account: ClaudeAccount?) {
+            lock.lock()
+            accounts[file] = account
+            lock.unlock()
+        }
+    }
+
+    /// From a `.claude.json`: its `oauthAccount`'s id and masked email, nothing else of it.
+    static func read(_ data: Data) -> ClaudeAccount? {
+        ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]).flatMap(read)
+    }
+
+    static func read(_ config: [String: Any]) -> ClaudeAccount? {
+        guard let account = config["oauthAccount"] as? [String: Any], let id = account["accountUuid"] as? String,
+              !id.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return ClaudeAccount(id: id, name: name(email: account["emailAddress"] as? String, id: id))
+    }
+
+    /// "so•••@ex•••.com (aaaa…)": the email's first letters and top-level domain, and the start of the id (two
+    /// accounts whose emails mask alike stay apart); "account aaaa…" without an email.
+    public static func name(email: String?, id: String) -> String {
+        let short = String(id.prefix(4)) + "…"
+        guard let masked = email.flatMap(mask) else { return "account " + short }
+        return "\(masked) (\(short))"
+    }
+
+    /// An email masked: "someone@example.com" → "so•••@ex•••.com"; nil when it isn't one.
+    static func mask(_ email: String) -> String? {
+        let parts = email.trimmingCharacters(in: .whitespaces).split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        func start(_ text: Substring) -> String { String(text.prefix(text.count > 2 ? 2 : 1)) + "•••" }
+        let domain = parts[1]
+        guard let dot = domain.lastIndex(of: "."), dot != domain.startIndex else { return start(parts[0]) + "@" + start(domain) }
+        return start(parts[0]) + "@" + start(domain[..<dot]) + domain[dot...]
+    }
+
+    /// The account a transcript's session runs on: its last `session-owner` line's, looked for in the file's end
+    /// (more of it while none is found, up to `ownerReach`); nil when none says.
+    public static func owner(transcript url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return nil }
+        var window: UInt64 = 64 * 1024
+        while true {
+            let start = size > window ? size - window : 0
+            guard (try? handle.seek(toOffset: start)) != nil, var data = try? handle.readToEnd() else { return nil }
+            if start > 0 { data = data.subdata(in: (data.startIndex + TranscriptReader.tailStart(data))..<data.endIndex) }
+            if let found = owner(data) { return found }
+            guard start > 0, window < ownerReach else { return nil }
+            window *= 4
+        }
+    }
+
+    /// How far back from a transcript's end its owner is looked for.
+    static let ownerReach: UInt64 = 4 * 1024 * 1024
+
+    /// From complete transcript lines: the last `session-owner` line's account.
+    static func owner(_ data: Data) -> String? {
+        let needle = Data("\"session-owner\"".utf8)
+        for line in TranscriptReader.lines(data).reversed() where line.range(of: needle) != nil {
+            guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
+                  object["type"] as? String == "session-owner", let id = object["accountUuid"] as? String,
+                  !id.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+            return id
+        }
+        return nil
+    }
+}
+
+/// Notices a /login to another account, for the app to nudge the leads (`LeadAdvance.nudge`): auto_advance holds a
+/// start at a limit with one look armed, at its reset, and nothing in a project's folder changes when the account
+/// does, so without a nudge what the old account's limit held would wait for that reset. Safe from any thread.
+public final class ClaudeAccountWatch: @unchecked Sendable {
+    public let home: String
+    private let lock = NSLock()
+    private var seen: String??
+
+    public init(home: String = VibePaths.home) { self.home = home }
+
+    /// The active account changed since the last look (the first look sets it: no change).
+    public func changed() -> Bool {
+        let now = ClaudeAccount.active(home: home)?.id
+        lock.lock()
+        defer { lock.unlock() }
+        guard let before = seen else {
+            seen = .some(now)
+            return false
+        }
+        seen = .some(now)
+        return before != now
     }
 }

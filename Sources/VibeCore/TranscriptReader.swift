@@ -641,6 +641,8 @@ public struct TranscriptTail: Equatable, Sendable {
         var lines = TranscriptReader.lines(data)
         if data.last != 0x0A, !lines.isEmpty { lines.removeLast() }
         guard var tail = state(lines) else { return nil }
+        // A refusal is the limit of the account the session runs on.
+        if tail.usageLimit != nil { tail.usageLimit?.account = ClaudeAccount.owner(data) }
         tail.background = background(lines)
         if tail.midTurn { tail.pending = pending(lines) }
         return tail
@@ -810,13 +812,16 @@ public struct UsageLimit: Equatable, Sendable {
     public var kind: String?
     /// Claude's code for the error (`apiError`: usage_limit_reached, model_requires_usage_credits), when the line says.
     public var apiError: String?
+    /// The account the session runs on (its transcript's `session-owner`, see `ClaudeAccount`): whose limit it is.
+    public var account: String?
 
-    public init(said: String, resetsAt: Double? = nil, at: Double? = nil, kind: String? = nil, apiError: String? = nil) {
+    public init(said: String, resetsAt: Double? = nil, at: Double? = nil, kind: String? = nil, apiError: String? = nil, account: String? = nil) {
         self.said = said
         self.resetsAt = resetsAt
         self.at = at
         self.kind = kind
         self.apiError = apiError
+        self.account = account
     }
 
     /// From an API-error line of a transcript (`isApiErrorMessage`) with its text: a usage limit when Claude marks it

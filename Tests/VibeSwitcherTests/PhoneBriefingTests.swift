@@ -88,7 +88,7 @@ struct PhoneBriefingTests {
         // The other routes' Host and account rules: another name (DNS rebinding) or another account gets nothing.
         #expect(send("POST", "/api/briefing", token: token, host: "evil.example:\(PhoneAccess.httpsPort)").status == 421)
         #expect(send("POST", "/api/briefing", token: token, host: "127.0.0.1:\(PhoneAccess.port)").status == 421)
-        #expect(send("POST", "/api/briefing", token: token, login: "someone@else.com").status == 403)
+        #expect(send("POST", "/api/briefing", token: token, login: "someone@else.example").status == 403)
         #expect(fake.presses == 0)
         // An unpaired phone (removed on the Mac) is refused too, its token no longer good.
         #expect(send("POST", "/api/unpair", token: token).status == 200)

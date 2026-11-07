@@ -1,0 +1,6 @@
+# Email-shaped strings under Sources/ and Tests/ that PrivateNamesLintTests lets through although their domain isn't
+# an example one (example.com/.org/.net, *.example, *.invalid, *.test, *.localhost). One per line, exactly as written
+# in the code; '#' starts a comment. Add one only when it names no person: a convention or a service's own address.
+
+git@github.com                                # an scp-style git remote, not a mailbox
+vibeswitcher@users.noreply.github.com         # the push subject VibeSwitcher's web-push requests carry; GitHub's no-reply domain

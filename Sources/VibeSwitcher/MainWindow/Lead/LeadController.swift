@@ -542,6 +542,9 @@ final class LeadController: ObservableObject {
     private var hostWelcome: AnyCancellable?
     /// Settings' "Ignore usage limits" changing (`MacLimitsEditor.usageLimitsChanged`): every running lead looks again.
     private var usageSetting: NSObjectProtocol?
+    /// A /login to another Claude account: every running lead looks again, since what the old account's limits held
+    /// waits on their reset otherwise (see `ClaudeAccountWatch`). Looked at off the main thread at each refresh.
+    private let accountWatch = ClaudeAccountWatch()
     /// The boards and decisions, and the teams' transcripts, read off the main thread (the boards written there too, to
     /// keep the order; `baseMoves` writes there as well).
     private let reads: LeadReads
@@ -1443,6 +1446,11 @@ final class LeadController: ObservableObject {
         keepRunningLeads()
         markReplaced()
         sweepRoles()
+        let accountWatch = accountWatch
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard accountWatch.changed() else { return }
+            DispatchQueue.main.async { self?.nudgeLeads() }
+        }
         guard !refreshing else {
             refreshAgain = true
             return
