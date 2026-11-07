@@ -284,6 +284,126 @@ struct ChatMessageTextTests {
         #expect(after.toolTip != nil)
     }
 
+    /// A reply's time is its text's tooltip before the pointer has been over its row: AppKit tells a tooltip's area
+    /// only of the pointer entering it after the area is made, so one made as the pointer came in (once the row was
+    /// reached) showed nothing on the first hover over a reply.
+    @Test func aReplysTimeIsItsTextsTooltipBeforeAnyHover() throws {
+        let home = scratch.url("chat-row-tooltip")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: home)
+        let at = Date(timeIntervalSince1970: 1_793_000_000)
+        let item = ChatItem.reply(ChatEntry(id: "r1", at: at, kind: .reply(Self.reply)))
+        let row = ChatItemRow(item: item, chat: chat, expanded: [], agent: .agent(.claude), rowID: nil, canSend: false, resend: { _ in },
+                              openImage: { _ in }, reached: false)
+        let host = NSHostingView(rootView: row.frame(width: 600))
+        let window = NSWindow(contentRect: NSRect(x: -30_000, y: -30_000, width: 600, height: 600), styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        host.layoutSubtreeIfNeeded()
+        let text = try #require(Self.texts(in: host).first)
+        #expect(text.toolTip == at.formatted(date: .abbreviated, time: .shortened))
+        // The tooltip's area is on the text view already, waiting for the pointer to come in.
+        #expect(text.trackingAreas.contains { $0.owner.map { String(describing: type(of: $0)) } == "NSToolTipManager" })
+    }
+
+    /// Three messages, one under another, in a window of their own (not key) with a text field holding the focus, as
+    /// the composer does.
+    func threeMessagesInAWindowNotKey() -> (window: NSWindow, messages: [ChatTextView], field: NSTextField) {
+        let messages = [message("The first message, to start in.", kind: .plain), message(Self.reply),
+                        message("The third message, to end in.", kind: .plain)]
+        let document = FlippedView(frame: NSRect(x: 0, y: 0, width: 520, height: 900))
+        var y: CGFloat = 0
+        for view in messages {
+            view.frame.origin.y = y
+            y += view.frame.height + 20
+            document.addSubview(view)
+        }
+        let field = NSTextField(frame: NSRect(x: 0, y: 860, width: 100, height: 20))
+        document.addSubview(field)
+        let window = KeyableWindow(contentRect: NSRect(x: -30_000, y: -30_000, width: 520, height: 900), styleMask: [.borderless],
+                                   backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = document
+        window.makeFirstResponder(field)
+        return (window, messages, field)
+    }
+
+    /// The events after a press, as the window would hand them to its tracking: made up, so no app needs to run.
+    func feed(_ events: [NSEvent], to messages: [ChatTextView]) {
+        var queue = events
+        for view in messages { view.nextTrackingEvent = { _ in queue.isEmpty ? nil : queue.removeFirst() } }
+    }
+
+    func mouse(_ type: NSEvent.EventType, at point: NSPoint, in window: NSWindow, modifiers: NSEvent.ModifierFlags = []) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: point, modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
+                           windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                           pressure: type == .leftMouseDown ? 1 : 0)!
+    }
+
+    /// A point (in the window) on `text` in `view`.
+    func point(on text: String, in view: ChatTextView) -> NSPoint {
+        let range = (view.string as NSString).range(of: text)
+        let glyphs = view.layoutManager!.glyphRange(forCharacterRange: NSRange(location: range.location, length: 1), actualCharacterRange: nil)
+        let rect = view.layoutManager!.boundingRect(forGlyphRange: glyphs, in: view.textContainer!)
+        return view.convert(NSPoint(x: rect.minX + 1, y: rect.midY), to: nil)
+    }
+
+    /// A drag that starts on a message in a window that isn't key selects at once, on into the messages below, and ⌘C
+    /// copies it all in order: before, the window kept that press to become key, and the first drag selected nothing.
+    @Test func aDragInAWindowNotKeySelectsAcrossMessagesAtOnce() throws {
+        let (window, messages, _) = threeMessagesInAWindowNotKey()
+        defer { window.close() }
+        #expect(!window.isKeyWindow)
+        let start = point(on: "first message", in: messages[0])
+        let end = point(on: "to end", in: messages[2])
+        feed((1...4).map { step in
+            let t = CGFloat(step) / 4
+            return mouse(.leftMouseDragged, at: NSPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t), in: window)
+        } + [mouse(.leftMouseUp, at: end, in: window)], to: messages)
+        // As the window does with a press while it isn't key: it asks the view under it whether the press is to go on to
+        // it, and hands it over if so.
+        let down = mouse(.leftMouseDown, at: start, in: window)
+        #expect(messages[0].acceptsFirstMouse(for: down))
+        messages[0].mouseDown(with: down)
+        #expect(window.firstResponder === messages[0])
+        #expect(messages.allSatisfy { $0.selectedRange().length > 0 })
+        let copied = try #require(copied(messages[0]))
+        #expect(copied.hasPrefix("first message, to start in.\n\nThe first paragraph says what changed."))
+        #expect(copied.hasSuffix("The third message, "))
+    }
+
+    /// A click (no drag) that brings the window forward does only that: the focus stays where it was (the composer's)
+    /// and nothing is selected.
+    @Test func aClickThatBringsTheWindowForwardLeavesTheFocus() throws {
+        let (window, messages, field) = threeMessagesInAWindowNotKey()
+        defer { window.close() }
+        let at = point(on: "first message", in: messages[0])
+        feed([mouse(.leftMouseUp, at: at, in: window)], to: messages)
+        let down = mouse(.leftMouseDown, at: at, in: window)
+        #expect(messages[0].acceptsFirstMouse(for: down))
+        messages[0].mouseDown(with: down)
+        #expect(window.firstResponder === field.currentEditor() || window.firstResponder === field, "\(String(describing: window.firstResponder))")
+        #expect(messages.allSatisfy { $0.selectedRange().length == 0 })
+    }
+
+    /// Press in one message, then shift-click two messages down: the selection runs from the press through the message
+    /// between, as a drag's would (before, AppKit's shift-click extended in the clicked message only).
+    @Test func aShiftClickExtendsTheSelectionIntoAnotherMessage() throws {
+        let (window, messages, _) = threeMessagesInAWindowNotKey()
+        defer { window.close() }
+        let start = point(on: "first message", in: messages[0])
+        _ = messages[0].press(at: start)
+        let end = point(on: "to end", in: messages[2])
+        feed([mouse(.leftMouseUp, at: end, in: window, modifiers: .shift)], to: messages)
+        messages[2].mouseDown(with: mouse(.leftMouseDown, at: end, in: window, modifiers: .shift))
+        #expect(messages.allSatisfy { $0.selectedRange().length > 0 })
+        let copied = try #require(copied(messages[2]))
+        #expect(copied.hasPrefix("first message, to start in.\n\nThe first paragraph says what changed."))
+        #expect(copied.hasSuffix("The third message, "))
+    }
+
     /// A reply coming in: each update replaces only its last block's characters (or the one before's too, when the new
     /// text joins it), ends as the whole text built at once,
     /// and leaves the headers of code blocks that didn't change as they were. With `purging`, the built texts' caches are
@@ -480,6 +600,15 @@ struct ChatMessageTextTests {
 
 /// A borderless window that is key (the test process isn't the active app, so none of its windows is), so a selection
 /// draws as in the window you type in.
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+/// A window that can become key, and isn't until it's made so (a borderless one never can).
+private final class KeyableWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+}
+
 private final class KeyWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var isKeyWindow: Bool { true }

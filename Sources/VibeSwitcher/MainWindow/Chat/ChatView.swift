@@ -591,7 +591,7 @@ private struct ChatItemView: View, Equatable {
 }
 
 /// What a row of the conversation shows. `reached` (the pointer has been over it, or VoiceOver is on) adds the row's
-/// menus and tooltip, never by wrapping its text in a branch of its own: the row's first hover comes as a drag ends
+/// SwiftUI menus and its mark's tooltip, never by wrapping its text in a branch of its own: the row's first hover comes as a drag ends
 /// on it (or brings it into view), and a new text view would drop its part of the selection.
 struct ChatItemRow: View {
     @AppStorage(ChatFont.key) private var chatFontSize = ChatFont.standard
@@ -655,9 +655,13 @@ struct ChatItemRow: View {
             if case .reply(let text) = entry.kind {
                 // The mark beside the text, as an HStack would place it, without the HStack's sizing: it measures the reply
                 // at no width and at any width to share the row out, every paragraph's text again each time.
+                // Its time is the text view's own tooltip from the start, not once the row is reached: given as the pointer
+                // came in, the tooltip's area was made with the pointer already inside it, and AppKit tells an area only
+                // of entries after it's made, so the first hover over a reply showed nothing (and a reply that came in or
+                // scrolled under a still pointer was never reached at all).
                 let when = entry.at.map { $0.formatted(date: .abbreviated, time: .shortened) }
                 ChatMessageText(text: text, kind: .markdown, fontSize: CGFloat(chatFontSize),
-                                menu: [ChatTextMenuItem(title: "Copy as Markdown") { Pasteboard.copy(text) }], help: reached ? when : nil)
+                                menu: [ChatTextMenuItem(title: "Copy as Markdown") { Pasteboard.copy(text) }], help: when)
                     .frame(maxWidth: .infinity, minHeight: 21, alignment: .topLeading)
                     .padding(.leading, 30)
                     .overlay(alignment: .topLeading) {

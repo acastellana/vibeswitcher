@@ -1167,6 +1167,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", ")),
         ("close settings|sheet", "closes Settings or the sheet"),
         ("shot NAME", "draws each window, light and dark, into the shots folder"),
+        ("pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT", "the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views (where, their tooltip); hover moves the pointer onto the message holding TEXT; drag presses on the message holding FROM and lets go on the one holding TO; copy is ⌘C (to a pasteboard of the sandbox's own, never the general one), printing what it copied; menu right-clicks the message holding TEXT and prints its menu"),
         ("unproved", "connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions"),
         ("quit", "quits (the host and fake sessions end with it)"),
     ]
@@ -2161,6 +2162,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             reply(true, "closed \(rest)")
         case "shot": shot(rest.isEmpty ? "shot" : rest, reply)
+        case "pointer": pointer(Array(words.dropFirst()), reply)
         case "unproved":
             key.stranger = SymmetricKey(size: .bits256)
             host.confirmKeyReset = { _, _ in false }
@@ -2173,6 +2175,159 @@ private final class Driver: NSObject, NSApplicationDelegate {
             reply(true, Self.commands.map { "\($0.name): \($0.help)" }.joined(separator: "\n"))
         default:
             reply(false, "no command \(words[0]); these are:\n" + Self.commands.map { "  \($0.name): \($0.help)" }.joined(separator: "\n"))
+        }
+    }
+
+    // MARK: The pointer over the chat
+
+    /// The shown chat's message text views, top to bottom, each writing to the sandbox's own pasteboard.
+    private func chatTexts() -> [ChatTextView] {
+        guard let root = window?.window?.contentView else { return [] }
+        var found: [ChatTextView] = []
+        func walk(_ view: NSView) {
+            if let text = view as? ChatTextView { found.append(text); return }
+            view.subviews.forEach(walk)
+        }
+        walk(root)
+        for text in found where text.pasteboard == .general { text.pasteboard = sandboxPasteboard }
+        return found.sorted { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }
+    }
+
+    private let sandboxPasteboard = NSPasteboard(name: NSPasteboard.Name("VibeSwitcherSandbox-\(getpid())"))
+
+    /// A point (in the window) on the first line of the message holding `text`: on that text when found, else its start.
+    private func point(onMessage text: String) -> (ChatTextView, NSPoint)? {
+        guard let view = chatTexts().first(where: { $0.string.localizedCaseInsensitiveContains(text) }),
+              let layout = view.layoutManager, let container = view.textContainer else { return nil }
+        let at = (view.string as NSString).range(of: text, options: .caseInsensitive)
+        let glyphs = layout.glyphRange(forCharacterRange: NSRange(location: at.location, length: min(max(at.length, 1), 3)), actualCharacterRange: nil)
+        let rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+        return (view, view.convert(NSPoint(x: rect.minX + 1, y: rect.midY), to: nil))
+    }
+
+    private func mouseEvent(_ type: NSEvent.EventType, at point: NSPoint, clicks: Int = 1) -> NSEvent? {
+        NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                           windowNumber: window?.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: clicks,
+                           pressure: type == .leftMouseDown || type == .rightMouseDown ? 1 : 0)
+    }
+
+    private func describe(_ view: NSView?) -> String {
+        guard let view else { return "nothing" }
+        return String(describing: type(of: view)).prefix(60).description
+    }
+
+    /// `pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT`.
+    private func pointer(_ words: [String], _ reply: @escaping (Bool, String) -> Void) {
+        guard let nsWindow = window?.window, let content = nsWindow.contentView else { return reply(false, "no window") }
+        let what = words.first ?? "rows"
+        let rest = words.dropFirst().joined(separator: " ")
+        switch what {
+        case "rows":
+            let lines = chatTexts().map { text -> String in
+                let frame = text.convert(text.bounds, to: nil)
+                let shown = !text.visibleRect.isEmpty && text.visibleRect.intersects(text.bounds)
+                return "\(shown ? "on screen " : "off screen")  y \(Int(frame.minY))…\(Int(frame.maxY))  tooltip \(text.toolTip ?? "none")  “\(text.string.prefix(40).replacingOccurrences(of: "\n", with: " "))”"
+            }
+            reply(true, lines.isEmpty ? "no messages shown" : lines.joined(separator: "\n"))
+        case "hover", "hover-beside":
+            // hover: onto the message's text; hover-beside: 15 pt left of it (a reply's mark, a prompt bubble's edge).
+            guard let (view, onText) = point(onMessage: rest) else { return reply(false, "no message holds \(rest)") }
+            let at = what == "hover" ? onText : NSPoint(x: view.convert(view.bounds, to: nil).minX - 15, y: onText.y)
+            let frame = content.superview ?? content
+            let hit = frame.hitTest(frame.convert(at, from: nil))
+            // As AppKit hands the pointer's moves to the tracking areas' owners (here, SwiftUI's hosting views).
+            // First a mouseEntered: naming the area (its tracking number is the area, as the window's are), then the moves.
+            var owners: [NSResponder] = []
+            var current: NSView? = hit
+            while let v = current {
+                for area in v.trackingAreas where area.options.contains(.mouseMoved) && (area.options.contains(.inVisibleRect) || area.rect.contains(v.convert(at, from: nil))) {
+                    guard let owner = area.owner as? NSResponder, !owners.contains(where: { $0 === owner }) else { continue }
+                    owners.append(owner)
+                    if let entered = NSEvent.enterExitEvent(with: .mouseEntered, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                            windowNumber: nsWindow.windowNumber, context: nil, eventNumber: 0,
+                                                            trackingNumber: Int(bitPattern: Unmanaged.passUnretained(area).toOpaque()), userData: nil) {
+                        owner.mouseEntered(with: entered)
+                    }
+                }
+                current = v.superview
+            }
+            for dx in [-2.0, -1, 0] {
+                guard let moved = mouseEvent(.mouseMoved, at: NSPoint(x: at.x + dx, y: at.y)) else { continue }
+                owners.forEach { $0.mouseMoved(with: moved) }
+            }
+            settle { reply(true, "pointer at \(Int(at.x)),\(Int(at.y)) on \(self.describe(hit)), moves to \(owners.map { String(describing: type(of: $0)).prefix(30) }); the message's tooltip now \(view.toolTip ?? "none")") }
+        case "drag", "drag-window":
+            guard words.count >= 3, let (from, start) = point(onMessage: words[1]), let (_, end) = point(onMessage: words[2...].joined(separator: " ")) else {
+                return reply(false, "drag FROM TO: each a text one of the shown messages holds")
+            }
+            let frame = content.superview ?? content
+            let hit = frame.hitTest(frame.convert(start, from: nil))
+            guard let down = mouseEvent(.leftMouseDown, at: start) else { return reply(false, "no event") }
+            // The drag's moves 50 ms apart, as a hand's come (the run loop turns between them: SwiftUI updates, the chat
+            // scrolls), then the button up there; it holds still there 0.5 s first when the end is off the chat's view.
+            let moves = (1...12).compactMap { step -> NSEvent? in
+                let t = Double(step) / 12
+                return mouseEvent(.leftMouseDragged, at: NSPoint(x: start.x + (end.x + 30 - start.x) * t, y: start.y + (end.y - start.y) * t))
+            }
+            // Run loop timers, in the common modes: the drag's tracking loop turns the run loop in its own, and this
+            // command runs in a block of the main queue, which runs no other block until it's done.
+            func later(_ delay: TimeInterval, _ event: NSEvent) {
+                let timer = Timer(timeInterval: delay, repeats: false) { _ in NSApp.postEvent(event, atStart: false) }
+                RunLoop.main.add(timer, forMode: .common)
+            }
+            for (index, move) in moves.enumerated() { later(0.05 * Double(index + 1), move) }
+            let offView = !(content.bounds.contains(content.convert(end, from: nil)))
+            if let up = mouseEvent(.leftMouseUp, at: NSPoint(x: end.x + 30, y: end.y)) {
+                later(0.05 * Double(moves.count + 1) + (offView ? 0.5 : 0), up)
+            }
+            // As the window hands a press to the view under it (the window isn't key: a key one does the same).
+            // drag-window: through the window's sendEvent, as the window server's event comes (a window not key takes a
+            // first click to become key unless the view under it accepts first mouse).
+            if what == "drag-window" { nsWindow.sendEvent(down) } else { hit?.mouseDown(with: down) }
+            settle {
+                let focused = nsWindow.firstResponder as? ChatTextView
+                let selected = focused?.selectedPlainText() ?? ""
+                reply(!selected.isEmpty, "window key \(nsWindow.isKeyWindow), pressed on \(self.describe(hit)) (first mouse \(hit?.acceptsFirstMouse(for: down) ?? false)) (the message's text view: \(hit === from)), first responder \(self.describe(nsWindow.firstResponder as? NSView)); selected: “\(selected)”")
+            }
+        case "copy":
+            _ = chatTexts()
+            sandboxPasteboard.clearContents()
+            // Only a message's own text view: it writes to the sandbox's pasteboard, anything else to the general one.
+            guard let focused = nsWindow.firstResponder as? ChatTextView else {
+                return reply(false, "the first responder is \(describe(nsWindow.firstResponder as? NSView)), not a message: not copied")
+            }
+            // ⌘C as the main menu has it, sent to the window's first responder (the window isn't key, so not through NSApp's key window).
+            // (The sandbox puts up no menu bar: the app's own menu, as AppDelegate installs it.)
+            let item = MainMenu.build().items.compactMap(\.submenu).flatMap(\.items).first { $0.keyEquivalent == "c" && $0.keyEquivalentModifierMask == .command }
+            let handled = item.flatMap(\.action).map { NSApp.sendAction($0, to: focused, from: item) } ?? false
+            let copied = sandboxPasteboard.string(forType: .string)
+            reply(copied != nil, "menu item \(item?.title ?? "none"), handled \(handled), first responder \(describe(nsWindow.firstResponder as? NSView)); copied: “\(copied ?? "")”")
+        case "areas":
+            // The tracking areas over the message holding TEXT, from its view up to the window, and each owner's kind.
+            guard let (view, at) = point(onMessage: rest) else { return reply(false, "no message holds \(rest)") }
+            var lines: [String] = []
+            var current: NSView? = view
+            while let v = current {
+                let local = v.convert(at, from: nil)
+                for recognizer in v.gestureRecognizers {
+                    lines.append("\(describe(v)): recognizer \(String(describing: type(of: recognizer)).prefix(60)) delays primary \(recognizer.delaysPrimaryMouseButtonEvents) enabled \(recognizer.isEnabled)")
+                }
+                for area in v.trackingAreas where area.rect.contains(local) || area.options.contains(.inVisibleRect) {
+                    lines.append("\(describe(v)): owner \(area.owner.map { String(describing: type(of: $0)).prefix(50).description } ?? "none") options \(String(area.options.rawValue, radix: 16))")
+                }
+                current = v.superview
+            }
+            reply(true, lines.joined(separator: "\n"))
+        case "menu":
+            guard let (_, at) = point(onMessage: rest) else { return reply(false, "no message holds \(rest)") }
+            let frame = content.superview ?? content
+            let hit = frame.hitTest(frame.convert(at, from: nil))
+            guard let event = mouseEvent(.rightMouseDown, at: at), let menu = hit?.menu(for: event) else {
+                return reply(false, "no menu on \(describe(hit))")
+            }
+            reply(true, "on \(describe(hit)): " + menu.items.map { $0.isSeparatorItem ? "—" : $0.title }.joined(separator: ", "))
+        default:
+            reply(false, "pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT")
         }
     }
 
