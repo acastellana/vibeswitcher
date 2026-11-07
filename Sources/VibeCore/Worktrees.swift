@@ -52,6 +52,13 @@ private final class PipeText: @unchecked Sendable {
         defer { lock.unlock() }
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    /// Bytes read so far.
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return data.count
+    }
 }
 
 /// A pipe for a program's output, made with pipe(2), both ends close-on-exec. Not Foundation's `Pipe`: out of
@@ -120,9 +127,11 @@ public enum Shell {
     /// as `BranchCode` says: under its wrapper, in a session of its own. With `ownSession`, only in a session of its own:
     /// no controlling terminal, so an interactive shell (`-i`) started from a process that has one (the tool server, under
     /// the lead's terminal) isn't stopped by SIGTTOU as it takes the terminal from a background group.
+    /// With `watch`, a run that makes no progress (no new output, almost no CPU in its tree, the Mac not loaded) for
+    /// its `after` is stopped as one past `timeout` is: `timedOut`, with `stall` saying what it was stuck on.
     public static func run(executable: String, args: [String], in directory: String, env: [String: String] = [:],
                            timeout: TimeInterval = 120, grace: TimeInterval = 5, interleaved: Bool = false,
-                           branchCode: Bool = false, ownSession: Bool = false) -> Git.Result {
+                           branchCode: Bool = false, ownSession: Bool = false, watch: StallWatch? = nil) -> Git.Result {
         let environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
         let out: ShellPipe, err: ShellPipe
         do {
@@ -158,11 +167,31 @@ public enum Shell {
         }
         let deadline = Date().addingTimeInterval(timeout)
         let cancel = ShellCancel.current
-        while process.isRunning, Date() < deadline, cancel?.isCancelled != true { usleep(20_000) }
+        var judge = watch.map { StallWatch.Judge(after: $0.after, loadLimit: $0.loadLimit, start: Date()) }
+        var nextLook = Date(), stall: StallWatch.Stall?
+        while process.isRunning, Date() < deadline, cancel?.isCancelled != true {
+            if let watch, Date() >= nextLook {
+                let members = StallWatch.tree(of: pid, group: group)
+                let look = StallWatch.Look(output: output.count + errors.count,
+                                           cpu: members.map { Dictionary($0.map { ($0.pid, $0.cpu) }, uniquingKeysWith: max) },
+                                           load: watch.load())
+                let now = Date()
+                if judge?.observe(look, at: now) == true, process.isRunning {
+                    // What it was stuck on, read before it's stopped: no debugger, no sample; the kernel's records.
+                    let (test, tail) = StallWatch.stuck(in: output.text + (interleaved ? "" : "\n" + errors.text))
+                    stall = StallWatch.Stall(idle: judge?.idle(at: now) ?? watch.after, load: look.load, loadLimit: watch.loadLimit,
+                                             lastTest: test, processes: StallWatch.lines(members ?? []), tail: tail)
+                    break
+                }
+                nextLook = now.addingTimeInterval(watch.every)
+            }
+            usleep(20_000)
+        }
         var timedOut = false, cancelled = false
         if process.isRunning {
             cancelled = cancel?.isCancelled == true
             timedOut = !cancelled
+            if cancelled { stall = nil }
             // Out of time: its children (a test runner's workers) go too, or they'd keep running in the worktree.
             // Asked first; whatever is still there after `grace` (it ignores TERM) is killed.
             stop(process, group: group, grace: grace)
@@ -181,7 +210,7 @@ public enum Shell {
             _ = readers.wait(timeout: .now() + grace)
         }
         return Git.Result(status: process.terminationStatus, output: output.text, error: errors.text, timedOut: timedOut, cancelled: cancelled,
-                          signaled: process.signaled)
+                          signaled: process.signaled, stall: timedOut ? stall : nil)
     }
 
     /// Stops a program and everything it started: its family and its process group, asked with TERM, then, once it's
@@ -342,13 +371,21 @@ public enum Worktrees {
         /// Rebasing onto main conflicted; the rebase was undone.
         case conflict
         /// A command (`init_command` or `test command`) ran past `after` seconds and was stopped, with everything it
-        /// started; what it wrote until then. Not a failure: nothing says the work is wrong.
-        case hung(command: String, after: TimeInterval, output: String)
+        /// started; what it wrote until then. Not a failure: nothing says the work is wrong. With `stall`, it was
+        /// stopped `after` seconds in for making no progress (stall_min, `StallWatch`), not at test_timeout_min.
+        case hung(command: String, after: TimeInterval, output: String, stall: StallWatch.Stall?)
         /// The run was cancelled (the tool call was), and stopped.
         case cancelled
         case error(String)
 
         public var isFailure: Bool { if case .failed = self { return true } else { return false } }
+    }
+
+    /// "hung after 45 min" (past test_timeout_min), or, stopped for making no progress, "hung: no progress for 10 min
+    /// (…; last test started: X), stopped 12 min in": as the lead's messages say a hung run.
+    public static func hung(after: TimeInterval, stall: StallWatch.Stall?) -> String {
+        guard let stall else { return "hung after \(duration(after))" }
+        return "hung: \(Redaction.secrets(in: stall.summary)), stopped \(duration(after)) in"
     }
 
     /// "45 min", "90 s": how long a time limit is, as a message says it.
@@ -920,7 +957,7 @@ public enum Worktrees {
         case conflict([String])
         /// A command failed; all of its output.
         case failed(String)
-        case hung(command: String, after: TimeInterval, output: String)
+        case hung(command: String, after: TimeInterval, output: String, stall: StallWatch.Stall?)
         case cancelled
         case error(String)
     }
@@ -997,7 +1034,7 @@ public enum Worktrees {
         switch stopped {
         case nil: return .passed(made)
         case .failed(let output): return .failed(output)
-        case .hung(let command, let after, let output): return .hung(command: command, after: after, output: output)
+        case .hung(let command, let after, let output, let stall): return .hung(command: command, after: after, output: output, stall: stall)
         case .cancelled: return .cancelled
         case .error(let text): return .error(text)
         case .passed, .passedOnRerun, .conflict: return .error("unexpected")
@@ -1075,12 +1112,16 @@ public enum Worktrees {
             let stop = progress?.heartbeat { "Running the \(name) (\(duration(Date().timeIntervalSince(started))) so far)." }
             // The branch's code (its build, its tests): never the lead to the session host (see `BranchCode`).
             let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path, env: env, timeout: timeout, interleaved: true,
-                                branchCode: true)
+                                branchCode: true, watch: lock?.watch)
             stop?()
-            let said = (name == "rerun" ? rerunHeader : "") + header + run.output
+            // A run stopped for making no progress says so first, then what it was stuck on, after its output.
+            let said = (name == "rerun" ? rerunHeader : "") + header + run.output + (run.stall.map { "\n\n" + $0.report } ?? "")
             outputs.append((name, said))
             if run.cancelled || cancel?.isCancelled == true { return (.cancelled, outputs) }
-            if run.timedOut { return (.hung(command: name, after: timeout, output: said), outputs) }
+            if let stall = run.stall {
+                return (.hung(command: name, after: Date().timeIntervalSince(started), output: said, stall: stall), outputs)
+            }
+            if run.timedOut { return (.hung(command: name, after: timeout, output: said, stall: nil), outputs) }
             guard run.ok else {
                 let failed = (name == "init_command" ? "init_command failed:\n" : "") + said
                 // Once, and only after the test command: a rerun that fails is the failure.
@@ -1133,7 +1174,7 @@ public enum Worktrees {
         switch stopped {
         case nil: outcome = outputs.contains { $0.name == "test command" } ? .passed : .noTests
         case .failed: outcome = .failed(outputs.last?.name ?? "test command")
-        case .hung(let command, let after, _): outcome = .hung(command, after: after)
+        case .hung(let command, let after, _, let stall): outcome = .hung(command, after: after, stall: stall?.summary)
         case .cancelled: outcome = .cancelled
         case .error(let text): outcome = .error(text)
         case .passed, .passedOnRerun, .conflict: outcome = .error("unexpected")
@@ -1151,7 +1192,8 @@ public enum Worktrees {
             case noTests
             /// That command failed (init_command or the test command).
             case failed(String)
-            case hung(String, after: TimeInterval)
+            /// With `stall`, stopped for making no progress: its summary (`StallWatch.Stall.summary`).
+            case hung(String, after: TimeInterval, stall: String? = nil)
             case cancelled
             case error(String)
 
@@ -1161,7 +1203,8 @@ public enum Worktrees {
                 case .passed: return "the test command passed"
                 case .noTests: return "no test_command is set, so no tests ran"
                 case .failed(let command): return "\(command) failed"
-                case .hung(let command, let after): return "\(command) hung, stopped after \(Worktrees.duration(after))"
+                case .hung(let command, let after, let stall):
+                    return "\(command) hung, stopped after \(Worktrees.duration(after))" + (stall.map { ": \($0)" } ?? "")
                 case .cancelled: return "cancelled"
                 case .error(let text): return "it couldn't run: \(text)"
                 }

@@ -14,6 +14,8 @@ public enum Git {
         public var cancelled = false
         /// A signal ended it: `status` is then the signal's number, not an exit code.
         public var signaled = false
+        /// It made no progress for its watch's stall_min and was stopped (`timedOut` too): what it was stuck on.
+        public var stall: StallWatch.Stall?
         public var ok: Bool { status == 0 && !timedOut && !cancelled }
     }
 

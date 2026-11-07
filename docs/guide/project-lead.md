@@ -221,7 +221,8 @@ then:
 1. rebases it onto the lead's branch in a worktree no agent works in (squashed into one commit if the worker merged
    the base in);
 2. runs `init_command`, then `test_command`, then `regression_command` if set, each within `test_timeout_min` (45
-   minutes);
+   minutes), and stops one as hung sooner when it makes no progress for `stall_min` (10 minutes: no new output, under
+   1 % of a core, while the Mac's load is under `load_threshold`), naming the last test it started;
 3. fast-forwards the lead's branch to exactly what was tested. Never a merge commit, never a force.
 
 It refuses while an Important finding is open, while the task is **kept** (held back with a reason, such as "don't
@@ -430,7 +431,8 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 | --- | --- | --- |
 | `max_workers` | 3 | `LeadWorkflow.swift:5` |
 | `task_budget_min` | 120 min (0: no budget) | `LeadBudget.swift:10` |
-| `test_timeout_min` | 45 min | `Worktrees.swift:1052` |
+| `test_timeout_min` | 45 min | `Worktrees.swift:1225` |
+| `stall_min` | 10 min (0: off; merges, audits and `vs-heavy --stall`) | `StallWatch.swift:22` |
 | `audit_finders` | 1 (at most 3) | `LeadWorkflow.swift:38`, `:142` |
 | `audit_nit_cap` | 5 | `LeadWorkflow.swift:40` |
 | `risk_lines` | 400 | `LeadRisk.swift:23` |
@@ -451,6 +453,7 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 | `load_threshold` | 2 × cores | `MacLoad.swift:119-133` |
 | `heavy_slots` | `VIBESWITCHER_HEAVY_SLOTS`, else Settings' (cores ÷ 6 unset); raised to boost's while on | `TestLock.slotCount`, `MacLimits.heavySlotsInForce` |
 | `vs-heavy` timeout | 60 min | `Resources/bin/vs-heavy` |
+| `vs-heavy` stall | 10 min with no progress, the Mac under `load_threshold` (`--stall`, `VIBESWITCHER_HEAVY_STALL`) | `Resources/bin/vs-heavy` |
 | Battery hold | below 50 % on battery | `PowerSource.swift:74` |
 | Usage back-off | 80 % of a limit on the model | `AccountUsage.swift` |
 | Stall: silent, idle, compacted | 15, 10, 5 min | `LeadStall.swift:44-46` |

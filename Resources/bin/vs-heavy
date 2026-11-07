@@ -36,7 +36,8 @@
 # what they started), this script freed the slot while a suite ran on, unlocked (process audit 2026-10-22, #4). COMMAND
 # runs in a process group of its own, started and watched by a supervisor (perl, in a group of its own too, holding the
 # slot with this script): TERM, INT (Ctrl-C) and HUP to this script go to the supervisor, which sends them on to
-# COMMAND's group, gives it 10 s, kills what's left of the group, and only then exits, and this script after it. When
+# COMMAND's group and every descendant of COMMAND (one in a group of its own too), gives them 10 s, kills what's left,
+# and only then exits, and this script after it. When
 # this script goes without a word (kill -9), the supervisor ends the group the same way. COMMAND ending by itself ends
 # the run: what it left running in its group is left alone (a daemon it started), and doesn't hold the slot (it hasn't
 # the fd). COMMAND's stdin is /dev/null when this script's is a terminal: its group isn't the terminal's, and a read
@@ -45,14 +46,29 @@
 # No holder keeps a slot for good (a TGE pytest sat at 0 % CPU for 3 h 23 min holding the only one, 2026-10-22):
 # --timeout TIME (VIBESWITCHER_HEAVY_TIMEOUT, else 60 min; "90" or "90m" minutes, "30s" seconds, "2h" hours) ends
 # COMMAND's group the same way once it has run that long, and this script exits 124. While COMMAND runs, the
-# supervisor looks at its group's CPU time every minute and touches the slot's .active note (its text this script's
-# "pid P") whenever the group used 1 % of a core or more since: how long ago it was last touched is how long the holder
-# has been idle, for waiters here and TestLock's (status, the witness).
+# supervisor looks at its tree's CPU time every minute and touches the slot's .active note (its text this script's
+# "pid P") whenever the group used 1 % of a core or more since (or wrote to a watched output, or started a process):
+# how long ago it was last touched is how long the holder has been idle, for waiters here and TestLock's (status, the
+# witness).
+#
+# Nor does a run that makes no progress keep it until then (five test runs sat at 0 % CPU for 30–60 min holding a slot
+# and the merge queue, 2026-11-05 and 06, one at load 4.2 on 12 cores): --stall TIME (VIBESWITCHER_HEAVY_STALL, else
+# 10 min; "0" or "off": never) ends COMMAND's group the same way, exit 124, once it has gone that long with no progress
+# while the Mac's 1-minute load is under load_threshold (mac-limits.json's loadThreshold, else twice the cores; raised
+# while boosted; VIBESWITCHER_HEAVY_LOAD stands in for the load, tests): no new output, its group under 1 % of a core,
+# no new process in it. A loaded Mac starving it isn't a hang: while the load is at or above the threshold, its
+# silence isn't counted, nor is time the Mac slept (a look that comes half a --stall late starts the count again). It's
+# looked at at least 4 times a --stall. Its output is watched where it can be seen without coming between COMMAND and it: a file
+# (its size) or a terminal (when it was last written); when either of its outputs goes elsewhere (a pipe, /dev/null),
+# --stall is off and only --timeout ends it. Stopping it, it says so first ("no progress for 10 min …; last test
+# started: X"), then its processes (pid, parent, state, CPU seconds, name: the kernel's records, no debugger) and,
+# from a file, its output's last 60 lines.
 #
 # COMMAND gets VIBESWITCHER_TEST_LOCK naming the slot: a vs-heavy under one that holds any of this folder's slots (a
 # test script the merge's test command runs, a suite under a wrapped build) runs its command at once rather than wait
 # for its own ancestor (the holder's own timeout and group are its).
 # --as WHAT: who the holder note names (default: the command line).
+# (vs-heavy [--as WHAT] [--timeout TIME] [--stall TIME] COMMAND [ARGS...])
 set -uo pipefail
 
 # TIME as seconds: "90" and "90m" minutes, "30s" seconds, "2h" hours; above 0. Fails on anything else.
@@ -64,14 +80,21 @@ seconds_of() {
         *) echo $(( 10#${BASH_REMATCH[1]} * 60 )) ;;
     esac
 }
-usage="usage: vs-heavy [--as WHAT] [--timeout TIME] COMMAND [ARGS...]: runs COMMAND in a Mac-wide slot for heavy work"
+# --stall's TIME as seconds, as `seconds_of`, or 0 for "0", "0m", "0s" and "off" (never). Fails on anything else.
+stall_of() {
+    [[ $1 == off || $1 =~ ^0+[smh]?$ ]] && { echo 0; return 0; }
+    seconds_of "$1"
+}
+usage="usage: vs-heavy [--as WHAT] [--timeout TIME] [--stall TIME] COMMAND [ARGS...]: runs COMMAND in a Mac-wide slot for heavy work"
 
 what=""
 timeout=$(seconds_of "${VIBESWITCHER_HEAVY_TIMEOUT:-}") || timeout=3600
+stall=$(stall_of "${VIBESWITCHER_HEAVY_STALL:-}") || stall=600
 while (( $# > 0 )); do
     case $1 in
         --as) what=${2:?vs-heavy --as WHAT COMMAND [ARGS...]}; shift 2 ;;
         --timeout) timeout=$(seconds_of "${2:-}") || { echo "vs-heavy: --timeout ${2:-}: give minutes (90, 90m), seconds (30s) or hours (2h)" >&2; exit 2; }; shift 2 ;;
+        --stall) stall=$(stall_of "${2:-}") || { echo "vs-heavy: --stall ${2:-}: give minutes (10, 10m), seconds (90s), hours (1h), or off" >&2; exit 2; }; shift 2 ;;
         --) shift; break ;;
         *) break ;;
     esac
@@ -106,6 +129,8 @@ slots=$(/usr/bin/perl -MJSON::PP -e '
     my $default = int($ncpu / 6) || 1;
     my $limits = json("$root/mac-limits.json");
     my $slots = $own ne "" ? $own : count($limits ? $limits->{heavySlots} : undef, $default);
+    my $set = $limits ? $limits->{loadThreshold} : undef;
+    my $limit = defined $set && !ref $set && $set =~ /^[0-9]+(\.[0-9]+)?$/ && $set > 0 ? $set + 0 : 2 * $ncpu;
     my $boost = json("$root/boost.json");
     # As Swift decodes it: on a JSON true, why, limits an object and at a number, else no boost.
     if ($boost && JSON::PP::is_bool($boost->{on}) && $boost->{on} && defined $boost->{why} && !ref $boost->{why}
@@ -113,9 +138,16 @@ slots=$(/usr/bin/perl -MJSON::PP -e '
         && time - $boost->{at} <= 150 && $boost->{at} <= time + 150) {
         my $raised = count($boost->{limits}{heavySlots}, 3);
         $slots = $raised if $raised > $slots;
+        my $boosted = $boost->{limits}{loadThreshold};
+        $boosted = 36 unless defined $boosted && !ref $boosted && $boosted =~ /^[0-9]+(\.[0-9]+)?$/ && $boosted > 0;
+        $limit = $boosted if $boosted > $limit;
     }
-    print $slots;
+    print "$slots $limit";
 ' "$vs_root" "$ncpu" "$own" 2>/dev/null)
+# load_threshold (as MacLimits.loadLimit, raised while boosted): above it, a run's silence isn't counted (--stall).
+load_limit=${slots#* }
+slots=${slots%% *}
+[[ $load_limit =~ ^[0-9]+(\.[0-9]+)?$ ]] || load_limit=$(( 2 * ncpu ))
 if ! [[ $slots =~ ^[0-9]+$ ]] || (( 10#$slots < 1 )); then
     slots=${own:-$(( ncpu / 6 ))}
     (( slots >= 1 )) || slots=1
@@ -311,14 +343,31 @@ done
 # (TERM, INT, HUP, this script gone, or past --timeout), it sends COMMAND's group the signal (TERM for the last two),
 # kills what's left of it after 10 s, and exits once the group is empty: 128 + the signal, or 124 past --timeout.
 # Else it exits with COMMAND's status, 128 + the signal when a signal ended it. Every minute (VIBESWITCHER_HEAVY_SAMPLE
-# seconds, for tests) it reads the group's CPU time with ps and touches .active when the group used 1 % of a core or
+# seconds, for tests) it reads its tree's CPU time with ps and touches .active when the tree used 1 % of a core or
 # more since the look before (CPU of processes that ended in between isn't seen; new ones count whole). Its stdin is this script's
 # (`<&0`: a script's background job's would be /dev/null).
 /usr/bin/perl -MPOSIX=:sys_wait_h -MTime::HiRes=time -e '
-    my ($script, $what, $limit, $active, $every, @command) = @ARGV;
+    my ($script, $what, $limit, $active, $every, $stall, $loadLimit, $loadGiven, @command) = @ARGV;
     my $stop;
     $SIG{$_} = sub { $stop //= $_[0] } for qw(TERM INT HUP);
     POSIX::setpgid(0, 0);
+    # Its outputs, when both can be watched without coming between COMMAND and them: a file (its size) or a terminal
+    # (when it was last written). Else --stall is off.
+    my @outputs;
+    for my $fh (\*STDOUT, \*STDERR) {
+        my @st = stat($fh);
+        my $kind = !@st ? undef : -t $fh ? "tty" : -f _ ? "file" : undef;
+        unless (defined $kind) { @outputs = (); $stall = 0; last; }
+        push @outputs, [$fh, $kind, "$st[0]:$st[1]"] unless grep { $_->[2] eq "$st[0]:$st[1]" } @outputs;
+    }
+    # What its outputs say now: a file'\''s size, a terminal'\''s last write.
+    sub mark { join ",", map { my @st = stat($_->[0]); @st ? ($_->[1] eq "file" ? $st[7] : $st[9]) : "?" } @outputs }
+    # The Mac'\''s 1-minute load (VIBESWITCHER_HEAVY_LOAD for it in tests); undef when unread.
+    sub load {
+        return $loadGiven + 0 if $loadGiven =~ /^[0-9]+(\.[0-9]+)?$/;
+        my $out = `/usr/sbin/sysctl -n vm.loadavg 2>/dev/null`;
+        return $out =~ /([0-9]+(?:[.,][0-9]+)?)/ ? do { (my $n = $1) =~ tr/,/./; $n + 0 } : undef;
+    }
     my $child = fork;
     defined $child or do { print STDERR "vs-heavy: $what: could not start it: $!\n"; exit 126 };
     if ($child == 0) {
@@ -333,24 +382,104 @@ done
     # Either side may run first: the group is made before anything is sent to it.
     POSIX::setpgid($child, $child);
     my ($start, $status, $timedOut) = (time, undef, 0);
-    # The group'\''s processes and their CPU seconds, from ps; undef when it did not answer in 5 s.
-    sub cpu {
-        my %cpu;
-        my $ps = open(my $out, "-|", "/bin/ps", "-A", "-o", "pgid=,pid=,time=") or return undef;
+    # The user'\''s own processes, from ps: pid => [parent, group, CPU seconds, start (lstart)]; undef when it did not
+    # answer in 5 s.
+    sub table {
+        my $ps = open(my $out, "-|", "/bin/ps", "-x", "-o", "pid=,ppid=,pgid=,time=,lstart=") or return undef;
         my @lines = eval { local $SIG{ALRM} = sub { die "late\n" }; alarm 5; my @all = <$out>; alarm 0; @all };
         alarm 0;
         if ($@) { kill "KILL", $ps; close $out; return undef; }
         close $out;
+        my %table;
         for (@lines) {
-            my ($group, $pid, $time) = split;
-            next unless defined $time && $group == $child;
+            my ($pid, $ppid, $pgid, $time, $lstart) = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.*?)\s*$/ or next;
             my $seconds = 0;
             $seconds = $seconds * 60 + $_ for split /:/, $time;
-            $cpu{$pid} = $seconds;
+            $table{$pid} = [$ppid, $pgid, $seconds, $lstart];
         }
-        return \%cpu;
+        return \%table;
     }
-    my ($seen, $next) = (undef, time + $every);
+    # COMMAND'\''s tree: its group and its descendants (one in a group of its own too: swift test starts
+    # swiftpm-testing-helper in a new one, and on 2026-11-06 a helper outlived its run at 0 % CPU for 1 h 18 min), as
+    # pid => its start (ps'\''s lstart), added to `$family` and kept: one whose parent has gone is launchd'\''s child by
+    # the next look. Only the user'\''s own processes, each matched by its start, so a pid given again is never hit.
+    # Returns the table it read (undef, and `$family` as it was, when ps did not answer).
+    sub family {
+        my ($family) = @_;
+        my $table = table() or return undef;
+        my %children;
+        push @{$children{$table->{$_}[0]}}, $_ for keys %$table;
+        my @walk = ($child, grep { $table->{$_}[1] == $child } keys %$table);
+        push @walk, grep { exists $table->{$_} && $table->{$_}[3] eq $family->{$_} } keys %$family;
+        my %seen;
+        while (defined(my $pid = shift @walk)) {
+            next if $seen{$pid}++;
+            $family->{$pid} //= $table->{$pid}[3] if exists $table->{$pid};
+            push @walk, @{$children{$pid} || []};
+        }
+        # What has ended (or is another process now) is no longer kept.
+        for (keys %$family) { delete $family->{$_} unless exists $table->{$_} && $table->{$_}[3] eq $family->{$_}; }
+        return $table;
+    }
+    my %tree;
+    # The tree'\''s processes and their CPU seconds; undef when ps did not answer.
+    sub cpu {
+        my $table = family(\%tree) or return undef;
+        return { map { $_ => $table->{$_}[2] } keys %tree };
+    }
+    # Says it made no progress for $idle seconds (at load $load), the last test its output shows started and never
+    # finished, its processes, and its output'\''s last 60 lines (from a file: F_GETPATH names it).
+    sub report {
+        my ($idle, $load) = @_;
+        my ($test, @tail);
+        for my $output (grep { $_->[1] eq "file" } @outputs) {
+            my $path = "\0" x 1024;
+            fcntl($output->[0], 50, $path) or next;
+            $path =~ s/\0.*//s;
+            open(my $in, "<", $path) or next;
+            my $size = -s $in;
+            seek($in, $size - 4194304, 0) if $size > 4194304;
+            local $/;
+            my $data = <$in>;
+            next unless defined $data;
+            utf8::decode($data);
+            my (@started, %ended);
+            my @lines = map { s/\e\[[0-9;]*m//gr =~ s/\s+$//r } split /\n/, $data;
+            for (@lines) {
+                my ($name, $event);
+                if (/^\s*\S{1,2} Test (.+?) (started\.$|passed after |failed after |skipped(?:\.$|:| with))/) {
+                    ($name, $event) = ($1, $2);
+                    next if $name eq "run" || $name =~ /^run with /;
+                } elsif (/^\s*Test Case \x27([^\x27]+)\x27 (started|passed|failed|skipped)/) {
+                    ($name, $event) = ($1, $2);
+                } else { next; }
+                if ($event =~ /^started/) { push @started, $name unless grep { $_ eq $name } @started; } else { $ended{$name} = 1; }
+            }
+            my @open = grep { !$ended{$_} } @started;
+            $test = $open[-1] if @open;
+            my @kept = grep { length } @lines;
+            @tail = @kept > 60 ? @kept[-60 .. -1] : @kept;
+            last;
+        }
+        my @processes;
+        family(\%tree);
+        if (open(my $ps, "-|", "/bin/ps", "-x", "-o", "pid=,ppid=,stat=,time=,comm=")) {
+            for (<$ps>) { my @row = split " ", $_, 5; push @processes, join(" ", @row) =~ s/\s+$//r if exists $tree{$row[0]}; }
+            close $ps;
+        }
+        my $min = $idle >= 60 ? int($idle / 60 + 0.5) . " min" : int($idle + 0.5) . " s";
+        my $at = defined $load ? sprintf("at load %.1f under load_threshold %s", $load, $loadLimit + 0) : "load unread";
+        binmode(STDERR, ":utf8");
+        print STDERR "vs-heavy: $what: no progress for $min (no new output and under 1 % of a core, $at): stopping it, with everything it started (exit 124); "
+            . (defined $test ? "last test started: $test" : "no test in its output started and never finished") . ".\n";
+        print STDERR "vs-heavy: its processes (pid, parent, state, CPU time, name):\n" . join("", map { "    $_\n" } @processes) if @processes;
+        print STDERR "vs-heavy: its output'\''s last " . scalar(@tail) . " lines:\n" . join("", map { "    $_\n" } @tail) if @tail;
+    }
+    # Looked at often enough that a few looks fit in --stall: its first only sets where CPU starts from.
+    $every = $stall / 4 if $stall > 0 && $every > $stall / 4;
+    my ($seen, $next, $looked) = (undef, time + $every, time);
+    # When it last made progress: new output, 1 % of a core or a new process in its tree, or a Mac too loaded to judge.
+    my ($progressed, $marked, $loaded) = (time, mark(), undef);
     while (1) {
         if (waitpid($child, WNOHANG) == $child) { $status = $?; last; }
         if (!defined $stop && (getppid() == 1 || !kill(0, $script))) {
@@ -364,26 +493,48 @@ done
         }
         last if defined $stop;
         if (time >= $next) {
+            my $wrote = mark();
+            my $busy = $wrote ne $marked;
             if (my $now = cpu()) {
                 # The first look only sets where it starts from.
                 my $used = 0;
                 $used += $now->{$_} - (exists $seen->{$_} ? $seen->{$_} : 0) for $seen ? keys %$now : ();
-                utime(undef, undef, $active) if $used >= 0.01 * $every;
+                $busy ||= $used >= 0.01 * $every || grep { !exists $seen->{$_} } keys %$now if $seen;
                 $seen = $now;
+            } else {
+                # Its group unread: nothing is stopped on what was not seen.
+                $busy = 1;
             }
+            utime(undef, undef, $active) if $busy;
+            $loaded = load();
+            # A look this late (the Mac slept, or this supervisor was starved) saw nothing of the time between: a
+            # fresh start, not silence.
+            my $late = time - $looked >= $every + $stall / 2;
+            $progressed = time if $busy || $late || (defined $loaded && $loaded >= $loadLimit);
+            ($marked, $looked) = ($wrote, time);
             $next = time + $every;
+            # Judged only at a look, on what that look saw.
+            if ($stall > 0 && time - $progressed >= $stall) {
+                report(time - $progressed, $loaded);
+                ($stop, $timedOut) = ("TERM", 1);
+                last;
+            }
         }
         select(undef, undef, undef, 0.1);
     }
+    # Stopping it ends its tree (as the looks have kept it, then as it is now): its group and every process it started.
+    sub signal_family { my ($signal, $family) = @_; kill $signal, -$child; kill $signal, $_ for grep { $_ != $child } keys %$family; }
     if (defined $stop) {
-        kill $stop, -$child;
+        family(\%tree);
+        signal_family($stop, \%tree);
         my ($end, $killed) = (time + 10, 0);
         while (1) {
             $status //= $? if waitpid($child, WNOHANG) == $child;
-            last if defined $status && !kill(0, -$child);
+            family(\%tree);
+            last if defined $status && !kill(0, -$child) && !grep { $_ != $child } keys %tree;
             if (time >= $end) {
                 last if $killed;
-                kill "KILL", -$child;
+                signal_family("KILL", \%tree);
                 ($end, $killed) = (time + 5, 1);
             }
             select(undef, undef, undef, 0.05);
@@ -392,7 +543,7 @@ done
         exit 128 + ({TERM => 15, INT => 2, HUP => 1}->{$stop});
     }
     exit($status & 127 ? 128 + ($status & 127) : $status >> 8);
-' "$$" "$what" "$timeout" "$lock_file.active" "${VIBESWITCHER_HEAVY_SAMPLE:-60}" "$@" <&0 &
+' "$$" "$what" "$timeout" "$lock_file.active" "${VIBESWITCHER_HEAVY_SAMPLE:-60}" "$stall" "$load_limit" "${VIBESWITCHER_HEAVY_LOAD:-}" "$@" <&0 &
 supervisor=$!
 [[ -n $stopping ]] && kill -"$stopping" "$supervisor" 2> /dev/null
 # A trap ends a wait early: waited for again while the supervisor is there.

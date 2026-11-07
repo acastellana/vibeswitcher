@@ -237,7 +237,10 @@ public enum MergeRerun {
     /// (`after`) and was stopped, the tests its `output` left started and unfinished (`hung(in:)`), and the output's
     /// last `hungTail` lines. Masked whole before it's cut (`Redaction`): a secret the tail starts partway into (a
     /// key's lines under its header) is masked as it would be in full. Each line cut at `evidenceWidth`.
-    public static func hungLog(task: String, commit: String, command: String, after: TimeInterval, output: String) -> String {
+    /// With `stall`, it was stopped for making no progress (stall_min) rather than at test_timeout_min: the file says
+    /// that, the last test it started, and its processes when it was stopped.
+    public static func hungLog(task: String, commit: String, command: String, after: TimeInterval, output: String,
+                               stall: StallWatch.Stall? = nil) -> String {
         let masked = Redaction.secrets(in: output).components(separatedBy: "\n")
             .map { $0.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
                 .replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression) }
@@ -245,7 +248,10 @@ public enum MergeRerun {
             .map { $0.count > evidenceWidth ? String($0.prefix(evidenceWidth - 1)) + "…" : $0 }
         let tests = hung(in: masked.joined(separator: "\n"))
         let what = command == "rerun" ? "the rerun of its failing tests" : "its \(command)"
-        var text = "Hung in \(task)'s merge (tested \(commit.prefix(12))): \(what) ran past test_timeout_min (\(Worktrees.duration(after))) and was stopped, with everything started under it.\n"
+        var text = stall.map { stall in
+            "Hung in \(task)'s merge (tested \(commit.prefix(12))): \(what) made \(Redaction.secrets(in: stall.summary)) and was stopped \(Worktrees.duration(after)) in (stall_min), with everything started under it.\n"
+                + (stall.processes.isEmpty ? "" : "\nIts processes when stopped (pid, parent, state, CPU seconds, name):\n" + stall.processes.map { "    " + $0 }.joined(separator: "\n") + "\n")
+        } ?? "Hung in \(task)'s merge (tested \(commit.prefix(12))): \(what) ran past test_timeout_min (\(Worktrees.duration(after))) and was stopped, with everything started under it.\n"
         text += tests.isEmpty ? "\nNo test in its output started and never finished.\n"
             : "\nStarted and never finished (secrets masked):\n" + tests.map { "    " + $0 }.joined(separator: "\n") + "\n"
         text += "\nIts output's last \(tail.count) lines (secrets masked, each cut at \(evidenceWidth) characters):\n"

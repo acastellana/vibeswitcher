@@ -262,7 +262,7 @@ public enum LeadRemote {
         /// The merge conflicts in these files outside the lead's records; nothing was made.
         case conflict([String])
         case failed(String)
-        case hung(command: String, after: TimeInterval, output: String)
+        case hung(command: String, after: TimeInterval, output: String, stall: StallWatch.Stall?)
         case cancelled
         case error(String)
     }
@@ -331,7 +331,7 @@ public enum LeadRemote {
         switch stopped {
         case nil: return .passed(commit: made, merged: !forward)
         case .failed(let output)?: return .failed(output)
-        case .hung(let command, let after, let output)?: return .hung(command: command, after: after, output: output)
+        case .hung(let command, let after, let output, let stall)?: return .hung(command: command, after: after, output: output, stall: stall)
         case .cancelled?: return .cancelled
         case .error(let text)?: return .error(text)
         case .passed?, .passedOnRerun?, .conflict?: return .error("unexpected")
@@ -490,9 +490,9 @@ extension LeadToolset {
             try? store.appendProgress("merge_remote stopped: the tests fail on \(label) merged into \(base)")
             throw Problem(text: "Not merged: the tests fail on \(label) merged into \(base); \(unmoved) "
                           + (saved.map { "Their output: \($0). " } ?? "") + "The end of it:\n" + Self.tail(output))
-        case .hung(let command, let after, let output):
+        case .hung(let command, let after, let output, let stall):
             let saved = saveMergeLog(output, slug: "merge-remote")
-            throw Problem(text: "Not merged: \(command == "init_command" ? "init_command" : "the tests") hung after \(Worktrees.duration(after)) on \(label) merged into \(base), and \(command == "init_command" ? "it was" : "they were") stopped; \(unmoved) "
+            throw Problem(text: "Not merged: \(command == "init_command" ? "init_command" : "the tests") \(Worktrees.hung(after: after, stall: stall)) on \(label) merged into \(base), and \(command == "init_command" ? "it was" : "they were") stopped; \(unmoved) "
                           + (saved.map { "The output so far: \($0)." } ?? ""))
         case .cancelled:
             throw Problem(text: "merge_remote was cancelled; nothing was merged, and \(unmoved)")

@@ -265,8 +265,15 @@ public final class LeadToolset: MCPToolset {
     func heavyLock(_ workflow: LeadWorkflow) -> TestLock? {
         testLock.map { lock in
             let own = workflow.heavySlots ?? (slotsFromSettings ? TestLock.slotsSet() : lock.slots)
-            let slots = macLimits().heavySlotsInForce(own)
-            return slots == lock.slots ? lock : lock.with(slots: slots)
+            let limits = macLimits()
+            let slots = limits.heavySlotsInForce(own)
+            var held = slots == lock.slots ? lock : lock.with(slots: slots)
+            // A run that makes no progress for stall_min (the Mac under load_threshold) is stopped then, not at
+            // test_timeout_min; one the caller set up already (tests) is kept.
+            if held.watch == nil, let stall = workflow.stall {
+                held.watch = StallWatch(after: stall, every: min(30, stall / 10), loadLimit: limits.loadLimit)
+            }
+            return held
         }
     }
 
@@ -634,6 +641,7 @@ public final class LeadToolset: MCPToolset {
                                          "disk_warning_gb": P(type: "number", description: "Free space (GB) on the worktrees' volume below which you're told, once, what takes the space (default 10)"),
                                          "disk_floor_gb": P(type: "number", description: "Free space (GB) below which start_worker refuses (default 3)"),
                                          "test_timeout_min": P(type: "number", description: "Minutes merge lets init_command and test_command run before it takes them as hung and stops them (default 45)"),
+                                         "stall_min": P(type: "number", description: "Minutes merge and audits let init_command and test_command (and workers' vs-heavy runs) go with no new output and almost no CPU, the Mac under load_threshold, before they take them as hung and stop them (default 10; 0: only test_timeout_min)"),
                                          "task_budget_min": P(type: "integer", description: "A task's time budget when it sets none (add_task budget_min), in minutes of its worker's working time: at it the worker is told to stop and report over_budget, and you decide (default 120; 0: no budget)"),
                                          "heavy_slots": P(type: "integer", description: "How many builds and full test runs (vs-heavy's, merges', audits') may run at once across all projects on this Mac (empty: VibeSwitcher's Settings value, the cores ÷ 6 unset; raised while Boost mode is on)"),
                                          "audit_finders": P(type: "integer", description: "How many finders an audit runs: 1 (one verifier, the default), 2 or 3 (different focuses on one shared build and test run, and a vote keeps what most of them found; each counts against mac_max_sessions)"),
@@ -2029,6 +2037,10 @@ public final class LeadToolset: MCPToolset {
             if workflow.testTimeoutMinutes != LeadWorkflow().testTimeoutMinutes {
                 environment[TestLock.timeoutVariable] = "\(Int(workflow.testTimeout.rounded(.up)))s"
             }
+            // And its stall_min, likewise: vs-heavy stops a run that makes no progress that long ("off" for 0).
+            if workflow.stallMinutes != LeadWorkflow().stallMinutes {
+                environment[TestLock.stallVariable] = workflow.stall.map { "\(Int($0.rounded(.up)))s" } ?? "off"
+            }
             let session = try runtime.spawn(cwd: folder, command: launch.command, env: environment, label: label,
                                             agent: codex ? Agent.codex.rawValue : Agent.claude.rawValue)
             do { try vault.bind(grant, root: root, session: session) } catch {
@@ -2771,25 +2783,40 @@ public final class LeadToolset: MCPToolset {
         case .cancelled:
             // Stopped by the caller: nothing is known about the work, and the task stays as it was.
             throw Problem(text: "The merge of \(slug) was cancelled; nothing was merged, and \(slug) stays as it was.")
-        case .hung(let command, let after, let output):
+        case .hung(let command, let after, let output, let stall):
             // Not a failure of the work as far as anyone knows: the task stays as it was, and the lead decides.
             let (what, they) = command == "init_command" ? ("init_command", "it was") : ("tests", "they were")
             let saved = saveMergeLog(output, slug: slug)
             // The tests that never finished and the output's tail, where the worker who fixes the hang can read them
             // (the merge's log is in the vault).
             let hung = Self.clip(Redaction.secrets(in: MergeRerun.hung(in: output).joined(separator: ", ")))
-            let readable = saveEvidence(MergeRerun.hungLog(task: slug, commit: commit, command: command, after: after, output: output),
+            let readable = saveEvidence(MergeRerun.hungLog(task: slug, commit: commit, command: command, after: after, output: output, stall: stall),
                                         log: MergeRerun.hungPath(task: slug, commit: commit, at: Date()))
                 .map { MergeRerun.evidenceFile(root: root, log: $0) }
             let named = hung.isEmpty ? "No test in its output started and never finished. " : "Started and never finished: \(hung). "
-            try? store.appendProgress("Hung in \(slug)'s merge: the \(what) stopped after \(Worktrees.duration(after))"
+            // Stopped for making no progress: the test it was stuck in goes in the flake ledger, so a test that hangs
+            // merges again and again gets a task of its own (`planFlakeFixes`).
+            var ledger = ""
+            if let stuck = stall?.lastTest.map(Redaction.secrets(in:)) {
+                let planned = (try? store.update { board in
+                    planFlakeFixes(&board, flakes: [stuck], slug: slug, commit: commit, at: Date(), logged: [], log: nil, workflow: workflow)
+                }) ?? []
+                ledger = "\(Self.clip(stuck, 200)), the last test it started, is recorded in the flake ledger"
+                    + (planned.first.map { $0.noted ? " (the open task \($0.slug) names it: noted in its context)" : " (it hung or flaked \(LeadBoard.flakeLimit) times: planned \($0.slug) to fix it)" } ?? "")
+                    + ". "
+            }
+            try? store.appendProgress("Hung in \(slug)'s merge: the \(what) "
+                                      + (stall.map { "made \(Redaction.secrets(in: $0.summary)), stopped \(Worktrees.duration(after)) in" } ?? "stopped after \(Worktrees.duration(after))")
                                       + (hung.isEmpty ? "; no test in its output started and never finished" : "; started and never finished: \(hung)")
                                       + (readable.map { " (\($0))" } ?? ""))
-            throw Problem(text: "Not merged: the \(what) hung after \(Worktrees.duration(after)) on \(slug) rebased onto \(base); \(they) stopped, with everything started under them. \(slug) stays as it was. "
-                          + named
+            let advice = stall == nil
+                ? "If they only need longer, raise test_timeout_min (\(Self.gb(workflow.testTimeoutMinutes)) in workflow.md) with configure; else have the worker find what hangs."
+                : "If they only work silently that long, raise stall_min (\(Self.gb(workflow.stallMinutes)) in workflow.md) with configure; else have the worker find what hangs."
+            throw Problem(text: "Not merged: the \(what) \(Worktrees.hung(after: after, stall: stall)) on \(slug) rebased onto \(base); \(they) stopped, with everything started under them. \(slug) stays as it was. "
+                          + named + ledger
                           + (readable.map { "Those and the output's last \(MergeRerun.hungTail) lines, readable by the worker who fixes it: \($0). " } ?? "")
                           + (saved.map { "The output so far: \($0). " } ?? "(The output couldn't be saved.) ")
-                          + "If they only need longer, raise test_timeout_min (\(Self.gb(workflow.testTimeoutMinutes)) in workflow.md) with configure; else have the worker find what hangs.")
+                          + advice)
         case .conflict:
             if let changed = changedMeanwhile(slug, since: task, tests: "didn't run: the branch conflicts with \(base)") { throw changed }
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Conflicts with \(base): the branch needs bringing up to date."))
@@ -2988,9 +3015,9 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "Not reverted: the \(which) fails with \(slug) reverted on \(base). \(base) is as it was, and \(slug) stays merged.\n\(found)\n"
                           + (saved.map { "Full output: \($0)" } ?? "(The full output couldn't be saved.)")
                           + "\nIf the tests fail without the change too, fix forward (add_task); if they only fail reverted, its later work depends on it.")
-        case .hung(let command, let after, let output):
+        case .hung(let command, let after, let output, let stall):
             let saved = saveMergeLog(output, slug: slug, name: "revert-test.log")
-            throw Problem(text: "Not reverted: the \(command) hung after \(Worktrees.duration(after)) with \(slug) reverted on \(base), and was stopped with everything started under it. \(base) is as it was. "
+            throw Problem(text: "Not reverted: the \(command) \(Worktrees.hung(after: after, stall: stall)) with \(slug) reverted on \(base), and was stopped with everything started under it. \(base) is as it was. "
                           + (saved.map { "The output so far: \($0)." } ?? "(The output couldn't be saved.)"))
         case .cancelled:
             throw Problem(text: "The revert of \(slug) was cancelled; \(base) is as it was, and \(slug) stays merged.")
@@ -3851,6 +3878,12 @@ public final class LeadToolset: MCPToolset {
                 guard !value.isEmpty else { break }
                 guard let minutes = LeadWorkflow.minutes(value) else { throw Problem(text: "test_timeout_min must be a number of minutes, more than 0.") }
                 value = Self.gb(minutes)
+            case "stall_min":
+                guard !value.isEmpty else { break }
+                guard let minutes = Double(value), minutes.isFinite, minutes >= 0 else {
+                    throw Problem(text: "stall_min must be a number of minutes, 0 (no stall watch, only test_timeout_min) or more.")
+                }
+                value = Self.gb(minutes)
             case "agent_default" where !value.isEmpty:
                 guard let agent = LeadTask.WorkerAgent(text: value), agent != .codex else {
                     throw Problem(text: "agent_default is claude or auto (each start picks Codex when Claude's usage is tight and Codex has room); "
@@ -3907,7 +3940,8 @@ public final class LeadToolset: MCPToolset {
                                           "base_branch": after.baseBranch ?? "", "remote": after.remote ?? "", "verifier_model": after.verifierModel ?? "",
                                           "max_workers": String(after.maxWorkers),
                                           "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
-                                          "test_timeout_min": Self.gb(after.testTimeoutMinutes), "task_budget_min": String(after.taskBudgetMinutes),
+                                          "test_timeout_min": Self.gb(after.testTimeoutMinutes), "stall_min": Self.gb(after.stallMinutes),
+                                          "task_budget_min": String(after.taskBudgetMinutes),
                                           "heavy_slots": after.heavySlots.map(String.init) ?? "",
                                           "audit_finders": String(after.auditFinders), "audit_nit_cap": String(after.auditNitCap),
                                           "merge_policy": after.mergePolicy?.rawValue ?? "", "sensitive_paths": after.sensitivePaths?.joined(separator: ", ") ?? "",
@@ -3918,7 +3952,8 @@ public final class LeadToolset: MCPToolset {
                                           "watch_app_logs": String(after.watchAppLogs), "agent_default": after.agentDefault.rawValue]
             // A limit cleared reads back as its default.
             let defaults = ["disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
-                            "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes), "task_budget_min": String(LeadWorkflow().taskBudgetMinutes),
+                            "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes), "stall_min": Self.gb(LeadWorkflow().stallMinutes),
+                            "task_budget_min": String(LeadWorkflow().taskBudgetMinutes),
                             "audit_finders": String(LeadWorkflow().auditFinders), "audit_nit_cap": String(LeadWorkflow().auditNitCap),
                             "auto_advance": String(LeadWorkflow().autoAdvance), "watch_app_logs": String(LeadWorkflow().watchAppLogs),
                             "merge_batching": LeadWorkflow().mergeBatching.rawValue,
@@ -4998,6 +5033,7 @@ public final class LeadToolset: MCPToolset {
                      "- disk_warning_gb: \(Self.gb(workflow.diskWarningGB)) (the lead is told below this much free space)",
                      "- disk_floor_gb: \(Self.gb(workflow.diskFloorGB)) (start_worker refuses below it)",
                      "- test_timeout_min: \(Self.gb(workflow.testTimeoutMinutes)) (merge stops init_command and test_command past it, as hung)",
+                     "- stall_min: \(Self.gb(workflow.stallMinutes)) (merge, audits and vs-heavy stop a run with no new output and almost no CPU that long, the Mac under load_threshold, as hung\(workflow.stall == nil ? "; 0: off" : ""))",
                      "- task_budget_min: " + (workflow.taskBudgetMinutes > 0 ? "\(workflow.taskBudgetMinutes) (a task's time budget, in minutes of its worker's working time, unless it sets its own)" : "0 (no time budget unless a task sets its own)"),
                      "- heavy_slots: \(heavySlotsText(workflow)) (builds and full test runs at once, Mac-wide: vs-heavy's, merges', audits'; one more waits)",
                      "- audit_finders: \(workflow.auditFinders) (" + (workflow.auditFinders == 1 ? "one verifier per audit" : "finders per audit, on one shared build and test run, with a vote; each counts against mac_max_sessions") + ")",

@@ -776,8 +776,8 @@ struct WorktreesTests {
             child = (try? String(contentsOfFile: marks + "/child", encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
             if child == nil { timeout *= 2 }
         }
-        guard case .hung(let command, let after, let output) = checked else { Issue.record("\(checked)"); return }
-        #expect(command == "test command" && after == timeout && output.contains("started"))
+        guard case .hung(let command, let after, let output, let stall) = checked else { Issue.record("\(checked)"); return }
+        #expect(command == "test command" && after == timeout && output.contains("started") && stall == nil)
         #expect(took < hangGuard)
         let left = try #require(child)
         #expect(await eventually { kill(left, 0) != 0 })

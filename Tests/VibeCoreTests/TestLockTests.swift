@@ -325,8 +325,8 @@ struct TestLockTests {
         #expect(bad.terminationStatus == 2)
     }
 
-    /// Past its timeout a hung run's own group ends, and nothing else: not a process it started in a group of its own (a
-    /// daemon), not another program beside it, not the run waiting in line, which takes the slot and runs.
+    /// Past its timeout a hung run's whole tree ends (its group, and what it started in a group of its own), and nothing
+    /// else: not another program beside it, not the run waiting in line, which takes the slot and runs.
     @Test func pastItsTimeoutOnlyTheHungRunsGroupEnds() async throws {
         let locks = url("heavy-locks").path, q = RecentProjects.shellQuote
         let sleeper = url("sleep.pid").path, daemon = url("daemon.pid").path, ran = url("next.ran").path
@@ -347,7 +347,9 @@ struct TestLockTests {
         #expect(await eventually { kill(sleep, 0) != 0 })
         #expect(await exited(next), "pid \(next.processIdentifier) still running")
         #expect(next.terminationStatus == 0 && lines(ran) == ["ran"], "\(lines(url("next.out").path))")
-        #expect(kill(started, 0) == 0, "the daemon it started in a group of its own was killed")
+        // A process it started in a group of its own goes with it too (swift test's swiftpm-testing-helper outlived its
+        // run at 0 % CPU for 1 h 18 min, 2026-11-06).
+        #expect(await eventually { kill(started, 0) != 0 }, "a process it started in a group of its own outlived it")
         #expect(kill(bystander.processIdentifier, 0) == 0 && bystander.isRunning, "a process beside it was killed")
     }
 

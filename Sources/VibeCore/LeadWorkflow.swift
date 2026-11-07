@@ -32,6 +32,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// How many minutes merge lets init_command and test_command run before they're taken as hung and stopped
     /// (`test_timeout_min:`).
     public var testTimeoutMinutes: Double = Worktrees.testTimeout / 60
+    /// How many minutes a merge's or audit's init_command and test_command (and its sessions' vs-heavy runs) may go
+    /// without progress (no new output, almost no CPU, the Mac under load_threshold) before they're taken as hung and
+    /// stopped, well before test_timeout_min (`stall_min:`; 0: never, only the timeout; see `StallWatch`).
+    public var stallMinutes: Double = StallWatch.defaultMinutes
     /// A task's time budget in minutes when it sets none of its own (`task_budget_min:`; 0: no budget): once its
     /// worker's working time reaches it, the worker is told to stop and report over_budget (see `LeadBudget`).
     public var taskBudgetMinutes = LeadBudget.defaultMinutes
@@ -125,6 +129,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "disk_warning_gb": workflow.diskWarningGB = gigabytes(value) ?? 10
                 case "disk_floor_gb": workflow.diskFloorGB = gigabytes(value) ?? 3
                 case "test_timeout_min": workflow.testTimeoutMinutes = minutes(value) ?? Worktrees.testTimeout / 60
+                case "stall_min": workflow.stallMinutes = Double(value).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } ?? StallWatch.defaultMinutes
                 case "task_budget_min": workflow.taskBudgetMinutes = Int(value).map { max(0, $0) } ?? LeadBudget.defaultMinutes
                 case _ where macKeys.contains(key):
                     if !value.isEmpty, !workflow.ignoredKeys.contains(key) { workflow.ignoredKeys.append(key) }
@@ -316,6 +321,9 @@ public struct LeadWorkflow: Equatable, Sendable {
 
     var testTimeout: TimeInterval { testTimeoutMinutes * 60 }
 
+    /// stall_min in seconds; nil when it's 0 (no stall watch, only test_timeout_min).
+    public var stall: TimeInterval? { stallMinutes > 0 ? stallMinutes * 60 : nil }
+
     /// Reads `workflow.md` whatever its line endings, BOM or stray bytes; `problem` says when it couldn't be used.
     public static func load(from path: String) -> LeadWorkflow {
         guard FileManager.default.fileExists(atPath: path) else {
@@ -405,7 +413,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     }
 
     public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "remote", "verifier_model", "max_workers",
-                                      "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "task_budget_min",
+                                      "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "stall_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
                                       "auto_advance", "merge_batching", "risk_lines", "risk_model", "watch_app_logs", "agent_default"]
 
