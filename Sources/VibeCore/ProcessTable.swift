@@ -254,6 +254,19 @@ public enum ProcessTable {
         return makeInfo(proc)
     }
 
+    /// Whether `pid`'s process group is its terminal's foreground group: for an interactive shell, that it's at its
+    /// prompt (a job it runs in the foreground has a group of its own, which holds the terminal meanwhile). nil: no
+    /// such process, or it has no terminal.
+    public static func holdsForeground(pid: Int32) -> Bool? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var proc = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        guard sysctl(&mib, 4, &proc, &size, nil, 0) == 0, size > 0, proc.kp_eproc.e_tdev != -1 else { return nil }
+        let tpgid = proc.kp_eproc.e_tpgid
+        guard tpgid > 0 else { return nil }
+        return tpgid == proc.kp_eproc.e_pgid
+    }
+
     /// Resident memory of a process we own, in bytes.
     public static func residentBytes(pid: Int32) -> Int64? {
         var info = proc_taskinfo()

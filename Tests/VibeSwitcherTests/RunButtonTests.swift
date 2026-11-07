@@ -34,41 +34,62 @@ struct RunButtonTests {
         #expect(Self.shown(RunButton.confirmation(command)) == "! git push origin main")
     }
 
+    /// A runner whose session is `id`, taking commands `way`, keeping what it's asked to type and answering `answer`.
+    static func runner(way: RunnableCommand.Way? = .bang, id: UUID? = UUID(), answer: RunOutcome = .ran,
+                       typed: @escaping (String) -> Void = { _ in }) -> ChatRunner {
+        let runner = ChatRunner()
+        runner.way = way
+        runner.session = { id }
+        runner.run = { runnable, way, done in
+            typed(runnable.typed(way))
+            done(answer)
+        }
+        return runner
+    }
+
     @Test func runWritesTheScriptThenTypesItsPrompt() throws {
         let runnable = try #require(RunnableCommand.runnable(code: Self.block, language: "bash", scripts: scratch.url("scripts")))
         let script = try #require(runnable.script)
-        let runner = ChatRunner()
         var typed: [String] = []
         var fileWhenTyped: Data?
-        runner.run = { prompt in
-            typed.append(prompt)
+        var answer = RunOutcome.ran
+        let runner = ChatRunner()
+        runner.way = .bang
+        let id = UUID()
+        runner.session = { id }
+        runner.run = { runnable, way, done in
+            typed.append(runnable.typed(way))
             fileWhenTyped = FileManager.default.contents(atPath: script.file.path)
-            return true
+            done(answer)
         }
+        var outcomes: [RunOutcome?] = []
         // Cancelled: nothing written, nothing typed.
         var asked: [RunnableCommand.Runnable] = []
-        #expect(!RunButton.run(runnable, with: runner, confirm: { asked.append($0); return false }))
+        RunButton.run(runnable, way: .bang, with: runner, confirm: { asked.append($0); return false }) { outcomes.append($0) }
+        #expect(outcomes == [nil])
         #expect(asked == [runnable])
         #expect(typed.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: script.file.path))
         // Confirmed: the file holds the block exactly, private, before the prompt that runs it is typed.
-        #expect(RunButton.run(runnable, with: runner, confirm: { _ in true }))
+        RunButton.run(runnable, way: .bang, with: runner, confirm: { _ in true }) { outcomes.append($0) }
+        #expect(outcomes.last == .ran)
         #expect(typed == [runnable.prompt])
         #expect(fileWhenTyped == Data(Self.block.utf8))
         let mode = try FileManager.default.attributesOfItem(atPath: script.file.path)[.posixPermissions] as? NSNumber
         #expect(mode?.intValue == 0o600)
-        // The session couldn't take it: the file goes too.
-        runner.run = { _ in false }
-        #expect(!RunButton.run(runnable, with: runner, confirm: { _ in true }))
+        // The session couldn't take it: the file goes too, unless an earlier Run's (maybe still queued) was there.
+        try FileManager.default.removeItem(at: script.file)
+        answer = .refused("Not run: because.")
+        RunButton.run(runnable, way: .bang, with: runner, confirm: { _ in true }) { outcomes.append($0) }
+        #expect(outcomes.last == .refused("Not run: because."))
         #expect(!FileManager.default.fileExists(atPath: script.file.path))
     }
 
     @Test func aPlainLineIsTypedWithoutAsking() throws {
         let runnable = try #require(RunnableCommand.runnable(code: "swift test", language: "bash"))
-        let runner = ChatRunner()
         var typed: [String] = []
-        runner.run = { typed.append($0); return true }
-        #expect(RunButton.run(runnable, with: runner, confirm: { _ in Issue.record("asked"); return false }))
+        let runner = Self.runner { typed.append($0) }
+        RunButton.run(runnable, way: .bang, with: runner, confirm: { _ in Issue.record("asked"); return false })
         #expect(typed == ["! swift test"])
     }
 }

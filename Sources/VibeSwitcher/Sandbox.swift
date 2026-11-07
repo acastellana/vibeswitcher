@@ -2662,11 +2662,18 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }.first
         guard let runnable else { return reply(false, "no code block with a Run in the chat's replies") }
         closeSheet()
+        guard let way = chat.runner.way else { return reply(false, "no Run shown: the selected session takes no commands") }
         if confirmed {
-            let ran = RunButton.run(runnable, with: chat.runner, confirm: { _ in true })
-            return settle { reply(ran, ran ? "ran it: \(runnable.prompt)" : "it couldn't be typed into the session") }
+            return RunButton.run(runnable, way: way, with: chat.runner, confirm: { _ in true }) { [weak self] outcome in
+                guard let self else { return }
+                switch outcome {
+                case .ran?: self.settle { reply(true, "ran it: \(runnable.typed(way))") }
+                case .refused(let reason)?: self.settle { reply(false, reason) }
+                case nil: reply(false, "cancelled")
+                }
+            }
         }
-        let alert = RunButton.confirmation(runnable)
+        let alert = RunButton.confirmation(runnable, way: way)
         alert.layout()
         let shown = alert.window
         Sandbox.hide(shown)

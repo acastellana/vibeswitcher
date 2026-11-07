@@ -198,14 +198,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         window.setFrameAutosaveName("MainWindow")
         if let layout = FocusLayout.saved { focusTerminal(keeping: layout, animated: false) }
 
-        chat.runner.run = { [weak self] prompt in
-            guard let self else { return false }
-            let working = self.model.selectedRow?.session?.status == .working
-            guard self.sendToSelected(prompt) else { return false }
-            Breadcrumbs.shared.note("chat: ran a code block (\(prompt.count) chars)")
-            self.chat.sent(prompt, expectsSoon: !working)
-            self.chat.scrollToBottom()
-            return true
+        chat.runner.session = { [weak self] in self?.model.selectedRow?.hostID }
+        chat.runner.refused = { [weak self] reason in self?.chat.sendNotice = reason }
+        chat.runner.run = { [weak self] runnable, way, done in
+            guard let self else { return done(.refused(RunRefusal.noSession)) }
+            self.runSelected(runnable, way: way, done)
         }
         model.$selectedID.removeDuplicates().receiveLatest(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.showSelection() } }
@@ -471,6 +468,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                                            needsInput: session.status == .needsInput && !session.isPaused)
         }
         sync.screen = { [weak self] id in self?.pane.screenText(id) ?? ScreenRead() }
+        // Its shell holds the terminal: no program it started runs in the foreground (a Run typed then would go to it).
+        sync.shellAtPrompt = { [weak self] id in
+            guard let session = self?.host.sessions.first(where: { $0.id == id }), session.isLive,
+                  let info = ProcessTable.info(pid: session.childPID), info.agent == nil,
+                  MainWindowController.shells.contains(info.comm.trimmingCharacters(in: CharacterSet(charactersIn: "-")))
+            else { return false }
+            return ProcessTable.holdsForeground(pid: session.childPID) == true
+        }
         sync.bracketedPaste = { [weak self] id in self?.pane.bracketedPaste(id) ?? false }
         sync.paneFocused = { [weak self] id in self?.pane.hasKeyboard(id) ?? false }
         sync.inSight = { [weak self] in self?.chatInSight ?? false }
@@ -479,9 +484,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     /// The menu and permission mode on the selected window session's screen, for the answer card and the mode chip.
     private func readScreen() {
-        // Run on code blocks: for a Claude window session you can type into (`!` runs a command there).
-        let canRun = model.selectedRow.map { $0.hostID != nil && actions.isLive($0) && $0.session?.agent == .claude } == true && host.isUsable
-        if chat.runner.canRun != canRun { chat.runner.canRun = canRun }
+        // Run on code blocks: shown while the session can take a command, even when it can't take it this moment (it
+        // says why then).
+        let way = runWay(model.selectedRow)
+        if chat.runner.way != way { chat.runner.way = way }
         // Messages steered to this session that are still waiting (also from before a relaunch), and whether its
         // agent is idle (then they won't be taken by themselves). Idle by the hook event the store's scan read off the
         // main thread: this runs each second, and a state file read here stalled the window (hang-20261031-102359).
@@ -493,6 +499,35 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         // What was typed into an idle agent whose turn started meanwhile is queued behind it, not late.
         chat.agentWorking(model.selectedRow?.session?.status == .working)
         sync.readScreen()
+    }
+
+    /// How `row` takes a code block's command: a window session's agent (Claude Code, a lead, Codex) by `!`, its plain
+    /// shell as typed; nil when nothing there can (it ended, or it's in a Terminal tab, whose screen is read-only here).
+    private func runWay(_ row: WindowRow?) -> RunnableCommand.Way? {
+        guard let row, row.hostID != nil, actions.isLive(row) else { return nil }
+        return row.session == nil ? .shell : .bang
+    }
+
+    /// A code block's Run, typed into the selected window session as `way` takes it (`ChatSync.run`).
+    private func runSelected(_ runnable: RunnableCommand.Runnable, way: RunnableCommand.Way, _ done: @escaping (RunOutcome) -> Void) {
+        guard let row = model.selectedRow, let id = row.hostID, actions.isLive(row) else { return done(.refused(RunRefusal.noSession)) }
+        // A replaced lead's typing goes to the live lead as a message: a command isn't one.
+        guard model.replacedLeads[id] == nil else {
+            return done(.refused("Not run: this lead was replaced. Run it from the live lead's chat."))
+        }
+        guard runWay(row) == way else { return done(.refused(RunRefusal.wayChanged)) }
+        let text = runnable.typed(way), working = row.session?.status == .working, agent = row.session?.agent
+        sync.run(text) { [weak self] refusal in
+            guard let self else { return }
+            if let refusal { return done(.refused(refusal)) }
+            Breadcrumbs.shared.note("chat: ran a code block (\(text.count) chars)")
+            // A `!` git command run: what lets the lead's base move it makes be taken as yours.
+            if let cwd = row.cwd { self.leads.baseMoves.typed(runnable.prompt, session: id.uuidString, cwd: cwd) }
+            // Claude records it (`<bash-input>`): shown as on its way until the conversation has it.
+            if agent == .claude { self.chat.sent(text, expectsSoon: !working) }
+            self.chat.scrollToBottom()
+            done(.ran)
+        }
     }
 
     /// The composer's message, typed into the selected window session (as a paste when its program asked for that).
@@ -620,6 +655,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     // MARK: Toolbar
+
+    /// The programs a plain shell session's process runs as (its name, without a login shell's "-").
+    static let shells: Set<String> = ["zsh", "bash", "sh", "fish", "dash", "ksh", "tcsh", "csh"]
 
     private static let newItem = NSToolbarItem.Identifier("newSession")
     private static let homeItem = NSToolbarItem.Identifier("startPage")
