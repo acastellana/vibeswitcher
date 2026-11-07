@@ -282,6 +282,95 @@ struct VerifierPromptTests {
         #expect(!LeadWitness.declineMayGo(plan, step: 0, screen: "> \n? for shortcuts"))
     }
 
+    static let evidenceShot = "/Users/x/dev/repo/.vibeswitcher/evidence/wallet-requests-marked/7C0E0F5B-1D2A/4-marked-no-peer-main-dark.png"
+
+    /// A Read's prompt as Claude Code 2.1.318's bundle builds it (not a capture: none exists): the file dialog's title,
+    /// the call as a tool-use line (wrapped here, as a narrow terminal does), the same question, and three rows.
+    static let readScreen = """
+    ──────────────────────────────────────────────────────────────────────────────────────
+     Read file
+
+      Read(/Users/x/dev/repo/.vibeswitcher/evidence/wallet-requests-marked/7C0E0F5B-1D2A/4-marked-no-
+      peer-main-dark.png)
+
+     Do you want to proceed?
+     ❯ 1. Yes
+       2. Yes, allow reading from 7C0E0F5B-1D2A/ during this session
+       3. No
+
+     Esc to cancel · Tab to amend
+    """
+
+    /// The prompt auto mode shows for its first read outside the working directories (2.1.318's bundle): another
+    /// question, and a No row that blocks such reads in every project from then on.
+    static let outsideReadScreen = """
+     Read file
+
+      Read(\(evidenceShot))
+
+     Allow this read outside the working directories?
+     ❯ 1. Yes, and keep allowing any reads outside the working directories
+       2. No, and block reads outside the working directories from now on
+       3. No, and ask again next time
+
+     Esc to cancel
+    """
+
+    /// The incident of 2026-11-05: the stuck prompt was a Read's ("Allow: Read <name>" over its input, as the witness
+    /// quoted it), which had no plan, so nothing declined it. It's declined as a command's is: down to No, Tab, the
+    /// reason, Enter, each key only while the screen shows that file's prompt. Another file's prompt, a tool with no
+    /// file, and auto mode's outside-read prompt get no key at all.
+    @Test func aReadPromptIsDeclinedAsACommandsIsAndOnlyThatFiles() throws {
+        let prompt = PendingPrompt(text: PendingPrompt.text(toolName: "Read", input: ["file_path": Self.evidenceShot]))
+        #expect(prompt.text.hasPrefix("Allow: Read 4-marked-no-peer-main-dark.png\n{"))
+        let plan = try #require(LeadWitness.declinePlan(screen: Self.readScreen, prompt: prompt))
+        let down: [UInt8] = [27, 91, 66]
+        #expect(plan.writes.map(\.bytes) == [down, down, [9], Array(LeadWitness.declineReason.utf8), [13]])
+        #expect(plan.no == 2 && plan.amend && plan.command == "4-marked-no-peer-main-dark.png")
+        #expect(LeadWitness.declineMayGo(plan, step: 0, screen: Self.readScreen))
+        let onNo = Self.readScreen.replacingOccurrences(of: "❯ 1. Yes", with: "  1. Yes").replacingOccurrences(of: "  3. No", with: "❯ 3. No")
+        #expect(LeadWitness.declineMayGo(plan, step: 2, screen: onNo) && !LeadWitness.declineMayGo(plan, step: 2, screen: Self.readScreen))
+        #expect(LeadWitness.declineMayGo(plan, step: 3, screen: onNo.replacingOccurrences(of: "3. No", with: "3. No, and tell Claude what to do differently")))
+        #expect(!LeadWitness.declineMayGo(plan, step: 3, screen: onNo))
+        #expect(LeadWitness.declineMayGo(plan, step: 4, screen: onNo.replacingOccurrences(of: "3. No", with: "3. No, " + LeadWitness.declineReason)))
+        // Another file's prompt on screen (this one answered, the verifier on to its next read): no key, not even Esc.
+        let other = Self.readScreen.replacingOccurrences(of: "4-marked-no-\n  peer-main-dark.png", with: "5-other.png")
+        #expect(other != Self.readScreen && LeadWitness.declinePlan(screen: other, prompt: prompt) == nil)
+        for step in 0..<5 { #expect(!LeadWitness.declineMayGo(plan, step: step, screen: other)) }
+        #expect(!LeadWitness.escapeMayGo(plan, screen: other))
+        // A command's prompt, a question, an idle screen.
+        #expect(LeadWitness.declinePlan(screen: Self.permissionScreen, prompt: prompt) == nil)
+        #expect(LeadWitness.declinePlan(screen: "> \n? for shortcuts", prompt: prompt) == nil)
+        // Auto mode's outside-read prompt: nothing typed (one of its No rows changes the user's settings).
+        #expect(LeadWitness.declinePlan(screen: Self.outsideReadScreen, prompt: prompt) == nil)
+        // A notebook's file counts; a tool with no file, an input that isn't one, or the hook's one-line detail don't.
+        #expect(LeadWitness.commandKey(PendingPrompt(text: PendingPrompt.text(toolName: "NotebookEdit", input: ["notebook_path": "/r/a b.ipynb"]))) == "ab.ipynb")
+        for text in ["Allow: WebFetch x\n{\"url\":\"https://example.com\"}", "Allow: Read 4-marked-no-peer-main-dark.png", "Allow: Read x\nnot json",
+                     "Allow: Read x\n{\"file_path\":7}", "Allow: Read x\n{\"file_path\":\"\"}", "a question or a permission"] {
+            #expect(LeadWitness.commandKey(PendingPrompt(text: text)) == nil, "\(text)")
+        }
+    }
+
+    /// A worker waiting on the same Read prompt is the lead's to answer: told at once, never among the stuck prompts.
+    @Test func aWorkersReadPromptIsNeverDeclined() {
+        let t0 = Date(timeIntervalSince1970: 1_793_900_000)
+        let started = t0.addingTimeInterval(-300).timeIntervalSince1970
+        let pending = PendingPrompt(text: PendingPrompt.text(toolName: "Read", input: ["file_path": Self.evidenceShot]), since: t0.timeIntervalSince1970)
+        let waiting = LeadWitness.Seen(live: true, status: .needsInput, since: t0, detail: "Read: 4-marked-no-peer-main-dark.png", pending: pending,
+                                       started: started, boundAt: started, toolsAt: started + 2)
+        var running = board()
+        running.tasks[0].status = .running
+        for after in [5.0, 121, 9_300] {
+            #expect(LeadWitness.stuckPrompts(board: running, seen: ["w1": waiting], now: t0 + after).isEmpty, "\(after)s")
+        }
+        #expect(LeadWitness.events(board: running, seen: ["w1": waiting], now: t0 + 5).contains { $0.key == "w1|input-\(Int(t0.timeIntervalSince1970))" })
+        // Its verifier, waiting on it past the wait, is.
+        let stuck = LeadWitness.stuckPrompts(board: board(), seen: ["v1": waiting], now: t0 + 121)
+        #expect(stuck.map(\.session) == ["v1"] && stuck.first.flatMap { LeadWitness.commandKey($0.prompt) } == "4-marked-no-peer-main-dark.png")
+        // And while the task is in review, its worker waiting on a prompt isn't the verifier's stuck prompt.
+        #expect(LeadWitness.stuckPrompts(board: board(), seen: ["w1": waiting], now: t0 + 9_300).isEmpty)
+    }
+
     @Test func theLeadIsToldWhatWasAskedAndWhatTheVerifierWasTold() {
         let t0 = Date(timeIntervalSince1970: 1_793_500_000)
         let stuck = LeadWitness.StuckPrompt(key: "v1|input-1", session: "v1", slug: "audit-me",

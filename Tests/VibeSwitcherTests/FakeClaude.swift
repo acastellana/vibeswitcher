@@ -280,8 +280,14 @@ def draw_question():
 
 def draw_permission():
     p = permission
-    lines = ["⏺ Bash(" + p["command"] + ")", "╭" + "─" * 58 + "╮", "│ Bash command", "│", "│   " + p["command"], "│",
-             "│ Do you want to proceed?"]
+    if p.get("file"):
+        # A file tool's prompt as Claude Code 2.1.318 builds it (read in its bundle, not captured from a terminal): the
+        # title "Read file", the call it asks about as a tool-use line ("Read(<path>)"), "Do you want to proceed?".
+        lines = ["⏺ Read(" + p["file"] + ")", "╭" + "─" * 58 + "╮", "│ Read file", "│", "│   Read(" + p["file"] + ")", "│",
+                 "│ Do you want to proceed?"]
+    else:
+        lines = ["⏺ Bash(" + p["command"] + ")", "╭" + "─" * 58 + "╮", "│ Bash command", "│", "│   " + p["command"], "│",
+                 "│ Do you want to proceed?"]
     for index, label in enumerate(p["options"]):
         if index == 2 and p["amend"]:
             # 2.1.316's No row with its text field open, drawn after its label (the Bash prompt's inlineDescriptions
@@ -643,12 +649,22 @@ def question_key(key):
                 answer_single(label)
 
 
-def open_permission(command, ui=None, plain_no=False):
+def open_permission(command, ui=None, plain_no=False, file=None):
     global permission
     tool = "toolu_" + uuid.uuid4().hex[:20]
+    v316 = ui == "2.1.316"
+    if file:
+        # A Read of a file outside the working directory: the call, and the file dialog's rows (2.1.318: Yes, the
+        # session row naming the file's folder, and the plain No that Tab opens, as the Bash prompt's since 2.1.316).
+        record({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": tool, "name": "Read", "input": {"file_path": file}}]}})
+        folder = os.path.basename(os.path.dirname(file))
+        permission = {"command": "Read " + file, "file": file, "tool": tool, "focus": 0, "feedback": "", "amend": False, "v316": True,
+                      "plainNo": plain_no, "options": ["Yes", "Yes, allow reading from %s/ during this session" % folder, "No"]}
+        state["mode"] = "permission"
+        return
     record({"type": "assistant", "message": {"role": "assistant", "content": [
         {"type": "tool_use", "id": tool, "name": "Bash", "input": {"command": command}}]}})
-    v316 = ui == "2.1.316"
     permission = {"command": command, "tool": tool, "focus": 0, "feedback": "", "amend": False, "v316": v316, "plainNo": plain_no,
                   "options": ["Yes", "Yes, and don't ask again for this command",
                               "No" if v316 else "No, and tell Claude what to do differently (esc)"]}
@@ -931,7 +947,8 @@ def control():
         if op == "ask":
             open_question(command["questions"])
         elif op == "permission":
-            open_permission(command["command"], command.get("ui"), command.get("plainNo", False))
+            # With "file", a Read's prompt for that file, not a Bash command's.
+            open_permission(command.get("command", ""), command.get("ui"), command.get("plainNo", False), command.get("file"))
         elif op == "work":
             state["mode"] = "working"
         elif op == "take":

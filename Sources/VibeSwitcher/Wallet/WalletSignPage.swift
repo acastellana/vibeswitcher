@@ -45,10 +45,11 @@ enum WalletSignPage {
         }
         rows.append(row("Requested by", card.requestedByText))
         var page: [String: Any] = [
-            "id": request.id, "chain": card.chainText, "chainHex": chainHex, "rows": rows,
+            "id": request.id, "line": card.line, "chain": card.chainText, "chainHex": chainHex, "rows": rows,
             "reasonTitle": WalletCardModel.reasonTitle, "reason": "“\(request.reason)”", "tx": txData,
         ]
         if let confirm = card.call?.confirmation { page["confirm"] = confirm }
+        if card.call?.alarming == true { page["lineBad"] = true }
         if let chain = WalletBrowser.addableChains[request.chainId], let rpc = chain.rpc {
             page["addChain"] = ["chainId": chainHex, "chainName": chain.name, "rpcUrls": [rpc], "blockExplorerUrls": [chain.explorer],
                                 "nativeCurrency": ["name": chain.symbol, "symbol": chain.symbol, "decimals": chain.decimals]] as [String: Any]
@@ -89,6 +90,7 @@ enum WalletSignPage {
             <body>
             <main>
             <h1>Transaction request</h1>
+            <p id="line" class="line"></p>
             <p class="warn">This skips the Wallet Manager's checks. Your wallet's own popup shows the real transaction: read it there before you confirm.</p>
             <dl id="rows"></dl>
             <section class="reason"><h2 id="reasonTitle"></h2><blockquote id="reason"></blockquote></section>
@@ -118,6 +120,7 @@ enum WalletSignPage {
         body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
         main{max-width:640px;margin:0 auto;padding:28px 16px}
         h1{font-size:20px;margin:0 0 8px}
+        .line{font-size:18px;font-weight:600;margin:0 0 10px}
         .warn{color:var(--warn);margin:0 0 18px}
         dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;margin:0 0 20px;padding:14px;border:1px solid var(--line);border-radius:10px}
         dt{color:var(--muted);text-align:right}
@@ -152,6 +155,8 @@ enum WalletSignPage {
             rows.appendChild(dt);
             rows.appendChild(dd);
           });
+          el("line").textContent = req.line;
+          if (req.lineBad === true) el("line").className = "line bad";
           el("reasonTitle").textContent = req.reasonTitle;
           el("reason").textContent = req.reason;
           var button = el("sign");

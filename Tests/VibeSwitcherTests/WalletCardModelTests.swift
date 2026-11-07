@@ -32,7 +32,9 @@ struct WalletCardModelTests {
             if case .unreachable = state { continue }
             if case .unsure = state { continue }
             if case .notSent = state { continue }
-            #expect(WalletCardModel.actions(for: state).isEmpty, "\(state)")
+            // A finished card shown for what went wrong offers only Dismiss (WalletStripTests).
+            let expected: [WalletCardModel.Action] = state.isFinished && state.showsOnStrip ? [.dismiss] : []
+            #expect(WalletCardModel.actions(for: state) == expected, "\(state)")
         }
     }
 

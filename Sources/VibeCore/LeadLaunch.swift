@@ -179,6 +179,22 @@ public enum LeadLaunch {
         return rules
     }
 
+    /// What a verifier on `task` may read outside its worktree without a prompt: the image files its task's worker
+    /// reported as evidence, kept in the main checkout (`<root>/.vibeswitcher/evidence/<task>/<report id>/<image>`,
+    /// see `KeptImages`), which its brief names. On 2026-11-05 three audits stopped on the Read prompt for one, which
+    /// no one answers; one waited 155 minutes. A rule per folder spelling and extension, two levels deep and no
+    /// deeper ("//" starts a path from the file system's root; `*` stays within one name). Claude Code (2.1.318, read
+    /// in its bundle) allows a read by rule only when every spelling of the file matches one (the path as asked, `..`
+    /// resolved, and where its symlinks land) and no deny rule matches any: a link out of the folder, another task's
+    /// evidence, the rest of `.vibeswitcher` and the lead's private files stay as they were. Nothing for a worker or
+    /// the lead, nor for a root or task `KeptImages.evidenceFolders` finds unusual.
+    public static func evidenceReads(_ role: Role, root: String, task: String?) -> [String] {
+        guard role == .verifier, let task else { return [] }
+        return KeptImages.evidenceFolders(root: root, task: task).flatMap { folder in
+            KeptImages.readExtensions.map { "Read(/\(folder)/*/*.\($0))" }
+        }
+    }
+
     /// The hook every role's settings add: its `PermissionRequest` hook lets a command line run without a prompt when
     /// it parses cleanly as git reads and grep/rg/head/tail/wc/sort with known flags, every path in the role's worktree
     /// `root` (symlinks resolved), and for a worker its own `git add`, `git rm`, `git commit -m` and `git apply`
@@ -227,7 +243,8 @@ public enum LeadLaunch {
         let mcp: [String: Any] = ["mcpServers": ["vibeswitcher": entry]]
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: mcp, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: mcpFile))
-        var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch), "deny": deny(role, base: branch, records: records)]]
+        var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch) + evidenceReads(role, root: root, task: task),
+                                                       "deny": deny(role, base: branch, records: records)]]
         if !environment(role).isEmpty { settings["env"] = environment(role) }
         // Where it's started (the task's worktree, else `root`): the hook's paths stay in it.
         let cwd = cwd ?? task.map { Worktrees.path(root: root, slug: $0) } ?? root

@@ -28,6 +28,7 @@ struct BoostWatchTests {
         watch.percent = { signals.percent }
         watch.away = { signals.away }
         watch.usage = { signals.usage }
+        watch.ignoringUsage = { false }
         watch.clock = { signals.now }
         watch.currentFolder = { signals.folder }
         // A disk with one repository, /Users/x/dev/alpha.
@@ -152,6 +153,18 @@ struct BoostWatchTests {
         signals.usage = AccountUsage()
         await look(watch)
         #expect(watch.state?.on == true)
+    }
+
+    /// Settings' "Ignore usage limits": the usage watch holds nothing off, at any share of a limit.
+    @Test func ignoringUsageLimitsTheUsageVetoDoesntHoldBoostOff() async {
+        let signals = Signals()
+        signals.usage = AccountUsage(limits: [AccountUsage.Limit(name: "five_hour", usedPercent: 82, resetsAt: signals.now.timeIntervalSince1970 + 3600,
+                                                                 at: signals.now.timeIntervalSince1970)])
+        let (watch, _, file) = watch(.automatic, signals)
+        watch.ignoringUsage = { true }
+        await look(watch)
+        #expect(watch.state?.on == true)
+        #expect(BoostState.load(from: file, now: signals.now)?.on == true)
     }
 
     /// The boost values are saved through Preferences (kept as their nearest valid), and each look writes them for

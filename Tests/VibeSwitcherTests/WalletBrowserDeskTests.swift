@@ -90,6 +90,49 @@ struct WalletBrowserCardTests {
         #expect(card.detail == WalletCardModel.detail(.waiting, wallet: nil))
     }
 
+    /// A request marked LOCAL FORK ONLY (its reason's first line), from an 0x address: its card never has Sign in
+    /// browser wallet, in any state, with a Wallet Manager set up or not. With none set up, it says it needs the Wallet
+    /// Manager because it's marked, and offers Open Settings.
+    @MainActor @Test(arguments: [
+        ("the marker alone", "LOCAL FORK ONLY"),
+        ("the marker, a line feed and more text", "LOCAL FORK ONLY\nDeploy the example contract to the fork."),
+        ("spaces at both ends, in lower case", " local fork only "),
+    ])
+    func aMarkedRequestsCardNeverHasTheBrowserAction(name: String, reason: String) {
+        var request = WalletBrowserDeskTests.request()
+        request.reason = reason
+        let setups = [nil, WalletCardModel.noPeerNote, WalletCardModel.noPassageNote]
+        for state in Self.states {
+            for setup in setups {
+                for wallet in [nil, WalletCardModel.Wallet.hardware, .hot, .safe] {
+                    var card = WalletCardModel(request: request, requestedBy: "example-agent", state: state, wallet: wallet)
+                    card.setupNeeded = setup
+                    #expect(!card.actions.contains(.browser), "\(name), \(state), \(setup ?? "set up")")
+                }
+            }
+        }
+        // Set up: Send to Wallet Manager, as for any other request.
+        var card = WalletCardModel(request: request, requestedBy: "example-agent", state: .waiting)
+        #expect(card.actions == [.send, .discard], "\(name)")
+        #expect(card.detail == WalletCardModel.detail(.waiting, wallet: nil), "\(name)")
+        #expect(card.reason == reason)
+        // None set up: it needs the Wallet Manager, and why; no browser, Open Settings.
+        for setup in [WalletCardModel.noPeerNote, WalletCardModel.noPassageNote] {
+            card.setupNeeded = setup
+            #expect(card.actions == [.discard, .settings], "\(name)")
+            #expect(card.detail == "Nothing has left this Mac. It needs the Wallet Manager: it's marked local fork only, "
+                    + "so the browser wallet isn't offered for it.", "\(name)")
+            #expect(card.text.contains(setup), "\(name)")
+        }
+        // The marker on line 2 isn't one: that card offers the browser wallet.
+        request.reason = "Deploy the example contract.\nLOCAL FORK ONLY"
+        var unmarked = WalletCardModel(request: request, requestedBy: "example-agent", state: .waiting)
+        #expect(unmarked.actions == [.send, .browser, .discard])
+        unmarked.setupNeeded = WalletCardModel.noPeerNote
+        #expect(unmarked.actions == [.browser, .discard, .settings])
+        #expect(unmarked.detail == "Nothing has left this Mac. Sign it in your browser wallet, or discard it.")
+    }
+
     @Test func aSentCardNotPickedUpAsksWhetherTheWalletManagerRuns() {
         var card = Self.card(.sent)
         #expect(!card.detail.contains("Is the Wallet Manager running?"))
@@ -124,12 +167,20 @@ struct WalletBrowserDeskTests {
         init(_ id: String = WalletFakePassage.peer) { self.id = id }
     }
 
-    func setup(clock: WalletDeskTests.Clock = WalletDeskTests.Clock(), peer: Peer = Peer()) throws -> Setup {
+    /// What the desk logged, as a test goes.
+    final class Logged: @unchecked Sendable {
+        private let lock = NSLock()
+        private var kept: [String] = []
+        func add(_ line: String) { lock.withLock { kept.append(line) } }
+        var lines: [String] { lock.withLock { kept } }
+    }
+
+    func setup(clock: WalletDeskTests.Clock = WalletDeskTests.Clock(), peer: Peer = Peer(), logged: Logged = Logged()) throws -> Setup {
         let fake = try WalletFakePassage(temp)
         let asked = temp.url("asked")
         let store = WalletRequestStore(folder: temp.url("requests"))
         let desk = WalletDesk(folder: asked, store: store, inbox: fake.inbox,
-                              config: { WalletDesk.Config(passage: fake.executable, peer: peer.id) }, now: { clock.now }, log: { _ in })
+                              config: { WalletDesk.Config(passage: fake.executable, peer: peer.id) }, now: { clock.now }, log: { logged.add($0) })
         desk.sessionNames = { WalletDeskTests.names() }
         desk.verifyStamps = WalletTestStamps.verify
         desk.sealMessage = WalletTestStamps.sealMessage
@@ -250,7 +301,7 @@ struct WalletBrowserDeskTests {
         #expect(await until { s.base.told.messages.count == 1 })
         _ = await until { s.desk.cards.first?.state != .inBrowser }
         #expect(s.desk.cards.first?.state == .rejectedInWallet)
-        #expect(s.desk.cards.first?.actions == [.discard])
+        #expect(s.desk.cards.first?.actions == [.dismiss])
         #expect(s.base.told.messages[0].text.contains("rejected it in their browser wallet"))
         await acted(s.desk, .send, request.id)
         #expect(s.base.fake.sends.isEmpty)
@@ -323,7 +374,7 @@ struct WalletBrowserDeskTests {
         clock.now = clock.now.addingTimeInterval(1)
         await refreshed(s.desk)
         #expect(s.desk.cards.first?.state == .browserNoAnswer)
-        #expect(s.desk.cards.first?.actions == [.discard])
+        #expect(s.desk.cards.first?.actions == [.dismiss])
         #expect(await until { s.base.told.messages.count == 1 })
         #expect(s.base.told.messages[0].text.contains("no answer came back"))
         // Stopped: nothing served, nothing taken.
@@ -496,6 +547,53 @@ struct WalletBrowserDeskTests {
         #expect(s.desk.cards.first?.state == .sent)
     }
 
+    /// A request marked LOCAL FORK ONLY, from an 0x address: no signing page is made for it, its card never offers the
+    /// browser wallet (a peer chosen or not), and a browser press that comes all the same does nothing and logs why:
+    /// no page, no mark, no browser. It still goes to the Wallet Manager, byte for byte, like any other.
+    @Test func aMarkedRequestIsNeverOpenedInTheBrowserWallet() async throws {
+        let logged = Logged()
+        let peer = Peer()
+        let s = try setup(peer: peer, logged: logged)
+        defer { s.desk.close() }
+        var request = Self.request()
+        request.reason = "LOCAL FORK ONLY\nDeploy the example contract to the fork."
+        #expect(WalletSignPage.html(for: request) == nil)
+        #expect(WalletSignPage.html(for: request, requestedBy: "Session A") == nil)
+        #expect(WalletSignPage.data(for: request) == nil)
+        try WalletAsk.file(request, in: s.base.asked)
+        await refreshed(s.desk)
+        #expect(s.desk.cards.first?.state == .waiting)
+        #expect(s.desk.cards.first?.actions == [.send, .discard])
+        let why = "browser on \(request.id) not done: it's marked LOCAL FORK ONLY"
+        await acted(s.desk, .browser, request.id)
+        #expect(logged.lines.filter { $0 == why }.count == 1, "\(logged.lines)")
+        #expect(s.opened.urls.isEmpty)
+        #expect(WalletBrowser.mark(request.id, in: s.base.asked) == nil)
+        #expect(s.desk.cards.first?.state == .waiting)
+
+        // No Wallet Manager peer chosen: still no browser; it says what it needs, and offers Open Settings.
+        peer.id = ""
+        await refreshed(s.desk)
+        let card = try #require(s.desk.cards.first)
+        #expect(card.state == .waiting && card.actions == [.discard, .settings])
+        #expect(card.detail == "Nothing has left this Mac. It needs the Wallet Manager: it's marked local fork only, "
+                + "so the browser wallet isn't offered for it.")
+        await acted(s.desk, .browser, request.id)
+        #expect(logged.lines.filter { $0 == why }.count == 2, "\(logged.lines)")
+        #expect(s.opened.urls.isEmpty)
+        #expect(WalletBrowser.mark(request.id, in: s.base.asked) == nil)
+
+        // A peer chosen again: Send takes it to the Wallet Manager as it was filed.
+        peer.id = WalletFakePassage.peer
+        await refreshed(s.desk)
+        #expect(s.desk.cards.first?.actions == [.send, .discard])
+        await acted(s.desk, .send, request.id)
+        #expect(s.base.fake.sends.count == 1)
+        #expect(try Data(contentsOf: s.base.fake.file("sent-wallet-request-\(request.id).json")) == request.encoded())
+        #expect(s.desk.cards.first?.state == .sent)
+        #expect(s.opened.urls.isEmpty)
+    }
+
     /// One request, one path: signed in the browser with no peer chosen, it never offers Send, nor sends, once one is.
     @Test func onceInTheBrowserAPeerChosenLaterDoesntBringSendBack() async throws {
         let peer = Peer("")
@@ -517,7 +615,7 @@ struct WalletBrowserDeskTests {
         #expect(posted?.status == 204)
         #expect(await until { s.desk.cards.first?.state == .rejectedInWallet })
         await refreshed(s.desk)
-        #expect(s.desk.cards.first?.actions == [.discard])
+        #expect(s.desk.cards.first?.actions == [.dismiss])
         await acted(s.desk, .send, request.id)
         #expect(s.base.fake.sends.isEmpty)
     }

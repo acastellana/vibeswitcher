@@ -100,11 +100,16 @@ final class Preferences: ObservableObject {
     /// The language the spoken briefing is written and read in (an ElevenLabs language code, see `BriefingLanguage`);
     /// the Mac's first preferred language until you pick one.
     @Published var briefingLanguage: String { didSet { defaults.set(briefingLanguage, forKey: "briefingLanguage") } }
-    /// The Passage peer that is the Wallet Manager's Mac (its peer id); empty until you choose one, and until then
-    /// wallet requests can be signed only in the browser wallet (from an 0x address).
+    /// The Passage peer that is the Wallet Manager's Mac (its peer id), or `WalletAsk.WalletManager.onThisMac` for the
+    /// Wallet Manager on this Mac; empty until you choose one, and until then wallet requests can be signed only in
+    /// the browser wallet (from an 0x address).
     @Published var walletPeerID: String { didSet { defaults.set(walletPeerID, forKey: "walletPeerID") } }
     /// The `passage` command wallet requests go through; empty: `passage` on the PATH.
     @Published var walletPassagePath: String { didSet { defaults.set(walletPassagePath, forKey: "walletPassagePath") } }
+
+    /// Settings › Agents › Let agents open shells without asking: a shell an agent asks for (`vs-shell run`) starts at
+    /// once instead of waiting on its card for Run. Off until you turn it on.
+    @Published var letAgentsOpenShells: Bool { didSet { defaults.set(letAgentsOpenShells, forKey: "letAgentsOpenShells") } }
 
     /// `defaults`, `presetsFile` and `reduceMotion` are for tests and offscreen renders; the app uses the standard ones.
     init(defaults: UserDefaults = .standard, presetsFile: URL = VibePaths.presetsFile, reduceMotion: Bool = Motion.isReduced) {
@@ -150,6 +155,7 @@ final class Preferences: ObservableObject {
         projectsFolder = defaults.string(forKey: "projectsFolder") ?? ProjectCreation.defaultLocation
         walletPeerID = defaults.string(forKey: "walletPeerID") ?? ""
         walletPassagePath = defaults.string(forKey: "walletPassagePath") ?? ""
+        letAgentsOpenShells = defaults.bool(forKey: "letAgentsOpenShells")
         boostMode = BoostMode(rawValue: defaults.string(forKey: "boostMode") ?? "") ?? .off
         boostOnBattery = defaults.bool(forKey: "boostOnBattery")
         boostLimits = defaults.data(forKey: "boostLimits").flatMap { try? JSONDecoder().decode(BoostLimits.self, from: $0) } ?? BoostLimits()
@@ -225,10 +231,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// nil until the first check, so a permission that is already on doesn't trigger the test banner.
     private var allowed: Bool?
 
+    /// A permission prompt's banner's Allow and Deny (set by the app: they need the session host). Without them a
+    /// banner has no actions.
+    var promptActions: PromptActions?
+    /// Each terminal's latest alert, by number: a banner whose screen read finished after a newer alert isn't posted.
+    private var posted: [String: Int] = [:]
+    private var postCount = 0
+
     init(preferences: Preferences) {
         self.preferences = preferences
         super.init()
         center.delegate = self
+        center.setNotificationCategories([PromptActions.notificationCategory])
     }
 
     func requestAuthorization() {
@@ -299,7 +313,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// A session went to needing input, or its turn ended.
     func post(for session: Session) {
-        post(AlertRules.attention(session, question: session.teamRole == .lead ? leadQuestion(session) : nil, settings: settings))
+        let alert = AlertRules.attention(session, question: session.teamRole == .lead ? leadQuestion(session) : nil, settings: settings)
+        post(alert, permission: alert?.kind == .needsYou && PromptActions.asksPermission(session) ? session.hostID : nil)
     }
 
     func post(_ nudge: Nudge, for session: Session) {
@@ -311,7 +326,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         post(AlertRules.lead(event, settings: settings))
     }
 
-    private func post(_ alert: AlertRules.Alert?) {
+    /// `permission`: the session host's session when the alert is about a permission prompt there: its banner gets
+    /// Allow and Deny once its screen shows the prompt (`PromptActions.prepare`), none otherwise.
+    private func post(_ alert: AlertRules.Alert?, permission: UUID? = nil) {
         guard let alert = gate.pass(alert) else { return }
         AppStatus.extras["lastAlert"] = "\(alert.kind) \(alert.tty) \(ISO8601DateFormatter().string(from: Date()))"
         onAlert?(alert.phoneTitle, alert.phoneBody, alert.tty)
@@ -320,14 +337,48 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             if alert.kind == .needsYou, alert.sound { NSSound(named: "Ping")?.play() }
             return
         }
+        postCount += 1
+        let number = postCount
+        if !alert.tty.isEmpty {
+            posted[alert.tty] = number
+            promptActions?.forget(tty: alert.tty)
+        }
+        guard let permission, let promptActions, !alert.tty.isEmpty else { return deliver(alert, actions: false) }
+        promptActions.prepare(tty: alert.tty, id: permission) { [weak self] ready in
+            // A newer alert about that terminal came meanwhile: it's the one shown.
+            guard let self, self.posted[alert.tty] == number else { return }
+            self.deliver(alert, actions: ready)
+        }
+    }
+
+    private func deliver(_ alert: AlertRules.Alert, actions: Bool) {
+        // One notification per terminal: a newer state replaces the older banner.
+        center.add(UNNotificationRequest(identifier: alert.tty.isEmpty ? UUID().uuidString : alert.tty,
+                                         content: Self.content(for: alert, actions: actions), trigger: nil))
+    }
+
+    /// A banner's content: with Allow and Deny (`PromptActions.category`) only when `actions` (a permission prompt
+    /// shown on its session's screen).
+    static func content(for alert: AlertRules.Alert, actions: Bool) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = alert.title
         if let subtitle = alert.subtitle { content.subtitle = subtitle }
         content.body = alert.body
         content.sound = alert.sound ? .default : nil
         content.userInfo = ["tty": alert.tty]
-        // One notification per terminal: a newer state replaces the older banner.
-        center.add(UNNotificationRequest(identifier: alert.tty.isEmpty ? UUID().uuidString : alert.tty, content: content, trigger: nil))
+        if actions { content.categoryIdentifier = PromptActions.category }
+        return content
+    }
+
+    /// Says a banner's Allow or Deny didn't answer its prompt: a banner of its own (a click opens the session), and
+    /// the chat's notice when the window shows that session (`onAnswerFailed`).
+    func postAnswerFailed(tty: String, title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.userInfo = ["tty": tty]
+        center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 
     /// A plain informational banner (pairings, remote input).
@@ -341,12 +392,23 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     func clear(tty: String) {
         center.removeDeliveredNotifications(withIdentifiers: [tty])
+        DispatchQueue.main.async { self.promptActions?.forget(tty: tty) }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         if let tty = response.notification.request.content.userInfo["tty"] as? String {
-            DispatchQueue.main.async { self.onOpen?(tty) }
+            let action = response.actionIdentifier
+            DispatchQueue.main.async {
+                // Allow or Deny answers the prompt (and says so when it didn't); the banner itself opens the session.
+                if PromptActions.choice(for: action) == nil {
+                    self.onOpen?(tty)
+                } else if let actions = self.promptActions {
+                    actions.handle(action, tty: tty)
+                } else {
+                    self.postAnswerFailed(tty: tty, title: "Not answered", body: PromptAnswer.Failure.unknown.text)
+                }
+            }
         }
         completionHandler()
     }
@@ -354,5 +416,88 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])
+    }
+}
+
+/// The Allow and Deny on a permission prompt's banner (`Notifier`): the prompt its session's screen showed when the
+/// banner was posted (`prepare`) is the one answered (`PromptAnswer`), never another one the screen shows by then.
+/// One that didn't go in is said (`notice`): the banner can't show that it did nothing. Apart from the notification
+/// center, so a test drives the same handler.
+final class PromptActions {
+    static let category = "vibeswitcher.permission-prompt"
+    static let allowAction = "vibeswitcher.permission.allow"
+    static let denyAction = "vibeswitcher.permission.deny"
+
+    /// The banner's category: Allow and Deny, neither bringing the app forward; only on an unlocked Mac.
+    static var notificationCategory: UNNotificationCategory {
+        UNNotificationCategory(identifier: category, actions: [
+            UNNotificationAction(identifier: allowAction, title: "Allow", options: [.authenticationRequired]),
+            UNNotificationAction(identifier: denyAction, title: "Deny", options: [.authenticationRequired]),
+        ], intentIdentifiers: [], options: [])
+    }
+
+    static func choice(for action: String) -> PromptAnswer.Choice? {
+        switch action {
+        case allowAction: return .allow
+        case denyAction: return .deny
+        default: return nil
+        }
+    }
+
+    /// The hooks say `session` waits on a permission prompt (not a question, a plan, or a turn's end).
+    static func asksPermission(_ session: Session) -> Bool {
+        guard session.status == .needsInput else { return false }
+        if session.hookEvent == "PermissionRequest" { return true }
+        let detail = session.detail ?? ""
+        return detail.hasPrefix("Run: ") || detail.hasPrefix("Allow: ") || detail.hasPrefix("Asks permission")
+            || (session.hookEvent == "Notification" && detail.lowercased().contains("permission"))
+    }
+
+    let answerer: PromptAnswer
+    /// Each terminal's prompt its banner was posted for.
+    private(set) var prompts: [String: PromptAnswer.Prompt] = [:]
+    /// A prompt that wasn't answered: title and text, for the terminal (a banner, and the chat's notice).
+    var notice: (_ tty: String, _ title: String, _ body: String) -> Void = { _, _, _ in }
+
+    init(answerer: PromptAnswer) {
+        self.answerer = answerer
+    }
+
+    /// Reads `id`'s screen for the permission prompt the banner for `tty` is about: `ready` true once it's
+    /// remembered (the banner gets Allow and Deny), false when the screen shows none (no actions).
+    func prepare(tty: String, id: UUID, ready: @escaping (Bool) -> Void) {
+        prompts[tty] = nil
+        answerer.capture(id) { [weak self] menu in
+            guard let self, let menu else { return ready(false) }
+            self.prompts[tty] = PromptAnswer.Prompt(id: id, menu: menu)
+            ready(true)
+        }
+    }
+
+    /// The banner for `tty` is gone or replaced: its Allow and Deny answer nothing now.
+    func forget(tty: String) {
+        prompts[tty] = nil
+    }
+
+    /// A banner's action (`allowAction`, `denyAction`) for `tty`: its prompt answered, or the notice saying it wasn't.
+    /// `done`: what came of it (nil: answered).
+    func handle(_ action: String, tty: String, done: @escaping (PromptAnswer.Failure?) -> Void = { _ in }) {
+        guard let choice = Self.choice(for: action) else { return }
+        guard let prompt = prompts[tty] else {
+            Breadcrumbs.shared.note("notification: \(choice.rawValue) for \(tty) refused, no prompt known")
+            notice(tty, "Not answered", PromptAnswer.Failure.unknown.text)
+            return done(.unknown)
+        }
+        // One answer per banner: a second click answers nothing.
+        prompts[tty] = nil
+        answerer.answer(prompt, choice) { [weak self] failure in
+            if let failure {
+                Breadcrumbs.shared.note("notification: \(choice.rawValue) for \(tty) not answered: \(failure)")
+                self?.notice(tty, choice == .allow ? "Not allowed" : "Not denied", failure.text)
+            } else {
+                Breadcrumbs.shared.note("notification: \(choice.rawValue) answered for \(tty)")
+            }
+            done(failure)
+        }
     }
 }

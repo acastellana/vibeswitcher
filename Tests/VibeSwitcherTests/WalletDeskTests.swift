@@ -482,7 +482,7 @@ struct WalletDeskTests {
         clock.now = request.expiresAt.addingTimeInterval(1)
         await refreshed(s.desk)
         #expect(s.desk.cards.first?.state == .expired)
-        #expect(s.desk.cards.first?.actions == [])
+        #expect(s.desk.cards.first?.actions == [.dismiss])
         await acted(s.desk, .send, request.id)
         #expect(s.fake.sends.isEmpty)
         // Past the time any answer could come, its card goes.
@@ -501,8 +501,8 @@ struct WalletDeskTests {
         #expect(s.told.messages.isEmpty)
         clock.now = request.expiresAt
         await refreshed(s.desk)
-        // The delivery was queued on the main thread before the refresh's `then`.
-        #expect(s.told.messages.count == 1)
+        // The delivery goes on the main thread asynchronously: wait for it.
+        #expect(await until { s.told.messages.count == 1 })
         let told = try #require(s.told.messages.first)
         #expect(told.session == Self.session.uuidString.lowercased())
         #expect(told.text.contains(request.id) && told.text.contains("expired") && told.text.contains("without being sent"))
@@ -539,7 +539,7 @@ struct WalletDeskTests {
         clock.now = request.expiresAt.addingTimeInterval(WalletCourier.resultGrace + 1)
         await refreshed(s.desk)
         #expect(s.desk.cards.isEmpty)
-        #expect(s.told.messages.count == 1)
+        #expect(await until { s.told.messages.count == 1 })
         #expect(s.told.messages.first?.text.contains("without being sent") == true)
         await refreshed(s.desk)
         #expect(s.told.messages.count == 1)
@@ -557,7 +557,7 @@ struct WalletDeskTests {
         #expect(s.desk.cards.first?.state == .unreachable(message: "passage: fake exit 4"))
         clock.now = request.expiresAt
         await refreshed(s.desk)
-        #expect(s.told.messages.count == 1)
+        #expect(await until { s.told.messages.count == 1 })
         let text = try #require(s.told.messages.first?.text)
         #expect(text.contains("without being sent") && text.contains("never reached the Wallet Manager"))
         // The user did press Send: the message mustn't say they didn't.
@@ -671,7 +671,7 @@ struct WalletDeskTests {
         await polled(s.desk)
         let hash = "0x" + String(repeating: "ab", count: 32)
         #expect(await until { s.desk.cards.first?.state == .signed(txHash: hash, explorerURL: URL(string: "https://explorer.example/tx/" + hash)) })
-        #expect(s.told.messages.count == 1)
+        #expect(await until { s.told.messages.count == 1 })
     }
 
     /// Review finding 1: Retry on an unsure card when no courier can be made (the peer was cleared in Settings since
@@ -695,7 +695,7 @@ struct WalletDeskTests {
         await polled(s.desk)
         let hash = "0x" + String(repeating: "ab", count: 32)
         #expect(await until { s.desk.cards.first?.state == .signed(txHash: hash, explorerURL: URL(string: "https://explorer.example/tx/" + hash)) })
-        #expect(s.told.messages.count == 1)
+        #expect(await until { s.told.messages.count == 1 })
     }
 
     /// wallet-request-fallback:F2: the "not picked up" hint counts from the send the record keeps, so a restart doesn't

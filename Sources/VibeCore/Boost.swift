@@ -135,9 +135,10 @@ public enum Boost {
     public static let vetoPercent = 70.0
 
     /// The usage limit that keeps boost off now: the most used every-model limit at or past `vetoPercent`; nil when
-    /// none is (or none is known: unknown usage holds nothing back).
-    public static func veto(_ usage: AccountUsage, now: Date = Date()) -> AccountUsage.Limit? {
-        usage.hold(model: nil, now: now, threshold: vetoPercent)
+    /// none is (or none is known: unknown usage holds nothing back). `ignoring`: Settings' "Ignore usage limits"
+    /// (`MacLimits.ignoreUsageLimits`) is on, and the watch holds nothing off.
+    public static func veto(_ usage: AccountUsage, now: Date = Date(), ignoring: Bool = false) -> AccountUsage.Limit? {
+        ignoring ? nil : usage.hold(model: nil, now: now, threshold: vetoPercent)
     }
 
     /// With "Also on battery" (Settings), boost on battery stops when the charge is below this (in percent), so a
@@ -210,7 +211,8 @@ extension MacLimits {
     public func boosted(by boost: BoostState?) -> MacLimits {
         guard let boost, boost.on else { return self }
         var raised = MacLimits(maxSessions: max(maxSessions, boost.limits.maxSessions),
-                               loadThreshold: max(loadLimit, boost.limits.loadThreshold), heavySlots: heavySlots)
+                               loadThreshold: max(loadLimit, boost.limits.loadThreshold), heavySlots: heavySlots,
+                               ignoreUsageLimits: ignoreUsageLimits)
         raised.boost = boost
         raised.normal = Normal(maxSessions: maxSessions, loadLimitText: loadLimitText)
         return raised

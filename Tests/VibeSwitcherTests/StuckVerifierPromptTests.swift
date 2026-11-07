@@ -44,7 +44,8 @@ struct StuckVerifierPromptTests {
             #expect(work.stuckPrompts.isEmpty, "\(after)s")
             #expect(work.messages.isEmpty, "\(after)s: \(work.messages.map { $0.text() })")
         }
-        #expect(h.agent["mode"] as? String == "permission")
+        // Still asking (its state is written after its screen is drawn: waited for, not read once).
+        try await h.waitFor { h.agent["mode"] as? String == "permission" }
 
         // Past it: declined, as the app does (each stuck prompt told once).
         var reports: [String] = []
@@ -54,9 +55,11 @@ struct StuckVerifierPromptTests {
         for stuck in work.stuckPrompts where told.insert(stuck.key).inserted {
             PromptDecline.handle(stuck, host: h.host) { text in reports.append(text()) }
         }
-        // The verifier gets the reason as the prompt's No, and its turn goes on.
-        try await h.waitFor { h.agent["declined"] as? String == LeadWitness.declineReason }
-        #expect(h.agent["mode"] as? String == "working")
+        // The verifier gets the reason as the prompt's No, and its turn goes on (one read of its state holds both).
+        try await h.waitFor {
+            let agent = h.agent
+            return agent["declined"] as? String == LeadWitness.declineReason && agent["mode"] as? String == "working"
+        }
         let transcript = try String(contentsOf: h.transcript, encoding: .utf8)
         #expect(transcript.contains("the user said:\\n" + LeadWitness.declineReason), "\(transcript.suffix(600))")
         // The lead: one report, naming the command.
@@ -67,6 +70,77 @@ struct StuckVerifierPromptTests {
         // And the next looks tell nothing more.
         for after in [300.0, 3_600] {
             let again = look(after)
+            #expect(again.stuckPrompts.isEmpty && again.messages.isEmpty, "\(after)s")
+        }
+        #expect(reports.count == 1)
+    }
+
+    /// The incident of 2026-11-05: a verifier stopped on the prompt to Read one of the worker's evidence screenshots
+    /// (outside its worktree), VibeSwitcher couldn't decline it (it knew only a command's prompt), and three audits
+    /// hung, one for 155 minutes. The fake draws the Read prompt as Claude Code 2.1.318's bundle builds it (no capture
+    /// of the real screen exists). After the wait it's declined with the reason, the verifier goes on without that
+    /// file, and the lead is told once. The same prompt in a worker's session is the lead's to answer: never declined.
+    @Test func aVerifiersReadPromptNoOneAnswersIsDeclinedAfterTheWaitAndAWorkersNever() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        let file = "/Users/x/dev/repo/.vibeswitcher/evidence/wallet-requests-marked/7C0E0F5B-1D2A/4-marked-no-peer-main-dark.png"
+        h.tell(["op": "permission", "file": file])
+        try await h.paneShows { $0.contains("Read file") && $0.contains("Do you want to proceed?") && $0.contains("allow reading from") }
+
+        let session = h.session.id.uuidString
+        let since = Date()
+        let started = since.addingTimeInterval(-300).timeIntervalSince1970
+        // What the witness has of it: the call as the transcript holds it, as it told the lead on 2026-11-05.
+        let pending = PendingPrompt(text: PendingPrompt.text(toolName: "Read", input: ["file_path": file]), since: since.timeIntervalSince1970)
+        #expect(pending.text == "Allow: Read 4-marked-no-peer-main-dark.png\n{\"file_path\":\"\(file)\"}", "\(pending.text)")
+        let seen = [session: LeadWitness.Seen(live: true, status: .needsInput, since: since, detail: "Read: 4-marked-no-peer-main-dark.png",
+                                              pending: pending, started: started, boundAt: started, toolsAt: started + 2)]
+        var told: Set<String> = []
+        func look(_ board: LeadBoard, _ after: TimeInterval) -> WitnessWork {
+            WitnessWork(board: board, seen: seen, now: since.addingTimeInterval(after), advancing: false, budgetMinutes: 60,
+                        firstSeen: { _ in nil }, told: { told.contains($0) })
+        }
+        var task = LeadTask(slug: "wallet-requests-marked", title: "t", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
+
+        // A worker waiting on it, however long: nothing to decline.
+        task.status = .running
+        task.worker = session
+        var working = LeadBoard()
+        working.tasks = [task]
+        for after in [5.0, LeadWitness.promptWait + 1, 9_300] { #expect(look(working, after).stuckPrompts.isEmpty, "\(after)s") }
+
+        // The verifier: nothing before the wait, declined past it.
+        task.status = .review
+        task.worker = nil
+        task.verifier = session
+        var board = LeadBoard()
+        board.tasks = [task]
+        for after in [5.0, 60, 119] {
+            let work = look(board, after)
+            #expect(work.stuckPrompts.isEmpty && work.messages.isEmpty, "\(after)s: \(work.messages.map { $0.text() })")
+        }
+        // Still asking (its state is written after its screen is drawn: waited for, not read once).
+        try await h.waitFor { h.agent["mode"] as? String == "permission" }
+        var reports: [String] = []
+        let work = look(board, LeadWitness.promptWait + 1)
+        #expect(work.stuckPrompts.count == 1 && work.messages.isEmpty)
+        for stuck in work.stuckPrompts where told.insert(stuck.key).inserted {
+            PromptDecline.handle(stuck, host: h.host) { text in reports.append(text()) }
+        }
+        try await h.waitFor {
+            let agent = h.agent
+            return agent["declined"] as? String == LeadWitness.declineReason && agent["mode"] as? String == "working"
+        }
+        let transcript = try String(contentsOf: h.transcript, encoding: .utf8)
+        #expect(transcript.contains("the user said:\\n" + LeadWitness.declineReason), "\(transcript.suffix(600))")
+        #expect(!transcript.contains("\"ran Read"), "a Yes went in: \(transcript.suffix(400))")
+        // The lead: one report, saying it was declined and what was asked.
+        try await h.waitFor { !reports.isEmpty }
+        #expect(reports.count == 1)
+        #expect(reports.first?.contains("VibeSwitcher declined it, telling it: “\(LeadWitness.declineReason)”") == true, "\(reports)")
+        #expect(reports.first?.contains("Allow: Read 4-marked-no-peer-main-dark.png") == true && reports.first?.contains(file) == true, "\(reports)")
+        for after in [300.0, 9_300] {
+            let again = look(board, after)
             #expect(again.stuckPrompts.isEmpty && again.messages.isEmpty, "\(after)s")
         }
         #expect(reports.count == 1)
@@ -88,8 +162,11 @@ struct StuckVerifierPromptTests {
         PromptDecline.handle(stuck, host: h.host) { text in reports.append(text()) }
         try await h.waitFor { !reports.isEmpty }
         #expect(reports.count == 1 && reports.first?.contains("with Esc") == true && reports.first?.contains(command) == true, "\(reports)")
-        try await h.waitFor { h.agent["mode"] as? String == "idle" }
-        #expect(h.agent["reply"] as? String == "Denied.", "\(h.agent)")
+        // Declined without a reason: its turn over, in one read of its state (idle alone is its state before the prompt too).
+        try await h.waitFor {
+            let agent = h.agent
+            return agent["mode"] as? String == "idle" && agent["reply"] as? String == "Denied."
+        }
         let transcript = try String(contentsOf: h.transcript, encoding: .utf8)
         #expect(!transcript.contains("\"ran " + command), "a Yes went in: \(transcript.suffix(400))")
     }
@@ -109,8 +186,10 @@ struct StuckVerifierPromptTests {
         PromptDecline.handle(stuck, host: h.host) { text in reports.append(text()) }
         try await h.waitFor { !reports.isEmpty }
         #expect(reports.count == 1 && reports.first?.contains("with Esc") == true, "\(reports)")
-        try await h.waitFor { h.agent["mode"] as? String == "idle" }
-        #expect(h.agent["reply"] as? String == "Denied.", "\(h.agent)")
+        try await h.waitFor {
+            let agent = h.agent
+            return agent["mode"] as? String == "idle" && agent["reply"] as? String == "Denied."
+        }
         let transcript = try String(contentsOf: h.transcript, encoding: .utf8)
         #expect(!transcript.contains("\"ran " + command), "a Yes went in: \(transcript.suffix(400))")
     }

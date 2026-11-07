@@ -12,8 +12,9 @@ extension WalletCardModel {
                   chainID: Int(clamping: request.chainId), asset: asset, amount: amount, reason: request.reason,
                   calldataBytes: request.data.map { ($0.utf8.count - 2) / 2 },
                   call: request.data.map { WalletCall.decode($0, contract: request.to) },
+                  token: request.data == nil && request.asset != "native" ? request.asset : nil,
                   requestedBy: requestedBy, requestedByLabel: label, state: state, checks: checks,
-                  browserSignable: WalletBrowser.canSign(request))
+                  browserSignable: WalletBrowser.canSign(request), localForkOnly: WalletBrowser.isLocalForkOnly(request))
     }
 
     /// The card state a browser wallet mark stands for.

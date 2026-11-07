@@ -11,7 +11,7 @@ The words MUST, MUST NOT and MAY are used as in RFC 2119.
 ## Contents
 
 - [Roles](#roles)
-- [Transport](#transport)
+- [Transport](#transport) ([on one Mac](#transport-on-one-mac))
 - [Encoding rules (both formats)](#encoding-rules-both-formats)
 - [wallet-request v1](#wallet-request-v1)
 - [wallet-result v1](#wallet-result-v1)
@@ -54,6 +54,54 @@ Wallet Manager's Mac itself, never through Passage. Both formats refuse any text
 - VibeSwitcher runs `passage listen` only while it has a request outstanding, and ends it (by its process id) when it
   has none. The Wallet Manager's Mac is expected to keep `passage listen` (or Passage's **Receive** switch) on while it accepts
   requests.
+
+### Transport on one Mac
+
+When the Wallet Manager runs on the Mac VibeSwitcher runs on, the two exchange the same files through a pair of
+folders, with no Passage (Passage has no peer that is the Mac itself). The user chooses it in VibeSwitcher's Settings
+› Wallet (**Wallet Manager on this Mac**) and starts the Wallet Manager with its local transport (`--local-transport`).
+Only one transport is in use at a time: with this one chosen VibeSwitcher runs no `passage`, and with a Passage peer
+chosen it never touches these folders. Files only: there is no socket and no network endpoint.
+
+- **The folders:** `~/Library/Application Support/wallet-manager/local-transport/to-wm/` (requests) and
+  `.../local-transport/from-wm/` (results), each owner-only (`0700`). The Wallet Manager makes them when it is started
+  with its local transport; VibeSwitcher never makes `local-transport` or either folder.
+- **A request** is `to-wm/wallet-request-<id>.json`: the name and the bytes it has through Passage, mode `0600`.
+  VibeSwitcher writes it whole under a temporary dot-name in `to-wm` and renames it into place, and never over a
+  file that is already there: the same bytes already under the name count as delivered, other bytes there are left
+  as they are and the request is not sent.
+- **A result** is `from-wm/wallet-result-<id>-<seq>.json`: the bytes it has through Passage, `<id>` the request's
+  `id` and `<seq>` the result's `sequence` in decimal with no padding (1 to 1000). The Wallet Manager writes it
+  under a dot-name in `from-wm` and renames it into place, and never rewrites it.
+- **Liveness:** while the Wallet Manager takes requests from this Mac (after each start it reads nothing from `to-wm`
+  until its user accepts them for that run), it keeps `to-wm/.listening`, holding its process id in decimal. It
+  removes the file when its user stops accepting and when it exits; a crash can leave one behind, so the file counts
+  only while that process id is running. VibeSwitcher treats a missing `.listening`, one that isn't a small regular
+  file of this user's holding a process id, and a process id that isn't running as this user, as the Wallet Manager
+  not listening: the request is not sent and nothing is written, as when `passage send` exits 4.
+- **What VibeSwitcher checks before it writes** (anything else is "not reachable", and nothing is written): every
+  folder from the home folder down to `to-wm` is a real directory (no symbolic link anywhere on the way), owned by
+  this user and not writable by anyone else; `to-wm` has no group or other permission bit; the liveness rule holds.
+- **What VibeSwitcher checks on what it reads** (anything else is ignored): `from-wm` passes the folder checks above;
+  the file is a regular file (no symbolic link) owned by this user, of at most 64 KiB, named exactly
+  `wallet-result-<id>-<seq>.json` with `<id>` an id and `<seq>` 1 to 1000; its content is a result whose `id` and
+  `sequence` are its name's. A dot-name is a file on its way in and is not looked at.
+- **What the Wallet Manager checks on what it reads:** the same. It refuses a file that isn't owned by the current
+  user, a folder that isn't `0700`, and symbolic links.
+- VibeSwitcher watches `from-wm` only while it has a request outstanding (no process is started), and looks at it at
+  most once a second.
+
+**Everything after receipt is unchanged on both sides.** A request read from `to-wm` goes through the strict parser
+and every check in [What each side checks](#what-each-side-checks), the at-most-once rule included; a result read from
+`from-wm` goes through the strict parser and the rules of [VibeSwitcher, on a result](#vibeswitcher-on-a-result) (in
+`sequence` order, nothing after a final status, each once). The formats, the vectors, and what the user and the
+asking session are shown are the same over either transport.
+
+**What the folders prove:** nothing about who wrote a file. Any process of this user (an agent's shell included) can
+write a request into `to-wm` or a result into `from-wm`, exactly as it can run `passage send` or write a file into
+Passage's inbox folder today. A request file there is not evidence of the user's Send, and a forged result can
+mislead a card as one dropped in Passage's inbox can. The boundary is where it was: the Wallet Manager's own checks,
+its user's acceptance of this Mac's requests for the run, and the signature on the hardware wallet.
 
 ## Encoding rules (both formats)
 
@@ -282,7 +330,9 @@ Then, answering `rejected` with the failing checks, at least:
 - `to`: a valid address (its EIP-55 checksum when the case is mixed); for a `call`, a contract; the Wallet Manager's own
   policies (allow lists, limits) for recipients, amounts and contracts.
 - The balance covers `amount` and the fees.
-- Nothing about the request is ever taken as an instruction: `reason` and `requestedBy` are shown, never followed.
+- Nothing about the request is ever taken as an instruction: `reason` and `requestedBy` are shown, never followed,
+  but for one marker that can only make the Wallet Manager refuse: a `reason` whose first line is `LOCAL FORK ONLY`
+  ([History](#history), 2026-11-05).
 
 And, without answering `rejected` for it:
 
@@ -407,6 +457,29 @@ are updated together.
 
 ### History
 
+- 2026-11-05: still version 1. A second transport, for a Wallet Manager on the same Mac as VibeSwitcher
+  ([Transport on one Mac](#transport-on-one-mac)): requests as `wallet-request-<id>.json` in an owner-only folder
+  `to-wm`, results as `wallet-result-<id>-<seq>.json` in `from-wm`, a liveness file `to-wm/.listening`, and the
+  checks each side makes on the folders and files. The bytes are the ones Passage carries: no field, rule or vector
+  changes, and everything after receipt is the same on both sides. The Passage transport is as it was.
+- 2026-11-05: still version 1. A marker in `reason` that can only make the Wallet Manager refuse. The first line of
+  `reason` is everything before its first line feed, or the whole `reason`. A request whose first line is exactly
+  `LOCAL FORK ONLY` (byte for byte: case counts, nothing is trimmed) is refused by the Wallet Manager (`rejected`,
+  with a fixed reason) unless the Wallet Manager is running with a loopback `--rpc` for that request's network. It
+  checks this at check time, at the sign page, at the confirmation and right before broadcast. The fixed reason is
+  `local fork only: Wallet Manager isn't running against a local fork for <network> (start it with --rpc <network>=http://127.0.0.1:<port>)`,
+  where `<network>` is `testnet` or `mainnet`. A near-miss, a first line that equals `LOCAL FORK ONLY` once spaces,
+  tabs and carriage returns at its ends are dropped and case is ignored, but isn't exactly it, is refused outright,
+  local fork or not, with the fixed reason
+  `malformed local-fork marker: the first line must be exactly LOCAL FORK ONLY`. Only a near-miss made of spaces or case
+  gets that reason: a tab or a carriage return in `reason` never reaches the marker check, because wallet-request v1
+  allows no control character there but the line feed, so a request holding one is refused earlier, by the
+  [format check](#the-format-check) (its result's only check, `format`), not with the malformed-marker reason; either
+  way it is `rejected`. The marker can only refuse: it never
+  allows or changes anything. No field, rule or vector changes: a marked request is a valid v1 request, and
+  VibeSwitcher files, shows and sends it like any other. VibeSwitcher never offers the browser wallet (its Sign in
+  browser wallet, which signs without the Wallet Manager's checks) for a marked request or a near-miss, whatever its
+  `from`.
 - 2026-11-01: still version 1. `chainId`'s informational "Known now" list also names Sepolia (`11155111`), Base
   (`8453`) and Base Sepolia (`84532`), the chains the Wallet Manager adds beside Ethereum and GenLayer's two. No field,
   rule or vector changes: the format already took any chain id.

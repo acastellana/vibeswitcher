@@ -31,6 +31,50 @@ public struct KeptImages {
     /// The kinds of groups, each a folder of groups: `updates/<id>`, `evidence/<task>/<id>`.
     static let updates = "updates", evidence = "evidence"
 
+    /// The kept evidence a verifier may read without a prompt, by extension: the image files Claude Code's Read shows
+    /// as pictures. A kept copy has its source's name (`keep`), so one with another extension still prompts.
+    public static let readExtensions = ["png", "jpg", "jpeg", "gif", "webp"]
+
+    /// Characters a permission rule's path can't hold as themselves (its pattern's wildcards, classes, braces,
+    /// escapes and negation, and the rule's own brackets).
+    private static let patternCharacters = CharacterSet(charactersIn: "*?[]{}\\()!").union(.controlCharacters).union(.newlines)
+
+    /// Where `task`'s evidence is kept in the project at `root` (`<root>/.vibeswitcher/evidence/<task>`), as `root`
+    /// spells it and, when that differs, as the file system does (`/private/tmp`, not `/tmp`): Claude Code holds a
+    /// rule against both spellings of a file. Empty, so that no rule is made, for anything unusual: a root that isn't
+    /// an absolute folder that's there, a task that isn't one plain path component, a character a rule's pattern
+    /// reads as its own, or a folder on the way that leads elsewhere (a symlink).
+    public static func evidenceFolders(root: String, task: String) -> [String] {
+        let inside = ".vibeswitcher/\(evidence)/\(task)"
+        guard root.hasPrefix("/"), !task.isEmpty, !task.hasPrefix("."), !task.contains("/"),
+              let resolvedRoot = real(root) else { return [] }
+        let spelled = URL(fileURLWithPath: root, isDirectory: true).standardizedFileURL.path
+        guard spelled != "/", resolvedRoot != "/" else { return [] }
+        // The deepest part of it that's there is where it says it is.
+        var parts = inside.split(separator: "/").map(String.init)
+        while !parts.isEmpty {
+            let relative = parts.joined(separator: "/")
+            if let found = real(resolvedRoot + "/" + relative) {
+                guard found == resolvedRoot + "/" + relative else { return [] }
+                break
+            }
+            // Not there, or a link that leads nowhere (which lstat still finds).
+            var info = stat()
+            guard lstat(resolvedRoot + "/" + relative, &info) != 0 else { return [] }
+            parts.removeLast()
+        }
+        let folders = (spelled == resolvedRoot ? [spelled] : [spelled, resolvedRoot]).map { $0 + "/" + inside }
+        guard folders.allSatisfy({ $0.rangeOfCharacter(from: patternCharacters) == nil && !$0.contains("/../") && !$0.contains("//") }) else { return [] }
+        return folders
+    }
+
+    /// `path` as the file system spells it, every symlink followed; nil when it isn't there.
+    private static func real(_ path: String) -> String? {
+        guard let found = realpath(path, nil) else { return nil }
+        defer { free(found) }
+        return String(cString: found)
+    }
+
     /// Keeps `paths` (absolute, or relative to `base`) as group `group` (e.g. "updates/<id>"), in their order, and
     /// returns the kept copies' paths. Every path is checked before anything is copied.
     public func keep(_ paths: [String], as group: String, relativeTo base: String) throws -> [String] {

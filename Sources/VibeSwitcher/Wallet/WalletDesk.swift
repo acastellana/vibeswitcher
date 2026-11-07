@@ -22,6 +22,10 @@ import VibeCore
 /// Manager set up: with no peer chosen or no Passage found, cards still show, Send gives way to a line saying what's
 /// missing and Open Settings (`openSettings`, Settings › Wallet), and Send comes back once Settings has what it needs.
 ///
+/// With the Wallet Manager on this Mac chosen there (`WalletAsk.WalletManager.onThisMac`), the same cards and the
+/// same Send go through the folder pair (`WalletLocalLink`) and never through Passage: nothing runs `passage`, and
+/// with a Passage peer chosen nothing touches the folders. Its results show as the watch on the folder hears them.
+///
 /// Its state lives on a queue of its own (`work`), where Passage runs (a send blocks for seconds); `cards` is
 /// published on the main thread.
 final class WalletDesk: ObservableObject {
@@ -31,18 +35,23 @@ final class WalletDesk: ObservableObject {
     @Published private(set) var sessions: [String: String] = [:]
     /// The request each card was drawn from: a button sends only that one (a file rewritten since isn't sent unseen).
     private(set) var drawn: [String: WalletRequest] = [:]
+    /// The cards the user took off the strip with Dismiss, by request id (`dismissedFile`, kept across launches).
+    @Published private(set) var dismissed: Set<String> = []
 
     /// Where Passage is and which peer is the Wallet Manager's Mac: Settings › Wallet (read on the main thread).
     struct Config: Equatable {
         /// The `passage` command: an absolute path (`passage`, Passage.app or its binary), or empty to find it.
         var passage: String
-        /// The Wallet Manager peer's ID; empty: none chosen.
+        /// The Wallet Manager peer's ID; empty: none chosen; `WalletAsk.WalletManager.onThisMac`: the Wallet Manager on
+        /// this Mac, through `localLink` and no Passage.
         var peer: String
     }
 
     let folder: URL
     let store: WalletRequestStore
     let inbox: URL
+    /// The folder pair to a Wallet Manager on this Mac, used only while Settings › Wallet has it chosen.
+    let localLink: WalletLocalLink
     /// The messages not delivered yet: `undelivered/` beside the store's records.
     let outbox: WalletOutbox
     /// Settings › Wallet, read on the main thread.
@@ -93,7 +102,10 @@ final class WalletDesk: ObservableObject {
     /// What Passage said when it stopped unsure, per request.
     private var unsureWhy: [String: String] = [:]
     private var courier: WalletCourier?
-    private var courierFor: (passage: PassageCommand, peer: String)?
+    /// What `courier` was made for: the Passage it runs (nil for the Wallet Manager on this Mac) and the peer setting.
+    private var courierFor: (passage: PassageCommand?, peer: String)?
+    /// Whether the Wallet Manager on this Mac is the one chosen, from the last time a courier was asked for.
+    private var onThisMac = false
     /// Passage found with no path set, once found.
     private var foundPassage: PassageCommand?
     /// The requests that went to the browser wallet, as their marks say (read from `folder`, written through).
@@ -116,13 +128,16 @@ final class WalletDesk: ObservableObject {
     private var outboxUnasked = false
     /// The cards not shown last time, over `maxCards` (logged when that changes).
     private var overCap: Set<String> = []
+    /// `dismissed`, with when each was dismissed: read from `dismissedFile` at the first publish, written through.
+    private var dismissedAt: [String: Date]?
 
     init(folder: URL = WalletAsk.folder, store: WalletRequestStore = WalletRequestStore(), inbox: URL = PassageLink.defaultInbox,
-         config: @escaping () -> Config, now: @escaping @Sendable () -> Date = { Date() },
+         local: WalletLocalLink = WalletLocalLink(), config: @escaping () -> Config, now: @escaping @Sendable () -> Date = { Date() },
          log: @escaping @Sendable (String) -> Void = { Breadcrumbs.shared.note("wallet: " + $0) }) {
         self.folder = folder
         self.store = store
         self.inbox = inbox
+        self.localLink = local
         self.outbox = WalletOutbox(folder: store.folder.appendingPathComponent("undelivered", isDirectory: true))
         self.config = config
         self.now = now
@@ -153,11 +168,26 @@ final class WalletDesk: ObservableObject {
     }
     #endif
 
-    /// The cards of one session's requests.
+    /// The cards of one session's requests that its strip shows (`shows`): those that need the user.
     func cards(for session: UUID) -> [WalletCardModel] {
         let id = session.uuidString.lowercased()
-        return cards.filter { sessions[$0.id] == id }
+        return cards.filter { sessions[$0.id] == id && Self.shows($0, dismissed: dismissed) }
     }
+
+    /// Whether the strip shows `card`: its state needs the user (`State.showsOnStrip`), or it was sent and the
+    /// Wallet Manager hasn't picked it up in 5 minutes (`notPickedUp`: the card asks whether it runs); and it isn't
+    /// one they dismissed. Only a card that offers Dismiss can be dismissed, so an entry in `dismissedFile` (any
+    /// process of the user's can write it) never hides a card that waits for Send or Retry.
+    static func shows(_ card: WalletCardModel, dismissed: Set<String>) -> Bool {
+        guard card.state.showsOnStrip || (card.state == .sent && card.notPickedUp) else { return false }
+        return !(dismissed.contains(card.id) && WalletCardModel.actions(for: card.state).contains(.dismiss))
+    }
+
+    /// The record of the cards dismissed: `dismissed.json` beside the request records (0600). Not a record's name, so
+    /// the store passes it by.
+    var dismissedFile: URL { store.folder.appendingPathComponent("dismissed.json") }
+    /// How long a dismissal is kept: past a request's results window and its record's 30 days, it has no card anyway.
+    static let dismissedKept: TimeInterval = 60 * 86_400
 
     /// Reads the filed requests again, takes the Wallet Manager's new results while any is outstanding, and redraws the cards.
     /// `then` runs on the main thread once the cards are published.
@@ -168,8 +198,10 @@ final class WalletDesk: ObservableObject {
             self.names = names
             reload()
             redeliver()
+            // The folder on this Mac is looked at each tick (the watch on it is what shows a result at once; this is
+            // for a watch that ended): listing it runs nothing.
             if (try? courier(config)) != nil, polling, !(courier?.outstanding.isEmpty ?? true),
-               polledAt.map({ now().timeIntervalSince($0) >= 60 }) ?? true {
+               polledAt.map({ now().timeIntervalSince($0) >= (onThisMac ? Self.localLookEvery : 60) }) ?? true {
                 polledAt = now()
                 courier?.poll()
             }
@@ -191,10 +223,23 @@ final class WalletDesk: ObservableObject {
     /// A button on a card: Send to Wallet Manager (only while it waits), Retry (after Passage couldn't reach the Wallet Manager or
     /// stopped unsure), Discard. `then` runs on the main thread once it's done and the cards are redrawn.
     func act(_ action: WalletCardModel.Action, on id: String, then: @escaping () -> Void = {}) {
-        guard let card = cards.first(where: { $0.id == id }), card.actions.contains(action), let shown = drawn[id] else { return then() }
+        guard let card = cards.first(where: { $0.id == id }), let shown = drawn[id] else { return then() }
+        guard card.actions.contains(action) else {
+            // Sign in browser wallet on a request the browser wallet can't sign (one marked LOCAL FORK ONLY, a wallet id):
+            // its card never offers it, and a press that comes all the same does nothing, and says why.
+            if action == .browser, let why = WalletBrowser.whyNot(shown) { log("browser on \(id) not done: \(why)") }
+            return then()
+        }
         if action == .settings {
             openSettings()
             return then()
+        }
+        if action == .dismiss {
+            // Only the strip forgets it: the request's files stay, and nothing more is told.
+            return work.async { [self] in
+                dismiss(id)
+                publish(then: then)
+            }
         }
         let config = self.config()
         let names = sessionNames()
@@ -217,7 +262,7 @@ final class WalletDesk: ObservableObject {
                 send(request, config: config)
             case .browser: browse(request)
             case .discard: discard(request)
-            case .settings: break
+            case .settings, .dismiss: break
             }
             publish(then: then)
         }
@@ -240,6 +285,13 @@ final class WalletDesk: ObservableObject {
     /// The courier made last, for `close` from the main thread while `work` may be busy with a send.
     private let liveLock = NSLock()
     private var live: WalletCourier?
+
+    /// Whether a courier listens for results now: `passage listen` runs, or the folder on this Mac is watched (a
+    /// test's look). Waits for `work`.
+    var isListening: Bool { work.sync { courier?.isListening ?? false } }
+
+    /// The least time between two looks at the folder on this Mac that a refresh asks for.
+    static let localLookEvery: TimeInterval = 10
 
     private var watch: DispatchSourceFileSystemObject?
     private var timer: DispatchSourceTimer?
@@ -363,6 +415,16 @@ final class WalletDesk: ObservableObject {
     /// is none (no peer chosen, no passage), and notes what's missing for the cards (`setupNeeded`).
     @discardableResult
     private func courier(_ config: Config) throws -> WalletCourier {
+        onThisMac = config.peer == WalletAsk.WalletManager.onThisMac
+        // The Wallet Manager on this Mac: the folder pair, and no Passage looked for or run.
+        if onThisMac {
+            setupNeeded = nil
+            if let courier, courierFor?.passage == nil, courierFor?.peer == config.peer { return courier }
+            return adopt(localLink, for: (nil, config.peer))
+        }
+        // No longer chosen, whatever is in its place (none, a peer, a peer with no Passage to run): its courier and
+        // its watch on the folder go now, so nothing reads from-wm from here on.
+        retireLocal()
         guard !config.peer.isEmpty else {
             setupNeeded = WalletCardModel.noPeerNote
             throw WalletAsk.Refusal("no Wallet Manager peer is chosen in Settings › Wallet")
@@ -384,6 +446,26 @@ final class WalletDesk: ObservableObject {
         guard let link = PassageLink(command: passage, walletPeer: config.peer, inboxFolder: inbox) else {
             throw WalletAsk.Refusal("the Wallet Manager peer \(config.peer) isn't a Passage peer ID")
         }
+        return adopt(link, for: (passage, config.peer))
+    }
+
+    /// Drops the courier of the Wallet Manager on this Mac, if that is the one there is: its watch on the folder is
+    /// stopped here, on `work` (a cancel: nothing to wait for), and it looks for no more results. Its records stay in
+    /// the store; the cards read them from there (`storedRecord`) until a courier is made again.
+    private func retireLocal() {
+        guard let local = courier, let made = courierFor, made.passage == nil, made.peer == WalletAsk.WalletManager.onThisMac else { return }
+        // What a look under way still takes is told as ever (`taken`); none starts after this.
+        local.retire()
+        courier = nil
+        courierFor = nil
+        liveLock.lock()
+        live = nil
+        liveLock.unlock()
+        log("the Wallet Manager on this Mac is no longer chosen in Settings › Wallet: its folder is no longer watched or read")
+    }
+
+    /// A courier over `link`, in place of the one there was.
+    private func adopt(_ link: any WalletTransport, for made: (passage: PassageCommand?, peer: String)) -> WalletCourier {
         // The one it replaces stops its `passage listen` on a thread of its own: that may take seconds, and `work`
         // carries on meanwhile.
         // What it still takes meanwhile isn't told again: only the new one's results reach the cards and the agents.
@@ -391,14 +473,14 @@ final class WalletDesk: ObservableObject {
             replaced.onTaken(nil)
             DispatchQueue.global(qos: .utility).async { replaced.close() }
         }
-        let made = WalletCourier(link: link, store: store, log: log, now: now)
-        made.onTaken { [weak self] results in self?.work.async { self?.taken(results) } }
-        courier = made
-        courierFor = (passage, config.peer)
+        let fresh = WalletCourier(link: link, store: store, log: log, now: now)
+        fresh.onTaken { [weak self] results in self?.work.async { self?.taken(results) } }
+        courier = fresh
+        courierFor = made
         liveLock.lock()
-        live = made
+        live = fresh
         liveLock.unlock()
-        return made
+        return fresh
     }
 
     private func send(_ request: WalletRequest, config: Config) {
@@ -441,6 +523,7 @@ final class WalletDesk: ObservableObject {
             (said, notGone) = (text(what), .notSent(reason: "passage didn't take the command" + (what.isEmpty ? "" : " (\(what))")))
         case .passage(.refusedAsSecret(let what)):
             (said, notGone) = (text(what), .notSent(reason: "Passage refused it as looking like a secret" + (what.isEmpty ? "" : " (\(what))")))
+        case .passage(.notSent(let what)): (said, notGone) = (text(what), .notSent(reason: what))
         }
         // A record that stayed (sent, or unsure: this send or an earlier one may have reached the Wallet Manager) decides the card.
         if courier.record(id) != nil { unsureWhy[id] = said } else { local[id] = notGone }
@@ -465,7 +548,9 @@ final class WalletDesk: ObservableObject {
         guard let name = names[request.requestedBy.session.lowercased()] else {
             return log("browser on \(id) not done: its session isn't one the session host runs")
         }
-        guard let page = WalletSignPage.html(for: request, requestedBy: name) else { return log("browser on \(id) not done: its from isn't an 0x address") }
+        guard let page = WalletSignPage.html(for: request, requestedBy: name) else {
+            return log("browser on \(id) not done: \(WalletBrowser.whyNot(request) ?? "no page could be made for it")")
+        }
         let server = WalletSignServer(page: page)
         let url: URL
         do {
@@ -713,8 +798,36 @@ final class WalletDesk: ObservableObject {
         }
     }
 
+    /// `dismissedAt` from `dismissedFile`, once: only request ids, and only those dismissed within `dismissedKept`.
+    private func loadDismissed() -> [String: Date] {
+        if let dismissedAt { return dismissedAt }
+        var loaded: [String: Date] = [:]
+        if let data = try? Data(contentsOf: dismissedFile), data.count <= Self.maxDismissedBytes,
+           let read = try? JSONDecoder().decode([String: Date].self, from: data) {
+            let time = now()
+            loaded = read.filter { WalletRequestFormat.isID($0.key) && time.timeIntervalSince($0.value) < Self.dismissedKept }
+        }
+        dismissedAt = loaded
+        return loaded
+    }
+
+    static let maxDismissedBytes = 1 << 20
+
+    private func dismiss(_ id: String) {
+        var all = loadDismissed()
+        all[id] = now()
+        dismissedAt = all
+        do {
+            try VibePaths.ensurePrivate(store.folder)
+            try VibePaths.writePrivate(JSONEncoder().encode(all), to: dismissedFile)
+        } catch {
+            log("dismissed \(id), not kept for the next launch: \(error)")
+        }
+    }
+
     private func publish(then: @escaping () -> Void = {}) {
         let time = now()
+        let dismissed = Set(loadDismissed().keys)
         var cards: [WalletCardModel] = []
         var sessions: [String: String] = [:]
         var drawn: [String: WalletRequest] = [:]
@@ -756,12 +869,13 @@ final class WalletDesk: ObservableObject {
                 cards.append(WalletCardModel(request: request, requestedBy: name, label: by.label, state: request.isExpired(now: time) ? .expired : .waiting))
             }
             cards[cards.count - 1].setupNeeded = setupNeeded
+            cards[cards.count - 1].onThisMac = onThisMac
             cards[cards.count - 1].agentMissed = undelivered?[request.id]?.contains { $0.ended && isTrusted($0, of: request.id) } ?? false
             sessions[request.id] = by.session.lowercased()
         }
         // At most `maxCards`: past that the oldest finished ones give way first, then the oldest. Their files stay; a
         // card shows again once others go.
-        let shown = Self.capped(cards)
+        let shown = Self.capped(cards, hidden: Set(cards.filter { !Self.shows($0, dismissed: dismissed) }.map(\.id)))
         if shown.count < cards.count {
             let hidden = Set(cards.map(\.id)).subtracting(shown.map(\.id))
             if !hidden.isSubset(of: overCap) { log("\(hidden.count) card(s) not shown: over \(Self.maxCards)") }
@@ -775,6 +889,7 @@ final class WalletDesk: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             if self?.cards != cards { self?.cards = cards }
             if self?.sessions != sessions { self?.sessions = sessions }
+            if self?.dismissed != dismissed { self?.dismissed = dismissed }
             self?.drawn = drawn
             then()
         }
@@ -783,12 +898,17 @@ final class WalletDesk: ObservableObject {
     /// The most cards shown at once, across sessions.
     static let maxCards = 30
 
-    /// `cards` (oldest first) cut to `limit`: the oldest finished ones go first, then the oldest; the order kept.
-    static func capped(_ cards: [WalletCardModel], limit: Int = maxCards) -> [WalletCardModel] {
+    /// `cards` (oldest first) cut to `limit`: the oldest of those the strip doesn't show (`hidden`) go first, then the
+    /// oldest finished ones, then the oldest; the order kept.
+    static func capped(_ cards: [WalletCardModel], limit: Int = maxCards, hidden: Set<String> = []) -> [WalletCardModel] {
         guard cards.count > limit else { return cards }
         var excess = cards.count - limit
         var dropped = Set<String>()
-        for card in cards where excess > 0 && card.state.isFinished {
+        for card in cards where excess > 0 && hidden.contains(card.id) {
+            dropped.insert(card.id)
+            excess -= 1
+        }
+        for card in cards where excess > 0 && !dropped.contains(card.id) && card.state.isFinished {
             dropped.insert(card.id)
             excess -= 1
         }

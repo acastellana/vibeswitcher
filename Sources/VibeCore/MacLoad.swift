@@ -164,6 +164,12 @@ public struct MacLimits: Codable, Equatable, Sendable {
     /// `TestLock`), 1 to the cores. The user chose 2 on a 12-core Mac (2026-11-01): the default is the cores ÷ 6.
     /// VIBESWITCHER_HEAVY_SLOTS, or a project's heavy_slots, sets it instead; boost raises it (`heavySlotsInForce`).
     public var heavySlots: Int
+    /// "Ignore usage limits" (Settings › Project lead, off by default; the user asked for "a setting to disable
+    /// worrying about quota", 2026-11-07): start_worker, audit and auto_advance start at any share of a Claude limit, as
+    /// with override_usage, Boost's usage watch holds nothing off, and agent: auto picks Claude unless Claude refused at a
+    /// reached limit. A limit Claude refused at still holds (`AccountUsage.hold(ignoring:)`): a session started into it
+    /// would stop at once.
+    public var ignoreUsageLimits: Bool
     /// The boost these were raised by (`boosted(by:)`), and the limits as set before it; nil: not boosted. Not saved.
     public internal(set) var boost: BoostState?
     var normal: Normal?
@@ -174,15 +180,17 @@ public struct MacLimits: Codable, Equatable, Sendable {
         var loadLimitText: String
     }
 
-    enum CodingKeys: String, CodingKey { case maxSessions, loadThreshold, heavySlots }
+    enum CodingKeys: String, CodingKey { case maxSessions, loadThreshold, heavySlots, ignoreUsageLimits }
 
     /// The cores ÷ 6, rounded down, at least 1: 2 on a 12-core Mac.
     public static var defaultHeavySlots: Int { max(1, MacLoad.processors / 6) }
     /// The most heavy slots: one per core.
     public static var heavySlotsCeiling: Int { max(1, MacLoad.processors) }
 
-    public init(maxSessions: Int = MacLimits.defaultMaxSessions, loadThreshold: Double? = nil, heavySlots: Int = MacLimits.defaultHeavySlots) {
+    public init(maxSessions: Int = MacLimits.defaultMaxSessions, loadThreshold: Double? = nil, heavySlots: Int = MacLimits.defaultHeavySlots,
+                ignoreUsageLimits: Bool = false) {
         self.maxSessions = max(1, maxSessions)
+        self.ignoreUsageLimits = ignoreUsageLimits
         self.loadThreshold = loadThreshold.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         self.heavySlots = min(max(1, heavySlots), Self.heavySlotsCeiling)
     }
@@ -191,7 +199,8 @@ public struct MacLimits: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(maxSessions: (try? container.decodeIfPresent(Int.self, forKey: .maxSessions)) ?? Self.defaultMaxSessions,
                   loadThreshold: try? container.decodeIfPresent(Double.self, forKey: .loadThreshold),
-                  heavySlots: (try? container.decodeIfPresent(Int.self, forKey: .heavySlots)) ?? Self.defaultHeavySlots)
+                  heavySlots: (try? container.decodeIfPresent(Int.self, forKey: .heavySlots)) ?? Self.defaultHeavySlots,
+                  ignoreUsageLimits: (try? container.decodeIfPresent(Bool.self, forKey: .ignoreUsageLimits)) ?? false)
     }
 
     /// The load threshold in force: the one set, else twice the Mac's cores.

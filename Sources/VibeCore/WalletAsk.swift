@@ -20,6 +20,7 @@ public enum WalletAsk {
         there; VibeSwitcher never signs. The Wallet Manager's answers come back to this session as messages.
         From an 0x address, the card also offers Sign in browser wallet: the browser's wallet extension signs it, without the
         Wallet Manager's checks. It works with no Wallet Manager set up; a wallet id (not 0x) needs the Wallet Manager.
+        A request whose reason's first line is LOCAL FORK ONLY is never offered the browser wallet: it needs the Wallet Manager.
 
           --workspace   the Wallet Manager's workspace the wallet is in
           --from        the wallet to send from: its id in that workspace, or its 0x address
@@ -190,6 +191,11 @@ public enum WalletAsk {
     /// Whether the Wallet Manager can be reached from here, as Settings › Wallet has it: requests are filed either way;
     /// without it, the browser wallet is the way to sign one (from an 0x address).
     public enum WalletManager: Equatable {
+        /// What Settings › Wallet keeps in place of a Passage peer's id (`walletPeerID`) when the Wallet Manager on this
+        /// Mac is chosen: requests then go through the folder pair (`WalletLocalLink`), with no Passage. Never a peer
+        /// id (8 hex digits).
+        public static let onThisMac = "this-mac"
+
         case ready
         /// No Wallet Manager peer is chosen in Settings › Wallet.
         case noPeer
@@ -206,9 +212,11 @@ public enum WalletAsk {
         }
 
         /// As the app's defaults have it: the peer chosen (`walletPeerID`) and Passage (`walletPassagePath`; empty:
-        /// `passage` on `path`, the session's PATH, else Passage.app in `apps`).
+        /// `passage` on `path`, the session's PATH, else Passage.app in `apps`). The Wallet Manager on this Mac chosen
+        /// (`onThisMac`) is set up as it is: it needs no Passage.
         public static func from(peer: String, passagePath: String, path: String?, apps: [URL] = PassageCommand.appLocations) -> WalletManager {
             guard !peer.isEmpty else { return .noPeer }
+            guard peer != onThisMac else { return .ready }
             let found = PassageCommand.resolve(setting: passagePath, onPath: { onPath("passage", path: path) }, apps: apps)
             return found == nil ? .noPassage : .ready
         }
@@ -227,7 +235,8 @@ public enum WalletAsk {
 
     /// `vs-wallet request …`, as the CLI runs it: what to print, and the exit status (0 filed, 1 refused, 2 usage).
     /// `walletManager`: whether Settings › Wallet has the Wallet Manager set up. Filed either way; without it the output
-    /// says the browser wallet is the way to sign it (or, for a wallet id, that it waits for the Wallet Manager).
+    /// says the browser wallet is the way to sign it (or, for a wallet id or a request marked LOCAL FORK ONLY, that it
+    /// waits for the Wallet Manager).
     /// `vault`: the session host's (`LeadVault.standard` in the CLI; the sandbox's own there). It says which session the
     /// calling process runs in, from that process (never from what it says, VIBESWITCHER_SESSION included), and stamps
     /// the request's bytes for that session; the app shows only a request the host stamped. Refused when it can't be
@@ -262,6 +271,10 @@ public enum WalletAsk {
             }
             let card = "Filed wallet request \(request.id): its card is up in this session's chat in VibeSwitcher. "
                 + "The Wallet Manager isn't set up yet (\(why)), "
+            if WalletBrowser.isLocalForkOnly(request) {
+                return (0, card + "and the browser wallet can't sign a request marked \(WalletBrowser.localForkMarker): it waits on its card "
+                           + "until the user sets up the Wallet Manager in Settings › Wallet and sends it. \(expires)", "")
+            }
             guard WalletBrowser.canSign(request) else {
                 return (0, card + "and a browser wallet can't sign for a wallet id (--from \(request.from)): it waits on its card until the "
                            + "user sets up the Wallet Manager in Settings › Wallet and sends it. To use the browser wallet instead, ask the user "

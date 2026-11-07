@@ -52,13 +52,16 @@ public struct PassageLink: Sendable {
         case refusedAsSecret(String)
         /// Any other end: another exit code, a signal, past the time limit, couldn't start, or exit 0 without the line.
         case unexpected(String)
+        /// The transport refused it before anything went, and sending it again won't change that. Never Passage's:
+        /// the transport on one Mac's (`WalletLocalLink`), for a file with other bytes under the request's name.
+        case notSent(String)
 
         /// Whether the Wallet Manager may have the file all the same: passage gave up after connecting (1), or ended in a way
         /// that says nothing (`unexpected`). The others (2–5) end before anything is sent.
         public var mayHaveArrived: Bool {
             switch self {
             case .sent, .failed, .unexpected: true
-            case .usage, .noSuchPeer, .peerNotListening, .refusedAsSecret: false
+            case .usage, .noSuchPeer, .peerNotListening, .refusedAsSecret, .notSent: false
             }
         }
     }
@@ -170,17 +173,41 @@ public struct PassageLink: Sendable {
     }
 }
 
+/// The link as `WalletCourier` uses it (`WalletTransport`): each call is the one above, as it was.
+extension PassageLink: WalletTransport {
+    public var destination: String { walletPeer }
+    public var listening: String { "passage listen" }
+
+    public func deliver(file: URL, id: String) -> SendOutcome { send(file: file, id: id) }
+
+    public func arrivals() -> Result<[InboxEntry], InboxFailure> { inbox() }
+
+    public func requestID(of entry: InboxEntry) throws -> String {
+        guard entry.peerID == walletPeer else { throw InboxFailure(description: "from peer \(entry.peerID), not the Wallet Manager peer \(walletPeer)") }
+        guard let id = WalletResult.id(fromFileName: entry.name) else { throw InboxFailure(description: "not a wallet result (\(entry.name))") }
+        return id
+    }
+
+    public func bytes(of entry: InboxEntry) throws -> Data { try read(entry) }
+
+    public func watch(heard: @escaping @Sendable () -> Void) throws -> any WalletListening { try listen(heard: heard) }
+}
+
 /// A running `passage listen`, a child of this process in a session of its own. Ended by its own pid (`stop`), never
 /// by name; reaped here, so the pid stays its own until then.
-public final class PassageListener: @unchecked Sendable {
+public final class PassageListener: WalletListening, @unchecked Sendable {
     public let pid: Int32
-    private let process: Shell.Spawned
+    /// The program it runs, an absolute path.
+    public let executable: String
+    public var process: (pid: Int32, executable: String)? { (pid, executable) }
+    private let spawned: Shell.Spawned
 
     init(command: PassageCommand, heard: @escaping @Sendable () -> Void) throws {
         let out = try ShellPipe(), err = try ShellPipe()
-        process = try Shell.Spawned([command.executable] + command.arguments(["listen"]), in: "/", environment: ProcessInfo.processInfo.environment,
+        executable = command.executable
+        spawned = try Shell.Spawned([command.executable] + command.arguments(["listen"]), in: "/", environment: ProcessInfo.processInfo.environment,
                                     output: out, errors: err, session: true)
-        pid = process.processIdentifier
+        pid = spawned.processIdentifier
         // Each line as it comes: read(2) returns what the pipe holds. FileHandle's read(upToCount:) waits on a pipe for
         // the whole count or the end, so a line went unheard until 4 KiB had piled up or passage ended.
         Thread.detachNewThread {
@@ -200,20 +227,20 @@ public final class PassageListener: @unchecked Sendable {
         }
     }
 
-    public var isRunning: Bool { process.isRunning }
+    public var isRunning: Bool { spawned.isRunning }
 
     /// How it ended (the exit code, or the signal), once it has.
-    public var exitStatus: Int32? { process.isRunning ? nil : process.terminationStatus }
+    public var exitStatus: Int32? { spawned.isRunning ? nil : spawned.terminationStatus }
 
     /// Asks it to stop (SIGTERM to its pid), and kills it (SIGKILL) if it's still running after `grace`; returns once
     /// it's reaped.
     public func stop(grace: TimeInterval = 5) {
-        guard process.isRunning else { return }
+        guard spawned.isRunning else { return }
         kill(pid, SIGTERM)
         let end = Date().addingTimeInterval(grace)
-        while process.isRunning, Date() < end { usleep(20_000) }
-        if process.isRunning { kill(pid, SIGKILL) }
-        process.waitUntilExit()
+        while spawned.isRunning, Date() < end { usleep(20_000) }
+        if spawned.isRunning { kill(pid, SIGKILL) }
+        spawned.waitUntilExit()
     }
 
     deinit { stop() }

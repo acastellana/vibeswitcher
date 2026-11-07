@@ -45,6 +45,7 @@ struct WalletCard: View {
         let tint = Self.tint(card.state)
         VStack(alignment: .leading, spacing: 10) {
             header(tint)
+            leadLine
             request
             if card.fileChanged { fileChanged }
             Text(card.detail)
@@ -75,6 +76,34 @@ struct WalletCard: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
+    }
+
+    /// What the transaction does, in one line of VibeSwitcher's own words (`WalletCardModel.line`), larger than the rows
+    /// under it; red, with the warning sign, for a call that isn't decoded or grants too much. A request marked for a
+    /// local fork only has its badge beside it.
+    private var leadLine: some View {
+        let alarming = card.call?.alarming == true
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Label {
+                Text(card.line)
+            } icon: {
+                if alarming { Image(systemName: "exclamationmark.triangle.fill").accessibilityHidden(true) }
+            }
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(alarming ? Color(nsColor: .systemRed) : .primary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if card.localForkOnly {
+                Text(WalletCardModel.localForkBadge)
+                    .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(SessionStatus.needsInput.color)
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Capsule().strokeBorder(SessionStatus.needsInput.color.opacity(increased ? 1 : 0.6), lineWidth: 1))
+                    .fixedSize()
+            }
+        }
+        .textSelection(.enabled)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel((alarming ? "Warning, " : "") + card.line + (card.localForkOnly ? ", \(WalletCardModel.localForkBadge)" : ""))
     }
 
     /// The request, a row per fact: the amount first and largest, as it's what a glance is for; for a contract call, what
@@ -285,7 +314,7 @@ struct WalletCard: View {
             if !main.isEmpty {
                 HStack(spacing: 8) {
                     ForEach(main, id: \.self) { action in
-                        if action == main.first && leads {
+                        if action == main.first && leads && action != .dismiss {
                             Button(action.title) { act(action) }.buttonStyle(.borderedProminent)
                         } else {
                             Button(action.title) { act(action) }.buttonStyle(.bordered)
@@ -334,6 +363,8 @@ struct WalletCard: View {
 struct WalletRequestStrip: View {
     @ObservedObject var desk: WalletDesk
     let session: UUID
+    /// After a card's button was pressed (under a terminal: the keyboard goes back to it).
+    var acted: () -> Void = {}
 
     var body: some View {
         let cards = desk.cards(for: session)
@@ -341,7 +372,10 @@ struct WalletRequestStrip: View {
             ScrollView {
                 LazyVStack(spacing: 10) {
                     ForEach(cards) { card in
-                        WalletCard(card: card) { action in desk.act(action, on: card.id) }
+                        WalletCard(card: card) { action in
+                            desk.act(action, on: card.id)
+                            acted()
+                        }
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 10)

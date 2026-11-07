@@ -176,6 +176,13 @@ final class WindowModel: ObservableObject {
         row.session?.transcriptPath ?? row.hostID.flatMap { agentSessions[$0]?.transcript }
     }
 
+    /// The session whose wallet cards sit under its terminal: a window session with no conversation to pin them under
+    /// (a New Shell session running a program that files with vs-wallet). One with a transcript has them in its chat.
+    func walletUnderTerminal(for row: WindowRow?) -> UUID? {
+        guard let row, chatPath(for: row) == nil else { return nil }
+        return row.hostID
+    }
+
     /// Whether the middle pane shows the selected row's chat right now.
     var chatShown: Bool { showsChat && selectedRow.map { chatPath(for: $0) != nil } == true }
 

@@ -127,6 +127,94 @@ cost, the receipts of the 2026-10-31 batch give 8 tasks, 2.9 h and ~$86.
 
 ## Entries
 
+### IM-17: An agent opens a New Shell with the user's one click (an-agent-can-open, planned)
+
+- **Change:** `vs-shell run [--cwd DIR] [--label TEXT] -- COMMAND…`, on every session's PATH, files a request the session
+  host stamps for the asking session; a card in that session's chat shows the folder and the exact command, and Run
+  starts an ordinary New Shell session whose shell is given the command at launch. Settings › Agents › Let agents open
+  shells without asking (off by default) starts them with no click. Planned 2026-11-06.
+- **Hypothesis:** if an agent can put a command on a card, then the user no longer has to open New Shell (⌥⌘N) and paste
+  a command an agent gives them: most shell requests filed in a week are run from their card (more run than declined),
+  because one click replaces opening a shell, finding the folder and pasting.
+- **Metric:** shell requests run vs. declined (and expired) over a week: the app log's `shell: <id> started as`,
+  `shell: <id> declined` and `shell: <id> expired unanswered` lines (`~/.vibeswitcher/debug/app.log`). Guard: no
+  shell started without a Run while the setting is off (every `started as` line follows a Run, none a `starts at once`
+  line with the setting off); no incident about a shell request in [incidents.md](../lead/incidents.md).
+- **Baseline:** 0 run: before the change no agent could open a shell; the user opened New Shell and pasted by hand
+  (2026-11-06, another project's lead asking for it).
+- **Check:** 2026-11-13, window the week after the build is installed.
+- **Status:** measuring
+- **Result:** (pending)
+- **Verdict:** (pending)
+- **Why:** (pending)
+
+### IM-16: Wallet requests reach a Wallet Manager on the same Mac (wallet-requests-reach-a, planned)
+
+- **Change:** Settings › Wallet offers "Wallet Manager on this Mac": Send on a card writes the request into an
+  owner-only folder pair the Wallet Manager reads, and its results come back through it, with no Passage
+  ([Transport on one Mac](../protocol/wallet-request.md#transport-on-one-mac)). Planned 2026-11-05.
+- **Hypothesis:** if requests can go through the folder pair, then a request filed on the Mac where the Wallet
+  Manager runs reaches it: cards delivered on the first real local-fork run move from 0 (no Passage peer is the Mac
+  itself, so such cards showed Open Settings in place of Send) to every card the user sends (about 62 in that run),
+  because the transport no longer needs a second Mac; cards sent through a Passage peer keep working as before.
+- **Metric:** cards delivered in the first real local-fork run, of the cards the user sent, as the other project's
+  lead reports them (the Wallet Manager's count of requests it received from this Mac). Guard: no request delivered
+  twice or to both transports; no wallet incident in [incidents.md](../lead/incidents.md).
+- **Baseline:** 0 delivered: before the change no card filed on the Wallet Manager's Mac could be sent at all
+  (Settings › Wallet had no peer to choose there). The script has no source for this; the number is the other
+  project's report.
+- **Check:** 2026-11-12, the first real local-fork run after the build is installed.
+- **Status:** measuring
+- **Result:** (pending)
+- **Verdict:** (pending)
+- **Why:** (pending)
+
+### IM-15: Marked wallet requests never go to the browser wallet (wallet-requests-marked, planned)
+
+- **Change:** a wallet request whose `reason` has the first line `LOCAL FORK ONLY` (or nearly: spaces, tabs and
+  carriage returns at its ends dropped, case ignored) is never offered Sign in browser wallet, whatever its `from`:
+  `WalletBrowser.canSign` is false for it, so the card has no browser button, no signing page is made, and
+  `vs-wallet request` says it waits for the Wallet Manager. It is filed, shown and sent to the Wallet Manager like any
+  other. The spec records the marker ([wallet-request.md](../protocol/wallet-request.md), History, 2026-11-05).
+- **Hypothesis:** no marked request is ever offered the browser wallet, because the card, the desk's signing page and
+  vs-wallet's output all ask the one rule. Unmarked requests from an 0x address are offered it as before.
+- **Metric:** the tests that hold the rule stay green in every merge's full suite:
+  `aRequestMarkedLocalForkOnlyCantBeSignedInTheBrowser`, `aNearlyRightMarkerIsRefusedTheBrowserToo`,
+  `aMarkedRequestsCardNeverHasTheBrowserAction`, `aMarkedRequestIsNeverOpenedInTheBrowserWallet` and
+  `aMarkedRequestWithoutAWalletManagerWaitsForItNeverTheBrowserWallet`. Guards: incidents of a marked request opened
+  in the browser wallet stay at 0; `aReasonWithoutTheMarkerAsItsFirstLineStaysSignable` stays green (an unmarked
+  request keeps the browser wallet).
+- **Baseline:** before the change, a marked request from an 0x address was offered the browser wallet: the five tests
+  fail on the commit before it (139 issues in the app's two suites, 46 in the core's two). 0 incidents, since no
+  project puts the marker on a request yet.
+- **Check:** 2026-11-12, window from this change's merge to 2026-11-12.
+- **Status:** measuring
+- **Result:** (pending)
+- **Verdict:** (pending)
+- **Why:** (pending)
+
+### IM-14: No audit waits on an evidence read (turn-this-incident-into-3, planned)
+
+- **Change:** a verifier's settings let it read the image files in its own task's evidence folder
+  (`<repo>/.vibeswitcher/evidence/<task>/<report>/`) without a prompt, and nothing else outside its worktree. The
+  witness also declines a verifier's Read prompt that no one answers, as it declines a command's.
+- **Hypothesis:** no audit waits on an evidence read: witness reports of a verifier waiting on a Read prompt drop
+  from 3 in one day to 0 over the week after the merge, because the verifier is no longer asked about the screenshots
+  its brief names, and a Read prompt that still shows is declined after 2 minutes (not the one auto mode shows for
+  its first read outside the working directories, nor a Glob's or Grep's: nothing is typed there and the lead is told
+  it waits; count those apart). Guard: no verifier reads a file
+  outside its worktree other than its task's evidence images without a prompt (0 incidents about it).
+- **Metric:** witness reports of a verifier waiting on a Read prompt, across projects where the lead reports them
+  (the lead's reports and incidents.md titles in the range). Guard: incidents about a verifier reading what it
+  shouldn't.
+- **Baseline:** 3 on 2026-11-05 (one here, two in another project on one task's audit, the first sitting 155 minutes
+  until the audit was restarted).
+- **Check:** 2026-11-12, window one week from the merge.
+- **Status:** measuring
+- **Result:** (pending)
+- **Verdict:** (pending)
+- **Why:** (pending)
+
 ### IM-13: Usage-aware worker routing (usage-aware-worker, planned)
 
 - **Change:** a task with `agent: auto` (or `agent_default: auto`) starts on Codex when Claude's usage is tight (a

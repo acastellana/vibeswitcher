@@ -79,6 +79,19 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--wallet-reque
     exit(ran.status)
 }
 
+// `vibeswitcher-mcp --shell-request run …`, as Resources/bin/vs-shell runs it in a session VibeSwitcher started: files a
+// request for a new shell session running a command, which waits on its card in this session's chat for the user's Run
+// (see `ShellAsk`). Nothing starts from here. The app's defaults say only what the output tells (whether Settings ›
+// Agents lets agents open shells without asking); the app decides.
+if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--shell-request" {
+    let defaults = UserDefaults(suiteName: "dev.vibeswitcher.VibeSwitcher")
+    let ran = ShellAsk.run(Array(CommandLine.arguments.dropFirst(2)), cwd: FileManager.default.currentDirectoryPath, vault: .standard,
+                           atOnce: defaults?.bool(forKey: "letAgentsOpenShells") ?? false)
+    if !ran.output.isEmpty { print(ran.output) }
+    if !ran.error.isEmpty { FileHandle.standardError.write(Data((ran.error + "\n").utf8)) }
+    exit(ran.status)
+}
+
 // `vibeswitcher-mcp --verifier-prompt ROOT SLUG BASE MESSAGE_FILE auto|off`, for scripts/verifier-eval.sh: what an
 // audit's single verifier starts with for the branch agent/SLUG against BASE in ROOT (a scratch clone, its own
 // .vibeswitcher/workflow.md), as JSON: the prompt (LeadPrompts.verifier; the task's goal is the commit's message), the

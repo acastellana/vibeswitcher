@@ -38,6 +38,8 @@ struct ChatContainer: View {
     var dismissMenu: () -> Void = {}
     /// The wallet requests agents filed: the selected session's cards are pinned under its conversation.
     var wallet: WalletDesk? = nil
+    /// The shells agents asked for: the selected session's cards, beside its wallet cards.
+    var shells: ShellDesk? = nil
     /// The answer card's keys: the composer hands it ⌘1–⌘9, ↩ and ↑ / ↓ while it's empty. Held, not observed.
     @State private var cardKeys = AnswerCardKeys()
     /// What you were writing under the lead's questions, kept when one closes (it moves into the conversation).
@@ -83,6 +85,9 @@ struct ChatContainer: View {
             }
             if let wallet, let session = model.selectedRow?.hostID {
                 WalletRequestStrip(desk: wallet, session: session)
+            }
+            if let shells, let session = model.selectedRow?.hostID {
+                ShellRequestStrip(desk: shells, session: session)
             }
             Divider()
             if let row = model.selectedRow {

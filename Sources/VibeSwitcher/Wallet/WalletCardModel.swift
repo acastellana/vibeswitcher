@@ -28,6 +28,8 @@ struct WalletCardModel: Equatable, Identifiable {
     var calldataBytes: Int? = nil
     /// A contract call's calldata in words (`WalletCall`); nil for a transfer.
     var call: WalletCall? = nil
+    /// A token transfer's token contract (the request's `asset`), for `line`; nil for the native coin or a call.
+    var token: String? = nil
     /// Who asked: the session's name as VibeSwitcher knows it (the window's), never as the request says.
     var requestedBy: String
     /// The label the agent gave (`--label`): shown beside the name as the agent's own words; empty when it gave none.
@@ -35,8 +37,12 @@ struct WalletCardModel: Equatable, Identifiable {
     var state: State
     /// The Wallet Manager's checks, when it sent any (with a rejection, but also along with other answers).
     var checks: [Check] = []
-    /// `from` is an 0x address, so the browser's wallet could sign it (`WalletBrowser.canSign`).
+    /// The browser's wallet could sign it (`WalletBrowser.canSign`): `from` is an 0x address, and it isn't marked for a
+    /// local fork only.
     var browserSignable = false
+    /// The reason's first line marks it for a local fork only (`WalletBrowser.isLocalForkOnly`): never the browser
+    /// wallet, whatever its `from`. Only the detail's wording reads this; `browserSignable` is already false for one.
+    var localForkOnly = false
     /// Sent, with no word from the Wallet Manager for 5 minutes: the card asks whether it's running.
     var notPickedUp = false
     /// The Wallet Manager isn't set up in Settings › Wallet (no peer chosen, no Passage found): the line that says so,
@@ -48,6 +54,10 @@ struct WalletCardModel: Equatable, Identifiable {
     /// A message about this request (its outcome) couldn't reach the asking agent: its session ended. Said on the card
     /// (`agentMissedNote`) until the request's results window is over.
     var agentMissed = false
+    /// The Wallet Manager on this Mac is the one chosen in Settings › Wallet: the lines that name the way there say
+    /// the folder on this Mac, not Passage, and those that say where it's checked and signed say this Mac, not the
+    /// Wallet Manager's (`detailOnThisMac`).
+    var onThisMac = false
 
     /// `setupNeeded`'s line for each way the Wallet Manager isn't set up.
     static let noPeerNote = "No Wallet Manager chosen: choose its Mac in Settings › Wallet"
@@ -116,6 +126,17 @@ struct WalletCardModel: Equatable, Identifiable {
             case .waiting, .sent, .unreachable, .unsure, .received, .proposed, .signedNotSubmitted, .inBrowser: return false
             }
         }
+
+        /// Whether the strip shows a card in this state: only while it needs the user, to act (Send, Retry) or to see
+        /// what went wrong. Handled ones leave it: sent and in the Wallet Manager's hands, or finished well. A card
+        /// comes back when a later result for it needs the user again (a rejection, a failure). The asking session is
+        /// told every outcome either way.
+        var showsOnStrip: Bool {
+            switch self {
+            case .waiting, .unreachable, .unsure, .notSent, .rejected, .failed, .expired, .rejectedInWallet, .browserNoAnswer: return true
+            case .sent, .received, .proposed, .signedNotSubmitted, .signed, .inBrowser, .sentFromBrowser: return false
+            }
+        }
     }
 
     /// What you can do on the card.
@@ -125,6 +146,9 @@ struct WalletCardModel: Equatable, Identifiable {
         case browser
         /// Opens Settings › Wallet, where Send or Retry would be while the Wallet Manager isn't set up (`setupNeeded`).
         case settings
+        /// Takes a finished card off the strip for good (`WalletDesk.dismissed`): the request's record stays, and
+        /// nothing more is told to the asking session.
+        case dismiss
 
         var title: String {
             switch self {
@@ -133,12 +157,16 @@ struct WalletCardModel: Equatable, Identifiable {
             case .retry: return "Retry"
             case .browser: return "Sign in browser wallet"
             case .settings: return "Open Settings"
+            case .dismiss: return "Dismiss"
             }
         }
     }
 
     /// The line under Sign in browser wallet.
     static let browserNote = "Skips the Wallet Manager's checks: read the wallet's own popup"
+    /// A waiting card's line for a request marked for a local fork only, while the Wallet Manager isn't set up.
+    static let localForkOnlyDetail = "Nothing has left this Mac. It needs the Wallet Manager: it's marked local fork only, "
+        + "so the browser wallet isn't offered for it."
     /// Added to a Sent card's line after `notPickedUpAfter` with no word from the Wallet Manager.
     static let notPickedUpNote = "Delivered to the Wallet Manager's Mac, but it hasn't picked it up yet. Is the Wallet Manager running?"
     static let notPickedUpAfter: TimeInterval = 5 * 60
@@ -154,16 +182,18 @@ struct WalletCardModel: Equatable, Identifiable {
         case .waiting: return [.send, .discard]
         case .unreachable, .unsure: return [.retry, .discard]
         case .notSent: return [.discard]
-        case .inBrowser, .rejectedInWallet, .browserNoAnswer: return [.discard]
-        case .sent, .received, .proposed, .signedNotSubmitted, .signed, .rejected, .failed, .expired, .sentFromBrowser: return []
+        case .inBrowser: return [.discard]
+        // Finished, and shown so you see what went wrong: Dismiss takes it off the strip.
+        case .rejected, .failed, .expired, .rejectedInWallet, .browserNoAnswer: return [.dismiss]
+        case .sent, .received, .proposed, .signedNotSubmitted, .signed, .sentFromBrowser: return []
         }
     }
 
     /// Whether Sign in browser wallet shows: only while the request has never reached the Wallet Manager (waiting,
-    /// unreachable, not sent), from an 0x address that isn't known to be a Safe. Once it's used the card is `inBrowser`
-    /// or after, where neither it nor Send shows again.
+    /// unreachable, not sent), from an 0x address that isn't known to be a Safe, and never for one marked for a local
+    /// fork only. Once it's used the card is `inBrowser` or after, where neither it nor Send shows again.
     var offersBrowser: Bool {
-        guard browserSignable, wallet != .safe else { return false }
+        guard browserSignable, !localForkOnly, wallet != .safe else { return false }
         switch state {
         case .waiting, .unreachable, .notSent: return true
         default: return false
@@ -262,14 +292,63 @@ struct WalletCardModel: Equatable, Identifiable {
     }
 
     var detail: String {
-        // Waiting with no Wallet Manager set up: the browser wallet is the way, or, for a wallet id, there is none yet.
+        // Waiting with no Wallet Manager set up: the browser wallet is the way, or, for a request marked for a local fork
+        // only or a wallet id, there is none yet.
         if state == .waiting, setupNeeded != nil {
-            return offersBrowser ? "Nothing has left this Mac. Sign it in your browser wallet, or discard it."
+            if offersBrowser { return "Nothing has left this Mac. Sign it in your browser wallet, or discard it." }
+            return localForkOnly ? Self.localForkOnlyDetail
                 : "Nothing has left this Mac. It needs the Wallet Manager: a browser wallet can't use a wallet id."
         }
-        let line = Self.detail(state, wallet: wallet)
-        return state == .sent && notPickedUp ? line + " " + Self.notPickedUpNote : line
+        let line = (onThisMac ? Self.detailOnThisMac(state, wallet: wallet) : nil) ?? Self.detail(state, wallet: wallet)
+        return state == .sent && notPickedUp ? line + " " + (onThisMac ? Self.notPickedUpOnThisMacNote : Self.notPickedUpNote) : line
     }
+
+    /// `notPickedUpNote` for a Wallet Manager on this Mac.
+    static let notPickedUpOnThisMacNote = "Delivered to the Wallet Manager's folder on this Mac, but it hasn't picked it up yet. Is the Wallet Manager running?"
+    /// What `unreachable` says with no reason given, for a Wallet Manager on this Mac.
+    static let notRunningOnThisMacNote = "The Wallet Manager isn't running with its local transport on this Mac"
+
+    /// The lines that name the way to the Wallet Manager or where it is, when it's the one on this Mac (no Passage: a
+    /// folder pair, `WalletLocalLink`, whose own words say why it can't be reached; and no other Mac: it's signed here,
+    /// in the Wallet Manager). Nil for a state whose line is the same either way.
+    static func detailOnThisMac(_ state: State, wallet: Wallet?) -> String? {
+        let checking = "The Wallet Manager on this Mac has it and is checking it."
+        switch state {
+        case .sent: return "Sent to the Wallet Manager on this Mac. Waiting for it to answer."
+        case .unreachable(let message): return (message ?? notRunningOnThisMacNote) + ". Nothing was sent."
+        case .unsure(let message):
+            return "It may have reached the Wallet Manager on this Mac" + (message.map { " (\($0))" } ?? "")
+                + ": its answer shows here if it did. Retry sends the same request again (the Wallet Manager"
+                + " ignores a repeat); Discard stops waiting for it here, though the Wallet Manager may still act on it."
+        case .received:
+            switch wallet {
+            case nil: return checking + " It's signed in the Wallet Manager, not in VibeSwitcher."
+            case .hardware: return checking + " Sign it in the Wallet Manager, on the hardware wallet."
+            case .hot: return checking
+            case .safe: return checking + " Sign it in the Wallet Manager to propose it to the Safe."
+            }
+        // A Safe's line names no Mac: the same either way.
+        case .proposed: return wallet == .safe ? nil : "Proposed: waiting for you to sign it in the Wallet Manager on this Mac."
+        case .signedNotSubmitted: return "Signed in the Wallet Manager on this Mac; waiting for it to be submitted to the chain."
+        case .signed: return wallet == .safe ? nil : "Signed in the Wallet Manager on this Mac and submitted."
+        case .rejected(let reason): return "The Wallet Manager on this Mac refused it: \(reason)"
+        case .failed(let message): return "The Wallet Manager on this Mac couldn't finish it: \(message)"
+        case .waiting, .notSent, .expired, .inBrowser, .sentFromBrowser, .rejectedInWallet, .browserNoAnswer: return nil
+        }
+    }
+
+    /// The card's lead line: what the transaction does, in VibeSwitcher's words, worked out from the request's fields and
+    /// calldata only (`WalletCall.line`), never from its reason or label: "Send 12.5 GEN to 0x1234…abcd". Addresses are
+    /// shortened (`WalletCall.short`); the rows below keep them whole. The same request always gives the same line.
+    var line: String {
+        let to = WalletCall.short(self.to)
+        if let call { return call.line + (amount == "0" ? "" : ", sending \(amount) \(asset)") }
+        if let token { return "Send \(amount) base units of token \(WalletCall.short(token)) to \(to)" }
+        return "Send \(amount) \(asset) to \(to)"
+    }
+
+    /// The badge beside `line` for a request marked for a local fork only (`localForkOnly`).
+    static let localForkBadge = "Local fork only"
 
     /// "Requested by"'s line: the session's name, and the agent's own label beside it when it gave one.
     var requestedByText: String {
@@ -281,7 +360,7 @@ struct WalletCardModel: Equatable, Identifiable {
 
     /// The card as text, for Copy.
     var text: String {
-        var lines = ["Wallet request: \(Self.title(state))", "Workspace: \(workspace)", "From: \(from)" + (wallet.map { " (\($0.title))" } ?? "")]
+        var lines = ["Wallet request: \(Self.title(state))", line + (localForkOnly ? " [\(Self.localForkBadge)]" : ""), "Workspace: \(workspace)", "From: \(from)" + (wallet.map { " (\($0.title))" } ?? "")]
         if let call {
             lines.append("Contract: \(to)")
             lines.append("Call: \(call.headline)" + (call.function.map { " (\($0))" } ?? ""))

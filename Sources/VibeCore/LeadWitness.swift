@@ -349,9 +349,14 @@ public enum LeadWitness {
         public static let escape = HostInput.Write(bytes: [27], delay: 0)
     }
 
-    /// The plan for declining `prompt` (a stuck Bash prompt's "Run: <command>") on `screen`, with `declineReason`.
-    /// Nil unless the screen shows that command over a permission prompt ("Do you want to …?" over Yes … No): a
-    /// question isn't answered, and a prompt opened since (the one waited on was answered meanwhile) isn't declined.
+    /// The plan for declining `prompt` (a stuck Bash prompt's "Run: <command>", or a file tool's "Allow: Read <name>")
+    /// on `screen`, with `declineReason`. Nil unless the screen shows that command or file (`commandKey`) over a
+    /// permission prompt ("Do you want to …?" over Yes … No): a question isn't answered, and a prompt opened since
+    /// (the one waited on was answered meanwhile) isn't declined. A file tool's prompt is the same menu in Claude Code
+    /// 2.1.318 (read in its bundle, not captured: "Read file", the call, "Do you want to proceed?", Yes, "Yes, allow
+    /// reading from <folder>/ during this session", a plain No that Tab opens). The one auto mode shows for its first
+    /// read outside the working directories ("Allow this read outside the working directories?", with a row that
+    /// blocks such reads in every project) isn't one: nothing is typed there, and the lead is told it waits.
     public static func declinePlan(screen: String, prompt: PendingPrompt) -> DeclinePlan? {
         guard let command = commandKey(prompt), squashed(screen).contains(command), let menu = permissionMenu(screen),
               let no = menu.options.lastIndex(where: { $0 == "No" || $0.hasPrefix("No,") || $0.hasPrefix("No ") }) else { return nil }
@@ -415,12 +420,22 @@ public enum LeadWitness {
         return menu
     }
 
-    /// A stuck Bash prompt's command as the screen shows it: its first line, squashed, at most 48 characters (a long
-    /// one wraps or is cut on screen). Nil for anything else: only a shell command's prompt is declined.
+    /// What the screen must show of a stuck prompt, squashed. A Bash prompt's ("Run: <command>"): the command's first
+    /// line, at most 48 characters (a long one wraps or is cut on screen). A file tool's ("Allow: Read <name>" over
+    /// its input, `PendingPrompt.text`): the file's name, its last 48 characters, which the prompt shows in the call
+    /// it asks about ("Read(<path>)") however it spells the folders before it. On 2026-11-05 a verifier's Read of an
+    /// evidence screenshot had no key, so its prompt was never declined and three audits hung on it. Nil for
+    /// anything else (a question, a tool with no file): nothing is typed.
     static func commandKey(_ prompt: PendingPrompt) -> String? {
-        guard prompt.text.hasPrefix("Run: ") else { return nil }
-        let first = prompt.text.dropFirst(5).split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
-        let key = String(squashed(first).prefix(48))
+        if prompt.text.hasPrefix("Run: ") {
+            let first = prompt.text.dropFirst(5).split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
+            let key = String(squashed(first).prefix(48))
+            return key.isEmpty ? nil : key
+        }
+        guard prompt.text.hasPrefix("Allow: "), let input = prompt.text.firstIndex(of: "\n").map({ prompt.text[prompt.text.index(after: $0)...] }),
+              let object = try? JSONSerialization.jsonObject(with: Data(input.utf8)) as? [String: Any],
+              let path = object["file_path"] as? String ?? object["notebook_path"] as? String else { return nil }
+        let key = String(squashed((path as NSString).lastPathComponent).suffix(48))
         return key.isEmpty ? nil : key
     }
 

@@ -1,0 +1,9 @@
+#!/bin/bash
+# vs-shell run [--cwd DIR] [--label TEXT] -- COMMAND…: asks the user to open a new shell session in VibeSwitcher that
+# runs COMMAND in DIR (vs-shell help says more). VibeSwitcher puts it on PATH in every session it starts (the app
+# bundle's Contents/Resources/bin, beside vs-wallet). The request shows as a card in this session's chat with the folder
+# and the exact command; nothing runs until the user presses Run there (or lets agents open shells without asking, in
+# Settings › Agents). It runs the app's tool server binary in its filing mode (`ShellAsk` in VibeCore): the session host
+# stamps the request for the session this process runs in, and the app shows only a request it stamped.
+here="$(cd "$(dirname "$0")" && pwd)"
+exec "$here/../../MacOS/vibeswitcher-mcp" --shell-request "$@"
