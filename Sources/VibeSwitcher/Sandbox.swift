@@ -1774,6 +1774,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
              waited: 0.14, verifierHours: 10.9)
         all.codexLeftOut = 7
         all.lead = LeadSpend(tokens: 41_200_000, cost: 27.3, unpricedDays: 0)
+        // The audit sample's audits of review none, and the audits split by whether the verifier ran on the worker's model.
+        (all.sampledAudits, all.sampledImportant) = (4, 1)
+        (all.sameModelAudited, all.sameModelImportant, all.otherModelAudited, all.otherModelImportant) = (5, 3, 11, 10)
         let passes: [Double?] = [nil, 0.4, 0.5, 0.45, 0.6, 0.55, 0.62, 0.56]
         let costs: [Double?] = [nil, 14.2, 12.9, 13.6, 11.4, 12.2, 10.8, 12.4]
         let weeks = (0..<8).map { index -> QualityWeek in
