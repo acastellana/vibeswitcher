@@ -3263,3 +3263,13 @@
 - 2026-11-07 11:08 Merged turn-this-incident-into-10: A test run with no progress is stopped in minutes, not at its 45–60 min timeout (in a batch: turn-this-incident-into-10, start-a-fresh-lead landed on one test run)
 - 2026-11-07 11:08 Merged start-a-fresh-lead: Start a fresh lead session each day, at a quiet moment (in a batch: turn-this-incident-into-10, start-a-fresh-lead landed on one test run)
 - 2026-11-07 11:08 Flaky in the batch turn-this-incident-into-10, start-a-fresh-lead: aQuestionsCardIsUpWithin1Point2SOfTheTerminalDrawingIt(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-07 11:08 Automatically (auto_advance): Merged turn-this-incident-into-10 at 9470171b (its passing audit), start-a-fresh-lead at 21123d72 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-07 11:08 Automatically (auto_advance): Cleaned up turn-this-incident-into-10 (freed 2.1 GB of build output and temporary folders). It stays done.
+- 2026-11-07 11:08 Automatically (auto_advance): Cleaned up start-a-fresh-lead (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-07 11:09 Update: Fresh lead sessions and hung-run stops merged — **What changed:**
+- 2026-11-07 11:10 Audit of wake-the-lead-only: complete, clean, round 2: 2 Important closed, 3 Nit (1 open)
+- 2026-11-07 11:11 Released test-under-load-s's worker (idle since its done report on a69dc36a) while its audit runs
+- 2026-11-07 11:18 Audit of test-under-load-s: complete, clean
+- 2026-11-07 11:45 Merged wake-the-lead-only: Wake the lead only for what it can act on
+- 2026-11-07 11:45 Flaky in wake-the-lead-only's merge: aSessionEndingWhileReadingIsPausedEndsOnlyItself(), heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared(), aBuildSlowToStartStillTakesOver(), aHeldMessageStaysHeldAcrossSwitchingAwayAndBack(), theWatchEndsWhenNoPickerComes(), anEmptyTranscriptAfterALevelHeardSaysItGaveNoText(), (the test comma… failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-07 11:45 Planned fix-the-flaky-test-19: heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() flaked 3 times within 7 days
