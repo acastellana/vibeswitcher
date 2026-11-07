@@ -3304,3 +3304,8 @@
 - 2026-11-07 12:56 Audit of resume-work-cut-off: complete, clean, round 4: 5 Important closed, 2 Nit closed
 - 2026-11-07 13:10 Merged resume-work-cut-off: Resume work cut off by the Mac sleeping
 - 2026-11-07 13:10 Flaky in resume-work-cut-off's merge: aQuestionsCardIsUpWithin1Point2SOfTheTerminalDrawingIt(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-07 13:10 Automatically (auto_advance): Merged resume-work-cut-off (Resume work cut off by the Mac sleeping) into main at 6d585ca9, on its passing audit and the full test run. (Its first test run failed on aQuestionsCardIsUpWithin1Point2SOfTheTerminalDrawingIt(), (the test command, naming no test) and the rerun of the whole test command passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/resume-work-cut-off/merge-test.log. Each flaky test's failing lines, re….)
+- 2026-11-07 13:10 Automatically (auto_advance): Cleaned up resume-work-cut-off (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-07 13:10 Started a worker on sleep-recovery-room-wait
+- 2026-11-07 13:10 Automatically (auto_advance): Started a worker on sleep-recovery-room-wait (Sleep-recovery room wait: no lock or file read on the main thread; retry when advanceSessions fails), its after tasks done (resume-work-cut-off).
+- 2026-11-07 13:10 Update: Fewer lead wake-ups, and work resumed after the Mac sleeps — **What changed:**
