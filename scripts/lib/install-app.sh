@@ -32,6 +32,15 @@
 #                       quit Apple Event to the app at DEST_APP, by its path)
 #   VS_INSTALL_LAUNCH   the command that launches DEST_APP, run as `bash -c "$VS_INSTALL_LAUNCH" launch DEST_APP` (open)
 #   VS_INSTALL_WAIT     seconds to wait for each quit attempt, and for the new process after the launch (10)
+#   VS_INSTALL_VERIFY   the command that checks the copied bundle's signature, run as
+#                       `bash -c "$VS_INSTALL_VERIFY" verify APP` (codesign -v)
+#
+# 2026-11-07: the copy into /Applications failed partway (`cp: …/VibeSwitcher_VibeHostTests.bundle/…: fcopyfile failed:
+# Input/output error`) after the old bundle had been removed and the app quit, which left an installed app that failed
+# `codesign -v` ("a sealed resource is missing or invalid") and nothing running. So the new bundle is copied next to
+# DEST_APP (DEST_APP.installing, same volume, not an .app), its signature checked, and only then swapped in by two
+# renames; a copy or check that fails removes the partial copy, leaves DEST_APP as it was, relaunches it when it was
+# running, and exits 1 saying what failed.
 set -euo pipefail
 source_app=$1
 dest=$2
@@ -44,6 +53,10 @@ quit=${VS_INSTALL_QUIT:-$default_quit}
 default_launch='open "$1"'
 launch=${VS_INSTALL_LAUNCH:-$default_launch}
 wait_s=${VS_INSTALL_WAIT:-10}
+default_verify='codesign -v "$1"'
+verify=${VS_INSTALL_VERIFY:-$default_verify}
+staged="$dest.installing"
+aside="$dest.replaced"
 export LC_ALL=C
 
 # The app's executable, as ps shows it (the path it was started by, with any // squeezed), and its path with the
@@ -128,9 +141,39 @@ else
     wait "$quit_pid" 2>/dev/null || true
 fi
 
+# The install failed before DEST_APP was touched: removes the partial copy, relaunches the old app if it was running,
+# and exits 1. $1: what failed.
+keep_old() {
+    rm -rf "$staged" 2>/dev/null || true
+    echo "$1" >&2
+    echo "Nothing was installed: $dest is the one that was there." >&2
+    if [[ -n $old ]]; then
+        if bash -c "$launch" launch "$dest"; then
+            echo "Relaunched the old $dest." >&2
+        else
+            echo "Relaunching the old $dest failed too (see above): open it yourself." >&2
+        fi
+    fi
+    exit 1
+}
+
 copied_at=$(date +%s)
-rm -rf "$dest"
-cp -R "$source_app" "$dest"
+rm -rf "$staged" "$aside" || keep_old "Couldn't remove what an earlier install left at $staged or $aside."
+cp -R "$source_app" "$staged" || keep_old "Copying $source_app to $staged failed (see above)."
+bash -c "$verify" verify "$staged" || keep_old "The copy at $staged doesn't pass its signature check (see above)."
+# Two renames on one volume: DEST_APP is the old bundle, then (after an instant with none) the new one, never partial.
+if [[ -e $dest ]]; then
+    mv "$dest" "$aside" || keep_old "Couldn't move the old $dest aside to $aside."
+fi
+if ! mv "$staged" "$dest"; then
+    if [[ -e $aside ]] && ! mv "$aside" "$dest"; then
+        echo "Couldn't move the new copy $staged to $dest, nor the old bundle back from $aside: move it back yourself" >&2
+        echo "(mv $(printf %q "$aside") $(printf %q "$dest")), then open it." >&2
+        exit 1
+    fi
+    keep_old "Couldn't move the new copy $staged to $dest."
+fi
+rm -rf "$aside" || echo "Installed $dest, but couldn't remove the old bundle at $aside: remove it yourself." >&2
 if ! bash -c "$launch" launch "$dest"; then
     echo "Installed $dest, but launching it failed (see above): open it yourself." >&2
     exit 1

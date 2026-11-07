@@ -25,6 +25,9 @@ struct InstallRelaunchTests {
         let built: URL
         let ready: URL
         let launcher: URL
+        /// Stands in for `codesign -v`: a bundle passes when the files under Contents are the ones its seal
+        /// (Contents/_CodeSignature/seal, written by `seal`) lists, byte for byte.
+        let verifier: URL
         /// Put first on the script's PATH: the stand-ins for the commands it finds there (`blindPgrep`, `failingPs`).
         let shims: URL
         let old: Process
@@ -42,10 +45,23 @@ struct InstallRelaunchTests {
             ready = root.appendingPathComponent("ready")
             launcher = root.appendingPathComponent("launch.sh")
             shims = root.appendingPathComponent("shims")
+            verifier = root.appendingPathComponent("verify.sh")
             try FileManager.default.createDirectory(at: ready, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: shims, withIntermediateDirectories: true)
+            try """
+                #!/bin/bash
+                # verify.sh APP: APP's files are the ones its seal lists, as `codesign -v` checks a signature's sealed
+                # resources. verify.sh seal APP: writes the seal.
+                listing() { (cd "$1/Contents" && find . -path ./_CodeSignature -prune -o -type f -print0 | sort -z | xargs -0 shasum); }
+                if [[ $1 == seal ]]; then mkdir -p "$2/Contents/_CodeSignature" && listing "$2" >"$2/Contents/_CodeSignature/seal"; exit; fi
+                listing "$1" | diff "$1/Contents/_CodeSignature/seal" - >&2 || { echo "$1: a sealed resource is missing or invalid" >&2; exit 1; }
+
+                """.write(to: verifier, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: verifier.path)
             try Self.makeBundle(installed, name: name, mode: mode, version: "old")
             try Self.makeBundle(built, name: name, mode: "quits-when-asked", version: "new")
+            #expect(try Self.runVerifier(verifier, ["seal", installed.path]) == 0)
+            #expect(try Self.runVerifier(verifier, ["seal", built.path]) == 0)
             try """
                 #!/bin/bash
                 # Stands in for `open APP`: starts APP's process when none of its name is running; when one is, only
@@ -90,6 +106,25 @@ struct InstallRelaunchTests {
 
                 """.write(to: resources.appendingPathComponent("main.sh"), atomically: true, encoding: .utf8)
         }
+
+        /// Runs the verifier: `seal` writes `bundle`'s seal; otherwise, 0 when `bundle` passes it.
+        @discardableResult
+        func runVerifier(_ arguments: [String]) throws -> Int32 { try Self.runVerifier(verifier, arguments) }
+        @discardableResult
+        static func runVerifier(_ verifier: URL, _ arguments: [String]) throws -> Int32 {
+            let process = Process()
+            process.executableURL = verifier
+            process.arguments = arguments
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus
+        }
+        func seal(_ bundle: URL) throws { #expect(try runVerifier(["seal", bundle.path]) == 0) }
+        func passesVerify(_ bundle: URL) throws -> Bool { try runVerifier([bundle.path]) == 0 }
+        var staged: URL { URL(fileURLWithPath: installed.path + ".installing") }
+        var aside: URL { URL(fileURLWithPath: installed.path + ".replaced") }
 
         /// The process of `pid` has set its traps.
         func waitReady(_ pid: pid_t) -> Bool {
@@ -168,6 +203,7 @@ struct InstallRelaunchTests {
             }
             environment["VS_INSTALL_LAUNCH"] = "\"\(launcher.path)\" \"$1\""
             environment["VS_INSTALL_WAIT"] = "\(wait)"
+            environment["VS_INSTALL_VERIFY"] = "\"\(verifier.path)\" \"$1\""
             environment["VS_STANDIN_READY"] = ready.path
             environment["BASH_ENV"] = bashEnv
             environment["PATH"] = shims.path + ":" + (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
@@ -228,6 +264,55 @@ struct InstallRelaunchTests {
         #expect(try stand.running() == [launched], "the one running is the one launched")
         #expect(stand.waitReady(launched), "the launched process is the new bundle's")
         #expect(!stand.old.isRunning)
+        #expect(try stand.passesVerify(stand.installed))
+        #expect(!FileManager.default.fileExists(atPath: stand.staged.path) && !FileManager.default.fileExists(atPath: stand.aside.path))
+    }
+
+    /// 2026-11-07: the copy into /Applications failed partway (`fcopyfile failed: Input/output error` on a file in a test
+    /// bundle) after the old bundle was removed, which left an installed app failing `codesign -v` and nothing running.
+    /// Here a file of the built bundle can't be read, so cp copies the rest and fails: the installed bundle is the old one
+    /// and still passes its check, the partial copy is gone, the old app is relaunched, and the exit status is 1.
+    @Test func aCopyThatFailsPartwayLeavesTheOldAppInstalledAndRelaunchesIt() throws {
+        let stand = try StandIn(temp, mode: "quits-when-asked")
+        defer { stand.cleanUp() }
+        let fixture = stand.built.appendingPathComponent("Contents/Resources/Fixtures/suggestion.raw")
+        try FileManager.default.createDirectory(at: fixture.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "raw".write(to: fixture, atomically: true, encoding: .utf8)
+        try stand.seal(stand.built)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: fixture.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fixture.path) }
+        let run = try stand.install(wait: 10)
+        #expect(run.status == 1, Comment(rawValue: run.output))
+        #expect(run.output.contains("suggestion.raw"), Comment(rawValue: run.output))
+        #expect(run.output.contains("Copying \(stand.built.path) to \(stand.staged.path) failed"), Comment(rawValue: run.output))
+        #expect(run.output.contains("Nothing was installed: \(stand.installed.path) is the one that was there."), Comment(rawValue: run.output))
+        #expect(run.output.contains("Relaunched the old \(stand.installed.path)."), Comment(rawValue: run.output))
+        #expect(!run.output.contains("Installed and launched"), Comment(rawValue: run.output))
+        #expect(stand.installedVersion == "old")
+        #expect(try stand.passesVerify(stand.installed), "the installed bundle no longer passes its check")
+        #expect(!FileManager.default.fileExists(atPath: stand.staged.path), "the partial copy was left")
+        #expect(!stand.old.isRunning)
+        #expect(eventually { ((try? stand.running()) ?? []).count == 1 }, "the old app wasn't relaunched")
+        let relaunched = try #require(try stand.running().first)
+        #expect(relaunched != stand.oldPid)
+        #expect(stand.waitReady(relaunched), "the relaunched process never started")
+    }
+
+    /// The copy completes but doesn't pass the signature check: the same, nothing swapped in, the old app relaunched.
+    @Test func aCopyThatFailsItsSignatureCheckIsNotSwappedIn() throws {
+        let stand = try StandIn(temp, mode: "quits-when-asked")
+        defer { stand.cleanUp() }
+        try "tampered".write(to: stand.built.appendingPathComponent("Contents/Resources/extra"), atomically: true, encoding: .utf8)
+        let run = try stand.install(wait: 10)
+        #expect(run.status == 1, Comment(rawValue: run.output))
+        #expect(run.output.contains("The copy at \(stand.staged.path) doesn't pass its signature check"), Comment(rawValue: run.output))
+        #expect(run.output.contains("Relaunched the old \(stand.installed.path)."), Comment(rawValue: run.output))
+        #expect(stand.installedVersion == "old")
+        #expect(try stand.passesVerify(stand.installed))
+        #expect(!FileManager.default.fileExists(atPath: stand.staged.path))
+        #expect(eventually { ((try? stand.running()) ?? []).count == 1 }, "the old app wasn't relaunched")
+        let relaunched = try #require(try stand.running().first)
+        #expect(stand.waitReady(relaunched))
     }
 
     /// 2026-11-03: the default quit command had lost its quotes to the ${VS_INSTALL_QUIT:-…} it was written in, so
