@@ -3485,3 +3485,8 @@
 - 2026-11-07 22:23 Audit of claude-dictation-held: complete, clean, round 1: 4 Nit open
 - 2026-11-07 22:32 Audit of review-rules-have-a: complete, clean, round 2: 2 Important closed, 5 Nit (1 open)
 - 2026-11-07 22:33 Merged usage-watch-forgets-a: Usage watch forgets a limit hit on a different Claude account
+- 2026-11-07 22:39 Audit of merge-gate-a-removed: complete, clean, round 1: 5 Nit open
+- 2026-11-07 22:40 Planned github-merge-third-try: GitHub merge, third try: land af82338b as an ancestor of main through the now-installed gate (review audit)
+- 2026-11-07 22:44 Started a worker on github-merge-third-try
+- 2026-11-07 22:58 Merged claude-dictation-held: Claude dictation: held-Space repeats survive main-thread stalls (in a batch, on a test run of its own)
+- 2026-11-07 22:58 Didn't merge review-rules-have-a in the batch: tests fail with it on main (statusAndBoardStayBounded()); back to its worker
