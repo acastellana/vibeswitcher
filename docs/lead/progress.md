@@ -3735,3 +3735,4 @@
 - 2026-11-08 00:41 Update: Review rules floor in Settings; merges record their build — **What changed (main c5d8bd58 and 703eafc1):**
 - 2026-11-08 00:45 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-11-08 00:46 Audit of dictation-test: complete, clean, round 1: 1 Pre-existing open
+- 2026-11-08 00:47 Audit of flake-ledger-its-own: complete, clean, round 1: 3 Nit open
