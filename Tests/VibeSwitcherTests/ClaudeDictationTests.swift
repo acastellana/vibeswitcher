@@ -1516,6 +1516,30 @@ struct ClaudeDictationTests {
         #expect(h.agentPrompts == prompts)
     }
 
+    /// Claude stopping by itself while held, its transcript going in at once, under reads 100 ms slow: the Spaces stop at
+    /// the read that shows the transcript, before enough of them go to start a second recording over it. They went on
+    /// until a second read confirmed it (2026-11-07: FakeClaude's voiceStarts 2, and the run said something was typed
+    /// meanwhile).
+    @Test func claudeStoppingByItselfStartsNoSecondRecording() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold"])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" }
+        let prompts = h.agentPrompts
+        let controller = dictation(h, readLatency: 0.1)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        h.tell(["op": "voiceStop"])
+        try await h.waitFor { controller.phase == .idle }
+        #expect(h.agent["voiceStarts"] as? Int == 1)
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
+        #expect(controller.notice?.text == ClaudeVoiceRun.stoppedByItself, "\(String(describing: controller.notice))")
+        #expect(h.agent["doubleSubmits"] as? Int == 0 && h.agent["enters"] as? Int == 0)
+        #expect(h.agentPrompts == prompts)
+        #expect(input(h) == "")
+        controller.release()
+    }
+
     /// A repeat stalls once on the queue the repeats go from, `seconds` (armed by the test).
     final class RepeatStall: @unchecked Sendable {
         private let lock = NSLock()
