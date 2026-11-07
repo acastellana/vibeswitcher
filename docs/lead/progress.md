@@ -3309,3 +3309,7 @@
 - 2026-11-07 20:07 Automatically (auto_advance): Merge of sweep-the-repository-and failed: Tests fail rebased onto main: aProbePastFifteenSecondsIsWaitedFor(), otherRequestsKeepTheirFifteenSecondsDuringAHandover(), listenLinesDuringAPollAskForOneMoreRunNotAnotherProcess() Sent its worker the output; it's back at work.
 - 2026-11-07 20:09 Planned handover-tests-stop: Handover tests stop timing out on a loaded Mac
 - 2026-11-07 20:18 Merged sweep-the-repository-and: Sweep the repository and its history for secrets
+- 2026-11-07 20:18 Automatically (auto_advance): Merged sweep-the-repository-and (Sweep the repository and its history for secrets) into main at 70883c24, on its passing audit and the full test run.
+- 2026-11-07 20:18 Automatically (auto_advance): Cleaned up sweep-the-repository-and; ended pid 96091 (Worker: Sweep the repository and its history for secrets) (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-07 20:18 Started a worker on handover-tests-stop
+- 2026-11-07 20:18 Automatically (auto_advance): Started a worker on handover-tests-stop (Handover tests stop timing out on a loaded Mac), its after tasks done (sweep-the-repository-and).
