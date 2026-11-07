@@ -3315,3 +3315,4 @@
 - 2026-11-07 13:19 Started a worker on fix-the-flaky-test-19
 - 2026-11-07 13:21 Released sleep-recovery-room-wait's worker (idle since its done report on ac203d47) while its audit runs
 - 2026-11-07 13:23 Audit of sleep-recovery-room-wait: complete, clean
+- 2026-11-07 13:34 Merged sleep-recovery-room-wait: Sleep-recovery room wait: no lock or file read on the main thread; retry when advanceSessions fails
