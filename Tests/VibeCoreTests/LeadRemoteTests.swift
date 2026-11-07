@@ -720,7 +720,7 @@ struct LeadRemoteTests: LeadTeamFixture {
         #expect(changed.label == "\(sha.prefix(12)) with changes not committed")
         // Builds from before build-app.sh wrote it (the 17:28 install of the incident): its time stands for it.
         let old = try #require(ServerBuild.read(executable: try app("Old.app", plist: ["CFBundleName": "VibeSwitcher"])))
-        #expect(old.commit == nil && old.label.contains("1794053807") && old.label.contains("no commit recorded"), "\(old.label)")
+        #expect(old.commit == nil && old.label.hasPrefix("unknown (no commit recorded") && old.label.contains("1794053807"), "\(old.label)")
         #expect(try ServerBuild.read(executable: try app("Bad.app", plist: ["VSSourceCommit": "main; rm -rf /"]))?.commit == nil)
         #expect(ServerBuild.read(executable: try app("Tests.xctest", plist: ["VSSourceCommit": sha])) == nil)
         #expect(ServerBuild.read(executable: base.appendingPathComponent("vibeswitcher-mcp").path) == nil)
@@ -732,17 +732,26 @@ struct LeadRemoteTests: LeadTeamFixture {
     }
 
     /// status says when main holds commits to the gate's own code the running build lacks: past its commit, or (a build
-    /// that recorded none) committed after it was built. Other commits don't count, and an install from main clears it.
+    /// that recorded none) committed after its files' date. Other commits don't count, and an install from main clears
+    /// it. Fails closed (F3): a build with no commit whose files are dated past the gate's code (an install's copy dates
+    /// them), or whose commit this repository doesn't hold, couldn't be compared, and says so. A repository holding none
+    /// of the gate's code (another project's) never shows it.
     @Test func statusSaysWhenGateCodeOnMainIsntInstalledYet() throws {
         let scene = try makeScene()
+        let lead = try lead(scene.root, FakeRuntime())
+        lead.power = { nil }
+        let elsewhere = String(repeating: "c", count: 40)
+        var build: ServerBuild? = ServerBuild(commit: elsewhere, builtAt: nil)
+        lead.runningBuild = { build }
+        #expect(!lead.call("status", [:]).text.contains("Gate code on main"))
+        build = ServerBuild(commit: nil, builtAt: Date().addingTimeInterval(3600))
+        #expect(!lead.call("status", [:]).text.contains("Gate code on main"))
+
         let installed = head(scene.root)
         try commit("a.txt", "two\n", in: scene.root, message: "Not the gate")
         try gateCommit(scene)
         try commit("Sources/vibeswitcher-mcp/main.swift", "// tool server\n", in: scene.root, message: "The tool server too")
-        let lead = try lead(scene.root, FakeRuntime())
-        lead.power = { nil }
-        var build: ServerBuild? = ServerBuild(commit: installed, builtAt: nil)
-        lead.runningBuild = { build }
+        build = ServerBuild(commit: installed, builtAt: nil)
         let status = lead.call("status", [:]).text
         let line = "Gate code on main isn't installed yet: 2 commits (The tool server too; merge lands a branch carrying the remote as a true merge); merges run the installed build (\(installed.prefix(12)))."
         #expect(status.contains(line), "\(status)")
@@ -750,14 +759,46 @@ struct LeadRemoteTests: LeadTeamFixture {
         // Installed from main: nothing to say.
         build = ServerBuild(commit: head(scene.root), builtAt: nil)
         #expect(!lead.call("status", [:]).text.contains("Gate code on main"))
-        // A build that recorded no commit: by its time.
+        // A build that recorded no commit: the gate's commits after its files' date are surely past it.
         build = ServerBuild(commit: nil, builtAt: Date(timeIntervalSince1970: 0))
         #expect(lead.call("status", [:]).text.contains("Gate code on main isn't installed yet: 2 commits"))
+        // None after it: the date may be the install's copy of an older build, so it can't be compared.
         build = ServerBuild(commit: nil, builtAt: Date().addingTimeInterval(3600))
-        #expect(!lead.call("status", [:]).text.contains("Gate code on main"))
+        let undated = lead.call("status", [:]).text
+        #expect(undated.contains("Gate code on main couldn't be compared with the installed build (unknown (no commit recorded")
+                && undated.contains("it recorded no commit, and its files' date") && undated.contains("Taken as not installed yet"), "\(undated)")
+        // A commit this repository doesn't hold: can't be compared either.
+        build = ServerBuild(commit: elsewhere, builtAt: nil)
+        #expect(lead.call("status", [:]).text.contains("couldn't be compared with the installed build (cccccccccccc): its commit cccccccccccc isn't in this repository"))
         // Not running from an installed app (no build known): nothing to say.
         build = nil
         #expect(!lead.call("status", [:]).text.contains("Gate code on main"))
+    }
+
+    /// turn-this-incident-into-12:F1: a git log that fails (here, a tree it needs is missing; a timeout returns the
+    /// same failure) is a lag that couldn't be compared, never none: status says so, and merge_remote refuses.
+    @Test func aGitLogThatFailsCountsAsALagThatCouldntBeCompared() throws {
+        let scene = try makeScene()
+        let installed = head(scene.root)
+        try gateCommit(scene)
+        let lead = try lead(scene.root, FakeRuntime())
+        lead.power = { nil }
+        lead.runningBuild = { ServerBuild(commit: installed, builtAt: nil) }
+        #expect(!lead.call("configure", ["auto_advance": false]).isError)
+        #expect(lead.call("status", [:]).text.contains("Gate code on main isn't installed yet: 1 commit"))
+        // The gate commit's tree, gone: git log can't diff it.
+        let tree = git(["rev-parse", "main^{tree}"], in: scene.root).output
+        try FileManager.default.removeItem(atPath: scene.root + "/.git/objects/\(tree.prefix(2))/\(tree.dropFirst(2))")
+        #expect(!Git.run(["log", "-1", "main", "--", "Sources/VibeCore/Worktrees*"], in: scene.root).ok)
+        let before = head(scene.root)
+
+        let status = lead.call("status", [:]).text
+        #expect(status.contains("Gate code on main couldn't be compared with the installed build (\(installed.prefix(12))): git log of main's gate code failed")
+                && status.contains("Taken as not installed yet"), "\(status)")
+        let remote = lead.call("merge_remote", [:])
+        #expect(remote.isError && remote.text.contains("couldn't be compared") && remote.text.contains("may lack them")
+                && remote.text.contains("Ask the user to install"), "\(remote.text)")
+        #expect(head(scene.root) == before)
     }
 
     /// While status says the gate's code on main isn't installed, merge_remote and a merge of a branch carrying the

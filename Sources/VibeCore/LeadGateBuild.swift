@@ -21,13 +21,19 @@ public struct ServerBuild: Equatable, Sendable {
         self.builtAt = builtAt
     }
 
-    /// How a receipt and a progress line name it: the commit's first 12 characters, else the build's time.
+    /// How a receipt and a progress line name it: the commit's first 12 characters. A build that recorded none is
+    /// unknown: its executable's date (the host log's build id) is when it was copied into place, not what it holds
+    /// (install-app.sh's `cp -R` dates the copy), so it's only said beside.
     public var label: String {
         if let commit { return String(commit.prefix(12)) + (changed ? " with changes not committed" : "") }
-        guard let builtAt else { return "unknown" }
+        guard let builtAt else { return "unknown (no commit recorded)" }
+        return "unknown (no commit recorded; its files dated \(Self.date(builtAt)), \(Int(builtAt.timeIntervalSince1970)))"
+    }
+
+    static func date(_ date: Date) -> String {
         let format = ISO8601DateFormatter()
         format.formatOptions = [.withInternetDateTime]
-        return "of \(format.string(from: builtAt)) (\(Int(builtAt.timeIntervalSince1970)); no commit recorded)"
+        return format.string(from: date)
     }
 
     /// This process's build, read once (an install the tool server switches to replaces the process, so it reads its
@@ -60,18 +66,32 @@ extension LeadToolset {
     /// change to it on main does nothing for merges until it's installed. Git pathspecs, from the repository's root.
     static let gatePaths = ["Sources/VibeCore/Lead*", "Sources/VibeCore/Worktrees*", "Sources/VibeCore/MergeRerun*", "Sources/vibeswitcher-mcp/"]
 
-    /// Commits on the base touching the gate's own code that the running build lacks.
+    /// Commits on the base touching the gate's own code that the running build lacks, or why it couldn't be compared
+    /// with the base (taken as lacking them: the check fails closed).
     struct GateLag: Equatable {
-        /// Each one's short id and subject, newest first.
+        /// Each one's short id and subject, newest first; empty when `uncompared`.
         var commits: [(id: String, subject: String)]
         var build: ServerBuild
+        /// Why the build couldn't be compared with the base (git failed or ran out of time, the build's commit isn't in
+        /// this repository, or it recorded none and its files' date can't tell); nil when it was.
+        var uncompared: String?
+
+        init(commits: [(id: String, subject: String)] = [], build: ServerBuild, uncompared: String? = nil) {
+            self.commits = commits
+            self.build = build
+            self.uncompared = uncompared
+        }
 
         static func == (lhs: GateLag, rhs: GateLag) -> Bool {
-            lhs.commits.map(\.id) == rhs.commits.map(\.id) && lhs.build == rhs.build
+            lhs.commits.map(\.id) == rhs.commits.map(\.id) && lhs.build == rhs.build && lhs.uncompared == rhs.uncompared
         }
 
         /// status's line.
         func text(base: String) -> String {
+            if let uncompared {
+                return "Gate code on \(base) couldn't be compared with the installed build (\(build.label)): \(uncompared). "
+                    + "Taken as not installed yet; merges run the installed build."
+            }
             let shown = commits.prefix(3).map { LeadToolset.clip($0.subject, 80) }.joined(separator: "; ")
                 + (commits.count > 3 ? "; … and \(commits.count - 3) more" : "")
             return "Gate code on \(base) isn't installed yet: \(commits.count) commit\(commits.count == 1 ? "" : "s") (\(shown)); merges run the installed build (\(build.label))."
@@ -79,40 +99,51 @@ extension LeadToolset {
 
         /// What merge_remote and a merge of a branch carrying the remote say when they refuse.
         func refusal(base: String, what: String) -> String {
-            "Not merged (nothing was tested): \(text(base: base)) \(what) runs through that build's gate, which lacks them. "
+            "Not merged (nothing was tested): \(text(base: base)) \(what) runs through that build's gate, which "
+                + (uncompared == nil ? "lacks them. " : "may lack them. ")
                 + "Ask the user to install the app from \(base) (scripts/build-app.sh --install), then merge again."
         }
     }
 
     /// The commits on `workflow`'s base touching `gatePaths` that the running build (`runningBuild`) lacks: past its
-    /// commit, or (a build that recorded none, or one this repository doesn't hold) committed after it was built. Nil
-    /// when there are none, or no build is known (not running from an installed app).
+    /// commit, or (a build that recorded none) committed after its files' date, which is no earlier than its build.
+    /// Fails closed (turn-this-incident-into-12:F1, F3): a git log that fails or runs out of time, a commit this
+    /// repository doesn't hold, or a build with no commit whose files' date is past all the gate's commits (an install
+    /// copies the files, dating them then) is a lag that couldn't be compared. Nil when there's none, when no build is
+    /// known (not running from an installed app), and in a repository holding none of the gate's code.
     func gateLag(_ workflow: LeadWorkflow) -> GateLag? {
         guard let build = runningBuild(), let head = branchHead(workflow.base) else { return nil }
         let paths = ["--"] + Self.gatePaths
-        var found: [(id: String, subject: String)] = []
-        if let commit = build.commit, Git.run(["cat-file", "-e", "\(commit)^{commit}"], in: root).ok {
-            let log = Git.run(["log", "--format=%h%x09%s", "\(commit)..\(head)"] + paths, in: root)
-            guard log.ok else { return nil }
-            found = log.output.split(separator: "\n").map { line in
-                let parts = line.split(separator: "\t", maxSplits: 1).map(String.init)
-                return (parts[0], parts.count > 1 ? parts[1] : "")
+        func failed(_ what: String, _ result: Git.Result) -> GateLag {
+            let said = (result.error.isEmpty ? result.output : result.error).split(separator: "\n").first.map(String.init) ?? ""
+            return GateLag(build: build, uncompared: "git log \(what) failed" + (said.isEmpty ? "" : " (\(LeadToolset.clip(said, 160)))"))
+        }
+        func entries(_ output: String, fields: Int) -> [[String]] {
+            output.split(separator: "\n").map { $0.split(separator: "\t", maxSplits: fields - 1, omittingEmptySubsequences: false).map(String.init) }
+        }
+        // Another project's repository holds none of it: nothing to lag behind.
+        let newest = Git.run(["log", "-1", "--format=%h", head] + paths, in: root)
+        guard newest.ok else { return failed("of \(workflow.base)'s gate code", newest) }
+        guard !newest.output.isEmpty else { return nil }
+        let found: [(id: String, subject: String)]
+        if let commit = build.commit {
+            guard Git.run(["cat-file", "-e", "\(commit)^{commit}"], in: root).ok else {
+                return GateLag(build: build, uncompared: "its commit \(commit.prefix(12)) isn't in this repository")
             }
+            let log = Git.run(["log", "--format=%h%x09%s", "\(commit)..\(head)"] + paths, in: root)
+            guard log.ok else { return failed("\(commit.prefix(8))..\(workflow.base)", log) }
+            found = entries(log.output, fields: 2).map { ($0[0], $0.count > 1 ? $0[1] : "") }
         } else if let builtAt = build.builtAt {
+            let log = Git.run(["log", "--format=%h%x09%ct%x09%s", "--since=\(ISO8601DateFormatter().string(from: builtAt))", head] + paths, in: root)
+            guard log.ok else { return failed("of \(workflow.base)'s gate code since \(ServerBuild.date(builtAt))", log) }
             let after = Int(builtAt.timeIntervalSince1970)
-            // Bounded by the date, so a long history isn't walked at each status.
-            let since = ISO8601DateFormatter().string(from: builtAt)
-            let log = Git.run(["log", "--format=%h%x09%ct%x09%s", "--since=\(since)", head] + paths, in: root)
-            guard log.ok else { return nil }
-            for line in log.output.split(separator: "\n") {
-                let parts = line.split(separator: "\t", maxSplits: 2).map(String.init)
-                guard parts.count >= 2, let time = Int(parts[1]) else { continue }
-                // Newest first: the first one built into it ends the list (a later date below it is clock skew).
-                guard time > after else { break }
-                found.append((parts[0], parts.count > 2 ? parts[2] : ""))
+            found = entries(log.output, fields: 3).filter { $0.count >= 2 && (Int($0[1]) ?? 0) > after }.map { ($0[0], $0.count > 2 ? $0[2] : "") }
+            // None after its files' date: they may be the install's copy of an older build, so that tells nothing.
+            if found.isEmpty {
+                return GateLag(build: build, uncompared: "it recorded no commit, and its files' date (\(ServerBuild.date(builtAt))) is past \(workflow.base)'s gate code, as an install's copy dates them; install a build that records its commit")
             }
         } else {
-            return nil
+            return GateLag(build: build, uncompared: "it recorded no commit, and its files' date can't be read")
         }
         return found.isEmpty ? nil : GateLag(commits: found, build: build)
     }
