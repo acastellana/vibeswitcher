@@ -73,3 +73,10 @@ Evidence: wallet-requests-marked's first audit: stopped 15:14 on "Allow: Read 4-
 Task: wallet-requests-reach-a
 Check: task turn-this-incident-into-4 turns it into a check that runs before merge.
 
+## 2026-11-07 17:31:31 The user's `scripts/build-app.sh --install` failed mid-copy and left /Applications/VibeSwitcher.app broken (bad signature) and not running
+
+Evidence: 2026-11-07 ~17:26: quit OK, then `cp: …/VibeSwitcher_VibeHostTests.bundle/Contents/Resources/Fixtures/claude-2.1.302-suggestion.raw: fcopyfile failed: Input/output error`; `codesign -v /Applications/VibeSwitcher.app` → "a sealed resource is missing or invalid". The run was the user's `!` command in Claude Code's sandbox. The lead's retry outside the sandbox installed and launched it at 17:31 (pid 48270, signature ok). The check is carried by task the-app-ships-no.
+
+Task: the-app-ships-no
+Check: task turn-this-incident-into-5 turns it into a check that runs before merge.
+

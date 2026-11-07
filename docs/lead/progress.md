@@ -3143,3 +3143,8 @@
 - 2026-11-07 14:56 Automatically (auto_advance): Cleaned up a-settings-option-to (freed 1.3 GB of build output and temporary folders). It stays done.
 - 2026-11-07 14:56 Update: Merged: permission banners get Allow and Deny (install to use) — **What changed.** When a session stops on a permission prompt, its notification now has **Allow** and **Deny** buttons. They require an unlocked Mac and don't bring the app forward. They answer the wa…
 - 2026-11-07 14:56 Update: Merged: Settings › Project lead › Ignore usage limits (install to use) — **What changed.** A new toggle, **Ignore usage limits**, off by default and shared by every project on this Mac (mac-limits.json). When it's on:
+- 2026-11-07 17:31 Planned the-app-ships-no: The app ships no test bundles, and a failed install leaves the old app working
+- 2026-11-07 17:31 Incident: The user's `scripts/build-app.sh --install` failed mid-copy and left /Applications/VibeSwitcher.app broken (bad signature) and not running (in the-app-ships-no); planned turn-this-incident-into-5 to turn it into a check
+- 2026-11-07 17:31 Folded turn-this-incident-into-5 into the-app-ships-no: that task carries its work
+- 2026-11-07 17:34 Started a worker on the-app-ships-no
+- 2026-11-07 17:34 Automatically (auto_advance): Started a worker on the-app-ships-no (The app ships no test bundles, and a failed install leaves the old app working).
