@@ -36,7 +36,13 @@ with_tmpdir() {
 
 # Entries a test run left in its temporary folder (test-under-load.sh).
 tmpdir_leftovers() {
-    ls -A "$1"
+    ls -A "$1" | while IFS= read -r entry; do
+        case $entry in
+            # Xcode 27.2's xcrun leaves its cache, lock and temporary variants in TMPDIR.
+            xcrun_db*) ;;
+            *) printf '%s\n' "$entry" ;;
+        esac
+    done
 }
 
 scratch_exit() {

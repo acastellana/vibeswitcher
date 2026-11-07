@@ -111,6 +111,34 @@ import Testing
     /// Readings under every threshold.
     let idle = ["FAKE_LOAD": "0.5", "FAKE_MEMORY": "80", "FAKE_DISK_GB": "100"]
 
+    /// Exercise the same listing and empty-result check as the harness, without starting nested test bundles.
+    @Test(arguments: ["", "xcrun_db", "xcrun_db.lock", "xcrun_db.tmp", "other-file", ".hidden", "prefix-xcrun_db"])
+    func temporaryFolderLeftoversOnlyAllowXcrunCache(extra: String) throws {
+        let folder = temp.url("run-tmp")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // A real leftover must still fail even when the cache is present beside it.
+        try Data().write(to: folder.appendingPathComponent("xcrun_db"))
+        if !extra.isEmpty { try Data().write(to: folder.appendingPathComponent(extra)) }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.currentDirectoryURL = Self.repo
+        process.arguments = ["-c", """
+        source scripts/lib/scratch.sh
+        left=$(tmpdir_leftovers "$1")
+        printf '%s' "$left"
+        [[ -z $left ]]
+        """, "leftover-check", folder.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        waitForEnd(process)
+        let allowed = extra.isEmpty || extra.hasPrefix("xcrun_db")
+        #expect(process.terminationStatus == (allowed ? 0 : 1), "\(output)")
+        #expect(output == (allowed ? "" : extra))
+    }
+
     @Test func anIdleMacIsOkUpToTwoLoadProcessesPerCore() async throws {
         let run = try await harness(["--load", "\(2 * cores)", "--check-only"], fake: idle)
         #expect(run.status == 0, "\(run.output)")
