@@ -216,6 +216,7 @@ extension LeadToolset {
                 return false
             }
             do { try vault.setHead(tip, root: root, branch: base) } catch { return unrecorded("the vault couldn't record its head", error) }
+            foldRemoteRecords(landed: tip, from: onto)
             let last = order[order.count - 1]
             var flaked: (plan: MergeRerun.Plan, failed: String, log: String?)?
             if case .flaked(let plan, let failed, let again) = passing.outcome {

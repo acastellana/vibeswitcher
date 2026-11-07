@@ -362,8 +362,8 @@ struct WorktreesTests {
 
     /// merge-github-s-main: a branch that carries commits of the remote's fetched tip the base lacks lands as a true
     /// merge, whether it merged them in or fast-forwarded onto them (no merge commit, so it would otherwise be rebased
-    /// as copies), through `rebaseAndTest` and a batch's stack alike. The records are the base's and the remote's, by
-    /// union; a conflict outside them still stops it.
+    /// as copies), through `rebaseAndTest` and a batch's stack alike. The records land as the base has them, their
+    /// conflicts don't stop it; a conflict outside them still does.
     @Test func aBranchCarryingTheRemotesCommitsLandsAsATrueMerge() throws {
         let root = try repo()
         try records(["progress.md": "# Progress\n\n- one\n"], in: root)
@@ -392,8 +392,8 @@ struct WorktreesTests {
         guard case .passed(let tested) = checked else { Issue.record("\(checked)"); return }
         #expect(Git.run(["rev-list", "--parents", "-n", "1", tested], in: root).output == "\(tested) \(main) \(tip)")
         #expect(Git.run(["merge-base", "--is-ancestor", remote, tested], in: root).ok)
-        let progress = Git.run(["show", "\(tested):docs/lead/progress.md"], in: root).output
-        #expect(progress.contains("- the base's") && progress.contains("- the other Mac's") && !progress.contains("<<<<<<<"), "\(progress)")
+        // The records as the base has them (merge takes the remote's into the main checkout's after the fast-forward).
+        #expect(recordsTree(tested, root) == recordsTree(main, root))
         #expect(heads(root, "w").tip == tip)
 
         // A batch's stack lands it the same way.

@@ -838,8 +838,8 @@ public enum Worktrees {
         // other Mac's commits landed as copies, so origin/main wasn't an ancestor of main and push_remote refused,
         // and its lead records were put back to main's copy. Rebased or squashed, the remote's commits would be
         // copies; merged whole, they're themselves.
-        if let carried = carried(remote, onto: base, in: path) {
-            guard let stopped = landAsMerge(onto: base, carrying: carried, in: path, records: records) else { return nil }
+        if carried(remote, onto: base, in: path) != nil {
+            guard let stopped = landAsMerge(onto: base, in: path, records: records) else { return nil }
             return cancel?.isCancelled == true ? .cancelled : stopped
         }
         // A worker brings its branch up to date by merging the base in. Rebasing would drop that merge and replay
@@ -1322,22 +1322,23 @@ public enum Worktrees {
     }
 
     /// The newest commit of `remote` (the remote's tip as fetch_remote fetched it, from the vault: a remote-tracking
-    /// ref is anyone's to move) that the detached HEAD at `path` holds and `base` lacks; nil when there's none, or no
-    /// `remote`.
-    static func carried(_ remote: String?, onto base: String, in path: String) -> String? {
+    /// ref is anyone's to move) that `head` holds and `base` lacks; nil when there's none, or no `remote`.
+    static func carried(_ remote: String?, head: String = "HEAD", onto base: String, in path: String) -> String? {
         guard let remote, !remote.isEmpty else { return nil }
-        let found = Git.run(["merge-base", "HEAD", remote], in: path)
+        let found = Git.run(["merge-base", head, remote], in: path)
         guard found.ok, !found.output.isEmpty else { return nil }
         return Git.run(["merge-base", "--is-ancestor", found.output, base], in: path).ok ? nil : found.output
     }
 
     /// Replaces the detached HEAD at `path` with a merge commit of it on `base` (the base its first parent, so the
     /// base's first-parent history stays a line), for a branch that carries `carried`, a remote's commit the base
-    /// lacks (`carried(_:onto:in:)`): its commits stay themselves, so the remote's tip stays an ancestor of the base.
-    /// The records under `records` land as the base's and `carried`'s, by union (`remoteRecords`), whatever the
-    /// branch did to them, and conflicts only in them don't stop it. Nil when that's done; `conflict` when the branch
-    /// conflicts with `base` elsewhere; `error`, saying what failed, when something else stops it.
-    static func landAsMerge(onto base: String, carrying carried: String, in path: String, records: String?) -> Check? {
+    /// lacks (`carried(_:head:onto:in:)`): its commits stay themselves, so the remote's tip stays an ancestor of the
+    /// base. The records under `records` land as the base has them (`baseRecords`), as in a rebase or a squash, so the
+    /// fast-forward never meets the lead's lines not committed yet; merge then takes the remote's lines into the main
+    /// checkout's records (`LeadRecords.takeRemote`). Conflicts only in them don't stop it. Nil when that's done;
+    /// `conflict` when the branch conflicts with `base` elsewhere; `error`, saying what failed, when something else
+    /// stops it.
+    static func landAsMerge(onto base: String, in path: String, records: String?) -> Check? {
         let tip = Git.run(["rev-parse", "HEAD"], in: path).output
         let subject = Git.run(["log", "-1", "--format=%s", tip], in: path).output
         let author = Git.run(["log", "-1", "--format=%an <%ae>", tip], in: path).output
@@ -1357,9 +1358,9 @@ public enum Worktrees {
                 return unmerged.isEmpty ? .error("Merging \(tip.prefix(8)) into \(base.prefix(8)) failed, and not on a conflict: \(said(merge))") : .conflict
             }
         }
-        if let records, let failure = remoteRecords(records, base: base, remote: carried, in: path) {
+        if let records, !baseRecords(records, base: base, in: path) {
             back()
-            return .error("Taking \(base.prefix(8))'s and the remote's lead records (\(records)) into the merge failed: \(failure)")
+            return .error("Taking \(base.prefix(8))'s lead records (\(records)) into the merge failed.")
         }
         let message = "Merge \(tip.prefix(8))" + (subject.isEmpty ? "" : ": \(subject)")
         let committed = noEditor(["commit", "-q", "-m", message] + (author.isEmpty ? [] : ["--author", author]), in: path)
@@ -1370,42 +1371,55 @@ public enum Worktrees {
         return nil
     }
 
-    /// Puts every one of the lead's records under `records` in the index and worktree at `path` as the union of
-    /// `base`'s and `remote`'s (from their merge base, as merge_remote merges them: both sides' lines kept, the
-    /// base's first where they overlap); one only one side has, as that side has it; gone where neither has it. A
-    /// worker's own edits aren't taken: workers may not edit the records (`LeadLaunch`). Nil when done, else what
-    /// failed.
-    static func remoteRecords(_ records: String, base: String, remote: String, in path: String) -> String? {
-        let ancestor = Git.run(["merge-base", base, remote], in: path).output
+    /// The records at `paths` (relative to `root`) as `ours` has them (the main checkout's, committed or not) with
+    /// `theirs`' lines taken in, by union from `ancestor` (as merge_remote merges them: both sides' lines kept, ours
+    /// first where they overlap): only the ones that change, by path. A record `theirs` didn't change from `ancestor`
+    /// is left out; one only `theirs` has is taken whole. `failure` says what failed.
+    static func unionRecords(root: String, paths: [String], ours: [String: Data], ancestor: String,
+                             theirs: String) -> Result<[String: Data], LeadRemote.Failure> {
         func blob(_ commit: String, _ file: String) -> String? {
             guard !commit.isEmpty else { return nil }
-            let found = Git.run(["rev-parse", "--verify", "--quiet", "\(commit):\(file)"], in: path)
+            let found = Git.run(["rev-parse", "--verify", "--quiet", "\(commit):\(file)"], in: root)
             return found.ok && !found.output.isEmpty ? found.output : nil
         }
-        // git's empty blob, which every repository has: the merge base of a record only one side's history added.
-        let empty = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
-        for file in LeadRecords.paths(records) {
-            let result: String?
-            switch (blob(base, file), blob(remote, file)) {
-            case (nil, nil): result = nil
-            case (let one?, nil), (nil, let one?): result = one
-            case (let ours?, let theirs?) where ours == theirs: result = ours
-            case (let ours?, let theirs?):
-                let merged = Git.run(["merge-file", "--union", "--object-id", ours, blob(ancestor, file) ?? empty, theirs], in: path)
-                guard merged.ok, !merged.output.isEmpty else { return "git merge-file --union on \(file): \(said(merged))" }
-                result = merged.output
-            }
-            if let result {
-                let staged = Git.run(["update-index", "--add", "--cacheinfo", "100644,\(result),\(file)"], in: path)
-                guard staged.ok else { return "staging \(file): \(said(staged))" }
-                let written = Git.run(["checkout-index", "-f", "--", file], in: path)
-                guard written.ok else { return "writing \(file): \(said(written))" }
-            } else {
-                let removed = Git.run(["rm", "-q", "-f", "--ignore-unmatch", "--", file], in: path)
-                guard removed.ok else { return "removing \(file): \(said(removed))" }
-            }
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("vibeswitcher-records-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        do { try FileManager.default.createDirectory(atPath: scratch, withIntermediateDirectories: true) } catch {
+            return .failure(LeadRemote.Failure("\(error)"))
         }
-        return nil
+        // A blob's bytes, as git writes them (git's output here is text, trimmed): through an index of its own.
+        var count = 0
+        func bytes(_ oid: String, _ file: String) -> Data? {
+            count += 1
+            let own = ["GIT_INDEX_FILE": (scratch as NSString).appendingPathComponent("index-\(count)")]
+            let out = (scratch as NSString).appendingPathComponent("out-\(count)") + "/"
+            guard Git.run(["update-index", "--add", "--cacheinfo", "100644,\(oid),\(file)"], in: root, env: own).ok,
+                  Git.run(["checkout-index", "-f", "--prefix=\(out)", "--", file], in: root, env: own).ok else { return nil }
+            return FileManager.default.contents(atPath: out + file)
+        }
+        // git's empty blob: the merge base of a record only one side's history added.
+        let empty = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+        var changed: [String: Data] = [:]
+        for file in paths {
+            guard let their = blob(theirs, file) else { continue }
+            let old = blob(ancestor, file)
+            guard their != old else { continue }
+            guard let mine = ours[file] else {
+                guard let data = bytes(their, file) else { return .failure(LeadRemote.Failure("Couldn't read \(file) as \(theirs.prefix(8)) has it.")) }
+                changed[file] = data
+                continue
+            }
+            let copy = (scratch as NSString).appendingPathComponent("ours-\(changed.count)-\(count)")
+            guard FileManager.default.createFile(atPath: copy, contents: mine) else { return .failure(LeadRemote.Failure("Couldn't copy \(file) to merge it.")) }
+            let hashed = Git.run(["hash-object", "-w", "--path=\(file)", "--", copy], in: root)
+            guard hashed.ok, !hashed.output.isEmpty else { return .failure(LeadRemote.Failure("git hash-object \(file): \(said(hashed))")) }
+            let merged = Git.run(["merge-file", "--union", "--object-id", hashed.output, old ?? empty, their], in: root)
+            guard merged.ok, !merged.output.isEmpty else { return .failure(LeadRemote.Failure("git merge-file --union on \(file): \(said(merged))")) }
+            guard merged.output != hashed.output else { continue }
+            guard let data = bytes(merged.output, file) else { return .failure(LeadRemote.Failure("Couldn't read the union of \(file).")) }
+            changed[file] = data
+        }
+        return .success(changed)
     }
 
     /// Files Claude Code reads as settings or instructions (project settings and hooks under `.claude/`, `.mcp.json`,

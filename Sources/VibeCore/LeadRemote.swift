@@ -425,6 +425,37 @@ extension LeadToolset {
         return vault.head(root: root, branch: LeadRemote.trackingRef(remote: remote, branch: workflow.base))
     }
 
+    /// Refuses a task whose branch holds commits of the remote's branch that fetch_remote didn't fetch (nothing fetched
+    /// yet, or the remote-tracking ref moved past what it fetched): merge lands a branch that carries the remote's
+    /// commits as a true merge and takes the remote's records as fetch_remote fetched them (`foldRemoteRecords`), so
+    /// records past that would be dropped for good (merge_remote then has nothing to merge).
+    func checkRemoteCarried(_ slug: String, commit: String) throws {
+        let workflow = self.workflow
+        let remote = workflow.remoteName
+        guard LeadRemote.isName(remote), let base = branchHead(workflow.base) else { return }
+        let ref = Git.run(["rev-parse", "--verify", "--quiet", LeadRemote.trackingRef(remote: remote, branch: workflow.base) + "^{commit}"], in: root)
+        guard ref.ok, !ref.output.isEmpty else { return }
+        let found = Git.run(["merge-base", commit, ref.output], in: root)
+        guard found.ok, !found.output.isEmpty, !Git.run(["merge-base", "--is-ancestor", found.output, base], in: root).ok else { return }
+        let label = "\(remote)/\(workflow.base)"
+        guard let fetched = fetchedTip(workflow) else {
+            throw Problem(text: "Not merged (nothing was tested): agent/\(slug) holds commits of \(label) (up to \(found.output.prefix(8))) that \(workflow.base) lacks, and fetch_remote hasn't fetched \(label). Run fetch_remote, then merge again: a branch that carries the remote's commits lands as a true merge, with the remote's records as fetch_remote fetched them.")
+        }
+        guard Git.run(["merge-base", "--is-ancestor", found.output, fetched], in: root).ok else {
+            throw Problem(text: "Not merged (nothing was tested): agent/\(slug) holds commits of \(label) (up to \(found.output.prefix(8))) past what fetch_remote fetched (\(fetched.prefix(8))). Run fetch_remote, then merge again: the remote's records are taken as fetch_remote fetched them.")
+        }
+    }
+
+    /// After a merge moved the base from `base` to `landed`: the lead's records the remote's commits it brought in have
+    /// (as fetch_remote fetched them), taken into the main checkout's (`LeadRecords.takeRemote`), for the flush after
+    /// the merge to commit. A failure is said in progress; the code has landed either way.
+    func foldRemoteRecords(landed: String, from base: String) {
+        guard let carried = Worktrees.carried(fetchedTip(workflow), head: landed, onto: base, in: root) else { return }
+        if let failure = records.takeRemote(carried, since: base) {
+            try? store.appendProgress("The remote's lead records (\(carried.prefix(8))) weren't taken into ours after the merge: \(failure)")
+        }
+    }
+
     public static func commits(_ count: Int) -> String { "\(count) commit\(count == 1 ? "" : "s")" }
 
     static func outlook(_ outlook: LeadRemote.Outlook, base: String, label: String) -> String {

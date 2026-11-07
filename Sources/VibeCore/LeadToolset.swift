@@ -2734,6 +2734,7 @@ public final class LeadToolset: MCPToolset {
                 + ". Have the worker fix \(blocking.count == 1 ? "it" : "them") and audit again, or dismiss_finding with a reason, or add_task(from_finding: …) to move one to a task of its own.")
         }
         try checkMergePolicy(task, commit: commit)
+        try checkRemoteCarried(slug, commit: commit)
         return MergeGate(task: task, commit: commit, audited: audited, dismissed: dismissed)
     }
 
@@ -2870,6 +2871,7 @@ public final class LeadToolset: MCPToolset {
         switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tested, from: current) }) {
         case .merged:
             try vault.setHead(tested, root: root, branch: base)
+            foldRemoteRecords(landed: tested, from: current)
             let flakes = flaked.map { MergeRerun.flakes(in: $0.failed) } ?? []
             // Each flaky test's failure lines, where every session can read them (the merge's log is in the vault).
             let flakeLines = flaked.map { MergeRerun.evidence(in: $0.failed, tests: flakes) } ?? [:]

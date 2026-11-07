@@ -18,7 +18,7 @@ struct PrivateWriteLintTests {
         "Sources/VibeCore/TeamSummaries.swift": (1, "its folder, 0700 attributes"),
         "Sources/VibeCore/TranscriptReader.swift": (2, "converted transcripts in a 0700 folder"),
         "Sources/VibeCore/LeadRemote.swift": (3, "merge_remote's scratch folder in the vault (0700 attributes) and the lead's records merged in its scratch worktree, a git checkout"),
-        "Sources/VibeCore/Worktrees.swift": (9, "merge and revert scratch and check logs in the vault's 0700 folders; worktrees and hash copies are git checkouts"),
+        "Sources/VibeCore/Worktrees.swift": (11, "merge and revert scratch and check logs in the vault's 0700 folders; worktrees and hash copies are git checkouts; the lead's records (the repository's own files) copied for their union in the user's temporary folder"),
         "Sources/VibeHost/VaultStorage.swift": (1, "the host's vault: its own 0600 rules"),
         "Sources/VibeHost/HostLog.swift": (1, "the host's log: its own 0600 rules"),
         "Sources/vibeswitcher-host/main.swift": (1, "the host's launchers folder, 0700 attributes"),
@@ -32,7 +32,7 @@ struct PrivateWriteLintTests {
         "Sources/VibeSwitcher/SessionStore.swift": (1, "the state folder, made 0700 by ensurePrivateDirectories first"),
         // Not VibeSwitcher's own files.
         "Sources/VibeCore/LeadBoard.swift": (2, ".git/info/exclude: git's file"),
-        "Sources/VibeCore/LeadRecords.swift": (2, "records_dir: the repository's own committed files, with its usual modes"),
+        "Sources/VibeCore/LeadRecords.swift": (4, "records_dir: the repository's own committed files, with its usual modes (the remote's lines taken in after a merge too)"),
         "Sources/VibeCore/HookInstaller.swift": (2, "the agents' settings (~/.claude, ~/.codex): theirs"),
         "Sources/VibeCore/ProjectCreation.swift": (3, "a new project the user makes, with its usual modes"),
         "Sources/VibeCore/FolderRepository.swift": (4, "a folder the user chose for a lead: its .gitignore, and git's .git/info/exclude, with their usual modes; an empty repository's index and exclude put back as they were"),
