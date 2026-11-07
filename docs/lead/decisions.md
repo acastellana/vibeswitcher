@@ -227,3 +227,7 @@ The user chose to switch reviews to Opus rather than wait (AFB3AD43), after the 
 
 The user agreed (2026-11-06). This week's evidence shows no failure these would have caught: workers always ran the reverse-apply check, a verifier reproduced it once, there were no reverts, and every out-of-boundary edit was declared and accepted. They cost usage and heavy slots while usage is ahead of pace and load spikes are the live problem. The policy is incident first, then the check.
 
+## 2026-11-07 09:57:10 Past 80% of Claude's weekly limit, keep starting workers and audits (override_usage) until the limit itself, through the Nov 11 18:00 reset.
+
+The user's answer to FFC4FEF0 (2026-11-07): "Keep everything going past 80%, up to the limit", and "lets continue with all".
+
