@@ -442,8 +442,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     /// A banner's Allow or Deny for `tty`'s permission prompt didn't answer it (`PromptActions`): said on the card
     /// too, when the chat shows that session.
     func answerFailed(tty: String, text: String) {
-        guard model.selectedRow?.session?.tty == tty else { return }
-        chat.answerNotice = text
+        guard let row = model.selectedRow, row.session?.tty == tty, let id = row.hostID else { return }
+        sync.say(text, for: id)
     }
 
     private func makeSync() -> ChatSync {

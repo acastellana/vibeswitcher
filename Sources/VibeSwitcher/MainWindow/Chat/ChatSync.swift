@@ -110,6 +110,9 @@ final class ChatSync {
     /// drew (`drawn`), and the notice is said again of the next read taken (none when that's still the question
     /// drawn: it can be clicked again). Its session's.
     private var refused: (id: UUID, drawn: ScreenMenu)?
+    /// A notice from outside the card (a banner's Allow or Deny that didn't answer, `say`): said again of the next
+    /// read taken, so the card catching up with the screen (a new menu clears the notice) doesn't drop it. Its session's.
+    private var told: (id: UUID, text: String)?
     /// What the screen shows now, for an answer about to be typed in: the pane's last read, taken or not (the card
     /// may be a read behind it), else the card's.
     private var onScreenNow: ScreenMenu? { paneSettling ? paneMenus?.menus.latest : chat.menu }
@@ -273,6 +276,10 @@ final class ChatSync {
         }
         if onScreen == nil, watched, settled.settling { return }
         guard show(menu) else { return }
+        if let told {
+            self.told = nil
+            if told.id == target.id { chat.answerNotice = told.text }
+        }
         if let refused {
             self.refused = nil
             if refused.id == target.id {
@@ -500,6 +507,15 @@ final class ChatSync {
         setAnswering((menu, now().addingTimeInterval(ScreenMenu.duration(writes) + Self.answerWait)))
         readSoon(after: ScreenMenu.duration(writes))
         chat.scrollToBottom()
+    }
+
+    /// Says `text` on the card of session `id` (the selected one): now, and again once the screen's next read is
+    /// taken (the card may be a read behind a prompt that changed).
+    func say(_ text: String, for id: UUID) {
+        guard target()?.id == id else { return }
+        chat.answerNotice = text
+        told = (id, text)
+        readScreen()
     }
 
     /// The answer card's tab `index`: ← / → from the tab the screen has open now.
@@ -734,7 +750,7 @@ final class ChatSync {
     }
 
     /// What the card says when the session host didn't take keys sent to the session.
-    static let keysLost = "That didn't reach the session: the session host didn't take the keys. Nothing was answered; try again."
+    static let keysLost = "That didn't reach the session: the session host didn't take the keys. Try again."
 }
 
 /// A permission prompt answered from outside the chat: a notification's Allow or Deny (`PromptActions`). It goes the

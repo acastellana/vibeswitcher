@@ -146,6 +146,25 @@ struct PromptActionsTests {
         #expect(chat.answerNotice == ChatSync.keysLost)
     }
 
+    /// The window's card a read behind a prompt that changed when a banner's Allow is refused: the notice stays on
+    /// the card once it shows the prompt as it is now (a new menu on the card clears its notice).
+    @Test func theRefusalStaysOnTheCardOnceItCatchesUp() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "permission", "file": Self.file])
+        try await h.settle { $0.contains("4-marked-no-peer-main-dark.png") && $0.contains("Do you want to proceed?") }
+        #expect(try h.requireCard().question.contains("4-marked-no-peer-main-dark.png"))
+        h.tell(["op": "permission", "file": "/Users/x/dev/repo/secrets/other.png"])
+        try await h.paneShows { $0.contains("other.png") && $0.contains("Do you want to proceed?") }
+        h.sync.say(PromptAnswer.Failure.changed.text, for: h.session.id)
+        #expect(h.chat.answerNotice == PromptAnswer.Failure.changed.text)
+        try await h.waitFor {
+            h.tickNow()
+            return h.card?.question.contains("other.png") == true && !h.sync.confirming
+        }
+        #expect(h.chat.answerNotice == PromptAnswer.Failure.changed.text, "\(String(describing: h.chat.answerNotice))")
+    }
+
     // MARK: No actions for anything else
 
     /// A question (AskUserQuestion) on screen isn't a permission prompt: its banner gets no Allow and Deny.
