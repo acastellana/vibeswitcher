@@ -109,7 +109,8 @@ public enum LeadLaunch {
     /// auto-memory (`~/.claude/projects/<folder>/memory`), which Claude Code loads into every later session there. A
     /// worker that wrote a note there planted it in the verifier that audits it, as its own memory (harness review of
     /// 2026-11-07); a verifier writing there would speak to the next one. Refused to workers and verifiers (the lead's
-    /// tools edit nothing). What a worker's shell writes there the verifier still doesn't read: `verifierEnvironment`.
+    /// tools edit nothing). A rule binds the file tools only: a worker's shell can still write there. Of that, the
+    /// verifier loads no auto-memory (`verifierEnvironment`); settings, CLAUDE.md and skills a shell writes stay open.
     static let claudeHome = ["Edit(~/.claude/**)", "Write(~/.claude/**)"]
 
     /// What each role may not do. `records`: the workflow's `records_dir`, which only the lead's tool server writes
