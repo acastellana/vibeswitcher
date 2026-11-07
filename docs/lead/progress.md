@@ -3332,3 +3332,6 @@
 - 2026-11-07 14:32 Merged test-waits-count-awake: Test waits count awake time, not wall-clock, everywhere a Mac sleep can trip them
 - 2026-11-07 14:32 Flaky in test-waits-count-awake's merge: aQuestionsCardIsUpWithin1Point2SOfTheTerminalDrawingIt(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
 - 2026-11-07 14:32 Planned fix-the-flaky-test-20: aQuestionsCardIsUpWithin1Point2SOfTheTerminalDrawingIt() flaked 3 times within 7 days
+- 2026-11-07 14:32 Automatically (auto_advance): Merged test-waits-count-awake (Test waits count awake time, not wall-clock, everywhere a Mac sleep can trip them) into main at d1e8a40d, on its passing audit and the full test run. (Its first test run failed on aQuestionsCardIsUpWithin1Point2SOfTheTerminalDrawingIt(), (the test command, naming no test) and the rerun of the whole test command passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/test-waits-count-awake/merge-test.log. Each flaky test's failing lines,….)
+- 2026-11-07 14:32 Automatically (auto_advance): Cleaned up test-waits-count-awake (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-07 14:32 Started a worker on fix-the-flaky-test-20
