@@ -108,7 +108,7 @@ extension LeadToolset {
     /// The commits on `workflow`'s base touching `gatePaths` that the running build (`runningBuild`) lacks: past its
     /// commit, or (a build that recorded none) committed after its files' date, which is no earlier than its build.
     /// Fails closed (turn-this-incident-into-12:F1, F3): a git log that fails or runs out of time, a commit this
-    /// repository doesn't hold, or a build with no commit whose files' date is past all the gate's commits (an install
+    /// repository doesn't hold, a build marked changed (`VSSourceChanged`), or a build with no commit whose files' date is past all the gate's commits (an install
     /// copies the files, dating them then) is a lag that couldn't be compared. Nil when there's none, when no build is
     /// known (not running from an installed app), and in a repository holding none of the gate's code.
     func gateLag(_ workflow: LeadWorkflow) -> GateLag? {
@@ -129,6 +129,10 @@ extension LeadToolset {
         if let commit = build.commit {
             guard Git.run(["cat-file", "-e", "\(commit)^{commit}"], in: root).ok else {
                 return GateLag(build: build, uncompared: "its commit \(commit.prefix(12)) isn't in this repository")
+            }
+            // Built from more than (or other than) its commit: what it holds can't be told from the commit.
+            if build.changed {
+                return GateLag(build: build, uncompared: "it was built with changes not committed in Sources/, or its checkout moved while it compiled, so its commit doesn't say what it holds")
             }
             let log = Git.run(["log", "--format=%h%x09%s", "\(commit)..\(head)"] + paths, in: root)
             guard log.ok else { return failed("\(commit.prefix(8))..\(workflow.base)", log) }

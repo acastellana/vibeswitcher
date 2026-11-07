@@ -759,6 +759,9 @@ struct LeadRemoteTests: LeadTeamFixture {
         // Installed from main: nothing to say.
         build = ServerBuild(commit: head(scene.root), builtAt: nil)
         #expect(!lead.call("status", [:]).text.contains("Gate code on main"))
+        // Built from main with changes not committed (or main moved while it compiled): its commit doesn't say.
+        build = ServerBuild(commit: head(scene.root), changed: true, builtAt: nil)
+        #expect(lead.call("status", [:]).text.contains("couldn't be compared with the installed build (\(head(scene.root).prefix(12)) with changes not committed): it was built with changes not committed"))
         // A build that recorded no commit: the gate's commits after its files' date are surely past it.
         build = ServerBuild(commit: nil, builtAt: Date(timeIntervalSince1970: 0))
         #expect(lead.call("status", [:]).text.contains("Gate code on main isn't installed yet: 2 commits"))
