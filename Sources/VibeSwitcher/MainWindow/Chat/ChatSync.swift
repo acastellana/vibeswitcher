@@ -764,7 +764,7 @@ final class ChatSync {
 
     /// The selected window session as dictation drives Claude's /voice in it (`ClaudeVoiceRun`), when it's `key`'s
     /// composer's and runs Claude Code; nil otherwise. Its keys go in raw and at once (key repeats can't wait out a
-    /// unit's gap), its screen is the host's with how it's drawn (Claude's live transcript is dim, not typed), and a
+    /// unit's gap), a held Space's repeats from off the main thread (`HostClient.directKeys`), its screen is the host's with how it's drawn (Claude's live transcript is dim, not typed), and a
     /// command is typed as the composer's messages are, only while that session is still the one shown.
     func claudeVoice(key: String, folder: String? = nil) -> ClaudeVoiceSession? {
         guard let target = target(), target.key == key, target.agent == .claude, host.isUsable else { return nil }
@@ -773,6 +773,11 @@ final class ChatSync {
             guard let self, self.host.isUsable else { return false }
             self.host.send(id, bytes: Data(bytes), reply: false)
             return true
+        }, offMainKeys: { [weak self] in
+            guard let keys = self?.host.directKeys(id) else { return nil }
+            return { keys.send(Data($0)) }
+        }, checkKeys: { [weak self] in
+            self?.host.checkDirectKeys(id)
         }, screen: { [weak self] done in
             guard let self else { return done(nil) }
             self.host.styledScreen(id, completion: done)

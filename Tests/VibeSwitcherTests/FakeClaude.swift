@@ -94,6 +94,8 @@ state = {
     "recording": "",         # "" | warming | listening | tap
     "voiceMessage": "",      # what its footer says about dictation
     "voiceStarts": 0,        # recordings started
+    "longestGap": 0.0,       # the longest a recording went between two repeats (seconds)
+    "heldRepeats": 0,        # repeats taken while recording
     "voiceCancels": 0,       # recordings cancelled (Esc)
     "voiceInserts": 0,       # transcripts written into the box
     "strayed": 0,            # spaces typed by held chains that broke before recording (a stall past "gap"): they stay
@@ -370,6 +372,8 @@ def voice_space():
         VOICE["processed"] += 1
         return VOICE["processed"] > 2
     if state["recording"] == "listening":
+        state["longestGap"] = max(state["longestGap"], round(t - VOICE["last"], 3))
+        state["heldRepeats"] += 1
         VOICE["last"] = t
         return True
     if state["voice"] == "tap":

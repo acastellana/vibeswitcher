@@ -429,6 +429,42 @@ struct ClaudeDictationTests {
         run.cancel(.button)
     }
 
+    /// Claude stopped listening with the key still held and its transcript went into the box (text not dim): the Spaces
+    /// stop at the read that shows it, not a read later. Each Space more went on into a second warmup and recording over
+    /// the transcript (2026-11-07, FakeClaude's voiceStarts 2, and the run said something was typed meanwhile).
+    @Test func aTranscriptInTheBoxWhileHeldStopsTheSpacesAtThatRead() {
+        let timers = Timers()
+        var keys: [[UInt8]] = []
+        var stopped = false
+        var spacesAtLanded: Int?
+        let spaces = { keys.filter { $0 == [ClaudeVoiceRun.space] }.count }
+        let session = ClaudeVoiceSession(keys: { keys.append($0); return true }, screen: { done in
+            let landed = stopped
+            let shown = landed ? ClaudeDictationTests.screen(input: "open the composer view on main")
+                : keys.isEmpty ? ClaudeDictationTests.screen() : ClaudeDictationTests.screen(footer: "listening…")
+            // Reads answer 100 ms on, as on a busy Mac.
+            _ = timers.schedule(0.1) {
+                if landed, spacesAtLanded == nil { spacesAtLanded = spaces() }
+                done(shown)
+            }
+        }, command: { _ in true })
+        var outcome: ClaudeVoiceRun.Outcome?
+        let run = ClaudeVoiceRun(session: session, schedule: timers.schedule, now: { timers.now }) { outcome = $0 }
+        run.start()
+        timers.advance(by: 0.5)
+        #expect(spaces() >= 5, "\(spaces()) Spaces")
+        stopped = true
+        timers.advance(by: 1)
+        #expect(spacesAtLanded != nil)
+        #expect(spaces() == spacesAtLanded, "\(spaces() - (spacesAtLanded ?? 0)) Spaces after the read that showed the transcript")
+        // End right after the last Space, before anything else.
+        let last = keys.lastIndex(of: [ClaudeVoiceRun.space]) ?? 0
+        #expect(keys.dropFirst(last + 1).first == ClaudeVoiceRun.disarm, "\(keys.suffix(4))")
+        run.cancel(.button)
+        timers.advance(by: 3)
+        _ = outcome
+    }
+
     // MARK: - Against FakeClaude's /voice
 
     /// A harness wait that times out says when the main thread was held for seconds at once meanwhile (another
@@ -1093,6 +1129,45 @@ struct ClaudeDictationTests {
         #expect(input(h) == "")
         controller.release()
         #expect(controller.phase == .idle)
+    }
+
+    /// The app's main thread held 700 ms while the key is held (app.log: hundreds of stalls of seconds): the repeats go
+    /// from a queue of their own, every gap between two of them under the one that ends Claude's hold, so it records on
+    /// and the whole transcript lands, not cut. On the main thread's timers they stopped with it, and Claude took the
+    /// gap for the key let go.
+    @Test func aMainThreadStallWhileHeldDoesntEndTheRecording() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        // A hold ends after 350 ms with no repeat here (Claude's 120 ms, widened so a loaded Mac's scheduling of
+        // FakeClaude itself doesn't end it): the stall is twice that.
+        let gap = 0.35
+        h.tell(["op": "voice", "mode": "hold", "gap": gap])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" }
+        let prompts = h.agentPrompts
+        let controller = dictation(h, now: { Date(timeIntervalSinceReferenceDate: MacTime.real.awake()) })
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        try await h.waitFor { h.agent["recording"] as? String == "listening" }
+
+        // The stall: this test runs on the main thread, and nothing else runs there meanwhile.
+        Thread.sleep(forTimeInterval: 2 * gap)
+
+        // Still recording, and the repeats going on after it.
+        let repeats = { h.agent["heldRepeats"] as? Int ?? 0 }
+        let after = repeats()
+        try await h.waitFor { h.agent["recording"] as? String != "listening" || repeats() >= after + 5 }
+        #expect(h.agent["recording"] as? String == "listening", "the recording ended: \(String(describing: h.agent["recording"]))")
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        let longest = h.agent["longestGap"] as? Double ?? 0
+        #expect(longest < gap, "the longest gap between two repeats while it recorded: \(longest) s")
+        #expect(h.agent["voiceStarts"] as? Int == 1)
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
+        #expect(controller.notice == nil, "\(String(describing: controller.notice))")
+        #expect(ended?.contains("cut short") == false, "\(String(describing: ended))")
+        #expect(h.agent["enters"] as? Int == 0 && h.agent["doubleSubmits"] as? Int == 0)
+        #expect(h.agentPrompts == prompts)
+        #expect(input(h) == "")
     }
 
     /// Claude wrote nothing after its level cursor stayed grey the whole recording (silence from the microphone): the
