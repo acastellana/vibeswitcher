@@ -3250,3 +3250,6 @@
 - 2026-11-07 10:33 Started a worker on turn-this-incident-into-10
 - 2026-11-07 10:33 Update: App Nap exemption and hang-free test suite merged — **What changed:**
 - 2026-11-07 10:43 Audit of developer-tools-warning: complete, clean, round 2: 1 Important closed, 3 Nit (2 open), 1 Pre-existing open
+- 2026-11-07 10:47 The worker on start-a-fresh-lead answered findings: start-a-fresh-lead:F1 fixed at 6996a74f: Already committed in 2a2a6e2a and present at current HEAD 6996a74f. rotationGeneration is keyed by session UUID; noteLeadInput bumps only that UUID. Queued delivery uses a separate project-root counter. inputToAnotherSessionDoesNotCancelRotation fails on ceffd1a0 and passes with the fix, including all 3 post-merge load runs.
+- 2026-11-07 10:47 Released turn-this-incident-into-10's worker (idle since its done report on 16b74bb2) while its audit runs
+- 2026-11-07 10:53 Merged developer-tools-warning: Developer-tools warning: no false alarms on a slow read, and a note that clears
