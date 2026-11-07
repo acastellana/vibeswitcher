@@ -412,7 +412,7 @@ not edit that folder.
 `workflow.md` (in `.vibeswitcher/`, git-ignored) holds the limits and commands below. The lead changes it with its
 `configure` tool, which keeps your comments. The guard rails (the test and setup commands, `merge_policy`,
 `sensitive_paths`, `strict_paths`, `records_dir`, `max_workers`, `heavy_slots`, `audit_finders`, `audit_nit_cap`, `auto_advance`,
-`risk_lines`, `risk_model`; `Sources/VibeCore/LeadVaultGuarded.swift:11`)
+`risk_lines`, `risk_model`, `audit_sample_percent`; `Sources/VibeCore/LeadVaultGuarded.swift:11`)
 count only as the lead last set them: when the file says anything else, `merge` and `start_worker` refuse until the
 lead sets them again.
 
@@ -437,6 +437,7 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 | `audit_nit_cap` | 5 | `LeadWorkflow.swift:40` |
 | `risk_lines` | 400 | `LeadRisk.swift:23` |
 | `risk_model` | true (a model pass may also raise a task to audit) | `LeadWorkflow.swift:61` |
+| `audit_sample_percent` | 10 (0: off; review none tasks audited anyway at random, the draw kept on the task) | `LeadAdvance.swift`, `LeadAuditSample.defaultPercent` |
 | `auto_advance` | true | `LeadWorkflow.swift:56` |
 | `merge_policy` | unset: handled as `ask_sensitive` | `LeadWorkflow.swift:41-42` |
 | `sensitive_paths` | the list above | `LeadWorkflow.swift:194` |
