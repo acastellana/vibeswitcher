@@ -3253,3 +3253,13 @@
 - 2026-11-07 10:47 The worker on start-a-fresh-lead answered findings: start-a-fresh-lead:F1 fixed at 6996a74f: Already committed in 2a2a6e2a and present at current HEAD 6996a74f. rotationGeneration is keyed by session UUID; noteLeadInput bumps only that UUID. Queued delivery uses a separate project-root counter. inputToAnotherSessionDoesNotCancelRotation fails on ceffd1a0 and passes with the fix, including all 3 post-merge load runs.
 - 2026-11-07 10:47 Released turn-this-incident-into-10's worker (idle since its done report on 16b74bb2) while its audit runs
 - 2026-11-07 10:53 Merged developer-tools-warning: Developer-tools warning: no false alarms on a slow read, and a note that clears
+- 2026-11-07 10:53 Automatically (auto_advance): Merged developer-tools-warning (Developer-tools warning: no false alarms on a slow read, and a note that clears) into main at 142727b0, on its passing audit and the full test run.
+- 2026-11-07 10:53 Released start-a-fresh-lead's worker (idle since its done report on 6996a74f) while its audit runs
+- 2026-11-07 10:53 Automatically (auto_advance): Released start-a-fresh-lead's worker, idle since its done report on 6996a74f, while its audit runs (ended pid 98502 (Worker: Start a fresh lead session each day, at a quiet moment)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-07 10:53 Automatically (auto_advance): Cleaned up developer-tools-warning; ended pid 99210 (Worker: Developer-tools warning: no false alarms on a slow read, and a note that clears) (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-07 10:54 Audit of turn-this-incident-into-10: complete, clean, round 3: 1 Important closed, 5 Nit open, 1 Pre-existing closed
+- 2026-11-07 10:55 Audit of start-a-fresh-lead: complete, clean, round 2: 1 Important closed, 5 Nit (3 open)
+- 2026-11-07 10:57 Released wake-the-lead-only's worker (idle since its done report on edd2a970) while its audit runs
+- 2026-11-07 11:08 Merged turn-this-incident-into-10: A test run with no progress is stopped in minutes, not at its 45–60 min timeout (in a batch: turn-this-incident-into-10, start-a-fresh-lead landed on one test run)
+- 2026-11-07 11:08 Merged start-a-fresh-lead: Start a fresh lead session each day, at a quiet moment (in a batch: turn-this-incident-into-10, start-a-fresh-lead landed on one test run)
+- 2026-11-07 11:08 Flaky in the batch turn-this-incident-into-10, start-a-fresh-lead: aQuestionsCardIsUpWithin1Point2SOfTheTerminalDrawingIt(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
