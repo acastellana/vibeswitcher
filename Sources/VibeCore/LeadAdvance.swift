@@ -268,7 +268,7 @@ public final class LeadAdvance: @unchecked Sendable {
         let outcomes = text.components(separatedBy: "\n").filter { $0.hasPrefix("- ") }.map { String($0.dropFirst(2)) }
         guard !outcomes.isEmpty else { return true }
         return outcomes.contains { line in
-            return !["Started a worker on ", "Started the audit of ", "Released ", "Cleaned up "].contains { line.hasPrefix($0) }
+            return !["Started a worker on ", "Started the audit of ", "Released ", "Cleaned up ", "Resumed after sleep: "].contains { line.hasPrefix($0) }
         }
     }
 
@@ -340,6 +340,7 @@ public final class LeadAdvance: @unchecked Sendable {
             let workflow = lead.workflow
             return (workflow, try? lead.vault.changedSettings(workflow, root: lead.root))
         }) else { return }
+        resumeAfterSleep()
         guard workflow.autoAdvance else { return }
         // Off as the lead set it, whatever a worker wrote into workflow.md since.
         if let changed, changed.contains(where: { $0.key == "auto_advance" }) {
@@ -395,6 +396,71 @@ public final class LeadAdvance: @unchecked Sendable {
         ready = []
         for task in tasks where task.status == .review { review(task.slug, busy: busy, batching: batching) }
         if batching { mergeReady(busy: busy) } else { readySince = [:] }
+    }
+
+    /// Recovery is independent of auto_advance's task planning switch. Gate refusals leave the interruption visible
+    /// to the lead and register a room-again nudge; no stale or missing power/load reading grants permission to resume.
+    private func resumeAfterSleep() {
+        let recovery = LeadSleepRecovery.Store(root: lead.root)
+        guard let pending = try? recovery.pending(), !pending.isEmpty else { return }
+        for event in pending {
+            guard let power = lead.power(), !(power.onBattery && power.heldUnder != nil),
+                  let load = lead.runtime.steadyLoad(), load <= lead.macLimits().loadLimit else {
+                for remaining in (try? recovery.pending()) ?? [] { try? recovery.release(remaining) }
+                // The app's minute room watch retries this even with auto_advance off or an unchanged power source.
+                // A retry still refused by power records another wait, without duplicating waits on other passes.
+                let what = LeadSleepRecovery.retryWait
+                if !lead.roomWaits.waits().contains(where: { $0.wait.root == lead.root && $0.wait.auto == true && $0.wait.what == what }) {
+                    lead.roomWaits.record(root: lead.root, what: what, need: 0, auto: true)
+                }
+                return
+            }
+            // The timestamp must still describe the last turn. A lead/user may have resumed it while held.
+            guard let sessions = try? lead.advanceSessions() else { return }
+            let task = lead.store.load().task(event.slug)
+            let current = event.verifier
+                ? task?.status == .review && task?.evidence == nil && task?.awaitedVerifiers.contains(event.session) == true
+                : [.running, .failed].contains(task?.status ?? .done) && task?.worker == event.session && task?.stopped != event.session
+            let info = sessions.first { $0.id == event.session }
+            let path = try? lead.runtime.transcript(of: event.session)
+            let tail = path.flatMap { TranscriptTail.read(url: URL(fileURLWithPath: $0)) }
+            let sleepError: Bool
+            if case .turnOver(let error)? = tail?.state { sleepError = LeadSleepRecovery.isSleepError(error) } else { sleepError = false }
+            let stillInterrupted = sleepError && tail?.at == event.at && tail?.usageLimit == nil
+            let actionable = current && info.map { $0.live && $0.usageLimit == nil && lead.runtime.agentEnding($0) == nil } == true && stillInterrupted
+            guard let allowed = try? recovery.claim(event, now: Date().timeIntervalSince1970, attempting: actionable) else { continue }
+            guard actionable else {
+                try? recovery.release(event)
+                once("sleep|\(event.key)", "Not resumed after sleep: the \(event.verifier ? "verifier" : "worker") on \(event.slug) could not be confirmed as still interrupted on its last turn. Check its session and resume it yourself if needed.")
+                continue
+            }
+            guard allowed else {
+                try? recovery.release(event)
+                once("sleep|\(event.key)", "The \(event.verifier ? "verifier" : "worker") on \(event.slug) stopped on the sleep API error a third time in an hour; it needs you to resume it (two automatic resumes already).")
+                continue
+            }
+            step("sleep|\(event.key)") {
+                do {
+                    if event.verifier {
+                        guard let entry = try lead.vault.roster(root: lead.root).first(where: { $0.session == event.session }),
+                              entry.holds, entry.submittedAt == nil, let head = lead.vault.current(.verifier, root: lead.root, task: event.slug)?.auditing else {
+                            throw LeadToolset.Problem(text: "Not resumed after sleep: the interrupted audit of \(event.slug) no longer holds its verifier grant. Check its audit before restarting it.")
+                        }
+                        guard lead.advanceHead(event.slug) == head else {
+                            throw LeadToolset.Problem(text: "The branch moved since the interrupted audit; audit \(event.slug) yourself on its new commit.")
+                        }
+                        _ = try lead.advanceAudit(event.slug, restarting: head)
+                        return "Resumed after sleep: restarted the audit of \(event.slug) on the same commit, \(head.prefix(8))."
+                    }
+                    let sent = try lead.advanceMessage(event.slug, LeadSleepRecovery.message, clearDraft: false)
+                    if case .notSubmitted = sent.delivered { throw LeadToolset.Problem(text: "Sleep resume was not submitted: " + sent.result.text) }
+                    return "Resumed after sleep: sent \(event.slug)'s worker one go-on message."
+                } catch {
+                    try? recovery.release(event)
+                    throw error
+                }
+            }
+        }
     }
 
     /// A task in review: its merge, or its audit, when due.

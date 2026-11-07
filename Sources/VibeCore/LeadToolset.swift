@@ -2094,7 +2094,7 @@ public final class LeadToolset: MCPToolset {
         }
     }
 
-    private func audit(_ slug: String, restart: Bool = false, overrideUsage: Bool = false) throws -> MCPToolResult {
+    private func audit(_ slug: String, restart: Bool = false, overrideUsage: Bool = false, expectedHead: String? = nil) throws -> MCPToolResult {
         if let task = store.load().task(slug), Self.settledStates.contains(task.status) { throw Self.settledRefusal(task, "Not audited") }
         // A verifier already at work on the branch's head is left to it: another would end it and throw its work away
         // (2026-10-27: audit(land-pr-1-host) ended the one auto_advance had started on that very head).
@@ -2107,6 +2107,7 @@ public final class LeadToolset: MCPToolset {
         guard let task = store.load().task(slug), Worktrees.isWorktree(root: root, slug: slug), let head = branchHead(Worktrees.branch(slug)) else {
             throw Problem(text: "\(slug) has no worktree to check.")
         }
+        if let expectedHead, head != expectedHead { throw Problem(text: "Not restarted: \(slug) moved since the interrupted audit at \(expectedHead.prefix(8)).") }
         // A passing verdict on this very commit with nothing Important open: another round would check the same code
         // again, for Nits at most (the working policy: no audit rounds without a concrete open concern; 2026-10-21, text
         // selection took four rounds and the picker card four tasks).
@@ -2169,7 +2170,7 @@ public final class LeadToolset: MCPToolset {
         // The audit starts here (a merged result's test run is part of it): its wait ends, its time begins.
         let auditStart = Date().timeIntervalSince1970
         if finders > 1 {
-            let started = try startFinders(finders, task: task, head: head, merged: merged, workflow: workflow, recheck: recheck, trust: config.isEmpty)
+            let started = try startFinders(finders, task: task, head: head, merged: merged, workflow: workflow, recheck: recheck, trust: config.isEmpty, expectedHead: expectedHead)
             (panel, earlier) = (started.0, started.1)
             session = started.0.sessions[0]
         } else {
@@ -2179,6 +2180,9 @@ public final class LeadToolset: MCPToolset {
                 merged?.logs = run.logs
                 merged?.run = run.outcome.text
                 try? store.appendProgress("Audit of \(slug) at \(head.prefix(8)) tested its merged result \(commit.prefix(8)) onto \(workflow.base): \(run.outcome.text)")
+            }
+            if let expectedHead, branchHead(Worktrees.branch(slug)) != expectedHead {
+                throw Problem(text: "Not restarted: \(slug) moved since the interrupted audit at \(expectedHead.prefix(8)).")
             }
             earlier = try endEarlierVerifiers(task, not: "Not audited, no verifier started")
             session = try launch(.verifier, task: slug, name: "verify-\(slug)", in: Worktrees.path(root: root, slug: slug),
@@ -2319,10 +2323,13 @@ public final class LeadToolset: MCPToolset {
     /// ended first (see `endEarlierVerifiers`), and the panel comes with what audit's reply says of them.
     /// A branch behind the base where it matters is tested as it would land: `merged`'s commit, not `head`.
     private func startFinders(_ count: Int, task: LeadTask, head: String, merged: LeadPrompts.Merged?, workflow: LeadWorkflow,
-                              recheck: LeadPrompts.Reaudit?, trust: Bool) throws -> (LeadAuditPanel, String) {
+                              recheck: LeadPrompts.Reaudit?, trust: Bool, expectedHead: String? = nil) throws -> (LeadAuditPanel, String) {
         let slug = task.slug
         let tested = merged?.commit ?? head
         let run = try auditRun(slug, commit: tested, workflow: workflow, not: "no finder started")
+        if let expectedHead, branchHead(Worktrees.branch(slug)) != expectedHead {
+            throw Problem(text: "Not restarted: \(slug) moved since the interrupted audit at \(expectedHead.prefix(8)).")
+        }
         let sensitive = Self.sensitiveChanges(root: root, head: head, workflow: workflow)
         let focuses = LeadPrompts.Focus.panel(count, sensitive: !sensitive.isEmpty)
         let strict = workflow.strictPaths == nil ? [] : workflow.strictTouched(
@@ -5181,7 +5188,7 @@ extension LeadToolset {
     }
 
     func advanceStart(_ slug: String, when: @escaping (LeadTask) -> Bool) throws -> MCPToolResult { try startWorker(slug, when: when) }
-    func advanceAudit(_ slug: String) throws -> MCPToolResult { try audit(slug) }
+    func advanceAudit(_ slug: String, restarting head: String? = nil) throws -> MCPToolResult { try audit(slug, restart: head != nil, expectedHead: head) }
     func advanceMerge(_ slug: String) throws -> MCPToolResult {
         let merged = try merge(slug)
         records.flush(base: base)

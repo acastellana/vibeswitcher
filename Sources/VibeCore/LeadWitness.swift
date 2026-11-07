@@ -840,7 +840,10 @@ extension LeadWitness {
             var due: [String: [Wait]] = [:]
             var kept: [(file: URL, wait: Wait)] = []
             for (file, wait) in waits() {
-                if now.timeIntervalSince1970 - wait.at > Self.expiry {
+                // A sleep interruption stays pending through a long battery/load hold, even overnight.
+                let pendingSleep = wait.auto == true && wait.what == LeadSleepRecovery.retryWait
+                    && ((try? LeadSleepRecovery.Store(root: wait.root).pending().isEmpty) == false)
+                if now.timeIntervalSince1970 - wait.at > Self.expiry && !pendingSleep {
                     try? FileManager.default.removeItem(at: file)
                     continue
                 }

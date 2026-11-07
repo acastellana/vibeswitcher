@@ -284,6 +284,7 @@ struct WitnessWork {
     var releasableForAdvance: [String] = []
     /// The messages not told yet as of the look (`LeadWitness.unbuiltMessages`), their texts built where they're posted.
     var messages: [(keys: [String], text: @Sendable () -> String)] = []
+    var sleepInterruptions: [LeadSleepRecovery.Interruption] = []
     /// The verifiers waiting on a prompt past its wait, not told yet (`LeadWitness.stuckPrompts`): declined, then told.
     var stuckPrompts: [LeadWitness.StuckPrompt] = []
     /// The running tasks' workers at work (`LeadBudget.working`), and whether the board's counts change for it.
@@ -296,9 +297,11 @@ struct WitnessWork {
     /// `firstSeen`: when the app first saw a verifier end for auto_advance (nil: not before now). `told`: whether an
     /// event key was told already. `step` names each computation as it starts (tests watch or slow them).
     init(board: LeadBoard, seen: [String: LeadWitness.Seen], now: Date, advancing: Bool, budgetMinutes: Int,
-         firstSeen: (String) -> Date?, told: (String) -> Bool, step: ((String) -> Void)? = nil) {
+         firstSeen: (String) -> Date?, told: (String) -> Bool, step: ((String) -> Void)? = nil, recoveryRoot: String? = nil) {
         step?("withoutTools")
         withoutTools = LeadWitness.withoutTools(board: board, seen: seen, now: now)
+        // Sleep recovery also owns running workers and works with auto_advance off.
+        sleepInterruptions = LeadSleepRecovery.interruptions(board: board, seen: seen, now: now)
         var advanced: Set<String> = []
         if advancing {
             step?("endedForAdvance")
@@ -311,6 +314,11 @@ struct WitnessWork {
         }
         step?("unbuiltMessages")
         messages = LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, told: told)
+        if let recoveryRoot {
+            // This initializer runs on the boards' queue. Never lock/read the ledger or write a nudge on main.
+            let recovering = LeadSleepRecovery.enqueue(sleepInterruptions, root: recoveryRoot)
+            messages = messages.filter { !$0.keys.contains(where: recovering.contains) }
+        }
         step?("stuckPrompts")
         stuckPrompts = LeadWitness.stuckPrompts(board: board, seen: seen, now: now, advanced: advanced).filter { !told($0.key) }
         step?("working")
@@ -1795,7 +1803,7 @@ final class LeadController: ObservableObject {
         let (advancing, budget) = (team.advancing, team.workflow.taskBudgetMinutes)
         reads.async({ _ in
             WitnessWork(board: board, seen: seen, now: now, advancing: advancing, budgetMinutes: budget,
-                        firstSeen: { advanceSeenNow["\(root)|\($0)"] }, told: { toldNow.contains("\(root)|\($0)") }, step: step)
+                        firstSeen: { advanceSeenNow["\(root)|\($0)"] }, told: { toldNow.contains("\(root)|\($0)") }, step: step, recoveryRoot: root)
         }) { [weak self] work in
             self?.witnessed(work, root: root, board: board, team: team, now: now)
         }
