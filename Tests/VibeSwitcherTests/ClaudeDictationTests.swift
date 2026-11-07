@@ -1411,13 +1411,24 @@ struct ClaudeDictationTests {
         #expect(h.agent["voiceCancels"] as? Int == 1 && controller.deliveries[h.key] == nil)
     }
 
+    /// Its warmup never records: once the run has seen it warming up, its 3 s for Claude to start are up (on a clock the
+    /// test moves, not 3 s of real Spaces). Claude's chain here waits longer than its 120 ms, so a stall on a loaded Mac
+    /// can't break it meanwhile and keep two more spaces typed, which read as /voice off (the stall tests cover that).
     @Test func outOfFocusItsToldTheTruthAfterAWarmupThatNeverRecords() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
-        try await outOfFocus(h, ["warmup": 100000])
+        try await outOfFocus(h, ["warmup": 100000, "gap": 5.0])
         let outs = focusOuts(h)
-        let controller = dictation(h)
+        let clock = Clock(held: true)
+        let controller = dictation(h, now: clock.now)
         controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor {
+            let lines = Breadcrumbs.shared.lines
+            guard self.input(h).count == ClaudeVoiceScreen.warmupTyped,
+                  let began = lines.lastIndex(where: { $0.contains("dictation: Claude's began") }) else { return false }
+            return lines[began...].last { $0.contains("dictation: Claude's saw") }?.hasSuffix("saw warming up") == true
+        }
+        clock.ahead += ClaudeVoiceRun.startWithin
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.notice?.text == ClaudeVoiceRun.unclear(.warming), "\(String(describing: controller.notice))")
         try await h.waitFor { self.focusOuts(h) == outs + 1 }

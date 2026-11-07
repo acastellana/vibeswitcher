@@ -105,7 +105,7 @@ state = {
 # "awaiting": a transcript went in and a second push of the key would send it (2.1.312's awaitingVoiceSubmitDoubleTap);
 # "push": when the first push came; "submitAt": when an armed send fires (120 ms after the second push); "typed": the
 # spaces the chain going now typed (its first two presses).
-VOICE = {"before": "", "last": 0.0, "repeats": 0, "awaiting": False, "push": 0.0, "submitAt": None,
+VOICE = {"before": "", "last": float("-inf"), "repeats": 0, "awaiting": False, "push": 0.0, "submitAt": None,
          "until": 0.0, "box": "", "processed": 0, "typed": 0}
 METER = ESC + "[38;2;215;119;87m" + "▃" + ESC + "[39m"   # its recording-level cursor: a coloured bar, not dim
 QUIET = ESC + "[38;2;128;128;128m" + "▁" + ESC + "[39m"  # the same below a low level: grey
