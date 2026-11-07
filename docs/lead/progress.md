@@ -3413,3 +3413,13 @@
 - 2026-11-07 20:36 Started a worker on usage-watch-forgets-a (auto → Claude: Claude weekly 4%, 30 points behind pace, not tight; Codex 59%)
 - 2026-11-07 20:36 Automatically (auto_advance): Started a worker on usage-watch-forgets-a (Usage watch forgets a limit hit on a different Claude account); its agent is auto, so it went to Claude: Claude weekly 4%, 30 points behind pace, not tight; Codex 59%.
 - 2026-11-07 20:37 Released review-sampling-audit-10's worker (idle since its done report on bcdfcfda) while its audit runs
+- 2026-11-07 20:46 Audit of review-sampling-audit-10: complete, clean, round 1: 2 Nit open
+- 2026-11-07 20:53 Planned ideas-backlog-ranked: Ideas backlog: ranked improvement ideas with their sources, in git
+- 2026-11-07 20:53 Planned branch-code-can-t: Branch code can't write the agents' own config (~/.claude hooks and settings, shell rc, .git/config) (review audit)
+- 2026-11-07 20:54 Audit of turn-this-incident-into-11: complete, clean, round 1: 3 Nit open
+- 2026-11-07 20:54 Planned redo-the-github-merge: Redo the GitHub merge as a true merge, so main can be pushed and the other Mac's records come back (review audit)
+- 2026-11-07 20:54 Released verifier-isolation's worker (idle since its done report on ddc6e4a1) while its audit runs
+- 2026-11-07 20:55 Released shellcard-s-run-follows's worker (idle since its done report on 60c91397) while its audit runs
+- 2026-11-07 21:03 Merged speech-to-text-find: Speech to text: find and fix what makes dictation unreliable (in a batch: speech-to-text-find, review-sampling-audit-10 landed on one test run)
+- 2026-11-07 21:03 Merged review-sampling-audit-10: Review sampling: audit 10% of review-none merges at random, and mark same-model audits (in a batch: speech-to-text-find, review-sampling-audit-10 landed on one test run)
+- 2026-11-07 21:03 Flaky in the batch speech-to-text-find, review-sampling-audit-10: sleepRecoverySessionReadFailureReleasesNoticeAndRetriesFromRoomWatch(), somethingTypedInTheTerminalMeanwhileIsLeftAlone(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
