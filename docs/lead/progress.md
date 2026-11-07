@@ -3456,3 +3456,5 @@
 - 2026-11-07 21:39 The worker on verifier-isolation answered findings: verifier-isolation:F1 fixed at 7936e195: Commit 7936e195. setAsideMemory no longer works on paths it reads twice: it opens ~/.claude/projects, then the project folder with openat(O_DIRECTORY|O_NOFOLLOW), so a link there (e.g. to the main checkout's folder) fails to open and is skipped. It renames `memory` within that open folder with renameatx_np(dirfd, "memory", dirfd, name, RENAME_EXCL), which moves a link itself, not what it names, and never replaces an earlier set-aside folder. There is no l…
 - 2026-11-07 21:41 Started a worker on review-rules-have-a
 - 2026-11-07 21:41 Automatically (auto_advance): Sent review-rules-have-a's worker the open Important findings review-rules-have-a:F1, review-rules-have-a:F2 from its audit at 1560774f (in a new worker: its last one was released during the audit).
+- 2026-11-07 21:45 Released redo-the-github-merge's worker (idle since its done report on ed0f9e66) while its audit runs
+- 2026-11-07 21:46 Released usage-watch-forgets-a's worker (idle since its done report on 3eaa97b6) while its audit runs
