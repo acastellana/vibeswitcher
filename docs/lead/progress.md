@@ -3423,3 +3423,16 @@
 - 2026-11-07 21:03 Merged speech-to-text-find: Speech to text: find and fix what makes dictation unreliable (in a batch: speech-to-text-find, review-sampling-audit-10 landed on one test run)
 - 2026-11-07 21:03 Merged review-sampling-audit-10: Review sampling: audit 10% of review-none merges at random, and mark same-model audits (in a batch: speech-to-text-find, review-sampling-audit-10 landed on one test run)
 - 2026-11-07 21:03 Flaky in the batch speech-to-text-find, review-sampling-audit-10: sleepRecoverySessionReadFailureReleasesNoticeAndRetriesFromRoomWatch(), somethingTypedInTheTerminalMeanwhileIsLeftAlone(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-07 21:03 Automatically (auto_advance): Merged speech-to-text-find at a4f31713 (its passing audit), review-sampling-audit-10 at 07346993 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-07 21:03 Automatically (auto_advance): Cleaned up speech-to-text-find (freed 2.2 GB of build output and temporary folders). It stays done.
+- 2026-11-07 21:03 Automatically (auto_advance): Cleaned up review-sampling-audit-10 (freed 2.8 GB of build output and temporary folders). It stays done.
+- 2026-11-07 21:04 Update: Dictation: long dictations land whole, and a cut says why — **What changed (main a4f31713):**
+- 2026-11-07 21:05 Audit of shellcard-s-run-follows: complete, clean, round 1: 3 Nit open
+- 2026-11-07 21:07 Started a worker on claude-dictation-held
+- 2026-11-07 21:07 Automatically (auto_advance): Started a worker on claude-dictation-held (Claude dictation: held-Space repeats survive main-thread stalls), its after tasks done (speech-to-text-find).
+- 2026-11-07 21:07 Started a worker on ideas-backlog-ranked
+- 2026-11-07 21:07 Automatically (auto_advance): Started a worker on ideas-backlog-ranked (Ideas backlog: ranked improvement ideas with their sources, in git).
+- 2026-11-07 21:08 Abandoned chat-quote-a-selection: The user answered "meh" to these chat ideas (2026-11-07) and asked the lead not to keep things waiting on them. Not wanted for now; the real chat issues (selection, hover time, Run) were fixed instead.
+- 2026-11-07 21:09 Abandoned chat-day-separators-and: The user answered "meh" to these chat ideas (2026-11-07) and asked the lead not to keep things waiting on them. Not wanted for now.
+- 2026-11-07 21:18 Merged turn-this-incident-into-11: Turn this incident into a check: merge(task) flattened a branch whose job was to merge origin… (in a batch: turn-this-incident-into-11, shellcard-s-run-follows landed on one test run)
+- 2026-11-07 21:18 Merged shellcard-s-run-follows: ShellCard's Run follows the one Run rule (in a batch: turn-this-incident-into-11, shellcard-s-run-follows landed on one test run)

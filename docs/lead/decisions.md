@@ -255,3 +255,7 @@ The same setback happened twice on 2026-11-07. terminal-panes-text-can and chat-
 
 The user chose it on 2026-11-07 (F0181AFD). The 2026-11-07 harness review found governance capture: the lead proposes changes and also sets the evaluation policy that judges them, with only a progress line as record. The macKeys refusal pattern (LeadWorkflow.swift ~380) is the precedent.
 
+## 2026-11-07 21:09:09 Nothing on the board stays blocked waiting on the user. When an idea gets a lukewarm answer ("meh"), the lead abandons it, or moves it into docs/process/backlog.md, rather than holding it as blocked. A task is blocked only on a concrete external condition (data, a reset, another task), and its reason names that condition.
+
+On 2026-11-07 the app showed items waiting on the user. They were two chat tasks the lead had blocked after the user said "meh". The user: "It's saying that some things are waiting for me. You shouldn't wait for me, right?"
+
