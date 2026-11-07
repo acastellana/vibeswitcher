@@ -627,6 +627,9 @@ final class LeadController: ObservableObject {
         timer = Heartbeat.shared.every(3) { [weak self] in self?.refresh() }
         // Whatever is typed into a replaced lead (its terminal, the composer, the phone) comes here, never to it.
         host.inputGate = { [weak self] id, bytes in self?.takeInput(bytes, for: id) ?? false }
+        // The same without handing it anything: a held key's repeats sent from off the main thread don't pass the gate,
+        // so they go only where it takes nothing (`HostClient.directKeys`).
+        host.inputTaken = { [weak self] id in self.map { $0.replacedLeads[id] != nil || $0.rotationCommits[id] != nil } ?? false }
         // The host's welcome says which sessions run: the starts that waited for it, and the running leads, go on.
         hostWelcome = host.$state.receive(on: DispatchQueue.main).sink { [weak self] _ in
             self?.startPending()

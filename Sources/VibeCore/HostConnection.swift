@@ -2,8 +2,10 @@ import CryptoKit
 import Darwin
 import Foundation
 
-/// The app's end of the session host socket. Every call and callback is on `queue`; its writes aren't (see `Writer`).
-public final class HostConnection {
+/// The app's end of the session host socket. Every call and callback is on `queue`, but `send`, which may be called from
+/// any thread (a held key's repeats go from a queue of their own, never waiting on the main thread: `ClaudeVoiceRun`);
+/// its writes are on the writer's (see `Writer`).
+public final class HostConnection: @unchecked Sendable {
     public var onEvent: ((HostEventEnvelope) -> Void)?
     public var onOutput: ((UUID, Data) -> Void)?
     /// The connection ended (the host quit or crashed, or sent something unreadable). Called once.
@@ -27,6 +29,9 @@ public final class HostConnection {
     private let writer: Writer
     private var nextSeq = 1
     private var closed = false
+    /// What sending touches (the next number, the held requests, the proof's state, `closed`), and the handing over
+    /// to the writer, under one lock: requests sent from any thread get their numbers in the order they go out.
+    private let sending = NSLock()
     /// The app's key (see `AppProof`): set by the app only, for every connection it makes (its tool calls too).
     nonisolated(unsafe) public static var appKey: SymmetricKey?
     private let appKey: SymmetricKey?
@@ -83,12 +88,14 @@ public final class HostConnection {
     /// large for a frame): nothing of it was sent, and nothing will answer it.
     @discardableResult
     public func send(_ request: HostRequest) throws -> Int {
+        sending.lock()
+        defer { sending.unlock() }
         guard !closed else { throw SendFailure.closed }
         let seq = nextSeq
         nextSeq += 1
         guard let payload = try? HostCoding.encode(HostRequestEnvelope(seq: seq, request: request)) else { throw SendFailure.tooLarge(0) }
         guard payload.count <= HostFrame.maxPayload else { throw SendFailure.tooLarge(payload.count) }
-        if appKey != nil, !proofFinished, Self.isHello(request) {
+        if Self.isHello(request), appKey != nil, !proofFinished {
             helloForProof = HostFrame.encode(.control, payload)
         }
         // The hello goes at once: an older host sends no challenge, only its welcome.
@@ -107,6 +114,8 @@ public final class HostConnection {
 
     /// The host's challenge, answered (and the key given first to a host that holds none); then what was held.
     private func answer(_ challenge: Data, keyless: Bool) {
+        sending.lock()
+        defer { sending.unlock() }
         guard let appKey, held != nil else { return }
         let proof = keyless ? [HostRequest.enrollApp(key: appKey.data), .proveApp(answer: AppProof.answer(challenge, key: appKey))]
             : [.proveApp(answer: AppProof.answer(challenge, key: appKey))]
@@ -119,6 +128,7 @@ public final class HostConnection {
         release()
     }
 
+    /// Under `sending`.
     private func release() {
         guard let pending = held else { return }
         held = nil
@@ -127,12 +137,15 @@ public final class HostConnection {
 
     /// A control message as is (tests: what a newer or broken client might send).
     func sendRaw(_ payload: Data) {
+        sending.lock()
+        defer { sending.unlock() }
         enqueue(HostFrame.encode(.control, payload))
     }
 
     public func close() { finish(notify: false) }
 
-    /// Hands `bytes` to the writer, after everything handed to it before; nothing once the connection is closed.
+    /// Hands `bytes` to the writer, after everything handed to it before; nothing once the connection is closed. Under
+    /// `sending`.
     private func enqueue(_ bytes: Data) {
         guard !closed, !bytes.isEmpty else { return }
         writer.enqueue(bytes)
@@ -164,12 +177,14 @@ public final class HostConnection {
                 case .control:
                     // An event this app doesn't know (a newer host) is skipped, not fatal.
                     guard let envelope = try? HostCoding.decode(HostEventEnvelope.self, from: frame.payload) else { break }
-                    if let proofSeq, envelope.replyTo == proofSeq {
-                        proofFinished = true
+                    if let proofSeq = sendingState({ proofSeq }), envelope.replyTo == proofSeq {
                         if case .error(let reason) = envelope.event { onProofRefused?(reason) }
-                        if let hello = helloForProof {
-                            helloForProof = nil
-                            enqueue(hello)
+                        sendingState {
+                            proofFinished = true
+                            if let hello = helloForProof {
+                                helloForProof = nil
+                                enqueue(hello)
+                            }
                         }
                     }
                     if case .challenge(let challenge, let keyless) = envelope.event {
@@ -177,11 +192,13 @@ public final class HostConnection {
                         if appKey == nil { onProofRefused?(Self.noKey) }
                         answer(challenge, keyless: keyless)
                     } else if case .welcome = envelope.event {
-                        if proofSeq != nil, !proofFinished { continue }
+                        if sendingState({ proofSeq != nil && !proofFinished }) { continue }
                         // A host that sent no challenge first (older than it) won't send one.
-                        helloForProof = nil
-                        proofFinished = true
-                        release()
+                        sendingState {
+                            helloForProof = nil
+                            proofFinished = true
+                            release()
+                        }
                     }
                     onEvent?(envelope)
                 case .output:
@@ -193,10 +210,21 @@ public final class HostConnection {
         }
     }
 
+    /// `body` under `sending`.
+    private func sendingState<T>(_ body: () -> T) -> T {
+        sending.lock()
+        defer { sending.unlock() }
+        return body()
+    }
+
     private func finish(notify: Bool) {
-        guard !closed else { return }
-        closed = true
-        writer.stop()
+        let finishing = sendingState { () -> Bool in
+            guard !closed else { return false }
+            closed = true
+            writer.stop()
+            return true
+        }
+        guard finishing else { return }
         readSource?.cancel()
         readSource = nil
         if notify { onClose?() }
@@ -232,7 +260,8 @@ extension HostConnection {
             self.sources = sources
         }
 
-        /// From the connection's queue while `fd` is open: each pending write counts as a source, so it stays open.
+        /// Under the connection's `sending` lock while it isn't closed (so while `fd` is open): each pending write counts
+        /// as a source, so it stays open.
         func enqueue(_ bytes: Data) {
             sources.enter()
             queue.async { [self] in
