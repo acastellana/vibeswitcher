@@ -85,6 +85,35 @@ extension LeadAdvanceTests {
         #expect(toWorker("sleep-task", root, runtime) == [LeadSleepRecovery.message])
     }
 
+    @Test func sleepRecoverySessionReadFailureReleasesNoticeAndRetriesFromRoomWatch() async throws {
+        let (root, runtime, lead, loop) = try sleepTeam()
+        let worker = try #require(task("sleep-task", root)?.worker)
+        let events = try interrupted(worker, root: root, runtime: runtime)
+        _ = LeadSleepRecovery.enqueue(events, root: root)
+        runtime.hostDown = "host restarting"
+        loop.trigger()
+        #expect(toWorker("sleep-task", root, runtime).isEmpty)
+        #expect(LeadSleepRecovery.enqueue(events, root: root).isEmpty, "A session read failure must release the witness notice")
+        #expect(try LeadSleepRecovery.Store(root: root).pending() == events)
+        loop.trigger()
+        #expect(roomWaits.waits().filter { $0.wait.what == "resume_after_sleep" && $0.wait.auto == true }.count == 1)
+
+        // A room nudge that still cannot list sessions must rearm the wait.
+        _ = roomWaits.look(mac: MacLoad.count([], load: 0), limits: lead.macLimits())
+        loop.trigger()
+        #expect(roomWaits.waits().count == 1)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        await advancing.settle()
+        runtime.calls.withLock { runtime.hostDown = nil }
+        // No new interruption or manual trigger: only the app's room watch nudges the server.
+        _ = roomWaits.look(mac: MacLoad.count([], load: 0), limits: lead.macLimits())
+        #expect(await advancing.until { toWorker("sleep-task", root, runtime) == [LeadSleepRecovery.message] })
+        #expect(try LeadSleepRecovery.Store(root: root).pending().isEmpty)
+        await advancing.settle()
+        #expect(toWorker("sleep-task", root, runtime) == [LeadSleepRecovery.message])
+    }
+
     @Test func sleepRecoveryMissingPowerReleasesNoticeAndRearmsRoomRetry() throws {
         let (root, runtime, lead, loop) = try sleepTeam()
         defer { withExtendedLifetime(lead) {} }

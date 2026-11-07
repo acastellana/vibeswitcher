@@ -89,6 +89,26 @@ extension LeadToolsetTests {
         #expect(waits.look(mac: Self.mac([], load: 1), limits: limits, now: now + LeadWitness.RoomWaits.expiry + 2).isEmpty)
     }
 
+    @Test func sleepLedgerIsOnlyReadWhenAnAutomaticSleepWaitExpires() {
+        var waits = roomWaits
+        var roots: [String] = []
+        waits.pendingSleep = { roots.append($0); return true }
+        let now = Date(timeIntervalSince1970: 1_793_000_000)
+        waits.record(root: "/r/sleep", what: LeadSleepRecovery.retryWait, need: 0, auto: true, now: now)
+        waits.record(root: "/r/manual", what: LeadSleepRecovery.retryWait, need: 0, now: now)
+        waits.record(root: "/r/other", what: "start_worker(a)", need: 1, auto: true, now: now)
+        let busy = Self.mac([], load: 10000)
+        let limits = MacLimits(maxSessions: 6)
+        #expect(waits.look(mac: busy, limits: limits, now: now).isEmpty)
+        #expect(roots.isEmpty)
+        #expect(waits.look(mac: busy, limits: limits, now: now + LeadWitness.RoomWaits.expiry + 1).isEmpty)
+        #expect(roots == ["/r/sleep"])
+        #expect(waits.waits().map(\.wait.root) == ["/r/sleep"])
+        waits.pendingSleep = { _ in false }
+        #expect(waits.look(mac: busy, limits: limits, now: now + LeadWitness.RoomWaits.expiry + 2).isEmpty)
+        #expect(waits.waits().isEmpty)
+    }
+
     @Test func aMergeRefusedForLoadIsWokenToo() throws {
         let root = try repo()
         let runtime = FakeRuntime()

@@ -809,6 +809,11 @@ extension LeadWitness {
         /// A wait this old is dropped untold: its lead has moved on, or ended.
         public static let expiry: TimeInterval = 12 * 3600
 
+        /// The sleep ledger reader, injected by tests to check which thread takes its lock and reads its file.
+        var pendingSleep: (String) -> Bool = { root in
+            (try? LeadSleepRecovery.Store(root: root).pending().isEmpty) == false
+        }
+
         public init(folder: URL = RoomWaits.folder) { self.folder = folder }
 
         /// Keeps a refusal for the lead of `root` until there's room for it.
@@ -841,9 +846,8 @@ extension LeadWitness {
             var kept: [(file: URL, wait: Wait)] = []
             for (file, wait) in waits() {
                 // A sleep interruption stays pending through a long battery/load hold, even overnight.
-                let pendingSleep = wait.auto == true && wait.what == LeadSleepRecovery.retryWait
-                    && ((try? LeadSleepRecovery.Store(root: wait.root).pending().isEmpty) == false)
-                if now.timeIntervalSince1970 - wait.at > Self.expiry && !pendingSleep {
+                if now.timeIntervalSince1970 - wait.at > Self.expiry
+                    && !(wait.auto == true && wait.what == LeadSleepRecovery.retryWait && pendingSleep(wait.root)) {
                     try? FileManager.default.removeItem(at: file)
                     continue
                 }

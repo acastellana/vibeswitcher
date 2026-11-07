@@ -1659,7 +1659,10 @@ final class LeadController: ObservableObject {
     func lookAtRoom(limits: MacLimits = MacLimits.current()) {
         guard let roomWaits else { return }
         let mac = MacLoad.count(host.sessions.map { ($0.label, $0.cwd, $0.isLive) }, load: macLoad())
-        for (root, text) in roomWaits.look(mac: mac, limits: limits) { deliver(text, from: .system("witness"), root: root) }
+        // Wait files and the sleep ledger (including its lock) belong on the boards' queue.
+        reads.async({ _ in roomWaits.look(mac: mac, limits: limits) }, then: { [weak self] due in
+            for (root, text) in due { self?.deliver(text, from: .system("witness"), root: root) }
+        })
     }
 
     /// Tells each running lead the working policy once a minute from now on, when it isn't the one it has (the first a

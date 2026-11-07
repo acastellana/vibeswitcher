@@ -398,6 +398,16 @@ public final class LeadAdvance: @unchecked Sendable {
         if batching { mergeReady(busy: busy) } else { readySince = [:] }
     }
 
+    /// A gate or session-host refusal leaves all pending interruptions visible and keeps one room-again retry.
+    private func deferSleepRecovery(_ recovery: LeadSleepRecovery.Store) {
+        for remaining in (try? recovery.pending()) ?? [] { try? recovery.release(remaining) }
+        // Retry even with auto_advance off, without needing another interruption or power change.
+        let what = LeadSleepRecovery.retryWait
+        if !lead.roomWaits.waits().contains(where: { $0.wait.root == lead.root && $0.wait.auto == true && $0.wait.what == what }) {
+            lead.roomWaits.record(root: lead.root, what: what, need: 0, auto: true)
+        }
+    }
+
     /// Recovery is independent of auto_advance's task planning switch. Gate refusals leave the interruption visible
     /// to the lead and register a room-again nudge; no stale or missing power/load reading grants permission to resume.
     private func resumeAfterSleep() {
@@ -406,17 +416,14 @@ public final class LeadAdvance: @unchecked Sendable {
         for event in pending {
             guard let power = lead.power(), !(power.onBattery && power.heldUnder != nil),
                   let load = lead.runtime.steadyLoad(), load <= lead.macLimits().loadLimit else {
-                for remaining in (try? recovery.pending()) ?? [] { try? recovery.release(remaining) }
-                // The app's minute room watch retries this even with auto_advance off or an unchanged power source.
-                // A retry still refused by power records another wait, without duplicating waits on other passes.
-                let what = LeadSleepRecovery.retryWait
-                if !lead.roomWaits.waits().contains(where: { $0.wait.root == lead.root && $0.wait.auto == true && $0.wait.what == what }) {
-                    lead.roomWaits.record(root: lead.root, what: what, need: 0, auto: true)
-                }
+                deferSleepRecovery(recovery)
                 return
             }
             // The timestamp must still describe the last turn. A lead/user may have resumed it while held.
-            guard let sessions = try? lead.advanceSessions() else { return }
+            guard let sessions = try? lead.advanceSessions() else {
+                deferSleepRecovery(recovery)
+                return
+            }
             let task = lead.store.load().task(event.slug)
             let current = event.verifier
                 ? task?.status == .review && task?.evidence == nil && task?.awaitedVerifiers.contains(event.session) == true
