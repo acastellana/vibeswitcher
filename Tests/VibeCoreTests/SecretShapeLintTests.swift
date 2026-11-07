@@ -131,8 +131,8 @@ struct SecretShapeLintTests {
         #expect(try Self.matches(under: root) == ["Legacy.txt:3 (GitLab token)"])
     }
 
-    /// A private key is its header and a whole body line under it, in a key file as in a string literal's `\n`; a
-    /// header over a body cut short (as the redaction fixtures quote one) or alone is no key.
+    /// A private key is its header and a whole body line under it, indented or not, in a key file as in a string
+    /// literal's `\n`; a header over a body cut short (as the redaction fixtures quote one) or alone is no key.
     @Test func aPrivateKeyIsItsHeaderAndABodyLine() throws {
         let root = temp.url("lint")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -143,9 +143,11 @@ struct SecretShapeLintTests {
             .write(to: root.appendingPathComponent("id_test"), atomically: true, encoding: .utf8)
         try ("-----BEGIN PGP " + "PRIVATE KEY BLOCK-----\r\n\r\n\(body)\r\n")
             .write(to: root.appendingPathComponent("armored.asc"), atomically: true, encoding: .utf8)
+        // In a multi-line literal or YAML the body is indented.
+        try "key: |\n  \(begin)\n  \(body)\n".write(to: root.appendingPathComponent("config.yml"), atomically: true, encoding: .utf8)
         try "let short = \"\(begin)\\nb3BlbnNzaC1rZXktdjE\\n-----END\"\nlet bare = \"\(begin)\"\n"
             .write(to: root.appendingPathComponent("Fixture.swift"), atomically: true, encoding: .utf8)
-        #expect(try Self.matches(under: root) == ["armored.asc:1 (Private key)", "id_test:2 (Private key)"])
+        #expect(try Self.matches(under: root) == ["armored.asc:1 (Private key)", "config.yml:2 (Private key)", "id_test:2 (Private key)"])
     }
 
     /// When git can't list the files the lint fails saying what git said, not with an expectation about a file it

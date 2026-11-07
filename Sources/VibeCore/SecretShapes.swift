@@ -29,8 +29,8 @@ public enum SecretShapes {
         ("Anthropic key", #"sk-ant-(?:api|admin)[0-9]{2}-[A-Za-z0-9_-]{80,}"#),
         ("OpenAI key", #"sk-[A-Za-z0-9_-]{16,}T3BlbkFJ[A-Za-z0-9_-]{16,}"#),
         // The header alone is no key (redaction fixtures quote it, with a body of a few characters): a header followed
-        // by a whole body line, 64 characters of base64 as PEM writes them (OpenSSH's are 70), is.
-        ("Private key", #"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?:\\n|\r?\n){1,2}[A-Za-z0-9+/]{64}"#),
+        // by a whole body line, 64 characters of base64 as PEM writes them (OpenSSH's are 70), indented or not, is.
+        ("Private key", #"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?:\\n|\r?\n){1,2}[ \t]*[A-Za-z0-9+/]{64}"#),
     ].map { ($0.0, try! NSRegularExpression(pattern: $0.1)) }
 
     /// The names of the shapes found in `text`, in the list's order (empty: none).

@@ -15,10 +15,10 @@ attribution line, a home path with personal data, a keychain dump).
 
 | Scope | Count |
 | --- | --- |
-| Commits reachable from main (`d3f50c5d`, rescanned after a first pass at `391fbce5`) | 1,930 |
-| Unique file versions (blobs) in those commits: every version of every file, fixtures, test data, `docs/lead/` and `docs/protocol/` included | 6,327 |
-| Files in the tree at main (1,185 unique blobs) | 1,192 |
-| Commit messages | 1,930 |
+| Commits reachable from main (`4a57434b`, rescanned after passes at `391fbce5` and `d3f50c5d`) | 1,935 |
+| Unique file versions (blobs) in those commits: every version of every file, fixtures, test data, `docs/lead/` and `docs/protocol/` included | 6,335 |
+| Files in the tree at main | 1,194 |
+| Commit messages | 1,935 |
 | Pushed commits outside main (`origin/security/harden-host-and-credentials`), their 41 new blobs and 2 messages | 2 |
 | Images added since the 2026-10-27 review (see [PUBLICATION-REVIEW.md](PUBLICATION-REVIEW.md), which OCR'd the 401 before them), OCR'd locally with Apple Vision | 12 |
 
@@ -78,7 +78,7 @@ attribution line, a home path with personal data, a keychain dump).
 - **No rotation is needed**: no real credential was found, in history or in the tree.
 - **The owner's macOS user names** appear in about 750 lines of the tree and in history (tests, `docs/eval/`,
   `docs/lead/`, one commit message). Commit metadata already publishes one of them through the work author address
-  (`albe…@genlayerlabs.com`, 1,801 commits) and the machine name in the other 127 (`genl…@MacBook-Air-…local`). This is
+  (about 1,800 commits) and a machine-local address in the rest. This is
   identifying, not a secret. Replacing the paths in the tree would be cosmetic while history and authorship keep them,
   so they were left alone. Hiding them for good would mean rewriting history and the author addresses, which this
   task doesn't do.
@@ -86,13 +86,16 @@ attribution line, a home path with personal data, a keychain dump).
 ## What changed
 
 `SecretShapes` gained a **Private key** shape: a PEM, OpenSSH or PGP private-key header followed by a whole body line
-(64 base64 characters, after a real newline or a string literal's `\n`). Until now nothing caught a committed private
+(64 base64 characters, indented or not, after a real newline or a string literal's `\n`). Until now nothing caught a committed private
 key. SecretShapeLint has a new case, `aPrivateKeyIsItsHeaderAndABodyLine`, and a new sample in
-`aLiteralIsNamedWithItsLineAndAnAssembledStringIsNot`. Both fail without the shape. `tell_lead` refuses and masks the
-same shape, since it uses the same list.
+`aLiteralIsNamedWithItsLineAndAnAssembledStringIsNot`. Both fail without the shape. `tell_lead` uses the same list,
+so it now refuses a message holding a private key. Its masked copy in `.vibeswitcher/lead-mail.jsonl` masks only the
+header and first body line, though, not the rest of the key.
 
 ## Limits
 
 Patterns, length checks and OCR can't prove that no secret exists: an unknown format, an obfuscated value, or a key
-split across a string could get past them. Only main's history, and the pushed branches visible locally, were
+split across a string could get past them. The private-key shape misses old encrypted PEM keys (`Proc-Type:` lines
+before the body), PGP armor with `Version:` or `Comment:` lines, and a literal's `\r\n`; the sweep's own header
+pattern (step 2) had no such gap. Only main's history, and the pushed branches visible locally, were
 scanned. Whether GitHub holds other refs (for example closed pull requests) wasn't checked: nothing was fetched.
