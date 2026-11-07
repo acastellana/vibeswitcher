@@ -261,19 +261,34 @@ public enum LeadLaunch {
     /// resolved), before a verifier starts there: to `memory.set-aside-<time>` beside it, which nothing loads and the
     /// audit can still read. Returns the folders moved. The main checkout's own memory (where Claude Code 2.1.319 keeps
     /// a worktree's) is yours and the lead's, and stays: the verifier doesn't load any (`verifierEnvironment`).
+    ///
+    /// A worker's shell can write `~/.claude` (the `Write(~/.claude/**)` rule holds only its tools), so nothing here
+    /// follows a link it could plant: the project folder is opened with `O_NOFOLLOW` (a link there, say to the main
+    /// checkout's folder, is skipped), and `memory` is renamed within that open folder, never through a path read again
+    /// (`renameatx_np`, which moves a link itself, not what it names, and never replaces an earlier set-aside folder).
     @discardableResult
     public static func setAsideMemory(cwd: String, home: String = VibePaths.home, now: Date = Date()) -> [String] {
-        let files = FileManager.default
         let resolved = URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path
         let stamp = Int(now.timeIntervalSince1970)
         var moved: [String] = []
         for path in Array(Set([cwd, resolved])).sorted() {
-            let memory = (claudeProjectFolder(path, home: home) as NSString).appendingPathComponent("memory")
-            guard (try? files.attributesOfItem(atPath: memory)) != nil else { continue }
-            var target = memory + ".set-aside-\(stamp)"
-            var tries = 1
-            while (try? files.attributesOfItem(atPath: target)) != nil { tries += 1; target = memory + ".set-aside-\(stamp)-\(tries)" }
-            if (try? files.moveItem(atPath: memory, toPath: target)) != nil { moved.append(target) }
+            let folder = claudeProjectFolder(path, home: home)
+            let projects = open((folder as NSString).deletingLastPathComponent, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+            guard projects >= 0 else { continue }
+            defer { close(projects) }
+            let dir = openat(projects, (folder as NSString).lastPathComponent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard dir >= 0 else { continue }
+            defer { close(dir) }
+            var info = stat()
+            guard fstatat(dir, "memory", &info, AT_SYMLINK_NOFOLLOW) == 0 else { continue }
+            for tries in 1...100 {
+                let name = "memory.set-aside-\(stamp)" + (tries > 1 ? "-\(tries)" : "")
+                if renameatx_np(dir, "memory", dir, name, UInt32(RENAME_EXCL)) == 0 {
+                    moved.append((folder as NSString).appendingPathComponent(name))
+                    break
+                }
+                if errno != EEXIST { break }
+            }
         }
         return moved
     }

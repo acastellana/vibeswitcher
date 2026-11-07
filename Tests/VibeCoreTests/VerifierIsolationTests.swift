@@ -66,6 +66,36 @@ struct VerifierIsolationTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: folder).filter { $0.hasPrefix("memory.set-aside-") }.count == 2)
     }
 
+    /// A worker's shell can write Claude Code's folder (`Write(~/.claude/**)` holds only its tools): a worktree's
+    /// project folder that's a link to another (the main checkout's, yours and the lead's) leaves that other's memory
+    /// where it is, and so does a `memory` that's a link (audit F1, 2026-11-07).
+    @Test func settingMemoryAsideNeverFollowsALinkToAnotherProjectsFolder() throws {
+        let files = FileManager.default
+        let main = LeadLaunch.claudeProjectFolder(try worktree())
+        try files.createDirectory(atPath: main + "/memory", withIntermediateDirectories: true)
+        try "- [Yours](y.md)\n".write(toFile: main + "/memory/MEMORY.md", atomically: true, encoding: .utf8)
+        func untouched() -> Bool {
+            files.fileExists(atPath: main + "/memory/MEMORY.md")
+                && (try? files.contentsOfDirectory(atPath: main))?.contains { $0.hasPrefix("memory.set-aside-") } == false
+        }
+        // The worktree's project folder is a link to the main checkout's.
+        let linked = try worktree()
+        try files.createDirectory(atPath: (LeadLaunch.claudeProjectFolder(linked) as NSString).deletingLastPathComponent,
+                                  withIntermediateDirectories: true)
+        try files.createSymbolicLink(atPath: LeadLaunch.claudeProjectFolder(linked), withDestinationPath: main)
+        #expect(LeadLaunch.setAsideMemory(cwd: linked).isEmpty)
+        _ = try prepare(.verifier, cwd: linked)
+        #expect(untouched())
+        // Its project folder is real, and its `memory` a link to the main checkout's: the link is moved, not what it names.
+        let own = try worktree()
+        let folder = LeadLaunch.claudeProjectFolder(own)
+        try files.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        try files.createSymbolicLink(atPath: folder + "/memory", withDestinationPath: main + "/memory")
+        _ = try prepare(.verifier, cwd: own)
+        #expect(untouched())
+        #expect((try? files.destinationOfSymbolicLink(atPath: folder + "/memory")) == nil)
+    }
+
     /// Claude Code's own names (2.1.319's `hD`): every character but an ASCII letter or digit a "-"; past 200, cut and
     /// followed by its JavaScript string hash in base 36 (worked out with the same function for this path).
     @Test func theProjectFolderIsNamedAsClaudeCodeNamesIt() {
