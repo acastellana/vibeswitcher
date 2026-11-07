@@ -3313,3 +3313,4 @@
 - 2026-11-07 20:18 Automatically (auto_advance): Cleaned up sweep-the-repository-and; ended pid 96091 (Worker: Sweep the repository and its history for secrets) (freed 1.4 GB of build output and temporary folders). It stays done.
 - 2026-11-07 20:18 Started a worker on handover-tests-stop
 - 2026-11-07 20:18 Automatically (auto_advance): Started a worker on handover-tests-stop (Handover tests stop timing out on a loaded Mac), its after tasks done (sweep-the-repository-and).
+- 2026-11-07 21:33 Automatically (auto_advance): Merge of handover-tests-stop failed: Tests fail rebased onto main: aReadBehindAHungOneWaitsNoLongerThanItsTimeout() Sent its worker the output; it's back at work.
