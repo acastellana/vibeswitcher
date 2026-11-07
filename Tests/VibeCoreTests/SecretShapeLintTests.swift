@@ -4,7 +4,8 @@ import Testing
 
 /// No text file in the repository (every one git has or would add: Sources, Tests, docs, scripts, Web, …) holds a
 /// string shaped like a vendor's credential: a Slack or Discord webhook, a Slack, Stripe, AWS, Google, GitHub,
-/// GitLab, SendGrid, npm, PyPI, Hugging Face, age, Anthropic or OpenAI key. GitHub push protection matches these
+/// GitLab, SendGrid, npm, PyPI, Hugging Face, age, Anthropic or OpenAI key, or a private key's header and first body
+/// line. GitHub push protection matches these
 /// shapes in every commit pushed, whatever the string says (an EXAMPLE in it changes nothing), and refuses the push
 /// until someone clicks to expose it. 2026-10-20 it refused project-lead twice for made-up redaction fixtures (a Slack
 /// webhook, then a GitLab token). A fixture that must look real is assembled at run time ("gl" + "pat-" and a body
@@ -97,6 +98,7 @@ struct SecretShapeLintTests {
             ("age secret key", "AGE-SECRET-" + "KEY-1" + run(58).uppercased(), "AGE-SECRET-KEY-\" + \"1" + run(58).uppercased()),
             ("Anthropic key", "sk-" + "ant-api03-" + run(93) + "AA", "sk-ant-api03-\" + \"" + run(93) + "AA"),
             ("OpenAI key", "sk-" + "proj-" + run(20) + "T3Blbk" + "FJ" + run(20), "sk-proj-" + run(20) + "\" + \"T3BlbkFJ" + run(20)),
+            ("Private key", "-----BEGIN RSA " + "PRIVATE KEY-----\\n" + run(64), "-----BEGIN RSA \" + \"PRIVATE KEY-----\\n" + run(64)),
         ]
         let literals = samples.map { "let \($0.name.filter(\.isLetter)) = \"\($0.literal)\"" }
         try (["import Foundation"] + literals).joined(separator: "\n")
@@ -127,6 +129,23 @@ struct SecretShapeLintTests {
         try bytes.write(to: root.appendingPathComponent("Legacy.txt"))
         #expect(String(data: bytes, encoding: .utf8) == nil)
         #expect(try Self.matches(under: root) == ["Legacy.txt:3 (GitLab token)"])
+    }
+
+    /// A private key is its header and a whole body line under it, in a key file as in a string literal's `\n`; a
+    /// header over a body cut short (as the redaction fixtures quote one) or alone is no key.
+    @Test func aPrivateKeyIsItsHeaderAndABodyLine() throws {
+        let root = temp.url("lint")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        #expect(Git.run(["init", "-q"], in: root.path).ok)
+        let body = String(String(repeating: "AbCdEfGh0123+/", count: 6).prefix(64))
+        let begin = "-----BEGIN OPENSSH " + "PRIVATE KEY-----"
+        try "notes\n\(begin)\n\(body)\n\(body)\n-----END OPENSSH PRIVATE KEY-----\n"
+            .write(to: root.appendingPathComponent("id_test"), atomically: true, encoding: .utf8)
+        try ("-----BEGIN PGP " + "PRIVATE KEY BLOCK-----\r\n\r\n\(body)\r\n")
+            .write(to: root.appendingPathComponent("armored.asc"), atomically: true, encoding: .utf8)
+        try "let short = \"\(begin)\\nb3BlbnNzaC1rZXktdjE\\n-----END\"\nlet bare = \"\(begin)\"\n"
+            .write(to: root.appendingPathComponent("Fixture.swift"), atomically: true, encoding: .utf8)
+        #expect(try Self.matches(under: root) == ["armored.asc:1 (Private key)", "id_test:2 (Private key)"])
     }
 
     /// When git can't list the files the lint fails saying what git said, not with an expectation about a file it
