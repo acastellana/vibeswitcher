@@ -3302,3 +3302,5 @@
 - 2026-11-07 12:55 Audit of resume-work-cut-off: incomplete, clean, round 3: 5 Important (1 open), 2 Nit (1 open)
 - 2026-11-07 12:56 Planned sleep-recovery-room-wait: Sleep-recovery room wait: no lock or file read on the main thread; retry when advanceSessions fails (review audit)
 - 2026-11-07 12:56 Audit of resume-work-cut-off: complete, clean, round 4: 5 Important closed, 2 Nit closed
+- 2026-11-07 13:10 Merged resume-work-cut-off: Resume work cut off by the Mac sleeping
+- 2026-11-07 13:10 Flaky in resume-work-cut-off's merge: aQuestionsCardIsUpWithin1Point2SOfTheTerminalDrawingIt(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
