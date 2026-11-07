@@ -1001,13 +1001,15 @@ enum HarnessError: Error { case timedOut }
 /// something else on it, the app's terminal, the dictation's reads and the wait itself stood still meanwhile. On
 /// 2026-11-05 a full suite's ClaudeDictationTests timed out showing "Voice: processing…" long gone in the fake agent:
 /// another main-actor test held the main thread (BenchDefaultsTests waiting there for a new build's first launch).
+/// Measured on the time the Mac was awake (as `until` is): a Mac asleep between two looks isn't a held main thread.
 @MainActor
 final class MainThreadHeld {
-    private var last: Date?
+    private var last: TimeInterval?
     private(set) var longest: TimeInterval = 0
 
-    func look(now: Date = Date()) {
-        if let last { longest = max(longest, now.timeIntervalSince(last)) }
+    /// `now`: seconds awake (`MacTime.awake`).
+    func look(now: TimeInterval = MacTime.real.awake()) {
+        if let last { longest = max(longest, now - last) }
         last = now
     }
 

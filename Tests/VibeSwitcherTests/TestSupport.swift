@@ -83,11 +83,13 @@ struct MacTime {
 
 /// Whether `condition` holds within `timeout` seconds (a hang guard), checked every 20 ms. Awaiting lets the main
 /// thread run what's queued for it meanwhile. A cancelled test (past its time limit) waits no more: its sleep would
-/// throw at once, and the loop spin until the deadline.
+/// throw at once, and the loop spin until the deadline. The timeout counts the time the Mac is awake: on the wall clock
+/// a Mac that slept mid-wait woke past it, and the wait timed out before what it waited on had a moment (2026-11-07, a
+/// merge's run: an idle sleep of 250 s a second into a 90 s wait).
 @MainActor
 func until(timeout: TimeInterval = hangGuard, time: MacTime = .real, _ condition: () -> Bool) async -> Bool {
-    let deadline = time.wall().addingTimeInterval(timeout)
-    while time.wall() < deadline, !Task.isCancelled {
+    let deadline = time.awake() + timeout
+    while time.awake() < deadline, !Task.isCancelled {
         if condition() { return true }
         try? await Task.sleep(nanoseconds: 20_000_000)
     }

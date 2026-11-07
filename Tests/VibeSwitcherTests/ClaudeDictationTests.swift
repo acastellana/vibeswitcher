@@ -416,11 +416,28 @@ struct ClaudeDictationTests {
     /// main-actor test blocking it, 2026-11-05), and says nothing of the kind for its own 20 ms looks.
     @Test func aTimedOutWaitSaysTheMainThreadWasHeld() {
         let held = MainThreadHeld()
-        let start = Date()
-        for look in 0...50 { held.look(now: start.addingTimeInterval(Double(look) * 0.02)) }
+        let start: TimeInterval = 1_000
+        for look in 0...50 { held.look(now: start + Double(look) * 0.02) }
         #expect(held.said == "")
-        held.look(now: start.addingTimeInterval(1 + 12))
+        held.look(now: start + 1 + 12)
         #expect(held.said == " (the main thread was held 12 s at once meanwhile, by something else there)", "\(held.said)")
+    }
+
+    /// A wait the Mac sleeps through goes on at the wake: its timeout counts the time the Mac was awake, not the wall
+    /// clock's. 2026-11-07, wake-the-lead-only's merge: the Mac idle-slept 250 s (pmset, 11:19:45) a second into the
+    /// held-transcript test below, and at the wake `Date()` was 248 s on, past the wait's 90 s: it timed out on what
+    /// FakeClaude was about to show ("the main thread was held 248 s" in a test that ran 1.037 s).
+    @Test func aWaitTheMacSleepsThroughGoesOnAtTheWake() async {
+        var wall = Date(timeIntervalSinceReferenceDate: 0), awake: TimeInterval = 0, looks = 0
+        let time = MacTime(wall: { wall }, awake: { awake })
+        let met = await until(timeout: 90, time: time) {
+            looks += 1
+            awake += 0.02
+            // Asleep between the first look and the next.
+            if looks == 1 { wall += 248 }
+            return looks == 3
+        }
+        #expect(met, "the wait gave up after \(looks) looks")
     }
 
     /// The harness's session, as the window gives it to dictation, a message sent over a dictation cancelling it as the
@@ -478,7 +495,9 @@ struct ClaudeDictationTests {
         h.tell(["op": "voice", "mode": "hold", "gap": 1.5])
         try await h.waitFor { h.agent["voice"] as? String == "hold" }
         let prompts = h.agentPrompts
-        let controller = dictation(h)
+        // The runs' waits (3 s for Claude to start, the quiet after the release) on the time the Mac is awake, as the
+        // harness's are and FakeClaude's (`time.monotonic`): a merge's Mac that idle-sleeps mid-run doesn't run them out.
+        let controller = dictation(h, now: { Date(timeIntervalSinceReferenceDate: MacTime.real.awake()) })
 
         controller.press(h.key, agent: .claude) { "" }
         try await h.waitFor { controller.listening }
