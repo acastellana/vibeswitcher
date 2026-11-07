@@ -239,3 +239,7 @@ Rounds 1–2 fixed and verified F1–F4. F5 is one narrow gap: a gate-refused re
 
 F1–F5 are fixed and verified. F6 is a small cost on a rare path and has a precise fix. Each patch round has surfaced one new narrow issue, and a separate task keeps that cycle from blocking the verified behaviour.
 
+## 2026-11-07 18:33:18 A code block's Run is one behaviour in every session kind that can take a command: Claude sessions, the lead's chat, Codex (via its own shell escape) and plain shells (typed without `!`). It uses the same detection, the same confirmation rule and the same can't-run message everywhere, through a single typing seam per session kind. It's audited, because it types into sessions.
+
+On 2026-11-07 the user reported that Run is unreliable and sometimes missing, with no confirmation popup. Today it appears only in Claude window sessions and fails with a bare beep. Asked whether Run should reach other session kinds, the user answered "yes lets unify stuff. make sure tis clean".
+
