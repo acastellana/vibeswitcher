@@ -3345,3 +3345,7 @@
 - 2026-11-07 18:09 Started a worker on chat-view-copying-text
 - 2026-11-07 18:14 Planned chat-quote-a-selection: Chat: quote a selection into the reply, and move between prompts by keyboard
 - 2026-11-07 18:14 Planned chat-day-separators-and: Chat: day separators, and how long each turn took on hover
+- 2026-11-07 18:20 Planned chat-the-run-buttons: Chat: the Run buttons on code blocks work every time
+- 2026-11-07 18:20 Planned speech-to-text-find: Speech to text: find and fix what makes dictation unreliable
+- 2026-11-07 18:20 Started a worker on chat-the-run-buttons
+- 2026-11-07 18:20 Started a worker on speech-to-text-find
