@@ -12,11 +12,28 @@ public struct ToolchainSnapshot: Codable, Equatable, Sendable {
     public init(developerDir: String, swift: String, sdkPath: String, sdkVersion: String,
                 commandLineTools: String, xcodeExists: Bool) {
         self.developerDir = developerDir
-        self.swift = swift
+        self.swift = Self.swiftVersion(swift)
         self.sdkPath = sdkPath
         self.sdkVersion = sdkVersion
         self.commandLineTools = commandLineTools
         self.xcodeExists = xcodeExists
+    }
+
+    /// Driver build identifiers and the target triple are not Swift language version changes.
+    static func swiftVersion(_ output: String) -> String {
+        guard let range = output.range(of: #"Apple Swift version [0-9]+(?:\.[0-9]+)*"#, options: .regularExpression) else { return output }
+        return String(output[range])
+    }
+
+    static func isAvailable(_ value: String) -> Bool { !value.isEmpty && value != "unavailable" }
+
+    /// Keep each field's last good observation without silencing changes in the other fields.
+    mutating func keepLastGoodValues(from previous: Self?) {
+        for key in [\Self.developerDir, \.swift, \.sdkPath, \.sdkVersion, \.commandLineTools] {
+            if !Self.isAvailable(self[keyPath: key]), let previous {
+                self[keyPath: key] = previous[keyPath: key]
+            }
+        }
     }
 
     public var needsXcode: Bool {
@@ -56,30 +73,54 @@ public final class ToolchainWatch: @unchecked Sendable {
     private struct State: Codable {
         var snapshot: ToolchainSnapshot
         var note: String?
+        var notedAt: Date?
     }
     private let file: URL
+    private let now: () -> Date
     private let read: () -> ToolchainSnapshot
     private var state: State?
     private var loaded = false
     public var note: String? { state?.note }
 
-    public init(file: URL = ToolchainWatch.file, read: @escaping () -> ToolchainSnapshot = { .read() }) {
+    public init(file: URL = ToolchainWatch.file, read: @escaping () -> ToolchainSnapshot = { .read() },
+                now: @escaping () -> Date = Date.init) {
         self.file = file
         self.read = read
+        self.now = now
     }
 
     @discardableResult public func look() -> String? {
-        if !loaded {
-            state = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(State.self, from: $0) }
-            loaded = true
+        load()
+        if state?.note != nil, state?.notedAt.map({ now().timeIntervalSince($0) >= 24 * 60 * 60 }) ?? true {
+            dismissNote()
         }
-        let current = read()
-        let previous = state?.snapshot
+        var current = read()
+        current.swift = ToolchainSnapshot.swiftVersion(current.swift)
+        var previous = state?.snapshot
+        if let swift = previous?.swift { previous?.swift = ToolchainSnapshot.swiftVersion(swift) }
+        current.keepLastGoodValues(from: previous)
         guard previous != current else { return nil }
         let report = LeadWitness.toolchainText(before: previous, after: current)
-        state = State(snapshot: current, note: report ?? state?.note)
-        if let data = try? JSONEncoder().encode(state) { try? VibePaths.writePrivate(data, to: file) }
+        state = State(snapshot: current, note: report ?? state?.note, notedAt: report == nil ? state?.notedAt : now())
+        save()
         return report
+    }
+
+    public func dismissNote() {
+        load()
+        state?.note = nil
+        state?.notedAt = nil
+        save()
+    }
+
+    private func load() {
+        guard !loaded else { return }
+        state = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(State.self, from: $0) }
+        loaded = true
+    }
+
+    private func save() {
+        if let data = try? JSONEncoder().encode(state) { try? VibePaths.writePrivate(data, to: file) }
     }
 }
 
@@ -90,7 +131,7 @@ extension LeadWitness {
             for (name, old, new) in [("Swift", before.swift, after.swift), ("SDK", before.sdkVersion, after.sdkVersion),
                                      ("SDK path", before.sdkPath, after.sdkPath),
                                      ("developer directory", before.developerDir, after.developerDir),
-                                     ("Command Line Tools package", before.commandLineTools, after.commandLineTools)] where old != new {
+                                     ("Command Line Tools package", before.commandLineTools, after.commandLineTools)] where old != new && ToolchainSnapshot.isAvailable(old) && ToolchainSnapshot.isAvailable(new) {
                 changes.append("\(name): \(old) → \(new)")
             }
         }

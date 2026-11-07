@@ -1096,6 +1096,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("home", "shows the start page"),
         ("boost off|on|away|present|battery|battery-on|battery-low|veto|mark", "boost mark clicks the main window's Boost mark (Settings › General at Boost). Otherwise Boost mode in a made-up state (the power source, the charge, your presence and the usage made up): off; On on AC; Automatic away on AC (boosted), at the Mac, away on battery; On on battery with Also on battery at 86 % (boosted) or 24 %; or away on AC with the usage watch's veto. Settings and the menu-bar sheet show it"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
+        ("toolchain [dismiss]", "shows or dismisses a fake developer tools notice"),
         ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", ")),
         ("close settings|sheet", "closes Settings or the sheet"),
         ("shot NAME", "draws each window, light and dark, into the shots folder"),
@@ -1884,6 +1885,18 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 transcript = text
             }
             startLead(transcript: transcript) { problem in if let problem { reply(false, problem) } else { show() } }
+        case "toolchain" where rest == "dismiss":
+            leads.dismissToolchainNote { [weak self] in self?.settle { reply(true, "developer tools notice dismissed") } }
+        case "toolchain":
+            let file = state.appendingPathComponent("toolchain-\(UUID().uuidString).json")
+            let before = ToolchainSnapshot(developerDir: "/Applications/Xcode.app/Contents/Developer", swift: "Apple Swift version 6.4.1",
+                                           sdkPath: "/SDKs/MacOSX27.sdk", sdkVersion: "27", commandLineTools: "27.0", xcodeExists: true)
+            ToolchainWatch(file: file, read: { before }).look()
+            var changed = before
+            changed.swift = "Apple Swift version 6.4.2"
+            let after = changed
+            leads.watchToolchain(ToolchainWatch(file: file, read: { after }))
+            leads.lookAtToolchain { [weak self] in self?.settle { reply(true, "developer tools notice shown") } }
         case "hangs":
             // The main thread's freezes so far, as the app's health digest tells them, and its longest wait for a beat.
             let folders = AppHealth.Folders(debug: watchdog.folder, reports: state.appendingPathComponent("no-crashes"))

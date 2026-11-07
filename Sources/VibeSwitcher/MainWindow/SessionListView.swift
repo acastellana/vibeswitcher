@@ -67,24 +67,36 @@ struct SessionListView: View {
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if let note = leads.toolchainNote {
-                Button { showingToolchain.toggle() } label: {
-                    Label("Developer tools notice", systemImage: "exclamationmark.triangle")
-                        .font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+            VStack(spacing: 0) {
+                if let note = leads.toolchainNote {
+                    HStack {
+                        Button { showingToolchain.toggle() } label: {
+                            Label("Developer tools notice", systemImage: "exclamationmark.triangle")
+                                .font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .popover(isPresented: $showingToolchain) { ToolchainNoteView(note: note) }
+                        Button {
+                            showingToolchain = false
+                            leads.dismissToolchainNote()
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .accessibilityLabel("Dismiss developer tools notice")
+                        .help("Dismiss developer tools notice")
+                    }
+                    .buttonStyle(.plain)
+                    .padding(10)
+                    Divider()
                 }
-                .buttonStyle(.plain)
-                .padding(10)
-                .popover(isPresented: $showingToolchain) { ToolchainNoteView(note: note) }
-                Divider()
+                Picker("Group", selection: $model.grouping) {
+                    Text("Attention").tag(WindowGrouping.attention)
+                    Text("Projects").tag(WindowGrouping.projects)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
             }
-            Picker("Group", selection: $model.grouping) {
-                Text("Attention").tag(WindowGrouping.attention)
-                Text("Projects").tag(WindowGrouping.projects)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {

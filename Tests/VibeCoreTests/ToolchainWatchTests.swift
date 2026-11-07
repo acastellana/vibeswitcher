@@ -61,6 +61,117 @@ struct ToolchainWatchTests {
         #expect(firstLaunch.look() == nil)
     }
 
+    @Test func unavailableLookKeepsLastGoodBaseline() throws {
+        for key in [\ToolchainSnapshot.developerDir, \.swift, \.sdkPath, \.sdkVersion, \.commandLineTools] {
+            let reader = Reader()
+            let file = temp.url(UUID().uuidString)
+            let watch = ToolchainWatch(file: file, read: { reader.value })
+            #expect(watch.look() == nil)
+            let good = reader.value
+            reader.value[keyPath: key] = "unavailable"
+            #expect(watch.look() == nil)
+            #expect(watch.note == nil)
+            reader.value = good
+            #expect(watch.look() == nil)
+            reader.value.swift = "Swift 6.4.2"
+            #expect(try #require(watch.look()).contains("Swift 6.4.1 → Swift 6.4.2"))
+        }
+    }
+
+    @Test func missingPackageDoesNotSilenceSwiftChanges() throws {
+        let reader = Reader()
+        reader.value.commandLineTools = "unavailable"
+        let watch = ToolchainWatch(file: temp.url("missing-package.json"), read: { reader.value })
+        #expect(watch.look() == nil)
+        reader.value.swift = "Swift 6.4.2"
+        #expect(try #require(watch.look()).contains("Swift 6.4.1 → Swift 6.4.2"))
+        #expect(watch.look() == nil)
+        reader.value.commandLineTools = "27.0"
+        #expect(watch.look() == nil) // First successful observation establishes this field's baseline.
+        reader.value.commandLineTools = "27.1"
+        #expect(try #require(watch.look()).contains("27.0 → 27.1"))
+    }
+
+    @Test func dismissBeforeFirstLookPreservesPersistedBaseline() throws {
+        let reader = Reader()
+        let file = temp.url("dismiss-before-look.json")
+        let watch = ToolchainWatch(file: file, read: { reader.value })
+        #expect(watch.look() == nil)
+        reader.value.swift = "Swift 6.4.2"
+        #expect(watch.look() != nil)
+        let restarted = ToolchainWatch(file: file, read: { reader.value })
+        restarted.dismissNote()
+        #expect(restarted.note == nil)
+        let saved = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        #expect(saved["note"] == nil)
+        reader.value.swift = "Swift 6.4.3"
+        let again = ToolchainWatch(file: file, read: { reader.value })
+        #expect(try #require(again.look()).contains("Swift 6.4.2 → Swift 6.4.3"))
+    }
+
+    @Test func driverAndTargetChangesDoNotReport() {
+        let reader = Reader()
+        reader.value.swift = "Apple Swift version 6.4.2 (swiftlang-1 clang-1)\nTarget: arm64-apple-macosx27.0"
+        let watch = ToolchainWatch(file: temp.url("driver.json"), read: { reader.value })
+        #expect(watch.look() == nil)
+        reader.value.swift = "swift-driver version: 2\nApple Swift version 6.4.2 (swiftlang-2 clang-2)\nTarget: arm64-apple-macosx28.0"
+        #expect(watch.look() == nil)
+        #expect(watch.note == nil)
+    }
+
+    @Test func dismissedNoteStaysClearedAfterRestart() throws {
+        let reader = Reader()
+        let file = temp.url("dismiss.json")
+        let watch = ToolchainWatch(file: file, read: { reader.value })
+        #expect(watch.look() == nil)
+        reader.value.swift = "Swift 6.4.2"
+        #expect(watch.look() != nil)
+        watch.dismissNote()
+        #expect(watch.note == nil)
+        let restarted = ToolchainWatch(file: file, read: { reader.value })
+        #expect(restarted.look() == nil)
+        #expect(restarted.note == nil)
+    }
+
+    @Test func oldNoteExpiresEvenWhenReadIsUnavailable() throws {
+        let reader = Reader()
+        let file = temp.url("expiry.json")
+        var now = Date(timeIntervalSince1970: 100_000)
+        let watch = ToolchainWatch(file: file, read: { reader.value }, now: { now })
+        #expect(watch.look() == nil)
+        reader.value.swift = "Swift 6.4.2"
+        let report = try #require(watch.look())
+        now.addTimeInterval(24 * 60 * 60 - 1)
+        #expect(watch.look() == nil)
+        #expect(watch.note == report)
+        now.addTimeInterval(2)
+        reader.value.swift = "unavailable"
+        #expect(watch.look() == nil)
+        #expect(watch.note == nil)
+        reader.value.swift = "Swift 6.4.2"
+        let restarted = ToolchainWatch(file: file, read: { reader.value }, now: { now })
+        #expect(restarted.look() == nil)
+        #expect(restarted.note == nil)
+    }
+
+    @Test func persistedOldNoteIsCleared() throws {
+        let reader = Reader()
+        let file = temp.url("persisted-expiry.json")
+        let watch = ToolchainWatch(file: file, read: { reader.value })
+        #expect(watch.look() == nil)
+        reader.value.swift = "Swift 6.4.2"
+        #expect(watch.look() != nil)
+        var saved = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        saved["notedAt"] = Date().addingTimeInterval(-25 * 60 * 60).timeIntervalSinceReferenceDate
+        try JSONSerialization.data(withJSONObject: saved).write(to: file)
+        let restarted = ToolchainWatch(file: file, read: { reader.value })
+        #expect(restarted.look() == nil)
+        #expect(restarted.note == nil)
+        let again = ToolchainWatch(file: file, read: { reader.value })
+        #expect(again.look() == nil)
+        #expect(again.note == nil)
+    }
+
     @Test func readerUsesOnlyQueriesAndShowsFailedQueries() {
         var calls: [(String, [String])] = []
         let snapshot = ToolchainSnapshot.read(run: { executable, args in
@@ -79,7 +190,7 @@ struct ToolchainWatchTests {
             ["-u", "DEVELOPER_DIR", "-u", "SDKROOT", "-u", "TOOLCHAINS", "/usr/bin/xcrun", "--show-sdk-path"],
             ["-u", "DEVELOPER_DIR", "-u", "SDKROOT", "-u", "TOOLCHAINS", "/usr/bin/xcrun", "--show-sdk-version"]])
         #expect(snapshot.commandLineTools == "27.2")
-        #expect(snapshot.swift.contains("Apple Swift version 6.4.2"))
+        #expect(snapshot.swift == "Apple Swift version 6.4.2")
         #expect(snapshot.sdkVersion == "unavailable")
         #expect(snapshot.needsXcode)
     }

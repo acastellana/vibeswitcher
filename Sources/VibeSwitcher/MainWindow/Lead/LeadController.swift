@@ -428,13 +428,14 @@ final class LeadController: ObservableObject {
     /// Where the power source is looked at (`lookAtPower`).
     private let powerQueue = DispatchQueue(label: "VibeSwitcher.power-look", qos: .utility)
     private var powerTimer: Heartbeat.Subscription?
-    /// The working policy in Settings › Project lead, told to each running lead once when it changes and once when
-    /// this build first runs (see `LeadWitness.PolicyWatch`); none until the app starts it (`watchPolicy`).
     @Published private(set) var toolchainNote: String?
     private var toolchainWatch: ToolchainWatch?
+    private var toolchainNoteRevision = 0
     private var pendingToolchainReports: [String] = []
     private var toolchainTimer: Heartbeat.Subscription?
     private let toolchainQueue = DispatchQueue(label: "VibeSwitcher.toolchain", qos: .utility)
+    /// The working policy in Settings › Project lead, told to each running lead once when it changes and once when
+    /// this build first runs (see `LeadWitness.PolicyWatch`); none until the app starts it (`watchPolicy`).
     var policyWatch: LeadWitness.PolicyWatch?
     private var policyTimer: Heartbeat.Subscription?
     /// The Mac-wide test and build slots, looked at once a minute: one held long is told to every running lead (see
@@ -1494,15 +1495,26 @@ final class LeadController: ObservableObject {
         toolchainTimer = Heartbeat.shared.every(ToolchainWatch.interval) { [weak self] in self?.lookAtToolchain() }
     }
 
+    func dismissToolchainNote(then: @escaping () -> Void = {}) {
+        toolchainNoteRevision += 1
+        toolchainNote = nil
+        guard let watch = toolchainWatch else { return then() }
+        toolchainQueue.async {
+            watch.dismissNote()
+            DispatchQueue.main.async { then() }
+        }
+    }
+
     func lookAtToolchain(then: @escaping () -> Void = {}) {
         guard let watch = toolchainWatch else { return then() }
+        let revision = toolchainNoteRevision
         toolchainQueue.async { [weak self] in
             let report = watch.look()
             let note = watch.note
             DispatchQueue.main.async {
                 defer { then() }
                 guard let self else { return }
-                self.toolchainNote = note
+                if self.toolchainNoteRevision == revision { self.toolchainNote = note }
                 guard let report else { return }
                 self.tellUser("Developer tools", report)
                 self.pendingToolchainReports.append(report)
