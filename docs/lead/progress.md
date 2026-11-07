@@ -3349,3 +3349,4 @@
 - 2026-11-07 18:20 Planned speech-to-text-find: Speech to text: find and fix what makes dictation unreliable
 - 2026-11-07 18:20 Started a worker on chat-the-run-buttons
 - 2026-11-07 18:20 Started a worker on speech-to-text-find
+- 2026-11-07 18:25 Released terminal-panes-text-can's worker (idle since its done report on 207d65a8) while its audit runs
