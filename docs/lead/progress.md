@@ -3451,3 +3451,5 @@
 - 2026-11-07 21:20 Started a worker on redo-the-github-merge
 - 2026-11-07 21:20 Automatically (auto_advance): Started a worker on redo-the-github-merge (Redo the GitHub merge as a true merge, so main can be pushed and the other Mac's records come back), its after tasks done (turn-this-incident-into-11).
 - 2026-11-07 21:22 Released review-rules-have-a's worker (idle since its done report on 1560774f) while its audit runs
+- 2026-11-07 21:34 Audit of review-rules-have-a: incomplete, clean, round 1: 2 Important open, 4 Nit open
+- 2026-11-07 21:34 Automatically (auto_advance): Couldn't send review-rules-have-a's worker its open Important findings (review-rules-have-a:F1, review-rules-have-a:F2): Not started: the Mac is shared by every project's team, and its load (the greater of its 1- and 5-minute averages) is above load_threshold. Now: load 71.1 (load_threshold 36 while boosted (normally 24, twice the 12 cores)), 7 team sessions across 2 projects (this one 6, 1 other 1) (mac_max_sessions 18 while boosted (15 normally)). VibeSwitcher sends you one message once there's room again. Don't s…
