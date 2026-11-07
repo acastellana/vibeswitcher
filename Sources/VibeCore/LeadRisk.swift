@@ -127,10 +127,11 @@ public enum LeadRisk {
         }
     }
 
-    /// The first changed line in `patch` (a `git diff -U0`) that does what a pattern says, in a file that isn't a test
-    /// or a document, and isn't a comment: what it does, the file, and the line. `kinds`: only those patterns (by what).
-    public static func flagged(_ patch: String, kinds: Set<String>? = nil) -> (what: String, path: String, line: String)? {
+    /// Each changed line of `patch` (a `git diff -U0`): its file (a deleted file's removed lines under its old path), its
+    /// hunk (counted from 1), whether it was added, and the line without its sign. `each` returns false to stop.
+    static func changedLines(_ patch: String, _ each: (_ path: String, _ hunk: Int, _ added: Bool, _ line: Substring) -> Bool) {
         var path: String?
+        var hunk = 0
         // Between `diff --git` and its first `@@`: a removed `-- x` or an added `++ x` in a hunk isn't a file's name.
         var header = true
         for raw in patch.split(separator: "\n", omittingEmptySubsequences: false) {
@@ -141,6 +142,7 @@ public enum LeadRisk {
             }
             if raw.hasPrefix("@@") {
                 header = false
+                hunk += 1
                 continue
             }
             // git prints `--- a/old` then `+++ b/new`: a new file's `---` is /dev/null and a deleted file's `+++` is, so
@@ -155,15 +157,126 @@ public enum LeadRisk {
                 if target != "/dev/null" { path = String(target.hasPrefix("b/") ? target.dropFirst(2) : target) }
                 continue
             }
-            guard !header, let file = path, raw.hasPrefix("+") || raw.hasPrefix("-"), !isTest(file), !isDocument(file) else { continue }
-            let code = raw.dropFirst().trimmingCharacters(in: .whitespaces)
-            guard !code.isEmpty, !["//", "/*", "*", "#"].contains(where: { code.hasPrefix($0) }) else { continue }
+            guard !header, let file = path, raw.hasPrefix("+") || raw.hasPrefix("-") else { continue }
+            if !each(file, hunk, raw.hasPrefix("+"), raw.dropFirst()) { return }
+        }
+    }
+
+    /// The first changed line in `patch` (a `git diff -U0`) that does what a pattern says, in a file that isn't a test
+    /// or a document, and isn't a comment: what it does, the file, and the line. `kinds`: only those patterns (by what).
+    public static func flagged(_ patch: String, kinds: Set<String>? = nil) -> (what: String, path: String, line: String)? {
+        var found: (what: String, path: String, line: String)?
+        changedLines(patch) { file, _, _, line in
+            guard !isTest(file), !isDocument(file) else { return true }
+            let code = line.trimmingCharacters(in: .whitespaces)
+            guard !code.isEmpty, !["//", "/*", "*", "#"].contains(where: { code.hasPrefix($0) }) else { return true }
             let range = NSRange(code.startIndex..., in: code)
             for pattern in compiled where kinds?.contains(pattern.what) ?? true && pattern.regex.firstMatch(in: code, range: range) != nil {
-                return (pattern.what, file, String(code.prefix(80)))
+                found = (pattern.what, file, String(code.prefix(80)))
+                return false
+            }
+            return true
+        }
+        return found
+    }
+
+    // MARK: The test census
+
+    /// A test the branch's lines declare or take out: its file (the suite, here) and its function's name.
+    public struct TestDeclaration: Hashable, Sendable {
+        public var path: String
+        public var name: String
+        /// An added `@Test(.disabled…)`: it's there, and doesn't run.
+        public var disabled: Bool
+
+        public init(path: String, name: String, disabled: Bool = false) {
+            self.path = path
+            self.name = name
+            self.disabled = disabled
+        }
+    }
+
+    /// A Swift Testing test (`@Test`, its function on the same line or a later one) or an XCTest one (`func test…(`).
+    private static let testAttribute = try! NSRegularExpression(pattern: #"(?<![\w.])@Test\b"#)
+    private static let function = try! NSRegularExpression(pattern: #"\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)\s*[(<]"#)
+    private static let xcTest = try! NSRegularExpression(pattern: #"\bfunc\s+(test[A-Za-z0-9_]*)\s*\("#)
+    private static let disabledTrait = try! NSRegularExpression(pattern: #"(?<![\w.])@Test\s*\(.*\.disabled\b"#)
+
+    /// The tests `patch` (a `git diff -U0`) takes out of test files and puts in, by the lines it removes and adds: an
+    /// `@Test` (its function on that line or the next changed one) or an XCTest `func test…(`. A commented-out line
+    /// declares nothing, so commenting a test out removes it.
+    public static func testDeclarations(_ patch: String) -> (removed: [TestDeclaration], added: [TestDeclaration]) {
+        var removed: [TestDeclaration] = [], added: [TestDeclaration] = []
+        // An `@Test` line whose function is on a later line of its hunk: where, which side, and whether it's disabled.
+        var pending: (path: String, hunk: Int, added: Bool, disabled: Bool)?
+        let record = { (declaration: TestDeclaration, isAdded: Bool) in
+            if isAdded { added.append(declaration) } else { removed.append(declaration) }
+        }
+        let flush = {
+            if let open = pending { record(TestDeclaration(path: open.path, name: "an @Test", disabled: open.disabled), open.added) }
+            pending = nil
+        }
+        changedLines(patch) { file, hunk, isAdded, line in
+            guard isTest(file) else { flush(); return true }
+            let code = line.trimmingCharacters(in: .whitespaces)
+            if let open = pending, open.path != file || open.hunk != hunk || open.added != isAdded { flush() }
+            guard !code.isEmpty, !["//", "/*", "*"].contains(where: { code.hasPrefix($0) }) else { return true }
+            let range = NSRange(code.startIndex..., in: code)
+            let name = function.firstMatch(in: code, range: range).flatMap { Range($0.range(at: 1), in: code) }.map { String(code[$0]) }
+            if testAttribute.firstMatch(in: code, range: range) != nil {
+                flush()
+                let disabled = disabledTrait.firstMatch(in: code, range: range) != nil
+                if let name {
+                    record(TestDeclaration(path: file, name: name, disabled: disabled && isAdded), isAdded)
+                } else {
+                    pending = (file, hunk, isAdded, disabled && isAdded)
+                }
+            } else if let open = pending, let name {
+                record(TestDeclaration(path: file, name: name, disabled: open.disabled), isAdded)
+                pending = nil
+            } else if pending == nil, let match = xcTest.firstMatch(in: code, range: range), let found = Range(match.range(at: 1), in: code) {
+                record(TestDeclaration(path: file, name: String(code[found])), isAdded)
+            }
+            return true
+        }
+        flush()
+        return (removed, added)
+    }
+
+    /// Why the branch's tests raise it: the tests it takes out that it doesn't put back (by name, in any test file: a
+    /// test moved or a declaration's line edited is still there), each removed, replaced (its suite gains a test the
+    /// base hadn't) or disabled; nil when it takes none out. A worker can't make its suite pass by having fewer tests
+    /// in it without an auditor looking (harness review 2026-11-07).
+    public static func testCensus(_ patch: String) -> String? {
+        let (removed, added) = testDeclarations(patch)
+        var kept = Dictionary(added.filter { !$0.disabled }.map { ($0.name, 1) }, uniquingKeysWith: +)
+        var gone: [TestDeclaration] = []
+        for test in removed {
+            if let count = kept[test.name], count > 0 { kept[test.name] = count - 1 } else { gone.append(test) }
+        }
+        guard !gone.isEmpty else { return nil }
+        let disabled = Set(added.filter(\.disabled).map(\.name))
+        // A suite's new tests: added under a name nothing removed.
+        let removedNames = Set(removed.map(\.name))
+        let new = added.filter { !$0.disabled && !removedNames.contains($0.name) }
+        var parts: [String] = []
+        var seen = Set<String>()
+        for path in gone.map(\.path) where seen.insert(path).inserted {
+            let here = gone.filter { $0.path == path }
+            let off = here.filter { disabled.contains($0.name) }.map(\.name)
+            let out = here.filter { !disabled.contains($0.name) }.map(\.name)
+            let fresh = new.filter { $0.path == path }.map(\.name)
+            if !off.isEmpty { parts.append("disabled " + names(off) + " in \(path)") }
+            if !out.isEmpty {
+                parts.append(fresh.isEmpty ? "removed " + names(out) + " from \(path)"
+                    : "replaced " + names(out) + " with " + names(fresh) + " in \(path)")
             }
         }
-        return nil
+        return "it takes tests out that the base has: " + parts.joined(separator: "; ")
+    }
+
+    static func names(_ names: [String]) -> String {
+        names.prefix(6).joined(separator: ", ") + (names.count > 6 ? ", … (\(names.count) in all)" : "")
     }
 
     /// Why the change raises a review none task to audit, without a model; nil when nothing does. `patch` is read
@@ -181,6 +294,7 @@ public enum LeadRisk {
             return "it changes \(guideFile), which steers every later review"
         }
         guard let patch = patch() else { return "what its lines change can't be read, so it's audited" }
+        if let census = testCensus(patch) { return census }
         if let flagged = flagged(patch) {
             return "it has code that \(flagged.what) (\(flagged.path): \(flagged.line))"
         }
