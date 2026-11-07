@@ -3464,3 +3464,9 @@
 - 2026-11-07 21:57 Started a worker on usage-watch-forgets-a (auto → Claude: Claude weekly 9%, 26 points behind pace, not tight; Codex 59%)
 - 2026-11-07 22:02 Audit of verifier-isolation at 851ee8c4 tested its merged result ea93a29e onto main: the test command passed
 - 2026-11-07 22:02 Released verifier-isolation's worker (idle since its done report on 851ee8c4) while its audit runs
+- 2026-11-07 22:07 Audit of redo-the-github-merge: complete, clean
+- 2026-11-07 22:09 Audit of verifier-isolation: complete, clean, round 2: 1 Important closed, 1 Nit open
+- 2026-11-07 22:09 Released claude-dictation-held's worker (idle since its done report on 1d670d3c) while its audit runs
+- 2026-11-07 22:15 Released merge-gate-a-removed's worker (idle since its done report on 74fb705e) while its audit runs
+- 2026-11-07 22:19 Merged verifier-isolation: Verifier isolation: branch code it runs can't act as it, and worker notes can't reach it (in a batch: verifier-isolation, redo-the-github-merge landed on one test run)
+- 2026-11-07 22:19 Merged redo-the-github-merge: Redo the GitHub merge as a true merge, so main can be pushed and the other Mac's records come back (in a batch: verifier-isolation, redo-the-github-merge landed on one test run)
