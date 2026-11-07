@@ -290,3 +290,7 @@ The user chose it on 2026-11-07 (F0181AFD). The 2026-11-07 harness review found 
 
 On 2026-11-07 the app showed items waiting on the user. They were two chat tasks the lead had blocked after the user said "meh". The user: "It's saying that some things are waiting for me. You shouldn't wait for me, right?"
 
+## 2026-11-08 00:08:13 First backlog batch, chosen by the user on 2026-11-08, after the lead reviewed each tier-A idea. In parallel: the log watcher (A3), freeze reduction plus a freeze metric (B3), and the product inventory plus a check-before-proposing rule in the lead's prompt (A5 + the cheap A4). In sequence, because they share the merge, board and receipt code: git provenance trailers (A2) → versioned contracts (A6) → the small scorecard (A1: exact data, no model classifier yet). A8 moves to tier B. The model-based question filter (full A4) and the message classifier wait until the scorecard shows they're needed.
+
+The user's goal: exactly what they want, without issues, safely, cheaply, fast, with only necessary questions. The lead's review judged A1–A6 and A9 worth doing (A1 and A4 in cheaper forms) and A8 lukewarm. B3 was added because 75–94 freezes a day hit the user directly. The user answered "yes".
+
