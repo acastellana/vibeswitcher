@@ -12,6 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
 source scripts/lib/swift-jobs.sh
+source scripts/lib/resource-bundles.sh
 
 # --- The keychain search list (this block is the same in setup-signing.sh and build-app.sh; test-signing.sh checks) ---
 LOGIN_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
@@ -115,8 +116,8 @@ mkdir -p "$APP/Contents/Resources/bin"
 cp Resources/bin/vs-heavy "$APP/Contents/Resources/bin/vs-heavy"
 cp Resources/bin/vs-wallet "$APP/Contents/Resources/bin/vs-wallet"
 cp Resources/bin/vs-shell "$APP/Contents/Resources/bin/vs-shell"
-# SwiftPM resource bundles (SwiftTerm's Metal shaders); found through Bundle.main.resourceURL.
-for bundle in "$BIN"/*.bundle; do [[ -e "$bundle" ]] && cp -R "$bundle" "$APP/Contents/Resources/"; done
+# SwiftPM resource bundles (SwiftTerm's Metal shaders), the app's alone: no *Tests.bundle (scripts/lib/resource-bundles.sh).
+copy_resource_bundles "$BIN" "$APP/Contents/Resources"
 # Sign with the stable local identity if it exists (scripts/setup-signing.sh), so macOS keeps granted
 # permissions across rebuilds; otherwise ad-hoc, which changes identity on every build.
 if [[ -f "$SIGNING_DIR/vibeswitcher.keychain-db" ]]; then
