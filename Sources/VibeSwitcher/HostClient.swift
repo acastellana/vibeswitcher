@@ -51,6 +51,9 @@ final class HostClient: ObservableObject {
     /// The resize log's clock, and how it writes a held line later; a test's own instead.
     var resizeClock: () -> Date = Date.init
     var resizeLater: (TimeInterval, @escaping () -> Void) -> Void = { DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1) }
+    /// How a request's reply wait and the handover's wait run out later (`request`, `waitForHandover`); a test's clock
+    /// instead, so a 15 s window can't run out behind a test the loaded Mac holds up.
+    var waitLater: (TimeInterval, @escaping () -> Void) -> Void = { DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1) }
     private var whenReady: [(String?) -> Void] = []
     private var replacing = false
     /// A handover asked of the running host: its pid then (the host re-executes itself, so the new build keeps it) and
@@ -576,7 +579,7 @@ final class HostClient: ObservableObject {
     /// says, see `handoverOutcome`). A refusal that comes later still fails it.
     private func waitForHandover(_ ask: Int, waited: TimeInterval, answered: @escaping () -> Bool) {
         let step = min(handoverBreadcrumb, handoverWait - waited)
-        DispatchQueue.main.asyncAfter(deadline: .now() + step) { [weak self] in
+        waitLater(step) { [weak self] in
             guard let self, ask == self.handoverAsk, self.handingOver, !answered() else { return }
             let waited = waited + step
             guard waited < self.handoverWait else {
@@ -652,7 +655,7 @@ final class HostClient: ObservableObject {
         replies[seq] = reply
         guard let wait else { return }
         // A reply that never comes must not leave its caller (e.g. a phone request) waiting forever.
-        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+        waitLater(wait) { [weak self] in
             self?.replies.removeValue(forKey: seq)?(.error("The session host didn't answer."))
         }
     }

@@ -19,30 +19,62 @@ struct WalletRobustnessTests {
 
     // MARK: One poll at a time
 
+    /// The fake passage's link, its first look held until the test lets it go: in the courier, as a running
+    /// `passage inbox` is, with no process under it that its 60 s limit could end while a loaded Mac holds the test up.
+    final class HeldInbox: WalletTransport, @unchecked Sendable {
+        let link: PassageLink
+        private let lock = NSLock()
+        private var count = 0
+        /// Signalled when the first look is under way; it goes on once `go` is.
+        let started = DispatchSemaphore(value: 0)
+        let go = DispatchSemaphore(value: 0)
+
+        init(_ link: PassageLink) { self.link = link }
+
+        /// The looks asked of the link so far.
+        var looks: Int { lock.withLock { count } }
+
+        var destination: String { link.destination }
+        var listening: String { link.listening }
+        func deliver(file: URL, id: String) -> PassageLink.SendOutcome { link.deliver(file: file, id: id) }
+        func arrivals() -> Result<[PassageLink.InboxEntry], PassageLink.InboxFailure> {
+            let first = lock.withLock { count += 1; return count == 1 }
+            if first {
+                started.signal()
+                _ = go.wait(timeout: .now() + hangGuard)
+            }
+            return link.arrivals()
+        }
+        func requestID(of entry: PassageLink.InboxEntry) throws -> String { try link.requestID(of: entry) }
+        func bytes(of entry: PassageLink.InboxEntry) throws -> Data { try link.bytes(of: entry) }
+        func watch(heard: @escaping @Sendable () -> Void) throws -> any WalletListening { try link.watch(heard: heard) }
+    }
+
     /// Listen lines (and another poll asked) while `passage inbox` runs start no second process: they ask the running
     /// poll to run once more when it's done, once however many asked.
     @Test func listenLinesDuringAPollAskForOneMoreRunNotAnotherProcess() throws {
         let fake = try Fake(scratch)
-        let courier = courier(fake)
+        let held = HeldInbox(fake.link)
+        let courier = WalletCourier(link: held, store: WalletRequestStore(folder: scratch.url("requests")), log: { _ in },
+                                    now: { PassageLinkTests.created.addingTimeInterval(30) })
         defer { courier.close() }
-        FileManager.default.createFile(atPath: fake.file("inbox-hold").path, contents: nil)
         let first = DispatchSemaphore(value: 0)
         DispatchQueue.global().async { _ = courier.poll(); first.signal() }
-        #expect(eventually { FileManager.default.fileExists(atPath: fake.file("inbox-started").path) })
+        #expect(held.started.wait(timeout: .now() + hangGuard) == .success)
         for _ in 0..<5 { courier.heardListenLine() }
         let second = DispatchSemaphore(value: 0)
         DispatchQueue.global().async { _ = courier.poll(); second.signal() }
         #expect(eventually { courier.pollsPending == 7 })
-        #expect(inboxRuns(fake) == 1)
-        try FileManager.default.removeItem(at: fake.file("inbox-hold"))
-        FileManager.default.createFile(atPath: fake.file("inbox-go").path, contents: nil)
+        #expect(held.looks == 1)
+        held.go.signal()
         #expect(first.wait(timeout: .now() + hangGuard) == .success)
         #expect(second.wait(timeout: .now() + hangGuard) == .success)
-        #expect(inboxRuns(fake) == 2)
+        #expect(held.looks == 2 && inboxRuns(fake) == 2)
         #expect(courier.pollsPending == 0)
         // Nothing running: a listen line starts one poll of its own.
         courier.heardListenLine()
         #expect(eventually { courier.pollsPending == 0 && inboxRuns(fake) == 3 })
+        #expect(held.looks == 3)
     }
 
     // MARK: Records read safely

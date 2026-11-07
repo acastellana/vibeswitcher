@@ -161,14 +161,17 @@ struct HostClientHandoverTests {
     }
 
     /// A client of `host` whose bundled build is 9, connected to it (an outdated host at build 8, so it hands over).
-    /// `wait`: its handover's wait and breadcrumb, shortened.
-    func client(of host: FakeHost, log: Log, wait: (handover: TimeInterval, breadcrumb: TimeInterval)? = nil) -> HostClient {
+    /// `wait`: its handover's wait and breadcrumb, shortened. `clock`: what its replies' and handover's waits run on,
+    /// moved by the test (no real time passes on it); the main queue's own timer without one.
+    func client(of host: FakeHost, log: Log, wait: (handover: TimeInterval, breadcrumb: TimeInterval)? = nil,
+                clock: ResizeLogTests.ManualClock? = nil) -> HostClient {
         let client = HostClient(socketPath: host.path, appKey: { nil }, bundledBuild: { 9 }, reconnectDelays: [0.05, 0.1, 0.2],
                                 note: { log.note($0) })
         if let wait {
             client.handoverWait = wait.handover
             client.handoverBreadcrumb = wait.breadcrumb
         }
+        if let clock { client.waitLater = clock.schedule }
         client.connectIfRunning()
         return client
     }
@@ -224,38 +227,49 @@ struct HostClientHandoverTests {
     }
 
     /// The host's probe of the new build takes past a request's 15 s (a loaded Mac's first exec waits on amfid): the
-    /// handover is waited for, with a breadcrumb every 15 s, and logged as handed over; never as failed first. The host
-    /// answers once the app has logged its 15 s breadcrumb (or given up), so the answer comes past 15 s however loaded
-    /// the Mac: a timer of the host's own raced the app's on a busy main queue.
+    /// handover is waited for, with a breadcrumb every 15 s, and logged as handed over; never as failed first. The
+    /// client's waits run on a clock the test moves, past 15 s and on to 30 s before the host answers: on a loaded Mac
+    /// the test itself can be held up for minutes, and real timers ran the whole 210 s wait out behind it.
     @Test func aProbePastFifteenSecondsIsWaitedFor() async throws {
         let host = try FakeHost(pid: 31589, build: 8, onHandover: .onCue(then: .reExec(build: 9)))
         defer { host.stop() }
         let log = Log()
-        let client = client(of: host, log: log)
-        let breadcrumb = "host: handover: waiting for the new build's probe, 15 s"
-        #expect(await until { log.lines.contains(breadcrumb) || !log.handover.isEmpty }, "\(log.lines)")
+        let clock = ResizeLogTests.ManualClock()
+        let client = client(of: host, log: log, clock: clock)
+        #expect(await until { log.lines.contains { $0.hasPrefix("host: handing over") } }, "\(log.lines)")
+        // A request's 15 s, and as long again: the handover's ask is still waited for.
+        clock.advance(15)
+        clock.advance(15)
+        #expect(log.lines.filter { $0.hasPrefix("host: handover: ") }
+                == ["host: handover: waiting for the new build's probe, 15 s", "host: handover: waiting for the new build's probe, 30 s"],
+                "\(log.lines)")
+        #expect(log.handover.isEmpty, "\(log.lines)")
         #expect(await until { host.cue() })
         #expect(await until { client.state == .connected })
         #expect(log.handover == ["host: handed over (pid 31589, build 9)"], "\(log.lines)")
-        #expect(log.lines.contains(breadcrumb), "\(log.lines)")
         #expect(!log.lines.contains { $0.contains("didn't answer") || $0.contains("no answer") }, "\(log.lines)")
     }
 
-    /// While a handover is waited for, any other request still gets its 15 s.
+    /// While a handover is waited for, any other request still gets its 15 s: no less, and no more. On a clock the
+    /// test moves, so the handover's own 210 s can't run out while a loaded Mac holds the test up.
     @Test func otherRequestsKeepTheirFifteenSecondsDuringAHandover() async throws {
         let host = try FakeHost(pid: 31589, build: 8, onHandover: .hold)
         defer { host.stop() }
         let log = Log()
-        let client = client(of: host, log: log)
+        let clock = ResizeLogTests.ManualClock()
+        let client = client(of: host, log: log, clock: clock)
         #expect(await until { log.lines.contains { $0.hasPrefix("host: handing over") } })
-        let asked = Date()
         var screen: (text: String?, after: TimeInterval)?
-        client.screen(UUID()) { screen = ($0, Date().timeIntervalSince(asked)) }
-        #expect(await until { screen != nil })
+        let asked = clock.now
+        client.screen(UUID()) { screen = ($0, clock.now.timeIntervalSince(asked)) }
+        clock.advance(14)
+        #expect(screen == nil)
+        clock.advance(1)
         let unanswered = try #require(screen)
-        #expect(unanswered.text == nil && unanswered.after >= 14.9, "\(unanswered)")
+        #expect(unanswered.text == nil && unanswered.after == 15, "\(unanswered)")
         // The handover is still waited for.
         #expect(log.handover.isEmpty && !log.lines.contains { $0.contains("no answer") }, "\(log.lines)")
+        #expect(log.lines.contains("host: handover: waiting for the new build's probe, 15 s"), "\(log.lines)")
         #expect(client.state == .outdated(live: 1, compatible: true))
     }
 
