@@ -3362,3 +3362,5 @@
 - 2026-11-07 18:48 Update: Shell panes: selection, copy and paste hold while output streams — **What changed (main 5f860e4f):**
 - 2026-11-07 19:04 Planned claude-dictation-held: Claude dictation: held-Space repeats survive main-thread stalls (review audit)
 - 2026-11-07 19:19 Automatically fetched origin/main at e8b183a8: 80 commits from the other Mac at origin/main (e8b183a8077b85c05f117694c4c5f5682efed0f6): merge_remote would stop: merging origin/main into main conflicts in Sources/VibeCore/AccountUsage.swift, Sources/VibeSwitcher/Sandbox.swift. It never picks a side for code: ask the user to resolve it (or plan a task that does).
+- 2026-11-07 19:25 Audit of merge-github-s-main: complete, clean
+- 2026-11-07 19:38 Merged merge-github-s-main: Merge GitHub's main (the other Mac's 80 commits) into main
