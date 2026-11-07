@@ -3716,3 +3716,8 @@
 - 2026-11-08 00:11 Automatically (auto_advance): Started a worker on freezes-remove-the-top (Freezes: remove the top recurring main-thread hangs and track freezes per hour (backlog B3)).
 - 2026-11-08 00:11 Started a worker on product-inventory-read (auto → Claude: Claude weekly 14%, 22 points behind pace, not tight; Codex 59%)
 - 2026-11-08 00:11 Automatically (auto_advance): Started a worker on product-inventory-read (Product inventory, read before proposing; backlog statuses updated (backlog A5 + the A4 rule)); its agent is auto, so it went to Claude: Claude weekly 14%, 22 points behind pace, not tight; Codex 59%.
+- 2026-11-08 00:22 Audit of turn-this-incident-into-12 at 793ade85 tested its merged result 23f99772 onto main: the test command passed
+- 2026-11-08 00:22 Released turn-this-incident-into-12's worker (idle since its done report on 793ade85) while its audit runs
+- 2026-11-08 00:22 Automatically (auto_advance): Started the audit of turn-this-incident-into-12 at 793ade85 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 00:22 Raised dictation-test to audit (the risk check, at 3fdf6162): it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift)
+- 2026-11-08 00:22 Automatically (auto_advance): dictation-test is audited, not merged: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift) (the risk check raised it from review none). Its audit starts once the Mac has room.
