@@ -3298,3 +3298,6 @@
 - 2026-11-07 18:52 Automatically (auto_advance): Started the audit of the-app-ships-no at bb5eb67f (It touches sensitive_paths (scripts/build-app.sh), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-07 18:55 Audit of the-app-ships-no: complete, clean
 - 2026-11-07 19:06 Merged the-app-ships-no: The app ships no test bundles, and a failed install leaves the old app working
+- 2026-11-07 19:06 Automatically (auto_advance): Merged the-app-ships-no (The app ships no test bundles, and a failed install leaves the old app working) into main at 4e1f8201, on its passing audit and the full test run.
+- 2026-11-07 19:06 Automatically (auto_advance): Cleaned up the-app-ships-no (freed 2.0 GB of build output and temporary folders). It stays done.
+- 2026-11-07 19:06 Update: Merged: a failed install now leaves your app working — **What changed.** `scripts/build-app.sh --install` copies the new app to `VibeSwitcher.app.installing`, checks it with `codesign -v`, and swaps it in only then. If a copy, check or rename fails, the c…
