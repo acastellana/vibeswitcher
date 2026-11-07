@@ -3249,3 +3249,4 @@
 - 2026-11-07 10:33 Automatically (auto_advance): Started a worker on test-under-load-s (test-under-load's default mode builds inside a scratch home), its after tasks done (tests-long-synchronous).
 - 2026-11-07 10:33 Started a worker on turn-this-incident-into-10
 - 2026-11-07 10:33 Update: App Nap exemption and hang-free test suite merged — **What changed:**
+- 2026-11-07 10:43 Audit of developer-tools-warning: complete, clean, round 2: 1 Important closed, 3 Nit (2 open), 1 Pre-existing open
