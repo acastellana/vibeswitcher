@@ -158,6 +158,10 @@ keep_old() {
 }
 
 copied_at=$(date +%s)
+# An earlier run that failed both renames left the only old bundle at $aside: put it back rather than remove it.
+if [[ ! -e $dest && -e $aside ]]; then
+    mv "$aside" "$dest" || keep_old "Couldn't move the old bundle an earlier install left at $aside back to $dest."
+fi
 rm -rf "$staged" "$aside" || keep_old "Couldn't remove what an earlier install left at $staged or $aside."
 cp -R "$source_app" "$staged" || keep_old "Copying $source_app to $staged failed (see above)."
 bash -c "$verify" verify "$staged" || keep_old "The copy at $staged doesn't pass its signature check (see above)."
