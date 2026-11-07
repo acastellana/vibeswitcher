@@ -290,6 +290,8 @@ if [[ $inner -eq 0 ]]; then
 fi
 
 logs=.build/test-under-load
+# The run's record for the done check; LeadToolset.recordsRuns looks for this path to know this script writes it.
+record=.build/test-under-load/result.json
 scratch="" burners=() tests=() watchdog=""
 script=$$
 
@@ -416,7 +418,7 @@ if [[ ${#command[@]} -eq 0 ]]; then
     failures="$bin/vibeswitcher-mcp"
     [[ -x $failures ]] || { echo "no $failures to name a failed run's tests with"; exit 1; }
     mkdir -p "$logs"
-    rm -f "$logs"/run-*.log "$logs/result.json"
+    rm -f "$logs"/run-*.log "$record"
 fi
 
 # Short: host tests put sockets under it, and a socket's path is limited to 104 bytes.
@@ -663,6 +665,6 @@ if [[ ${#command[@]} -eq 0 ]]; then
         '{version: 1, commit: $commit, filter: $filter, runs: $runs, load: $load, passed: $passed, result: $result,
           tests: $counts, finished: $finished,
           files: ($hashes | split("\n") | map(select(length > 0) | split("\t") | {(.[0]): .[1]}) | add // {})}' \
-        > "$logs/result.json.new" && mv "$logs/result.json.new" "$logs/result.json"
+        > "$record.new" && mv "$record.new" "$record"
 fi
 exit $failed

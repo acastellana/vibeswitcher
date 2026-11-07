@@ -10,13 +10,15 @@ struct LeadRuleChecksTests: LeadTeamFixture {
     let vault: LeadVault
     init() { vault = Self.newVault(in: temp) }
 
-    func repo(loadScript: Bool = false) throws -> String {
+    /// loadScript: the project has a load harness; recording: one that writes its record (VibeSwitcher's), else one
+    /// that doesn't (another project's).
+    func repo(loadScript: Bool = false, recording: Bool = true) throws -> String {
         let url = temp.url("rules")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let root = url.resolvingSymlinksInPath().path
         for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }
         try commit("a.txt", "one\n", in: root)
-        if loadScript { try commit(LeadToolset.loadScript, "#!/bin/bash\n", in: root) }
+        if loadScript { try commit(LeadToolset.loadScript, "#!/bin/bash\n" + (recording ? "record=\(LeadToolset.loadResult)\n" : ""), in: root) }
         return root
     }
 
@@ -212,6 +214,21 @@ struct LeadRuleChecksTests: LeadTeamFixture {
         #expect(!worker.call("report", doneReport("answered")).isError)
     }
 
+    /// Another project's harness, which writes no record (wallet-manager's runs node's tests): its done needs the
+    /// script named in the report, as before; it can't be asked for a record its harness never writes.
+    @Test func aHarnessThatWritesNoRecordIsCheckedByTheReportsWords() throws {
+        let root = try repo(loadScript: true, recording: false)
+        let runtime = FakeRuntime()
+        let lead = try planned(root, runtime)
+        #expect(!lead.call("start_worker", ["task": "add-b"]).isError)
+        try commit("test/bee.test.ts", "// b\n", in: Worktrees.path(root: root, slug: "add-b"))
+        let worker = try seat("worker-add-b", runtime)
+        let refused = worker.call("report", doneReport("added bee.test.ts"))
+        #expect(refused.isError && refused.text.contains("the report doesn't give their run under load"), "\(refused.text)")
+        let proved = worker.call("report", doneReport("added bee.test.ts; scripts/test-under-load.sh -r 3 -f test/bee.test.ts: all 3 runs passed"))
+        #expect(!proved.isError, "\(proved.text)")
+    }
+
     /// No tests changed, or a project without the harness: nothing more is asked.
     @Test func aDoneWithoutNewTestsOrWithoutTheHarnessNeedsNoLoadRun() throws {
         let root = try repo()
@@ -250,6 +267,19 @@ struct LeadRuleChecksTests: LeadTeamFixture {
         #expect(missing?.contains("TestSupport.swift changed since") == true, "\(missing ?? "nil")")
         let other = LeadToolset.loadProofProblem(record(filter: "LeadBoardTests"), tests: tests, blobs: blobs)
         #expect(other == "its last run under load (-f 'LeadBoardTests') doesn't take Tests/VibeCoreTests/LeadRiskTests.swift.", "\(other ?? "nil")")
+        // A file whose suites aren't named as it is (HistoryTests.swift holds ScrollbackTests): the filter goes by its
+        // suites or its tests, as swift test's does.
+        let history = ["Tests/VibeCoreTests/HistoryTests.swift"]
+        let sources = [history[0]: "struct ScrollbackTests {\n    @Test func itKeepsTheTail() {}\n}\n@Suite struct TranscriptReaderTests {}\n"]
+        let historyBlobs = [history[0]: "ccc"]
+        func historyRun(_ filter: String) -> String? {
+            LeadToolset.loadProofProblem(record(filter: filter, files: historyBlobs), tests: history, blobs: historyBlobs, sources: sources)
+        }
+        #expect(historyRun("ScrollbackTests") == nil)
+        #expect(historyRun("TranscriptReader") == nil)
+        #expect(historyRun("itKeepsTheTail") == nil)
+        #expect(historyRun("ScrollbackTests/itKeepsTheTail") == nil)
+        #expect(historyRun("LeadBoardTests|itKeepsTheTailOff")?.contains("doesn't take Tests/VibeCoreTests/HistoryTests.swift") == true)
     }
 
     /// The record is in .build, which the repository ignores: `git add -A` can't commit it by accident.

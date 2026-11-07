@@ -183,6 +183,9 @@ struct LeadRiskTests {
         let moved = Self.testPatch([(removed: ["    @Test func itWaits() {", "    }"], added: [])])
             + Self.testPatch([(removed: [], added: ["    @Test func itWaits() {", "    }"])], in: other)
         #expect(Self.raise([Self.change(Self.suite, 0, 2), Self.change(other, 2, 0)], patch: moved) == nil)
+        // A helper in a test file whose name starts with test but takes arguments isn't an XCTest test.
+        let helper = Self.testPatch([(removed: ["    static func testPatch(_ hunks: [String]) -> String {", "    }"], added: [])])
+        #expect(Self.raise([Self.change(Self.suite, 0, 2)], patch: helper) == nil)
         // A product file's `func test…` isn't a test.
         #expect(Self.raise([Self.change("Sources/VibeCore/Thing.swift")], patch: Self.patch("Sources/VibeCore/Thing.swift", [], removed: ["func testConnection() {"])) == nil)
     }

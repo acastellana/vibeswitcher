@@ -4107,7 +4107,7 @@ public final class LeadToolset: MCPToolset {
         let done = kind != "blocked"
         // Before anything is recorded: a done that doesn't show how each check was checked doesn't count as one.
         var evidence = done ? try Self.doneEvidence(arguments, acceptance: store.load().task(slug)?.contract.acceptance ?? [], base: workflow.base) : nil
-        if done { try checkLoadProof(slug) }
+        if done { try checkLoadProof(slug, arguments) }
         // Its screenshots as copies kept in .vibeswitcher, so board(task), the verifier and the lead still open them
         // once the worktree (where sandbox shots are) is cleaned up. Relative paths are the worktree's.
         if let given = evidence {
@@ -4551,16 +4551,29 @@ public final class LeadToolset: MCPToolset {
     /// behind it: on 2026-10-23 three new tests passed in their workers and failed in loaded merge runs, each a ~30 min
     /// merge and a rework (decision 2026-10-23 14:16). Not the report's words (until 2026-11-07 the script's name in
     /// it was enough): the record the script writes at the end of a run (`loadResult`), which must have passed, on the
-    /// test files the branch has now, with a filter that takes each changed suite.
-    private func checkLoadProof(_ slug: String) throws {
+    /// test files the branch has now, with a filter that takes each changed suite. A project whose own `loadScript`
+    /// writes no record (another project's harness: wallet-manager's runs node's tests) keeps the old check, the
+    /// script's name in the report.
+    private func checkLoadProof(_ slug: String, _ arguments: [String: Any]) throws {
         let worktree = Worktrees.path(root: root, slug: slug)
-        guard FileManager.default.fileExists(atPath: (worktree as NSString).appendingPathComponent(Self.loadScript)),
+        guard let script = FileManager.default.contents(atPath: (worktree as NSString).appendingPathComponent(Self.loadScript)),
               let head = branchHead(Worktrees.branch(slug)) else { return }
         // A done again on the same commit (answering findings, a note): its first one gave it.
         if (try? vault.unaudited(root: root, task: slug))?.reported == head { return }
         let changed = Git.run(["diff", "--name-only", "--diff-filter=d", "\(workflow.base)...\(head)"], in: root)
         let tests = Self.testFiles(changed.output.split(whereSeparator: \.isNewline).map(String.init))
         guard changed.ok, !tests.isEmpty else { return }
+        let named = "Not reported: your branch adds or changes tests (\(tests.prefix(5).joined(separator: ", "))\(tests.count > 5 ? ", …" : "")), "
+        guard Self.recordsRuns(script) else {
+            let said = [arguments["summary"], arguments["evidence"], arguments["blind_check"]].map { value -> String in
+                guard let value else { return "" }
+                if let text = value as? String { return text }
+                return (try? JSONSerialization.data(withJSONObject: value)).flatMap { String(data: $0, encoding: .utf8) } ?? "\(value)"
+            }.joined(separator: "\n")
+            guard !said.contains("test-under-load") else { return }
+            throw Problem(text: named + "and the report doesn't give their run under load. Run them once through `\(LeadPrompts.proofCommand)` "
+                + "and put its result line in your report (summary or evidence), then report again.")
+        }
         // Each test file's blob on the reported commit: `<mode> blob <sha>\t<path>`.
         let tree = Git.run(["ls-tree", head, "--"] + tests, in: root)
         var blobs: [String: String] = [:]
@@ -4569,16 +4582,32 @@ public final class LeadToolset: MCPToolset {
             guard parts.count == 2, let sha = parts[0].split(separator: " ").last else { continue }
             blobs[String(parts[1])] = String(sha)
         }
+        // Each one's text on that commit, for the suites and tests it declares.
+        var sources: [String: String] = [:]
+        for path in tests {
+            let shown = Git.run(["show", "\(head):\(path)"], in: root)
+            if shown.ok { sources[path] = shown.output }
+        }
         let record = FileManager.default.contents(atPath: (worktree as NSString).appendingPathComponent(Self.loadResult))
-        guard let problem = Self.loadProofProblem(record, tests: tests, blobs: blobs) else { return }
-        throw Problem(text: "Not reported: your branch adds or changes tests (\(tests.prefix(5).joined(separator: ", "))\(tests.count > 5 ? ", …" : "")), "
-            + "and \(problem) Run them once through `\(LeadPrompts.proofCommand)` (each changed suite in its -f; it records the run "
+        guard let problem = Self.loadProofProblem(record, tests: tests, blobs: blobs, sources: sources) else { return }
+        throw Problem(text: named + "and \(problem) Run them once through `\(LeadPrompts.proofCommand)` (each changed suite in its -f; it records the run "
             + "in \(Self.loadResult)), put its result line in your report, then report again.")
     }
 
+    /// Whether a project's `loadScript` (its text) is one that writes `loadResult`.
+    static func recordsRuns(_ script: Data) -> Bool {
+        String(decoding: script, as: UTF8.self).contains(loadResult)
+    }
+
+    private static let declaredType = try! NSRegularExpression(pattern: #"\b(?:struct|class|actor|enum|extension)\s+([A-Za-z_][A-Za-z0-9_]*)"#)
+    private static let declaredFunction = try! NSRegularExpression(pattern: #"\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)"#)
+
     /// What's wrong with `record` (`loadResult`'s contents, nil when there's none) as the proof of `tests`' run under
-    /// load, `blobs` being their git blobs on the reported commit; nil when it proves it.
-    static func loadProofProblem(_ record: Data?, tests: [String], blobs: [String: String]) -> String? {
+    /// load, `blobs` being their git blobs on the reported commit and `sources` their text there; nil when it proves
+    /// it. A changed suite file is taken when the run's filter (a regular expression over `Target.Suite/test()`, as
+    /// swift test's) matches one of its suites or tests: the types it declares (a file's name needn't be its suite's,
+    /// HistoryTests.swift holds ScrollbackTests) or its name, with any of its functions.
+    static func loadProofProblem(_ record: Data?, tests: [String], blobs: [String: String], sources: [String: String] = [:]) -> String? {
         guard let record else {
             return "there's no record of their run under load: \(loadScript) writes \(loadResult) in your worktree at the end of a run, and there's none."
         }
@@ -4600,9 +4629,17 @@ public final class LeadToolset: MCPToolset {
             let suite = ((parts.last ?? path) as NSString).deletingPathExtension
             // A suite file (FooTests.swift), not a helper beside the tests.
             guard suite.hasSuffix("Tests") else { return false }
-            let id = (parts.count > 1 ? parts[parts.count - 2] + "." : "") + suite
-            let taken = regex?.firstMatch(in: id, range: NSRange(id.startIndex..., in: id)) != nil
-            return !taken && !filter.contains(suite)
+            let target = parts.count > 1 ? parts[parts.count - 2] + "." : ""
+            let source = sources[path] ?? ""
+            let whole = NSRange(source.startIndex..., in: source)
+            let matched = { (regex: NSRegularExpression) in
+                regex.matches(in: source, range: whole).compactMap { Range($0.range(at: 1), in: source).map { String(source[$0]) } }
+            }
+            let suites = [suite] + matched(declaredType)
+            let functions = matched(declaredFunction)
+            if suites.contains(where: { filter.contains($0) }) { return false }
+            let ids = suites.map { target + $0 } + suites.flatMap { name in functions.map { target + name + "/" + $0 + "(" } }
+            return !ids.contains { id in regex?.firstMatch(in: id, range: NSRange(id.startIndex..., in: id)) != nil }
         }
         guard missed.isEmpty else {
             return "its last run under load (-f '\(clip(filter, 120))') doesn't take \(LeadRisk.list(missed))."

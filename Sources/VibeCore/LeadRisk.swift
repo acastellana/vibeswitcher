@@ -199,7 +199,8 @@ public enum LeadRisk {
     /// A Swift Testing test (`@Test`, its function on the same line or a later one) or an XCTest one (`func test…(`).
     private static let testAttribute = try! NSRegularExpression(pattern: #"(?<![\w.])@Test\b"#)
     private static let function = try! NSRegularExpression(pattern: #"\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)\s*[(<]"#)
-    private static let xcTest = try! NSRegularExpression(pattern: #"\bfunc\s+(test[A-Za-z0-9_]*)\s*\("#)
+    /// XCTest runs `func test…()` taking no arguments: a helper like `func testPatch(_ hunks:)` isn't one.
+    private static let xcTest = try! NSRegularExpression(pattern: #"\bfunc\s+(test[A-Za-z0-9_]*)\s*\(\s*\)"#)
     private static let disabledTrait = try! NSRegularExpression(pattern: #"(?<![\w.])@Test\s*\(.*\.disabled\b"#)
 
     /// The tests `patch` (a `git diff -U0`) takes out of test files and puts in, by the lines it removes and adds: an
