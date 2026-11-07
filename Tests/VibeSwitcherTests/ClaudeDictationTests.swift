@@ -1516,19 +1516,49 @@ struct ClaudeDictationTests {
         #expect(h.agentPrompts == prompts)
     }
 
-    /// The app stalls (its main thread busy) past the end of Claude's hold: Claude ends the recording and processes it,
-    /// and a Space then would be typed and make it drop what it heard. The Spaces wait for a read asked since: it shows
-    /// it processing, the hold stops, and what was heard lands.
+    /// A repeat stalls once on the queue the repeats go from, `seconds` (armed by the test).
+    final class RepeatStall: @unchecked Sendable {
+        private let lock = NSLock()
+        private var armed = false
+        let seconds: TimeInterval
+        init(seconds: TimeInterval) { self.seconds = seconds }
+        func arm() { lock.withLock { armed = true } }
+        /// On the repeats' queue.
+        func pass() {
+            guard lock.withLock({ () -> Bool in defer { armed = false }; return armed }) else { return }
+            Thread.sleep(forTimeInterval: seconds)
+        }
+    }
+
+    /// The harness's session, its held Space's repeats stalled once by `stall`.
+    func dictation(_ h: Harness, stall: RepeatStall) -> DictationController {
+        controller(session: { [weak h] key in
+            guard var session = h?.sync.claudeVoice(key: key) else { return nil }
+            let offMain = session.offMainKeys
+            session.offMainKeys = {
+                guard let send = offMain() else { return nil }
+                // After a key went: the next is late, as when the queue is held up.
+                return { let went = send($0); stall.pass(); return went }
+            }
+            return session
+        }).0
+    }
+
+    /// The repeats stall past the end of Claude's hold (the main thread's stalls no longer hold them up, but their own
+    /// queue may be, on a Mac loaded enough): Claude ends the recording and processes it, and a Space then would be
+    /// typed and make it drop what it heard. The Spaces wait for a read asked since: it shows it processing, the hold
+    /// stops, and what was heard lands.
     @Test func aStallPastTheEndOfTheHoldSendsNoSpaceWhileClaudeProcesses() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
         h.tell(["op": "voice", "mode": "hold", "processing": 0.6])
         try await h.waitFor { h.agent["processing"] as? Double == 0.6 }
-        let controller = dictation(h)
+        // The stall itself (what's tested), longer than Claude's 120 ms here.
+        let stall = RepeatStall(seconds: 0.35)
+        let controller = dictation(h, stall: stall)
         controller.press(h.key, agent: .claude) { "" }
         try await h.waitFor { controller.listening }
-        // The stall itself (what's tested), longer than Claude's 120 ms here.
-        Thread.sleep(forTimeInterval: 0.35)
+        stall.arm()
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
         // The cut is said, with why: the app's stall, which Claude took for letting go.

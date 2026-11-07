@@ -125,10 +125,11 @@ final class HeldKey: @unchecked Sendable {
         timing.sync {
             self.current.pausedAt = nil
             self.generation += 1
+            let at = self.now()
             guard self.send(self.key) else { return }
             went = true
             self.current.count += 1
-            self.current.lastAt = self.now()
+            self.current.lastAt = at
             self.running = true
             self.next(after: self.every, self.generation)
         }
@@ -146,13 +147,14 @@ final class HeldKey: @unchecked Sendable {
                 current.pausedAt = now()
                 return
             }
+            let at = now()
             guard send(key) else {
                 running = false
                 DispatchQueue.main.async(execute: failed)
                 return
             }
             current.count += 1
-            current.lastAt = now()
+            current.lastAt = at
             next(after: every, generation)
         }
     }
