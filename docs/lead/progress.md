@@ -3490,3 +3490,8 @@
 - 2026-11-07 22:44 Started a worker on github-merge-third-try
 - 2026-11-07 22:58 Merged claude-dictation-held: Claude dictation: held-Space repeats survive main-thread stalls (in a batch, on a test run of its own)
 - 2026-11-07 22:58 Didn't merge review-rules-have-a in the batch: tests fail with it on main (statusAndBoardStayBounded()); back to its worker
+- 2026-11-07 22:58 Started a worker on review-rules-have-a
+- 2026-11-07 22:58 Automatically (auto_advance): Merge of review-rules-have-a failed: Tests fail rebased onto main (in a batch): statusAndBoardStayBounded() Sent its worker the output; it's back at work.
+- 2026-11-07 22:58 Automatically (auto_advance): Merged claude-dictation-held at d1b53f34 (its passing audit) into main as one batch, on 2 test runs for 2 tasks.
+- 2026-11-07 22:58 Automatically (auto_advance): Cleaned up claude-dictation-held (freed 2.1 GB of build output and temporary folders). It stays done.
+- 2026-11-07 22:58 Update: Dictation: an app stall no longer cuts a Claude recording — **What changed (main d1b53f34):**
