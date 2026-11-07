@@ -223,3 +223,7 @@ The lead proposed it with a 15 min timer and the user didn't answer in time, so 
 
 Question 6B9DC8CB went ahead on its timer with the lead's proposal, as on 2026-11-01 in the same situation. The account reached Fable's weekly limit, and an audited task (an-agent-can-open) was waiting.
 
+## 2026-11-07 10:27:13 The 2026-11-05 incident "the user's Allow on a verifier's Read prompt didn't reach the session" gets no regression check. turn-this-incident-into-4 is abandoned after its probe (00c6531, ChatSyncTests.probeReadPermissionAllow) passed on main's code: Chat's Allow on today's Read prompt shape lands, the card shows nothing misleading, and the notification has no Allow action (a click only opens the session). The most likely cause is that the user answered from the notification, which sends nothing.
+
+The contract said to stop if the Allow path works, rather than invent a check. The probe was run by the lead on 2026-11-07 under vs-heavy, because Codex's sandbox can't compile SwiftTerm's Metal shaders. Not reproduced: a host write failure that only goes to the log, and a selection that moves between the screen read and the key writes.
+

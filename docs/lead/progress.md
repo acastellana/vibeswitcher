@@ -3126,3 +3126,4 @@
 - 2026-11-07 10:08 Review of turn-this-incident-into-4: audit
 - 2026-11-07 10:08 Started a worker on turn-this-incident-into-4
 - 2026-11-07 10:08 Automatically (auto_advance): Started a worker on turn-this-incident-into-4 (Turn this incident into a check: The user's Allow on a verifier's Read permission prompt didn…).
+- 2026-11-07 10:27 Abandoned turn-this-incident-into-4: Probe passed: Chat Allow works for the Read prompt; not reproducible, so per contract no check (decision 2026-11-07).
