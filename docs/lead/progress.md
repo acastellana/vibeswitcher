@@ -3727,3 +3727,11 @@
 - 2026-11-08 00:32 Automatically (auto_advance): Started the audit of dictation-test at 3fdf6162 (Its review is audit. (audited: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift), as the risk check found.)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-08 00:41 Merged review-rules-have-a: Review rules have a floor the user sets and the lead can only raise (in a batch: review-rules-have-a, turn-this-incident-into-12 landed on one test run)
 - 2026-11-08 00:41 Merged turn-this-incident-into-12: Turn this incident into a check: The same incident a second time, after its fix merged: redo-… (in a batch: review-rules-have-a, turn-this-incident-into-12 landed on one test run)
+- 2026-11-08 00:41 Automatically (auto_advance): Merged review-rules-have-a at c5d8bd58 (its passing audit), turn-this-incident-into-12 at 703eafc1 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-08 00:41 Automatically (auto_advance): Cleaned up review-rules-have-a; ended pid 81713 (Worker: Review rules have a floor the user sets and the lead can only raise) (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-08 00:41 Automatically (auto_advance): Cleaned up turn-this-incident-into-12 (freed 2.8 GB of build output and temporary folders). It stays done.
+- 2026-11-08 00:41 Started a worker on provenance-in-git-every (auto → Claude: Claude weekly 16%, 20 points behind pace, not tight; Codex 59%)
+- 2026-11-08 00:41 Automatically (auto_advance): Started a worker on provenance-in-git-every (Provenance in git: every merge commit carries its task, models, verdict and the VS build (backlog A2)), its after tasks done (turn-this-incident-into-12); its agent is auto, so it went to Claude: Claude weekly 16%, 20 points behind pace, not tight; Codex 59%.
+- 2026-11-08 00:41 Update: Review rules floor in Settings; merges record their build — **What changed (main c5d8bd58 and 703eafc1):**
+- 2026-11-08 00:45 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-08 00:46 Audit of dictation-test: complete, clean, round 1: 1 Pre-existing open
