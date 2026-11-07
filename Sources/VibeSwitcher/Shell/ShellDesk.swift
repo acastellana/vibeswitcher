@@ -66,8 +66,12 @@ final class ShellDesk: ObservableObject {
     /// On main: requests seen this run (one first seen while `atOnce` is on starts then), and messages under way.
     private var seen: Set<String> = []
     private var telling: Set<String> = []
-    /// Which Run each `refused` line is for: an earlier one's timer doesn't clear a later one's.
+    /// Which Run of its card each `refused` line is for: an earlier one's timer doesn't clear a later one's.
     private var refusals = 0
+    /// Runs `clear` once a refusal has shown long enough (main thread); tests fire it themselves.
+    var later: (_ after: TimeInterval, _ clear: @escaping () -> Void) -> Void = { after, clear in
+        DispatchQueue.main.asyncAfter(deadline: .now() + after, execute: clear)
+    }
     private var watch: DispatchSourceFileSystemObject?
     private var timer: DispatchSourceTimer?
 
@@ -135,12 +139,13 @@ final class ShellDesk: ObservableObject {
     func run(_ id: String, done: @escaping (RunOutcome) -> Void = { _ in }) {
         let finish: (RunOutcome) -> Void = { [self] outcome in
             refusals += 1
+            let mine = refusals
             if case .refused(let reason) = outcome {
                 log("\(id): \(reason)")
-                let mine = refusals
                 refused[id] = reason
-                DispatchQueue.main.asyncAfter(deadline: .now() + RunShown.refused(reason).lasts) { [weak self] in
-                    if self?.refusals == mine { self?.refused[id] = nil }
+                later(RunShown.refused(reason).lasts) { [weak self] in
+                    guard let self, refusals == mine else { return }
+                    refused[id] = nil
                 }
             } else {
                 refused[id] = nil
