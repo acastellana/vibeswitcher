@@ -3357,3 +3357,6 @@
 - 2026-11-07 18:35 Audit of terminal-panes-text-can: complete, suspect, round 1: 4 Nit open
 - 2026-11-07 18:36 Audit of terminal-panes-text-can: complete, clean, round 2: 4 Nit (3 open)
 - 2026-11-07 18:48 Merged terminal-panes-text-can: Terminal panes: text can be selected, copied and pasted again
+- 2026-11-07 18:48 Automatically (auto_advance): Merged terminal-panes-text-can (Terminal panes: text can be selected, copied and pasted again) into main at 5f860e4f, on its passing audit and the full test run.
+- 2026-11-07 18:48 Automatically (auto_advance): Cleaned up terminal-panes-text-can (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-07 18:48 Update: Shell panes: selection, copy and paste hold while output streams — **What changed (main 5f860e4f):**
