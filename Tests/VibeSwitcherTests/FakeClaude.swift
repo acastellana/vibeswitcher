@@ -24,7 +24,9 @@ enum FakeClaude {
 # and takes CSI I and CSI O as them; else they're Esc and typed text), "focused" (its terminal has focus: only then
 # does it draw its caret and level cursor), "processing" (seconds a recording takes to process once it ends: a
 # Space then is typed, and it drops what it heard if the box changed meanwhile, as 2.1.312's input_diverged), "stuck" (a
-# recording goes on after the Spaces stop, until Esc), "loud" (its level cursor coloured though no words show)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
+# recording goes on after the Spaces stop, until Esc), "loud" (its level cursor coloured though no words show), "wrap"
+# (a box wider than this many characters is word-wrapped onto rows of its own, as Claude Code draws a long draft, and ⌃U
+# deletes only the row the caret is on, as its deleteToLineStart does)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
 # "processed" (the recording being processed is done now, whatever "processing" said) | "print" (the bytes of "file"
 # written on its terminal, as a command's output) |
 # "exit" (it quits, as /exit)).
@@ -96,6 +98,7 @@ state = {
     "voiceInserts": 0,       # transcripts written into the box
     "strayed": 0,            # spaces typed by held chains that broke before recording (a stall past "gap"): they stay
     "killed": 0,             # ⌃U taken
+    "wrap": 0,               # the box's width for a long draft, word-wrapped onto rows (0: one line, as the pty wraps it)
 }
 # "awaiting": a transcript went in and a second push of the key would send it (2.1.312's awaitingVoiceSubmitDoubleTap);
 # "push": when the first push came; "submitAt": when an armed send fires (120 ms after the second push); "typed": the
@@ -158,6 +161,18 @@ def out(text):
 
 # MARK: drawing
 
+def box_rows(text):
+    """The rows a draft is drawn on, as (start, end) offsets: word-wrapped at "wrap" characters (one row when it's 0)."""
+    width = state["wrap"]
+    rows, start = [], 0
+    while width and len(text) - start > width:
+        cut = text.rfind(" ", start, start + width + 1)
+        rows.append((start, cut if cut > start else start + width))
+        start = cut + 1 if cut > start else start + width
+    rows.append((start, len(text)))
+    return rows
+
+
 def draw():
     lines = []
     if state["mode"] == "question":
@@ -182,7 +197,11 @@ def draw():
             heard = state["interim"] if state["interim"] is not None else " ".join(words[:max(1, len(words) // 2)])
             cursor = (METER if heard or state["loud"] else QUIET) if state["focused"] and state["recording"] == "listening" else ""
             live = ESC + "[2m" + heard + ESC + "[22m" + cursor
-        lines.append("❯ " + state["input"].replace("\n", " ") + live)
+        flat = state["input"].replace("\n", " ")
+        drawn = [flat[a:b] for a, b in box_rows(flat)]
+        drawn[-1] += live
+        lines.append("❯ " + drawn[0])
+        lines.extend("  " + row for row in drawn[1:])
         lines.append(RULE)
         menu = suggestions()
         footer = {"warming": "keep holding…", "listening": "listening…", "tap": "● REC · tap to send",
@@ -792,7 +811,12 @@ def key(name):
         if name not in ("up", "down"):
             state["suggest"] = 0
             state["dismissed"] = False
-        if name == "ctrl-u":
+        if name == "ctrl-u" and state["wrap"]:
+            # Claude Code's: from the caret (at the end) to the start of its row, one row of a wrapped draft at a time.
+            text = state["input"].rstrip(" ")
+            state["input"] = text[:box_rows(text)[-1][0]]
+            state["killed"] += 1
+        elif name == "ctrl-u":
             cut = state["input"].rstrip("\n").rfind("\n")
             state["input"] = state["input"][:cut + 1] if cut >= 0 else ""
             state["killed"] += 1
@@ -986,7 +1010,7 @@ def control():
             if state["recording"] == "processing":
                 VOICE["until"] = time.monotonic()
         elif op == "voice":
-            for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine", "focused", "processing", "stuck", "loud"):
+            for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine", "focused", "processing", "stuck", "loud", "wrap"):
                 if name in command:
                     state[{"mode": "voice", "account": "voiceAccount"}.get(name, name)] = command[name]
             if "focusEvents" in command:

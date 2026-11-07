@@ -261,9 +261,11 @@ final class DictationController: ObservableObject, @unchecked Sendable {
             try recorder.start()
         } catch {
             held = nil
+            Breadcrumbs.shared.note("dictation: OpenAI's not started: the microphone couldn't be started (\(error))")
             notices[rowID] = Notice(rowID: rowID, text: "The microphone couldn't be started.")
             return
         }
+        Breadcrumbs.shared.note("dictation: OpenAI's recording began")
         let work = Work()
         work.vocabulary = vocabulary
         work.cancelLimit = schedule(DictationLimits.maxDuration) { [weak self] in self?.stop(rowID, limitReached: true) }
@@ -293,6 +295,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         }
         guard case .recording = run.phase else { return }
         recorder.cancel()
+        Breadcrumbs.shared.note("dictation: OpenAI's ended, cancelled")
         idle(rowID)
     }
 
@@ -347,6 +350,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         let vocabulary = work.vocabulary ?? { "" }
         work.vocabulary = nil
         guard let audio, audio.duration >= DictationLimits.minDuration else {
+            Breadcrumbs.shared.note(String(format: "dictation: OpenAI's ended, nothing recorded (%.1f s)", audio?.duration ?? 0))
             notices[rowID] = Notice(rowID: rowID, text: "Nothing was recorded: hold the mic button (or \(shortcuts)) while you speak.")
             return idle(rowID)
         }
@@ -363,12 +367,19 @@ final class DictationController: ObservableObject, @unchecked Sendable {
                 } catch {
                     result = .failure(error as? OpenAITranscription.Failure ?? .unreadable)
                 }
-                DispatchQueue.main.async { self?.finish(result, rowID: rowID) }
+                DispatchQueue.main.async { self?.finish(result, rowID: rowID, recorded: audio.duration) }
             }
         }
     }
 
-    private func finish(_ result: Result<String, OpenAITranscription.Failure>, rowID: String) {
+    private func finish(_ result: Result<String, OpenAITranscription.Failure>, rowID: String, recorded: TimeInterval) {
+        // How it ended, never what was said.
+        let how: String
+        switch result {
+        case .success(let text): how = "text taken (\(text.count) characters)"
+        case .failure(let failure): how = "no text: \(failure.name)"
+        }
+        Breadcrumbs.shared.note(String(format: "dictation: OpenAI's ended, %@ after %.1f s recorded, model %@", how, recorded, model))
         switch result {
         case .success(let text):
             deliver(text, to: rowID)
@@ -438,6 +449,8 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         case .text(let text):
             claudeHeard = true
             deliver(text, to: rowID)
+            // Its recording ended before the release: said, so a cut isn't taken for all that was said.
+            if let cut = work.claudeRun?.cut { notices[rowID] = Notice(rowID: rowID, text: cut) }
         case .notice(let text, let offer):
             notices[rowID] = Notice(rowID: rowID, text: text, turnOn: offer, privacy: text == Self.microphoneNotice || text == ClaudeVoiceRun.heardNothing)
         case .cancelled:

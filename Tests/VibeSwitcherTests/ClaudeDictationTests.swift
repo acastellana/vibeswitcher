@@ -652,6 +652,29 @@ struct ClaudeDictationTests {
     /// release, ends 3 s after it (the runs' clock), not 20. Claude went idle at once with nothing (too fast to see it
     /// process): nothing more to do. Claude still recording after the Spaces stopped: its own cancel first, so it isn't
     /// left recording. Mid-turn both times, and its turn goes on.
+    /// A long dictation (2026-10-31, a minute held): Claude wraps its transcript onto many rows of its box, and its ⌃U
+    /// deletes one row at a time. Every row goes, however many there are, and the text lands in the composer; four ⌃U
+    /// at most left the rest in Claude's box ("Claude's prompt box kept the dictated text").
+    @Test func aLongTranscriptOnManyRowsIsTakenOutWhole() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        let sentence = "open the composer view on main and run the dictation tests again before the merge"
+        let transcript = Array(repeating: sentence, count: 12).joined(separator: " ")
+        h.tell(["op": "voice", "mode": "hold", "gap": 1.5, "wrap": 90, "transcript": transcript, "interim": "open the composer"])
+        try await h.waitFor { h.agent["wrap"] as? Int == 90 && h.agent["voice"] as? String == "hold" }
+        let controller = dictation(h, now: { Date(timeIntervalSinceReferenceDate: MacTime.real.awake()) })
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == transcript, "\(String(describing: controller.notice)) \(String(describing: ended))")
+        #expect(controller.notice == nil)
+        #expect(input(h) == "")
+        // One ⌃U a row: 11 rows of at most 90 characters.
+        #expect((h.agent["killed"] as? Int ?? 0) >= 11)
+        #expect(h.agent["enters"] as? Int == 0 && h.agent["doubleSubmits"] as? Int == 0)
+    }
+
     @Test func aRecordingThatStaysFlatAfterTheReleaseEndsWithinAboutThreeSeconds() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
@@ -734,6 +757,35 @@ struct ClaudeDictationTests {
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.notice?.text == ClaudeVoiceRun.didntCatch && controller.notice?.privacy == false,
                 "\(String(describing: controller.notice))")
+        #expect(ended?.contains("level cursor flat") == true, "\(String(describing: ended))")
+    }
+
+    /// The same after a long hold (2026-10-30, session 3C336E7A: held 10 s and more, its level cursor grey throughout,
+    /// four runs in a row, after two that heard): not too short, so not "hold a little longer"; it says Claude heard only
+    /// silence, and what to try.
+    @Test func afterARunHeardALongFlatOneSaysItHeardOnlySilence() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold"])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" }
+        let clock = Clock()
+        let controller = dictation(h, now: clock.now)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main")
+
+        h.tell(["op": "voice", "transcript": "", "interim": "", "processing": 0.5])
+        try await h.waitFor { h.agent["interim"] as? String == "" && h.agent["processing"] as? Double == 0.5 }
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        // Held past the long-hold mark while it records.
+        clock.ahead += ClaudeVoiceRun.longHold + 0.1
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.notice?.text == ClaudeVoiceRun.onlySilence && controller.notice?.privacy == false,
+                "\(String(describing: controller.notice)) \(String(describing: ended))")
         #expect(ended?.contains("level cursor flat") == true, "\(String(describing: ended))")
     }
 
@@ -1031,6 +1083,10 @@ struct ClaudeDictationTests {
         h.tell(["op": "voiceStop"])
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
+        // Cut short while still held: said, not only what was heard landing as if it were all.
+        #expect(controller.notice?.text == ClaudeVoiceRun.stoppedByItself && controller.notice?.info == false,
+                "\(String(describing: controller.notice))")
+        #expect(ended?.contains("cut short: Claude stopped by itself") == true, "\(String(describing: ended))")
         #expect(h.agent["doubleSubmits"] as? Int == 0)
         #expect(h.agent["voiceStarts"] as? Int == 1)
         #expect(h.agentPrompts == prompts)
@@ -1322,6 +1378,8 @@ struct ClaudeDictationTests {
         try await h.waitFor { controller.listening }
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
+        // Stopped at the first words while still held: said, and why.
+        #expect(controller.notice?.text == ClaudeVoiceRun.stoppedUnseen, "\(String(describing: controller.notice))")
         #expect(h.agent["voiceInserts"] as? Int == 1)
         #expect(h.agent["focusIns"] as? Int == 0)
         #expect(input(h) == "")
@@ -1398,6 +1456,9 @@ struct ClaudeDictationTests {
         Thread.sleep(forTimeInterval: 0.35)
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
+        // The cut is said, with why: the app's stall, which Claude took for letting go.
+        #expect(controller.notice?.text.hasPrefix("Cut short: VibeSwitcher stalled") == true, "\(String(describing: controller.notice))")
+        #expect(ended?.contains("cut short: VibeSwitcher stalled") == true, "\(String(describing: ended))")
         #expect(h.agent["dropped"] as? Int == 0)
         #expect(h.agent["doubleSubmits"] as? Int == 0 && h.agent["enters"] as? Int == 0)
         #expect(input(h) == "")

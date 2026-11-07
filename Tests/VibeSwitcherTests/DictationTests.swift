@@ -450,6 +450,36 @@ struct DictationTests {
         #expect(controller.phase == .idle)
     }
 
+    /// Each OpenAI run leaves its start and end in app.log, how it ended and why, as Claude's do: never the key, the
+    /// vocabulary or the text. Until 2026-11-07 it left nothing, so a run that failed couldn't be told from one never made.
+    @Test func eachOpenAIRunLeavesATrailInAppLogWithoutTheKeyOrTheText() async {
+        // Looked for in the whole ring, not from a count taken before: in a full suite the ring (its last 400 lines) may
+        // roll past where this test's began.
+        let lines = { Breadcrumbs.shared.lines.filter { $0.contains("dictation: OpenAI's") } }
+        let (ok, _) = controller(FakeHTTP(), recorder: FakeRecorder())
+        ok.press("row-log") { "Words that may come up: VibeSwitcher." }
+        await releaseAndWait(ok)
+        let (refused, _) = controller(FakeHTTP(status: 429), recorder: FakeRecorder())
+        refused.press("row-log") { "" }
+        await releaseAndWait(refused)
+        let (offline, _) = controller(FakeHTTP(fails: true), recorder: FakeRecorder())
+        offline.press("row-log") { "" }
+        await releaseAndWait(offline)
+        let short = FakeRecorder()
+        short.audio = DictationAudio(data: Data("x".utf8), mimeType: "audio/mp4", duration: 0.1)
+        let (tapped, _) = controller(FakeHTTP(), recorder: short)
+        tapped.press("row-log") { "" }
+        tapped.release()
+        let trail = lines().joined(separator: "\n")
+        #expect(trail.contains("dictation: OpenAI's recording began"), "\(trail)")
+        #expect(trail.contains("dictation: OpenAI's ended, text taken (31 characters) after 3.0 s recorded"), "\(trail)")
+        #expect(trail.contains("dictation: OpenAI's ended, no text: HTTP 429"), "\(trail)")
+        #expect(trail.contains("dictation: OpenAI's request failed (NSURLErrorDomain -1009)"), "\(trail)")
+        #expect(trail.contains("dictation: OpenAI's ended, no text: network"), "\(trail)")
+        #expect(trail.contains("dictation: OpenAI's ended, nothing recorded (0.1 s)"), "\(trail)")
+        #expect(!trail.contains(Self.key) && !trail.contains("ComposerView") && !trail.contains("Words that may"), "\(trail)")
+    }
+
     @Test func anOpenAIFailureIsSaidUnderTheBox() async {
         let (controller, _) = controller(FakeHTTP(status: 429, body: #"{"error":{"message":"quota"}}"#), recorder: FakeRecorder())
         controller.press("row-2") { "" }
