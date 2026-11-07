@@ -3341,3 +3341,5 @@
 - 2026-11-07 17:43 Planned terminal-panes-text-can: Terminal panes: text can be selected, copied and pasted again
 - 2026-11-07 17:43 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 87% used, resets Nov 11, 18:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway. A bounded, mechanical task with a tight contract can run on Codex instead (update_task(<task>, agent: codex): the Codex account's usage, always audited by a Claude verifier); you decide.
 - 2026-11-07 17:43 Started a worker on terminal-panes-text-can
+- 2026-11-07 18:09 Planned chat-view-copying-text: Chat view: copying text and the hover time work on the first try
+- 2026-11-07 18:09 Started a worker on chat-view-copying-text
