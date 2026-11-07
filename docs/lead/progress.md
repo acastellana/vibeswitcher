@@ -3293,3 +3293,5 @@
 - 2026-11-07 12:41 Audit of resume-work-cut-off: incomplete, clean, round 2: 4 Important (1 open), 1 Nit closed
 - 2026-11-07 12:42 Started a worker on resume-work-cut-off (auto → Codex: Claude weekly 82%, 42 points ahead of pace; Codex 58%)
 - 2026-11-07 12:44 Audit of load-harness-xcrun-s: complete, clean, round 1: 1 Nit open
+- 2026-11-07 12:45 The worker on resume-work-cut-off answered findings: resume-work-cut-off:F5 fixed at 8e8f8068: Committed 8e8f8068: gate refusals release pending events' witness suppression and register a deduplicated automatic room-wait nudge. The minute room watcher retries with no new interruption, including missing-power retries; pending recovery markers survive overnight holds. Added fake-runtime regression coverage.
+- 2026-11-07 12:54 Merged load-harness-xcrun-s: Load harness: xcrun's xcrun_db cache isn't a leftover
