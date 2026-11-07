@@ -53,6 +53,7 @@ final class Preferences: ObservableObject {
     @Published var aiSummaries: Bool { didSet { defaults.set(aiSummaries, forKey: "aiSummaries") } }
     /// Lead mail: one project's lead may tell another's with tell_lead (see `LeadMail`). The tool server reads this
     /// key in the app's defaults at each call (`LeadMail.isOn`): unset, it's on.
+    @Published var leadRotation: LeadRotationMode { didSet { defaults.set(leadRotation.rawValue, forKey: "leadRotation") } }
     @Published var leadMail: Bool { didSet { defaults.set(leadMail, forKey: LeadMail.enabledKey) } }
     /// Keep the Mac from idle sleep while a lead's team works (see `KeepAwake`).
     @Published var keepAwake: KeepAwakeMode { didSet { defaults.set(keepAwake.rawValue, forKey: "keepAwake") } }
@@ -141,6 +142,7 @@ final class Preferences: ObservableObject {
             .flatMap { try? JSONDecoder().decode(TerminalAppearance.self, from: $0) } ?? TerminalAppearance()
         openWindowAtLaunch = defaults.bool(forKey: "openWindowAtLaunch")
         aiSummaries = defaults.bool(forKey: "aiSummaries")
+        leadRotation = LeadRotationMode(rawValue: defaults.string(forKey: "leadRotation") ?? "") ?? .context
         leadMail = LeadMail.isOn(defaults)
         keepAwake = KeepAwakeMode(rawValue: defaults.string(forKey: "keepAwake") ?? "") ?? .onPower
         batteryHoldBelow = PowerWatch.clamp(defaults.integer(forKey: "batteryHoldBelow"))

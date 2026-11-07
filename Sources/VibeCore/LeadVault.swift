@@ -148,6 +148,7 @@ public struct LeadVault: Sendable {
         /// `finder`: a verifier that's one of an audit's finders; it replaces only the task's verifiers from other
         /// audits (and the same finder of its own).
         case issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String?, finder: Finder? = nil)
+        case rotateLead(root: String, expected: String, session: String, restoring: Member? = nil)
         case bind(grant: String, root: String, session: String)
         case revoke(grant: String, root: String)
         /// The task is over: its worker's and verifier's grants and its verdict go (the lead).
@@ -307,6 +308,11 @@ public struct LeadVault: Sendable {
             try setHead(now, root: root, branch: branch)
         }
         return grant
+    }
+
+    /// Scheduled replacement, only after the successor spawned. A stale start cannot displace a newer lead.
+    public func rotateLead(root: String, expected: String, session: String, restoring: Member? = nil) throws {
+        _ = try call(.rotateLead(root: root, expected: expected, session: session, restoring: restoring))
     }
 
     /// The lead that's still running when VibeSwitcher starts again (a relaunch, an install): its role bound to its
@@ -760,6 +766,24 @@ extension LeadVault {
                     team.members.append(member)
                 }
                 return .grant(member.id)
+            case .rotateLead(let root, let expected, let session, let restoring):
+                guard caller == .app else { return .refused("Only VibeSwitcher rotates a lead.") }
+                guard let old = team(root)?.members.first(where: { $0.role == .lead }), old.session == expected,
+                      team(root)?.members.contains(where: { $0.session == session }) == false else {
+                    return .refused("The running lead changed; rotation cancelled.")
+                }
+                if let restoring {
+                    guard restoring.role == .lead, restoring.task == nil, restoring.session == session, restoring.issuer == .app else {
+                        return .refused("Only the original lead member may be restored.")
+                    }
+                }
+                let member = restoring ?? Member(id: UUID().uuidString, role: .lead, task: nil, session: session,
+                                                 issuedAt: Date().timeIntervalSince1970, issuer: caller)
+                change(root, &changed) { team in
+                    team.remove { $0.role == .lead }
+                    team.members.append(member)
+                }
+                return .ok
             case .bind(let grant, let root, let session):
                 guard let member = team(root)?.members.first(where: { $0.id == grant }), member.issuer == caller else {
                     return .refused("That grant isn't yours to bind (or it was withdrawn).")

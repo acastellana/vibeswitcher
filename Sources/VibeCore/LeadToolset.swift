@@ -664,6 +664,15 @@ public final class LeadToolset: MCPToolset {
         guard let role else { return fail(refusal ?? "This tool server has no role.") }
         guard tools.contains(where: { $0.name == name }) else { return fail("No tool \(name) for the \(role.rawValue).") }
         do {
+            // Hold across authentication and the complete call: rotation never overlaps a merge or audit.
+            let rotationGate: FileLock?
+            if role == .lead && ["merge", "audit", "revert", "merge_remote"].contains(name) {
+                guard let gate = FileLock.attempt(LeadRotation.gate(root), shared: true) else {
+                    return fail("A scheduled lead rotation is starting; try again on the fresh lead.")
+                }
+                rotationGate = gate
+            } else { rotationGate = nil }
+            defer { rotationGate?.release() }
             let member = try authenticate()
             if role == .lead { introduceLead() }
             switch name {

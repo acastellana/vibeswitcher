@@ -1432,11 +1432,11 @@ public final class FileLock {
 
     private init(fd: Int32) { self.fd = fd }
 
-    public static func attempt(_ path: String) -> FileLock? {
+    public static func attempt(_ path: String, shared: Bool = false) -> FileLock? {
         try? VibePaths.ensurePrivate(URL(fileURLWithPath: (path as NSString).deletingLastPathComponent, isDirectory: true))
         let fd = open(path, O_CREAT | O_RDWR, 0o600)
         guard fd >= 0 else { return nil }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+        guard flock(fd, (shared ? LOCK_SH : LOCK_EX) | LOCK_NB) == 0 else {
             close(fd)
             return nil
         }

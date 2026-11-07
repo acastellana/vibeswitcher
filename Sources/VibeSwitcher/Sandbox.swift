@@ -1077,6 +1077,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("team named", "starts the fake lead's worker and a verifier titled as Claude Code 2.1.311 names them (worker-<slug>, verify-<slug>) and moves the lead's agent into its .vibeswitcher/worktrees (start the lead first): its team still folds under it"),
         ("ask [TEXT]", "puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its row reads needs you"),
         ("unfold", "shows the selected lead's team under its row in the sidebar"),
+        ("rotation", "shows the scheduled rotation chat line in the selected fake session"),
         ("replaced [N]", "shows the selected window session as a lead another session replaced, with N characters (default 200000) typed into it: the header's one line it makes"),
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
         ("leadmail", "writes made-up messages between the fake lead and other projects' leads (start the lead first) to its private lead-mail record, one of them refused, and shows its Team tab: they're under Between leads"),
@@ -1911,6 +1912,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
             guard let row = model.selectedRow else { return reply(false, "nothing selected") }
             if !model.expandedTeams.contains(row.id) { model.toggleTeam(row.id) }
             settle { reply(true, "\(row.title)'s team shown") }
+        case "rotation":
+            guard let id = model.selectedRow?.hostID else { return reply(false, "no fake session selected") }
+            leads.rotationNotices[id] = "Started a fresh lead session (the last one's context was 72% full)"
+            settle { reply(true, "scheduled rotation chat line shown in the fake session") }
         case "replaced":
             guard let row = model.selectedRow, let id = row.hostID, let tty = row.session?.tty else { return reply(false, "no window session selected") }
             var replaced = ReplacedLead(root: row.cwd ?? home, project: "sandbox-lead", tty: tty, live: nil)

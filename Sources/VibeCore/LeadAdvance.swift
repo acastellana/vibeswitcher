@@ -322,6 +322,8 @@ public final class LeadAdvance: @unchecked Sendable {
 
     /// One look at the board, taking the steps that are due.
     func pass() {
+        guard let rotationGate = FileLock.attempt(LeadRotation.gate(lead.root), shared: true) else { return }
+        defer { rotationGate.release() }
         guard (try? lead.authenticate()) != nil else { return }
         // The file and the vault's record of it as one (a configure under way finishes first).
         guard let (workflow, changed) = try? lead.advanceSettled({ () -> (LeadWorkflow, [(key: String, value: String)]?) in

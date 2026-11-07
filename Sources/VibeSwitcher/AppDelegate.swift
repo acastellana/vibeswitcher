@@ -102,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         // Read off the main thread from now on, and at each change the system posts (see `PowerSourceCache`).
         let power = PowerSourceCache.shared
         controller.watchPower(limit: { [weak self] in self?.preferences.batteryHoldBelow ?? PowerWatch.defaultLimit }) { power.state }
+        controller.rotationMode = { [weak self] in self?.preferences.leadRotation ?? .never }
         controller.watchPolicy()
         controller.watchHeavySlots()
         controller.tellUser = { [weak self] title, body in self?.notifier?.postInfo(title: title, body: body) }

@@ -78,6 +78,9 @@ struct ChatContainer: View {
                 // Its questions that closed without your answer, where they closed (only open ones are pinned under it).
                 .onChange(of: lead?.board.questions ?? [], initial: true) { _, questions in chat.showQuestions(questions, notices: leads.answerNotices) }
                 .onChange(of: leads.answerNotices) { _, notices in chat.showQuestions(lead?.board.questions ?? [], notices: notices) }
+            if let id = model.selectedRow?.hostID, let notice = leads.rotationNotices[id] {
+                LeadRotationNotice(text: notice)
+            }
             if let wallet, let session = model.selectedRow?.hostID {
                 WalletRequestStrip(desk: wallet, session: session)
             }
@@ -96,7 +99,8 @@ struct ChatContainer: View {
                                      if sent { chat.scrollToBottom() }
                                      return sent
                                  }, steer: composer.steer, stop: composer.stop, cycleMode: composer.cycleMode),
-                                 cardKeys: cardKeys, project: row.session?.project, folder: row.cwd)
+                                 cardKeys: cardKeys, project: row.session?.project, folder: row.cwd,
+                                 onTyping: { if let id = row.hostID { leads.noteLeadInput(id) } })
                     // A text box of its own per session: nothing typed for one can end up in another.
                     .id(row.id)
                 } else if let session = row.session, session.inTerminalApp, session.agent == .claude, session.status == .working {
@@ -1381,5 +1385,14 @@ private extension ChatItem {
     var isTools: Bool {
         if case .tools = self { return true }
         return false
+    }
+}
+
+
+/// The scheduled rotation's line, in the successor's chat.
+struct LeadRotationNotice: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.system(size: 12)).foregroundStyle(.secondary).padding(8)
     }
 }

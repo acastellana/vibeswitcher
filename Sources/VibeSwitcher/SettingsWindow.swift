@@ -207,6 +207,9 @@ struct GeneralSettings: View {
                 Picker("Keep the Mac awake while the team works", selection: $preferences.keepAwake) {
                     ForEach(KeepAwakeMode.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
+                Picker("Start a fresh lead session", selection: $preferences.leadRotation) {
+                    ForEach(LeadRotationMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
                 BatteryHoldRow(preferences: preferences)
                 Toggle("Let project leads message each other", isOn: $preferences.leadMail)
                     .accessibilityHint("Off, a lead's message to another project's lead is refused and nothing is sent")

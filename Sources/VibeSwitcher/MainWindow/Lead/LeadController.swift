@@ -489,6 +489,42 @@ final class LeadController: ObservableObject {
     private let observer = LeadObserver()
     /// Roots whose lead is being prepared (off the main thread) right now.
     private var startingLeads: Set<String> = []
+    var rotationMode: () -> LeadRotationMode = { .never }
+    var rotationNow: () -> Date = Date.init
+    var rotationUserQueued: (UUID) -> Bool = { _ in false }
+    var rotationObserver: LeadObserver?
+    var rotationSpawn: ((SpawnRequest, @escaping (Result<HostSession, HostClientError>) -> Void) -> Void)?
+    var rotationEvent: (String) -> Void = { _ in }
+    var rotationRequest: ((String, @escaping (Bool) -> Void) -> Void)?
+    @Published var rotationNotices: [UUID: String] = [:]
+    private var rotationInput: [UUID: Date] = [:]
+    private final class RotationCommit {
+        private let lock = NSLock()
+        private var stopped = false
+        var bytes: [Data] = [] // main thread only; a typing race is replayed to whichever lead keeps the role.
+        var cancelled: Bool { lock.withLock { stopped } }
+        func cancel() { lock.withLock { stopped = true } }
+    }
+    private var rotationCommits: [UUID: RotationCommit] = [:]
+    private var rotationGeneration: [UUID: Int] = [:]
+    private var rotationDeliveries: [String: Int] = [:]
+
+    private func rotationVersion(root: String, session: UUID) -> (input: Int, delivery: Int) {
+        (rotationGeneration[session, default: 0], rotationDeliveries[root, default: 0])
+    }
+    private var rotationSystemInput: [UUID: [Data]] = [:]
+    private var rotationLooking: Set<String> = []
+    private var rotationAsked: [String: (session: UUID, at: Date, reason: String, marker: String)] = [:]
+    private var rotationRetry: [String: Date] = [:]
+    private let rotationLaunched = Date()
+
+    func noteLeadInput(_ id: UUID) {
+        rotationInput[id] = rotationNow()
+        rotationAsked = rotationAsked.filter { $0.value.session != id }
+        rotationCommits[id]?.cancel()
+        rotationGeneration[id, default: 0] += 1
+    }
+
     /// Starts asked for before the host said which sessions run (right after a relaunch), by root: decided then.
     private var pendingStarts: [String: (goal: String?, show: Bool, askAboutMovedHead: Bool)] = [:]
     /// The leads found running (after a relaunch, an install) whose role the vault binds to their session: bound
@@ -1129,6 +1165,7 @@ final class LeadController: ObservableObject {
     /// `LeadWitness.Notice`).
     private func deliver(built: @escaping @Sendable () -> String, from sender: SteerMessage.Sender, root: String, order: Int? = nil,
                          then: @escaping (Bool) -> Void = { _ in }) {
+        rotationDeliveries[root, default: 0] += 1
         let (leadRuns, inbox) = (self.leadRuns, self.inbox)
         let order = order ?? next()
         // The board as it is now names the lead that holds the role (none while a new one starts, see
@@ -1170,6 +1207,9 @@ final class LeadController: ObservableObject {
     /// program. What's typed there makes a line (see `HostInput.Line`), and Enter sends it to the live lead (see
     /// `route`). Returns whether it was taken.
     func takeInput(_ bytes: Data, for id: UUID) -> Bool {
+        if rotationSystemInput[id]?.first == bytes { rotationSystemInput[id]?.removeFirst() }
+        else { noteLeadInput(id) }
+        if let commit = rotationCommits[id] { commit.bytes.append(bytes); return true }
         guard replacedLeads[id] != nil else { return false }
         var line = lines[id] ?? HostInput.Line()
         let submitted = line.feed(bytes)
@@ -1372,7 +1412,9 @@ final class LeadController: ObservableObject {
 
     /// As one unit, in order with what else is typed into that session (the composer's messages, the phone's replies).
     private func type(_ text: String, into id: UUID) {
-        host.send(id, writes: ComposerText.writes(text, bracketed: true))
+        let writes = ComposerText.writes(text, bracketed: true)
+        rotationSystemInput[id, default: []] += HostClient.pieces(of: writes).map { Data($0.write.bytes) }
+        host.send(id, writes: writes)
     }
 
     // MARK: Refresh and witness
@@ -1450,6 +1492,10 @@ final class LeadController: ObservableObject {
                 alert(event)
             }
             witness(root: root, board: board, team: teams[root] ?? TeamReading())
+            if host.state == .connected, let id = board.leadSession.flatMap(UUID.init(uuidString:)),
+               let session = host.sessions.first(where: { $0.id == id && $0.isLive }) {
+                rotateIfDue(root: root, session: session)
+            }
             allDone.look(root: root, previous: previous[root], board: board)
         }
         forgetFinished(finished)
@@ -1945,6 +1991,209 @@ final class LeadController: ObservableObject {
         NSApp.activate()
         return alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
     }
+
+    /// Each refresh checks only live project leads. All disk/transcript work stays on the boards' queue.
+    func rotateIfDue(root: String, session: HostSession) {
+        let now = rotationNow(), mode = rotationMode()
+        guard mode != .never else { rotationAsked[root] = nil; return }
+        if let asked = rotationAsked[root], now.timeIntervalSince(asked.at) > 60 {
+            cancelRotation(root, now: now)
+            rotationEvent("checked")
+            return
+        }
+        guard !startingLeads.contains(root), !rotationLooking.contains(root),
+              now >= (rotationRetry[root] ?? .distantPast), !rotationUserQueued(session.id), held[root]?.isEmpty != false else { return }
+        let lastInput = rotationInput[session.id] ?? rotationLaunched
+        guard now.timeIntervalSince(lastInput) >= 120 else { return }
+        rotationLooking.insert(root)
+        let generation = rotationVersion(root: root, session: session.id), asked = rotationAsked[root]
+        let observer = rotationObserver ?? LeadObserver(home: home)
+        let inbox = inbox, vault = vault
+        let context = LeadContextStore(root: inbox, home: home)
+        reads.async({ _ -> (path: String, log: ChatLog, reason: String, gate: FileLock?)? in
+            let board = BoardStore(root: root).load()
+            guard board.leadSession == session.id.uuidString,
+                  vault.current(.lead, root: root, task: nil)?.session == session.id.uuidString,
+                  let agent = LeadHandover.named(board),
+                  let path = observer.transcript(session, hook: observer.hook(session, agentPid: agent.pid)),
+                  let log = try? LeadRotation.reading(path: path),
+                  LeadRotation.quiet(activity: observer.reading(session, agentPid: agent.pid).activity,
+                                     queued: !SteerInbox.pending(tty: agent.tty, root: inbox).filter { $0.agentPid == agent.pid }.isEmpty,
+                                     lastInput: lastInput, now: now),
+                  let reason = LeadRotation.reason(mode: mode, started: session.startedAt, percent: context.percent(transcript: path, started: session.startedAt), now: now)
+            else { return nil }
+            guard let gate = FileLock.attempt(LeadRotation.gate(root)) else { return nil }
+            return (path, log, reason, gate)
+        }) { [weak self] reading in
+            guard let self else { reading?.gate?.release(); return }
+            defer { self.rotationEvent("checked") }
+            self.rotationLooking.remove(root)
+            guard let reading else {
+                if let asked, now.timeIntervalSince(asked.at) >= 60 { self.cancelRotation(root, now: now) }
+                return
+            }
+            guard generation == self.rotationVersion(root: root, session: session.id), self.rotationMode() == mode, !self.rotationUserQueued(session.id),
+                  self.held[root]?.isEmpty != false else { reading.gate?.release(); return }
+            guard let asked, asked.session == session.id else {
+                reading.gate?.release()
+                let marker = "VIBESWITCHER_HANDOVER_" + UUID().uuidString
+                self.rotationAsked[root] = (session.id, now, reading.reason, marker)
+                let message = LeadRotation.request + " Start your reply with this line:\n" + marker + "\nThen write the handover note."
+                let done: (Bool) -> Void = { [weak self] sent in
+                    if !sent { self?.cancelRotation(root, now: now) }
+                }
+                if let request = self.rotationRequest { request(message, done) }
+                else { self.deliver(message, from: .system("scheduled rotation"), root: root, then: done) }
+                return
+            }
+            // A fresh completed reply is the note. An old reply, a timeout, an API error or a tool still running
+            // leaves the running lead alone. The one minute is a deadline, never a fixed sleep in tests.
+            let note = reading.log.entries.reversed().compactMap { entry -> String? in
+                guard let at = entry.at, at >= asked.at, at <= asked.at.addingTimeInterval(60),
+                      case .reply(let text) = entry.kind, text.contains(asked.marker) else { return nil }
+                return text.replacingOccurrences(of: asked.marker, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+            }.first
+            guard let note, !note.isEmpty else {
+                reading.gate?.release()
+                if now.timeIntervalSince(asked.at) >= 60 { self.cancelRotation(root, now: now) }
+                return
+            }
+            self.startingLeads.insert(root)
+            self.launchRotation(root: root, old: session, path: reading.path, note: note, reason: asked.reason,
+                                gate: reading.gate!, generation: generation)
+        }
+    }
+
+    private func cancelRotation(_ root: String, now: Date) {
+        rotationEvent("cancelled")
+        rotationAsked[root] = nil
+        rotationRetry[root] = now.addingTimeInterval(300)
+    }
+
+    private func launchRotation(root: String, old: HostSession, path: String, note: String, reason: String,
+                                gate: FileLock, generation: (input: Int, delivery: Int)) {
+        let vault = vault, home = home, base = command(for: root), inbox = inbox
+        let observer = rotationObserver ?? LeadObserver(home: home)
+        let preflight = preflight
+        let project = (root as NSString).lastPathComponent
+        reads.async({ _ -> Result<(launch: LeadLaunch.Prepared, policy: String), Error> in
+            Result {
+                let policy = WorkingPolicy.load()
+                if let problem = preflight(base) { throw problem }
+                let turns = LastTurns.read(transcript: path, tty: old.tty, home: home, hadRole: true)
+                    ?? "No user turns were recorded. Continue from the board and the scheduled handover note."
+                guard let file = try LeadLaunch.writeTurns(turns, root: root) else { throw RotationError.noTurns }
+                let noteFile = BoardStore(root: root).folder + "/scheduled-lead-handover.md"
+                try VibePaths.writePrivate(Data(note.utf8), to: URL(fileURLWithPath: noteFile))
+                let workflow = LeadWorkflow.load(from: BoardStore(root: root).folder + "/workflow.md")
+                let start = LeadPrompts.leadStart(root: root, goal: nil, note: Self.commandLineNote,
+                                                   replaced: (old.tty, file), scheduledNote: noteFile)
+                let launch = try LeadLaunch.prepare(role: .lead, root: root, task: nil, base: base,
+                    prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow, policy: policy), start: start,
+                    server: Self.serverPath, name: "lead-\(Slug.make(project, taken: []))",
+                    folder: vault.runFolder(root: root, name: "scheduled-\(UUID().uuidString)"), cwd: root)
+                return (launch, policy)
+            }
+        }) { [weak self] prepared in
+            guard let self else { gate.release(); return }
+            guard case .success(let (launch, policy)) = prepared, generation == self.rotationVersion(root: root, session: old.id),
+                  self.rotationMode() != .never, !self.rotationUserQueued(old.id) else {
+                self.startingLeads.remove(root); self.cancelRotation(root, now: self.rotationNow()); gate.release(); return
+            }
+            let spawn = self.rotationSpawn ?? self.host.spawn
+            spawn(SpawnRequest(cwd: root, command: launch.command, env: launch.environment, cols: 120, rows: 40,
+                               keepShell: false, label: "Lead · \(project)", agent: "claude")) { [weak self] result in
+                guard let self else { gate.release(); return }
+                guard case .success(let fresh) = result else {
+                    self.startingLeads.remove(root); self.cancelRotation(root, now: self.rotationNow()); gate.release(); return
+                }
+                guard generation == self.rotationVersion(root: root, session: old.id), self.rotationMode() != .never, !self.rotationUserQueued(old.id) else {
+                    self.host.kill(fresh.id); self.startingLeads.remove(root)
+                    self.cancelRotation(root, now: self.rotationNow()); gate.release(); return
+                }
+                // Buffer input during the commit: a keystroke racing the board write goes to the lead that keeps
+                // the role, and cancels the transfer if it arrives before the final check.
+                let commit = RotationCommit()
+                self.rotationCommits[old.id] = commit
+                // Commit only after spawn. Board writes can fail without withdrawing the old role.
+                self.reads.async({ _ -> (committed: Bool, waiting: [SteerMessage], endFresh: Bool) in
+                    let store = BoardStore(root: root)
+                    let before = store.load()
+                    let original = vault.current(.lead, root: root, task: nil)
+                    do {
+                        guard let original, original.session == old.id.uuidString,
+                              !commit.cancelled, let agent = LeadHandover.named(before),
+                              observer.reading(old, agentPid: agent.pid).activity == .idle(background: nil),
+                              SteerInbox.pending(tty: agent.tty, root: inbox).filter({ $0.agentPid == agent.pid }).isEmpty
+                        else { throw RotationError.changed }
+                        try store.update { board in
+                            guard board.leadSession == old.id.uuidString else { throw RotationError.changed }
+                            board.leadSession = fresh.id.uuidString
+                            board.leadPid = nil; board.leadTTY = nil
+                        }
+                        do {
+                            guard !commit.cancelled else { throw RotationError.changed }
+                            try vault.rotateLead(root: root, expected: old.id.uuidString, session: fresh.id.uuidString)
+                        }
+                        catch {
+                            // A lost reply may follow a successful transfer: restore the old session too.
+                            if vault.current(.lead, root: root, task: nil)?.session == fresh.id.uuidString {
+                                do {
+                                    try vault.rotateLead(root: root, expected: fresh.id.uuidString, session: old.id.uuidString, restoring: original)
+                                } catch {
+                                    Breadcrumbs.shared.note("scheduled rotation role restore failed: \(error)")
+                                }
+                            }
+                            try store.update { board in
+                                board.leadSession = before.leadSession; board.leadPid = before.leadPid; board.leadTTY = before.leadTTY
+                            }
+                            throw error
+                        }
+                        let waiting = LeadHandover.takeWaiting(for: agent, root: inbox)
+                        return (true, waiting, false)
+                    } catch {
+                        Breadcrumbs.shared.note("scheduled rotation cancelled: \(error)")
+                        let restored = vault.current(.lead, root: root, task: nil)?.session == old.id.uuidString
+                        if !restored {
+                            let text = "Scheduled lead rotation could not confirm restoration of the old lead \(old.id.uuidString). "
+                                + "The fresh session \(fresh.id.uuidString) was kept running because it may still hold the role. "
+                                + "The board and vault need reconciliation before another rotation. Error: \(error)"
+                            Breadcrumbs.shared.note(text)
+                            do {
+                                try store.update { board in
+                                    board.reports = (board.reports ?? []) + [LeadReport(about: "scheduled rotation", text: text)]
+                                }
+                            } catch { Breadcrumbs.shared.note("scheduled rotation recovery report failed: \(error)") }
+                        }
+                        return (false, [], restored)
+                    }
+                }) { [weak self] committed, waiting, endFresh in
+                    guard let self else { gate.release(); return }
+                    self.rotationCommits[old.id] = nil
+                    self.startingLeads.remove(root)
+                    self.cancelRotation(root, now: self.rotationNow())
+                    if committed {
+                        self.policyWatch?.started(fresh.id.uuidString, with: policy)
+                        for message in waiting { self.hold(message.text, from: message.from, root: root) }
+                        self.replacing[old.id] = root; self.replacements += 1
+                        self.holders[root] = fresh.id
+                        self.markReplaced(holders: self.holders)
+                        let notice = "Started a fresh lead session (\(reason))"
+                        self.rotationNotices[fresh.id] = notice
+                        self.rotationNotices[old.id] = notice
+                        if self.answersTrust { self.answerTrust(fresh.id, folder: root) }
+                        self.refresh()
+                    } else if endFresh { self.host.kill(fresh.id) }
+                    else { self.rotationEvent("retained") }
+                    for bytes in commit.bytes { self.host.send(committed ? fresh.id : old.id, bytes: bytes, reply: false) }
+                    gate.release()
+                }
+            }
+        }
+    }
+
+    private enum RotationError: Error { case noTurns, changed }
+
 }
 
 /// What became of a message for a window session's agent (`LeadController.tell`).

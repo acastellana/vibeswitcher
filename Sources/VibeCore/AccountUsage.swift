@@ -216,12 +216,14 @@ public enum UsageStatusLine {
     /// few words. Never fails: input that isn't JSON keeps nothing (your status line still runs on it).
     public static func run(input: Data, userOnly: Bool = false, store: AccountUsageStore = AccountUsageStore(), home: String = VibePaths.home,
                            now: Date = Date(), patience: TimeInterval = UsageStatusLine.patience, runner: Runner = runCommand,
+                           contextStore: LeadContextStore? = nil,
                            show: (Data) -> Void) {
         let object = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any]
         let command = userCommand(home: home, project: userOnly ? nil : projectFolder(object))
         if let command { show(runner(command, input, patience)) }
         let limits = object.map { AccountUsage.fromStatusLine($0, now: now) } ?? []
         store.record(limits, now: now)
+        if let object { (contextStore ?? LeadContextStore(home: home)).record(object, now: now) }
         guard command == nil else { return }
         show(Data(limits.map { limit in
             let name = limit.name == "seven_day" ? "weekly" : limit.name == "five_hour" ? "5h" : limit.name.replacingOccurrences(of: "_", with: " ")

@@ -134,6 +134,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         window.minSize = NSSize(width: 760, height: 420)
         super.init(window: window)
         window.delegate = self
+        leads.rotationUserQueued = { [weak chat] id in
+            guard let chat else { return false }
+            let key = "host:\(id)"
+            return !(chat.composer.drafts[key] ?? "").isEmpty || !(chat.composer.attachments[key] ?? []).isEmpty
+                || chat.outbox.outbox.entries.contains { $0.key == key }
+        }
         // A Claude Code session's dictation goes through its own /voice.
         dictation?.claudeSession = { [weak self] key in self?.sync.claudeVoice(key: key, folder: self?.model.selectedRow?.cwd) }
         // A message sent over it cancels it, and goes once it's stopped.

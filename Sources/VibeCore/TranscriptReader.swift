@@ -948,11 +948,12 @@ public enum LastTurns {
 
     /// The turns as a file for the new lead, at most about `limit` characters: the oldest answered turns go first,
     /// then long texts are cut; an unanswered prompt always stays. Nil when the user said nothing.
-    public static func text(_ turns: [Turn], tty: String, limit: Int = limit) -> String? {
+    public static func text(_ turns: [Turn], tty: String, limit: Int = limit, hadRole: Bool = false) -> String? {
         guard !turns.isEmpty else { return nil }
         let header = "# The replaced lead's last turns\n\nThe lead on \(tty) held this project's role before you; its last turns "
-            + "with the user, oldest first (tool calls left out). It had no tools: what it said it would do didn't happen, and "
-            + "nothing it was told reached the board unless you put it there.\n"
+            + "with the user, oldest first (tool calls left out). "
+            + (hadRole ? "It held its tools: check the board before repeating work it already did.\n"
+               : "It had no tools: what it said it would do didn't happen, and nothing it was told reached the board unless you put it there.\n")
         func render(_ turn: Turn, cut: Int?) -> String {
             func bounded(_ text: String) -> String {
                 guard let cut, text.count > cut else { return text }
@@ -985,7 +986,7 @@ public enum LastTurns {
     /// The last turns in a session's transcript (a Claude Code or Codex one, checked as `TranscriptReader.checkedURL`
     /// checks it), read from its end.
     public static func read(transcript path: String, tty: String, home: String = VibePaths.home, prompts: Int = prompts,
-                            limit: Int = limit) -> String? {
+                            limit: Int = limit, hadRole: Bool = false) -> String? {
         guard let (url, format) = TranscriptReader.checkedURL(path, home: home),
               let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
@@ -995,7 +996,7 @@ public enum LastTurns {
         if start > 0 { data = data.dropFirst(TranscriptReader.tailStart(data)) }
         if data.last != 0x0A { data.append(0x0A) }
         let entries = TranscriptReader.read(data, format: format).entries
-        return text(turns(entries, prompts: prompts), tty: tty, limit: limit)
+        return text(turns(entries, prompts: prompts), tty: tty, limit: limit, hadRole: hadRole)
     }
 }
 

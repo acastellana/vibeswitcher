@@ -877,20 +877,24 @@ public enum LeadPrompts {
     /// back merges and deletions a fresh lead can't otherwise know about). `goal`: one given with `vibeswitcher --lead`.
     /// `replaced`: the lead this one replaces (its terminal) and the file holding its last turns (see `LastTurns`):
     /// what the user told it there never reached the board (it had no tools), so it's read and acted on first.
-    public static func leadStart(root: String, goal: String?, note: String, replaced: (tty: String, turnsFile: String)? = nil) -> String {
+    public static func leadStart(root: String, goal: String?, note: String, replaced: (tty: String, turnsFile: String)? = nil, scheduledNote: String? = nil) -> String {
         let store = BoardStore(root: root)
         let memory = "Read status, the workflow notes, \(store.recordPath("decisions.md")) (every decision: one may hold a task back from "
             + "merging or its branch from deletion) and the end of \(store.recordPath("progress.md"))"
+        let scheduled = scheduledNote.map { " This is a scheduled rotation. Read \($0) first (open threads, promises made to the user, timers due)." } ?? ""
         let handover = replaced.map {
-            " You replace the lead on \($0.tty), whose tools are off now: what the user told it may never have reached the board. Before greeting, read "
+            if scheduledNote != nil {
+                return " You replace the lead on \($0.tty). Read \($0.turnsFile), its last turns with the user, and reconcile them with the board before acting. Continue open work without repeating completed actions; workers and verifiers keep running."
+            }
+            return " You replace the lead on \($0.tty), whose tools are off now: what the user told it may never have reached the board. Before greeting, read "
                 + "\($0.turnsFile) (its last turns: what the user asked, what it answered) and act on what the user asked there "
                 + "(add the tasks, start the workers, answer what's open), then say in your greeting what you took over from it."
         } ?? ""
         if let goal {
-            return "\(startOpening)\(handover) A goal given with vibeswitcher --lead (\(note)): \(goal)\n"
+            return "\(startOpening)\(scheduled)\(handover) A goal given with vibeswitcher --lead (\(note)): \(goal)\n"
                 + "\(memory); then plan the goal into tasks with contracts, start the workers, and tell the user your plan in a few lines."
         }
-        return "\(startOpening)\(handover) \(memory); then greet the user in one short line: what's on the board, and "
+        return "\(startOpening)\(scheduled)\(handover) \(memory); then greet the user in one short line: what's on the board, and "
             + "what they'd like to build next. Merge or clean up nothing a decision or the user holds back."
     }
 
