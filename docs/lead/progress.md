@@ -3462,3 +3462,5 @@
 - 2026-11-07 21:54 Audit of usage-watch-forgets-a: complete, clean, round 1: 3 Nit open
 - 2026-11-07 21:55 Kept usage-watch-forgets-a unmerged: Hold for F1: a doc comment in AccountUsage.swift:573 carries the user's real email address. It gets replaced with an example address before this merges, because main is pushed to GitHub.
 - 2026-11-07 21:57 Started a worker on usage-watch-forgets-a (auto → Claude: Claude weekly 9%, 26 points behind pace, not tight; Codex 59%)
+- 2026-11-07 22:02 Audit of verifier-isolation at 851ee8c4 tested its merged result ea93a29e onto main: the test command passed
+- 2026-11-07 22:02 Released verifier-isolation's worker (idle since its done report on 851ee8c4) while its audit runs
