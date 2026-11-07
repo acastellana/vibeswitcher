@@ -3290,3 +3290,6 @@
 - 2026-11-06 00:01 Update: Today: build toolchain recovered, push button, test hangs fixed, freeze cost cut — **Landed (2026-11-05):**
 - 2026-11-07 18:26 accepted 68 commits on main that you ran from VibeSwitcher's window: bfaf287 Merge remote-tracking branch 'origin/main'; 553e879 Lead: decisions and progress; 9b11716 Lead: decisions and progress; …
 - 2026-11-07 18:27 accepted 1 commit on main that you ran from VibeSwitcher's window: e8b183a incidents.md: drop a leftover conflict marker
+- 2026-11-07 18:28 Planned sweep-the-repository-and: Sweep the repository and its history for secrets (review audit)
+- 2026-11-07 18:28 Started a worker on sweep-the-repository-and
+- 2026-11-07 18:28 Automatically (auto_advance): Started a worker on sweep-the-repository-and (Sweep the repository and its history for secrets).
