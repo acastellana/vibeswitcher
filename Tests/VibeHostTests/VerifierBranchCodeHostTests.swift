@@ -42,7 +42,7 @@ import Testing
         FileManager.default.createFile(atPath: folder + "/a.in", contents: nil)
         let launch = try LeadLaunch.prepare(role: .verifier, root: team.root, task: "add-b", base: "claude", prompt: "p", start: "s",
                                             server: mcp, name: "verifier-add-b", folder: URL(fileURLWithPath: folder + "/run"), cwd: team.root,
-                                            temporary: URL(fileURLWithPath: team.dir + "/tmp"))
+                                            temporary: URL(fileURLWithPath: team.dir + "/session-temp"))
         let settings = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
         let mcpConfig = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any])
         let server = try #require((mcpConfig["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any])

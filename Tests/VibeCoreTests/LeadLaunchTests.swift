@@ -69,9 +69,10 @@ struct LeadLaunchTests {
         // The session host knows which session holds the role: the tool server gets nothing that would make one.
         #expect(entry?["env"] == nil)
         #expect(Set(entry?.keys.map { $0 } ?? []) == ["command", "args"])
-        // Its session's git takes no optional index.lock either.
+        // Its session's git takes no optional index.lock either; its commands run as branch code, with no auto-memory
+        // (`LeadLaunch.verifierEnvironment`).
         let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
-        #expect(settings?["env"] as? [String: String] == ["GIT_OPTIONAL_LOCKS": "0"])
+        #expect(settings?["env"] as? [String: String] == ["GIT_OPTIONAL_LOCKS": "0"].merging(LeadLaunch.verifierEnvironment(server: "/s")) { $1 })
         for file in [launch.mcpFile, launch.promptFile, launch.settingsFile] {
             #expect((try FileManager.default.attributesOfItem(atPath: file)[.posixPermissions] as? Int) == 0o600, "\(file)")
         }

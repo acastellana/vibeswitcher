@@ -109,7 +109,7 @@ struct VerifierIsolationTests {
         #expect(BranchCode.prefix("'\(mcp)' --keeper --role verifier", executable: mcp, shell: "/bin/zsh") == [mcp, "--keeper", "--role", "verifier"])
         // Everything else, wrapped: a Bash command, a hook, another program with the keeper's flag, the server with
         // anything a shell would expand, the server without the keeper.
-        for command in ["source /x/snapshot.sh && eval 'make test' && pwd -P >| /tmp/cwd", "\(mcp) --read-only-permission --root /r",
+        for command in ["source /x/snapshot.sh && eval 'make test' && pwd -P >| /x/cwd", "\(mcp) --read-only-permission --root /r",
                         "/bin/sh --keeper -c 'nc -U host.sock'", "\(mcp) --keeper $(nc -U host.sock)", "\(mcp) --keeper; nc -U h",
                         "\(mcp) --keeper \"$HOME\"", "\(mcp) --keeper 'open", "\(mcp) --role verifier", "\(mcp)\t--keeper",
                         "\(mcp) --keeper\nnc -U h", "\(mcp) --keeper *"] {
