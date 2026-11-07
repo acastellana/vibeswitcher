@@ -67,7 +67,7 @@ final class ShellDesk: ObservableObject {
     private var seen: Set<String> = []
     private var telling: Set<String> = []
     /// Which Run of its card each `refused` line is for: an earlier one's timer doesn't clear a later one's.
-    private var refusals = 0
+    private var refusals: [String: Int] = [:]
     /// Runs `clear` once a refusal has shown long enough (main thread); tests fire it themselves.
     var later: (_ after: TimeInterval, _ clear: @escaping () -> Void) -> Void = { after, clear in
         DispatchQueue.main.asyncAfter(deadline: .now() + after, execute: clear)
@@ -138,17 +138,19 @@ final class ShellDesk: ObservableObject {
     /// redrawn): ran, or refused with why not in the chat's Run words (`RunRefusal`), which the card shows (`refused`).
     func run(_ id: String, done: @escaping (RunOutcome) -> Void = { _ in }) {
         let finish: (RunOutcome) -> Void = { [self] outcome in
-            refusals += 1
-            let mine = refusals
+            let mine = (refusals[id] ?? 0) + 1
+            refusals[id] = mine
             if case .refused(let reason) = outcome {
                 log("\(id): \(reason)")
                 refused[id] = reason
                 later(RunShown.refused(reason).lasts) { [weak self] in
-                    guard let self, refusals == mine else { return }
+                    guard let self, refusals[id] == mine else { return }
                     refused[id] = nil
+                    refusals[id] = nil
                 }
             } else {
                 refused[id] = nil
+                refusals[id] = nil
             }
             done(outcome)
         }

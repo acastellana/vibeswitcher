@@ -260,6 +260,31 @@ struct ShellCardRunTests {
         }
     }
 
+    @Test func aCardsNotRunLineGoesInItsTimeWhateverOtherCardsDo() async throws {
+        let folder = base.temp.url("shells"), seen = ShellDeskTests.Seen(), clock = ShellDeskTests.Clock()
+        let desk = base.desk(seen, clock: clock, folder: folder)
+        var clears: [() -> Void] = []
+        desk.later = { _, clear in clears.append(clear) }
+        let refused = try base.file(folder, command: "make serve")
+        let other = try base.file(folder, command: "make watch")
+        await base.refreshed(desk)
+        await base.acted(desk, .decline, refused.id)
+        #expect(await base.ran(desk, refused.id) == .refused(RunRefusal.shellAnswered))
+        // Another card's Runs before this one's line has shown its time: they don't keep it up.
+        #expect(await base.ran(desk, other.id) == .ran)
+        #expect(await base.ran(desk, other.id) == .refused(RunRefusal.shellAnswered))
+        #expect(desk.refused[refused.id] == RunRefusal.shellAnswered)
+        clears.first?()
+        #expect(desk.refused[refused.id] == nil)
+        #expect(desk.refused[other.id] == RunRefusal.shellAnswered)
+        // A later refusal of the same card outlives an earlier one's time.
+        #expect(await base.ran(desk, refused.id) == .refused(RunRefusal.shellAnswered))
+        clears[1]()
+        #expect(desk.refused[refused.id] == RunRefusal.shellAnswered)
+        clears.last?()
+        #expect(desk.refused[refused.id] == nil)
+    }
+
     @Test func theCardsRunButtonShowsWhatTheChatsShows() {
         #expect(RunShown(.ran) == .sent && RunShown(.refused("Not run: x")) == .refused("Not run: x"))
         #expect(RunShown.ready.label == "Run" && RunShown.refused("Not run: x").label == "Not run")
