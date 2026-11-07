@@ -3676,3 +3676,10 @@
 - 2026-11-07 20:18 Merged sweep-the-repository-and: Sweep the repository and its history for secrets
 - 2026-11-07 23:25 Merged github-merge-third-try: GitHub merge, third try: land af82338b as an ancestor of main through the now-installed gate
 - 2026-11-07 23:25 Flaky in github-merge-third-try's merge: releasedWhenItGoes(), aPlainShellTakesARunOnlyAtItsPrompt(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-07 23:25 Fetched origin/main at af82338b: main is 140 commits ahead of origin/main and 0 commits behind it
+- 2026-11-07 23:25 Asked the user to push main at 31921aaa (140 commits) to origin/main
+- 2026-11-07 23:35 Pushed main at 31921aaa (140 commits) to origin/main, on the user's click
+- 2026-11-07 23:36 Audit of turn-this-incident-into-12: complete, clean, round 1: 1 Important open, 2 Nit open, 1 Pre-existing open
+- 2026-11-07 23:36 Planned dictation-test: Dictation test outOfFocusItsToldTheTruthAfterAWarmupThatNeverRecords fails on main after the held-Space change
+- 2026-11-07 23:37 Merged merge-gate-a-removed: Merge gate: a removed test raises the task to audit, and the load proof is a result, not a word (in a batch: merge-gate-a-removed, ideas-backlog-ranked landed on one test run)
+- 2026-11-07 23:37 Merged ideas-backlog-ranked: Ideas backlog: ranked improvement ideas with their sources, in git (in a batch: merge-gate-a-removed, ideas-backlog-ranked landed on one test run)
