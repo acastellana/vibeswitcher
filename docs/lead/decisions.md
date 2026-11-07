@@ -227,3 +227,11 @@ Question 6B9DC8CB went ahead on its timer with the lead's proposal, as on 2026-1
 
 The contract said to stop if the Allow path works, rather than invent a check. The probe was run by the lead on 2026-11-07 under vs-heavy, because Codex's sandbox can't compile SwiftTerm's Metal shaders. Not reproduced: a host write failure that only goes to the log, and a selection that moves between the screen read and the key writes.
 
+## 2026-11-07 12:47:21 permission-prompt runs now on Claude with override_usage, spending the rest of the weekly limit (80% used, resets Nov 11, 18:00). This is the user's answer to 3ABA1BF9 on 2026-11-07. Its audit also uses override_usage.
+
+The user said not to wait and chose to spend the limit. The task changes a guard rail, so it stays on Claude, and Codex's sandbox can't build the app.
+
+## 2026-11-07 12:49:02 Settings › Project lead gets "Ignore usage limits", off by default and Mac-wide in mac-limits.json (task a-settings-option-to, audited, started with override_usage). When it's on: no 80% hold on starts, audits or auto_advance; no Boost usage veto; agent: auto stays on Claude unless Claude is refusing at a reached limit. Usage stays visible, marked "(limits ignored)". This supersedes, for users who turn it on, the 80% hold and the Codex routing in the 2026-11-02 08:18 decision.
+
+The user asked for it on 2026-11-07 ("a setting to disable worrying about quota"). The lead judged that "worrying" covers all three ways usage changes behaviour, not only the 80% start hold. Load and battery holds stay as they are.
+

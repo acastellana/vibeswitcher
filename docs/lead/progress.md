@@ -3127,3 +3127,7 @@
 - 2026-11-07 10:08 Started a worker on turn-this-incident-into-4
 - 2026-11-07 10:08 Automatically (auto_advance): Started a worker on turn-this-incident-into-4 (Turn this incident into a check: The user's Allow on a verifier's Read permission prompt didn…).
 - 2026-11-07 10:27 Abandoned turn-this-incident-into-4: Probe passed: Chat Allow works for the Read prompt; not reproducible, so per contract no check (decision 2026-11-07).
+- 2026-11-07 12:46 Planned permission-prompt: Permission-prompt notifications get Allow and Deny actions (review audit)
+- 2026-11-07 12:47 Started a worker on permission-prompt
+- 2026-11-07 12:48 Planned a-settings-option-to: A Settings option to stop holding work for Claude's usage limits (review audit)
+- 2026-11-07 12:48 Started a worker on a-settings-option-to
