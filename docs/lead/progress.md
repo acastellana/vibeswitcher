@@ -3721,3 +3721,9 @@
 - 2026-11-08 00:22 Automatically (auto_advance): Started the audit of turn-this-incident-into-12 at 793ade85 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-08 00:22 Raised dictation-test to audit (the risk check, at 3fdf6162): it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift)
 - 2026-11-08 00:22 Automatically (auto_advance): dictation-test is audited, not merged: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-08 00:31 Audit of turn-this-incident-into-12: complete, clean, round 2: 1 Important closed, 2 Nit closed, 1 Pre-existing closed
+- 2026-11-08 00:32 Automatically (auto_advance): Started the audit of flake-ledger-its-own at c7120459 (Its review is audit).
+- 2026-11-08 00:32 Released dictation-test's worker (idle since its done report on 3fdf6162) while its audit runs
+- 2026-11-08 00:32 Automatically (auto_advance): Started the audit of dictation-test at 3fdf6162 (Its review is audit. (audited: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift), as the risk check found.)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 00:41 Merged review-rules-have-a: Review rules have a floor the user sets and the lead can only raise (in a batch: review-rules-have-a, turn-this-incident-into-12 landed on one test run)
+- 2026-11-08 00:41 Merged turn-this-incident-into-12: Turn this incident into a check: The same incident a second time, after its fix merged: redo-… (in a batch: review-rules-have-a, turn-this-incident-into-12 landed on one test run)
