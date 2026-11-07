@@ -257,8 +257,8 @@ public enum LeadLaunch {
         return (home as NSString).appendingPathComponent(".claude/projects/\(name)")
     }
 
-    /// Moves aside the auto-memory Claude Code keeps for a session started in `cwd` (by its path as given and as
-    /// resolved), before a verifier starts there: to `memory.set-aside-<time>` beside it, which nothing loads and the
+    /// Moves aside the auto-memory Claude Code keeps for a session started in `cwd`, a task's worktree (by its path as
+    /// given and as resolved, each only while it's still a worktree's path), before a verifier starts there: to `memory.set-aside-<time>` beside it, which nothing loads and the
     /// audit can still read. Returns the folders moved. The main checkout's own memory (where Claude Code 2.1.319 keeps
     /// a worktree's) is yours and the lead's, and stays: the verifier doesn't load any (`verifierEnvironment`).
     ///
@@ -271,7 +271,18 @@ public enum LeadLaunch {
         let resolved = URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path
         let stamp = Int(now.timeIntervalSince1970)
         var moved: [String] = []
-        for path in Array(Set([cwd, resolved])).sorted() {
+        // Only a task's worktree, by both its paths: Claude Code's names are lossy ("/dev/x" and "/dev.x" share one), so
+        // a worktree a worker's shell moved, a link left in its place, must not name another project's folder when
+        // followed (the main checkout's: yours and the lead's). A folder named for `.vibeswitcher/worktrees/<slug>` is
+        // only ever a worktree's.
+        let slug = (cwd as NSString).lastPathComponent
+        func isWorktree(_ path: String) -> Bool {
+            (path as NSString).lastPathComponent == slug
+                && ((path as NSString).deletingLastPathComponent as NSString).lastPathComponent == "worktrees"
+                && (((path as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent as NSString)
+                    .lastPathComponent == ".vibeswitcher"
+        }
+        for path in Array(Set([cwd, resolved])).sorted() where isWorktree(path) {
             let folder = claudeProjectFolder(path, home: home)
             let projects = open((folder as NSString).deletingLastPathComponent, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
             guard projects >= 0 else { continue }

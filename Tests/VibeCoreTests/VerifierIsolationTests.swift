@@ -19,8 +19,12 @@ struct VerifierIsolationTests {
                                cwd: cwd, temporary: temp.url("tmp"))
     }
 
+    /// A task's worktree, where `Worktrees.path` puts one: `<root>/.vibeswitcher/worktrees/<slug>`.
     func worktree() throws -> String {
-        let url = temp.url("wt-\(UUID().uuidString.prefix(6))")
+        try make(temp.url("repo").appendingPathComponent(".vibeswitcher/worktrees/wt"))
+    }
+
+    func make(_ url: URL) throws -> String {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url.resolvingSymlinksInPath().path
     }
@@ -71,7 +75,7 @@ struct VerifierIsolationTests {
     /// where it is, and so does a `memory` that's a link (audit F1, 2026-11-07).
     @Test func settingMemoryAsideNeverFollowsALinkToAnotherProjectsFolder() throws {
         let files = FileManager.default
-        let main = LeadLaunch.claudeProjectFolder(try worktree())
+        let main = LeadLaunch.claudeProjectFolder(try make(temp.url("main")))
         try files.createDirectory(atPath: main + "/memory", withIntermediateDirectories: true)
         try "- [Yours](y.md)\n".write(toFile: main + "/memory/MEMORY.md", atomically: true, encoding: .utf8)
         func untouched() -> Bool {
@@ -94,6 +98,30 @@ struct VerifierIsolationTests {
         _ = try prepare(.verifier, cwd: own)
         #expect(untouched())
         #expect((try? files.destinationOfSymbolicLink(atPath: folder + "/memory")) == nil)
+    }
+
+    /// Claude Code's folder names are lossy ("/dev/x" and "/dev.x" share one), so a worktree moved by a worker's shell
+    /// and left as a link to its new place mustn't name, when followed, another project's folder: only a path that's a
+    /// task's worktree (in `.vibeswitcher/worktrees`, under its own name) has its memory set aside (blind check of F1's fix).
+    @Test func aWorktreeLinkedElsewhereNeverSetsAsideAnotherProjectsMemory() throws {
+        let files = FileManager.default
+        let dev = temp.url("dev")
+        let checkout = try make(dev.appendingPathComponent("vibe"))
+        let main = LeadLaunch.claudeProjectFolder(checkout)
+        try files.createDirectory(atPath: main + "/memory", withIntermediateDirectories: true)
+        // The worktree moved to a folder whose name Claude Code turns into the checkout's, a link left in its place.
+        let moved = try make(temp.adopt(URL(fileURLWithPath: dev.path + ".vibe")))
+        #expect(LeadLaunch.claudeProjectFolder(moved) == main)
+        let worktree = try worktree()
+        try files.removeItem(atPath: worktree)
+        try files.createSymbolicLink(atPath: worktree, withDestinationPath: moved)
+        #expect(LeadLaunch.setAsideMemory(cwd: worktree).isEmpty)
+        _ = try prepare(.verifier, cwd: worktree)
+        #expect(files.fileExists(atPath: main + "/memory"))
+        #expect((try files.contentsOfDirectory(atPath: main)).allSatisfy { !$0.hasPrefix("memory.set-aside-") })
+        // A verifier started in the checkout itself (no worktree) sets none of it aside either.
+        #expect(LeadLaunch.setAsideMemory(cwd: checkout).isEmpty)
+        #expect(files.fileExists(atPath: main + "/memory"))
     }
 
     /// Claude Code's own names (2.1.319's `hD`): every character but an ASCII letter or digit a "-"; past 200, cut and
