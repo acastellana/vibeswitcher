@@ -3470,3 +3470,18 @@
 - 2026-11-07 22:15 Released merge-gate-a-removed's worker (idle since its done report on 74fb705e) while its audit runs
 - 2026-11-07 22:19 Merged verifier-isolation: Verifier isolation: branch code it runs can't act as it, and worker notes can't reach it (in a batch: verifier-isolation, redo-the-github-merge landed on one test run)
 - 2026-11-07 22:19 Merged redo-the-github-merge: Redo the GitHub merge as a true merge, so main can be pushed and the other Mac's records come back (in a batch: verifier-isolation, redo-the-github-merge landed on one test run)
+- 2026-11-07 22:19 Automatically (auto_advance): Merged verifier-isolation at c9c6f74a (its passing audit), redo-the-github-merge at 98df3ea2 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-07 22:19 Automatically (auto_advance): Cleaned up verifier-isolation (freed 2.2 GB of build output and temporary folders). It stays done.
+- 2026-11-07 22:19 Automatically (auto_advance): Cleaned up redo-the-github-merge (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-07 22:19 Started a worker on branch-code-can-t
+- 2026-11-07 22:19 Automatically (auto_advance): Started a worker on branch-code-can-t (Branch code can't write the agents' own config (~/.claude hooks and settings, shell rc, .git/config)), its after tasks done (verifier-isolation).
+- 2026-11-07 22:19 The worker on review-rules-have-a answered findings: review-rules-have-a:F1 fixed at 4144ada5: f521743a: LeadReviewFloor has auditSamplePercent (in keys, refusal, starting(from:) at the project's value, lines for status/configure, Codable with a missing field decoding as 0); in force via LeadWorkflow.samplePercentInForce, which LeadAdvance.sample now draws with; Settings row 'Audit sample, at least'. Test auditSamplePercentBelowTheFloorIsRefusedAndTheHigherIsInForce (refuses 10/0/cleared under a floor of 20, takes 20/50, a worker's 0 in the file k…
+- 2026-11-07 22:19 Incident: The same incident a second time, after its fix merged: redo-the-github-merge's true merge of origin/main (af82338b) landed on main squashed into one single-pare… (in redo-the-github-merge); planned turn-this-incident-into-12 to turn it into a check
+- 2026-11-07 22:19 Started a worker on turn-this-incident-into-12
+- 2026-11-07 22:19 Automatically (auto_advance): Started a worker on turn-this-incident-into-12 (Turn this incident into a check: The same incident a second time, after its fix merged: redo-…).
+- 2026-11-07 22:20 Review of turn-this-incident-into-12: audit
+- 2026-11-07 22:20 Released review-rules-have-a's worker (idle since its done report on 4144ada5) while its audit runs
+- 2026-11-07 22:22 Audit of usage-watch-forgets-a: complete, clean, round 2: 3 Nit (1 open)
+- 2026-11-07 22:23 Audit of claude-dictation-held: complete, clean, round 1: 4 Nit open
+- 2026-11-07 22:32 Audit of review-rules-have-a: complete, clean, round 2: 2 Important closed, 5 Nit (1 open)
+- 2026-11-07 22:33 Merged usage-watch-forgets-a: Usage watch forgets a limit hit on a different Claude account

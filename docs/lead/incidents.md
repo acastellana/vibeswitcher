@@ -89,3 +89,10 @@ Evidence: merge-github-s-main: the audited branch head 7a263116 is a true merge 
 Task: merge-github-s-main
 Check: task turn-this-incident-into-11 turns it into a check that runs before merge.
 
+## 2026-11-07 22:19:51 The same incident a second time, after its fix merged: redo-the-github-merge's true merge of origin/main (af82338b) landed on main squashed into one single-parent commit (98df3ea2, in a batch with verifier-isolation). origin/main is still not an ancestor of main, so the push is blocked again.
+
+Evidence: The audited head ed0f9e66 had merge commit b32522b7 (parents a4fbbd9b + af82338b); the verifier confirmed `git merge-base --is-ancestor af82338b HEAD`. auto_advance merged it at 22:10 "as one batch" with verifier-isolation (merge_batching: always). On main: 98df3ea2 has parents=c9c6f74a only; its message lists the squashed commits ("- Lead: decisions and progress" ×10, "- AccountUsageTests read the usage at a fixed time…"). `git merge-base --is-ancestor af82338b main` fails, and `git rev-parse origin/main` = af82338b. turn-this-incident-into-11 (merged 4fb98121 / 3b10a688) claimed Worktrees.put lands a branch carrying the vault's fetched tip as a true merge, including through Stack (batches). Either the batch path doesn't pass it, or the vault's fetched tip isn't af82338b (the remote poller fetched af82338b; fetch_remote last fetched e8b183a8), or the carried check fails. The remote's code did land (docs/security/SECRET-SWEEP-2026-11-07.md is on main).
+
+Task: redo-the-github-merge
+Check: task turn-this-incident-into-12 turns it into a check that runs before merge.
+
