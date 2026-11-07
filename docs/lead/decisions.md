@@ -231,3 +231,7 @@ The user agreed (2026-11-06). This week's evidence shows no failure these would 
 
 The user's answer to FFC4FEF0 (2026-11-07): "Keep everything going past 80%, up to the limit", and "lets continue with all".
 
+## 2026-11-07 12:42:22 resume-work-cut-off gets a third, targeted round for F5 instead of a re-roll.
+
+Rounds 1–2 fixed and verified F1–F4. F5 is one narrow gap: a gate-refused resume has nothing to wake it again. It has a precise fix and a test. A re-roll would throw away verified work, and merging with F5 open would put back the silent stuck worker the task exists to prevent.
+

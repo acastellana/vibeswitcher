@@ -3290,3 +3290,6 @@
 - 2026-11-07 12:35 The worker on resume-work-cut-off answered findings: resume-work-cut-off:F1 fixed at 4f7bf3f4: 8587452f collects sleep interruptions independently of review advancement. App witness regression fails without it for a lone running worker and a verifier with auto-advance off.; resume-work-cut-off:F2 fixed at 4f7bf3f4: 4f7bf3f4 reports non-actionable observations and releases their witness suppression; refused delivery, audit grant loss, moved branches, and third-occurrence refusals also release suppression. Missing-transcript and refused-delivery reg…
 - 2026-11-07 12:37 Released load-harness-xcrun-s's worker (idle since its done report on ffda34e3) while its audit runs
 - 2026-11-07 12:38 Released resume-work-cut-off's worker (idle since its done report on 4f7bf3f4) while its audit runs
+- 2026-11-07 12:41 Audit of resume-work-cut-off: incomplete, clean, round 2: 4 Important (1 open), 1 Nit closed
+- 2026-11-07 12:42 Started a worker on resume-work-cut-off (auto → Codex: Claude weekly 82%, 42 points ahead of pace; Codex 58%)
+- 2026-11-07 12:44 Audit of load-harness-xcrun-s: complete, clean, round 1: 1 Nit open
