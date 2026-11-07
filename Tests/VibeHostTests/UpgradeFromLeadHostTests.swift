@@ -27,13 +27,26 @@ import Testing
         return ["-j", "2", "-Xswiftc", "-j\((cores + 1) / 2)"]
     }
 
+    /// What scripts/lib/swift-jobs.sh's `swiftpm_options` gives every SwiftPM command: the native build system (the
+    /// Command Line Tools of 2026-11-05 made swiftbuild the default, which compiles SwiftTerm's .metal file and wants
+    /// Xcode's Metal Toolchain), and inside Codex's sandbox `--disable-sandbox` (macOS refuses a sandbox in a sandbox).
+    static func swiftpmOptions(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> [String] {
+        ["--build-system", "native"] + ((environment["CODEX_SANDBOX"] ?? "").isEmpty ? [] : ["--disable-sandbox"])
+    }
+
+    @Test func theOldHostBuildsAsTheScriptsBuild() {
+        #expect(Self.swiftpmOptions([:]) == ["--build-system", "native"])
+        #expect(Self.swiftpmOptions(["CODEX_SANDBOX": "seatbelt"]) == ["--build-system", "native", "--disable-sandbox"])
+        #expect(Self.swiftpmOptions(["CODEX_SANDBOX": ""]) == ["--build-system", "native"])
+    }
+
     @Test func theOldHostsBuildTakesTheSlotsShareOfTheCores() {
         #expect(Self.heavyJobs(["VS_HEAVY_CORES": "4"]) == ["-j", "2", "-Xswiftc", "-j2"])
         #expect(Self.heavyJobs(["VS_HEAVY_CORES": "5"]) == ["-j", "2", "-Xswiftc", "-j3"])
         #expect(Self.heavyJobs([:]).isEmpty && Self.heavyJobs(["VS_HEAVY_CORES": "x"]).isEmpty && Self.heavyJobs(["VS_HEAVY_CORES": "0"]).isEmpty)
     }
 
-    /// The old build's host: built once (minutes), then reused.
+    /// The old build's host: built once (minutes), then reused. Blocking: a test awaits it through `offPool`.
     static func oldHost() throws -> String {
         let folder = repo.appendingPathComponent(".build/old-hosts/\(commit)")
         let built = folder.appendingPathComponent("vibeswitcher-host").path
@@ -53,11 +66,13 @@ import Testing
             try run("/bin/cp", ["-c", "-R", repo.appendingPathComponent(".build/\(item)").path, scratch.path + "/"])
         }
         // SwiftPM leaves folders in its TMPDIR: the build's own, removed with it.
-        try run("/usr/bin/xcrun", ["swift", "build", "--package-path", source.path, "--scratch-path", scratch.path,
+        try run("/usr/bin/xcrun", ["swift", "build"] + swiftpmOptions() + ["--package-path", source.path, "--scratch-path", scratch.path,
                                    "--disable-automatic-resolution", "--product", "vibeswitcher-host"] + heavyJobs(), temporary: temporary, limit: buildLimit)
-        let product = try run("/usr/bin/xcrun", ["swift", "build", "--package-path", source.path, "--scratch-path", scratch.path,
+        let product = try run("/usr/bin/xcrun", ["swift", "build"] + swiftpmOptions() + ["--package-path", source.path, "--scratch-path", scratch.path,
                                                  "--disable-automatic-resolution", "--show-bin-path"], temporary: temporary, limit: buildLimit)
-        let binary = product.trimmingCharacters(in: .whitespacesAndNewlines) + "/vibeswitcher-host"
+        // Its last line: the native build system says first, in the same output, that it's deprecated.
+        let binPath = product.split(whereSeparator: \.isNewline).last.map(String.init) ?? ""
+        let binary = binPath.trimmingCharacters(in: .whitespaces) + "/vibeswitcher-host"
         let staged = folder.appendingPathComponent("host-\(UUID().uuidString.prefix(8))").path
         try FileManager.default.copyItem(atPath: binary, toPath: staged)
         if rename(staged, built) != 0 { unlink(staged) }
@@ -152,69 +167,70 @@ import Testing
     }
 
     /// A step that hangs is stopped at its limit and fails, rather than holding the run.
-    @Test func aStepPastItsLimitIsStopped() throws {
+    @Test func aStepPastItsLimitIsStopped() async throws {
         let started = Date()
-        #expect(throws: BuildFailed.self) { try Self.run("/bin/sleep", ["3600"], limit: 1) }
+        await #expect(throws: BuildFailed.self) { try await offPool { try Self.run("/bin/sleep", ["3600"], limit: 1) } }
         #expect(Date().timeIntervalSince(started) < hangGuard)
     }
 
     /// The old commit's export, where the old host builds (.build/old-hosts/COMMIT/work-*/src), holds its files but
     /// not its AGENTS.md or CLAUDE.md: while it's there, the audit sees no agent file under .build.
     @Test(.enabled(if: hasOldCommit, "needs commit 6311e18 in this clone"))
-    func theOldCommitsExportLeavesItsAgentFilesOut() throws {
-        let tracked = try Self.run("/usr/bin/git", ["ls-tree", "--name-only", Self.commit], in: Self.repo).components(separatedBy: "\n")
+    func theOldCommitsExportLeavesItsAgentFilesOut() async throws {
+        let tracked = try await offPool { try Self.run("/usr/bin/git", ["ls-tree", "--name-only", Self.commit], in: Self.repo) }.components(separatedBy: "\n")
         #expect(tracked.contains("AGENTS.md") && tracked.contains("CLAUDE.md"), "the commit has no agent files to leave out")
         let work = Self.repo.appendingPathComponent(".build/old-hosts/\(Self.commit)/work-\(UUID().uuidString.prefix(8))")
         let source = work.appendingPathComponent("src")
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: work) }
-        try Self.export(Self.commit, into: source, through: work.appendingPathComponent("tree.tar"))
+        try await offPool { try Self.export(Self.commit, into: source, through: work.appendingPathComponent("tree.tar")) }
         #expect(FileManager.default.fileExists(atPath: source.appendingPathComponent("Package.swift").path))
         #expect(FileManager.default.fileExists(atPath: source.appendingPathComponent("Sources").path))
         #expect(Self.agentFilesUnderBuild() == [])
     }
 
     @Test(.enabled(if: canBuildOldHost, "needs commit 6311e18 in this clone and its resolved dependencies in .build (or the old host built already in .build/old-hosts); a fresh clone or another Mac has neither, and nothing is downloaded"))
-    func theAppSeesItsSessionsAfterAnOlderHostHandsOver() throws {
-        let host = try ScratchHostProcess(old: try Self.oldHost())
+    func theAppSeesItsSessionsAfterAnOlderHostHandsOver() async throws {
+        // The build (minutes on a loaded Mac) on a thread of its own, not on the cooperative pool.
+        let host = try await ScratchHostProcess(old: try await offPool { try Self.oldHost() })
         defer { host.stop() }
-        let (client, _, build, _, capabilities, pid, startedAt) = try TestClient.welcomed(host.socket, appKey: host.appKey)
+        let (client, _, build, _, capabilities, pid, startedAt) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
         #expect(build == host.oldBuild && pid == host.pid)
         #expect(capabilities?.contains(HostProtocol.Capability.handover) == true)
-        let shell = try client.spawn(nil)
-        let done = try client.spawn("echo finished-early; exit 3")
-        #expect(eventually { client.exitStatus(done.id) == 3 })
-        #expect(eventually { client.screen(shell.id)?.contains("$") == true })
+        let shell = try await client.spawn(nil)
+        let done = try await client.spawn("echo finished-early; exit 3")
+        #expect(await eventually { client.exitStatus(done.id) == 3 })
+        #expect(await eventually { client.screen(shell.id)?.contains("$") == true })
         defer { kill(-shell.childPID, SIGKILL) }
         // The build from before PR #1: it shows its sessions to any client.
-        let (before, _, _, shown, _, _, _) = try TestClient.welcomed(host.socket)
+        let (before, _, _, shown, _, _, _) = try await TestClient.welcomed(host.socket)
         #expect(shown.map(\.id) == [shell.id, done.id])
         before.close()
 
         // A handover that doesn't happen ends the test here: every step after it would wait out a hang guard of its own.
         let seq = client.send(.handover(executable: host.newBinary))
-        try #require(eventually { client.reply(to: seq) != nil }, "no answer to the handover: \(host.log)")
+        try #require(await eventually { client.reply(to: seq) != nil }, "no answer to the handover: \(host.log)")
         try #require(client.reply(to: seq) == .ok, "\(host.log)")
-        try #require(eventually { client.closed }, "the old build answered ok but kept the connection: \(host.log)")
+        try #require(await eventually { client.closed }, "the old build answered ok but kept the connection: \(host.log)")
 
         // The app proves itself to the new build and sees every session, as it was.
-        let (app, _, newBuild, sessions, _, newPID, newStart) = try TestClient.welcomed(host.socket, appKey: host.appKey)
+        let (app, _, newBuild, sessions, _, newPID, newStart) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
         defer { app.close() }
         #expect(newBuild == host.newBuild, "\(host.log)")
         #expect(newPID == host.pid && newStart == startedAt)
         #expect(sessions.map(\.id) == [shell.id, done.id])
         #expect(sessions.first { $0.id == done.id }?.exit?.status == 3)
-        #expect(app.screen(done.id)?.contains("finished-early") == true)
-        app.attach(shell.id)
+        await #expect(app.screen(done.id)?.contains("finished-early") == true)
+        await app.attach(shell.id)
         app.send(.input(id: shell.id, bytes: Data("echo upgraded-$((6*7))\r".utf8), reply: false))
-        #expect(eventually { app.text(shell.id).contains("upgraded-42") })
+        #expect(await eventually { app.text(shell.id).contains("upgraded-42") })
 
         // A client that proves nothing sees none of them, and reaches none.
-        let (stranger, _, _, seen, _, _, _) = try TestClient.welcomed(host.socket)
+        let (stranger, _, _, seen, _, _, _) = try await TestClient.welcomed(host.socket)
         defer { stranger.close() }
         #expect(seen.isEmpty)
         let read = stranger.send(.screen(id: shell.id))
-        #expect(eventually { stranger.reply(to: read) != nil })
+        #expect(await eventually { stranger.reply(to: read) != nil })
         #expect(stranger.reply(to: read) == .error(HostProtocol.unauthorized))
         // The old host's build left no agent file where the lead's audit would count it as the worktree's.
         #expect(Self.agentFilesUnderBuild() == [])

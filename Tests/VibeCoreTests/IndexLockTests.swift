@@ -52,7 +52,7 @@ struct IndexLockTests {
     /// GIT_OPTIONAL_LOCKS of its own) and, once it's at work where it holds index.lock if it takes it, kills it as
     /// Claude Code does a status line on a busy Mac: stopped there (the Mac doesn't get to it), TERM to its group, then
     /// KILL. Whether it held the lock there, and whether the lock was left once git is gone.
-    func killStatus(in root: String, environment: [String: String]) throws -> (held: Bool, left: Bool) {
+    func killStatus(in root: String, environment: [String: String]) async throws -> (held: Bool, left: Bool) {
         let lock = root + "/.git/index.lock"
         let waiting = temp.url("waiting").path
         var base = ProcessInfo.processInfo.environment
@@ -71,22 +71,22 @@ struct IndexLockTests {
         let group = git.processIdentifier
         defer {
             if git.isRunning { kill(-group, SIGKILL) }
-            git.waitUntilExit()
+            waitForEnd(git)
         }
-        #expect(eventually { FileManager.default.fileExists(atPath: waiting) }, "git status never got to its submodule")
+        #expect(await eventually { FileManager.default.fileExists(atPath: waiting) }, "git status never got to its submodule")
         kill(group, SIGSTOP)
         // A TERM that git gets before the stop takes effect is handled first: it would remove its lock.
-        #expect(eventually { stopped(group) }, "git status never stopped")
+        #expect(await eventually { stopped(group) }, "git status never stopped")
         let held = FileManager.default.fileExists(atPath: lock)
         kill(-group, SIGTERM)
         kill(-group, SIGKILL)
-        #expect(eventually { !git.isRunning }, "git status outlived SIGKILL")
+        #expect(await eventually { !git.isRunning }, "git status outlived SIGKILL")
         return (held, FileManager.default.fileExists(atPath: lock))
     }
 
     /// The incidents, reproduced: a `git status` killed outright while it holds index.lock leaves it, 0 bytes.
-    @Test func aGitKilledOutrightLeavesItsLock() throws {
-        let killed = try killStatus(in: try waitingRepo(), environment: ["GIT_OPTIONAL_LOCKS": "1"])
+    @Test func aGitKilledOutrightLeavesItsLock() async throws {
+        let killed = try await killStatus(in: try waitingRepo(), environment: ["GIT_OPTIONAL_LOCKS": "1"])
         #expect(killed.held, "git status didn't hold index.lock while it collected")
         #expect(killed.left)
     }
@@ -94,7 +94,7 @@ struct IndexLockTests {
     /// Stopped with TERM, a git that holds the lock (a `git commit -a` waiting for its editor) removes it: a git that
     /// gets to run its signal handler cleans up. (Not in its first microseconds: it makes the file a moment before it
     /// registers it for removal.)
-    @Test func aGitStoppedWithTermRemovesItsLock() throws {
+    @Test func aGitStoppedWithTermRemovesItsLock() async throws {
         let root = try repo()
         try "two\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
         let git = Process()
@@ -108,22 +108,22 @@ struct IndexLockTests {
         try git.run()
         let lock = root + "/.git/index.lock"
         // Waiting for its editor: the git holding the lock is past setting up.
-        #expect(eventually { FileManager.default.fileExists(atPath: editing) })
+        #expect(await eventually { FileManager.default.fileExists(atPath: editing) })
         #expect(FileManager.default.fileExists(atPath: lock))
         defer {
             if git.isRunning { kill(-git.processIdentifier, SIGKILL) }
-            git.waitUntilExit()
+            #expect(await exited(git), "pid \(git.processIdentifier) still running")
         }
         kill(-git.processIdentifier, SIGTERM)
-        #expect(eventually { !git.isRunning }, "git commit outlived SIGTERM")
+        #expect(await eventually { !git.isRunning }, "git commit outlived SIGTERM")
         #expect(!FileManager.default.fileExists(atPath: lock))
     }
 
     /// The git VibeSwitcher runs (a merge's `git status` in the main checkout, among others) leaves no lock however
     /// it's stopped.
-    @Test func vibeSwitchersGitLeavesNoLockWhenKilled() throws {
+    @Test func vibeSwitchersGitLeavesNoLockWhenKilled() async throws {
         let root = try waitingRepo()
-        let killed = try killStatus(in: root, environment: Git.environment)
+        let killed = try await killStatus(in: root, environment: Git.environment)
         #expect(!killed.held, "it took index.lock")
         #expect(!killed.left)
         // It still answers (past the submodule, whose hook waits).
@@ -133,10 +133,10 @@ struct IndexLockTests {
 
     /// Nor does the git that the lead's, a worker's or a verifier's session runs, its status line's included: they
     /// start with the role's environment.
-    @Test func theTeamsSessionsLeaveNoLockWhenTheirGitIsKilled() throws {
+    @Test func theTeamsSessionsLeaveNoLockWhenTheirGitIsKilled() async throws {
         let root = try waitingRepo()
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
-            let killed = try killStatus(in: root, environment: LeadLaunch.environment(role))
+            let killed = try await killStatus(in: root, environment: LeadLaunch.environment(role))
             #expect(!killed.held, "\(role) took index.lock")
             #expect(!killed.left, "\(role)")
         }
@@ -152,12 +152,12 @@ func stopped(_ pid: pid_t) -> Bool {
 }
 
 /// A process that holds `path` open (and made it, as git makes its lock), until it's stopped.
-func holdOpen(_ path: String) throws -> Process {
+func holdOpen(_ path: String) async throws -> Process {
     let holder = Process()
     holder.executableURL = URL(fileURLWithPath: "/bin/sh")
     holder.arguments = ["-c", "exec 3>>\"$0\"; exec sleep 300", path]
     try holder.run()
-    #expect(eventually { FileManager.default.fileExists(atPath: path) && ProcessTable.info(pid: holder.processIdentifier)?.comm == "sleep" })
+    #expect(await eventually { FileManager.default.fileExists(atPath: path) && ProcessTable.info(pid: holder.processIdentifier)?.comm == "sleep" })
     return holder
 }
 
@@ -189,11 +189,11 @@ struct IndexLockHolderTests {
         #expect(IndexLock.find(in: try repo()) == nil)
     }
 
-    @Test func aLockAProcessHasOpenNamesItsPidAndCommand() throws {
+    @Test func aLockAProcessHasOpenNamesItsPidAndCommand() async throws {
         let root = try repo()
         let path = root + "/.git/index.lock"
-        let holder = try holdOpen(path)
-        defer { holder.terminate(); holder.waitUntilExit() }
+        let holder = try await holdOpen(path)
+        defer { holder.terminate(); waitForEnd(holder) }
         let lock = try #require(IndexLock.find(in: root))
         #expect(lock.holder?.pid == holder.processIdentifier)
         #expect(lock.holder?.command == "sleep 300")
@@ -204,7 +204,7 @@ struct IndexLockHolderTests {
     }
 
     /// The user's `git commit` waiting for its editor in the main checkout: its git holds the lock.
-    @Test func aGitCommitWaitingForItsEditorHoldsIt() throws {
+    @Test func aGitCommitWaitingForItsEditorHoldsIt() async throws {
         let root = try repo()
         try "two\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
         let git = Process()
@@ -216,8 +216,8 @@ struct IndexLockHolderTests {
         git.standardOutput = FileHandle.nullDevice
         git.standardError = FileHandle.nullDevice
         try git.run()
-        defer { kill(-git.processIdentifier, SIGTERM); git.waitUntilExit() }
-        #expect(eventually { FileManager.default.fileExists(atPath: editing) })
+        defer { kill(-git.processIdentifier, SIGTERM); waitForEnd(git) }
+        #expect(await eventually { FileManager.default.fileExists(atPath: editing) })
         let lock = try #require(IndexLock.find(in: root))
         #expect(lock.holder?.pid == git.processIdentifier)
         #expect(lock.holder?.command.contains("commit -q -a") == true)
@@ -252,7 +252,7 @@ struct IndexLockHolderTests {
         var burners: [Process] = []
         defer {
             for burner in burners where burner.isRunning { kill(burner.processIdentifier, SIGKILL) }
-            for burner in burners { burner.waitUntilExit() }
+            for burner in burners { waitForEnd(burner) }
         }
         for _ in 0..<(2 * ProcessInfo.processInfo.activeProcessorCount) {
             let burner = Process()
@@ -277,7 +277,7 @@ struct IndexLockHolderTests {
     }
 
     /// A git at work in a worktree under the main checkout doesn't hold the main checkout's lock.
-    @Test func aGitInAWorktreeDoesntHoldTheMainCheckoutsLock() throws {
+    @Test func aGitInAWorktreeDoesntHoldTheMainCheckoutsLock() async throws {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "w")
         try "two\n".write(toFile: worktree + "/a.txt", atomically: true, encoding: .utf8)
@@ -290,8 +290,8 @@ struct IndexLockHolderTests {
         git.standardOutput = FileHandle.nullDevice
         git.standardError = FileHandle.nullDevice
         try git.run()
-        defer { kill(-git.processIdentifier, SIGTERM); git.waitUntilExit() }
-        #expect(eventually { FileManager.default.fileExists(atPath: editing) })
+        defer { kill(-git.processIdentifier, SIGTERM); waitForEnd(git) }
+        #expect(await eventually { FileManager.default.fileExists(atPath: editing) })
         leaveStaleLock(root + "/.git/index.lock", age: 600)
         #expect(IndexLock.find(in: root)?.stale == true)
         #expect(IndexLock.find(in: worktree)?.holder?.pid == git.processIdentifier)
@@ -330,11 +330,11 @@ struct IndexLockHolderTests {
     }
 
     /// On the main thread (the app's) it never reads the process table: the lock is reported unchecked at once.
-    @MainActor @Test func onTheMainThreadItDoesntLookForTheHolder() throws {
+    @MainActor @Test func onTheMainThreadItDoesntLookForTheHolder() async throws {
         let root = try repo()
         let path = root + "/.git/index.lock"
-        let holder = try holdOpen(path)
-        defer { holder.terminate(); holder.waitUntilExit() }
+        let holder = try await holdOpen(path)
+        defer { holder.terminate(); waitForEnd(holder) }
         let searched: IndexLock.Search = { _, _, _ in
             Issue.record("searched on the main thread")
             return .none
@@ -346,7 +346,7 @@ struct IndexLockHolderTests {
     }
 
     /// A fast-forward into the main checkout says whose lock stops it, and leaves a stale one there.
-    @Test func aFastForwardNamesTheLockInTheMainCheckout() throws {
+    @Test func aFastForwardNamesTheLockInTheMainCheckout() async throws {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "b")
         try "bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
@@ -358,8 +358,8 @@ struct IndexLockHolderTests {
         #expect(stale.contains("is stale") && stale.contains("rm '\(IndexLock.real(path))'"), "\(stale)")
         #expect(FileManager.default.fileExists(atPath: path))
         try FileManager.default.removeItem(atPath: path)
-        let holder = try holdOpen(path)
-        defer { holder.terminate(); holder.waitUntilExit() }
+        let holder = try await holdOpen(path)
+        defer { holder.terminate(); waitForEnd(holder) }
         guard case .refused(let held) = try Worktrees.merge(root: root, slug: "b") else { Issue.record("merged over a lock"); return }
         #expect(held.contains("held by pid \(holder.processIdentifier)"), "\(held)")
         #expect(FileManager.default.fileExists(atPath: path))
@@ -369,7 +369,7 @@ struct IndexLockHolderTests {
 extension LeadToolsetTests {
     /// merge meets the main checkout's lock before running the tests, and names it: stale (left there, it's the user's
     /// checkout too) or held (by whom).
-    @Test func mergeSaysWhoseLockStopsIt() throws {
+    @Test func mergeSaysWhoseLockStopsIt() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -382,11 +382,11 @@ extension LeadToolsetTests {
         #expect(stale.text.contains("is stale") && stale.text.contains(" min ago \(written)"), "\(stale.text)")
         #expect(FileManager.default.fileExists(atPath: path))
         try FileManager.default.removeItem(atPath: path)
-        let holder = try holdOpen(path)
+        let holder = try await holdOpen(path)
         let held = call(lead, "merge", ["task": "add-b"])
         #expect(held.isError && held.text.contains("held by pid \(holder.processIdentifier) (sleep 300)"), "\(held.text)")
         holder.terminate()
-        holder.waitUntilExit()
+        #expect(await exited(holder), "pid \(holder.processIdentifier) still running")
         #expect(FileManager.default.fileExists(atPath: path))
         try FileManager.default.removeItem(atPath: path)
         let merged = call(lead, "merge", ["task": "add-b"])
@@ -395,7 +395,7 @@ extension LeadToolsetTests {
 
     /// start_worker removes a stale lock from the task's own worktree (it would stop the worker's first commit), and
     /// leaves one a process holds, telling the lead and the worker whose it is.
-    @Test func startWorkerClearsAStaleLockInItsWorktreeAndNamesAHeldOne() throws {
+    @Test func startWorkerClearsAStaleLockInItsWorktreeAndNamesAHeldOne() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -412,8 +412,8 @@ extension LeadToolsetTests {
         #expect(!FileManager.default.fileExists(atPath: path))
 
         _ = call(lead, "stop_worker", ["task": "add-b"])
-        let holder = try holdOpen(path)
-        defer { holder.terminate(); holder.waitUntilExit() }
+        let holder = try await holdOpen(path)
+        defer { holder.terminate(); waitForEnd(holder) }
         let held = call(lead, "start_worker", ["task": "add-b"])
         #expect(!held.isError, "\(held.text)")
         #expect(held.text.contains("held by pid \(holder.processIdentifier) (sleep 300)"), "\(held.text)")

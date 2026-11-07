@@ -31,7 +31,7 @@ import Testing
         func stop() {
             let started = (try? String(contentsOfFile: dir + "/starts", encoding: .utf8)) ?? ""
             for pid in started.split(separator: "\n").compactMap({ pid_t($0) }) {
-                endClientHost(pid)
+                endClientHost(pid, pidFile: dir + "/starts", folder: dir)
             }
         }
 

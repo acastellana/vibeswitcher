@@ -89,7 +89,7 @@ extension HookInstallerTests {
     }
 
     /// The repro: a home folder with a space gave `/Users/Jane Doe/… claude`, which the shell runs as `/Users/Jane`.
-    @Test func theCommandIsShellQuotedForAnyHomePath() throws {
+    @Test func theCommandIsShellQuotedForAnyHomePath() async throws {
         #expect(HookInstaller.command(for: .codex, hookBinary: Self.binary) == "/h/vibeswitcher-hook codex")
         let spaced = "/Users/Jane Doe/.vibeswitcher/bin/vibeswitcher-hook"
         #expect(HookInstaller.command(for: .claude, hookBinary: spaced)
@@ -102,7 +102,7 @@ extension HookInstallerTests {
             let output = Pipe()
             shell.standardOutput = output
             try shell.run()
-            shell.waitUntilExit()
+            #expect(await exited(shell), "pid \(shell.processIdentifier) still running")
             #expect(String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self) == "\(path)|codex")
             let handler: [String: Any] = ["type": "command", "command": HookInstaller.command(for: .codex, hookBinary: path)]
             #expect(HookInstaller.ourHandler(handler)?.binary == path)

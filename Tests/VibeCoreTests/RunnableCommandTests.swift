@@ -196,7 +196,7 @@ struct RunnableCommandTests {
         process.standardInput = FileHandle.nullDevice
         try process.run()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        waitForEnd(process)
         return String(decoding: data, as: UTF8.self)
     }
 

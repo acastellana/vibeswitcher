@@ -11,7 +11,7 @@ struct ReadOnlyGitFormsTests {
     let temp = Scratch()
 
     /// A repository with `main`, a branch `other` off it, and links committed inside that point outside it.
-    func repository() throws -> (repo: String, privateDir: String, base: String) {
+    func repository() async throws -> (repo: String, privateDir: String, base: String) {
         let scratch = temp.url("forms").resolvingSymlinksInPath().path
         let privateDir = scratch + "/private", repo = scratch + "/repo"
         try FileManager.default.createDirectory(atPath: privateDir, withIntermediateDirectories: true)
@@ -21,9 +21,9 @@ struct ReadOnlyGitFormsTests {
             + " && ln -s ../private/seal inner && ln -s \(privateDir) linkdir && git add -A && git commit -qm one"
             + " && git checkout -qb other && echo c >> sub/b && git commit -qam two && git checkout -q main"
             + " && echo d >> a && git commit -qam three"
-        let out = try LeadLaunchOutsideReadsTests.shell(setup, in: repo)
+        let out = try await LeadLaunchOutsideReadsTests.shell(setup, in: repo)
         #expect(!out.contains("fatal"), "\(out)")
-        let base = try LeadLaunchOutsideReadsTests.shell("git rev-parse HEAD~1", in: repo).trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = try await LeadLaunchOutsideReadsTests.shell("git rev-parse HEAD~1", in: repo).trimmingCharacters(in: .whitespacesAndNewlines)
         return (repo, privateDir, base)
     }
 
@@ -34,8 +34,8 @@ struct ReadOnlyGitFormsTests {
     /// The table: each listed form, and each read the replay found, runs unasked for every role, and is a form git takes
     /// (run here, it prints no usage or error); a worker's patch on its input runs unasked for it alone; each refusal
     /// (a path outside, a global option, `--stdin`, an abbreviation, a symlink out) holds for every role.
-    @Test func everydayGitFormsRunUnaskedPerRoleAndTheRefusalsHold() throws {
-        let (repo, privateDir, base) = try repository()
+    @Test func everydayGitFormsRunUnaskedPerRoleAndTheRefusalsHold() async throws {
+        let (repo, privateDir, base) = try await repository()
         let reads = [
             // merge-tree's trial merges.
             "git merge-tree --write-tree main other", "git merge-tree main other", "git merge-tree --write-tree --name-only --no-messages main other",
@@ -56,7 +56,7 @@ struct ReadOnlyGitFormsTests {
         ]
         let roles = try roles(repo)
         for command in reads {
-            let out = try LeadLaunchOutsideReadsTests.shell(command, in: repo)
+            let out = try await LeadLaunchOutsideReadsTests.shell(command, in: repo)
             #expect(!out.contains("usage:") && !out.contains("fatal:") && !out.contains("error:"), "not a git form: \(command): \(out)")
             for role in roles { #expect(role.runsUnasked(command, cwd: repo), "\(role.role): \(command)") }
         }
@@ -113,8 +113,8 @@ struct ReadOnlyGitFormsTests {
     /// `git merge-tree` forms beyond a trial merge (a merge per line of its input, strategy options, a commit too many
     /// or too few for the form, the mode flags mixed, a ref move after it), and git grep's pager and searches of files
     /// git doesn't track, prompt for every role.
-    @Test func mergeTreeBeyondATrialAndGrepsPagerPrompt() throws {
-        let (repo, _, base) = try repository()
+    @Test func mergeTreeBeyondATrialAndGrepsPagerPrompt() async throws {
+        let (repo, _, base) = try await repository()
         let refused = [
             "git merge-tree --stdin", "git merge-tree --stdin main other", "git merge-tree -X ours main other",
             "git merge-tree --strategy-option=ours main other", "git merge-tree main", "git merge-tree a b c d",
@@ -140,12 +140,12 @@ struct ReadOnlyGitFormsTests {
     /// not the shell's folder the path check judges it from, so in `sub`, `git grep -E -f ../private/seal` looked inside
     /// (sub/../private) and read outside (repo/../private), printing the seal in its regex error. `-f` prompts in every
     /// spelling, as does `-f -` (its input) and ls-tree's `--full-tree` (paths from the top); the listed forms still run.
-    @Test func fromASubfolderGitOpensFilesWhereThePathCheckLooks() throws {
-        let (repo, _, _) = try repository()
+    @Test func fromASubfolderGitOpensFilesWhereThePathCheckLooks() async throws {
+        let (repo, _, _) = try await repository()
         let sub = repo + "/sub"
         // A git that opens -f's file from the top (as the audit's did) prints the seal; Apple Git 2.54 opens it from the
         // shell's folder, as the path check judges it, and finds nothing there. Either way -f prompts below.
-        let witness = try LeadLaunchOutsideReadsTests.shell("git grep -E -f ../private/seal", in: sub)
+        let witness = try await LeadLaunchOutsideReadsTests.shell("git grep -E -f ../private/seal", in: sub)
         #expect(witness.contains("SECRET-SEAL-VALUE") || witness.contains("cannot open '../private/seal'"), "\(witness)")
         let refused = ["git grep -E -f ../private/seal", "git grep -E -f ../private/seal HEAD", "git grep -f b HEAD", "git grep -fb HEAD",
                        "git grep -nfb", "git grep -f - HEAD", "git grep -e x -f b", "git ls-tree --full-tree HEAD a",
@@ -156,7 +156,7 @@ struct ReadOnlyGitFormsTests {
                      "git rev-list --count main..other -- b", "git diff-tree -r --cc HEAD -- ../a"]
         let roles = try roles(repo)
         for command in reads {
-            let out = try LeadLaunchOutsideReadsTests.shell(command, in: sub)
+            let out = try await LeadLaunchOutsideReadsTests.shell(command, in: sub)
             #expect(!out.contains("usage:") && !out.contains("fatal:") && !out.contains("error:"), "not a git form: \(command): \(out)")
         }
         for role in roles {

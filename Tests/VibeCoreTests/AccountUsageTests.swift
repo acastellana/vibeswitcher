@@ -393,7 +393,7 @@ struct AccountUsageTests: LeadTeamFixture {
 extension LeadAdvanceTests {
     /// auto_advance starts nothing near a limit, and tells the lead once, with the reset time; at the reset (its look
     /// again, armed once; the reading by then under 80 %) the tasks start, with nothing else nudging it.
-    @Test func nearALimitAutoAdvanceStartsNothingAndTellsTheLeadOnce() throws {
+    @Test func nearALimitAutoAdvanceStartsNothingAndTellsTheLeadOnce() async throws {
         let (root, runtime, lead) = try team()
         let resets = Date().timeIntervalSince1970 + 86_400
         let armed = Armed()
@@ -407,10 +407,10 @@ extension LeadAdvanceTests {
         _ = lead.call("add_task", ["title": "First", "goal": "g", "acceptance": ["a"]])
         _ = lead.call("add_task", ["title": "Second", "goal": "g", "acceptance": ["a"]])
         let told = { reports(runtime).filter { $0.contains("The account's usage is near a limit: the weekly limit (every model): 91% used, resets ") } }
-        #expect(advancing.until { !told().isEmpty }, "\(reports(runtime))")
-        advancing.settle()
+        #expect(await advancing.until { !told().isEmpty }, "\(reports(runtime))")
+        await advancing.settle()
         LeadAdvance.nudge(root: root)
-        advancing.settle()
+        await advancing.settle()
         #expect(told().count == 1, "\(reports(runtime))")
         #expect(told().first?.contains("Tell the user") == true)
         #expect(task("first", root)?.status == .planned && task("second", root)?.status == .planned && runtime.spawned.isEmpty)
@@ -420,7 +420,7 @@ extension LeadAdvanceTests {
         // The reset: the next reading is under the threshold, and the armed look starts them.
         UsageStatusLine.run(input: Data(status(30).utf8), store: usageStore, home: temp.url("no-home").path) { _ in }
         wakes.first?.1()
-        #expect(advancing.until { task("first", root)?.status == .running && task("second", root)?.status == .running })
+        #expect(await advancing.until { task("first", root)?.status == .running && task("second", root)?.status == .running })
     }
 
     /// The looks again a test's lead armed (`LeadToolset.usageWake`), not run.

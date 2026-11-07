@@ -544,6 +544,10 @@ struct ClaudeDictationTests {
                 try await h.waitFor { h.agent["stuck"] as? Bool == (phase == "waiting") }
                 controller.press(h.key, agent: .claude) { "" }
                 try await h.waitFor { controller.listening }
+                // Held: cancelled once Claude records. Listening comes before the run has read the screen; a cancel
+                // then (a busy Mac's slow screen read) ends the run before Claude ever started, with nothing of its
+                // own to cancel (2026-11-05, at load 150: "held .button: voiceCancels 1, cancels 2").
+                if phase == "held" { try await h.waitFor { !(h.agent["recording"] as? String ?? "").isEmpty } }
                 if phase != "held" {
                     controller.release()
                     #expect(controller.isTranscribing(h.key))

@@ -29,7 +29,7 @@ struct TestScriptWebTests {
     }
 
     /// `scripts/test.sh --web DIR` with PATH `path`: its exit status and all of its output.
-    func run(_ dir: URL, path: String) throws -> (status: Int32, output: String) {
+    func run(_ dir: URL, path: String) async throws -> (status: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [Self.repo.appendingPathComponent("scripts/test.sh").path, "--web", dir.path]
@@ -41,14 +41,18 @@ struct TestScriptWebTests {
         process.standardError = pipe
         process.standardInput = FileHandle.nullDevice
         try process.run()
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+        // The tool's run read to its end and waited for on a thread of its own, not the cooperative pool.
+        let output = await offPool { () -> String in
+            let read = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            waitForEnd(process)
+            return read
+        }
         return (process.terminationStatus, output)
     }
 
-    @Test func passingWebTestsPassWithOneSummaryLine() throws {
+    @Test func passingWebTestsPassWithOneSummaryLine() async throws {
         let root = try folder(["a.test.mjs": "ok", "b.test.mjs": "ok", "helper.mjs": "FAIL: not a test"])
-        let (status, output) = try run(root.appendingPathComponent("web"), path: root.path + "/bin:/usr/bin:/bin")
+        let (status, output) = try await run(root.appendingPathComponent("web"), path: root.path + "/bin:/usr/bin:/bin")
         #expect(status == 0, "\(output)")
         #expect(output.contains("ran a.test.mjs") && output.contains("ran b.test.mjs"), "\(output)")
         #expect(!output.contains("helper.mjs"), "only *.test.mjs run: \(output)")
@@ -59,10 +63,10 @@ struct TestScriptWebTests {
         }
     }
 
-    @Test func aFailingWebTestFailsTheRunNamingTheFile() throws {
+    @Test func aFailingWebTestFailsTheRunNamingTheFile() async throws {
         let root = try folder(["a.test.mjs": "ok", "b.test.mjs": "FAIL", "c.test.mjs": "ok"])
         let web = root.appendingPathComponent("web")
-        let (status, output) = try run(web, path: root.path + "/bin:/usr/bin:/bin")
+        let (status, output) = try await run(web, path: root.path + "/bin:/usr/bin:/bin")
         #expect(status == 1, "\(output)")
         // The ones after it still run, and its own output stays in the log.
         #expect(output.contains("ran c.test.mjs") && output.contains("assertion failed in b.test.mjs"), "\(output)")
@@ -73,18 +77,18 @@ struct TestScriptWebTests {
     }
 
     /// No web tests where they should be is a failure too, not a pass with nothing run.
-    @Test func noWebTestsFailsTheRun() throws {
+    @Test func noWebTestsFailsTheRun() async throws {
         let root = try folder([:])
-        let (status, output) = try run(root.appendingPathComponent("web"), path: root.path + "/bin:/usr/bin:/bin")
+        let (status, output) = try await run(root.appendingPathComponent("web"), path: root.path + "/bin:/usr/bin:/bin")
         #expect(status == 1, "\(output)")
         #expect(output.contains("web tests: none in "), "\(output)")
     }
 
     /// Without node the run stops before anything, saying node is missing: never a silent skip.
-    @Test func withoutNodeTheRunFailsNamingIt() throws {
+    @Test func withoutNodeTheRunFailsNamingIt() async throws {
         try #require(!FileManager.default.isExecutableFile(atPath: "/usr/bin/node") && !FileManager.default.isExecutableFile(atPath: "/bin/node"))
         let root = try folder(["a.test.mjs": "ok"])
-        let (status, output) = try run(root.appendingPathComponent("web"), path: "/usr/bin:/bin")
+        let (status, output) = try await run(root.appendingPathComponent("web"), path: "/usr/bin:/bin")
         #expect(status == 1, "\(output)")
         #expect(output.contains("node isn't on PATH"), "\(output)")
         #expect(!output.contains("ran ") && !output.contains("web tests:"), "\(output)")

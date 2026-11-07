@@ -9,7 +9,7 @@ struct HangGuardTests {
     @Test func aWaitInACancelledTestEndsAtOnce() async {
         let waiting = Task.detached { () -> (held: Bool, took: TimeInterval) in
             let started = Date()
-            let held = eventually { false }
+            let held = await eventually { false }
             return (held, Date().timeIntervalSince(started))
         }
         waiting.cancel()

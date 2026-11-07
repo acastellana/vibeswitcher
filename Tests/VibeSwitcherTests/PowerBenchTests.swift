@@ -21,7 +21,7 @@ struct PowerBenchTests {
         return phases
     }
 
-    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly)) func idleUnder1PercentAndLeadWorkUnder3() throws {
+    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly)) func idleUnder1PercentAndLeadWorkUnder3() async throws {
         let app = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("VibeSwitcher")
         #expect(FileManager.default.isExecutableFile(atPath: app.path))
         let home = URL(fileURLWithPath: try scratch.shortFolder("vspw"))
@@ -41,7 +41,7 @@ struct PowerBenchTests {
         let ended = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in ended.signal() }
         try process.run()
-        if ended.wait(timeout: .now() + hangGuard) == .timedOut {
+        if await offPool({ ended.wait(timeout: .now() + hangGuard) }) == .timedOut {
             process.terminate()
             Issue.record("the bench hung")
             return

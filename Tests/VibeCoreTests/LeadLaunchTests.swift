@@ -218,7 +218,7 @@ struct LeadLaunchOutsideReadsTests {
         process.standardError = out
         try process.run()
         let data = out.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        waitForEnd(process)
         return String(decoding: data, as: UTF8.self)
     }
 

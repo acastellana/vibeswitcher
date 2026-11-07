@@ -48,7 +48,7 @@ struct LoopPassageTests {
             if let input { stdin.fileHandleForWriting.write(Data(input.utf8)) }
             try stdin.fileHandleForWriting.close()
             let output = out.fileHandleForReading.readDataToEndOfFile(), errors = err.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
+            waitForEnd(process)
             return (process.terminationStatus, String(decoding: output, as: UTF8.self), String(decoding: errors, as: UTF8.self))
         }
 
@@ -58,35 +58,35 @@ struct LoopPassageTests {
         }
     }
 
-    @Test func versionPeersAndUsageAreAsTheReadmeSays() throws {
+    @Test func versionPeersAndUsageAreAsTheReadmeSays() async throws {
         let loop = try Loop(scratch)
-        #expect(try loop.run("dev", ["version"]) == (0, "passage 1.0\n", ""))
-        #expect(try loop.run("dev", ["peers", "--no-discovery"]).out == "\(Self.vaultPeer)\tpaired\tLoop vault Mac\n")
-        #expect(try loop.run("vault", ["peers", "--no-discovery", "--json"]).out
+        await #expect(try loop.run("dev", ["version"]) == (0, "passage 1.0\n", ""))
+        await #expect(try loop.run("dev", ["peers", "--no-discovery"]).out == "\(Self.vaultPeer)\tpaired\tLoop vault Mac\n")
+        await #expect(try loop.run("vault", ["peers", "--no-discovery", "--json"]).out
                 == #"{"name":"Loop dev Mac","pairedAt":"2026-10-31T00:00:00Z","peerID":"de0e2e01","reachable":null}"# + "\n")
         // Nobody listens on the vault side: unreachable, after the --wait.
-        #expect(try loop.run("dev", ["peers", "--wait", "0"]).out == "\(Self.vaultPeer)\tunreachable\tLoop vault Mac\n")
+        await #expect(try loop.run("dev", ["peers", "--wait", "0"]).out == "\(Self.vaultPeer)\tunreachable\tLoop vault Mac\n")
         // Usage: an unknown command or option, --yes (neither app passes it), a bad number, a missing or extra argument.
         for arguments in [["unpair", Self.vaultPeer], ["frob"], [], ["inbox", "--bogus"], ["send", Self.vaultPeer, "f", "--yes"],
                           ["send", Self.vaultPeer, "f", "--timeout", "soon"], ["send", Self.vaultPeer], ["listen", "extra"],
                           ["peers", "--name", "x"], ["send", Self.vaultPeer, "f", "--name", ""]] {
-            let ran = try loop.run("dev", arguments)
+            let ran = try await loop.run("dev", arguments)
             #expect(ran.status == 2, "\(arguments)")
             #expect(ran.err.hasPrefix("passage: ") && ran.err.contains("usage: passage"), "\(arguments): \(ran.err)")
         }
         // No such peer: 3, by ID or name.
-        #expect(try loop.run("dev", ["send", "0d0d0d0d", "-"], input: "x").status == 3)
-        #expect(try loop.run("dev", ["inbox", "someone"]).status == 3)
+        await #expect(try loop.run("dev", ["send", "0d0d0d0d", "-"], input: "x").status == 3)
+        await #expect(try loop.run("dev", ["inbox", "someone"]).status == 3)
         // An unpaired peer's folder may still be listed by ID: empty.
-        #expect(try loop.run("dev", ["inbox", "0d0d0d0d"]) == (0, "", ""))
+        await #expect(try loop.run("dev", ["inbox", "0d0d0d0d"]) == (0, "", ""))
         // Not listening: 4, with Passage's message, and nothing lands.
-        let unreachable = try loop.run("dev", ["send", "loop VAULT mac", "-", "--timeout", "0"], input: "x")
+        let unreachable = try await loop.run("dev", ["send", "loop VAULT mac", "-", "--timeout", "0"], input: "x")
         #expect(unreachable.status == 4)
         #expect(unreachable.err == "passage: Loop vault Mac (0a1b2c3d) is not reachable on the local network. Is `passage listen` running there?\n")
-        #expect(try loop.run("vault", ["inbox"]).out.isEmpty)
+        await #expect(try loop.run("vault", ["inbox"]).out.isEmpty)
         // The file: 1.
-        #expect(try loop.run("dev", ["send", Self.vaultPeer, loop.file("missing").path]).err.hasPrefix("passage: no such file: "))
-        #expect(try loop.run("dev", ["send", Self.vaultPeer, loop.root.path]).status == 1)
+        await #expect(try loop.run("dev", ["send", Self.vaultPeer, loop.file("missing").path]).err.hasPrefix("passage: no such file: "))
+        await #expect(try loop.run("dev", ["send", Self.vaultPeer, loop.root.path]).status == 1)
         // Without its environment it refuses to guess a side.
         let bare = Process()
         bare.executableURL = URL(fileURLWithPath: Self.script)
@@ -94,20 +94,20 @@ struct LoopPassageTests {
         bare.environment = ["PATH": "/usr/bin:/bin"]
         bare.standardError = FileHandle.nullDevice
         try bare.run()
-        bare.waitUntilExit()
+        #expect(await exited(bare), "pid \(bare.processIdentifier) still running")
         #expect(bare.terminationStatus == 1)
     }
 
     /// VibeSwitcher's link on the dev side sends to a `passage listen` on the vault side: the file lands in the vault's
     /// inbox under the dev peer, 0600, never over another; `inbox --json` lists it where the Wallet Manager reads it;
     /// the listener prints a line per arrival and stops cleanly on SIGTERM.
-    @Test func devSendsToAListeningVault() throws {
+    @Test func devSendsToAListeningVault() async throws {
         let loop = try Loop(scratch)
         let heard = DispatchSemaphore(value: 0)
         let vault = try #require(PassageLink(executable: loop.passage("vault"), walletPeer: Self.devPeer, inboxFolder: loop.inbox("vault")))
         let listener = try vault.listen { heard.signal() }
-        #expect(eventually { loop.listening("vault") })
-        #expect(try loop.run("dev", ["peers", "--json"]).out.contains(#""reachable":true"#))
+        #expect(await eventually { loop.listening("vault") })
+        await #expect(try loop.run("dev", ["peers", "--json"]).out.contains(#""reachable":true"#))
 
         let dev = try #require(PassageLink(executable: loop.passage("dev"), walletPeer: Self.vaultPeer, inboxFolder: loop.inbox("dev")))
         let request = loop.file("request.json")
@@ -115,8 +115,8 @@ struct LoopPassageTests {
         let id = "3f2b8c1e-5d4a-4b6f-9e0c-7a1d2e3f4a5d"
         #expect(dev.send(file: request, id: id) == .sent)
         #expect(dev.send(file: request, id: id) == .sent)
-        #expect(heard.wait(timeout: .now() + hangGuard) == .success)
-        #expect(heard.wait(timeout: .now() + hangGuard) == .success)
+        #expect(await offPool { heard.wait(timeout: .now() + hangGuard) } == .success)
+        #expect(await offPool { heard.wait(timeout: .now() + hangGuard) } == .success)
 
         // Both copies, under two names (the second never replaces the first), listed where the vault's inbox is.
         let entries = try vault.inbox().get()
@@ -130,7 +130,7 @@ struct LoopPassageTests {
         }
         #expect(Set(entries.map(\.path)).count == 2)
         // The text listing: peer, received UTC, bytes, path.
-        let lines = try loop.run("vault", ["inbox", "Loop dev Mac"]).out.split(separator: "\n")
+        let lines = try await loop.run("vault", ["inbox", "Loop dev Mac"]).out.split(separator: "\n")
         #expect(lines.count == 2 && lines.allSatisfy { $0.split(separator: "\t").count == 4 && $0.hasPrefix("\(Self.devPeer)\t") })
         // Nothing went to the dev side.
         #expect(try dev.inbox().get().isEmpty)
@@ -142,12 +142,12 @@ struct LoopPassageTests {
 
     /// The faults a run sets: a send that delivers and then fails (exit 1, the link's `failed`: it may have arrived),
     /// one that can't reach the other side (4), and a hold that makes every send unreachable until it's lifted.
-    @Test func faultsDeliverThenFailAndHold() throws {
+    @Test func faultsDeliverThenFailAndHold() async throws {
         let loop = try Loop(scratch)
         let vault = try #require(PassageLink(executable: loop.passage("vault"), walletPeer: Self.devPeer, inboxFolder: loop.inbox("vault")))
         let listener = try vault.listen {}
         defer { listener.stop() }
-        #expect(eventually { loop.listening("vault") })
+        #expect(await eventually { loop.listening("vault") })
         let dev = try #require(PassageLink(executable: loop.passage("dev"), walletPeer: Self.vaultPeer, inboxFolder: loop.inbox("dev")))
         let request = loop.file("request.json")
         try Data("{}".utf8).write(to: request)

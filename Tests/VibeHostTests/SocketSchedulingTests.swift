@@ -5,7 +5,7 @@ import Testing
 @testable import VibeHost
 
 struct SocketSchedulingTests {
-    @Test func aPipelinedClientYieldsAndThenResumesItsBufferedFrames() throws {
+    @Test func aPipelinedClientYieldsAndThenResumesItsBufferedFrames() async throws {
         var fds: [Int32] = [-1, -1]
         try #require(socketpair(AF_UNIX, SOCK_STREAM, 0, &fds) == 0)
         UnixSocket.configure(fds[0])
@@ -27,7 +27,7 @@ struct SocketSchedulingTests {
         let written = pipeline.withUnsafeBytes { Darwin.write(fds[1], $0.baseAddress, $0.count) }
         #expect(written == pipeline.count)
         client.start()
-        #expect(finished.wait(timeout: .now() + 10) == .success)
+        #expect(await offPool { finished.wait(timeout: .now() + 10) } == .success)
         let result = queue.sync { (handled, handledWhenOtherWorkRan) }
         #expect(result.0 == 128)
         #expect(result.1 > 0 && result.1 <= 64)

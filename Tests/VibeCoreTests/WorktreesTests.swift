@@ -50,7 +50,7 @@ struct WorktreesTests {
 
     /// Cleanup: what runs in the worktree (a dev server left there) ends with it; what runs elsewhere doesn't. Only
     /// `sleep`s this test started.
-    @Test func removingAWorktreeEndsWhatRunsInItOnly() throws {
+    @Test func removingAWorktreeEndsWhatRunsInItOnly() async throws {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "serve")
         try FileManager.default.createDirectory(atPath: worktree + "/web", withIntermediateDirectories: true)
@@ -65,7 +65,7 @@ struct WorktreesTests {
         let inside = try sleeper(in: worktree + "/web"), outside = try sleeper(in: root)
         defer { inside.terminate(); outside.terminate() }
         try Worktrees.remove(root: root, slug: "serve", force: true)
-        #expect(eventually { !inside.isRunning })
+        #expect(await eventually { !inside.isRunning })
         #expect(outside.isRunning)
         #expect(!FileManager.default.fileExists(atPath: worktree))
     }
@@ -756,7 +756,7 @@ struct WorktreesTests {
 
     /// E-17: a test command that never ends is stopped at the time limit with what it started (also a child its shell
     /// left behind, outside its family but in its process group), and the scratch worktree goes.
-    @Test func aTestCommandThatNeverEndsIsStoppedAsHung() throws {
+    @Test func aTestCommandThatNeverEndsIsStoppedAsHung() async throws {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "n")
         try commit("n.txt", "n\n", in: worktree)
@@ -780,7 +780,7 @@ struct WorktreesTests {
         #expect(command == "test command" && after == timeout && output.contains("started"))
         #expect(took < hangGuard)
         let left = try #require(child)
-        #expect(eventually { kill(left, 0) != 0 })
+        #expect(await eventually { kill(left, 0) != 0 })
         #expect(!FileManager.default.fileExists(atPath: scratch.path))
         #expect(!FileManager.default.fileExists(atPath: scratch.path + "-home"))
         #expect(output.hasPrefix("HOME, CFFIXED_USER_HOME and TMPDIR: \(scratch.path)-home "), "\(output)")
@@ -789,7 +789,7 @@ struct WorktreesTests {
 
     /// E-12: a cancelled run stops its test command, removes its scratch worktree (git's list included) and says
     /// cancelled, not failed.
-    @Test func aCancelledRunIsCancelledAndCleanedUp() throws {
+    @Test func aCancelledRunIsCancelledAndCleanedUp() async throws {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "k")
         try commit("k.txt", "k\n", in: worktree)
@@ -806,12 +806,12 @@ struct WorktreesTests {
             }
             result.set(checked)
         }
-        #expect(eventually { FileManager.default.fileExists(atPath: marks + "/child") })
+        #expect(await eventually { FileManager.default.fileExists(atPath: marks + "/child") })
         token.cancel()
-        #expect(eventually { result.get() != nil })
+        #expect(await eventually { result.get() != nil })
         #expect(result.get() == .cancelled)
         let child = try #require(Int32(try String(contentsOfFile: marks + "/child", encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
-        #expect(eventually { kill(child, 0) != 0 })
+        #expect(await eventually { kill(child, 0) != 0 })
         #expect(!FileManager.default.fileExists(atPath: scratch.path))
         #expect(!FileManager.default.fileExists(atPath: scratch.path + "-home"))
         #expect(listed(root).count == 2)
@@ -877,26 +877,26 @@ struct ShellTests {
         }
     }
 
-    @Test func aTimedOutCommandTakesItsChildrenWithIt() throws {
+    @Test func aTimedOutCommandTakesItsChildrenWithIt() async throws {
         let dir = temp.url("shell").path
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let run = runUntilTimedOut("sleep \(Self.childRuns) & echo $! > child; wait", in: dir)
         #expect(run.took < hangGuard)
         let child = try #require(run.child)
-        #expect(eventually { kill(child, 0) != 0 })
+        #expect(await eventually { kill(child, 0) != 0 })
     }
 
-    @Test func aCommandThatIgnoresTermIsKilled() throws {
+    @Test func aCommandThatIgnoresTermIsKilled() async throws {
         let dir = temp.url("shell").path
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let run = runUntilTimedOut("trap '' TERM; sleep \(Self.childRuns) & echo $! > child; wait", in: dir, grace: 1)
         // It returned long before its child would have ended: the child was killed, not waited for.
         #expect(run.took < hangGuard)
         let child = try #require(run.child)
-        #expect(eventually { kill(child, 0) != 0 })
+        #expect(await eventually { kill(child, 0) != 0 })
     }
 
-    @Test func aChildLeftBehindByItsParentIsKilledToo() throws {
+    @Test func aChildLeftBehindByItsParentIsKilledToo() async throws {
         let dir = temp.url("shell").path
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         // The shell dies on TERM; the child it started ignores TERM and is left to launchd (still holding the output
@@ -904,12 +904,12 @@ struct ShellTests {
         let run = runUntilTimedOut("(trap '' TERM; exec sleep \(Self.childRuns)) & echo $! > child; wait", in: dir, grace: 1)
         #expect(run.took < hangGuard)
         let child = try #require(run.child)
-        #expect(eventually { kill(child, 0) != 0 })
+        #expect(await eventually { kill(child, 0) != 0 })
     }
 
     /// E-17: a command that ends but leaves something holding its output open (a background job) isn't waited for
     /// without end: what it wrote is returned, and what it left is stopped with its process group.
-    @Test func aBackgroundJobHoldingTheOutputIsNotWaitedFor() throws {
+    @Test func aBackgroundJobHoldingTheOutputIsNotWaitedFor() async throws {
         let dir = temp.url("shell").path
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let started = Date()
@@ -917,7 +917,7 @@ struct ShellTests {
         #expect(Date().timeIntervalSince(started) < hangGuard)
         #expect(run.ok && !run.timedOut && run.output == "done")
         let child = try #require(Int32(try String(contentsOfFile: dir + "/child", encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
-        #expect(eventually { kill(child, 0) != 0 })
+        #expect(await eventually { kill(child, 0) != 0 })
     }
 
     /// E-32: `signalFamily` stops a process and what it started (its children and theirs), each matched by pid and
@@ -925,7 +925,7 @@ struct ShellTests {
     /// Only processes this test started are signalled. Nothing here waits on the clock: the child and grandchild say
     /// they started on the root's output, and each exit is seen by the kernel's process filter (`Exits`), so a loaded
     /// Mac makes it slower, never wrong. The hang guard bounds the wait for them to start; `stopsWithin`, for them to go.
-    @Test func signalFamilyStopsAProcessAndWhatItStartedAndNothingElse() throws {
+    @Test func signalFamilyStopsAProcessAndWhatItStartedAndNothingElse() async throws {
         let dir = temp.url("family").path
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         /// Running as it was when read: gone, or its pid another process's by now, is not.
@@ -952,7 +952,7 @@ struct ShellTests {
             for process in [shell, outsider] where process.isRunning { kill(process.processIdentifier, SIGKILL) }
             for pid in started.pids.values where getpgid(pid) == shell.processIdentifier { kill(pid, SIGKILL) }
         }
-        #expect(started.all.wait(timeout: .now() + hangGuard) == .success, "started: \(started.pids)")
+        #expect(await offPool { started.all.wait(timeout: .now() + hangGuard) } == .success, "started: \(started.pids)")
         let root = try #require(ProcessTable.info(pid: shell.processIdentifier))
         let child = try #require(started.pids["child"].flatMap(ProcessTable.info(pid:)))
         let grandchild = try #require(started.pids["grandchild"].flatMap(ProcessTable.info(pid:)))
@@ -973,13 +973,13 @@ struct ShellTests {
         #expect(Set([root.pid, child.pid, grandchild.pid]).isSubset(of: Set(signalled.map(\.pid))))
         // A sleep sent TERM ends at once: this bounds only a failure (a member never signalled), never a speed.
         let stopsWithin: TimeInterval = 10
-        #expect(exits.wait(for: [root.pid, child.pid, grandchild.pid], within: stopsWithin),
+        #expect(await offPool { exits.wait(for: [root.pid, child.pid, grandchild.pid], within: stopsWithin) },
                 "the family wasn't all gone \(stopsWithin) s after TERM: \(exits.ended)")
         // The root, this process's child, was ended by TERM: its wait status is the signal's number (no core).
         #expect(exits.ended[root.pid] == SIGTERM, "\(exits.ended)")
         #expect(exits.ended[other.pid] == nil && running(other))
         kill(other.pid, SIGKILL)
-        #expect(exits.wait(for: [other.pid], within: stopsWithin) && exits.ended[other.pid] == SIGKILL)
+        #expect(await offPool { exits.wait(for: [other.pid], within: stopsWithin) } && exits.ended[other.pid] == SIGKILL)
     }
 
     /// Processes' exits, through a kqueue of the test's own: a watch is the kernel's when `watch` returns, and `wait`

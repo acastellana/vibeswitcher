@@ -5,7 +5,7 @@ import Testing
 
 /// Programs that finish in milliseconds: their output and exit code must still arrive.
 struct FastExitTests {
-    @Test func quickCommandsKeepTheirOutputAndExitCode() throws {
+    @Test func quickCommandsKeepTheirOutputAndExitCode() async throws {
         let probes = (0..<30).map { _ in SessionProbe() }
         var sessions: [HostedSession?] = Array(repeating: nil, count: probes.count)
         var failures: [Int: String] = [:]
@@ -26,7 +26,7 @@ struct FastExitTests {
             }
         }
         #expect(failures.isEmpty, "spawn failed: \(failures)")
-        _ = eventually { probes.indices.allSatisfy { failures[$0] != nil || probes[$0].lastChange?.exit != nil } }
+        _ = await eventually { probes.indices.allSatisfy { failures[$0] != nil || probes[$0].lastChange?.exit != nil } }
         let noExit = probes.indices.filter { failures[$0] == nil && probes[$0].lastChange?.exit?.status != 3 }
         let noOutput = probes.indices.filter { failures[$0] == nil && !probes[$0].text.contains("quick-\($0)") }
         #expect(noExit.isEmpty, "no exit code: \(noExit.map { i in "\(i):\(String(describing: probes[i].lastChange?.exit?.status)) \(sessions[i].map { probes[i].diagnosis($0) } ?? "")" })")
@@ -38,7 +38,7 @@ struct FastExitTests {
     /// the one its session reads, and no two sessions name the same one. (ttyname and ptsname share one buffer between
     /// threads, and ttyname can find no name for a terminal just made on a busy Mac: with them a session could fail to
     /// start, or its program open another session's terminal.)
-    @Test func sessionsStartedAtOnceEachGetTheirOwnTerminal() throws {
+    @Test func sessionsStartedAtOnceEachGetTheirOwnTerminal() async throws {
         for _ in 0..<5 {
             let probes = (0..<40).map { _ in SessionProbe() }
             var sessions: [HostedSession?] = Array(repeating: nil, count: probes.count)
@@ -57,7 +57,7 @@ struct FastExitTests {
             }
             let started = probes.indices.filter { sessions[$0] != nil }
             #expect(started.count == probes.count, "didn't start: \(probes.indices.filter { sessions[$0] == nil })")
-            _ = eventually { started.allSatisfy { probes[$0].text.contains("mine-\($0).") } }
+            _ = await eventually { started.allSatisfy { probes[$0].text.contains("mine-\($0).") } }
             let elsewhere = started.filter { i in
                 probes[i].text.components(separatedBy: "mine-").dropFirst().contains { !$0.hasPrefix("\(i).") }
             }

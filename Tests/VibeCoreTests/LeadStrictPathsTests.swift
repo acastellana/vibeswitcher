@@ -189,13 +189,13 @@ extension LeadAuditFindersTests {
 
 extension LeadAdvanceTests {
     /// An audit task's 3 finders vote one lone Important finding, unconfirmed, on b.txt; `strict`: strict_paths.
-    func strictAudit(strict: String) throws -> (root: String, runtime: FakeRuntime, advancing: Advancing) {
+    func strictAudit(strict: String) async throws -> (root: String, runtime: FakeRuntime, advancing: Advancing) {
         let (root, runtime, lead) = try team(["audit_finders": 3, "strict_paths": strict])
         let advancing = Advancing(lead)
         _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "review": "audit"])
-        #expect(advancing.until { task("add-b", root)?.status == .running })
+        #expect(await advancing.until { task("add-b", root)?.status == .running })
         try work("add-b", file: "b.txt", root: root, runtime)
-        #expect(advancing.until { task("add-b", root)?.panel?.size == 3 && vault.current(.verifier, root: root, task: "add-b") != nil })
+        #expect(await advancing.until { task("add-b", root)?.panel?.size == 3 && vault.current(.verifier, root: root, task: "add-b") != nil })
         let clean: [String: Any] = ["completion": "complete", "integrity": "clean", "summary": "checked", "tests": "passed"]
         let lone: [String: Any] = ["severity": "Important", "file": "b.txt", "line": 1, "evidence": "only finder 3 sees it",
                                    "failure_scenario": "cat b.txt gives bee where the contract wants b"]
@@ -207,21 +207,21 @@ extension LeadAdvanceTests {
         return (root, runtime, advancing)
     }
 
-    @Test func strictPathsKeepAutoAdvanceFromMergingAnUnconfirmedImportantFinding() throws {
-        let (root, runtime, advancing) = try strictAudit(strict: "b.txt")
+    @Test func strictPathsKeepAutoAdvanceFromMergingAnUnconfirmedImportantFinding() async throws {
+        let (root, runtime, advancing) = try await strictAudit(strict: "b.txt")
         defer { advancing.stop() }
         // Sent to the worker as an open one would be, and not merged.
-        #expect(advancing.until { toWorker("add-b", root, runtime).contains { $0.contains("F1") && $0.contains("strict_paths holds it") } })
-        advancing.settle()
+        #expect(await advancing.until { toWorker("add-b", root, runtime).contains { $0.contains("F1") && $0.contains("strict_paths holds it") } })
+        await advancing.settle()
         #expect(task("add-b", root)?.status != .done)
         #expect(!Git.run(["show", "main:b.txt"], in: root).ok)
         #expect(!reports(runtime).contains { $0.contains("Merged add-b") }, "\(reports(runtime))")
     }
 
-    @Test func strictPathsLetAutoAdvanceMergeABranchTouchingNone() throws {
-        let (root, runtime, advancing) = try strictAudit(strict: "src/signing/**")
+    @Test func strictPathsLetAutoAdvanceMergeABranchTouchingNone() async throws {
+        let (root, runtime, advancing) = try await strictAudit(strict: "src/signing/**")
         defer { advancing.stop() }
-        #expect(advancing.until { task("add-b", root)?.status == .done && reports(runtime).contains { $0.contains("Merged add-b") } })
+        #expect(await advancing.until { task("add-b", root)?.status == .done && reports(runtime).contains { $0.contains("Merged add-b") } })
         #expect(Git.run(["show", "main:b.txt"], in: root).output == "bee")
     }
 }

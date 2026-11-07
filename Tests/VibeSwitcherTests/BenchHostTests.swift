@@ -23,7 +23,7 @@ struct BenchHostTests {
         return gone.wait(timeout: .now() + timeout) == .success
     }
 
-    @Test func aKilledBenchsHostAndSessionsAreGoneWithin10Seconds() throws {
+    @Test func aKilledBenchsHostAndSessionsAreGoneWithin10Seconds() async throws {
         let app = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("VibeSwitcher")
         try #require(FileManager.default.isExecutableFile(atPath: app.path))
         let home = URL(fileURLWithPath: try scratch.shortFolder("vsbh"))
@@ -51,23 +51,24 @@ struct BenchHostTests {
         var host: pid_t = 0
         defer {
             output.fileHandleForReading.readabilityHandler = nil
-            if bench.isRunning { kill(bench.processIdentifier, SIGKILL); bench.waitUntilExit() }
+            if bench.isRunning { kill(bench.processIdentifier, SIGKILL); waitForEnd(bench) }
             // Only on a failure: this test's own bench's host.
             if host > 0, kill(host, 0) == 0 { kill(host, SIGKILL) }
         }
         try bench.run()
-        try #require(ready.wait(timeout: .now() + hangGuard) == .success, "the bench never started its shells: \(said.withLock { text })")
+        try #require(await offPool { ready.wait(timeout: .now() + hangGuard) } == .success, "the bench never started its shells: \(said.withLock { text })")
         let table = ProcessTable.snapshot()
         host = try #require(table.values.first { $0.ppid == bench.processIdentifier && $0.comm.hasPrefix("vibeswitcher-hos") }?.pid,
                             "no host under the bench")
         let sessions = table.values.filter { $0.ppid == host }.map(\.pid)
         #expect(sessions.count >= 3, "the host's children: \(sessions)")
         kill(bench.processIdentifier, SIGKILL)
-        bench.waitUntilExit()
+        #expect(await exited(bench))
         let killed = Date()
-        #expect(Self.waitForExit(of: host, timeout: 10), "the host outlived its bench")
+        #expect(await offPool { Self.waitForExit(of: host, timeout: 10) }, "the host outlived its bench")
         for session in sessions {
-            #expect(Self.waitForExit(of: session, timeout: max(0, 10 - Date().timeIntervalSince(killed))), "pid \(session) outlived its bench")
+            let left = max(0, 10 - Date().timeIntervalSince(killed))
+            #expect(await offPool { Self.waitForExit(of: session, timeout: left) }, "pid \(session) outlived its bench")
         }
     }
 }

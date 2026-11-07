@@ -230,7 +230,7 @@ struct WorkingPolicyTests: LeadTeamFixture {
 
     // MARK: vs-heavy on every session's PATH
 
-    @Test func sessionsGetTheBundlesVsHeavyFirstOnTheirPath() throws {
+    @Test func sessionsGetTheBundlesVsHeavyFirstOnTheirPath() async throws {
         let app = temp.url("VibeSwitcher.app")
         let macOS = app.appendingPathComponent("Contents/MacOS"), bin = app.appendingPathComponent("Contents/Resources/bin")
         try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
@@ -255,13 +255,13 @@ struct WorkingPolicyTests: LeadTeamFixture {
         process.standardOutput = pipe
         try process.run()
         let found = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+        #expect(await exited(process), "pid \(process.processIdentifier) still running")
         #expect(found.trimmingCharacters(in: .whitespacesAndNewlines) == folder + "/vs-heavy")
     }
 
     // MARK: Every project's merge takes the same lock
 
-    @Test func aMergeInAnyProjectWaitsForVsHeavysRunAndHoldsTheSameLock() throws {
+    @Test func aMergeInAnyProjectWaitsForVsHeavysRunAndHoldsTheSameLock() async throws {
         let url = temp.url("project-c")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let root = url.resolvingSymlinksInPath().path
@@ -287,9 +287,9 @@ struct WorkingPolicyTests: LeadTeamFixture {
         // Another project's worker runs its suite under vs-heavy, on the same lock.
         let holder = try TestLockTests.runVsHeavy(["--as", "tge's suite", "/bin/sh", "-c", "echo started >> \(q(order)); sleep 2; echo suite >> \(q(order))"],
                                                lockDirectory: (lock.path as NSString).deletingLastPathComponent, output: temp.url("holder.out").path)
-        #expect(eventually { TestLockTests.lines(order) == ["started"] })
+        #expect(await eventually { TestLockTests.lines(order) == ["started"] })
         let merged = lead.call("merge", ["task": "add-b"])
-        holder.waitUntilExit()
+        #expect(await exited(holder), "pid \(holder.processIdentifier) still running")
         #expect(!merged.isError, "\(merged.text)")
         // Never side by side: the merge's tests ran once the suite was done, holding the lock (and saying so to them).
         #expect(TestLockTests.lines(order) == ["started", "suite", "merge"])

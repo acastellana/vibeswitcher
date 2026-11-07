@@ -126,7 +126,7 @@ struct LoadRecorderTests {
 
     /// The app calls `record` from its Heartbeat on the main thread; the sample is taken and written on the recorder's
     /// own queue.
-    @Test func aRecordIsTakenOffTheCallersThreadOnItsQueue() throws {
+    @Test func aRecordIsTakenOffTheCallersThreadOnItsQueue() async throws {
         let folder = temp.url("stats")
         let label = Locked<String?>(nil)
         var fake = sources(load: 5)
@@ -141,7 +141,7 @@ struct LoadRecorderTests {
             written.set(sample)
             done.signal()
         }
-        #expect(done.wait(timeout: .now() + 30) == .success)
+        #expect(await offPool { done.wait(timeout: .now() + 30) } == .success)
         #expect(label.get() == "vibeswitcher.load-recorder")
         #expect(written.get()?.sessions.count == 3)
         #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent(LoadStats.fileName("load", for: Date())).path))
@@ -274,7 +274,7 @@ struct LoadReportScriptTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     let temp = Scratch()
 
-    func report(_ arguments: [String]) throws -> (status: Int32, output: String) {
+    func report(_ arguments: [String]) async throws -> (status: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [Self.repo.appendingPathComponent("scripts/load-report.sh").path] + arguments
@@ -283,12 +283,16 @@ struct LoadReportScriptTests {
         process.standardError = pipe
         process.standardInput = FileHandle.nullDevice
         try process.run()
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+        // The tool's run read to its end and waited for on a thread of its own, not the cooperative pool.
+        let output = await offPool { () -> String in
+            let read = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            waitForEnd(process)
+            return read
+        }
         return (process.terminationStatus, output)
     }
 
-    @Test func itPrintsTheProfileAndFreezesPerLoadBucketForTheDays() throws {
+    @Test func itPrintsTheProfileAndFreezesPerLoadBucketForTheDays() async throws {
         let home = temp.url("home")
         let stats = home.appendingPathComponent("stats"), debug = home.appendingPathComponent("debug")
         try VibePaths.ensurePrivate(debug)
@@ -322,7 +326,7 @@ struct LoadReportScriptTests {
             }
         }
 
-        let (status, output) = try report(["--home", home.path, "2026-10-30", "2026-10-30"])
+        let (status, output) = try await report(["--home", home.path, "2026-10-30", "2026-10-30"])
         #expect(status == 0, "\(output)")
         let rows = output.split(separator: "\n").map { $0.split(separator: " ").map(String.init) }
         #expect(output.contains("Samples: 100 minutes"), "\(output)")
@@ -333,7 +337,7 @@ struct LoadReportScriptTests {
         #expect(output.contains("Memory pressure: normal 90 min, warn 10 min"), "\(output)")
         #expect(output.contains("swift-frontend") && !output.contains("100.0"), "\(output)")
 
-        let bad = try report(["--home", home.path, "30-10-2026"])
+        let bad = try await report(["--home", home.path, "30-10-2026"])
         #expect(bad.status == 2 && bad.output.contains("isn't a day"), "\(bad.output)")
     }
 }

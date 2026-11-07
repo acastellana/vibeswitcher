@@ -55,6 +55,8 @@ unset VIBESWITCHER_HOME
 
 cores=$(cpu_count)
 [[ -n $cores ]] || { echo "the cores couldn't be counted (sysctl -n hw.ncpu, getconf _NPROCESSORS_ONLN)"; exit 1; }
+# At most a test a core at once in each run's bundles, as scripts/test.sh runs them (it says why); a caller's own kept.
+export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH=${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-$cores}
 cap=$((2 * cores))
 usage="usage: scripts/test-under-load.sh [--load N] [--memory-floor PCT] [--max-load L] [--max-time S] [--wait S]"
 usage+=" [--pid-file FILE] [--check-only] [-r RUNS] [-f FILTER] [-- COMMAND...]"

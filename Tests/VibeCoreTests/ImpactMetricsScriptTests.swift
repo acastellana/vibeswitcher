@@ -10,7 +10,7 @@ struct ImpactMetricsScriptTests {
     static let fixtures = repo.appendingPathComponent("Tests/Fixtures/impact-metrics")
     let temp = Scratch()
 
-    func metrics(_ arguments: [String]) throws -> (status: Int32, output: String) {
+    func metrics(_ arguments: [String]) async throws -> (status: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [Self.repo.appendingPathComponent("scripts/impact-metrics.sh").path] + arguments
@@ -23,8 +23,12 @@ struct ImpactMetricsScriptTests {
         process.standardError = pipe
         process.standardInput = FileHandle.nullDevice
         try process.run()
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+        // The tool's run read to its end and waited for on a thread of its own, not the cooperative pool.
+        let output = await offPool { () -> String in
+            let read = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            waitForEnd(process)
+            return read
+        }
         return (process.terminationStatus, output)
     }
 
@@ -52,9 +56,9 @@ struct ImpactMetricsScriptTests {
             .map { String($0.dropFirst(metric.count + 4)) }
     }
 
-    @Test func itPrintsTheKnownNumbersOfTheFixtureDay() throws {
+    @Test func itPrintsTheKnownNumbersOfTheFixtureDay() async throws {
         let (project, home) = try layout()
-        let run = try metrics(["2026-10-20..2026-10-20", "--project", project.path, "--home", home.path])
+        let run = try await metrics(["2026-10-20..2026-10-20", "--project", project.path, "--home", home.path])
         #expect(run.status == 0, "\(run.output)")
         let out = run.output
         // alpha (board), beta (archive only), gamma (board) merged on the day; delta the day before. Progress lines on
@@ -90,9 +94,9 @@ struct ImpactMetricsScriptTests {
         #expect(out.contains("    unsampled 1 (no load sample within 2 minutes)"), "\(out)")
     }
 
-    @Test func aRangeOfHoursCountsOnlyThoseHours() throws {
+    @Test func aRangeOfHoursCountsOnlyThoseHours() async throws {
         let (project, home) = try layout()
-        let run = try metrics(["2026-10-20T09:30..2026-10-20T12:30", "--project", project.path, "--home", home.path])
+        let run = try await metrics(["2026-10-20T09:30..2026-10-20T12:30", "--project", project.path, "--home", home.path])
         #expect(run.status == 0, "\(run.output)")
         // alpha (10:00) and beta (12:00) in 3 h; progress lines at 10:00, 11:00, 12:00.
         #expect(value(run.output, "merges/h") == "0.67 (2 merges in 3.0 h; 0.67 per active hour, 3 h with lead activity)")
@@ -102,25 +106,25 @@ struct ImpactMetricsScriptTests {
 
     /// The app prunes hang reports (a week, at most 500 MB): hours before the oldest report left aren't counted as
     /// freeze-free. The fixtures' oldest report is 2026-10-19 23:00.
-    @Test func hoursWhoseHangReportsWerePrunedArentCounted() throws {
+    @Test func hoursWhoseHangReportsWerePrunedArentCounted() async throws {
         let (project, home) = try layout()
         // From 23:00 to 12:00: 13 h covered, with the freezes at 23:00, 05:00, 10:00:30 and 10:30.
-        let partial = try metrics(["2026-10-19T12:00..2026-10-20T12:00", "--project", project.path, "--home", home.path])
+        let partial = try await metrics(["2026-10-19T12:00..2026-10-20T12:00", "--project", project.path, "--home", home.path])
         #expect(partial.status == 0, "\(partial.output)")
         #expect(value(partial.output, "freezes/h")
             == "0.31 (4 hang reports in 13.0 h; partial: reports before 2026-10-19 23:00 were pruned by the app, which keeps a week, at most 500 MB)")
         // A day before every report left: no number at all, for freezes or their load buckets.
-        let pruned = try metrics(["2026-10-18..2026-10-18", "--project", project.path, "--home", home.path])
+        let pruned = try await metrics(["2026-10-18..2026-10-18", "--project", project.path, "--home", home.path])
         #expect(pruned.status == 0, "\(pruned.output)")
         #expect(value(pruned.output, "freezes/h")?.hasPrefix("n/a (reports before 2026-10-19 23:00 were pruned") == true, "\(pruned.output)")
     }
 
-    @Test func missingSourcesAreNotApplicableNeverGuessed() throws {
+    @Test func missingSourcesAreNotApplicableNeverGuessed() async throws {
         let root = temp.url("impact-empty")
         let project = root.appendingPathComponent("proj"), home = root.appendingPathComponent("home")
         try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        let run = try metrics(["2026-10-20..2026-10-20", "--project", project.path, "--home", home.path])
+        let run = try await metrics(["2026-10-20..2026-10-20", "--project", project.path, "--home", home.path])
         #expect(run.status == 0, "\(run.output)")
         for metric in ["merges/h", "median start-to-merge", "median audit-to-merge", "audit rounds per audited task",
                        "Important findings per task", "reverts", "incidents", "flaky-merge rate", "median full-suite duration",
@@ -129,9 +133,9 @@ struct ImpactMetricsScriptTests {
         }
     }
 
-    @Test func aBadRangeIsRefused() throws {
+    @Test func aBadRangeIsRefused() async throws {
         for range in ["2026-10-20", "2026-10-21..2026-10-20", "yesterday..today"] {
-            let run = try metrics([range, "--home", temp.url("home").path])
+            let run = try await metrics([range, "--home", temp.url("home").path])
             #expect(run.status != 0, "\(range): \(run.output)")
         }
     }

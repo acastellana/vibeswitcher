@@ -153,7 +153,7 @@ final class SlowTools: MCPToolset, @unchecked Sendable {
 }
 
 struct MCPConcurrencyTests {
-    @Test func otherCallsAnswerWhileOneRunsAndCancelStopsIt() throws {
+    @Test func otherCallsAnswerWhileOneRunsAndCancelStopsIt() async throws {
         let tools = SlowTools()
         let server = MCPServer(name: "t", version: "1", toolset: tools)
         let lock = NSLock()
@@ -167,13 +167,13 @@ struct MCPConcurrencyTests {
         let started = Date()
         server.receive(Data(#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"slow","arguments":{}}}"#.utf8), respond: respond)
         // It's running (not just queued) when the ping and the cancel come.
-        #expect(eventually { tools.started == 1 })
+        #expect(await eventually { tools.started == 1 })
         server.receive(Data(#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#.utf8), respond: respond)
         func reply(_ id: String) -> (Date, String)? { lock.lock(); defer { lock.unlock() }; return replies[id] }
-        #expect(eventually { reply("2") != nil })
+        #expect(await eventually { reply("2") != nil })
         #expect(reply("1") == nil)
         server.receive(Data(#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}"#.utf8), respond: respond)
-        #expect(eventually { reply("1") != nil })
+        #expect(await eventually { reply("1") != nil })
         // Stopped: answered in well under the time its command takes.
         #expect(Date().timeIntervalSince(started) < TimeInterval(SlowTools.runs) / 2)
     }

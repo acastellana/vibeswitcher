@@ -90,7 +90,7 @@ import Testing
                 while process.isRunning, Date() < deadline { usleep(20_000) }
                 if process.isRunning { kill(pid, SIGKILL) }
             }
-            process.waitUntilExit()
+            waitForEnd(process)
             try? FileManager.default.removeItem(atPath: dir)
         }
 

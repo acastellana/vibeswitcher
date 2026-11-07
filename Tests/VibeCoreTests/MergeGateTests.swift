@@ -106,13 +106,13 @@ struct MergeGateTests: LeadTeamFixture {
 
     // MARK: The ledger
 
-    @Test func eachFailingTestsLinesAreKeptMaskedAndCapped() {
+    @Test func eachFailingTestsLinesAreKeptMaskedAndCapped() async {
         let output = """
             ◇ Test flaky() started.
             ✘ Test flaky() recorded an issue at FlakyTests.swift:3:5: Expectation failed: (header → "X-Auth: Bearer abc123def456") == nil
             ↳ waited for the reply
             ✔ Test steady() passed after 0.001 seconds.
-            ✘ Test param(n:) recorded an issue with 1 argument n → 2 at ParamTests.swift:9:7: Expectation failed: eventually {
+            ✘ Test param(n:) recorded an issue with 1 argument n → 2 at ParamTests.swift:9:7: Expectation failed: await eventually {
                 n == 3
             }
             \u{1B}[1;31m✘\u{1B}[0m Test flaky() failed after 0.010 seconds with 1 issue.
@@ -123,7 +123,7 @@ struct MergeGateTests: LeadTeamFixture {
         let evidence = MergeRerun.evidence(in: output, tests: ["flaky()", "param(n:)", "OldTests.testIt", "crashed()"])
         #expect(evidence["flaky()"] == [#"✘ Test flaky() recorded an issue at FlakyTests.swift:3:5: Expectation failed: (header → "X-Auth: Bearer •••") == nil"#,
                                         "↳ waited for the reply", "✘ Test flaky() failed after 0.010 seconds with 1 issue."], "\(evidence)")
-        #expect(evidence["param(n:)"] == ["✘ Test param(n:) recorded an issue with 1 argument n → 2 at ParamTests.swift:9:7: Expectation failed: eventually {",
+        #expect(evidence["param(n:)"] == ["✘ Test param(n:) recorded an issue with 1 argument n → 2 at ParamTests.swift:9:7: Expectation failed: await eventually {",
                                           "    n == 3", "}"], "\(evidence)")
         #expect(evidence["OldTests.testIt"]?.count == 2, "\(evidence)")
         // A test with no line of its own (one that crashed) is left out, and so is one that isn't asked for.
@@ -595,7 +595,7 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(gone.contains("- \(last.flakes[0].task)'s merge (\(first)): (its file can't be read now)"), "\(gone)")
     }
 
-    @Test func anEvidenceFileThatIsntAPlainFileQuotesNothingAndDoesntBlock() throws {
+    @Test func anEvidenceFileThatIsntAPlainFileQuotesNothingAndDoesntBlock() async throws {
         let root = try repo()
         let folder = root + "/.vibeswitcher/flakes"
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
@@ -609,11 +609,11 @@ struct MergeGateTests: LeadTeamFixture {
             read.signal()
         }
         // Waits on the read itself; the bound is only for failing: a writer then frees the blocked read.
-        let returned = read.wait(timeout: .now() + 60) == .success
+        let returned = await offPool { read.wait(timeout: .now() + 60) } == .success
         if !returned {
             let writer = open(fifo, O_WRONLY | O_NONBLOCK)
             if writer >= 0 { close(writer) }
-            read.wait()
+            #expect(await offPool { read.wait(timeout: .now() + hangGuard) } == .success, "a writer never freed the blocked read")
         }
         #expect(returned, "reading a FIFO blocked")
         #expect(found.get() == nil)
@@ -761,7 +761,7 @@ struct MergeGateTests: LeadTeamFixture {
 
     /// The tests a hung merge left started and never finished, and its output's tail, in a file every session can read
     /// (the merge's log is in the vault); the reply and the progress log name them.
-    @Test func aHungMergeNamesTheTestsThatNeverFinishedInAReadableFile() throws {
+    @Test func aHungMergeNamesTheTestsThatNeverFinishedInAReadableFile() async throws {
         let root = try repo()
         let marks = temp.url("marks").path
         try FileManager.default.createDirectory(atPath: marks, withIntermediateDirectories: true)
@@ -807,7 +807,7 @@ struct MergeGateTests: LeadTeamFixture {
         let task = try #require(BoardStore(root: root).load().task("add-b"))
         #expect(task.status == .review && task.setback == nil)
         let child = try #require(Int32((try String(contentsOfFile: marks + "/child", encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines)))
-        #expect(eventually { kill(child, 0) != 0 })
+        #expect(await eventually { kill(child, 0) != 0 })
     }
 
     @Test func aFailingOrPassingMergeWritesNoHungFile() throws {

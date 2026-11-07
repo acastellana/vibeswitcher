@@ -67,10 +67,10 @@ struct TestFailuresTests {
     }
 
     /// Real output from this suite (a flake under load): the expectation's source spans lines, its comment after.
-    @Test func anExpectationOverSeveralLinesIsKeptWhole() {
+    @Test func anExpectationOverSeveralLinesIsKeptWhole() async {
         let failures = TestFailures(output: """
             ✔ Test historyLargerThanAFrameIsTrimmedNotDropped() passed after 18.796 seconds.
-            ✘ Test slowClientGetsResyncAndProgramKeepsRunning() recorded an issue at HostServerTests.swift:139:9: Expectation failed: eventually(timeout: 30) {
+            ✘ Test slowClientGetsResyncAndProgramKeepsRunning() recorded an issue at HostServerTests.swift:139:9: Expectation failed: await eventually(timeout: 30) {
                         let seq = watcher.send(.screen(id: session.id))
                         Thread.sleep(forTimeInterval: 0.2)
                         if case .screenText(_, let text) = watcher.reply(to: seq) { return text.contains("all-done") }

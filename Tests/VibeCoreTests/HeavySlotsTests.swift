@@ -30,14 +30,15 @@ extension LeadToolsetTests {
         }
     }
 
+    /// Blocking, for a `defer`: a SIGKILL's process ends at once.
     func end(_ processes: [Process]) {
         for process in processes {
             kill(process.processIdentifier, SIGKILL)
-            process.waitUntilExit()
+            waitForEnd(process)
         }
     }
 
-    @Test func aMergeWaitingOnFullSlotsSaysWhoHoldsThemAndRefusesPastTheTimeout() throws {
+    @Test func aMergeWaitingOnFullSlotsSaysWhoHoldsThemAndRefusesPastTheTimeout() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -69,13 +70,13 @@ extension LeadToolsetTests {
         let gaps = zip(times.dropFirst(), times).map { $0.timeIntervalSince($1) }
         #expect(gaps.allSatisfy { $0 < 1 }, "\(gaps)")
         // A slot frees: the merge goes on, and says it waited and for whom.
-        end([holders[1]])
+        await end([holders[1]])
         let merged = ToolProgress.with(ToolProgress(every: 0.2, told.add)) { call(lead, "merge", ["task": "add-b"]) }
         #expect(!merged.isError, "\(merged.text)")
         #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
     }
 
-    @Test func theMergesTestRunSaysHowItGoesWhileItRuns() throws {
+    @Test func theMergesTestRunSaysHowItGoesWhileItRuns() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -87,7 +88,7 @@ extension LeadToolsetTests {
         #expect(told.texts.contains { $0.hasPrefix("Running the test command (") }, "\(told.texts)")
         // Done: it says nothing more.
         let after = told.texts.count
-        Thread.sleep(forTimeInterval: 0.6)
+        await pause(0.6)
         #expect(told.texts.count == after)
     }
 
@@ -105,7 +106,7 @@ extension LeadToolsetTests {
         #expect(told.texts.first?.contains("for the Mac's load (150, the greater of its 1- and 5-minute averages) to drop below load_threshold (24) before testing add-b") == true, "\(told.texts)")
     }
 
-    @Test func anAuditRunWaitingOnFullSlotsSaysWhoHoldsThem() throws {
+    @Test func anAuditRunWaitingOnFullSlotsSaysWhoHoldsThem() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -120,7 +121,7 @@ extension LeadToolsetTests {
         #expect(told.texts.contains { $0.contains("its one slot held") && $0.contains("scripts/test.sh in /Users/a/dev/project-c (project-c)") }, "\(told.texts)")
     }
 
-    @Test func statusNamesASlotHeldOverThirtyMinutes() throws {
+    @Test func statusNamesASlotHeldOverThirtyMinutes() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -170,7 +171,7 @@ extension LeadToolsetTests {
 
     /// Status names who holds the Mac-wide test and build lock, and a worker in line for it as waiting for it, with
     /// whom it waits for: not stalled (11 of 19 of TGE's stall alarms were workers in line).
-    @Test func statusSaysWhoHoldsTheLockAndWhichWorkerWaitsForIt() throws {
+    @Test func statusSaysWhoHoldsTheLockAndWhichWorkerWaitsForIt() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -188,10 +189,10 @@ extension LeadToolsetTests {
             if case .held(let taken, _, _) = lock.acquire(as: "scripts/test.sh", in: worktree, timeout: hangGuard, cancel: cancel) { taken.release() }
             done.signal()
         }.start()
-        #expect(eventually { !lock.waiters().isEmpty })
+        #expect(await eventually { !lock.waiters().isEmpty })
         let waiting = call(lead, "status").text
         cancel.cancel()
-        done.wait()
+        #expect(await offPool { done.wait(timeout: .now() + hangGuard) } == .success)
         #expect(waiting.contains("\nMac-wide test and build lock: held by TGE/redesign for 12 min; one: waiting for the Mac-wide test lock (held by TGE/redesign for 12 min) (not stalled).\n"),
                 "\(waiting)")
     }
@@ -217,12 +218,12 @@ extension MCPServerTests {
         var objects: [[String: Any]] { lock.withLock { all } }
     }
 
-    @Test func aCallWithAProgressTokenHearsItsProgress() throws {
+    @Test func aCallWithAProgressTokenHearsItsProgress() async throws {
         let server = MCPServer(name: "v", version: "1", toolset: Halfway())
         let lines = Lines()
         let call = #"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"slow","arguments":{},"_meta":{"progressToken":"tok-7"}}}"#
         server.receive(Data(call.utf8), respond: lines.add)
-        #expect(eventually(timeout: 10) { lines.objects.contains { $0["id"] as? Int == 7 } })
+        #expect(await eventually(timeout: 10) { lines.objects.contains { $0["id"] as? Int == 7 } })
         let objects = lines.objects
         #expect(objects.count == 2)
         let note = try #require(objects.first)
@@ -233,7 +234,7 @@ extension MCPServerTests {
         // No token: nothing is sent but the answer.
         let plain = Lines()
         server.receive(Data(#"{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"slow","arguments":{}}}"#.utf8), respond: plain.add)
-        #expect(eventually(timeout: 10) { !plain.objects.isEmpty })
+        #expect(await eventually(timeout: 10) { !plain.objects.isEmpty })
         #expect(plain.objects.count == 1)
         #expect(((plain.objects.first?["result"] as? [String: Any])?["content"] as? [[String: Any]])?.first?["text"] as? String == "no progress")
     }

@@ -63,10 +63,10 @@ import Testing
 
         /// The lead's session running `program`, its role granted by the app; the worker's, waiting, with its done
         /// report on agent/add-b's head (review none: merge takes it with the test run).
-        func start(lead program: String) throws -> (lead: HostSession, worker: HostSession) {
+        func start(lead program: String) async throws -> (lead: HostSession, worker: HostSession) {
             // No job control (the session's shell is interactive): what it starts stays in its process group.
-            let lead = try app.spawn("set +m; \(environment)cd '\(root)'; \(program)", cwd: root)
-            let worker = try app.spawn(keepRunning, cwd: root)
+            let lead = try await app.spawn("set +m; \(environment)cd '\(root)'; \(program)", cwd: root)
+            let worker = try await app.spawn(keepRunning, cwd: root)
             sessions = [lead, worker]
             let vault = { (caller: LeadVault.Caller) in self.book.vault(folder: URL(fileURLWithPath: self.dir + "/vault"), as: { caller }) }
             let grant = try vault(.app).startLead(root: root, branch: "main")
@@ -116,7 +116,7 @@ import Testing
         return (text, result["isError"] as? Bool ?? true)
     }
 
-    @Test func aMergesTestCommandIsntTheLeadAndTheMergeStillLands() throws {
+    @Test func aMergesTestCommandIsntTheLeadAndTheMergeStillLands() async throws {
         let mcp = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")
         let team = try Team(temp)
@@ -124,23 +124,23 @@ import Testing
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: folder + "/a.in", contents: nil)
         // The lead's tool server, as Claude Code starts it in the lead's session, once its role is bound.
-        let (lead, worker) = try team.start(lead: "while [ ! -f '\(folder)/go' ]; do sleep 0.05; done; "
+        let (lead, worker) = try await team.start(lead: "while [ ! -f '\(folder)/go' ]; do sleep 0.05; done; "
             + "tail -n +1 -f '\(folder)/a.in' | '\(mcp)' --root '\(team.root)' --role lead > '\(folder)/a.out' 2> '\(folder)/a.err'")
         let probe = try probe(team, leadRequests(team, agentPid: lead.childPID, worker: worker))
         FileManager.default.createFile(atPath: folder + "/go", contents: nil)
         let server = LeadToolServerHandoverTests.Server(folder: folder, name: "a")
-        #expect(try server.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(server.errors)")
+        await #expect(try server.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(server.errors)")
         // The probe is merge's test command: the branch's code, run from the lead's tool server. The merge is this
         // test's call only (auto_advance would take it too).
-        let configured = try server.ask(2, "tools/call", ["name": "configure", "arguments": ["test_command": "sh '\(probe.script)'", "merge_policy": "auto",
+        let configured = try await server.ask(2, "tools/call", ["name": "configure", "arguments": ["test_command": "sh '\(probe.script)'", "merge_policy": "auto",
                                                                                               "auto_advance": false]])
         #expect(configured?["isError"] as? Bool == false, "configure: \(configured ?? [:]) \(server.errors)")
-        let added = try server.ask(3, "tools/call", ["name": "add_task", "arguments": ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]]])
+        let added = try await server.ask(3, "tools/call", ["name": "add_task", "arguments": ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]]])
         #expect(added?["isError"] as? Bool == false, "add_task: \(added ?? [:])")
 
         try server.send(4, "tools/call", ["name": "merge", "arguments": ["task": "add-b"]])
         // The test command asks while the merge waits on it; it ends once the host has answered everything.
-        #expect(eventually { wire.answered(probe.answers, 1...5) || result(server, 4) != nil }, "the probe got no answers: \(result(server, 4)?.text ?? "")")
+        #expect(await eventually { wire.answered(probe.answers, 1...5) || result(server, 4) != nil }, "the probe got no answers: \(result(server, 4)?.text ?? "")")
         FileManager.default.createFile(atPath: probe.stop.path, contents: nil)
         let replies = try wire.replies(Data(contentsOf: probe.answers))
         #expect(refused(replies[2]), "sealed as the lead's: \(String(describing: replies[2]))")
@@ -149,7 +149,7 @@ import Testing
         if case .error? = replies[5] {} else { Issue.record("ended the lead's worker: \(String(describing: replies[5]))") }
 
         // The merge itself still works: the tool server is still the lead (it records main's new head, the lead's to say).
-        #expect(eventually { result(server, 4) != nil })
+        #expect(await eventually { result(server, 4) != nil })
         let merged = result(server, 4)
         #expect(merged?.isError == false && merged?.text.contains("Merged add-b into main") == true, "merge: \(merged?.text ?? "no answer") \(server.errors)")
         #expect(FileManager.default.fileExists(atPath: team.root + "/b.txt"))
@@ -160,7 +160,7 @@ import Testing
 
     /// A git hook the lead accepted runs as branch code too (`GitGuard.shim`): a post-merge hook that asks the host for
     /// what only the lead gets, as the merge's fast-forward runs it, is refused, and the merge lands.
-    @Test func anAcceptedHookIsntTheLeadAndTheMergeStillLands() throws {
+    @Test func anAcceptedHookIsntTheLeadAndTheMergeStillLands() async throws {
         let mcp = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")
         let team = try Team(temp)
@@ -170,47 +170,47 @@ import Testing
         let folder = team.dir + "/mcp"
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: folder + "/a.in", contents: nil)
-        let (lead, worker) = try team.start(lead: "while [ ! -f '\(folder)/go' ]; do sleep 0.05; done; "
+        let (lead, worker) = try await team.start(lead: "while [ ! -f '\(folder)/go' ]; do sleep 0.05; done; "
             + "tail -n +1 -f '\(folder)/a.in' | '\(mcp)' --root '\(team.root)' --role lead > '\(folder)/a.out' 2> '\(folder)/a.err'")
         let probe = try probe(team, leadRequests(team, agentPid: lead.childPID, worker: worker))
         FileManager.default.createFile(atPath: folder + "/go", contents: nil)
         let server = LeadToolServerHandoverTests.Server(folder: folder, name: "a")
-        #expect(try server.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(server.errors)")
-        let configured = try server.ask(2, "tools/call", ["name": "configure", "arguments": ["test_command": "true", "merge_policy": "auto", "auto_advance": false]])
+        await #expect(try server.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(server.errors)")
+        let configured = try await server.ask(2, "tools/call", ["name": "configure", "arguments": ["test_command": "true", "merge_policy": "auto", "auto_advance": false]])
         #expect(configured?["isError"] as? Bool == false, "configure: \(configured ?? [:]) \(server.errors)")
-        let accepted = try server.ask(3, "tools/call", ["name": "accept_git_hooks", "arguments": ["hooks": ["post-merge"]]])
+        let accepted = try await server.ask(3, "tools/call", ["name": "accept_git_hooks", "arguments": ["hooks": ["post-merge"]]])
         #expect(accepted?["isError"] as? Bool == false, "accept_git_hooks: \(accepted ?? [:])")
-        let added = try server.ask(4, "tools/call", ["name": "add_task", "arguments": ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]]])
+        let added = try await server.ask(4, "tools/call", ["name": "add_task", "arguments": ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]]])
         #expect(added?["isError"] as? Bool == false, "add_task: \(added ?? [:])")
         try server.send(5, "tools/call", ["name": "merge", "arguments": ["task": "add-b"]])
         // The hook asks while the fast-forward waits on it; it ends once the host has answered everything.
-        #expect(eventually { wire.answered(probe.answers, 1...5) || result(server, 5) != nil }, "the hook got no answers: \(result(server, 5)?.text ?? "")")
+        #expect(await eventually { wire.answered(probe.answers, 1...5) || result(server, 5) != nil }, "the hook got no answers: \(result(server, 5)?.text ?? "")")
         FileManager.default.createFile(atPath: probe.stop.path, contents: nil)
         let replies = try wire.replies(Data(contentsOf: probe.answers))
         #expect(refused(replies[2]), "sealed as the lead's: \(String(describing: replies[2]))")
         #expect(refused(replies[3]), "sealed as auto_advance's: \(String(describing: replies[3]))")
         #expect(refused(replies[4]), "the lead's roster: \(String(describing: replies[4]))")
         if case .error? = replies[5] {} else { Issue.record("ended the lead's worker: \(String(describing: replies[5]))") }
-        #expect(eventually { result(server, 5) != nil })
+        #expect(await eventually { result(server, 5) != nil })
         let merged = result(server, 5)
         #expect(merged?.isError == false && merged?.text.contains("Merged add-b into main") == true, "merge: \(merged?.text ?? "no answer") \(server.errors)")
         #expect(FileManager.default.fileExists(atPath: team.root + "/b.txt"))
         #expect(kill(worker.childPID, 0) == 0, "the worker's session was ended")
     }
 
-    @Test func theLeadsOwnSessionStillGetsThem() throws {
+    @Test func theLeadsOwnSessionStillGetsThem() async throws {
         let team = try Team(temp)
         let base = team.dir + "/probe"
         // Beside where its tool server runs: a process of the lead's session, under no merge's command.
-        let (lead, worker) = try team.start(lead: "while [ ! -f '\(base).sh' ]; do sleep 0.05; done; sh '\(base).sh'; \(keepRunning)")
+        let (lead, worker) = try await team.start(lead: "while [ ! -f '\(base).sh' ]; do sleep 0.05; done; sh '\(base).sh'; \(keepRunning)")
         let probe = try probe(team, leadRequests(team, agentPid: lead.childPID, worker: worker))
-        #expect(eventually { wire.answered(probe.answers, 1...5) })
+        #expect(await eventually { wire.answered(probe.answers, 1...5) })
         FileManager.default.createFile(atPath: probe.stop.path, contents: nil)
         let replies = try wire.replies(Data(contentsOf: probe.answers))
         #expect(sealed(replies[2]), "sealed as the lead's: \(String(describing: replies[2]))")
         #expect(sealed(replies[3]), "sealed as auto_advance's: \(String(describing: replies[3]))")
         if case .vault(.roster)? = replies[4] {} else { Issue.record("the lead's roster: \(String(describing: replies[4]))") }
         #expect(replies[5] == .ok, "ended the lead's worker: \(String(describing: replies[5]))")
-        #expect(eventually { kill(worker.childPID, 0) != 0 })
+        #expect(await eventually { kill(worker.childPID, 0) != 0 })
     }
 }

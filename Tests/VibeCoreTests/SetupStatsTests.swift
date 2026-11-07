@@ -40,7 +40,7 @@ struct SetupStatsTests {
     }
 
     /// load-report.sh's output for `days` on `home`, in UTC.
-    func loadReport(home: URL, _ days: [String]) throws -> String {
+    func loadReport(home: URL, _ days: [String]) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [KeychainLintTests.repo.appendingPathComponent("scripts/load-report.sh").path, "--home", home.path] + days
@@ -53,8 +53,12 @@ struct SetupStatsTests {
         process.standardError = pipe
         process.standardInput = FileHandle.nullDevice
         try process.run()
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+        // The tool's run read to its end and waited for on a thread of its own, not the cooperative pool.
+        let output = await offPool { () -> String in
+            let read = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            waitForEnd(process)
+            return read
+        }
         return output
     }
 
@@ -63,7 +67,7 @@ struct SetupStatsTests {
     @Test func itMatchesImpactMetricsOnTheFixtureDay() async throws {
         let script = ImpactMetricsScriptTests()
         let (project, home) = try layout()
-        let run = try script.metrics(["2026-10-20..2026-10-20", "--project", project.path, "--home", home.path])
+        let run = try await script.metrics(["2026-10-20..2026-10-20", "--project", project.path, "--home", home.path])
         #expect(run.status == 0, "\(run.output)")
         let out = run.output
         let stats = await collector(home: home).collect(projects: [project.path], range: Self.fixtureDay)
@@ -121,7 +125,7 @@ struct SetupStatsTests {
 
     @Test func itMatchesLoadReportOnTheFixtureDay() async throws {
         let (_, home) = try layout()
-        let out = try loadReport(home: home, ["2026-10-20", "2026-10-20"])
+        let out = try await loadReport(home: home, ["2026-10-20", "2026-10-20"])
         let stats = await collector(home: home).collect(projects: [], range: Self.fixtureDay)
         // 10:00–10:59 at load 30, 20:00–21:59 at 50.
         let load = try #require(stats.mac.load)

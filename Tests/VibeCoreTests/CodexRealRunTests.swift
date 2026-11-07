@@ -40,7 +40,7 @@ struct CodexRealRunTests {
     }
 
     @Test(.enabled(if: codexHome != nil, "spends Codex usage: set VIBESWITCHER_REAL_CODEX_HOME to run it"))
-    func aSmallTaskRunsEndToEndInTheRealCodex() throws {
+    func aSmallTaskRunsEndToEndInTheRealCodex() async throws {
         // Not under /tmp, which Codex's sandbox lets every command write (its refusals would prove nothing there): in
         // this checkout's git-ignored .build folder, removed after.
         let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -88,7 +88,7 @@ struct CodexRealRunTests {
         process.terminationHandler = { _ in ended.signal() }
         try process.run()
         // Until it exits (its turn over), 15 minutes at most.
-        if ended.wait(timeout: .now() + 900) == .timedOut { process.terminate() }
+        if await offPool({ ended.wait(timeout: .now() + 900) }) == .timedOut { process.terminate() }
         let calls = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
         let transcript = (try? String(contentsOfFile: output, encoding: .utf8)) ?? ""
         print("CODEX CALLS:\n\(calls)\nCODEX COMMITS:\n\(Git.run(["log", "--oneline", "main..agent/hello"], in: root).output)\nCODEX OUTPUT TAIL:\n\(transcript.suffix(4000))")
@@ -111,7 +111,7 @@ struct CodexRealRunTests {
     /// Operation not permitted", task wallet-results-tests) and its leftover check said "env: /bin/ps: Operation not
     /// permitted".
     @Test(.enabled(if: codexHome != nil, "spends Codex usage: set VIBESWITCHER_REAL_CODEX_HOME to run it"))
-    func theProjectsChecksRunInARealCodexWorkersSandbox() throws {
+    func theProjectsChecksRunInARealCodexWorkersSandbox() async throws {
         let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         // This checkout's HEAD, exported without its agent files into a scratch repository outside the worktree (an
         // export inside it would hold AGENTS.md and CLAUDE.md for the audit to take as a worker's: AgentExportLintTests).
@@ -122,7 +122,7 @@ struct CodexRealRunTests {
         export.arguments = ["-c", "/usr/bin/git archive HEAD | tar -x -C '\(root)' --exclude AGENTS.md --exclude 'CLAUDE*.md' --exclude .claude --exclude .mcp.json"]
         export.currentDirectoryURL = checkout
         try export.run()
-        export.waitUntilExit()
+        #expect(await exited(export), "pid \(export.processIdentifier) still running")
         try #require(export.terminationStatus == 0, "git archive of this checkout failed")
         // A stand-in where the docs link to it (DocLinksLint), not the checkout's.
         try "# A scratch export: the checkout's AGENTS.md is left out.\n".write(toFile: root + "/AGENTS.md", atomically: true, encoding: .utf8)
@@ -143,7 +143,7 @@ struct CodexRealRunTests {
         build.standardOutput = FileHandle.nullDevice
         build.standardError = FileHandle.nullDevice
         try build.run()
-        build.waitUntilExit()
+        #expect(await exited(build), "pid \(build.processIdentifier) still running")
         try #require(build.terminationStatus == 0, "the worktree's build failed outside Codex")
 
         let codexHome = temp.url("codex-home").path
@@ -186,7 +186,7 @@ struct CodexRealRunTests {
         process.terminationHandler = { _ in ended.signal() }
         try process.run()
         // Until it exits (its turn over), 30 minutes at most.
-        if ended.wait(timeout: .now() + 1800) == .timedOut { process.terminate() }
+        if await offPool({ ended.wait(timeout: .now() + 1800) }) == .timedOut { process.terminate() }
         let read = { (name: String) in (try? String(contentsOfFile: (tmp as NSString).appendingPathComponent(name), encoding: .utf8)) ?? "" }
         let (focused, lintRun, load) = (read("focused.log"), read("lints.log"), read("load.log"))
         let calls = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""

@@ -46,14 +46,18 @@ import Testing
 
     /// Runs the harness with `arguments` to its end.
     func harness(_ arguments: [String], fake: [String: String] = [:], claudeCode: Bool = false,
-                 pathFirst: URL? = nil) throws -> (status: Int32, output: String) {
+                 pathFirst: URL? = nil) async throws -> (status: Int32, output: String) {
         let process = process(arguments, fake: fake, claudeCode: claudeCode, pathFirst: pathFirst)
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
         try process.run()
-        let output = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        // The tool's run read to its end and waited for on a thread of its own, not the cooperative pool.
+        let output = await offPool { () -> Data in
+            let read = pipe.fileHandleForReading.readDataToEndOfFile()
+            waitForEnd(process)
+            return read
+        }
         return (process.terminationStatus, String(decoding: output, as: UTF8.self))
     }
 
@@ -74,26 +78,26 @@ import Testing
 
         var said: String { (try? String(contentsOf: output, encoding: .utf8)) ?? "" }
 
-        /// Its status, once it has ended.
-        func ended() -> Int32 {
-            process.waitUntilExit()
+        /// Its status, once it has ended: awaited (its run takes seconds), bounded by the hang guard.
+        func ended() async -> Int32 {
+            #expect(await exited(process), "the harness run (pid \(process.processIdentifier)) never ended")
             return process.terminationStatus
         }
 
         /// Ends it (vs-heavy hands the TERM on, and the harness ends its runs and loops) if a failed check left it.
         func stop() {
             if process.isRunning { process.terminate() }
-            process.waitUntilExit()
+            waitForEnd(process)
         }
     }
 
     /// Waits until `condition` holds, looking every 50 ms for at most `seconds`: the event is a file a run writes.
     @discardableResult
-    func until(_ seconds: TimeInterval = 120, _ condition: () -> Bool) -> Bool {
+    func until(_ seconds: TimeInterval = 120, _ condition: () -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition() {
             guard Date() < deadline else { return false }
-            Thread.sleep(forTimeInterval: 0.05)
+            await pause(0.05)
         }
         return true
     }
@@ -107,41 +111,41 @@ import Testing
     /// Readings under every threshold.
     let idle = ["FAKE_LOAD": "0.5", "FAKE_MEMORY": "80", "FAKE_DISK_GB": "100"]
 
-    @Test func anIdleMacIsOkUpToTwoLoadProcessesPerCore() throws {
-        let run = try harness(["--load", "\(2 * cores)", "--check-only"], fake: idle)
+    @Test func anIdleMacIsOkUpToTwoLoadProcessesPerCore() async throws {
+        let run = try await harness(["--load", "\(2 * cores)", "--check-only"], fake: idle)
         #expect(run.status == 0, "\(run.output)")
         #expect(run.output.contains("ok to start"))
     }
 
-    @Test func moreThanTwoLoadProcessesPerCoreAreRefused() throws {
-        let run = try harness(["--load", "\(2 * cores + 1)", "--check-only"], fake: idle)
+    @Test func moreThanTwoLoadProcessesPerCoreAreRefused() async throws {
+        let run = try await harness(["--load", "\(2 * cores + 1)", "--check-only"], fake: idle)
         #expect(run.status != 0)
         #expect(run.output.contains("at most \(2 * cores) load processes"), "\(run.output)")
     }
 
-    @Test func theThresholdCanOnlyBeLowered() throws {
-        let run = try harness(["--max-load", "\(2 * cores + 1)", "--check-only"], fake: idle)
+    @Test func theThresholdCanOnlyBeLowered() async throws {
+        let run = try await harness(["--max-load", "\(2 * cores + 1)", "--check-only"], fake: idle)
         #expect(run.status != 0)
         #expect(run.output.contains("can only lower"), "\(run.output)")
     }
 
-    @Test func aMacAlreadyLoadedIsRefusedSayingWhatToWaitFor() throws {
-        let run = try harness(["--load", "2", "--check-only"], fake: idle.merging(["FAKE_LOAD": "\(2 * cores).5"]) { $1 })
+    @Test func aMacAlreadyLoadedIsRefusedSayingWhatToWaitFor() async throws {
+        let run = try await harness(["--load", "2", "--check-only"], fake: idle.merging(["FAKE_LOAD": "\(2 * cores).5"]) { $1 })
         #expect(run.status != 0)
         #expect(run.output.contains("already loaded"), "\(run.output)")
         #expect(run.output.contains("Wait until the first of `uptime`'s load averages is under \(2 * cores)"), "\(run.output)")
     }
 
-    @Test func memoryUnderTheFloorIsRefused() throws {
+    @Test func memoryUnderTheFloorIsRefused() async throws {
         let low = idle.merging(["FAKE_MEMORY": "24"]) { $1 }
-        let run = try harness(["--check-only"], fake: low)
+        let run = try await harness(["--check-only"], fake: low)
         #expect(run.status != 0)
         #expect(run.output.contains("under the floor of 25 %"), "\(run.output)")
-        #expect(try harness(["--memory-floor", "20", "--check-only"], fake: low).status == 0)
+        await #expect(try harness(["--memory-floor", "20", "--check-only"], fake: low).status == 0)
     }
 
-    @Test func aSessionWithNoLiveClaudeIsRefused() throws {
-        let run = try harness(["--check-only"], fake: idle.merging(["OWNER_NAME": "no-such-process"]) { $1 }, claudeCode: true)
+    @Test func aSessionWithNoLiveClaudeIsRefused() async throws {
+        let run = try await harness(["--check-only"], fake: idle.merging(["OWNER_NAME": "no-such-process"]) { $1 }, claudeCode: true)
         #expect(run.status != 0)
         #expect(run.output.contains("no live owner"), "\(run.output)")
     }
@@ -150,7 +154,7 @@ import Testing
     /// Command Line Tools, which have Testing.framework (Library/Developer/Frameworks) and no platform. The developer
     /// folder is picked before any wait (scripts/lib/developer-dir.sh, DeveloperDirTests), and --check-only names it:
     /// here fake Command Line Tools that a fake xcode-select names, with DEVELOPER_DIR unset.
-    @Test func commandLineToolsSelectedAreTheDeveloperFolder() throws {
+    @Test func commandLineToolsSelectedAreTheDeveloperFolder() async throws {
         let tools = temp.url("CommandLineTools"), bin = temp.url("bin")
         try FileManager.default.createDirectory(at: tools.appendingPathComponent("Library/Developer/Frameworks/Testing.framework"),
                                                 withIntermediateDirectories: true)
@@ -158,7 +162,7 @@ import Testing
         let select = bin.appendingPathComponent("xcode-select")
         try "#!/bin/bash\n[[ $1 == -p ]] || exit 9\necho '\(tools.path)'\n".write(to: select, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: select.path)
-        let run = try harness(["--check-only"], fake: idle, pathFirst: bin)
+        let run = try await harness(["--check-only"], fake: idle, pathFirst: bin)
         #expect(run.status == 0, "\(run.output)")
         #expect(run.output.contains("ok to start"), "\(run.output)")
         #expect(run.output.contains("tests run with \(tools.path)'s Testing.framework"), "\(run.output)")
@@ -166,9 +170,9 @@ import Testing
 
     /// Without --check-only or the fake burner the fake load (0) is ignored: the real one, never 0.01 or less on a Mac
     /// running a suite, is over --max-load 0.01, so nothing starts (--wait 0: it refuses rather than wait).
-    @Test func fakeReadingsNeverStartLoad() throws {
+    @Test func fakeReadingsNeverStartLoad() async throws {
         let pids = temp.url("load-pids")
-        let run = try harness(["--load", "1", "--max-load", "0.01", "--wait", "0", "--pid-file", pids.path, "--", "true"], fake: ["FAKE_LOAD": "0"])
+        let run = try await harness(["--load", "1", "--max-load", "0.01", "--wait", "0", "--pid-file", pids.path, "--", "true"], fake: ["FAKE_LOAD": "0"])
         #expect(run.status != 0)
         #expect(run.output.contains("already loaded"), "\(run.output)")
         #expect(!FileManager.default.fileExists(atPath: pids.path))
@@ -190,17 +194,17 @@ import Testing
     /// load run burns at a time on this Mac: a second waits, saying for whose, and starts once the first is over; each
     /// holds a heavy-work slot of vs-heavy's, its note naming the loops, while it runs. Run under a slot held already
     /// (`vs-heavy bash scripts/test-under-load.sh`), the first keeps the lock in its own process all the same.
-    @Test(arguments: [false, true]) func twoLoadRunsBurnOneAfterTheOtherEachInAHeavySlot(heldSlot: Bool) throws {
+    @Test(arguments: [false, true]) func twoLoadRunsBurnOneAfterTheOtherEachInAHeavySlot(heldSlot: Bool) async throws {
         let fake = try fakeMac(temp.url("load"))
         let log = temp.url("log"), first = temp.url("go-a"), second = temp.url("go-b")
         let a = try Run(process(["--load", "2", "--max-time", "300"] + held("a", log: log, go: first), fake: fake, heldSlot: heldSlot),
                         output: temp.url("a.out"))
         defer { a.stop() }
         let starts = { ((try? String(contentsOf: log, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init) }
-        #expect(until { starts() == ["start-a"] }, "\(a.said)")
+        #expect(await until { starts() == ["start-a"] }, "\(a.said)")
         let b = try Run(process(["--load", "2", "--max-time", "300"] + held("b", log: log, go: second), fake: fake), output: temp.url("b.out"))
         defer { b.stop() }
-        #expect(until { b.said.contains("waiting for the other load run to end") }, "\(b.said)")
+        #expect(await until { b.said.contains("waiting for the other load run to end") }, "\(b.said)")
         #expect(b.said.contains("pid \(a.process.processIdentifier), test-under-load in "), "\(b.said)")
         // a holds a slot (vs-heavy's note; under a held slot, its holder's), and b, waiting, doesn't start its command.
         let notes = try FileManager.default.contentsOfDirectory(atPath: locks.path).filter { $0.hasSuffix(".lock.holder") && $0.hasPrefix("test-build") }
@@ -210,19 +214,19 @@ import Testing
         }
         #expect(starts() == ["start-a"])
         try Data().write(to: first)
-        #expect(a.ended() == 0, "\(a.said)")
-        #expect(until { starts().count == 3 }, "\(b.said)")
+        await #expect(a.ended() == 0, "\(a.said)")
+        #expect(await until { starts().count == 3 }, "\(b.said)")
         #expect(starts() == ["start-a", "end-a", "start-b"])
         #expect(b.said.contains("the other load run is over"), "\(b.said)")
         try Data().write(to: second)
-        #expect(b.ended() == 0, "\(b.said)")
+        await #expect(b.ended() == 0, "\(b.said)")
         #expect(starts() == ["start-a", "end-a", "start-b", "end-b"])
         #expect(!FileManager.default.fileExists(atPath: locks.appendingPathComponent("load-run.lock.holder").path))
     }
 
     /// --load N is the load to top up to: the loops make up what the others' load leaves short of N (2 of 3 at load 1),
     /// stop while the others' alone are over it, and start again once they ease; it says how many ran on average.
-    @Test func theLoadIsToppedUpToTheTargetNotAddedTo() throws {
+    @Test func theLoadIsToppedUpToTheTargetNotAddedTo() async throws {
         let load = temp.url("load")
         let fake = try fakeMac(load, "1")
         let pids = temp.url("pids"), step = temp.url("step")
@@ -230,35 +234,35 @@ import Testing
                                    "--", "/bin/bash", "-c", "until [[ -e \(step.path) ]]; do sleep 0.05; done"], fake: fake),
                           output: temp.url("out"))
         defer { run.stop() }
-        #expect(until { run.said.contains("busy loops: 2 (1-minute load 1, target 3,") }, "\(run.said)")
-        #expect(until { live(pids) == 2 }, "\(run.said)")
+        #expect(await until { run.said.contains("busy loops: 2 (1-minute load 1, target 3,") }, "\(run.said)")
+        #expect(await until { live(pids) == 2 }, "\(run.said)")
         try "10".write(to: load, atomically: true, encoding: .utf8)
-        #expect(until { run.said.contains("busy loops: 0 (1-minute load 10,") && live(pids) == 0 }, "\(run.said)")
+        #expect(await until { run.said.contains("busy loops: 0 (1-minute load 10,") && live(pids) == 0 }, "\(run.said)")
         try "0".write(to: load, atomically: true, encoding: .utf8)
-        #expect(until { run.said.contains("busy loops: 3 (1-minute load 0,") && live(pids) == 3 }, "\(run.said)")
+        #expect(await until { run.said.contains("busy loops: 3 (1-minute load 0,") && live(pids) == 3 }, "\(run.said)")
         try Data().write(to: step)
-        #expect(run.ended() == 0, "\(run.said)")
+        await #expect(run.ended() == 0, "\(run.said)")
         #expect(run.said.range(of: #"busy loops: [0-9.]+ on average \(target load 3, over [0-9]+ looks every 0.1 s\)"#, options: .regularExpression) != nil, "\(run.said)")
         #expect(live(pids) == 0)
     }
 
     /// On a loaded Mac it waits (saying so) rather than refuse once, and burns once the load is under --max-load;
     /// past --wait it gives up, having started nothing.
-    @Test func aLoadedMacIsWaitedForThenItBurns() throws {
+    @Test func aLoadedMacIsWaitedForThenItBurns() async throws {
         let load = temp.url("load")
         let fake = try fakeMac(load, "\(2 * cores + 1)")
         let pids = temp.url("pids")
         let run = try Run(process(["--load", "2", "--max-time", "300", "--pid-file", pids.path, "--", "true"], fake: fake), output: temp.url("out"))
         defer { run.stop() }
-        #expect(until { run.said.contains("waiting: the Mac's 1-minute load is \(2 * cores + 1), over \(2 * cores)") }, "\(run.said)")
+        #expect(await until { run.said.contains("waiting: the Mac's 1-minute load is \(2 * cores + 1), over \(2 * cores)") }, "\(run.said)")
         #expect(!run.said.contains("busy loops"))
         try "1".write(to: load, atomically: true, encoding: .utf8)
-        #expect(run.ended() == 0, "\(run.said)")
+        await #expect(run.ended() == 0, "\(run.said)")
         #expect(run.said.contains("busy loops: 1 (1-minute load 1, target 2,"), "\(run.said)")
 
         let late = temp.url("late-pids")
         try "\(2 * cores + 1)".write(to: load, atomically: true, encoding: .utf8)
-        let gaveUp = try harness(["--load", "2", "--wait", "1", "--pid-file", late.path, "--", "true"], fake: fake)
+        let gaveUp = try await harness(["--load", "2", "--wait", "1", "--pid-file", late.path, "--", "true"], fake: fake)
         #expect(gaveUp.status != 0)
         // Whether it said it waits first depends on how soon vs-heavy handed over, on a busy Mac after the second.
         #expect(gaveUp.output.contains("already loaded"), "\(gaveUp.output)")
@@ -267,7 +271,7 @@ import Testing
 
     /// Its waits hold the load-run lock or a slot: once the shell that started it is gone, it stops waiting, having
     /// started nothing, rather than hold them for nobody up to --wait.
-    @Test func aRunWaitingForTheLoadStopsOnceItsOwnerIsGone() throws {
+    @Test func aRunWaitingForTheLoadStopsOnceItsOwnerIsGone() async throws {
         let fake = try fakeMac(temp.url("load"), "\(2 * cores + 1)")
         let out = temp.url("out"), pidFile = temp.url("harness-pid"), pids = temp.url("pids")
         let script = Self.repo.appendingPathComponent("scripts/test-under-load.sh").path
@@ -275,14 +279,14 @@ import Testing
         owner.arguments = ["-c", "/bin/bash \(script) --load 2 --pid-file \(pids.path) -- true > \(out.path) 2>&1 & echo $! > \(pidFile.path); wait"]
         try owner.run()
         let said = { (try? String(contentsOf: out, encoding: .utf8)) ?? "" }
-        #expect(until { said().contains("waiting: the Mac's 1-minute load") }, "\(said())")
+        #expect(await until { said().contains("waiting: the Mac's 1-minute load") }, "\(said())")
         let harness = pid_t(((try? String(contentsOf: pidFile, encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
         #expect(harness > 0)
         // Gone outright, as a turn's shell can be: no signal of its reaches the harness.
         kill(owner.processIdentifier, SIGKILL)
-        owner.waitUntilExit()
-        #expect(until { said().contains("stopped waiting: its owner (pid \(owner.processIdentifier)) is gone") }, "\(said())")
-        #expect(until { kill(harness, 0) != 0 }, "\(said())")
+        #expect(await exited(owner), "pid \(owner.processIdentifier) still running")
+        #expect(await until { said().contains("stopped waiting: its owner (pid \(owner.processIdentifier)) is gone") }, "\(said())")
+        #expect(await until { kill(harness, 0) != 0 }, "\(said())")
         #expect(!said().contains("busy loops"))
         #expect(!FileManager.default.fileExists(atPath: pids.path))
     }
@@ -296,7 +300,7 @@ import Testing
     /// processes, so kill -0 to its owner, outside, fails with "Operation not permitted".
     static let codexLike = "(version 1)(allow default)(deny signal)(allow signal (target same-sandbox))"
 
-    @Test(.enabled(if: LeftoverCheckTests.canSandbox)) func insideASandboxThatRefusesPsItRunsAndEndsWhatItsCommandStarted() throws {
+    @Test(.enabled(if: LeftoverCheckTests.canSandbox)) func insideASandboxThatRefusesPsItRunsAndEndsWhatItsCommandStarted() async throws {
         let fake = try fakeMac(temp.url("load"))
         let out = temp.url("out"), child = temp.url("child-pid"), pids = temp.url("pids")
         let script = Self.repo.appendingPathComponent("scripts/test-under-load.sh").path
@@ -311,13 +315,13 @@ import Testing
             if owner.isRunning { kill(owner.processIdentifier, SIGKILL) }
             if sleeper() > 0 { kill(sleeper(), SIGKILL) }
         }
-        #expect(until { said().contains("busy loops: 2 (1-minute load 0, target 2,") && sleeper() > 0 }, "\(said())")
+        #expect(await until { said().contains("busy loops: 2 (1-minute load 0, target 2,") && sleeper() > 0 }, "\(said())")
         #expect(kill(sleeper(), 0) == 0)
         kill(owner.processIdentifier, SIGKILL)
-        owner.waitUntilExit()
-        #expect(until { said().contains("stopped: its owner (pid \(owner.processIdentifier)) is gone") }, "\(said())")
-        #expect(until { kill(sleeper(), 0) != 0 }, "\(said())")
-        #expect(until { live(pids) == 0 }, "\(said())")
+        #expect(await exited(owner), "pid \(owner.processIdentifier) still running")
+        #expect(await until { said().contains("stopped: its owner (pid \(owner.processIdentifier)) is gone") }, "\(said())")
+        #expect(await until { kill(sleeper(), 0) != 0 }, "\(said())")
+        #expect(await until { live(pids) == 0 }, "\(said())")
         #expect(!said().contains("/bin/ps"), "\(said())")
     }
 
@@ -342,7 +346,7 @@ import Testing
             process.standardError = pipe
             try process.run()
             let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            process.waitUntilExit()
+            waitForEnd(process)
             #expect(process.terminationStatus != 0)
             #expect(output.contains("the build failed"), "\(output)")
             #expect(!output.contains("busy loops"), "\(output)")

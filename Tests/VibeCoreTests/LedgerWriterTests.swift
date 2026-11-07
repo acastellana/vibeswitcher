@@ -30,7 +30,7 @@ struct LedgerWriterTests {
         return ledger
     }
 
-    @Test func savesDontWaitAreWrittenInOrderAndADaysLatestWins() {
+    @Test func savesDontWaitAreWrittenInOrderAndADaysLatestWins() async {
         let gate = Gate()
         let started = DispatchSemaphore(value: 0)
         let written = Log<ActivityLedger>()
@@ -40,7 +40,7 @@ struct LedgerWriterTests {
             gate.wait()
         }
         writer.save(ledger("2026-10-28", working: 1))
-        #expect(started.wait(timeout: .now() + 300) == .success)
+        #expect(await offPool { started.wait(timeout: .now() + 300) } == .success)
         // The first write is held; these return at once, with it still going.
         writer.save(ledger("2026-10-28", working: 2))
         writer.save(ledger("2026-10-29", working: 10))
@@ -69,7 +69,7 @@ struct LedgerWriterTests {
         #expect(mode as? Int == 0o600)
     }
 
-    @Test func bundleIDsAreAskedOncePerPidAndForgottenWhenItsGone() {
+    @Test func bundleIDsAreAskedOncePerPidAndForgottenWhenItsGone() async {
         final class Alive: @unchecked Sendable {
             private let lock = NSLock()
             private var pids: Set<Int32> = [10, 11]
@@ -91,11 +91,11 @@ struct LedgerWriterTests {
             _ = cache.bundleID(pid: 11, lookup: { lookups.add(11); asking.signal(); gate.wait(); return "com.example.Slow" })
             done.signal()
         }
-        #expect(asking.wait(timeout: .now() + 300) == .success)
+        #expect(await offPool { asking.wait(timeout: .now() + 300) } == .success)
         #expect(cache.bundleID(pid: 10, lookup: { lookups.add(10); return "other" }) == "com.apple.Terminal")
         #expect(!gate.opened)
         gate.open()
-        #expect(done.wait(timeout: .now() + 300) == .success)
+        #expect(await offPool { done.wait(timeout: .now() + 300) } == .success)
         #expect(cache.pids == [10, 11])
 
         // pid 10 quits: forgotten at the next ask, and a new app with that pid is asked again.

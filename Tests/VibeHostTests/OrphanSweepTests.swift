@@ -20,7 +20,7 @@ import Testing
         starter.standardOutput = pipe
         try starter.run()
         let output = pipe.fileHandleForReading.readDataToEndOfFile()
-        starter.waitUntilExit()
+        waitForEnd(starter)
         return try #require(pid_t(String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)))
     }
 
@@ -61,20 +61,20 @@ import Testing
     /// Its parsers: the host's children that are `--parse-session`.
     static func parsers(of host: pid_t) -> [pid_t] { HostProcesses.children(of: host).filter(HostProcesses.isParser) }
 
-    @Test func aToolServerWhoseAgentEndedIsEndedAndNothingElse() throws {
-        let host = try ScratchHostProcess(arguments: ["--housekeeping", "0.5", "--end-orphaned-tool-servers"])
+    @Test func aToolServerWhoseAgentEndedIsEndedAndNothingElse() async throws {
+        let host = try await ScratchHostProcess(arguments: ["--housekeeping", "0.5", "--end-orphaned-tool-servers"])
         defer { host.stop() }
         // The tool server beside the scratch host's binary: the built one, waiting on its input as it does for its agent.
         let built = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         let toolServer = host.dir + "/old/vibeswitcher-mcp"
         try FileManager.default.copyItem(atPath: built, toPath: toolServer)
         let input = Self.fifo(in: host.dir, "orphan-input")
-        let orphaned = try Self.orphan(toolServer, input: input)
+        let orphaned = try await Self.orphan(toolServer, input: input)
         let writer = try FileHandle(forWritingTo: URL(fileURLWithPath: input))
         defer { try? writer.close() }
         // Another build's, left to launchd too: not this host's to end.
         let otherInput = Self.fifo(in: host.dir, "other-input")
-        let other = try Self.orphan(built, input: otherInput)
+        let other = try await Self.orphan(built, input: otherInput)
         let otherWriter = try FileHandle(forWritingTo: URL(fileURLWithPath: otherInput))
         defer {
             kill(other, SIGKILL)
@@ -95,43 +95,43 @@ import Testing
         defer { if switched.isRunning { kill(switched.processIdentifier, SIGKILL) } }
         cue.fileHandleForWriting.write(Data("go\n".utf8))
         let target = URL(fileURLWithPath: toolServer).resolvingSymlinksInPath().path
-        #expect(eventually { HostServer.executable(of: switched.processIdentifier).map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == target })
+        #expect(await eventually { HostServer.executable(of: switched.processIdentifier).map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == target })
 
         // What the host did is in its session log.
         let notes = { (try? String(contentsOfFile: host.sessionLog, encoding: .utf8)) ?? "" }
-        #expect(eventually(timeout: 60) { !Self.alive(orphaned) }, "\(notes())")
-        #expect(eventually(timeout: 60) { notes().contains("ended tool server pid \(orphaned), whose agent ended") }, "\(notes())")
+        #expect(await eventually(timeout: 60) { !Self.alive(orphaned) }, "\(notes())")
+        #expect(await eventually(timeout: 60) { notes().contains("ended tool server pid \(orphaned), whose agent ended") }, "\(notes())")
         // A few more looks: the others stay.
-        Thread.sleep(forTimeInterval: 2)
+        await pause(2)
         #expect(served.isRunning && switched.isRunning && Self.parent(of: switched.processIdentifier) == getpid())
         #expect(Self.alive(other) && Self.parent(of: other) == 1, "\(notes())")
         for kept in [served.processIdentifier, switched.processIdentifier, other] { #expect(!notes().contains("pid \(kept)"), "\(notes())") }
     }
 
     /// A scratch host not told to (a test's, a bench's, beside a build folder) ends none: they'd be that folder's.
-    @Test func aScratchHostEndsNoToolServerUnasked() throws {
-        let host = try ScratchHostProcess(arguments: ["--housekeeping", "0.5"])
+    @Test func aScratchHostEndsNoToolServerUnasked() async throws {
+        let host = try await ScratchHostProcess(arguments: ["--housekeeping", "0.5"])
         defer { host.stop() }
         let built = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         let toolServer = host.dir + "/old/vibeswitcher-mcp"
         try FileManager.default.copyItem(atPath: built, toPath: toolServer)
         let input = Self.fifo(in: host.dir, "orphan-input")
-        let orphaned = try Self.orphan(toolServer, input: input)
+        let orphaned = try await Self.orphan(toolServer, input: input)
         let writer = try FileHandle(forWritingTo: URL(fileURLWithPath: input))
         defer {
             kill(orphaned, SIGKILL)
             try? writer.close()
         }
         // One the sweep would take: only the flag (or being the user's host) is missing.
-        #expect(eventually(timeout: 60) { HostProcesses.orphans(running: toolServer).contains(orphaned) })
-        Thread.sleep(forTimeInterval: 3)
+        #expect(await eventually(timeout: 60) { HostProcesses.orphans(running: toolServer).contains(orphaned) })
+        await pause(3)
         #expect(Self.alive(orphaned))
         let notes = (try? String(contentsOfFile: host.sessionLog, encoding: .utf8)) ?? ""
         #expect(!notes.contains("ended tool server"), "\(notes)")
     }
 
     /// What the housekeeping takes for a parser: `launcher --parse-session`, not a session's program or anything else.
-    @Test func aParserIsToldFromOtherChildren() throws {
+    @Test func aParserIsToldFromOtherChildren() async throws {
         var pair: [Int32] = [-1, -1]
         #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0)
         defer { pair.forEach { Darwin.close($0) } }
@@ -147,7 +147,7 @@ import Testing
         try other.run()
         defer { kill(other.processIdentifier, SIGKILL) }
 
-        #expect(eventually { HostProcesses.isParser(parser.processIdentifier) })
+        #expect(await eventually { HostProcesses.isParser(parser.processIdentifier) })
         #expect(!HostProcesses.isParser(other.processIdentifier))
         let children = HostProcesses.children(of: getpid())
         #expect(children.contains(parser.processIdentifier) && children.contains(other.processIdentifier))
@@ -173,7 +173,7 @@ import Testing
 
     /// The sweep's list, from the real process table: the orphan at the host's sibling path only, not one at another
     /// path, nor one whose agent (this test) runs, nor one that switched builds in place under it.
-    @Test func theSweepListsOnlyThatFilesOrphans() throws {
+    @Test func theSweepListsOnlyThatFilesOrphans() async throws {
         let dir = "\(shortScratchRoot)/vsos-\(UUID().uuidString.prefix(8))"
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: dir) }
@@ -186,7 +186,7 @@ import Testing
             writers.forEach { try? $0.close() }
         }
         let orphanInput = Self.fifo(in: dir, "orphan-input"), otherInput = Self.fifo(in: dir, "other-input")
-        let orphaned = try Self.orphan(toolServer, input: orphanInput), other = try Self.orphan(Self.built, input: otherInput)
+        let orphaned = try await Self.orphan(toolServer, input: orphanInput), other = try await Self.orphan(Self.built, input: otherInput)
         ended += [orphaned, other]
         writers += [try FileHandle(forWritingTo: URL(fileURLWithPath: orphanInput)), try FileHandle(forWritingTo: URL(fileURLWithPath: otherInput))]
         let served = Process()
@@ -200,10 +200,10 @@ import Testing
         let switched = try Self.execsInPlace(into: toolServer, cue: cue)
         ended.append(switched.processIdentifier)
         cue.fileHandleForWriting.write(Data("go\n".utf8))
-        #expect(eventually { HostServer.executable(of: switched.processIdentifier).map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
+        #expect(await eventually { HostServer.executable(of: switched.processIdentifier).map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
                     == URL(fileURLWithPath: toolServer).resolvingSymlinksInPath().path })
 
-        #expect(eventually(timeout: 60) { HostProcesses.orphans(running: toolServer).contains(orphaned) })
+        #expect(await eventually(timeout: 60) { HostProcesses.orphans(running: toolServer).contains(orphaned) })
         let listed = HostProcesses.orphans(running: toolServer)
         #expect(listed == [orphaned], "listed \(listed); other \(other), served \(served.processIdentifier), switched \(switched.processIdentifier)")
         #expect(Self.parent(of: switched.processIdentifier) == getpid() && Self.parent(of: served.processIdentifier) == getpid())
@@ -212,16 +212,16 @@ import Testing
     /// A parser a session holds stays through every housekeeping, before a handover and after it; one the host
     /// started no session holds (here one a build standing in for the next left behind as it became the host, in
     /// place) is ended, and that's logged.
-    @Test func aHeldParserStaysAndOneNoSessionHoldsIsEnded() throws {
-        let host = try ScratchHostProcess(arguments: ["--housekeeping", "0.5"])
+    @Test func aHeldParserStaysAndOneNoSessionHoldsIsEnded() async throws {
+        let host = try await ScratchHostProcess(arguments: ["--housekeeping", "0.5"])
         defer { host.stop() }
-        let (client, _, _, _, _, _, _) = try TestClient.welcomed(host.socket, appKey: host.appKey)
-        let session = try client.spawn("exec sleep 600")
+        let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        let session = try await client.spawn("exec sleep 600")
         defer { kill(session.childPID, SIGKILL) }
         let notes = { (try? String(contentsOfFile: host.sessionLog, encoding: .utf8)) ?? "" }
-        #expect(eventually { Self.parsers(of: host.pid).count == 1 })
+        #expect(await eventually { Self.parsers(of: host.pid).count == 1 })
         let held = try #require(Self.parsers(of: host.pid).first)
-        Thread.sleep(forTimeInterval: 2)
+        await pause(2)
         #expect(Self.parsers(of: host.pid) == [held], "\(notes())")
         #expect(!notes().contains("ended parser"), "\(notes())")
 
@@ -234,18 +234,18 @@ import Testing
             exec '\(host.newBinary)' "$@"
             """)
         let seq = client.send(.handover(executable: leaving))
-        #expect(eventually { client.reply(to: seq) != nil })
+        #expect(await eventually { client.reply(to: seq) != nil })
         #expect(client.reply(to: seq) == .ok, "\(host.log)")
-        #expect(eventually { host.log.contains("took over 1 sessions") }, "\(host.log)")
+        #expect(await eventually { host.log.contains("took over 1 sessions") }, "\(host.log)")
         let stray = try #require(pid_t((try? String(contentsOfFile: strayFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""))
         defer { kill(stray, SIGKILL) }
-        #expect(eventually(timeout: 60) { notes().contains("host: ended parser pid \(stray), which no session holds") }, "\(notes())")
-        #expect(eventually { !Self.alive(stray) })
+        #expect(await eventually(timeout: 60) { notes().contains("host: ended parser pid \(stray), which no session holds") }, "\(notes())")
+        #expect(await eventually { !Self.alive(stray) })
         // The restored session's own parser (the one before went with the old build) stays.
-        #expect(eventually { Self.parsers(of: host.pid).count == 1 })
+        #expect(await eventually { Self.parsers(of: host.pid).count == 1 })
         let restored = try #require(Self.parsers(of: host.pid).first)
         #expect(restored != held && restored != stray)
-        Thread.sleep(forTimeInterval: 2)
+        await pause(2)
         #expect(Self.parsers(of: host.pid) == [restored], "\(notes())")
         #expect(!notes().contains("ended parser pid \(restored),") && !notes().contains("ended parser pid \(held),"), "\(notes())")
     }

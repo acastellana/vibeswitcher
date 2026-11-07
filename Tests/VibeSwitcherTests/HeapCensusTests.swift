@@ -9,7 +9,7 @@ struct HeapCensusTests {
     /// Objects of a class of its own, kept alive while the census counts: it finds them by class.
     final class Marker { var payload = [UInt8](repeating: 1, count: 48) }
 
-    @Test func itCountsWhileOtherThreadsAllocate() throws {
+    @Test func itCountsWhileOtherThreadsAllocate() async throws {
         let kept = (0..<500).map { _ in Marker() }
         let stop = Stop()
         let threads = 4
@@ -27,11 +27,11 @@ struct HeapCensusTests {
                 ended.leave()
             }
         }
-        for _ in 0..<threads { #expect(started.wait(timeout: .now() + hangGuard) == .success) }
+        for _ in 0..<threads { #expect(await offPool { started.wait(timeout: .now() + hangGuard) } == .success) }
         var results: [HeapCensus.Result] = []
         for _ in 0..<5 { results.append(HeapCensus.take()) }
         stop.set()
-        #expect(ended.wait(timeout: .now() + hangGuard) == .success)
+        #expect(await offPool { ended.wait(timeout: .now() + hangGuard) } == .success)
         // Every census came back (none aborted the process) with the heap's blocks; a zone being changed under one is
         // counted again, but it's still a close count: the markers are all found in most.
         for result in results { #expect(result.total.blocks > 1_000) }

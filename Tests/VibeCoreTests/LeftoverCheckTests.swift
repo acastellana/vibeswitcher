@@ -19,7 +19,7 @@ struct LeftoverCheckTests {
 
     /// `scripts/test.sh --leftovers mark`: its exit status and output. `sandbox`: run under sandbox-exec with that
     /// profile.
-    static func check(_ mark: String, sandbox: String? = nil) throws -> (status: Int32, output: String) {
+    static func check(_ mark: String, sandbox: String? = nil) async throws -> (status: Int32, output: String) {
         let process = Process()
         let script = [Self.repo.appendingPathComponent("scripts/test.sh").path, "--leftovers", mark]
         if let sandbox {
@@ -33,8 +33,12 @@ struct LeftoverCheckTests {
         process.standardOutput = pipe
         process.standardError = pipe
         try process.run()
-        let output = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        // The tool's run read to its end and waited for on a thread of its own, not the cooperative pool.
+        let output = await offPool { () -> Data in
+            let read = pipe.fileHandleForReading.readDataToEndOfFile()
+            waitForEnd(process)
+            return read
+        }
         return (process.terminationStatus, String(decoding: output, as: UTF8.self))
     }
 
@@ -60,70 +64,70 @@ struct LeftoverCheckTests {
         return Array(pids.prefix(Int(max(0, count))))
     }
 
-    @Test func aProcessOfTheRunLeftRunningIsEndedAndFailsTheRun() throws {
+    @Test func aProcessOfTheRunLeftRunningIsEndedAndFailsTheRun() async throws {
         let mark = "vs-test-leftover.\(UUID().uuidString.prefix(8))"
         let (shell, input) = try Self.leftover(mark)
         defer { if shell.isRunning { kill(shell.processIdentifier, SIGKILL) } }
         _ = input
-        #expect(eventually(timeout: 30) { !Self.children(of: shell.processIdentifier).isEmpty })
+        #expect(await eventually(timeout: 30) { !Self.children(of: shell.processIdentifier).isEmpty })
         let sleeper = Self.children(of: shell.processIdentifier).first ?? 0
-        let (status, output) = try Self.check(mark)
+        let (status, output) = try await Self.check(mark)
         #expect(status == 1, "\(output)")
         #expect(output.contains("LEFTOVER PROCESSES") && output.contains("\(shell.processIdentifier) /bin/sh -c sleep 600"), "\(output)")
         // What it ran goes too, though only the shell names the mark.
         #expect(output.contains("\(sleeper) sleep 600"), "\(output)")
-        shell.waitUntilExit()
+        #expect(await exited(shell), "pid \(shell.processIdentifier) still running")
         #expect(shell.terminationReason == .uncaughtSignal && shell.terminationStatus == SIGTERM)
-        #expect(eventually(timeout: 30) { kill(sleeper, 0) != 0 })
+        #expect(await eventually(timeout: 30) { kill(sleeper, 0) != 0 })
     }
 
     /// Inside Codex's sandbox /bin/ps can't start (setuid), and a Codex worker's run said "env: /bin/ps: Operation not
     /// permitted" and found nothing (2026-11-02): there the processes come from libproc, and a leftover is named and
     /// ended all the same.
-    @Test(.enabled(if: canSandbox)) func whereTheSandboxRefusesPsALeftoverIsStillEndedAndFailsTheRun() throws {
+    @Test(.enabled(if: canSandbox)) func whereTheSandboxRefusesPsALeftoverIsStillEndedAndFailsTheRun() async throws {
         let mark = "vs-test-leftover.\(UUID().uuidString.prefix(8))"
         let (shell, input) = try Self.leftover(mark)
         defer { if shell.isRunning { kill(shell.processIdentifier, SIGKILL) } }
         _ = input
-        #expect(eventually(timeout: 30) { !Self.children(of: shell.processIdentifier).isEmpty })
+        #expect(await eventually(timeout: 30) { !Self.children(of: shell.processIdentifier).isEmpty })
         let sleeper = Self.children(of: shell.processIdentifier).first ?? 0
-        let (status, output) = try Self.check(mark, sandbox: Self.psRefused)
+        let (status, output) = try await Self.check(mark, sandbox: Self.psRefused)
         #expect(status == 1, "\(output)")
         #expect(!output.contains("/bin/ps"), "\(output)")
         #expect(output.contains("LEFTOVER PROCESSES") && output.contains("\(shell.processIdentifier) /bin/sh -c sleep 600"), "\(output)")
         #expect(output.contains("\(sleeper) sleep 600"), "\(output)")
         // Bounded: a check that ended nothing leaves the shell waiting on its pipe for good (the defer kills it).
-        #expect(eventually(timeout: 30) { !shell.isRunning && kill(sleeper, 0) != 0 })
+        #expect(await eventually(timeout: 30) { !shell.isRunning && kill(sleeper, 0) != 0 })
         if kill(sleeper, 0) == 0 { kill(sleeper, SIGKILL) }
         // Nothing left there: it passes, saying nothing.
-        let clean = try Self.check("vs-test-leftover.\(UUID().uuidString.prefix(8))", sandbox: Self.psRefused)
+        let clean = try await Self.check("vs-test-leftover.\(UUID().uuidString.prefix(8))", sandbox: Self.psRefused)
         #expect(clean.status == 0 && clean.output.isEmpty, "\(clean.output)")
     }
 
     /// Where no process can be listed at all (neither ps nor libproc), the check says so in one line and doesn't fail
     /// the run.
-    @Test(.enabled(if: canSandbox)) func whereNoProcessCanBeListedItSaysSoInOneLineAndPasses() throws {
-        let (status, output) = try Self.check("vs-test-leftover.\(UUID().uuidString.prefix(8))",
+    @Test(.enabled(if: canSandbox)) func whereNoProcessCanBeListedItSaysSoInOneLineAndPasses() async throws {
+        let (status, output) = try await Self.check("vs-test-leftover.\(UUID().uuidString.prefix(8))",
                                               sandbox: "(version 1)(allow default)(deny process-info*)")
         #expect(status == 0, "\(output)")
         #expect(output == "leftover check: skipped, no process could be listed here (/bin/ps and libproc both refused)\n", "\(output)")
     }
 
-    @Test func aRunThatLeftNothingPasses() throws {
-        let (status, output) = try Self.check("vs-test-leftover.\(UUID().uuidString.prefix(8))")
+    @Test func aRunThatLeftNothingPasses() async throws {
+        let (status, output) = try await Self.check("vs-test-leftover.\(UUID().uuidString.prefix(8))")
         #expect(status == 0 && output.isEmpty, "\(output)")
     }
 
     /// The run's own processes aren't judged: only one carrying this run's mark (another run's, on the same Mac, is
     /// theirs).
-    @Test func anotherMarkIsLeftAlone() throws {
+    @Test func anotherMarkIsLeftAlone() async throws {
         let (shell, input) = try Self.leftover("vs-test-other.\(UUID().uuidString.prefix(8))")
         defer {
             for pid in Self.children(of: shell.processIdentifier) { kill(pid, SIGKILL) }
             kill(shell.processIdentifier, SIGKILL)
         }
         _ = input
-        let (status, _) = try Self.check("vs-test-leftover.\(UUID().uuidString.prefix(8))")
+        let (status, _) = try await Self.check("vs-test-leftover.\(UUID().uuidString.prefix(8))")
         #expect(status == 0)
         #expect(shell.isRunning)
     }

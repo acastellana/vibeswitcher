@@ -241,6 +241,11 @@ else
     defaults_before=$(build_defaults)
     # A failed build leaves a mark, so what needs its products is skipped rather than failed (or run on an older build).
     export VS_BUILD_FAILED_MARK=$tool_scratch/build-failed
+    # At most a test a core at once (a caller's own width kept). Swift Testing gives no width of its own: it starts every
+    # test as a task on the cooperative pool, and only tests blocking a pool thread used to bound it, one a core. With
+    # their waits awaited (2026-11-05) a full run started hundreds at once, and their hosts and scripts took the Mac from
+    # load 18 to 193 in three minutes; 23 tests judged by time failed.
+    export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH=${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-$(cpu_count)}
     # Both on the slot's share of the cores, VS_HEAVY_CORES (scripts/lib/swift-jobs.sh).
     Resources/bin/vs-heavy --as scripts/test.sh bash -c 'heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
     status=$?

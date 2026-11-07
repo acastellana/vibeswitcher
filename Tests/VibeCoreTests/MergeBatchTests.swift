@@ -140,7 +140,7 @@ struct MergeBatchTests: LeadTeamFixture {
 
     /// merge_batching always: three tasks ready together merge on one test run, each its commits on main in order, each
     /// its own merge on the board (`onto` the one before) and its own line in the merge stats.
-    @Test func threeReadyTasksMergeOnOneTestRunInOrder() throws {
+    @Test func threeReadyTasksMergeOnOneTestRunInOrder() async throws {
         let (root, runtime, lead) = try team(["merge_batching": "always"])
         let stats = temp.url("stats")
         lead.mergeStats = { stats }
@@ -151,7 +151,7 @@ struct MergeBatchTests: LeadTeamFixture {
         }
         let advancing = LeadAdvanceTests.Advancing(lead)
         defer { advancing.stop() }
-        #expect(advancing.until { ["add-x", "add-y", "add-z"].allSatisfy { board(root).task($0)?.status == .done } })
+        #expect(await advancing.until { ["add-x", "add-y", "add-z"].allSatisfy { board(root).task($0)?.status == .done } })
 
         #expect(ran().count == 1, "\(ran())")
         #expect(ran().first?.contains("x.txt y.txt z.txt") == true, "\(ran())")
@@ -166,7 +166,7 @@ struct MergeBatchTests: LeadTeamFixture {
         #expect(lines.allSatisfy { $0.firstRun == "passed" && $0.taskFirstRun == "passed" }, "\(lines)")
         let progress = try String(contentsOfFile: lead.store.recordPath("progress.md"), encoding: .utf8)
         #expect(["add-x", "add-y", "add-z"].allSatisfy { progress.contains("Merged \($0): \($0) (in a batch: add-x, add-y, add-z landed on one test run)") }, "\(progress)")
-        #expect(advancing.until { reports(runtime).contains { $0.contains("as one batch, on 1 test run for 3 tasks") } }, "\(reports(runtime))")
+        #expect(await advancing.until { reports(runtime).contains { $0.contains("as one batch, on 1 test run for 3 tasks") } }, "\(reports(runtime))")
         // Revert takes back one task's commits only.
         let reverted = lead.call("revert", ["task": "add-y", "reason": "y broke"])
         #expect(!reverted.isError, "\(reverted.text)")
@@ -175,7 +175,7 @@ struct MergeBatchTests: LeadTeamFixture {
     }
 
     /// Fewer than batch_size ready: they wait for the window, then merge together (a look again is armed for its end).
-    @Test func readyTasksWaitForTheWindowThenMergeTogether() throws {
+    @Test func readyTasksWaitForTheWindowThenMergeTogether() async throws {
         let (root, runtime, lead) = try team(["merge_batching": "always"])
         let clock = Clock()
         lead.batchClock = { clock.now }
@@ -186,32 +186,32 @@ struct MergeBatchTests: LeadTeamFixture {
         }
         let advancing = LeadAdvanceTests.Advancing(lead)
         defer { advancing.stop() }
-        #expect(advancing.until { wakes.count > 0 })
-        advancing.settle()
+        #expect(await advancing.until { wakes.count > 0 })
+        await advancing.settle()
         #expect(ran().isEmpty && board(root).task("add-x")?.status == .review)
         let wake = try #require(wakes.first)
         #expect(abs(wake.date.timeIntervalSince(clock.now) - lead.batchWindow - 1) < 0.5)
         clock.now = clock.now.addingTimeInterval(lead.batchWindow)
         wake.body()
-        #expect(advancing.until { board(root).task("add-y")?.status == .done })
+        #expect(await advancing.until { board(root).task("add-y")?.status == .done })
         #expect(ran().count == 1 && board(root).task("add-x")?.merged?.batch == ["add-x", "add-y"])
     }
 
     /// merge_batching off (the default): each merges on a run of its own, as before.
-    @Test func withBatchingOffEachMergesOnItsOwnRun() throws {
+    @Test func withBatchingOffEachMergesOnItsOwnRun() async throws {
         let (root, runtime, lead) = try team()
         for (slug, file) in [("add-x", "x.txt"), ("add-y", "y.txt")] {
             try audited(lead, runtime, root: root, slug, [file: "\(slug)\n"])
         }
         let advancing = LeadAdvanceTests.Advancing(lead)
         defer { advancing.stop() }
-        #expect(advancing.until { board(root).task("add-y")?.status == .done && board(root).task("add-x")?.status == .done })
+        #expect(await advancing.until { board(root).task("add-y")?.status == .done && board(root).task("add-x")?.status == .done })
         #expect(ran().count == 2)
         #expect(board(root).task("add-x")?.merged?.batch == nil)
     }
 
     /// Tasks merge refuses (waiting on the user's approval) don't take a batch's places: the one behind them merges.
-    @Test func tasksRefusedAtTheGateDontHoldBackTheOnesBehindThem() throws {
+    @Test func tasksRefusedAtTheGateDontHoldBackTheOnesBehindThem() async throws {
         let (root, runtime, lead) = try team(["merge_batching": "always", "merge_policy": "ask_sensitive"])
         lead.batchSize = 2
         // No wait: what's ready merges at once (all three, before the fix: a batch of the two refused, and nothing ran).
@@ -221,16 +221,16 @@ struct MergeBatchTests: LeadTeamFixture {
         try audited(lead, runtime, root: root, "add-z", ["z.txt": "zed\n"])
         let advancing = LeadAdvanceTests.Advancing(lead)
         defer { advancing.stop() }
-        #expect(advancing.until { board(root).task("add-z")?.status == .done })
+        #expect(await advancing.until { board(root).task("add-z")?.status == .done })
         #expect(board(root).task("rules")?.status == .review && board(root).task("more-rules")?.status == .review)
-        #expect(advancing.until { reports(runtime).contains { $0.contains("Didn't merge rules: Not merged yet: the merge policy is ask_sensitive") } }, "\(reports(runtime))")
+        #expect(await advancing.until { reports(runtime).contains { $0.contains("Didn't merge rules: Not merged yet: the merge policy is ask_sensitive") } }, "\(reports(runtime))")
     }
 
     // MARK: Split on failure
 
     /// One task of four breaks the suite: the split finds it in log2(4) = 2 more runs, the two before it land, it goes
     /// back to its worker with its failing output, and the one after it lands on a run of its own.
-    @Test func aBreakerIsFoundInLog2NRunsAndTheOthersMerge() throws {
+    @Test func aBreakerIsFoundInLog2NRunsAndTheOthersMerge() async throws {
         let (root, runtime, lead) = try team(["merge_batching": "always"])
         let stats = temp.url("stats")
         lead.mergeStats = { stats }
@@ -240,7 +240,7 @@ struct MergeBatchTests: LeadTeamFixture {
         }
         let advancing = LeadAdvanceTests.Advancing(lead)
         defer { advancing.stop() }
-        #expect(advancing.until { board(root).task("add-z")?.status == .done && board(root).task("add-break")?.status != .review })
+        #expect(await advancing.until { board(root).task("add-z")?.status == .done && board(root).task("add-break")?.status != .review })
 
         // The whole stack, then prefixes of 2 (passes) and 3 (fails), then add-z alone on the new main.
         let first = ran(first: true)
@@ -257,7 +257,7 @@ struct MergeBatchTests: LeadTeamFixture {
         let own = Dictionary(lines.map { ($0.task, $0.taskFirstRun ?? "none") }, uniquingKeysWith: { first, _ in first })
         #expect(own["add-w"] == "passed" && own["add-x"] == "passed" && own["add-break"] == "failed", "\(lines)")
         #expect(lines.filter { ["add-w", "add-x", "add-break"].contains($0.task) }.allSatisfy { $0.firstRun == "failed" }, "\(lines)")
-        #expect(advancing.until { toWorker("add-break", root, runtime).contains { $0.contains("Failing tests (1): breaks()") && $0.contains("the stack without it passes") } },
+        #expect(await advancing.until { toWorker("add-break", root, runtime).contains { $0.contains("Failing tests (1): breaks()") && $0.contains("the stack without it passes") } },
                 "\(toWorker("add-break", root, runtime))")
     }
 
@@ -380,7 +380,7 @@ struct MergeBatchTests: LeadTeamFixture {
     // MARK: Failing closed
 
     /// A batch whose tests hang stops: nothing lands, each stays as it was, and auto_advance merges them one at a time.
-    @Test func aHungBatchLeavesEachAsItWasAndTheyMergeOneAtATime() throws {
+    @Test func aHungBatchLeavesEachAsItWasAndTheyMergeOneAtATime() async throws {
         let hung = temp.url("hung").path
         // The first run hangs (the batch's); every later one passes.
         let (root, runtime, lead) = try team(["merge_batching": "always", "test_timeout_min": "0.05"], suite: """
@@ -395,7 +395,7 @@ struct MergeBatchTests: LeadTeamFixture {
         }
         let advancing = LeadAdvanceTests.Advancing(lead)
         defer { advancing.stop() }
-        #expect(advancing.until { board(root).task("add-y")?.status == .done && board(root).task("add-x")?.status == .done })
+        #expect(await advancing.until { board(root).task("add-y")?.status == .done && board(root).task("add-x")?.status == .done })
         #expect(reports(runtime).contains { $0.contains("The batch of add-x, add-y stopped short: the test command hung") && $0.contains("merge one at a time from here") },
                 "\(reports(runtime))")
         // The hung batch's run, then one of each.

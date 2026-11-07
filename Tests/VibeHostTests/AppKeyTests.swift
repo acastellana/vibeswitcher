@@ -25,41 +25,41 @@ extension LeadVaultHostTests {
         }
     }
 
-    @Test func aHeldKeyIsReplacedOnlyByTheAppsCodeWhileNoSessionRuns() throws {
+    @Test func aHeldKeyIsReplacedOnlyByTheAppsCodeWhileNoSessionRuns() async throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let book = LeadVault.Book()
         let host = try TestHost(vault: book, appExecutable: "/usr/bin/nc", log: sessionLog())
         let other = try TestClient(host, asApp: false)
-        let session = try spawnViaNC(host, "sleep 30")
+        let session = try await spawnViaNC(host, "sleep 30")
         let fresh = SymmetricKey(size: .bits256)
         let message = SteerMessage(text: "x", from: .user, agentPid: 1)
 
         // While a session runs, not even the app's code.
-        guard case .error? = try viaNC(host.socket, proof: nil, [.replaceAppKey(key: fresh.data)])[2] else { Issue.record("replaced with a session live"); return }
+        guard case .error? = try await viaNC(host.socket, proof: nil, [.replaceAppKey(key: fresh.data)])[2] else { Issue.record("replaced with a session live"); return }
         #expect(book.appKey?.data == host.appKey.data)
         kill(-session.childPID, SIGKILL)
-        #expect(eventually {
-            guard case .welcome(_, _, let list, _, _, _)? = try? viaNC(host.socket, proof: host.appKey,
+        #expect(await eventuallyAsync {
+            guard case .welcome(_, _, let list, _, _, _)? = try? await viaNC(host.socket, proof: host.appKey,
                 [.hello(protocolVersion: HostProtocol.version, app: "test")])[2] else { return false }
             return list.first { $0.id == session.id }?.isLive == false
         })
         // No session, but not the app's code.
         let seq = other.send(.replaceAppKey(key: fresh.data))
-        #expect(eventually { other.reply(to: seq) != nil })
+        #expect(await eventually { other.reply(to: seq) != nil })
         guard case .error? = other.reply(to: seq) else { Issue.record("replaced by another program"); return }
         #expect(book.appKey?.data == host.appKey.data)
         // The app's code, no session: replaced, and logged.
-        #expect(try viaNC(host.socket, proof: nil, [.replaceAppKey(key: fresh.data)])[2] == .ok)
+        await #expect(try viaNC(host.socket, proof: nil, [.replaceAppKey(key: fresh.data)])[2] == .ok)
         #expect(book.appKey?.data == fresh.data)
         #expect(logged(sessionLog()).contains("replaced the app's key"))
         #expect(logged(sessionLog()).contains("refused to replace the app's key"))
         // Only the new key proves the app now.
-        #expect(sealed(try viaNC(host.socket, proof: fresh, [.vault(.seal(message))])[2]))
-        #expect(refused(try viaNC(host.socket, proof: host.appKey, [.vault(.seal(message))])[2]))
+        await #expect(sealed(try viaNC(host.socket, proof: fresh, [.vault(.seal(message))])[2]))
+        await #expect(refused(try viaNC(host.socket, proof: host.appKey, [.vault(.seal(message))])[2]))
         expectNoSecrets(logged(sessionLog()), [fresh, host.appKey])
     }
 
-    @Test func aHostWithNoKeyTakesOnlyTheFirstFromTheAppsCode() throws {
+    @Test func aHostWithNoKeyTakesOnlyTheFirstFromTheAppsCode() async throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let book = LeadVault.Book()
         let host = try TestHost(vault: book, appExecutable: "/usr/bin/nc", log: sessionLog(), holdsKey: false)
@@ -68,21 +68,21 @@ extension LeadVaultHostTests {
         let impostor = SymmetricKey(size: .bits256)
         let other = try TestClient(socket: host.socket, appKey: impostor)
         let hello = other.send(.hello(protocolVersion: HostProtocol.version, app: "x"))
-        #expect(eventually { other.reply(to: hello) != nil })
+        #expect(await eventually { other.reply(to: hello) != nil })
         let screen = other.send(.screen(id: UUID()))
-        #expect(eventually { other.reply(to: screen) != nil })
+        #expect(await eventually { other.reply(to: screen) != nil })
         #expect(book.appKey == nil)
 
         // The app's code: its key is the first, and the only one. Enrolling gets no answer: the screen asked after it
         // on the same connection is answered once the host has handled it.
         let first = SymmetricKey(size: .bits256), second = SymmetricKey(size: .bits256)
-        _ = try viaNC(host.socket, proof: nil, [.enrollApp(key: first.data), .screen(id: UUID())])
+        _ = try await viaNC(host.socket, proof: nil, [.enrollApp(key: first.data), .screen(id: UUID())])
         #expect(book.appKey?.data == first.data)
-        #expect(eventually { logged(sessionLog()).contains("took the app's first key") })
-        _ = try viaNC(host.socket, proof: nil, [.enrollApp(key: second.data), .screen(id: UUID())])
+        #expect(await eventually { logged(sessionLog()).contains("took the app's first key") })
+        _ = try await viaNC(host.socket, proof: nil, [.enrollApp(key: second.data), .screen(id: UUID())])
         #expect(book.appKey?.data == first.data)
-        #expect(sealed(try viaNC(host.socket, proof: first, [.vault(.seal(message))])[2]))
-        #expect(refused(try viaNC(host.socket, proof: second, [.vault(.seal(message))])[2]))
+        await #expect(sealed(try viaNC(host.socket, proof: first, [.vault(.seal(message))])[2]))
+        await #expect(refused(try viaNC(host.socket, proof: second, [.vault(.seal(message))])[2]))
         expectNoSecrets(logged(sessionLog()), [first, second, impostor])
     }
 }

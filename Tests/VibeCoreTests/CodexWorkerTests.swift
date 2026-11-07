@@ -124,7 +124,7 @@ struct CodexWorkerTests: LeadTeamFixture {
         #expect(runtime.environments[spawn.id]?["GIT_EDITOR"] == "true" && runtime.environments[spawn.id]?[SessionNote.roleVariable] == "worker")
     }
 
-    @Test func aCodexWorkerReportsAndAutoAdvanceAuditsItWithAClaudeVerifierAndSendsFindingsBack() throws {
+    @Test func aCodexWorkerReportsAndAutoAdvanceAuditsItWithAClaudeVerifierAndSendsFindingsBack() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -134,7 +134,7 @@ struct CodexWorkerTests: LeadTeamFixture {
         let advancing = LeadAdvanceTests.Advancing(lead)
         defer { advancing.stop() }
         _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "agent": "codex"])
-        #expect(advancing.until { task("add-b", root)?.status == .running })
+        #expect(await advancing.until { task("add-b", root)?.status == .running })
         let worker = try #require(task("add-b", root)?.worker)
         #expect(runtime.agents[worker] == "codex")
         // The Codex worker's own tool server: progress and report, as any worker's.
@@ -147,7 +147,7 @@ struct CodexWorkerTests: LeadTeamFixture {
         let report = seat.call("report", doneReport("added b.txt"))
         #expect(!report.isError, "\(report.text)")
         // Audited, by a Claude verifier, though nobody set review audit.
-        #expect(advancing.until { vault.current(.verifier, root: root, task: "add-b") != nil })
+        #expect(await advancing.until { vault.current(.verifier, root: root, task: "add-b") != nil })
         let verifier = try #require(task("add-b", root)?.verifier)
         #expect(runtime.agents[verifier] == "claude")
         #expect(try #require(runtime.spawned.first { $0.id == verifier }).command.hasPrefix("claude"))
@@ -157,7 +157,7 @@ struct CodexWorkerTests: LeadTeamFixture {
         let verdict = try self.seat("verify-add-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "one problem",
                                                                                     "tests": "passed", "findings": [finding]])
         #expect(!verdict.isError, "\(verdict.text)")
-        #expect(advancing.until {
+        #expect(await advancing.until {
             runtime.calls.lock()
             defer { runtime.calls.unlock() }
             return runtime.steered.contains { $0.target == worker && $0.text.contains("F1") }
@@ -257,7 +257,7 @@ struct CodexWorkerTests: LeadTeamFixture {
 
     /// Codex workers start by default (task codex-s-tui-renders); switched off (`VIBESWITCHER_CODEX_WORKERS=0`),
     /// start_worker refuses a codex task and auto_advance starts none, so nobody starts one by accident.
-    @Test func codexWorkersStartByDefaultAndArentStartedWhileSwitchedOff() throws {
+    @Test func codexWorkersStartByDefaultAndArentStartedWhileSwitchedOff() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -271,12 +271,12 @@ struct CodexWorkerTests: LeadTeamFixture {
         let advancing = LeadAdvanceTests.Advancing(lead)
         defer { advancing.stop() }
         let said = { (try? String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8))?.contains("by-codex won't start by itself") == true }
-        #expect(advancing.until(said))
-        advancing.settle()
+        #expect(await advancing.until(said))
+        await advancing.settle()
         #expect(runtime.spawned.isEmpty && task("by-codex", root)?.status == .planned)
         // On Claude, it starts.
         #expect(!lead.call("update_task", ["task": "by-codex", "agent": "claude"]).isError)
-        #expect(advancing.until { task("by-codex", root)?.status == .running })
+        #expect(await advancing.until { task("by-codex", root)?.status == .running })
         #expect(runtime.agents.values.allSatisfy { $0 == "claude" })
     }
 

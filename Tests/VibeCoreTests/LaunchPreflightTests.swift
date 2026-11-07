@@ -177,7 +177,7 @@ struct LaunchPreflightTests {
     /// `resolve` blocks, so it runs on a thread of its own, not the shared pool a loaded full run can leave it no thread
     /// on. Whatever happens, `go` is made and the answer waited for (`resolve` ends the shell's group at its timeout),
     /// and a shell still there after that is killed with its group: a failed check leaves nothing looping.
-    @Test func theLoginShellRunsInASessionOfItsOwn() throws {
+    @Test func theLoginShellRunsInASessionOfItsOwn() async throws {
         let folder = scratch.url("own-session").path
         let (pidFile, go) = (folder + "/pid", folder + "/go")
         let shell = folder + "/fakesh"
@@ -201,12 +201,13 @@ struct LaunchPreflightTests {
         let deadline = Date().addingTimeInterval(lookBudget)
         while pid == nil, Date() < deadline {
             pid = said()
-            if pid == nil, answer.wait(0.02) != nil { pid = said(); break }
+            if pid == nil, answer.wait(0) != nil { pid = said(); break }
+            if pid == nil { await pause(0.02) }
         }
         let shellPid = try #require(pid, "no pid from the fake shell; resolve said \(String(describing: answer.wait(0)))")
         #expect(getsid(shellPid) == shellPid, "the login shell shares the caller's session (\(getsid(shellPid)), the caller's \(getsid(0)))")
         FileManager.default.createFile(atPath: go, contents: nil)
-        #expect(answer.wait(shellBudget + 10) == .found("/bin/sh"))
+        #expect(await offPool { answer.wait(shellBudget + 10) } == .found("/bin/sh"))
     }
 
     /// `LoginShellCommand.resolve`'s answer, given once from its thread and waited for any number of times.

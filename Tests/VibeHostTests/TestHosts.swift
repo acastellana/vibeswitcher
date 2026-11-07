@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import CryptoKit
+import Testing
 import VibeCore
 @testable import VibeHost
 
@@ -61,7 +62,22 @@ enum TestHosts {
             while host.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
             if host.isRunning { kill(pid, SIGKILL) }
         }
-        host.waitUntilExit()
+        // Bounded, not `waitUntilExit`: a child something else reaped (a waitpid on a stale, reused pid) is never seen
+        // to end by its `Process`, and waiting on it held a full run at 0 % CPU until vs-heavy's timeout (2026-11-06).
+        // Gone from the process table (no zombie left) for 2 s while its `Process` still says running: reaped elsewhere.
+        let killed = Date().addingTimeInterval(hangGuard)
+        var goneSince: Date?
+        while host.isRunning, Date() < killed {
+            if kill(pid, 0) != 0, errno == ESRCH {
+                if let since = goneSince { if Date().timeIntervalSince(since) > 2 { break } } else { goneSince = Date() }
+            } else {
+                goneSince = nil
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        if host.isRunning {
+            Issue.record(Comment(rawValue: "scratch host pid \(pid) never seen to end" + (goneSince != nil ? ": gone, reaped by someone else" : "")))
+        }
         lock.withLock { _ = started.remove(pid) }
     }
 

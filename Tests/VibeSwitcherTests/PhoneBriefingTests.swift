@@ -253,7 +253,8 @@ struct PhoneBriefingTests {
         let temp = Scratch()
         let folder = temp.url("mac-voice")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let data = try #require(await Task.detached { MacVoiceFile.render("Two tasks landed.", language: "en", folder: folder) }.value)
+        // The render waits up to a minute for the synthesizer: on a thread of its own, not the cooperative pool.
+        let data = try #require(await offPool { MacVoiceFile.render("Two tasks landed.", language: "en", folder: folder) })
         #expect(data.count > 1000)
         #expect(String(decoding: data.dropFirst(4).prefix(4), as: UTF8.self) == "ftyp")
         #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)

@@ -71,7 +71,7 @@ import Testing
 
     /// A write the kernel holds (the hang reports' case): the caller's queue goes on answering, and both requests
     /// arrive, in order, once it's let go.
-    @Test func aStalledWriteLeavesTheCallersQueueFree() throws {
+    @Test func aStalledWriteLeavesTheCallersQueueFree() async throws {
         let host = try StandIn()
         let queue = callersQueue()
         let writes = Writes()
@@ -91,10 +91,10 @@ import Testing
             _ = try? connection.send(.screen(id: first))
             _ = try? connection.send(.screen(id: second))
         }
-        #expect(entered.wait(timeout: .now() + hangGuard) == .success)
+        #expect(await offPool { entered.wait(timeout: .now() + hangGuard) } == .success)
         let answered = DispatchSemaphore(value: 0)
         queue.async { answered.signal() }
-        #expect(answered.wait(timeout: .now() + hangGuard) == .success, "the caller's queue waits on a write")
+        #expect(await offPool { answered.wait(timeout: .now() + hangGuard) } == .success, "the caller's queue waits on a write")
         #expect(writes.onCallersQueue == 0, "write(2) ran on the caller's queue")
         for _ in 0..<8 { gate.signal() }
         #expect(host.requests(2).map(screenID) == [first, second])
@@ -103,7 +103,7 @@ import Testing
 
     /// A host that stops reading fills the socket: what's sent meanwhile waits, the caller's queue goes on answering,
     /// and every request arrives in the order sent once the host reads again.
-    @Test func requestsSentWhileTheHostStopsReadingArriveInOrder() throws {
+    @Test func requestsSentWhileTheHostStopsReadingArriveInOrder() async throws {
         let host = try StandIn()
         let queue = callersQueue()
         let writes = Writes()
@@ -121,7 +121,7 @@ import Testing
         let session = UUID()
         let big = HostRequest.input(id: session, bytes: Data(repeating: 0x61, count: 512 << 10), reply: false)
         queue.async { _ = try? connection.send(big) }
-        #expect(full.wait(timeout: .now() + hangGuard) == .success, "the socket never filled")
+        #expect(await offPool { full.wait(timeout: .now() + hangGuard) } == .success, "the socket never filled")
         let first = UUID(), second = UUID()
         queue.async {
             _ = try? connection.send(.screen(id: first))
@@ -129,7 +129,7 @@ import Testing
         }
         let answered = DispatchSemaphore(value: 0)
         queue.async { answered.signal() }
-        #expect(answered.wait(timeout: .now() + hangGuard) == .success, "the caller's queue waits on a write")
+        #expect(await offPool { answered.wait(timeout: .now() + hangGuard) } == .success, "the caller's queue waits on a write")
         let arrived = host.requests(3)
         #expect(arrived.count == 3)
         if case .input(let id, let bytes, _)? = arrived.first?.request {

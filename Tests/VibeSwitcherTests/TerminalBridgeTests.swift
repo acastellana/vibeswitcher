@@ -112,13 +112,16 @@ struct AppleScriptRunnerTests {
         defer { try? FileManager.default.removeItem(at: folder) }
         let held = folder.appendingPathComponent("held"), release = folder.appendingPathComponent("release")
         let ranBehind = folder.appendingPathComponent("ran-behind")
-        let hung = Task.detached { runner.run("holdUntil", [.string(held.path), .string(release.path)], timeout: 30) }
+        // Each run on a thread of its own (`offPool`), not the cooperative pool: a starved pool started the read behind
+        // past the hung one's own timeout, which then let it run ("marked" instead of .timedOut, 2026-11-05 at load
+        // 150). The hung one's timeout is the hang guard, so only the test's release ends it.
+        let hung = Task { await offPool { runner.run("holdUntil", [.string(held.path), .string(release.path)], timeout: hangGuard) } }
         #expect(await until { FileManager.default.fileExists(atPath: held.path) })
-        let (behind, waited) = await Task.detached { () -> (AppleScriptRunner.Outcome, TimeInterval) in
+        let (behind, waited) = await offPool { () -> (AppleScriptRunner.Outcome, TimeInterval) in
             let called = Date()
             let outcome = runner.run("mark", [.string(ranBehind.path)], timeout: 0.5)
             return (outcome, Date().timeIntervalSince(called))
-        }.value
+        }
         #expect(behind == .timedOut)
         // Its own timeout and the grace, on its own clock, and the semaphore's wake-up on a loaded Mac.
         #expect(waited < 0.5 + AppleScriptRunner.cancelGrace + 0.5, "the read behind waited \(waited) s")

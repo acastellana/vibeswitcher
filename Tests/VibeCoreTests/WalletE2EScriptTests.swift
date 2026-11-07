@@ -65,7 +65,7 @@ struct WalletE2EScriptTests {
         }
 
         /// Runs the script copy on the fake checkout: its status and its output and errors together.
-        func run(npmFails: Bool = false) throws -> (status: Int32, output: String) {
+        func run(npmFails: Bool = false) async throws -> (status: Int32, output: String) {
             var environment = [
                 "PATH": root.appendingPathComponent("bin").path + ":/usr/bin:/bin",
                 "HOME": root.appendingPathComponent("home").path,
@@ -73,7 +73,7 @@ struct WalletE2EScriptTests {
                 "FAKE_NPM_LOG": npmLog.path, "FAKE_NODE_LOG": nodeLog.path,
             ]
             if npmFails { environment["FAKE_NPM_FAIL"] = "1" }
-            return try HomeIsolationTests.run("/bin/bash", [script, "--wallet-manager", wm.path], environment: environment)
+            return try await HomeIsolationTests.run("/bin/bash", [script, "--wallet-manager", wm.path], environment: environment)
         }
 
         func npmCalls() -> [String] {
@@ -85,11 +85,11 @@ struct WalletE2EScriptTests {
         }
     }
 
-    @Test func npmCiRunsWhenNodeModulesIsMissingOrOlderThanTheLockfile() throws {
+    @Test func npmCiRunsWhenNodeModulesIsMissingOrOlderThanTheLockfile() async throws {
         let setup = try Setup(scratch)
 
         // No node_modules/.package-lock.json: npm ci --ignore-scripts, in the checkout, said so; then the run goes on.
-        var ran = try setup.run()
+        var ran = try await setup.run()
         #expect(setup.npmCalls() == ["ci --ignore-scripts"], "\(ran.output)")
         #expect(FileManager.default.fileExists(atPath: setup.installed.path), "npm ran in the checkout")
         #expect(ran.output.contains("node_modules is missing or older than its package-lock.json: running `npm ci --ignore-scripts` there"), "\(ran.output)")
@@ -100,21 +100,21 @@ struct WalletE2EScriptTests {
         let now = Date()
         try setup.setModified(setup.lockfile, now.addingTimeInterval(-3600))
         try setup.setModified(setup.installed, now.addingTimeInterval(-60))
-        ran = try setup.run()
+        ran = try await setup.run()
         #expect(setup.npmCalls().count == 1, "\(ran.output)")
         #expect(!ran.output.contains("npm ci"), "\(ran.output)")
         #expect(ran.output.contains("the Wallet Manager's checker refused the synthetic vault"), "\(ran.output)")
 
         // The lockfile changed since (a dependency added): npm ci again.
         try setup.setModified(setup.lockfile, now.addingTimeInterval(-30))
-        ran = try setup.run()
+        ran = try await setup.run()
         #expect(setup.npmCalls() == ["ci --ignore-scripts", "ci --ignore-scripts"], "\(ran.output)")
         #expect(ran.output.contains("running `npm ci --ignore-scripts` there"), "\(ran.output)")
     }
 
-    @Test func aFailingNpmStopsTheRunWithOneLine() throws {
+    @Test func aFailingNpmStopsTheRunWithOneLine() async throws {
         let setup = try Setup(scratch)
-        let ran = try setup.run(npmFails: true)
+        let ran = try await setup.run(npmFails: true)
         #expect(ran.status == 1)
         #expect(setup.npmCalls() == ["ci --ignore-scripts"])
         let lines = ran.output.split(separator: "\n").map(String.init)
@@ -129,10 +129,10 @@ struct WalletE2EScriptTests {
         #expect(!FileManager.default.fileExists(atPath: setup.nodeLog.path))
     }
 
-    @Test func aCheckoutWithoutItsVaultFormatStopsTheRunBeforeAnything() throws {
+    @Test func aCheckoutWithoutItsVaultFormatStopsTheRunBeforeAnything() async throws {
         let setup = try Setup(scratch)
         try FileManager.default.removeItem(at: setup.wm.appendingPathComponent("src/vault/format.ts"))
-        let ran = try setup.run()
+        let ran = try await setup.run()
         #expect(ran.status == 1, "\(ran.output)")
         // The checkout as the run resolves it (pwd -P), then the file under it.
         #expect(ran.output.hasPrefix("wallet-e2e: can't read the Wallet Manager's vault format version from /"), "\(ran.output)")
@@ -164,13 +164,13 @@ struct WalletE2EScriptTests {
     }
 
     /// `--vault-format FILE` (runs nothing else): the version the run writes vault.json at and the contact shape for it.
-    func vaultFormat(_ text: String?) throws -> (file: String, status: Int32, output: String) {
+    func vaultFormat(_ text: String?) async throws -> (file: String, status: Int32, output: String) {
         let script = Self.repo.appendingPathComponent("scripts/e2e/wallet-e2e.sh").path
         let dir = scratch.url("format")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = dir.appendingPathComponent("format.ts")
         if let text { try text.write(to: file, atomically: true, encoding: .utf8) }
-        let ran = try HomeIsolationTests.run("/bin/bash", [script, "--vault-format", file.path],
+        let ran = try await HomeIsolationTests.run("/bin/bash", [script, "--vault-format", file.path],
                                              environment: ["PATH": "/usr/bin:/bin", "HOME": scratch.url("format-home").path])
         return (file.path, ran.status, ran.output)
     }
@@ -184,8 +184,8 @@ struct WalletE2EScriptTests {
         (formatTs(minor: "2", contactChains: nil), "1.2 networks"),
         (formatTs(minor: "WATCH_MINOR", version: "export const FORMAT_VERSION = {major: 1,minor: WATCH_MINOR};"), "1.11 chains"),
     ])
-    func theVaultFormatIsReadFromTheWalletManagersFormatTs(_ text: String, _ expected: String) throws {
-        let ran = try vaultFormat(text)
+    func theVaultFormatIsReadFromTheWalletManagersFormatTs(_ text: String, _ expected: String) async throws {
+        let ran = try await vaultFormat(text)
         #expect(ran.status == 0, "\(ran.output)")
         #expect(ran.output == expected + "\n", "\(ran.output)")
     }
@@ -207,8 +207,8 @@ struct WalletE2EScriptTests {
         (formatTs(minor: "WATCH_MINOR", contactChains: "export const CONTACT_CHAINS_MINOR = CHAINS_MINOR + 3;"),
          "CONTACT_CHAINS_MINOR isn't `export const CONTACT_CHAINS_MINOR = N;`"),
     ] as [(String?, String)])
-    func anUnreadableVaultFormatStopsTheRunNamingTheFile(_ text: String?, _ why: String) throws {
-        let ran = try vaultFormat(text)
+    func anUnreadableVaultFormatStopsTheRunNamingTheFile(_ text: String?, _ why: String) async throws {
+        let ran = try await vaultFormat(text)
         #expect(ran.status == 1, "\(ran.output)")
         #expect(ran.output == "wallet-e2e: can't read the Wallet Manager's vault format version from \(ran.file): \(why)\n", "\(ran.output)")
     }
@@ -216,15 +216,15 @@ struct WalletE2EScriptTests {
     /// Case 1's verdict on recorded outcomes (`--judge-case-1 SEEN RECORD`, which runs nothing else): a check that failed
     /// in a record that isn't rejected is a warning, named on a line of its own, and the case passes; a rejection or a
     /// missing answer fails it.
-    func judge(_ seen: String, _ record: String) throws -> (status: Int32, output: String) {
+    func judge(_ seen: String, _ record: String) async throws -> (status: Int32, output: String) {
         let script = Self.repo.appendingPathComponent("scripts/e2e/wallet-e2e.sh").path
         let home = scratch.url("judge-home").path   // read (the default checkout's path), never made
-        return try HomeIsolationTests.run("/bin/bash", [script, "--judge-case-1", seen, record], environment: ["PATH": "/usr/bin:/bin", "HOME": home])
+        return try await HomeIsolationTests.run("/bin/bash", [script, "--judge-case-1", seen, record], environment: ["PATH": "/usr/bin:/bin", "HOME": home])
     }
 
-    @Test func case1CountsFailedChecksOutsideARejectionAsWarnings() throws {
+    @Test func case1CountsFailedChecksOutsideARejectionAsWarnings() async throws {
         // The Wallet Manager with an address book: received and pending, recipient-known and calldata warn.
-        var ran = try judge("waiting → sent → received", "pending true 1 wallet:ok,chain:ok,balance:ok,recipient-known:failed,calldata:failed")
+        var ran = try await judge("waiting → sent → received", "pending true 1 wallet:ok,chain:ok,balance:ok,recipient-known:failed,calldata:failed")
         #expect(ran.status == 0, "\(ran.output)")
         var lines = ran.output.split(separator: "\n").map(String.init)
         #expect(lines.first?.hasPrefix("case 1 valid testnet transfer from a known wallet: pass (") == true, "\(ran.output)")
@@ -234,7 +234,7 @@ struct WalletE2EScriptTests {
 
         // Every check ok: a pass with no warning lines; a proposed card passes too.
         for seen in ["waiting → sent → received", "waiting → sent → proposed"] {
-            ran = try judge(seen, "pending true 2 wallet:ok,chain:ok,recipient-known:ok")
+            ran = try await judge(seen, "pending true 2 wallet:ok,chain:ok,recipient-known:ok")
             lines = ran.output.split(separator: "\n").map(String.init)
             #expect(ran.status == 0 && lines.count == 1 && lines[0].contains(": pass (") && lines[0].contains("warnings: 0"), "\(ran.output)")
         }
@@ -250,8 +250,8 @@ struct WalletE2EScriptTests {
         ("waiting → sent → received", "pending true 0 wallet:ok", "the Wallet Manager sent no result"),
         ("waiting → sent → received", "pending false 1 ", "the Wallet Manager didn't finish its checks"),
     ])
-    func case1FailsOnARejectionOrAMissingAnswer(_ seen: String, _ record: String, _ why: String) throws {
-        let ran = try judge(seen, record)
+    func case1FailsOnARejectionOrAMissingAnswer(_ seen: String, _ record: String, _ why: String) async throws {
+        let ran = try await judge(seen, record)
         #expect(ran.status == 1, "\(ran.output)")
         #expect(ran.output.hasPrefix("case 1 valid testnet transfer from a known wallet: fail (\(why); "), "\(ran.output)")
         #expect(!ran.output.contains("warning:"), "\(ran.output)")
@@ -259,13 +259,13 @@ struct WalletE2EScriptTests {
 
     /// `--help` prints the script's header comment, line 2 up to its first line that isn't a comment, and nothing else.
     @Test(arguments: ["scripts/e2e/wallet-e2e.sh", "scripts/sandbox-app.sh"])
-    func helpPrintsTheHeaderCommentsOnly(_ path: String) throws {
+    func helpPrintsTheHeaderCommentsOnly(_ path: String) async throws {
         let script = Self.repo.appendingPathComponent(path).path
         let lines = try String(contentsOfFile: script, encoding: .utf8).split(separator: "\n", omittingEmptySubsequences: false)
         let header = lines.dropFirst().prefix { $0.hasPrefix("#") }
             .map { $0.hasPrefix("# ") ? String($0.dropFirst(2)) : String($0.dropFirst()) }
         let home = scratch.url("help-home").path   // read (wallet-e2e.sh's default checkout), never made
-        let ran = try HomeIsolationTests.run("/bin/bash", [script, "--help"], environment: ["PATH": "/usr/bin:/bin", "HOME": home])
+        let ran = try await HomeIsolationTests.run("/bin/bash", [script, "--help"], environment: ["PATH": "/usr/bin:/bin", "HOME": home])
         #expect(ran.status == 0)
         #expect(ran.output == header.joined(separator: "\n") + "\n")
         #expect(header.count > 10)
@@ -359,8 +359,8 @@ struct WalletE2ERealTestnetGuardTests {
             try write(keystore, #"{"version":\#(version),"id":"00000000-0000-4000-8000-000000000000","address":"\#(address)"\#(extra),"crypto":{"ciphertext":"\#(WalletE2ERealTestnetGuardTests.ciphertextMarker)"}}"# + "\n")
         }
 
-        func run(_ arguments: [String]) throws -> (status: Int32, output: String) {
-            try HomeIsolationTests.run("/bin/bash", [script, "--wallet-manager", root.appendingPathComponent("wallet-manager").path] + arguments, environment: [
+        func run(_ arguments: [String]) async throws -> (status: Int32, output: String) {
+            try await HomeIsolationTests.run("/bin/bash", [script, "--wallet-manager", root.appendingPathComponent("wallet-manager").path] + arguments, environment: [
                 "PATH": root.appendingPathComponent("bin").path + ":/usr/bin:/bin",
                 "HOME": root.appendingPathComponent("home").path,
                 "TMPDIR": tmp.path,
@@ -379,11 +379,11 @@ struct WalletE2ERealTestnetGuardTests {
         #expect(!output.contains(Self.passphrase) && !output.contains(Self.ciphertextMarker), "\(output)")
     }
 
-    @Test func theGuardsPassOnlyForTheThrowawayWalletsSelfTransferAndTouchNothing() throws {
+    @Test func theGuardsPassOnlyForTheThrowawayWalletsSelfTransferAndTouchNothing() async throws {
         let setup = try Setup(scratch)
         for arguments in [["--real-testnet", "--check-guards"],
                           ["--real-testnet", "--check-guards", "--amount", "1", "--from", Self.throwaway.lowercased(), "--to", Self.throwaway, "--chain", "4221"]] {
-            let ran = try setup.run(arguments)
+            let ran = try await setup.run(arguments)
             #expect(ran.status == 0, "\(arguments): \(ran.output)")
             #expect(ran.output.hasPrefix("wallet-e2e --real-testnet: guards pass: chain 4221, a self-transfer of "), "\(ran.output)")
             // The explorer and genesis are the checkout's `node src/networks.ts --json`'s.
@@ -397,9 +397,9 @@ struct WalletE2ERealTestnetGuardTests {
     /// Without --real-testnet, its options are refused (usage, 64) and the synthetic run never starts with them.
     @Test(arguments: [["--check-guards"], ["--dry-run"], ["--amount", "1000"], ["--from", throwaway], ["--chain", "4221"],
                       ["--real-testnet", "--dry-run", "--check-guards"]])
-    func realTestnetOptionsNeedTheFlag(_ arguments: [String]) throws {
+    func realTestnetOptionsNeedTheFlag(_ arguments: [String]) async throws {
         let setup = try Setup(scratch)
-        let ran = try setup.run(arguments)
+        let ran = try await setup.run(arguments)
         #expect(ran.status == 64, "\(ran.output)")
         #expect(setup.toolCalls.isEmpty && setup.tmpEntries.isEmpty, "\(setup.toolCalls) \(setup.tmpEntries)")
     }
@@ -429,7 +429,7 @@ struct WalletE2ERealTestnetGuardTests {
         ([], "keystore-version-1", "isn't a version 3 keystore"),
     ]
     @Test(arguments: refusals)
-    func refusesBeforeAnyNetwork(_ arguments: [String], _ fault: String, _ why: String) throws {
+    func refusesBeforeAnyNetwork(_ arguments: [String], _ fault: String, _ why: String) async throws {
         let setup = try Setup(scratch)
         let fm = FileManager.default
         switch fault {
@@ -452,7 +452,7 @@ struct WalletE2ERealTestnetGuardTests {
         case "keystore-version-1": try setup.writeKeystore(address: "4c50c0ae2b75b8c17d999ca2e11118a27867ab99", version: 1)
         default: break
         }
-        let ran = try setup.run(["--real-testnet"] + arguments)
+        let ran = try await setup.run(["--real-testnet"] + arguments)
         #expect(ran.status == 2, "\(ran.output)")
         #expect(ran.output.hasPrefix("wallet-e2e --real-testnet: refused: "), "\(ran.output)")
         #expect(ran.output.contains(why), "\(ran.output)")
@@ -462,12 +462,12 @@ struct WalletE2ERealTestnetGuardTests {
         #expect(setup.tmpEntries.isEmpty, "no scratch folder before the refusal: \(setup.tmpEntries)")
     }
     /// The command's line decides, its keys in any order, a trailing newline or none.
-    @Test func theWalletManagersTestnetIsReadFromNetworksJson() throws {
+    @Test func theWalletManagersTestnetIsReadFromNetworksJson() async throws {
         let setup = try Setup(scratch)
         let reordered = #"{"mainnet":{},"testnet":{"genesisHash":"\#(Self.genesis)","explorerUrl":"https://scan.testnet-chain.genlayer.com","rpcUrl":"https://rpc.testnet-chain.genlayer.com","chainId":4221}}"#
         for line in [reordered, reordered + "\n"] {
             try Self.networks(stdout: line).write(to: setup.networks, atomically: true, encoding: .utf8)
-            let ran = try setup.run(["--real-testnet", "--check-guards"])
+            let ran = try await setup.run(["--real-testnet", "--check-guards"])
             #expect(ran.status == 0, "\(ran.output)")
             #expect(ran.output.contains("explorer https://scan.testnet-chain.genlayer.com, genesis \(Self.genesis)"), "\(ran.output)")
         }
@@ -505,12 +505,12 @@ struct WalletE2ERealTestnetGuardTests {
         ("export const NETWORKS = { testnet: { chainId: 4221 } };\n", "didn't print one JSON line, and only that"),
         ("", "no src/networks.ts in a Wallet Manager checkout at "),
     ])
-    func refusesAWalletManagerWhoseTestnetIsntGenLayers(_ networks: String, _ why: String) throws {
+    func refusesAWalletManagerWhoseTestnetIsntGenLayers(_ networks: String, _ why: String) async throws {
         let setup = try Setup(scratch)
         if networks.isEmpty { try FileManager.default.removeItem(at: setup.networks) }
         else { try networks.write(to: setup.networks, atomically: true, encoding: .utf8) }
         for arguments in [["--real-testnet"], ["--real-testnet", "--check-guards"], ["--real-testnet", "--dry-run"]] {
-            let ran = try setup.run(arguments)
+            let ran = try await setup.run(arguments)
             #expect(ran.status == 2, "\(arguments): \(ran.output)")
             #expect(ran.output.hasPrefix("wallet-e2e --real-testnet: refused: the Wallet Manager's ") || ran.output.hasPrefix("wallet-e2e --real-testnet: refused: no src/networks.ts"), "\(ran.output)")
             #expect(ran.output.contains(why), "\(arguments): \(ran.output)")
@@ -533,7 +533,7 @@ struct WalletE2ESignPageTests {
     static let hooks = #"<div hidden data-sign-warnings=""><span data-sign-field="from" data-value="0x4c50c0Ae2b75B8C17d999CA2e11118A27867ab99"></span><span data-sign-field="chain" data-value="4221"></span><span data-sign-field="to" data-value="0x4c50c0Ae2b75B8C17d999CA2e11118A27867ab99"></span><span data-sign-field="value" data-value="1000"></span><span data-sign-field="call" data-value="none"></span></div>"#
 
     /// Judges `page` (the recorded page with `edit` applied): its status and output.
-    func judge(_ edit: (String) -> String = { $0 }, _ arguments: [String] = []) throws -> (status: Int32, output: String) {
+    func judge(_ edit: (String) -> String = { $0 }, _ arguments: [String] = []) async throws -> (status: Int32, output: String) {
         let page = try String(contentsOf: Self.recorded, encoding: .utf8)
         #expect(page.contains(Self.hooks), "the recorded page carries its hooks as recorded")
         let file = scratch.url("page.html")
@@ -541,7 +541,7 @@ struct WalletE2ESignPageTests {
         let node = try #require(WalletE2ERealTestnetGuardTests.realNode, "node isn't on the test's PATH")
         let path = URL(fileURLWithPath: node).deletingLastPathComponent().path + ":/usr/bin:/bin"
         let script = WalletE2EScriptTests.repo.appendingPathComponent("scripts/e2e/wallet-e2e.sh").path
-        return try HomeIsolationTests.run("/bin/bash", [script, "--judge-sign-page", file.path] + arguments,
+        return try await HomeIsolationTests.run("/bin/bash", [script, "--judge-sign-page", file.path] + arguments,
                                           environment: ["PATH": path, "HOME": scratch.url("judge-home").path])
     }
 
@@ -552,8 +552,8 @@ struct WalletE2ESignPageTests {
         }
     }
 
-    @Test func theRecordedPageSignsTheSelfTransferWithNoWarnings() throws {
-        let ran = try judge()
+    @Test func theRecordedPageSignsTheSelfTransferWithNoWarnings() async throws {
+        let ran = try await judge()
         #expect(ran.status == 0, "\(ran.output)")
         #expect(ran.output == "wallet-e2e: the signing page signs a self-transfer of 1000 wei on 4221 from \(Self.throwaway), with no warnings\n", "\(ran.output)")
     }
@@ -567,12 +567,12 @@ struct WalletE2ESignPageTests {
         replacing("data-sign-warnings=\"\"", "data-sign-warnings"),
         replacing(#"<div hidden data-sign-warnings="">"#, #"<section data-sign-warnings="  " hidden>"#),
     ] as [(String) -> String])
-    func otherMarkupAroundTheHooksDoesntMatter(_ edit: @escaping (String) -> String) throws {
+    func otherMarkupAroundTheHooksDoesntMatter(_ edit: @escaping (String) -> String) async throws {
         let moved = { (page: String) -> String in
             let edited = edit(page)
             return edited.contains("data-sign-warnings") ? edited : edited.replacingOccurrences(of: "<main class=\"signing\">", with: "<main class=\"signing\">\n" + Self.hooks.replacingOccurrences(of: "></span><span", with: "></span>\n<span"))
         }
-        let ran = try judge(moved)
+        let ran = try await judge(moved)
         #expect(ran.status == 0, "\(ran.output)")
     }
 
@@ -605,8 +605,8 @@ struct WalletE2ESignPageTests {
         // Escaped values aren't unescaped: they don't match.
         (replacing(#"data-value="none""#, #"data-value="&#110;one""#), "call &#110;one, not none"),
     ] as [((String) -> String, String)])
-    func aMismatchOrAnyWarningRefusesBeforeThePost(_ edit: @escaping (String) -> String, _ why: String) throws {
-        let ran = try judge(edit)
+    func aMismatchOrAnyWarningRefusesBeforeThePost(_ edit: @escaping (String) -> String, _ why: String) async throws {
+        let ran = try await judge(edit)
         #expect(ran.status == 2, "\(ran.output)")
         #expect(ran.output.hasPrefix("wallet-e2e: refused before the sign POST: "), "\(ran.output)")
         #expect(ran.output.contains(why), "\(ran.output)")
@@ -614,12 +614,12 @@ struct WalletE2ESignPageTests {
     }
 
     /// The amount asked decides `value`: the recorded 1000 wei page is refused for 999.
-    @Test func theAmountAskedIsTheValueExpected() throws {
-        var ran = try judge({ $0 }, ["--amount", "999"])
+    @Test func theAmountAskedIsTheValueExpected() async throws {
+        var ran = try await judge({ $0 }, ["--amount", "999"])
         #expect(ran.status == 2 && ran.output.contains("value 1000, not 999"), "\(ran.output)")
-        ran = try judge({ $0 }, ["--amount", "1000"])
+        ran = try await judge({ $0 }, ["--amount", "1000"])
         #expect(ran.status == 0, "\(ran.output)")
-        ran = try judge({ $0 }, ["--chain", "4221"])
+        ran = try await judge({ $0 }, ["--chain", "4221"])
         #expect(ran.status == 64, "\(ran.output)")
     }
 }
@@ -637,7 +637,7 @@ struct WalletE2ERealResultsTests {
 
     /// Writes each (sequence, status, txHash) as a result for `id` under a made-up name (the names' order deliberately not
     /// the sequence's), runs the judge on the folder: its status and output.
-    func judge(_ results: [(Int, String, String?)], id: String = id, extra: [String] = []) throws -> (status: Int32, output: String) {
+    func judge(_ results: [(Int, String, String?)], id: String = id, extra: [String] = []) async throws -> (status: Int32, output: String) {
         let dir = scratch.url("results").appendingPathComponent("inbox/0a1b2c3d")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         for (index, (sequence, status, tx)) in results.enumerated() {
@@ -648,18 +648,18 @@ struct WalletE2ERealResultsTests {
         let node = try #require(WalletE2ERealTestnetGuardTests.realNode, "node isn't on the test's PATH")
         let path = URL(fileURLWithPath: node).deletingLastPathComponent().path + ":/usr/bin:/bin"
         let script = WalletE2EScriptTests.repo.appendingPathComponent("scripts/e2e/wallet-e2e.sh").path
-        return try HomeIsolationTests.run("/bin/bash", [script, "--judge-real-results", dir.path, Self.id] + extra,
+        return try await HomeIsolationTests.run("/bin/bash", [script, "--judge-real-results", dir.path, Self.id] + extra,
                                           environment: ["PATH": path, "HOME": scratch.url("judge-home").path])
     }
 
-    @Test func receivedProposedSignedSubmittedPassesInSequenceOrder() throws {
-        let ran = try judge([(3, "signed", nil), (1, "received", nil), (4, "submitted", Self.tx), (2, "proposed", nil)])
+    @Test func receivedProposedSignedSubmittedPassesInSequenceOrder() async throws {
+        let ran = try await judge([(3, "signed", nil), (1, "received", nil), (4, "submitted", Self.tx), (2, "proposed", nil)])
         #expect(ran.status == 0, "\(ran.output)")
         #expect(ran.output == "wallet-e2e: the results read received → proposed → signed → submitted\n", "\(ran.output)")
     }
 
-    @Test func anotherRequestsResultsDontCount() throws {
-        let ran = try judge([(1, "received", nil), (2, "proposed", nil), (3, "signed", nil), (4, "submitted", Self.tx)], id: Self.other)
+    @Test func anotherRequestsResultsDontCount() async throws {
+        let ran = try await judge([(1, "received", nil), (2, "proposed", nil), (3, "signed", nil), (4, "submitted", Self.tx)], id: Self.other)
         #expect(ran.status == 1 && ran.output == "wallet-e2e: the results read none, not received → proposed → signed → submitted\n", "\(ran.output)")
     }
 
@@ -674,15 +674,15 @@ struct WalletE2ERealResultsTests {
         ([(1, "received", nil), (2, "proposed", nil), (4, "signed", nil), (5, "submitted", tx)], "the results are numbered 1, 2, 4, 5, not 1 to 4"),
         ([(1, "received", nil), (2, "proposed", nil), (3, "signed", nil), (4, "submitted", nil)], "the submitted result has no txHash (none)"),
     ] as [([(Int, String, String?)], String)])
-    func anyOtherOrderFails(_ results: [(Int, String, String?)], _ why: String) throws {
-        let ran = try judge(results)
+    func anyOtherOrderFails(_ results: [(Int, String, String?)], _ why: String) async throws {
+        let ran = try await judge(results)
         #expect(ran.status == 1, "\(ran.output)")
         #expect(ran.output.hasPrefix("wallet-e2e: \(why)"), "\(ran.output)")
         #expect(ran.output.split(separator: "\n").count == 1, "\(ran.output)")
     }
 
-    @Test func takesNoOtherOption() throws {
-        let ran = try judge([(1, "received", nil)], extra: ["--amount", "1000"])
+    @Test func takesNoOtherOption() async throws {
+        let ran = try await judge([(1, "received", nil)], extra: ["--amount", "1000"])
         #expect(ran.status == 64, "\(ran.output)")
     }
 }

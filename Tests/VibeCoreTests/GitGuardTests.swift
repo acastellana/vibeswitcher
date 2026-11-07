@@ -379,7 +379,7 @@ struct GitGuardTests: LeadTeamFixture {
 
     /// auto_advance's merge and cleanup, with nobody watching, run nothing planted either, and the lead hears of it
     /// in the report of what moved by itself.
-    @Test func autoAdvanceRunsNothingPlantedAndTellsTheLead() throws {
+    @Test func autoAdvanceRunsNothingPlantedAndTellsTheLead() async throws {
         let root = try repo("advance")
         let marks = try marks()
         let runtime = FakeRuntime()
@@ -396,7 +396,7 @@ struct GitGuardTests: LeadTeamFixture {
         let report = try seat("worker-add-b", runtime).call("report", doneReport("added"))
         #expect(!report.isError, "\(report.text)")
         // Merged, then cleaned up: its worktree is gone.
-        #expect(advancing.until { BoardStore(root: root).load().task("add-b")?.status == .done && !FileManager.default.fileExists(atPath: worktree) })
+        #expect(await advancing.until { BoardStore(root: root).load().task("add-b")?.status == .done && !FileManager.default.fileExists(atPath: worktree) })
         #expect(Git.run(["show", "main:b.txt"], in: root).output == "bee")
         runtime.calls.lock()
         let reports = runtime.steered.filter { $0.text.hasPrefix("VibeSwitcher moved finished work on by itself") }.map(\.text)
