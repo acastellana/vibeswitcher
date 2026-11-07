@@ -2997,6 +2997,157 @@
 - 2026-11-03 09:17 Automatically (auto_advance): Merged installer-s-quit-apple (Installer's quit Apple Event fails with -1708) into main at 11c5a65a, on its passing audit and the full test run.
 - 2026-11-03 09:17 Automatically (auto_advance): Cleaned up installer-s-quit-apple (freed 1.2 GB of build output and temporary folders). It stays done.
 - 2026-11-03 09:17 Update: Install now quits VibeSwitcher properly (no more -1708 / SIGTERM fallback) — **What changed:** `scripts/lib/install-app.sh` builds its default quit command so the quotes survive. It now sends a real quit Apple Event to the app at its install path. The cause was bash quote remo…
+- 2026-11-03 11:06 You accepted 75 commits on main in VibeSwitcher: 86aa477 Lead: decisions and progress; aff7940 Lead: decisions and progress; 11c5a65 InstallRelaunchTests: the default quit command, run through an osascript stand-in, asks the installed app to quit; …
+- 2026-11-03 11:08 Planned main-s-full-suite-4: Main's full suite is green after the 2026-11-03 GitHub pull
+- 2026-11-03 11:08 Started a worker on main-s-full-suite-4
+- 2026-11-03 11:08 Automatically (auto_advance): Started a worker on main-s-full-suite-4 (Main's full suite is green after the 2026-11-03 GitHub pull).
+- 2026-11-03 11:36 Merged main-s-full-suite-4: Main's full suite is green after the 2026-11-03 GitHub pull (no audit: review none)
+- 2026-11-03 11:36 Automatically (auto_advance): Merged main-s-full-suite-4 (Main's full suite is green after the 2026-11-03 GitHub pull) into main at e0e05e35, review none: on its worker's done report on 86aa4778 and the full test run.
+- 2026-11-03 11:36 Automatically (auto_advance): Cleaned up main-s-full-suite-4 (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-04 02:37 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-05 03:17 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-05 10:02 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-05 14:36 Planned wallet-requests-marked: Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker (review audit)
+- 2026-11-05 14:36 Started a worker on wallet-requests-marked
+- 2026-11-05 14:36 Automatically (auto_advance): Started a worker on wallet-requests-marked (Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker).
+- 2026-11-05 15:06 Automatically (auto_advance): Started the audit of wallet-requests-marked at 6d0d8cc5 (Its review is audit).
+- 2026-11-05 15:06 Released wallet-requests-marked's worker (idle since its done report on 6d0d8cc5) while its audit runs
+- 2026-11-05 15:06 Automatically (auto_advance): Released wallet-requests-marked's worker, idle since its done report on 6d0d8cc5, while its audit runs (ended pid 6021 (Worker: Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-05 15:38 Planned spec-note-a-tab: Spec note: a tab or CR near-miss of the fork marker is refused by the format check
+- 2026-11-05 15:54 Incident: A verifier stops on a permission prompt to Read the worker's evidence screenshots (<repo>/.vibeswitcher/evidence/<task>/<report>/*.png, outside its worktree), V… (in wallet-requests-marked); planned turn-this-incident-into-3 to turn it into a check
+- 2026-11-05 15:54 Started a worker on turn-this-incident-into-3
+- 2026-11-05 15:54 Automatically (auto_advance): Started a worker on turn-this-incident-into-3 (Turn this incident into a check: A verifier stops on a permission prompt to Read the worker's…).
+- 2026-11-05 15:54 Review of turn-this-incident-into-3: audit
+- 2026-11-05 16:31 Planned accountusagetests-don-t: AccountUsageTests don't depend on today's date (two fail on main since 2026-11-05 12:00)
+- 2026-11-05 16:31 Started a worker on accountusagetests-don-t
+- 2026-11-05 16:31 Automatically (auto_advance): Started a worker on accountusagetests-don-t (AccountUsageTests don't depend on today's date (two fail on main since 2026-11-05 12:00)).
+- 2026-11-05 16:53 Merged accountusagetests-don-t: AccountUsageTests don't depend on today's date (two fail on main since 2026-11-05 12:00) (no audit: review none)
+- 2026-11-05 16:54 Automatically (auto_advance): Merged accountusagetests-don-t (AccountUsageTests don't depend on today's date (two fail on main since 2026-11-05 12:00)) into main at f98a4efb, review none: on its worker's done report on 2149199c and the full test run.
+- 2026-11-05 16:54 Automatically (auto_advance): Cleaned up accountusagetests-don-t; ended pid 70886 (Worker: AccountUsageTests don't depend on today's date (two fail on main since 2026-11-05 12:00)) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-05 16:59 Automatically (auto_advance): Started the audit of turn-this-incident-into-3 at ecca1cfd (Its review is audit).
+- 2026-11-05 16:59 Released turn-this-incident-into-3's worker (idle since its done report on ecca1cfd) while its audit runs
+- 2026-11-05 16:59 Automatically (auto_advance): Released turn-this-incident-into-3's worker, idle since its done report on ecca1cfd, while its audit runs (ended pid 80409 (Worker: Turn this incident into a check: A verifier stops on a permission prompt to Read the worker's…)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-05 17:02 Audit of turn-this-incident-into-3: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-11-05 17:02 Planned fix: Fix StuckVerifierPromptTests.swift:47: The worker reports that the existing test aVerifie…
+- 2026-11-05 17:12 Merged turn-this-incident-into-3: A verifier reads its task's evidence screenshots without a prompt, and a Read prompt no one answers is declined
+- 2026-11-05 17:12 Automatically (auto_advance): Merged turn-this-incident-into-3 (A verifier reads its task's evidence screenshots without a prompt, and a Read prompt no one answers is declined) into main at 836173cb, on its passing audit and the full test run.
+- 2026-11-05 17:12 Automatically (auto_advance): Cleaned up turn-this-incident-into-3 (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-05 17:12 Started a worker on fix
+- 2026-11-05 17:12 Automatically (auto_advance): Started a worker on fix (The stuck-verifier-prompt test waits on the fake's state instead of reading it once), its after tasks done (turn-this-incident-into-3).
+- 2026-11-05 17:13 Update: Merged: audits no longer hang on reading a worker's screenshots (needs the new build installed) — **What changed.** Three audits stopped on 2026-11-05 on a permission prompt to read a worker's evidence screenshot, one here and two in another project (one sat 155 minutes). Now:
+- 2026-11-05 17:30 Merged fix: The stuck-verifier-prompt test waits on the fake's state instead of reading it once (no audit: review none)
+- 2026-11-05 17:30 Automatically (auto_advance): Merged fix (The stuck-verifier-prompt test waits on the fake's state instead of reading it once) into main at 4df695ac, review none: on its worker's done report on dec3dc4e and the full test run.
+- 2026-11-05 17:30 Automatically (auto_advance): Cleaned up fix; ended pid 23379 (Worker: The stuck-verifier-prompt test waits on the fake's state instead of reading it once) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-05 17:31 Started a worker on wallet-requests-marked
+- 2026-11-05 20:42 Released wallet-requests-marked's worker (idle since its done report on c7a9f5c5) while its audit runs
+- 2026-11-05 20:42 Automatically (auto_advance): Released wallet-requests-marked's worker, idle since its done report on c7a9f5c5, while its audit runs (ended pid 88140 (Worker: Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-05 22:30 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-05 22:33 Planned wallet-requests-reach-a: Wallet requests reach a Wallet Manager on this Mac through a local folder pair (review audit)
+- 2026-11-05 22:33 Started a worker on wallet-requests-reach-a
+- 2026-11-05 22:33 Automatically (auto_advance): Started a worker on wallet-requests-reach-a (Wallet requests reach a Wallet Manager on this Mac through a local folder pair).
+- 2026-11-05 23:20 Automatically (auto_advance): Started the audit of wallet-requests-reach-a at 05032546 (Its review is audit).
+- 2026-11-05 23:20 Released wallet-requests-reach-a's worker (idle since its done report on 05032546) while its audit runs
+- 2026-11-05 23:20 Automatically (auto_advance): Released wallet-requests-reach-a's worker, idle since its done report on 05032546, while its audit runs (ended pid 18717 (Worker: Wallet requests reach a Wallet Manager on this Mac through a local folder pair)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-05 23:33 Audit of wallet-requests-marked: complete, clean
+- 2026-11-05 23:33 Audit of wallet-requests-reach-a: complete, clean, round 1: 2 Nit open
+- 2026-11-05 23:33 Incident: The user's Allow on a verifier's Read permission prompt didn't reach the session, twice on 2026-11-05: the user answered "I allowed it" and "allowed in both", y… (in wallet-requests-reach-a); planned turn-this-incident-into-4 to turn it into a check
+- 2026-11-05 23:48 Merged wallet-requests-marked: Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker
+- 2026-11-05 23:48 Automatically (auto_advance): Merged wallet-requests-marked (Wallet requests marked LOCAL FORK ONLY never go to the browser wallet, and the spec notes the marker) into main at 6337415c, on its passing audit and the full test run.
+- 2026-11-05 23:48 Started a worker on wallet-requests-reach-a
+- 2026-11-05 23:48 Automatically (auto_advance): Merge of wallet-requests-reach-a failed: Conflicts with main: the branch needs bringing up to date. Sent its worker the output; it's back at work.
+- 2026-11-05 23:48 Automatically (auto_advance): Cleaned up wallet-requests-marked (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-05 23:48 Started a worker on spec-note-a-tab
+- 2026-11-05 23:48 Automatically (auto_advance): Started a worker on spec-note-a-tab (Spec note: a tab or CR near-miss of the fork marker is refused by the format check), its after tasks done (wallet-requests-marked).
+- 2026-11-06 00:14 Merged spec-note-a-tab: Spec note: a tab or CR near-miss of the fork marker is refused by the format check (no audit: review none)
+- 2026-11-06 00:14 Automatically (auto_advance): Merged spec-note-a-tab (Spec note: a tab or CR near-miss of the fork marker is refused by the format check) into main at 417d0553, review none: on its worker's done report on ed6c6e0f and the full test run.
+- 2026-11-06 00:14 Automatically (auto_advance): Cleaned up spec-note-a-tab; ended pid 17640 (Worker: Spec note: a tab or CR near-miss of the fork marker is refused by the format check) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-06 00:29 Automatically (auto_advance): Started the audit of wallet-requests-reach-a at f67498f7 (Its review is audit).
+- 2026-11-06 00:29 Released wallet-requests-reach-a's worker (idle since its done report on f67498f7) while its audit runs
+- 2026-11-06 00:29 Automatically (auto_advance): Released wallet-requests-reach-a's worker, idle since its done report on f67498f7, while its audit runs (ended pid 17302 (Worker: Wallet requests reach a Wallet Manager on this Mac through a local folder pair)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-06 00:30 Audit of wallet-requests-reach-a: complete, clean, round 2: 2 Nit closed
+- 2026-11-06 01:08 Started a worker on wallet-requests-reach-a
+- 2026-11-06 01:08 Automatically (auto_advance): Merge of wallet-requests-reach-a failed: Tests fail rebased onto main: aResultIsTakenAsItsFileAppearsWhileARequestIsOutstanding(), aRetiredCourierNeitherWatchesNorReadsAgain(), listenLinesDuringAPollAskForOneMoreRunNotAnotherProcess(), bundleIDsAreAskedOncePerPidAndForgo Sent its worker the output; it's back at work.
+- 2026-11-06 01:39 Automatically (auto_advance): Started the audit of wallet-requests-reach-a at c0e14733 (Its review is audit).
+- 2026-11-06 01:39 Released wallet-requests-reach-a's worker (idle since its done report on c0e14733) while its audit runs
+- 2026-11-06 01:39 Automatically (auto_advance): Released wallet-requests-reach-a's worker, idle since its done report on c0e14733, while its audit runs (ended pid 26169 (Worker: Wallet requests reach a Wallet Manager on this Mac through a local folder pair)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-06 01:39 Audit of wallet-requests-reach-a: complete, clean, round 3: 2 Nit closed
+- 2026-11-06 01:49 Merged wallet-requests-reach-a: Wallet requests reach a Wallet Manager on this Mac through a local folder pair
+- 2026-11-06 01:49 Automatically (auto_advance): Merged wallet-requests-reach-a (Wallet requests reach a Wallet Manager on this Mac through a local folder pair) into main at 98ecc8fb, on its passing audit and the full test run.
+- 2026-11-06 01:49 Automatically (auto_advance): Cleaned up wallet-requests-reach-a (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-06 01:50 Update: Merged: wallet requests can reach a Wallet Manager on this Mac (install, then choose it in Settings › Wallet) — **What changed.** Settings › Wallet has a new choice, "Wallet Manager on this Mac". With it, Send to Wallet Manager on a card writes the request into an owner-only folder the Wallet Manager reads, and…
+- 2026-11-06 10:07 Planned an-agent-can-open: An agent can open a New Shell running a command, with the user's one click (review audit)
+- 2026-11-06 10:07 Started a worker on an-agent-can-open
+- 2026-11-06 10:07 Automatically (auto_advance): Started a worker on an-agent-can-open (An agent can open a New Shell running a command, with the user's one click).
+- 2026-11-06 10:10 Planned wallet-cards-show-for: Wallet cards show for a shell session (it has no Chat view, so they were invisible)
+- 2026-11-06 10:10 Started a worker on wallet-cards-show-for
+- 2026-11-06 10:10 Automatically (auto_advance): Started a worker on wallet-cards-show-for (Wallet cards show for a shell session (it has no Chat view, so they were invisible)).
+- 2026-11-06 10:46 Merged wallet-cards-show-for: Wallet cards show for a shell session (it has no Chat view, so they were invisible) (no audit: review none)
+- 2026-11-06 10:46 Flaky in wallet-cards-show-for's merge: aRestoredSessionsEndIsLoggedWithItsSignal(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-06 10:46 Automatically (auto_advance): Merged wallet-cards-show-for (Wallet cards show for a shell session (it has no Chat view, so they were invisible)) into main at f6c29de2, review none: on its worker's done report on ce972d0e and the full test run. (Its first test run failed on aRestoredSessionsEndIsLoggedWithItsSignal(), (the test command, naming no test) and the rerun of the whole test command passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/genlayer/.vibeswitcher/lead/scratch/05238e665841a2aa78fc/wallet-cards-show-for/merge-test.log. Each flaky test's failing lines, readable by….)
+- 2026-11-06 10:46 Automatically (auto_advance): Cleaned up wallet-cards-show-for; ended pid 24230 (Worker: Wallet cards show for a shell session (it has no Chat view, so they were invisible)) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-06 10:54 Planned walletdesktests-waits: WalletDeskTests waits for the session to be told instead of reading the count once
+- 2026-11-06 10:55 Started a worker on walletdesktests-waits
+- 2026-11-06 10:55 Automatically (auto_advance): Started a worker on walletdesktests-waits (WalletDeskTests waits for the session to be told instead of reading the count once).
+- 2026-11-06 11:20 Merged walletdesktests-waits: WalletDeskTests waits for the session to be told instead of reading the count once (no audit: review none)
+- 2026-11-06 11:20 Automatically (auto_advance): Merged walletdesktests-waits (WalletDeskTests waits for the session to be told instead of reading the count once) into main at c1ff2bb2, review none: on its worker's done report on 37c89ce2 and the full test run.
+- 2026-11-06 11:20 Automatically (auto_advance): Cleaned up walletdesktests-waits; ended pid 80560 (Worker: WalletDeskTests waits for the session to be told instead of reading the count once) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-06 11:27 Automatically (auto_advance): The account's usage is near a limit: the fable limit (seven_day_overage_included): reached (Claude refused a request at it), resets Nov 11, 18:00. At 80% of a limit VibeSwitcher starts no workers or audits on fable (this one runs fable), so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway, and a task can run on another model (update_task model, configure verifier_model). A bounded, mechanical task with a tight contract can run on Codex instead (update_task(<task>, agent: codex): the Codex account's usage, always audited by a Claude verifier); you decide.
+- 2026-11-06 11:43 Workflow: verifier_model = `opus`
+- 2026-11-06 11:43 Released an-agent-can-open's worker (idle since its done report on 21e75064) while its audit runs
+- 2026-11-06 11:43 Automatically (auto_advance): Started the audit of an-agent-can-open at 21e75064 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-06 11:43 Automatically (auto_advance): The verifier on an-agent-can-open ended without a verdict (exited 129 after pid 1982 (vibeswitcher-mcp) closed it): closed its session and started the audit again on the same commit, 21e75064. If this one ends without a verdict too, it's left to you.
+- 2026-11-06 11:46 Audit of an-agent-can-open: complete, clean, round 1: 2 Nit open
+- 2026-11-06 11:56 Merged an-agent-can-open: An agent can open a New Shell running a command, with the user's one click
+- 2026-11-06 11:56 Automatically (auto_advance): Merged an-agent-can-open (An agent can open a New Shell running a command, with the user's one click) into main at 08557f8a, on its passing audit and the full test run.
+- 2026-11-06 11:56 Automatically (auto_advance): Cleaned up an-agent-can-open (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-06 11:56 Update: Merged: agents can open a New Shell running a command, on your one click (install to use) — **What changed.** An agent runs `vs-shell run [--cwd DIR] [--label TEXT] -- COMMAND…`. A card in its chat shows the folder and the exact command with Run and Decline. Run opens an ordinary New Shell s…
+- 2026-11-06 12:37 Planned handled-wallet-cards: Handled wallet cards leave the strip instead of piling up
+- 2026-11-06 12:37 Started a worker on handled-wallet-cards
+- 2026-11-06 12:37 Automatically (auto_advance): Started a worker on handled-wallet-cards (Handled wallet cards leave the strip instead of piling up).
+- 2026-11-06 13:30 Automatically (auto_advance): Started the audit of handled-wallet-cards at 4f63bf0f (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-11-06 13:57 Audit of handled-wallet-cards: complete, clean, round 1: 2 Nit open
+- 2026-11-06 14:19 Merged handled-wallet-cards: Handled wallet cards leave the strip instead of piling up
+- 2026-11-06 14:19 Automatically (auto_advance): Merged handled-wallet-cards (Handled wallet cards leave the strip instead of piling up) into main at ae3248a1, on its passing audit and the full test run.
+- 2026-11-06 14:19 Automatically (auto_advance): Cleaned up handled-wallet-cards; ended pid 86047 (Worker: Handled wallet cards leave the strip instead of piling up) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-06 14:20 Update: Merged: handled wallet cards clear themselves (install to use) — **What changed.** The wallet card strip shows only cards that need you. A card leaves once it's sent and the Wallet Manager has it, and once a request finishes well (signed, submitted, proposed). It s…
+- 2026-11-06 18:16 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-06 20:36 Planned each-wallet-card-leads: Each wallet card leads with one plain line saying what it does (review audit)
+- 2026-11-06 20:36 Started a worker on each-wallet-card-leads
+- 2026-11-06 20:36 Automatically (auto_advance): Started a worker on each-wallet-card-leads (Each wallet card leads with one plain line saying what it does).
+- 2026-11-06 20:52 Automatically (auto_advance): Started the audit of each-wallet-card-leads at 1c59acff (Its review is audit).
+- 2026-11-06 20:54 Audit of each-wallet-card-leads: complete, clean
+- 2026-11-06 21:05 Merged each-wallet-card-leads: Each wallet card leads with one plain line saying what it does
+- 2026-11-06 21:05 Automatically (auto_advance): Merged each-wallet-card-leads (Each wallet card leads with one plain line saying what it does) into main at b92264ca, on its passing audit and the full test run.
+- 2026-11-06 21:05 Automatically (auto_advance): Cleaned up each-wallet-card-leads; ended pid 92687 (Worker: Each wallet card leads with one plain line saying what it does) (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-06 21:05 Update: Merged: each wallet card opens with one line saying what it does (install to use) — **What changed.** Every wallet card and the browser wallet's page open with one line, worked out by VibeSwitcher from the transaction's own fields and calldata (never from the agent's reason): "Send 1…
+- 2026-11-06 21:25 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-07 08:24 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-07 10:08 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 80% used, resets Nov 11, 18:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway. A bounded, mechanical task with a tight contract can run on Codex instead (update_task(<task>, agent: codex): the Codex account's usage, always audited by a Claude verifier); you decide.
+- 2026-11-07 10:08 Review of turn-this-incident-into-4: audit
+- 2026-11-07 10:08 Started a worker on turn-this-incident-into-4
+- 2026-11-07 10:08 Automatically (auto_advance): Started a worker on turn-this-incident-into-4 (Turn this incident into a check: The user's Allow on a verifier's Read permission prompt didn…).
+- 2026-11-07 10:27 Abandoned turn-this-incident-into-4: Probe passed: Chat Allow works for the Read prompt; not reproducible, so per contract no check (decision 2026-11-07).
+- 2026-11-07 12:46 Planned permission-prompt: Permission-prompt notifications get Allow and Deny actions (review audit)
+- 2026-11-07 12:47 Started a worker on permission-prompt
+- 2026-11-07 12:48 Planned a-settings-option-to: A Settings option to stop holding work for Claude's usage limits (review audit)
+- 2026-11-07 12:48 Started a worker on a-settings-option-to
+- 2026-11-07 13:38 Released a-settings-option-to's worker (idle since its done report on 4e4ee789) while its audit runs
+- 2026-11-07 13:38 Released permission-prompt's worker (idle since its done report on 59f47376) while its audit runs
+- 2026-11-07 13:55 Audit of a-settings-option-to: complete, clean, round 1: 2 Nit open
+- 2026-11-07 14:08 Audit of permission-prompt: complete, clean
+- 2026-11-07 14:31 Merged permission-prompt: Permission-prompt notifications get Allow and Deny actions
+- 2026-11-07 14:31 Automatically (auto_advance): Merged permission-prompt (Permission-prompt notifications get Allow and Deny actions) into main at 82eb19a9, on its passing audit and the full test run.
+- 2026-11-07 14:55 Merged a-settings-option-to: A Settings option to stop holding work for Claude's usage limits
+- 2026-11-07 14:55 Automatically (auto_advance): Merged a-settings-option-to (A Settings option to stop holding work for Claude's usage limits) into main at dec6d134, on its passing audit and the full test run.
+- 2026-11-07 14:56 Automatically (auto_advance): Cleaned up permission-prompt (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-07 14:56 Automatically (auto_advance): Cleaned up a-settings-option-to (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-07 14:56 Update: Merged: permission banners get Allow and Deny (install to use) — **What changed.** When a session stops on a permission prompt, its notification now has **Allow** and **Deny** buttons. They require an unlocked Mac and don't bring the app forward. They answer the wa…
+- 2026-11-07 14:56 Update: Merged: Settings › Project lead › Ignore usage limits (install to use) — **What changed.** A new toggle, **Ignore usage limits**, off by default and shared by every project on this Mac (mac-limits.json). When it's on:
+- 2026-11-07 17:31 Planned the-app-ships-no: The app ships no test bundles, and a failed install leaves the old app working
+- 2026-11-07 17:31 Incident: The user's `scripts/build-app.sh --install` failed mid-copy and left /Applications/VibeSwitcher.app broken (bad signature) and not running (in the-app-ships-no); planned turn-this-incident-into-5 to turn it into a check
+- 2026-11-07 17:31 Folded turn-this-incident-into-5 into the-app-ships-no: that task carries its work
+- 2026-11-07 17:34 Started a worker on the-app-ships-no
+- 2026-11-07 17:34 Automatically (auto_advance): Started a worker on the-app-ships-no (The app ships no test bundles, and a failed install leaves the old app working).
 - 2026-11-03 09:26 Incident: Lead messages to a working Codex worker sat undelivered for about 40 min. The worker reported blocked "no answer received" while the answer was in its inbox.; planned turn-this-incident-into-9 to turn it into a check
 - 2026-11-03 09:26 Started a worker on turn-this-incident-into-9
 - 2026-11-03 09:26 Automatically (auto_advance): Started a worker on turn-this-incident-into-9 (Turn this incident into a check: Lead messages to a working Codex worker sat undelivered for …).
@@ -3495,3 +3646,33 @@
 - 2026-11-07 22:58 Automatically (auto_advance): Merged claude-dictation-held at d1b53f34 (its passing audit) into main as one batch, on 2 test runs for 2 tasks.
 - 2026-11-07 22:58 Automatically (auto_advance): Cleaned up claude-dictation-held (freed 2.1 GB of build output and temporary folders). It stays done.
 - 2026-11-07 22:58 Update: Dictation: an app stall no longer cuts a Claude recording — **What changed (main d1b53f34):**
+- 2026-11-07 23:06 Audit of github-merge-third-try: complete, clean, round 1: 1 Pre-existing open
+- 2026-11-07 23:08 Audit of ideas-backlog-ranked at 451960a5 tested its merged result 9195f0d1 onto main: the test command passed
+- 2026-11-07 23:08 Released ideas-backlog-ranked's worker (idle since its done report on 451960a5) while its audit runs
+- 2026-11-07 23:08 Automatically (auto_advance): Started the audit of ideas-backlog-ranked at 451960a5 (Its review is audit. (audited: headless Claude said raise: The change touches docs/README.md and adds a doc file, but the diff is documentation-only and its contract bars touching docs/lead/, so the risk is low; the one real concern is that the author's…, as the risk check found.)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-07 23:13 Audit of ideas-backlog-ranked: complete, clean
+- 2026-11-07 23:23 Audit of turn-this-incident-into-12 at 45c4bac2 tested its merged result 341b3c6a onto main: test command failed
+- 2026-11-07 23:23 Automatically (auto_advance): Started the audit of turn-this-incident-into-12 at 45c4bac2 (Its review is audit).
+- 2026-11-07 18:26 accepted 68 commits on main that you ran from VibeSwitcher's window: bfaf287 Merge remote-tracking branch 'origin/main'; 553e879 Lead: decisions and progress; 9b11716 Lead: decisions and progress; …
+- 2026-11-07 18:27 accepted 1 commit on main that you ran from VibeSwitcher's window: e8b183a incidents.md: drop a leftover conflict marker
+- 2026-11-07 18:28 Planned sweep-the-repository-and: Sweep the repository and its history for secrets (review audit)
+- 2026-11-07 18:28 Started a worker on sweep-the-repository-and
+- 2026-11-07 18:28 Automatically (auto_advance): Started a worker on sweep-the-repository-and (Sweep the repository and its history for secrets).
+- 2026-11-07 18:52 Audit of the-app-ships-no at bb5eb67f tested its merged result 03559270 onto main: test command failed
+- 2026-11-07 18:52 Released the-app-ships-no's worker (idle since its done report on bb5eb67f) while its audit runs
+- 2026-11-07 18:52 Automatically (auto_advance): Started the audit of the-app-ships-no at bb5eb67f (It touches sensitive_paths (scripts/build-app.sh), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-07 18:55 Audit of the-app-ships-no: complete, clean
+- 2026-11-07 19:06 Merged the-app-ships-no: The app ships no test bundles, and a failed install leaves the old app working
+- 2026-11-07 19:06 Automatically (auto_advance): Merged the-app-ships-no (The app ships no test bundles, and a failed install leaves the old app working) into main at 4e1f8201, on its passing audit and the full test run.
+- 2026-11-07 19:06 Automatically (auto_advance): Cleaned up the-app-ships-no (freed 2.0 GB of build output and temporary folders). It stays done.
+- 2026-11-07 19:06 Update: Merged: a failed install now leaves your app working — **What changed.** `scripts/build-app.sh --install` copies the new app to `VibeSwitcher.app.installing`, checks it with `codesign -v`, and swaps it in only then. If a copy, check or rename fails, the c…
+- 2026-11-07 19:40 Automatically (auto_advance): Started the audit of sweep-the-repository-and at cc9ad2f2 (Its review is audit).
+- 2026-11-07 19:40 Released sweep-the-repository-and's worker (idle since its done report on cc9ad2f2) while its audit runs
+- 2026-11-07 19:40 Automatically (auto_advance): Released sweep-the-repository-and's worker, idle since its done report on cc9ad2f2, while its audit runs (ended pid 15573 (Worker: Sweep the repository and its history for secrets)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-07 19:44 Audit of sweep-the-repository-and: complete, clean, round 1: 1 Nit open
+- 2026-11-07 20:07 Started a worker on sweep-the-repository-and
+- 2026-11-07 20:07 Automatically (auto_advance): Merge of sweep-the-repository-and failed: Tests fail rebased onto main: aProbePastFifteenSecondsIsWaitedFor(), otherRequestsKeepTheirFifteenSecondsDuringAHandover(), listenLinesDuringAPollAskForOneMoreRunNotAnotherProcess() Sent its worker the output; it's back at work.
+- 2026-11-07 20:09 Planned handover-tests-stop: Handover tests stop timing out on a loaded Mac
+- 2026-11-07 20:18 Merged sweep-the-repository-and: Sweep the repository and its history for secrets
+- 2026-11-07 23:25 Merged github-merge-third-try: GitHub merge, third try: land af82338b as an ancestor of main through the now-installed gate
+- 2026-11-07 23:25 Flaky in github-merge-third-try's merge: releasedWhenItGoes(), aPlainShellTakesARunOnlyAtItsPrompt(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun

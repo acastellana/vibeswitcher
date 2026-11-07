@@ -59,6 +59,26 @@ Evidence: Reported by another project's lead. (1) 2026-10-31 ~16:2x: vault-struc
 
 Check: task turn-this-incident-into-8 turns it into a check that runs before merge.
 
+## 2026-11-05 15:54:03 A verifier stops on a permission prompt to Read the worker's evidence screenshots (<repo>/.vibeswitcher/evidence/<task>/<report>/*.png, outside its worktree), VibeSwitcher can't decline that prompt, and the audit hangs until the user allows it or the lead restarts it. Three times on 2026-11-05: once here and twice in another project, one of them for 155 minutes.
+
+Evidence: Here: wallet-requests-marked's audit at 6d0d8cc5, 2026-11-05 15:14: the witness reported "The verifier … has waited 2 min for input no one answers. It waited on: Allow: Read 4-marked-no-peer-main-dark.png {file_path: …/.vibeswitcher/evidence/wallet-requests-marked/<report id>/4-marked-no-peer-main-dark.png} VibeSwitcher couldn't decline it (that prompt isn't on its screen, or it changed while the keys went in)"; it went on only after the user chose Allow (question 7A3D6D24). Another project's lead reported the same prompt twice the same day on one task's audit, the first sitting 155 minutes until the audit was restarted. Cause as read in the code: a verifier's settings (LeadLaunch.prepare: allow, deny, the PermissionRequest hook for Bash only) give it no read access to the evidence folder in the main checkout, while its prompt names the screenshots there; and the witness's decline (LeadWitness.stuckPrompts) only handles a "Do you want to …?" prompt, not a Read prompt.
+
+Task: wallet-requests-marked
+Check: task turn-this-incident-into-3 turns it into a check that runs before merge.
+
+## 2026-11-05 23:33:26 The user's Allow on a verifier's Read permission prompt didn't reach the session, twice on 2026-11-05: the user answered "I allowed it" and "allowed in both", yet the verifiers stayed on the prompt (136 and 164 minutes in all) until the user answered it with the keyboard in the session's Terminal view.
+
+Evidence: wallet-requests-marked's first audit: stopped 15:14 on "Allow: Read 4-marked-no-peer-main-dark.png"; the user answered question 7A3D6D24 "I allowed it" about 15:25; the verifier's transcript had no tool result and its state no event until the audit was replaced at 20:42. Second audit of the same task stopped 20:44, and wallet-requests-reach-a's stopped 23:24; the user answered A0CDD1C6 "Done: allowed in both" about 23:28; ~/.vibeswitcher/state/ttys008.json and ttys011.json still read lastEvent Notification, notificationType permission_prompt, toolName Read, lastEventAt 20:44 and 23:24 at 23:30. After the user answered in each session's Terminal view with the keyboard (question A0056E73), both state files read lastEvent PostToolUse at 23:33. Where the first Allow clicks were made (the Chat view's buttons, a notification) isn't known yet: the user has been asked. The witness said of the same prompts "VibeSwitcher couldn't decline it (that prompt isn't on its screen, or it changed while the keys went in)", so the app's own keys for this prompt don't match what the session shows.
+
+Task: wallet-requests-reach-a
+Check: task turn-this-incident-into-4 turns it into a check that runs before merge.
+
+## 2026-11-07 17:31:31 The user's `scripts/build-app.sh --install` failed mid-copy and left /Applications/VibeSwitcher.app broken (bad signature) and not running
+
+Evidence: 2026-11-07 ~17:26: quit OK, then `cp: …/VibeSwitcher_VibeHostTests.bundle/Contents/Resources/Fixtures/claude-2.1.302-suggestion.raw: fcopyfile failed: Input/output error`; `codesign -v /Applications/VibeSwitcher.app` → "a sealed resource is missing or invalid". The run was the user's `!` command in Claude Code's sandbox. The lead's retry outside the sandbox installed and launched it at 17:31 (pid 48270, signature ok). The check is carried by task the-app-ships-no.
+
+Task: the-app-ships-no
+Check: task turn-this-incident-into-5 turns it into a check that runs before merge.
 ## 2026-11-03 09:26:45 Lead messages to a working Codex worker sat undelivered for about 40 min. The worker reported blocked "no answer received" while the answer was in its inbox.
 
 Evidence: This came from wallet-manager's lead, a cross-session report on 2026-11-03. Its task merge-the-other-computer runs on Codex. 5 message() calls over about 40 min each returned "Sent to … while it works; it gets it at its next step". The worker kept running commands, and the witness twice reported "a message … has waited 5/7 min in its inbox, undelivered". The worker then reported blocked: it had asked via ask_lead and got "no answer received". read_session showed no draft or prompt holding the messages.

@@ -203,6 +203,37 @@ The user (2026-11-02, about 21:30) asked for more information and for how well t
 
 The user chose estimate only over a $60–100 pilot.
 
+## 2026-11-05 14:37:03 Wallet-request v1 gains a reason marker, at the Wallet Manager lead's request (2026-11-05): a request whose `reason` has the exact first line `LOCAL FORK ONLY` is refused by the Wallet Manager unless it runs against a loopback RPC for that network. VibeSwitcher's part (task wallet-requests-marked, audited): the spec gets a dated note, still version 1 with no format or vector change, and a marked request is never offered Sign in browser wallet, whatever its `from`. VibeSwitcher reads no other meaning into `reason`.
+
+Another project runs a local-fork rehearsal that files real-looking requests; the marker keeps them off real networks. The browser wallet signs without the Wallet Manager's checks, so a marked request from an 0x address would bypass that guard. Accepted without a new field because the marker can only refuse, so the rule that a reason is never followed as an instruction holds in effect, and the spec's sentence is amended to say so.
+
+## 2026-11-05 22:32:42 Wallet requests get a same-Mac transport (the user's answer to 67D93641, 2026-11-05): when the Wallet Manager runs on the same Mac as VibeSwitcher, requests and results travel through an owner-only folder pair instead of Passage, chosen in Settings › Wallet as "Wallet Manager on this Mac". The format, the card, the user's Send and every Wallet Manager check stay as they are. Task wallet-requests-reach, audited. This supersedes, for a Wallet Manager on this Mac, the 2026-10-31 15:15 rule that transactions cross only through Passage; the two-Mac Passage link stays as it is. Which networks the Wallet Manager accepts over the local transport is the Wallet Manager's gate, which its lead is confirming with the user.
+
+Another project's local-fork rehearsal files its requests on the Mac where the Wallet Manager runs, and VibeSwitcher had no way to deliver them there: Passage has no peer that is the Mac itself. The user chose building the path over moving the sessions to the other Mac or rehearsing with made-up data. A folder pair adds no listening endpoint, and gives a same-user process nothing it couldn't already do with the Passage command line or Passage's inbox folder.
+
+## 2026-11-06 10:07:50 Agents can ask for a New Shell session running a command (`vs-shell run`, task an-agent-can-open, audited). It starts on the user's one click on a card that shows the exact command and folder; a Settings option, off by default, lets it start without the click. The command is passed to the shell at launch, never typed as keystrokes.
+
+The user asked on 2026-11-06 why they had to open New Shell and paste a command another project's lead gave them, "or do it yourself". Agents' own shells have no terminal, so interactive long-running programs (local-fork runs that file wallet requests) need a hosted shell session. The click is the default because the command runs as the user in a session with a real terminal; the no-click option is the user's to turn on.
+
+## 2026-11-06 11:43:13 Fable's weekly limit is reached until Nov 11, 18:00, and audits run on Fable, so the one-click shell feature (an-agent-can-open, built and reported done) can't be audited. Switch audits to Opus until the reset, as you chose on Nov 1 in the same situation? Workers also run Opus 5.5 now, so the verifier would be the same model as the worker, which is weaker than our usual rule of a different model. → Audits on Opus until Nov 11, 18:00
+
+The lead proposed it with a 15 min timer and the user didn't answer in time, so it went ahead (question 6B9DC8CB). Why it was asked: The shell feature is ready for audit and nothing else on the board can move it.
+
+## 2026-11-06 11:43:23 Audits run on Opus (configure verifier_model: opus) from 2026-11-06 11:43 until the Fable limit resets on 2026-11-11 at 18:00; then the lead switches back with configure(verifier_model: ""). Workers also run Opus 5.5 in this window, so verifier and worker are the same model: the lead reads audit verdicts on security-relevant tasks with extra care.
+
+Question 6B9DC8CB went ahead on its timer with the lead's proposal, as on 2026-11-01 in the same situation. The account reached Fable's weekly limit, and an audited task (an-agent-can-open) was waiting.
+
+## 2026-11-07 10:27:13 The 2026-11-05 incident "the user's Allow on a verifier's Read prompt didn't reach the session" gets no regression check. turn-this-incident-into-4 is abandoned after its probe (00c6531, ChatSyncTests.probeReadPermissionAllow) passed on main's code: Chat's Allow on today's Read prompt shape lands, the card shows nothing misleading, and the notification has no Allow action (a click only opens the session). The most likely cause is that the user answered from the notification, which sends nothing.
+
+The contract said to stop if the Allow path works, rather than invent a check. The probe was run by the lead on 2026-11-07 under vs-heavy, because Codex's sandbox can't compile SwiftTerm's Metal shaders. Not reproduced: a host write failure that only goes to the log, and a selection that moves between the screen read and the key writes.
+
+## 2026-11-07 12:47:21 permission-prompt runs now on Claude with override_usage, spending the rest of the weekly limit (80% used, resets Nov 11, 18:00). This is the user's answer to 3ABA1BF9 on 2026-11-07. Its audit also uses override_usage.
+
+The user said not to wait and chose to spend the limit. The task changes a guard rail, so it stays on Claude, and Codex's sandbox can't build the app.
+
+## 2026-11-07 12:49:02 Settings › Project lead gets "Ignore usage limits", off by default and Mac-wide in mac-limits.json (task a-settings-option-to, audited, started with override_usage). When it's on: no 80% hold on starts, audits or auto_advance; no Boost usage veto; agent: auto stays on Claude unless Claude is refusing at a reached limit. Usage stays visible, marked "(limits ignored)". This supersedes, for users who turn it on, the 80% hold and the Codex routing in the 2026-11-02 08:18 decision.
+
+The user asked for it on 2026-11-07 ("a setting to disable worrying about quota"). The lead judged that "worrying" covers all three ways usage changes behaviour, not only the 80% start hold. Load and battery holds stay as they are.
 ## 2026-11-04 22:18:21 Lead-to-lead messaging goes through a VibeSwitcher channel, tell_lead. - VibeSwitcher fills in the sender from the vault's role binding, never from server arguments. - Delivery is immediate. - Secret-shaped text is refused, and messages are capped in size and rate. - Each message is logged privately in .vibeswitcher/; the app shows them and the user can turn the channel off. - Raw Claude Code SendMessage and ListAgents are denied to every role VibeSwitcher starts. - Raw cross-session messages are unverified information, never approval. - docs/lead/ never holds message content or another project's name.
 
 The user wants lead-to-lead messaging kept and made truly safe, and chose immediate delivery with full visibility and an off switch (4D5835E0). Raw cross-session messages can be spoofed (any session can take a --name), workers can use them, the user can't see them, and nothing guards secrets. Repo records are pushed to GitHub, so message content stays out of them.
