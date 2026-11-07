@@ -105,6 +105,13 @@ public enum LeadLaunch {
     /// entirely" (code.claude.com/docs/en/permissions, "Match all uses of a tool", "Manage permissions").
     static let crossSession = ["SendMessage", "ListAgents"]
 
+    /// Claude Code's own folder in your home: your settings and hooks, CLAUDE.md, skills, agents, and each project's
+    /// auto-memory (`~/.claude/projects/<folder>/memory`), which Claude Code loads into every later session there. A
+    /// worker that wrote a note there planted it in the verifier that audits it, as its own memory (harness review of
+    /// 2026-11-07); a verifier writing there would speak to the next one. Refused to workers and verifiers (the lead's
+    /// tools edit nothing). What a worker's shell writes there the verifier still doesn't read: `verifierEnvironment`.
+    static let claudeHome = ["Edit(~/.claude/**)", "Write(~/.claude/**)"]
+
     /// What each role may not do. `records`: the workflow's `records_dir`, which only the lead's tool server writes
     /// (and commits to the base branch): a worker editing it would conflict with those commits.
     public static func deny(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
@@ -114,7 +121,7 @@ public enum LeadLaunch {
                 + crossSession
         case .verifier:
             return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers
-                + crossSession
+                + crossSession + claudeHome
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
             // the brief gives, or `git rebase <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
@@ -138,7 +145,7 @@ public enum LeadLaunch {
                 rules += ["Edit(\(records)/**)", "Write(\(records)/**)", "Bash(git add \(records)*)", "Bash(git rm \(records)*)",
                           "Bash(git rm * \(records)*)"]
             }
-            return rules + gitAround + remoteWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers + crossSession
+            return rules + gitAround + remoteWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers + crossSession + claudeHome
         }
     }
 
@@ -220,6 +227,56 @@ public enum LeadLaunch {
         ["GIT_OPTIONAL_LOCKS": "0"].merging(role == .worker ? ["GIT_EDITOR": "true"] : [:]) { $1 }
     }
 
+    /// What a verifier's session adds to its environment, given its tool server's binary `server`: every command it
+    /// runs goes under the branch-code wrapper, its own tool server excepted (`BranchCode.prefixEnvironment`), and
+    /// Claude Code's auto-memory is off: no notes from its folder are loaded as the verifier's own (a worker's shell
+    /// can write them: Claude Code 2.1.319 keeps a worktree's under the main checkout's folder, shared with the lead's
+    /// and your sessions), and the verifier leaves none for the next one.
+    public static func verifierEnvironment(server: String) -> [String: String] {
+        BranchCode.prefixEnvironment(server: server).merging([autoMemoryVariable: "1"]) { $1 }
+    }
+
+    static let autoMemoryVariable = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
+
+    /// Claude Code's folder for the project at `path` (in `~/.claude/projects`): every character but an ASCII letter or
+    /// digit made a "-", and a name longer than 200 cut there and followed by "-" and its hash (as Claude Code 2.1.319
+    /// names it: a JavaScript string hash of the UTF-16 path, its absolute value in base 36).
+    public static func claudeProjectFolder(_ path: String, home: String = VibePaths.home) -> String {
+        let units = Array(path.utf16)
+        var name = String(units.map { unit -> Character in
+            let scalar = UnicodeScalar(unit).map(Character.init)
+            guard let scalar, scalar.isASCII, scalar.isLetter || scalar.isNumber else { return "-" }
+            return scalar
+        })
+        if name.count > 200 {
+            var hash: Int32 = 0
+            for unit in units { hash = (hash &<< 5) &- hash &+ Int32(unit) }
+            name = String(name.prefix(200)) + "-" + String(abs(Int64(hash)), radix: 36)
+        }
+        return (home as NSString).appendingPathComponent(".claude/projects/\(name)")
+    }
+
+    /// Moves aside the auto-memory Claude Code keeps for a session started in `cwd` (by its path as given and as
+    /// resolved), before a verifier starts there: to `memory.set-aside-<time>` beside it, which nothing loads and the
+    /// audit can still read. Returns the folders moved. The main checkout's own memory (where Claude Code 2.1.319 keeps
+    /// a worktree's) is yours and the lead's, and stays: the verifier doesn't load any (`verifierEnvironment`).
+    @discardableResult
+    public static func setAsideMemory(cwd: String, home: String = VibePaths.home, now: Date = Date()) -> [String] {
+        let files = FileManager.default
+        let resolved = URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path
+        let stamp = Int(now.timeIntervalSince1970)
+        var moved: [String] = []
+        for path in Array(Set([cwd, resolved])).sorted() {
+            let memory = (claudeProjectFolder(path, home: home) as NSString).appendingPathComponent("memory")
+            guard (try? files.attributesOfItem(atPath: memory)) != nil else { continue }
+            var target = memory + ".set-aside-\(stamp)"
+            var tries = 1
+            while (try? files.attributesOfItem(atPath: target)) != nil { tries += 1; target = memory + ".set-aside-\(stamp)-\(tries)" }
+            if (try? files.moveItem(atPath: memory, toPath: target)) != nil { moved.append(target) }
+        }
+        return moved
+    }
+
     /// Writes the role's files (0600) and returns the command line to run. They go in `folder`: the vault's run folder
     /// for the role (`LeadVault.runFolder`, outside the repository); `<root>/.vibeswitcher/run/<name>/` when none is given.
     /// The session's TMPDIR is made under `temporary` for `cwd`, where it's started (the task's worktree, else `root`):
@@ -243,11 +300,19 @@ public enum LeadLaunch {
         let mcp: [String: Any] = ["mcpServers": ["vibeswitcher": entry]]
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: mcp, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: mcpFile))
-        var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch) + evidenceReads(role, root: root, task: task),
-                                                       "deny": deny(role, base: branch, records: records)]]
-        if !environment(role).isEmpty { settings["env"] = environment(role) }
         // Where it's started (the task's worktree, else `root`): the hook's paths stay in it.
         let cwd = cwd ?? task.map { Worktrees.path(root: root, slug: $0) } ?? root
+        var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch) + evidenceReads(role, root: root, task: task),
+                                                       "deny": deny(role, base: branch, records: records)]]
+        var env = environment(role)
+        if role == .verifier {
+            // Never started with its commands as itself (see `verifierEnvironment`).
+            guard BranchCode.prefixable(server) else { throw VerifierUnsafe(server: server) }
+            env.merge(verifierEnvironment(server: server)) { $1 }
+            settings["autoMemoryEnabled"] = false
+            setAsideMemory(cwd: cwd)
+        }
+        if !env.isEmpty { settings["env"] = env }
         settings["hooks"] = hooks(role, server: server, root: cwd)
         // The account's usage windows reach VibeSwitcher only through a status line's input: its own records them and
         // shows yours (see `UsageStatusLine`): for a verifier, only your user settings' (its project settings don't run).
@@ -272,9 +337,19 @@ public enum LeadLaunch {
         var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
         // Marks the role's session: its hook gives it none of the notes plain sessions get (`SessionNote`).
         prepared.environment[SessionNote.roleVariable] = role.rawValue
+        // Also from the start (Claude Code takes the settings' env as it reads them).
+        if role == .verifier { prepared.environment.merge(verifierEnvironment(server: server)) { $1 } }
         // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
         if let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary) { prepared.environment["TMPDIR"] = temporary.path + "/" }
         return prepared
+    }
+
+    /// A verifier isn't started when its tool server's path can't be its shell prefix (`BranchCode.prefixable`).
+    public struct VerifierUnsafe: Error, CustomStringConvertible {
+        public let server: String
+        public var description: String {
+            "A verifier runs its commands through VibeSwitcher's tool server, and Claude Code can't take \(server) as that (it isn't an absolute path, or it holds \" -\")."
+        }
     }
 
     // MARK: Codex workers

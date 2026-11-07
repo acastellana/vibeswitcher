@@ -118,6 +118,117 @@ public enum BranchCode {
 
     /// Whether `pid` is the wrapper (only the user's own processes' arguments can be read).
     public static func isRunner(pid: Int32) -> Bool { isRunner(ProcessTable.commandLine(pid: pid)) }
+
+    // MARK: A verifier's commands
+
+    /// The variable that marks the tool server's binary as a verifier session's shell prefix (`prefix`): set with
+    /// `CLAUDE_CODE_SHELL_PREFIX` in the verifier's environment, and taken out of what the prefix runs.
+    public static let prefixVariable = "VIBESWITCHER_BRANCH_CODE_PREFIX"
+
+    /// A verifier runs the branch it audits (its tests, its scripts): every command its session runs is that branch's
+    /// code, never the verifier to the session host (audit of 2026-11-07: a test that ran `vibeswitcher-mcp --role
+    /// verifier`, or spoke to host.sock, submitted the verdict as the verifier). Claude Code runs each of its shell
+    /// commands as `<CLAUDE_CODE_SHELL_PREFIX> '<command>'`: the Bash and Monitor tools' (after the permission rules
+    /// have judged the command as written: a PreToolUse hook rewriting it would have them judge the rewrite, and on
+    /// 2.1.319 a denied `touch` then ran), hooks, the status line, and MCP servers' start (all seen on 2.1.319). With
+    /// the tool server's binary as the prefix (`prefixEnvironment`), each runs under the wrapper, except one: its own
+    /// tool server, started as itself (`prefix`), which the host knows as the verifier.
+    /// The prefix is the binary's path with no options: Claude Code starts an MCP server with the whole prefix as the
+    /// program, and quotes a Bash command's prefix up to its last " -" (a path holding one is refused, by `prefixable`).
+    public static func prefixEnvironment(server: String) -> [String: String] {
+        ["CLAUDE_CODE_SHELL_PREFIX": server, prefixVariable: "1"]
+    }
+
+    /// Whether `server` can be a shell prefix as it is: an absolute path with no " -" in it.
+    public static func prefixable(_ server: String) -> Bool { server.hasPrefix("/") && !server.contains(" -") }
+
+    /// Whether this process, started with `arguments` in `environment`, is a verifier session's shell prefix: marked,
+    /// and given one command line (none of the binary's own modes, which all start with an option).
+    public static func isPrefix(_ arguments: [String], environment: [String: String]) -> Bool {
+        environment[prefixVariable] == "1" && arguments.count == 2 && !arguments[1].hasPrefix("-")
+    }
+
+    /// What the prefix runs for `command`: the tool server itself when the command line is exactly `executable` with
+    /// `MCPKeeper.flag` first (an MCP server's start, the session's own: the words are run as they are, never through
+    /// a shell), else `shell -c <command>` under the wrapper. Starting the tool server so gives a process nothing it
+    /// lacked: the prefix is under the wrapper whenever its caller is, and so is all it runs.
+    public static func prefix(_ command: String, executable: String, shell: String) -> [String] {
+        if let words = words(command), words.count >= 2, words[1] == MCPKeeper.flag, sameFile(words[0], executable) {
+            return [executable] + words.dropFirst()
+        }
+        return wrapper + [shell, "-c", command]
+    }
+
+    /// The shell Claude Code built the command for: its `CLAUDE_CODE_SHELL`, else your `SHELL` when it's zsh or bash,
+    /// else zsh.
+    public static func prefixShell(_ environment: [String: String]) -> String {
+        let usable = { (path: String?) -> String? in
+            guard let path, path.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: path) else { return nil }
+            return path
+        }
+        if let shell = usable(environment["CLAUDE_CODE_SHELL"]) { return shell }
+        if let shell = usable(environment["SHELL"]), ["zsh", "bash"].contains((shell as NSString).lastPathComponent) { return shell }
+        return "/bin/zsh"
+    }
+
+    /// Becomes what `prefix` says to run for `arguments[1]`, its environment without `prefixVariable`; returns only
+    /// when that can't start (the error is printed, and the command fails).
+    public static func runPrefix(_ arguments: [String], environment: [String: String], executable: String) -> Int32 {
+        let argv = prefix(arguments[1], executable: executable, shell: prefixShell(environment))
+        var passed = environment
+        passed[prefixVariable] = nil
+        let cArgs = argv.map { strdup($0) } + [nil]
+        let cEnv = passed.map { strdup("\($0.key)=\($0.value)") } + [nil]
+        execve(argv[0], cArgs, cEnv)
+        let code = errno
+        FileHandle.standardError.write(Data("vibeswitcher: couldn't run \(argv[0]): \(String(cString: strerror(code)))\n".utf8))
+        return 126
+    }
+
+    static func sameFile(_ a: String, _ b: String) -> Bool {
+        let resolved = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path }
+        return a.hasPrefix("/") && resolved(a) == resolved(b)
+    }
+
+    /// The words of a command line made only of words a shell takes literally, as Claude Code quotes an MCP server's
+    /// command and arguments (`/x/y --keeper 'a b' 'it'"'"'s'`): plain characters, single quotes, and double quotes
+    /// holding nothing a shell expands, separated by spaces. nil for anything else (an expansion, an operator, a glob,
+    /// a backslash, a newline), which `prefix` then runs as a command, wrapped.
+    static func words(_ line: String) -> [String]? {
+        let plain = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@%+=:,./_-")
+        var words: [String] = []
+        var current = "", inWord = false
+        var characters = line.makeIterator()
+        while let character = characters.next() {
+            switch character {
+            case " ":
+                if inWord { words.append(current); current = ""; inWord = false }
+            case "'":
+                inWord = true
+                var closed = false
+                while let next = characters.next() {
+                    if next == "'" { closed = true; break }
+                    current.append(next)
+                }
+                guard closed else { return nil }
+            case "\"":
+                inWord = true
+                var closed = false
+                while let next = characters.next() {
+                    if next == "\"" { closed = true; break }
+                    guard !"$`\\!".contains(next) else { return nil }
+                    current.append(next)
+                }
+                guard closed else { return nil }
+            default:
+                guard plain.contains(character) else { return nil }
+                inWord = true
+                current.append(character)
+            }
+        }
+        if inWord { words.append(current) }
+        return words
+    }
 }
 
 /// Runs a program and captures its output.

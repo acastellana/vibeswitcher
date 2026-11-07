@@ -7,6 +7,13 @@ import Darwin
 import Foundation
 import VibeCore
 
+// A verifier session's shell prefix (`BranchCode.prefix`): each command its Claude Code runs, under the branch-code
+// wrapper, or its own tool server as itself. Before anything else: it runs none of the server's code.
+if BranchCode.isPrefix(CommandLine.arguments, environment: ProcessInfo.processInfo.environment) {
+    exit(BranchCode.runPrefix(CommandLine.arguments, environment: ProcessInfo.processInfo.environment,
+                              executable: Bundle.main.executablePath ?? CommandLine.arguments[0]))
+}
+
 // `vibeswitcher-mcp --keeper <arguments>`, as Claude Code starts it (see `LeadLaunch`): the tool server with the other
 // arguments, run as a child that's started again when it stops (see `MCPKeeper`). First of all, so the keeper runs
 // none of the server's code: its own log, and the relay.
