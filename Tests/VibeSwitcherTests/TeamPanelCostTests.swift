@@ -363,6 +363,26 @@ struct TeamPanelCostTests {
 
     // MARK: TestLock.holders < HeavySlots.look < LeadController.lookAtHeavySlots (175702)
 
+    @Test func appHealthFyiIsKeptForStatusAndProgress() async throws {
+        let controller = try controller()
+        let root = temp.url("health-project").path
+        let store = BoardStore(root: root)
+        try FileManager.default.createDirectory(atPath: store.folder, withIntermediateDirectories: true)
+        try "---\nwatch_app_logs: true\n---\n".write(toFile: store.folder + "/workflow.md", atomically: true, encoding: .utf8)
+        try store.update { board in
+            board.leadPid = 4242
+            board.leadTTY = "ttys940"
+        }
+        controller.refreshed(roots: [root], fired: [:], loaded: [root: store.load()], decisions: [:], teams: [:], refusals: [:])
+        let delivered = AppHealthWatcherTests.Box(false)
+        controller.leadRuns = { _ in delivered.value = true; return false }
+        let text = "VibeSwitcher's own logs show something new: likely starvation; no task for it."
+        #expect(controller.tellAppHealth(text))
+        #expect(await until { delivered.value })
+        #expect(store.load().reports?.contains { $0.text == text && $0.about == AppHealth.sender } == true)
+        #expect((try? String(contentsOfFile: store.recordPath("progress.md"), encoding: .utf8))?.contains(text) == true)
+    }
+
     @Test func theHeavySlotsAreLookedAtOffTheMainThread() async throws {
         let controller = try controller()
         let folder = temp.url("team-panel-cost-locks")

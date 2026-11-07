@@ -605,25 +605,78 @@ public enum LeadWitness {
     }
 
     /// Watches the Mac-wide test and build slots (the app looks once a minute, see `TestLock`): a slot held over
-    /// `TestLock.longAfter` is told to every running lead once per holder, as long. Only said: nothing is ended (it may
-    /// be another project's, and a long suite isn't a hung one).
+    /// `TestLock.longAfter` is told to its owner once per holder. Unowned runs go only to projects queued behind them.
     public struct HeavySlots {
         let lock: TestLock?
         /// The long holders told, by slot, note and since: one that's let go is forgotten.
         public private(set) var told: Set<String> = []
+        private var toldTo: [String: Set<String>] = [:]
 
         public init(lock: TestLock? = TestLock.standard()) { self.lock = lock }
 
         /// What to tell the leads now, if anything.
         public mutating func look(now: Date = Date()) -> String? {
-            guard let lock else { return nil }
+            let new = newHolders(now: now)
+            return new.isEmpty ? nil : LeadWitness.longSlotText(new, now: now)
+        }
+
+        /// Only the owning project can act on its run. A bare run is relevant to its queued waiters.
+        public mutating func look(roots: Set<String>, now: Date = Date()) -> [String: String] {
+            guard let lock else { return [:] }
+            let holders = lock.holders().filter { $0.isLong(now: now) }
+            let keys = Set(holders.map(Self.key))
+            let waiters = lock.waiters()
+            var out: [String: String] = [:]
+            for root in roots {
+                var sent = (toldTo[root] ?? []).intersection(keys)
+                let fresh = holders.filter { !sent.contains(Self.key($0)) }
+                let reports = Self.reports(holders: fresh, waiters: waiters, roots: [root], now: now)
+                if let text = reports[root] {
+                    out[root] = text
+                    // Mark only the holders routed to this root, so a later waiter still hears about a bare run.
+                    for holder in fresh where !Self.reports(holders: [holder], waiters: waiters, roots: [root], now: now).isEmpty {
+                        sent.insert(Self.key(holder))
+                    }
+                }
+                toldTo[root] = sent
+            }
+            return out
+        }
+
+        public static func reports(holders: [TestLock.Holder], waiters: [TestLock.Waiter], roots: Set<String>, now: Date,
+                                   isRepository: (String) -> Bool = LoadStats.isRepository) -> [String: String] {
+            func belongs(_ holder: TestLock.Holder, to root: String) -> Bool {
+                if let directory = holder.directory {
+                    return directory == root || directory.hasPrefix(root + "/")
+                }
+                return holder.project == TestLock.whose(root).project
+            }
+            var reports: [String: String] = [:]
+            for root in roots {
+                let relevant = holders.filter { holder in
+                    // vs-heavy records PWD's basename as "project" even outside a repository.
+                    let owned = roots.contains { belongs(holder, to: $0) }
+                        || (holder.directory.map { LoadStats.project(ofFolder: $0, isRepository: isRepository) != nil } ?? (holder.project != nil))
+                    if owned { return belongs(holder, to: root) }
+                    return waiters.contains { $0.slots >= holder.slot && belongs($0.who, to: root) }
+                }
+                if !relevant.isEmpty { reports[root] = LeadWitness.longSlotText(relevant, now: now) }
+            }
+            return reports
+        }
+
+        private static func key(_ holder: TestLock.Holder) -> String {
+            "\(holder.slot)|\(holder.note ?? "")|\(holder.since?.timeIntervalSince1970 ?? 0)"
+        }
+
+        private mutating func newHolders(now: Date) -> [TestLock.Holder] {
+            guard let lock else { return [] }
             let long = lock.holders().filter { $0.isLong(now: now) }
-            let keyed = long.map { (holder: $0, key: "\($0.slot)|\($0.note ?? "")|\($0.since?.timeIntervalSince1970 ?? 0)") }
+            let keyed = long.map { (holder: $0, key: Self.key($0)) }
             told.formIntersection(keyed.map(\.key))
             let new = keyed.filter { !told.contains($0.key) }
-            guard !new.isEmpty else { return nil }
             told.formUnion(new.map(\.key))
-            return LeadWitness.longSlotText(new.map(\.holder), now: now)
+            return new.map(\.holder)
         }
     }
 

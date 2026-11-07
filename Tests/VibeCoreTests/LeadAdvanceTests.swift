@@ -15,6 +15,20 @@ struct LeadAdvanceTests: LeadTeamFixture {
         log = temp.url("runs.log").path
     }
 
+    @Test func automaticFyiStaysInStatusAndProgressWithoutWaking() async throws {
+        let (root, runtime, lead) = try team()
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "FYI start", "goal": "g", "acceptance": ["a"]])
+        #expect(await advancing.until { reports(runtime).contains { $0.contains("Started a worker on fyi-start") } })
+        let text = try #require(reports(runtime).first { $0.contains("Started a worker on fyi-start") })
+        let message = SteerMessage(text: text, from: .system(LeadAdvance.sender), agentPid: runtime.me.pid)
+        #expect(message.wakes == false)
+        #expect(progress(root).contains("Automatically (auto_advance): Started a worker on fyi-start"))
+        let status = lead.call("status", [:]).text
+        #expect(status.contains("Reports since your last status") && status.contains("Started a worker on fyi-start"))
+    }
+
     func repo() throws -> String {
         let url = temp.url("advance")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

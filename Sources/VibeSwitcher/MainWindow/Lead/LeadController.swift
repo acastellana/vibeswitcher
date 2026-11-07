@@ -135,12 +135,12 @@ final class HeavySlotsWatch: @unchecked Sendable {
 
     init(_ watch: LeadWitness.HeavySlots) { self.watch = watch }
 
-    func look(now: Date = Date()) -> String? {
+    func look(roots: Set<String> = [], now: Date = Date()) -> [String: String] {
         lock.lock()
         defer { lock.unlock() }
         looks += 1
         if Thread.isMainThread { lookedOnMain += 1 }
-        return watch.look(now: now)
+        return watch.look(roots: roots, now: now)
     }
 }
 
@@ -1301,7 +1301,7 @@ final class LeadController: ObservableObject {
         let reports = LeadWake.reports(pending, agentPid: lead.pid)
         let now = Date().timeIntervalSince1970
         ReportsWaiting.shared.set(LeadWake.waiting(reports, now: now), tty: lead.tty)
-        if pending.first?.from == .user { return flush(lead, lead: root) }
+        if pending.contains(where: { $0.from == .user }) { return flush(lead, lead: root) }
         let key = "\(lead.tty)#\(lead.pid)"
         guard let id = lead.session.flatMap(UUID.init(uuidString:)), let activity else { return }
         var state = wakes[key] ?? LeadWake()
@@ -1594,16 +1594,16 @@ final class LeadController: ObservableObject {
     /// (hang-20261028-175702). `then` runs on the main thread once the look is told (tests).
     func lookAtHeavySlots(then: @escaping () -> Void = {}) {
         guard let watch = heavySlots else { return then() }
+        let roots = leadRoots
         heavySlotsQueue.async { [weak self] in
-            let text = watch.look()
+            let reports = watch.look(roots: roots)
             let active = !(TestLock.standard()?.holders().isEmpty ?? true)
             DispatchQueue.main.async {
                 defer { then() }
                 guard let self else { return }
                 self.heavyActivity = active
                 self.teamActivity?.update(working: TeamActivity.working(hosted: self.host.sessions, sessions: self.store.sessions, heavy: active))
-                guard let text else { return }
-                for root in self.leadRoots { self.deliver(text, from: .system("witness"), root: root) }
+                for (root, text) in reports { self.deliver(text, from: .system("witness"), root: root) }
             }
         }
     }
@@ -1710,7 +1710,16 @@ final class LeadController: ObservableObject {
     /// lead's project has it on (the watcher tries again later).
     func tellAppHealth(_ text: String) -> Bool {
         let roots = Self.appHealthRoots(leadRoots.union(boards.keys))
-        for root in roots { deliver(text, from: .system(AppHealth.sender), root: root) }
+        for root in roots {
+            deliver(built: {
+                let store = BoardStore(root: root)
+                try? store.update { board in
+                    board.reports = ((board.reports ?? []) + [LeadReport(about: AppHealth.sender, text: text)]).suffix(LeadBoard.keptReports)
+                }
+                try? store.appendProgress("App health: " + text)
+                return text
+            }, from: .system(AppHealth.sender), root: root)
+        }
         return !roots.isEmpty
     }
 

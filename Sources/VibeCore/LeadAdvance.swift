@@ -262,6 +262,16 @@ public final class LeadAdvance: @unchecked Sendable {
         }
     }
 
+    /// Only successful housekeeping is FYI. Unknown outcomes and refusals still need judgement.
+    static func wakes(_ text: String) -> Bool {
+        if text.localizedCaseInsensitiveContains("decide") { return true }
+        let outcomes = text.components(separatedBy: "\n").filter { $0.hasPrefix("- ") }.map { String($0.dropFirst(2)) }
+        guard !outcomes.isEmpty else { return true }
+        return outcomes.contains { line in
+            return !["Started a worker on ", "Started the audit of ", "Released ", "Cleaned up "].contains { line.hasPrefix($0) }
+        }
+    }
+
     private func tell(_ report: [String]) {
         let text = "VibeSwitcher moved finished work on by itself (auto_advance):\n" + report.map { "- " + $0 }.joined(separator: "\n")
             + "\nThe judgement calls stay yours: holds (update_task kept or blocked), re-plans, questions to the user, and post_update for a merge the user would notice."

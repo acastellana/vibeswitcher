@@ -975,6 +975,22 @@ struct TestLockTests {
         #expect(lock.holders().map(\.slot) == [2, 5])
     }
 
+    @Test func anUnownedLongSlotTellsAProjectThatQueuesLater() throws {
+        let lock = TestLock(directory: url("late-slot-wait").path, slots: 1)
+        let holder = try outsideHolder(lock)
+        defer { kill(holder.processIdentifier, SIGKILL); waitForEnd(holder) }
+        try note(lock, "pid \(holder.processIdentifier), bare run, since 01:00:00", ago: 38 * 60)
+        var watch = LeadWitness.HeavySlots(lock: lock)
+        #expect(watch.look(roots: ["/repos/beta"]).isEmpty)
+        let waiter = try Self.outsideHolder(path: lock.ticketPath(1))
+        defer { kill(waiter.processIdentifier, SIGKILL); waitForEnd(waiter) }
+        try "pid \(waiter.processIdentifier), test in /repos/beta, since 01:00:00\nslots 1\n".write(toFile: lock.ticketPath(1), atomically: false, encoding: .utf8)
+        let reports = watch.look(roots: ["/repos/beta", "/repos/gamma"])
+        #expect(reports["/repos/beta"]?.contains("bare run") == true)
+        #expect(reports["/repos/gamma"] == nil)
+        #expect(watch.look(roots: ["/repos/beta"]).isEmpty)
+    }
+
     @Test func theWitnessTellsALongHolderOnceAndForgetsItWhenItsLetGo() async throws {
         let lock = TestLock(directory: url("locks").path, slots: 2)
         var watch = LeadWitness.HeavySlots(lock: lock)

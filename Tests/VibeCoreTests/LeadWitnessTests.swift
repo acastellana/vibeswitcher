@@ -122,3 +122,29 @@ extension LeadWitnessTests {
         #expect(LeadWitness.leftToAdvance(board: board, seen: ["v3": ended], now: later, firstSeen: ["v3": now]).isEmpty)
     }
 }
+
+struct LeadSlotRoutingTests {
+    @Test func aBareRunsPwdLabelIsNotAProjectOwner() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let holder = TestLock.Holder(slot: 1, note: "pid 1, test in /outside, since 00:00:00", since: now, project: "outside")
+        let waiter = TestLock.Waiter(number: 1, slots: 1, who: TestLock.Holder(slot: 0, note: nil, since: now, project: "beta"))
+        let bare = LeadWitness.HeavySlots.reports(holders: [holder], waiters: [waiter], roots: ["/repos/beta"], now: now, isRepository: { _ in false })
+        #expect(bare["/repos/beta"] != nil)
+        let owned = LeadWitness.HeavySlots.reports(holders: [holder], waiters: [waiter], roots: ["/repos/beta"], now: now, isRepository: { $0 == "/outside" })
+        #expect(owned.isEmpty)
+    }
+
+    @Test func longSlotsReachOnlyOwnersOrQueuedProjectsForBareRuns() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let owned = TestLock.Holder(slot: 1, note: "pid 1, test in /repos/alpha/.vibeswitcher/worktrees/fix, since 00:00:00", since: now)
+        let bare = TestLock.Holder(slot: 2, note: "pid 2, test, since 00:00:00", since: now)
+        let waiter = TestLock.Waiter(number: 1, slots: 2, who: TestLock.Holder(slot: 0, note: nil, since: now, project: "beta"))
+        let reports = LeadWitness.HeavySlots.reports(holders: [owned, bare], waiters: [waiter], roots: ["/repos/alpha", "/repos/beta", "/repos/gamma"], now: now)
+        #expect(reports["/repos/alpha"]?.contains("slot 1 held") == true)
+        #expect(reports["/repos/alpha"]?.contains("slot 2 held") == false)
+        #expect(reports["/repos/beta"]?.contains("slot 1 held") == false)
+        #expect(reports["/repos/beta"]?.contains("slot 2 held") == true)
+        #expect(reports["/repos/gamma"] == nil)
+        #expect(LeadWitness.HeavySlots.reports(holders: [bare], waiters: [], roots: ["/repos/alpha"], now: now).isEmpty)
+    }
+}
