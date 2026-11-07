@@ -14,7 +14,7 @@ public enum AppHealth {
     /// A digest's actionable sections: new app work, crash signatures or error kinds. Repeats and trends are FYI.
     static func wakes(_ text: String) -> Bool {
         text.contains("Turn what's a real bug into a task") || text.contains("Crashes (reports in ")
-            || text.contains("Error lines in app.log within ")
+            || text.contains("Error lines in app.log within ") || text.contains("\nProposed task ")
     }
 
     /// Who the lead's told it's from: "VibeSwitcher (not the user) reports (app health)".
@@ -791,6 +791,9 @@ public enum AppHealth {
         public var lookedOn: String?
         /// Digests no lead could take yet (none ran with watch_app_logs on): sent at the next look.
         public var pending: [String] = []
+        /// Freezes, error lines and failure notices counted by cause (see `AppHealthCauses.swift`, `causes`); optional
+        /// so a state file from before it still decodes.
+        public var causeLog: AppHealth.Causes?
 
         public struct Told: Codable, Equatable, Sendable {
             public var at: Double
@@ -834,6 +837,7 @@ public enum AppHealth {
 
         /// New app.log lines: their error kinds, counted into the digest under way.
         public mutating func saw(lines: [String], now: Date) {
+            countCauses(lines: lines, now: now)
             let kinds = lines.compactMap(AppHealth.errorKind)
             guard !kinds.isEmpty else { return }
             open(now)
@@ -861,10 +865,14 @@ public enum AppHealth {
                 if let digest = digest(now: now, folders: folders) { pending.append(digest) }
             }
             let today = Self.day(now)
-            if let last = lookedOn, last < today, let trend = trend(of: last, now: now, memory: memory) {
-                pending.append(trend)
-                // Its repeats are told now.
-                for key in told.keys { told[key]?.repeats = 0 }
+            if let last = lookedOn, last < today {
+                if let trend = trend(of: last, now: now, memory: memory) {
+                    pending.append(trend)
+                    // Its repeats are told now.
+                    for key in told.keys { told[key]?.repeats = 0 }
+                }
+                // What keeps coming back, as tasks: one proposal per cause, in one message.
+                if causeLog != nil, let proposals = causes.propose(closing: last) { pending.append(proposals) }
             }
             lookedOn = today
             prune(now: now)
@@ -879,6 +887,7 @@ public enum AppHealth {
             // goes in the next digest, read whole.
             let read = hangs.sorted().map(folders.hang)
             let unsampled = read.filter { $0.sampled == false && at - ($0.since?.timeIntervalSince1970 ?? 0) < Self.sampleWait }
+            countCauses(hangs: read.filter { hang in !unsampled.contains { $0.name == hang.name } }, now: now)
             defer {
                 opened = unsampled.isEmpty ? nil : at
                 hangs = unsampled.map(\.name)
@@ -1033,6 +1042,7 @@ public enum AppHealth {
             told = told.filter { at - $0.value.at < ($0.key.hasPrefix("hang ") ? 8 * 86_400 : 2 * AppHealth.repeatWithin) }
             errorKindsTold = errorKindsTold.filter { at - $0.value < 2 * AppHealth.repeatWithin }
             if let oldest = Self.day(Self.day(now), offset: -8) { days = days.filter { $0.key >= oldest } }
+            if causeLog != nil { causes.prune(today: Self.day(now)) }
         }
 
         /// yyyy-MM-dd in this Mac's time zone.
