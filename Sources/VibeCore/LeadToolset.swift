@@ -262,6 +262,9 @@ public final class LeadToolset: MCPToolset {
     var mailClock: () -> Double = { Date().timeIntervalSince1970 }
     /// Where merge appends its line of the Mac's merge stats (`MergeSample`, merges-<day>.jsonl); nil: none.
     public var mergeStats: () -> URL? = { VibePaths.statsDir }
+    /// The build of the tool server running now (`ServerBuild.running`): each merge's receipt and progress line name
+    /// it, and status says when the base holds merge-gate code it lacks (`gateLag`). Faked in tests.
+    var runningBuild: () -> ServerBuild? = { ServerBuild.running }
 
     /// `testLock` with the slots in force (`MacLimits.heavySlotsInForce`): the workflow's heavy_slots when set, else
     /// (with `slotsFromSettings`) VIBESWITCHER_HEAVY_SLOTS or Settings', else the lock's own; raised to boost's while
@@ -2918,6 +2921,7 @@ public final class LeadToolset: MCPToolset {
             let flakeLog = flakeLines.isEmpty ? nil : saveFlakeEvidence(flakeLines, tests: flakes, slug: slug, commit: tested, at: flakedAt)
             // Its receipt, written with the merge: its transcripts read before the board's lock is taken.
             let usage = receiptUsage(task)
+            let build = runningBuild()?.label
             let brought = Int(Git.run(["rev-list", "--count", "\(current)..\(tested)"], in: root).output)
             let planned = try store.update { board -> [(test: String, slug: String, noted: Bool)] in
                 guard let index = board.taskIndex(slug) else { return [] }
@@ -2927,6 +2931,7 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].receipt = LeadReceipt(board.tasks[index], ending: .merged, questions: board.questions, usage: usage,
                                                          tests: workflow.testCommand == nil ? nil : testCount, mergeReruns: flaked == nil ? 0 : 1,
                                                          commits: brought)
+                board.tasks[index].receipt?.build = build
                 return planFlakeFixes(&board, flakes: flakes, slug: slug, commit: tested, at: flakedAt, logged: Set(flakeLines.keys),
                                       log: flakeLog, workflow: workflow)
             }
@@ -2934,7 +2939,8 @@ public final class LeadToolset: MCPToolset {
             let untested = workflow.testCommand == nil
                 ? " (merged without tests: no test_command\(workflow.problem.map { "; \($0)" } ?? ""). Set one with configure.)" : ""
             try? store.appendProgress("Merged \(slug): \(task.title)\(untested.isEmpty ? "" : " (without tests: no test_command)")\(audited ? "" : " (no audit: review none)")"
-                + (dismissed.isEmpty ? "" : " (its audit's Important findings dismissed by the lead: \(dismissed.map(\.id).joined(separator: ", ")))"))
+                + (dismissed.isEmpty ? "" : " (its audit's Important findings dismissed by the lead: \(dismissed.map(\.id).joined(separator: ", ")))")
+                + buildNote)
             let ran = workflow.regressionCommand == nil ? "" : " (regression_command passed too.)"
             let patience = waited.map { " (The tests waited \(Worktrees.duration($0.after)) for the Mac's load to drop from \(MacLoad.number($0.from)) below load_threshold.)" } ?? ""
             let unaudited = audited ? "" : " (No audit: review none, on its worker's done report and the tests that just passed.)"
@@ -4774,6 +4780,7 @@ public final class LeadToolset: MCPToolset {
         if let ignored = ignoredKeysOnce(workflow) { lines.append(ignored) }
         lines += diskWarning(workflow, board: board, sessions: listing)
         if let line = records.statusLine { lines.append(line) }
+        if let lag = gateLag(workflow) { lines.append(lag.text(base: workflow.base)) }
         if let line = archiveNudgeOnce() { lines.append(line) }
         if let listing {
             do {

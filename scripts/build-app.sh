@@ -106,6 +106,16 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp "$BIN/VibeSwitcher" "$BIN/vibeswitcher-hook" "$BIN/vibeswitcher-host" "$BIN/vibeswitcher-mcp" "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+# The source commit this build is made from (`ServerBuild`): the lead's tool server names it in each merge's receipt
+# and progress line, and status says when main holds merge-gate code newer than it (turn-this-incident-into-12: a
+# merge ran an install older than the fix that guarded it). Built with changes not committed in Sources/: said so.
+SOURCE_COMMIT="$(git rev-parse --verify --quiet 'HEAD^{commit}' || true)"
+if [[ -n "$SOURCE_COMMIT" ]]; then
+    /usr/libexec/PlistBuddy -c "Add :VSSourceCommit string $SOURCE_COMMIT" "$APP/Contents/Info.plist"
+    if ! git diff --quiet HEAD -- Sources Package.swift; then
+        /usr/libexec/PlistBuddy -c "Add :VSSourceChanged bool true" "$APP/Contents/Info.plist"
+    fi
+fi
 # The phone web app (Phone Access), served by the app itself.
 mkdir -p "$APP/Contents/Resources"
 cp -R Web "$APP/Contents/Resources/Web"

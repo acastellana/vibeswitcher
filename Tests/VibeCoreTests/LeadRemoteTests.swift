@@ -629,6 +629,9 @@ struct LeadRemoteTests: LeadTeamFixture {
         lead.macLimits = { MacLimits(maxSessions: 12) }
         lead.batchSize = 2
         lead.batchWindow = 0
+        // Installed from main as it is: the gate's code is all in it.
+        let build = ServerBuild(commit: head(scene.root), builtAt: nil)
+        lead.runningBuild = { build }
         let set = lead.call("configure", ["merge_batching": "always"])
         #expect(!set.isError, "\(set.text)")
         #expect(!lead.call("fetch_remote", [:]).isError)
@@ -684,6 +687,126 @@ struct LeadRemoteTests: LeadTeamFixture {
         #expect(Git.run(["show", "\(main):docs/lead/decisions.md"], in: scene.root).output.contains("## the other Mac's decision"))
         let push = lead.call("push_remote", [:])
         #expect(!push.text.contains("wouldn't be a fast-forward"), "\(push.text)")
+        // Each merge names the build that ran it, in its receipt and its progress line.
+        #expect(tasks.allSatisfy { $0.receipt?.build == build.label && $0.receipt?.line.contains("merged by build \(build.label)") == true },
+                "\(tasks.map { $0.receipt?.build ?? "none" })")
+        let lines = read(BoardStore(root: scene.root).recordPath("progress.md"))
+        #expect(slugs.allSatisfy { slug in lines.split(separator: "\n").contains { $0.contains("Merged \(slug):") && $0.hasSuffix("(build \(build.label))") } }, "\(lines)")
+    }
+
+    // MARK: The installed build (turn-this-incident-into-12)
+
+    /// The build build-app.sh made: its source commit from the app's Info.plist, its time from the executable; none
+    /// outside an app bundle (a test runner, `swift run`).
+    @Test func theServersBuildIsTheCommitBuildAppWroteAndNoneOutsideAnApp() throws {
+        let base = temp.url("builds").resolvingSymlinksInPath()
+        func app(_ name: String, plist: [String: Any]?) throws -> String {
+            let macOS = base.appendingPathComponent("\(name)/Contents/MacOS")
+            try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
+            if let plist {
+                try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+                    .write(to: macOS.deletingLastPathComponent().appendingPathComponent("Info.plist"))
+            }
+            let tool = macOS.appendingPathComponent("vibeswitcher-mcp")
+            try Data("x".utf8).write(to: tool)
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_794_053_807)], ofItemAtPath: tool.path)
+            return tool.path
+        }
+        let sha = String(repeating: "ab", count: 20)
+        let built = try #require(ServerBuild.read(executable: try app("A.app", plist: ["VSSourceCommit": sha.uppercased()])))
+        #expect(built.commit == sha && !built.changed && built.builtAt == Date(timeIntervalSince1970: 1_794_053_807))
+        #expect(built.label == String(sha.prefix(12)))
+        let changed = try #require(ServerBuild.read(executable: try app("C.app", plist: ["VSSourceCommit": sha, "VSSourceChanged": true])))
+        #expect(changed.label == "\(sha.prefix(12)) with changes not committed")
+        // Builds from before build-app.sh wrote it (the 17:28 install of the incident): its time stands for it.
+        let old = try #require(ServerBuild.read(executable: try app("Old.app", plist: ["CFBundleName": "VibeSwitcher"])))
+        #expect(old.commit == nil && old.label.contains("1794053807") && old.label.contains("no commit recorded"), "\(old.label)")
+        #expect(try ServerBuild.read(executable: try app("Bad.app", plist: ["VSSourceCommit": "main; rm -rf /"]))?.commit == nil)
+        #expect(ServerBuild.read(executable: try app("Tests.xctest", plist: ["VSSourceCommit": sha])) == nil)
+        #expect(ServerBuild.read(executable: base.appendingPathComponent("vibeswitcher-mcp").path) == nil)
+    }
+
+    /// A commit to the gate's own code on main, which the scene's lead hasn't started yet.
+    func gateCommit(_ scene: Scene, _ subject: String = "merge lands a branch carrying the remote as a true merge") throws {
+        try commit("Sources/VibeCore/Worktrees.swift", "// \(subject)\n", in: scene.root, append: true, message: subject)
+    }
+
+    /// status says when main holds commits to the gate's own code the running build lacks: past its commit, or (a build
+    /// that recorded none) committed after it was built. Other commits don't count, and an install from main clears it.
+    @Test func statusSaysWhenGateCodeOnMainIsntInstalledYet() throws {
+        let scene = try makeScene()
+        let installed = head(scene.root)
+        try commit("a.txt", "two\n", in: scene.root, message: "Not the gate")
+        try gateCommit(scene)
+        try commit("Sources/vibeswitcher-mcp/main.swift", "// tool server\n", in: scene.root, message: "The tool server too")
+        let lead = try lead(scene.root, FakeRuntime())
+        lead.power = { nil }
+        var build: ServerBuild? = ServerBuild(commit: installed, builtAt: nil)
+        lead.runningBuild = { build }
+        let status = lead.call("status", [:]).text
+        let line = "Gate code on main isn't installed yet: 2 commits (The tool server too; merge lands a branch carrying the remote as a true merge); merges run the installed build (\(installed.prefix(12)))."
+        #expect(status.contains(line), "\(status)")
+        #expect(!status.contains("Not the gate"))
+        // Installed from main: nothing to say.
+        build = ServerBuild(commit: head(scene.root), builtAt: nil)
+        #expect(!lead.call("status", [:]).text.contains("Gate code on main"))
+        // A build that recorded no commit: by its time.
+        build = ServerBuild(commit: nil, builtAt: Date(timeIntervalSince1970: 0))
+        #expect(lead.call("status", [:]).text.contains("Gate code on main isn't installed yet: 2 commits"))
+        build = ServerBuild(commit: nil, builtAt: Date().addingTimeInterval(3600))
+        #expect(!lead.call("status", [:]).text.contains("Gate code on main"))
+        // Not running from an installed app (no build known): nothing to say.
+        build = nil
+        #expect(!lead.call("status", [:]).text.contains("Gate code on main"))
+    }
+
+    /// While status says the gate's code on main isn't installed, merge_remote and a merge of a branch carrying the
+    /// remote refuse, nothing tested and main unmoved, telling the lead to ask the user to install; a task not carrying
+    /// the remote merges as ever. Once installed, both go ahead.
+    @Test func mergeRemoteAndARemoteCarryingMergeRefuseUntilTheGateIsInstalled() throws {
+        let scene = try makeScene()
+        let installed = head(scene.root)
+        try gateCommit(scene)
+        let tip = try pushed(scene, "b.txt", "bee\n", message: "Remote b")
+        let runtime = FakeRuntime()
+        let lead = try lead(scene.root, runtime)
+        lead.power = { nil }
+        var build = ServerBuild(commit: installed, builtAt: nil)
+        lead.runningBuild = { build }
+        #expect(!lead.call("configure", ["auto_advance": false]).isError)
+        #expect(!lead.call("fetch_remote", [:]).isError)
+        let before = head(scene.root)
+
+        let remote = lead.call("merge_remote", [:])
+        #expect(remote.isError && remote.text.contains("Gate code on main isn't installed yet: 1 commit")
+                && remote.text.contains("merge_remote runs through that build's gate") && remote.text.contains("Ask the user to install"), "\(remote.text)")
+        #expect(head(scene.root) == before)
+
+        for slug in ["carry-the-remote", "own-work"] {
+            #expect(!lead.call("add_task", ["title": slug, "goal": "g", "acceptance": ["a"]]).isError)
+            #expect(!lead.call("start_worker", ["task": slug]).isError)
+        }
+        let carrying = Worktrees.path(root: scene.root, slug: "carry-the-remote")
+        #expect(Git.run(["merge", "-q", "--no-edit", "origin/main"], in: carrying).ok)
+        try commit("o.txt", "own\n", in: Worktrees.path(root: scene.root, slug: "own-work"), message: "Own work")
+        for slug in ["carry-the-remote", "own-work"] {
+            #expect(!(try seat("worker-\(slug)", runtime)).call("report", doneReport("done")).isError)
+        }
+        let refused = lead.call("merge", ["task": "carry-the-remote"])
+        #expect(refused.isError && refused.text.contains("Not merged (nothing was tested): Gate code on main isn't installed yet")
+                && refused.text.contains("agent/carry-the-remote holds commits of origin/main") && refused.text.contains("Ask the user to install"), "\(refused.text)")
+        #expect(head(scene.root) == before)
+        let own = lead.call("merge", ["task": "own-work"])
+        #expect(!own.isError, "\(own.text)")
+        #expect(read(BoardStore(root: scene.root).recordPath("progress.md")).split(separator: "\n")
+            .contains { $0.contains("Merged own-work: own-work") && $0.hasSuffix("(build \(installed.prefix(12)))") })
+
+        // The user installs from main.
+        build = ServerBuild(commit: head(scene.root), builtAt: nil)
+        let merged = lead.call("merge", ["task": "carry-the-remote"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(isAncestor(tip, of: head(scene.root), in: scene.root))
+        #expect(BoardStore(root: scene.root).load().task("carry-the-remote")?.receipt?.build == build.label)
     }
 
     // MARK: Roles

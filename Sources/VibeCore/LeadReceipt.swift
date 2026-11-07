@@ -36,6 +36,9 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
     /// Where its time went waiting on audits and the merge's test runs (`LeadWaits`), as of its end; nil for receipts
     /// from before they were kept, and for a task that waited on neither.
     public var waits: LeadWaits?
+    /// Merged: the build of the tool server that ran the merge (`ServerBuild.label`: its source commit, else its time);
+    /// nil for receipts from before it was kept, and when no build is known.
+    public var build: String?
 
     public init(ending: Ending, startedAt: Double?, endedAt: Double, worked: Double?, worker: LeadTokens?, verifier: LeadTokens?,
                 rounds: Int = 0, rerolls: Int = 0, mergeReruns: Int = 0, tests: Int? = nil, questions: Int = 0, waitingOnUser: Double = 0,
@@ -126,6 +129,7 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
             let count = commits.map { "\($0) commit\($0 == 1 ? "" : "s")" } ?? "its commits"
             parts.append("\(count) \(onto.prefix(8))..\(commit.prefix(8)); rollback point \(onto.prefix(8))")
         }
+        if let build { parts.append("merged by build \(build)") }
         return "Receipt (\(ending.rawValue); cost an estimate at prices of \(pricesAsOf)): " + parts.joined(separator: " · ")
     }
 

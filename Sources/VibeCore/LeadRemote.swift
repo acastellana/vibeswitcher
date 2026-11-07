@@ -444,6 +444,11 @@ extension LeadToolset {
         guard Git.run(["merge-base", "--is-ancestor", found.output, fetched], in: root).ok else {
             throw Problem(text: "Not merged (nothing was tested): agent/\(slug) holds commits of \(label) (up to \(found.output.prefix(8))) past what fetch_remote fetched (\(fetched.prefix(8))). Run fetch_remote, then merge again: the remote's records are taken as fetch_remote fetched them.")
         }
+        // turn-this-incident-into-12: a branch carrying the remote lands as a true merge only through a gate that does
+        // that; the installed one may predate it.
+        if let lag = gateLag(workflow) {
+            throw Problem(text: lag.refusal(base: workflow.base, what: "agent/\(slug) holds commits of \(label) (up to \(found.output.prefix(8))), and its merge"))
+        }
     }
 
     /// After a merge moved the base from `base` to `landed`: the lead's records the remote's commits it brought in have
@@ -482,6 +487,8 @@ extension LeadToolset {
         guard LeadRemote.isName(remote) else { throw Problem(text: "workflow.md's remote, \"\(remote)\", isn't a remote's name: set it with configure (remote).") }
         let tracked = Git.run(["rev-parse", "--verify", "--quiet", LeadRemote.trackingRef(remote: remote, branch: base) + "^{commit}"], in: root)
         guard tracked.ok, !tracked.output.isEmpty else { throw Problem(text: "There's no \(label) to merge: run fetch_remote first.") }
+        // turn-this-incident-into-12: the other Mac's commits land through the installed build's gate.
+        if let lag = gateLag(workflow) { throw Problem(text: lag.refusal(base: base, what: "merge_remote")) }
         let tip = tracked.output
         let fetched = vault.head(root: root, branch: LeadRemote.trackingRef(remote: remote, branch: base))
         guard fetched == tip else {
@@ -548,7 +555,7 @@ extension LeadToolset {
             try vault.setHead(made, root: root, branch: base)
             let brought = Int(Git.run(["rev-list", "--count", "\(current)..\(tip)"], in: root).output) ?? 0
             let how = merged ? "a merge commit, \(made.prefix(8))" : "a fast-forward"
-            try? store.appendProgress("Merged \(label) into \(base): \(Self.commits(brought)) from the remote, as \(how); the tests passed on it")
+            try? store.appendProgress("Merged \(label) into \(base): \(Self.commits(brought)) from the remote, as \(how); the tests passed on it" + buildNote)
             let patience = waited.map { " (The tests waited \(Worktrees.duration($0.after)) for the Mac's load to drop.)" } ?? ""
             return MCPToolResult(text: "Merged \(label) into \(base) as \(how): \(Self.commits(brought)) from the remote, the test command passing on the result. "
                                  + "\(label) (\(tip.prefix(8))) is an ancestor of \(base) now, so pushing \(base) is a fast-forward.\(patience)")

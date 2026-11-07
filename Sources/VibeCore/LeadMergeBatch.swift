@@ -230,6 +230,7 @@ extension LeadToolset {
             var under: [String: String] = [:]
             var brought: [String: Int] = [:]
             var usage: [String: LeadReceipts.Usage] = [:]
+            let build = runningBuild()?.label
             for (index, gate) in prefix.enumerated() {
                 let below = index == 0 ? onto : stack.tips[index - 1]
                 under[gate.task.slug] = below
@@ -249,6 +250,7 @@ extension LeadToolset {
                     board.tasks[at].receipt = LeadReceipt(board.tasks[at], ending: .merged, questions: board.questions,
                                                           usage: usage[gate.task.slug] ?? LeadReceipts.Usage(),
                                                           tests: passing.tests, mergeReruns: flaked == nil ? 0 : 1, commits: brought[gate.task.slug] ?? nil)
+                    board.tasks[at].receipt?.build = build
                 }
                 return planFlakeFixes(&board, flakes: flakes, slug: last, commit: tip, at: flakedAt, logged: Set(flakeLines.keys),
                                       log: flakeLog, workflow: workflow)
@@ -261,7 +263,7 @@ extension LeadToolset {
                 results[slug] = (flaked == nil ? "passed" : "passed_on_rerun", decided, passing.plan)
                 try? store.appendProgress("Merged \(slug): \(gate.task.title)\(gate.audited ? "" : " (no audit: review none)")"
                     + (gate.dismissed.isEmpty ? "" : " (its audit's Important findings dismissed by the lead: \(gate.dismissed.map(\.id).joined(separator: ", ")))")
-                    + together)
+                    + together + buildNote)
             }
             landed += order
             lines.append("Merged \(order.joined(separator: ", ")) into \(base) at \(tip.prefix(8)), \(onto.prefix(8))..\(tip.prefix(8)), on one test run"
