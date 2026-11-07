@@ -3316,3 +3316,8 @@
 - 2026-11-07 13:21 Released sleep-recovery-room-wait's worker (idle since its done report on ac203d47) while its audit runs
 - 2026-11-07 13:23 Audit of sleep-recovery-room-wait: complete, clean
 - 2026-11-07 13:34 Merged sleep-recovery-room-wait: Sleep-recovery room wait: no lock or file read on the main thread; retry when advanceSessions fails
+- 2026-11-07 13:34 Automatically (auto_advance): Merged sleep-recovery-room-wait (Sleep-recovery room wait: no lock or file read on the main thread; retry when advanceSessions fails) into main at ea8e39dc, on its passing audit and the full test run.
+- 2026-11-07 13:34 Automatically (auto_advance): Cleaned up sleep-recovery-room-wait (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-07 13:35 Raised fix-the-flaky-test-19 to audit (the risk check, at 9053475c): it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/TestSupport.swift)
+- 2026-11-07 13:35 Released fix-the-flaky-test-19's worker (idle since its done report on 9053475c) while its audit runs
+- 2026-11-07 13:36 Planned test-waits-count-awake: Test waits count awake time, not wall-clock, everywhere a Mac sleep can trip them
