@@ -1098,6 +1098,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 preferences: preferences, setup: SetupModel(preferences: preferences, system: .fixed(hooks: [.claude: true, .codex: false], terminal: .notAsked, notifications: .off)),
                 phoneAccess: PhoneAccess(store: store), recentProjects: { [] }, showWelcome: { [weak self] in self?.refuse("the welcome window") },
                 host: host, briefing: briefing, dictation: dictation, policy: WorkingPolicyEditor(), boost: boostWatch,
+                // The sandbox's own projects with a workflow.md, against its own host's vault (the app's proof, as ever).
+                floor: ReviewFloorEditor(projects: { [home] in
+                    ((try? FileManager.default.contentsOfDirectory(atPath: home + "/projects")) ?? []).map { home + "/projects/" + $0 }
+                }),
                 // Its own fake passage's peers, whatever the path setting says: never the real passage.
                 walletPeers: WalletPeerList(load: { [passage = PassageCommand(executable: walletPassage.appendingPathComponent("passage").path)] _ in
                     WalletPeerList.Read(passage: passage, peers: WalletPeerChoice.list(passage: passage))
@@ -1166,7 +1170,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
         ("boost off|on|away|present|battery|battery-on|battery-low|veto|mark", "boost mark clicks the main window's Boost mark (Settings › General at Boost). Otherwise Boost mode in a made-up state (the power source, the charge, your presence and the usage made up): off; On on AC; Automatic away on AC (boosted), at the Mac, away on battery; On on battery with Also on battery at 86 % (boosted) or 24 %; or away on AC with the usage watch's veto. Settings and the menu-bar sheet show it"),
-        ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
+        ("settings [TAB] [SECTION]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")
+            + "; scrolled to a section: boost, review-floor (General; it makes the made-up project sandbox-floor first)"),
         ("toolchain [dismiss]", "shows or dismisses a fake developer tools notice"),
         ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", ")),
         ("close settings|sheet", "closes Settings or the sheet"),
@@ -1176,8 +1181,35 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("quit", "quits (the host and fake sessions end with it)"),
     ]
 
+    /// A made-up project with a lead's workflow.md (its own sensitive_paths, merge_policy auto, audit_finders 1, a
+    /// verifier_model), for the review rules' floor; made once in the sandbox's home.
+    static func floorProject(home: String) -> String {
+        let root = ((home as NSString).appendingPathComponent("projects/sandbox-floor") as NSString).standardizingPath
+        let file = root + "/.vibeswitcher/workflow.md"
+        if !FileManager.default.fileExists(atPath: file) {
+            try? VibePaths.ensurePrivate(URL(fileURLWithPath: root + "/.vibeswitcher"))
+            let text = LeadWorkflow.updating(LeadWorkflow.template, with: [("merge_policy", "auto"), ("verifier_model", "fable"),
+                                                                           ("sensitive_paths", ".claude/, AGENTS.md, .github/, src/vault/")])
+            try? LeadWorkflow.write(Data(text.utf8), to: file)
+        }
+        return root
+    }
+
     /// The sheets `sheet NAME` shows: a sheet a change adds or touches goes here, so a worker can photograph it.
     static let sheets: [(name: String, make: (Driver) -> AnyView)] = [
+        // Settings › Project lead's review rules floor for the made-up project sandbox-floor, on a vault of its own
+        // (never the host's): the floor raised above the project's values in places.
+        ("review-floor", { driver in
+            let root = Driver.floorProject(home: driver.home)
+            let vault = LeadVault.Book().vault(folder: URL(fileURLWithPath: driver.home + "/review-floor-vault"), as: { .app })
+            _ = try? vault.setReviewFloor(LeadReviewFloor(sensitivePaths: [".claude/", "AGENTS.md", ".github/", "src/vault/", "src/signing/"],
+                                                          strictPaths: ["src/signing/**"], auditFinders: 2, mergePolicy: .askSensitive,
+                                                          riskLines: 300, riskModel: true, verifierDifferent: true,
+                                                          auditSamplePercent: 20), root: root)
+            let editor = ReviewFloorEditor(vault: vault, projects: { [root] }, inline: true)
+            editor.reload()
+            return AnyView(Form { ReviewFloorSection(editor: editor) }.formStyle(.grouped).frame(width: 620, height: 720))
+        }),
         ("toolchain-note", { _ in
             let before = ToolchainSnapshot(developerDir: "/Library/Developer/CommandLineTools", swift: "Apple Swift version 6.4.1",
                                            sdkPath: "/Library/Developer/CommandLineTools/SDKs/MacOSX27.sdk", sdkVersion: "27",
@@ -2096,11 +2128,15 @@ private final class Driver: NSObject, NSApplicationDelegate {
             model.showHome()
             reply(true, "start page shown")
         case "settings":
-            guard let tab = rest.isEmpty ? .general : SettingsTab(rawValue: rest) else {
+            let words = rest.split(separator: " ").map(String.init)
+            guard let tab = words.isEmpty ? .general : SettingsTab(rawValue: words[0]) else {
                 return reply(false, "no tab \(rest): " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", "))
             }
-            showSettings(tab)
-            settle { reply(true, "settings shown on \(tab.rawValue)") }
+            let section = words.count > 1 ? SettingsSection(rawValue: words[1]) : nil
+            if words.count > 1, section == nil { return reply(false, "no section \(words[1]): boost, review-floor") }
+            if section == .reviewFloor { _ = Driver.floorProject(home: home) }
+            showSettings(tab, reveal: section)
+            settle { reply(true, "settings shown on \(tab.rawValue)" + (section.map { " at \($0.rawValue)" } ?? "")) }
         case "sheet": showSheet(rest, reply)
         case "boost":
             let now = Date().timeIntervalSince1970

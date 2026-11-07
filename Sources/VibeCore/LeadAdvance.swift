@@ -502,7 +502,7 @@ public final class LeadAdvance: @unchecked Sendable {
 
     /// Starts `slug`'s audit at `head` (`why`: what sends it there) once the Mac has room for its finders.
     private func audit(_ slug: String, head: String, busy: Bool, why needed: String) {
-        let finders = lead.workflow.auditFinders
+        let finders = lead.workflow.findersInForce
         guard !busy, hasRoom(slug, need: finders) else {
             // Raised: the lead hears why now, though its audit waits for the Mac's room.
             if let raised = lead.store.load().task(slug)?.riskRaised {
@@ -510,7 +510,7 @@ public final class LeadAdvance: @unchecked Sendable {
             }
             return roomWait("audit(\(slug))", need: finders)
         }
-        if usageHeld(model: lead.auditModel(lead.workflow)) { return }
+        if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug))) { return }
         step("audit|\(slug)|\(head)") {
             guard let before = due(slug, [.review]) else { throw NotDue() }
             _ = try lead.advanceAudit(slug)
@@ -525,7 +525,7 @@ public final class LeadAdvance: @unchecked Sendable {
     private func sample(_ slug: String, head: String) -> LeadAuditSample? {
         guard let task = due(slug, [.review]) else { return nil }
         if let drawn = task.auditSample { return drawn }
-        let percent = lead.workflow.auditSamplePercent
+        let percent = lead.workflow.samplePercentInForce
         guard percent > 0 else { return nil }
         let drawn = LeadAuditSample(seed: lead.auditSampleSeed(), percent: percent, commit: head)
         var kept: LeadAuditSample?
@@ -669,9 +669,9 @@ public final class LeadAdvance: @unchecked Sendable {
                 + "read_session(\(slug), who: verifier) to see why, then audit(\(slug)) again or tell the user.")
             return
         }
-        let finders = lead.workflow.auditFinders
+        let finders = lead.workflow.findersInForce
         guard !busy, hasRoom(slug, need: finders) else { return roomWait("audit(\(slug))", need: finders) }
-        if usageHeld(model: lead.auditModel(lead.workflow)) { return }
+        if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug))) { return }
         step("audit|\(slug)|\(head)|again") {
             guard let task = due(slug, [.review]), task.evidence == nil, endedVerifier(task)?.session == ended.session else { throw NotDue() }
             _ = try lead.advanceAudit(slug)

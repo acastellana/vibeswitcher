@@ -444,12 +444,36 @@ public final class LeadToolset: MCPToolset {
                 : "Stop here: that session carries on with the task.")
     }
 
-    /// The workflow notes, with the lead's branch resolved.
+    /// The workflow notes, with the lead's branch resolved and the review rules' floor the user set (`LeadReviewFloor`,
+    /// from the vault: none when it can't be read, the rules as the file says, as before).
     var workflow: LeadWorkflow {
         var workflow = LeadWorkflow.load(from: workflowPath)
         workflow.baseBranch = workflow.baseBranch ?? store.load().baseBranch ?? Worktrees.mainBranch(root: root)
+        workflow.floor = floorRead()
         return workflow
     }
+
+    /// The floor as the vault has it, read at most once every `floorFresh` seconds (one tool call reads `workflow`
+    /// many times: each read is a round trip to the host); when the vault can't be read this once (a timeout), the
+    /// floor last read, so a rule doesn't fall back to the file's looser value for that call. nil: none recorded (or
+    /// never read). configure's own check reads the vault afresh (`checkFloor`).
+    func floorRead() -> LeadReviewFloor? {
+        floorLock.lock()
+        defer { floorLock.unlock() }
+        let now = floorClock()
+        if let readAt = floorReadAt, now >= readAt, now - readAt < Self.floorFresh { return lastFloor }
+        // A failed read stands as long too: a host that timed out isn't waited on again at every access.
+        floorReadAt = now
+        do { lastFloor = try vault.reviewFloor(root: root) } catch {}
+        return lastFloor
+    }
+    /// How long a floor read stands for: a floor the user raised in Settings is in force here this long after at most.
+    static let floorFresh: TimeInterval = 2
+    /// Seconds, monotonic; the tests' own clock.
+    var floorClock: @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    private let floorLock = NSLock()
+    private var lastFloor: LeadReviewFloor?
+    private var floorReadAt: TimeInterval?
 
     var workflowPath: String { (store.folder as NSString).appendingPathComponent("workflow.md") }
 
@@ -1082,7 +1106,7 @@ public final class LeadToolset: MCPToolset {
     func hold(_ slug: String, _ ledger: LeadAuditLedger?, head: String? = nil) -> Hold {
         guard let ledger else { return Hold() }
         let workflow = self.workflow
-        guard workflow.strictPaths != nil, !ledger.unconfirmedImportant.isEmpty else { return Hold(findings: ledger.blocking) }
+        guard workflow.strictGlobs != nil, !ledger.unconfirmedImportant.isEmpty else { return Hold(findings: ledger.blocking) }
         let diff = Self.changedFiles("\(workflow.base)...\(head ?? Worktrees.branch(slug))", root: root)
         guard diff.ok else {
             let error = diff.error.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2153,13 +2177,13 @@ public final class LeadToolset: MCPToolset {
         try checkSettings(workflow, not: "Not audited, no verifier started", keys: ["audit_finders", "audit_nit_cap"])
         // Several finders, or a merged result to test: the audit itself runs init_command and test_command as the lead
         // first (a scratch home is no boundary), so every guard rail must be the lead's, as for merge.
-        if workflow.auditFinders > 1 || upToDate.merged != nil {
-            try checkSettings(workflow, not: "Not audited, nothing built or tested, no " + (workflow.auditFinders > 1 ? "finder" : "verifier") + " started")
+        if workflow.findersInForce > 1 || upToDate.merged != nil {
+            try checkSettings(workflow, not: "Not audited, nothing built or tested, no " + (workflow.findersInForce > 1 ? "finder" : "verifier") + " started")
         }
-        let finders = workflow.auditFinders
+        let finders = workflow.findersInForce
         if let refusal = macRefusal(mac, not: "No verifier started", what: "audit(\(slug))", need: finders) { throw Problem(text: refusal) }
         // Near one of the account's usage limits on the audits' model: a verifier started now would stop mid-audit at it.
-        if !overrideUsage, let refusal = usageRefusal(model: auditModel(workflow), sessions: sessions, not: "Not audited, no verifier started",
+        if !overrideUsage, let refusal = usageRefusal(model: auditModel(workflow, task: task), sessions: sessions, not: "Not audited, no verifier started",
                                                       what: "audit(\(slug))", instead: "audit on another model (configure verifier_model, e.g. opus)") {
             throw Problem(text: refusal)
         }
@@ -2215,13 +2239,13 @@ public final class LeadToolset: MCPToolset {
                                                               notes: leadNotes(task), report: doneReport(task, head: head),
                                                               guide: LeadRisk.reviewGuide(root: root, base: workflow.base),
                                                               security: Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised)),
-                                 start: "Verify the task now, then call submit_audit.", model: auditModel(workflow), auditing: head)
+                                 start: "Verify the task now, then call submit_audit.", model: auditModel(workflow, task: task), auditing: head)
         }
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].verifier = session
             board.tasks[index].panel = panel
-            board.tasks[index].launched(panel?.sessions ?? [session], on: auditModel(workflow))
+            board.tasks[index].launched(panel?.sessions ?? [session], on: auditModel(workflow, task: task))
             board.tasks[index].noteWaits { $0.auditStarted(at: auditStart, sessions: panel?.sessions.count ?? 1) }
             // A kept task stays kept through a new audit: what holds it back hasn't changed.
             if ![.kept, .folded, .abandoned, .reverted].contains(board.tasks[index].status) { board.tasks[index].status = .review }
@@ -2323,7 +2347,10 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// The model this project's audits run on: verifier_model, or another than the workers' (see `LeadWorkflow.auditModel`).
-    func auditModel(_ workflow: LeadWorkflow) -> String { workflow.auditModel(workerModel: runtime.workerModel(root: root)) }
+    /// `task`: the task audited, whose own model (add_task's model) counts as the workers' under the floor.
+    func auditModel(_ workflow: LeadWorkflow, task: LeadTask? = nil) -> String {
+        workflow.auditModel(workerModel: runtime.workerModel(root: root), taskModel: task?.model)
+    }
 
     /// " The worktree has 3 untracked files (12.0 KB), leftovers …: path (size), …", or "" for none.
     static func leftoversText(_ leftovers: [Worktrees.Leftover]) -> String {
@@ -2356,7 +2383,7 @@ public final class LeadToolset: MCPToolset {
         }
         let sensitive = Self.sensitiveChanges(root: root, head: head, workflow: workflow)
         let focuses = LeadPrompts.Focus.panel(count, sensitive: !sensitive.isEmpty)
-        let strict = workflow.strictPaths == nil ? [] : workflow.strictTouched(
+        let strict = workflow.strictGlobs == nil ? [] : workflow.strictTouched(
             Self.changedFiles("\(workflow.base)...\(head)", root: root).output.split(whereSeparator: \.isNewline).map(String.init))
         let notes = leadNotes(task), report = doneReport(task, head: head), guide = LeadRisk.reviewGuide(root: root, base: workflow.base)
         let security = Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised, sensitive: sensitive)
@@ -2373,7 +2400,7 @@ public final class LeadToolset: MCPToolset {
                                            trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, finder: finder,
                                                                                       merged: merged, notes: notes, report: report, guide: guide,
                                                                                       security: security),
-                                           start: "Look for findings in your focus now, then call submit_audit.", model: auditModel(workflow), auditing: head,
+                                           start: "Look for findings in your focus now, then call submit_audit.", model: auditModel(workflow, task: task), auditing: head,
                                            finder: LeadVault.Finder(panel: id, index: index, size: count, focus: focus.rawValue, nitCap: workflow.auditNitCap)))
             } catch {
                 for started in sessions { try? runtime.kill(started) }
@@ -3197,7 +3224,7 @@ public final class LeadToolset: MCPToolset {
             return patch.ok ? patch.output : nil
         }, workflow: workflow)
         var byModel = false
-        if reason == nil, model, workflow.riskModel, let ask = riskModel {
+        if reason == nil, model, workflow.riskModelInForce, let ask = riskModel {
             let key = "\(task.slug)@\(commit)"
             riskLock.lock()
             let asked = riskAnswers[key]
@@ -3266,7 +3293,7 @@ public final class LeadToolset: MCPToolset {
         let workflow = self.workflow
         // The policy as the lead set it, not as a worker rewrote it.
         try checkSettings(workflow, not: "Not merged")
-        guard workflow.mergePolicy != .auto else { return }
+        guard workflow.policyInForce != .auto else { return }
         let diff = Self.changedFiles("\(workflow.base)...\(commit)", root: root)
         guard diff.ok else { throw Problem(text: "Not merged: can't tell which files \(task.slug) changes (\(diff.error)), so the merge policy can't be checked.") }
         let changed = diff.output.split(whereSeparator: \.isNewline).map(String.init)
@@ -3279,7 +3306,7 @@ public final class LeadToolset: MCPToolset {
         // An approval only the board shows wasn't given in the app: it doesn't count.
         let boardOnly = store.load().questions.contains { LeadWorkflow.approves($0, commit: commit) }
             ? " The board shows an approval of \(commit.prefix(8)), but the user gave none in VibeSwitcher for \(task.slug): only their answer there counts." : ""
-        let policy = workflow.mergePolicy?.rawValue ?? "ask_sensitive (no merge_policy is set yet: ask the owner once which one they want, then set it with configure)"
+        let policy = workflow.policyInForce?.rawValue ?? "ask_sensitive (no merge_policy is set yet: ask the owner once which one they want, then set it with configure)"
         let touches = files.isEmpty ? "" : " It touches " + files.prefix(8).joined(separator: ", ") + (files.count > 8 ? ", …" : "") + "."
         throw Problem(text: "Not merged yet: the merge policy is \(policy), so the user approves \(task.slug) at \(commit.prefix(8)) first.\(touches) "
             + "Ask once: ask_user(question: \"Merge \(task.slug) (\(task.title)) at \(commit.prefix(8))? …what it changes and the risk…\", "
@@ -3972,6 +3999,7 @@ public final class LeadToolset: MCPToolset {
             }
             changes.append((key, value))
         }
+        try checkFloor(changes)
         guard !changes.isEmpty else { return MCPToolResult(text: workflowText()) }
         try store.prepare()
         let path = workflowPath
@@ -4035,6 +4063,23 @@ public final class LeadToolset: MCPToolset {
         let set = changes.map { $0.value.isEmpty ? "cleared \($0.key)" : "\($0.key) = `\($0.value)`" }.joined(separator: ", ")
         try? store.appendProgress("Workflow: \(set)")
         return MCPToolResult(text: "Set \(set).\n\n\(workflowText())")
+    }
+
+    /// configure's review rules at or above the floor the user set (`LeadReviewFloor`); else nothing is changed and the
+    /// refusal names each rule and where the user changes the floor.
+    func checkFloor(_ changes: [(key: String, value: String)]) throws {
+        let rules = changes.filter { LeadReviewFloor.keys.contains($0.key) }
+        guard !rules.isEmpty else { return }
+        let floor: LeadReviewFloor?
+        do { floor = try vault.reviewFloor(root: root) } catch {
+            throw Problem(text: "Nothing was changed: the session host couldn't say what floor the user set for the review rules (\(error)), so \(rules.map(\.key).joined(separator: ", ")) can't be checked against it. Try again.")
+        }
+        guard let floor else { return }
+        let model = runtime.workerModel(root: root)
+        let refused = rules.compactMap { floor.refusal(key: $0.key, value: $0.value, workerModel: model) }
+        guard !refused.isEmpty else { return }
+        throw Problem(text: "Nothing was changed: \(refused.joined(separator: "; ")). The user set that floor in \(LeadReviewFloor.place); "
+                      + "configure may raise a review rule above it, never lower one below it. If it should be lower, ask the user to change it there.")
     }
 
     /// workflow.md's guard rails (`LeadVault.guardedKeys`: its commands run as the lead, its policy and limits hold
@@ -4740,6 +4785,9 @@ public final class LeadToolset: MCPToolset {
             }
         }
         if let line = boostLine(workflow) { lines.append(line) }
+        // One line, only where the floor holds a rule above workflow.md: status stays bounded on a big board;
+        // configure() shows every rule.
+        if let line = workflow.floor?.statusLine(workflow, workerModel: runtime.workerModel(root: root)) { lines.append(Self.clip(line, 600)) }
         if let line = heavyLockLine(board) { lines.append(line) }
         lines += usageLines(sessions: listing)
         if sessions == nil {
@@ -5157,6 +5205,15 @@ public final class LeadToolset: MCPToolset {
         return lines
     }
 
+    /// The review rules' floor and what's in force, for configure (status has its one line).
+    func floorLines(_ workflow: LeadWorkflow) -> [String] {
+        guard let floor = workflow.floor else {
+            return ["Review rules' floor (the user's, in \(LeadReviewFloor.place)): none recorded yet; VibeSwitcher records it at these values when it next starts this lead. The rules are as workflow.md says."]
+        }
+        return ["Review rules' floor, set by the user in \(LeadReviewFloor.place) (configure may raise a rule above it, never lower one below it; in force: the floor joined with workflow.md, paths both lists, the rest the stricter):"]
+            + floor.lines(workflow, auditModel: auditModel(workflow))
+    }
+
     private func workflowText() -> String {
         let workflow = self.workflow
         let raw = LeadWorkflow.load(from: workflowPath)
@@ -5195,6 +5252,7 @@ public final class LeadToolset: MCPToolset {
         if workflow.watchAppLogs {
             lines.append("- watch_app_logs: true (VibeSwitcher's own freezes, crashes, error lines and daily trend come to you as witness reports)")
         }
+        lines += [""] + floorLines(workflow)
         let limits = macLimits()
         lines += ["", "Mac-wide, set by the user in VibeSwitcher's Settings › Project lead (not here; configure doesn't set them):",
                   "- load_threshold: \(limits.loadLimitText) (above this load, the greater of the 1- and 5-minute averages, start_worker and audit refuse and merge waits)",

@@ -80,6 +80,11 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// This project's lead gets VibeSwitcher's own health digests (`watch_app_logs:`, see `AppHealth`): its freezes,
     /// crashes and error lines, and a daily trend. Off for every project but the one that builds VibeSwitcher.
     public var watchAppLogs = false
+    /// The review rules' floor the user set in Settings (`LeadReviewFloor`), as the lead's tool server read it from the
+    /// vault; nil: none (none recorded, or not read here). Never in the file: what's in force joins it with the file's
+    /// values (`sensitiveGlobs`, `strictGlobs`, `findersInForce`, `policyInForce`, `riskLinesInForce`, `riskModelInForce`,
+    /// `samplePercentInForce`, `auditModel`), while the file's own stay as written for the guard rails' hashes.
+    public var floor: LeadReviewFloor?
     public var notes = ""
     /// Each setting in the front matter as written (a key's last line), whatever the key: what the vault's hashes of
     /// the guard rails are of (`LeadVault.guardedKeys`).
@@ -246,7 +251,8 @@ public struct LeadWorkflow: Equatable, Sendable {
     public static let defaultSensitivePaths = [".claude/", ".mcp.json", "CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".github/",
                                                ".env", ".env.*", "*.entitlements", "*.pem"]
 
-    public var sensitiveGlobs: [String] { sensitivePaths ?? Self.defaultSensitivePaths }
+    /// sensitive_paths (the defaults when it names none) joined with the floor's.
+    public var sensitiveGlobs: [String] { LeadReviewFloor.clean((sensitivePaths ?? Self.defaultSensitivePaths) + (floor?.sensitivePaths ?? [])) }
 
     /// A comma-separated list of globs; nil when it names none.
     static func globs(_ value: String) -> [String]? {
@@ -255,9 +261,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     }
 
     /// The changed files in `strict_paths`: on a branch that touches any, an unconfirmed Important finding holds the
-    /// merge too. Empty when strict_paths names none.
+    /// merge too. Empty when strict_paths (joined with the floor's) names none.
     public func strictTouched(_ changed: [String]) -> [String] {
-        guard let strictPaths else { return [] }
+        guard let strictPaths = strictGlobs else { return [] }
         return changed.filter { path in strictPaths.contains { Self.matches(path, glob: $0) } }
     }
 
@@ -265,7 +271,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// ask_sensitive); nil when it needs none. Under ask_all that's every file (an empty list for a commit that
     /// changes none still asks).
     public func filesNeedingApproval(_ changed: [String]) -> [String]? {
-        switch mergePolicy ?? .askSensitive {
+        switch policyInForce ?? .askSensitive {
         case .auto: return nil
         case .askAll: return changed
         case .askSensitive:
@@ -391,9 +397,23 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// most capable, or opus when the workers run fable already. The aliases, as Claude Code 2.1.310 resolves them here
     /// (2026-10-25): fable → claude-fable-5-1, opus → claude-opus-5-5, sonnet → claude-sonnet-5-5; Claude's default
     /// for this user's workers is opus (its settings' "model").
-    public func auditModel(workerModel: String?) -> String {
-        if let verifierModel, !verifierModel.isEmpty { return verifierModel }
-        return Self.otherModel(than: workerModel)
+    /// Under a floor that says audits run on a different model than the workers', a verifier_model naming theirs is
+    /// passed over for that other one.
+    /// Under that floor, a task's own model (`taskModel`, add_task's model) counts as the workers' too, and a
+    /// verifier_model that names no model this knows (an alias such as default) is passed over as well: it may be theirs.
+    /// The task's model is board.json's, which any session of the team can write, so it only adds a model to keep the
+    /// audit off, never takes the workers' off that list: a worker started on the workers' model that writes another
+    /// as its task's still gets an audit on neither (fable, else opus, else sonnet; Claude's default counts as opus).
+    public func auditModel(workerModel: String?, taskModel: String? = nil) -> String {
+        let different = floor?.verifierDifferent == true
+        if let verifierModel, !verifierModel.isEmpty {
+            if !different { return verifierModel }
+            if LeadReviewFloor.knownModel(verifierModel), !LeadReviewFloor.sameModel(verifierModel, LeadReviewFloor.workersModel(workerModel)),
+               !LeadReviewFloor.sameModel(verifierModel, taskModel) { return verifierModel }
+        }
+        guard different else { return Self.otherModel(than: workerModel) }
+        let workers = LeadReviewFloor.workersModel(workerModel)
+        return ["fable", "opus", "sonnet"].first { !LeadReviewFloor.sameModel($0, workers) && !LeadReviewFloor.sameModel($0, taskModel) } ?? "sonnet"
     }
 
     /// A model at least as capable as `worker` and not it: fable, or opus for a worker on fable.
@@ -1090,7 +1110,7 @@ public enum LeadPrompts {
     /// follow without asking again.
     static func mergePolicy(_ workflow: LeadWorkflow) -> String {
         let options = LeadWorkflow.MergePolicy.allCases.map { "\($0.rawValue) (\($0.meaning))" }.joined(separator: "; ")
-        guard let policy = workflow.mergePolicy else {
+        guard let policy = workflow.policyInForce else {
             return """
             Merge policy: the owner hasn't chosen one yet (merge_policy in workflow.md). Ask them once, early, with \
             ask_user: a short question on how they want merges handled, with the three options (\(options)) and your \

@@ -284,8 +284,8 @@ public enum LeadRisk {
     /// only when the change is under the size threshold (`git diff -U0`, here on the Mac; never sent anywhere).
     public static func deterministic(changes: [Change], patch: () -> String?, workflow: LeadWorkflow) -> String? {
         let lines = changes.filter { countsForSize($0.path) }.reduce(0) { $0 + $1.added + $1.removed }
-        if workflow.riskLines > 0, lines > workflow.riskLines {
-            return "it changes \(lines) lines outside tests, over risk_lines (\(workflow.riskLines))"
+        if workflow.riskLinesInForce > 0, lines > workflow.riskLinesInForce {
+            return "it changes \(lines) lines outside tests, over risk_lines (\(workflow.riskLinesInForce))"
         }
         let infrastructure = changes.map(\.path).filter { isInfrastructure($0, workflow: workflow) }
         if !infrastructure.isEmpty {

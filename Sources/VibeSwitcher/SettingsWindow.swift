@@ -6,7 +6,7 @@ import VibeCore
 enum SettingsTab: String, CaseIterable { case general, agents, phone, launch, terminal, wallet }
 
 /// A section a tab scrolls to when Settings opens on it (the main window's Boost mark opens General at Boost).
-enum SettingsSection: String { case boost }
+enum SettingsSection: String { case boost, reviewFloor = "review-floor" }
 
 final class SettingsSelection: ObservableObject {
     @Published var tab: SettingsTab = .general
@@ -27,7 +27,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     init(preferences: Preferences, setup: SetupModel, phoneAccess: PhoneAccess,
          recentProjects: @escaping () -> [String], showWelcome: @escaping () -> Void, host: HostClient? = nil,
          briefing: BriefingModel? = nil, dictation: DictationController? = nil, policy: WorkingPolicyEditor? = nil,
-         boost: BoostWatch? = nil,
+         boost: BoostWatch? = nil, floor: ReviewFloorEditor? = nil,
          walletPeers: WalletPeerList = WalletPeerList(load: { _ in WalletPeerList.Read(passage: nil, peers: []) })) {
         self.setup = setup
         self.briefing = briefing
@@ -41,7 +41,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.contentView = NSHostingView(rootView: SettingsView(preferences: preferences, setup: setup, phoneAccess: phoneAccess,
                                                                   selection: selection, recentProjects: recentProjects,
                                                                   showWelcome: showWelcome, host: host, briefing: briefing,
-                                                                  dictation: dictation, policy: policy, boost: boost, walletPeers: walletPeers))
+                                                                  dictation: dictation, policy: policy, boost: boost, floor: floor, walletPeers: walletPeers))
         window.center()
     }
 
@@ -86,13 +86,14 @@ struct SettingsView: View {
     var dictation: DictationController? = nil
     var policy: WorkingPolicyEditor? = nil
     var boost: BoostWatch? = nil
+    var floor: ReviewFloorEditor? = nil
     var walletPeers = WalletPeerList(load: { _ in WalletPeerList.Read(passage: nil, peers: []) })
 
     var body: some View {
         TabView(selection: $selection.tab) {
             ScrollViewReader { proxy in
                 GeneralSettings(preferences: preferences, setup: setup, showWelcome: showWelcome, host: host, briefing: briefing,
-                                dictation: dictation, policy: policy, boost: boost)
+                                dictation: dictation, policy: policy, boost: boost, floor: floor)
                     .onAppear { reveal(in: proxy) }
                     .onChange(of: selection.reveal) { reveal(in: proxy) }
             }
@@ -155,6 +156,7 @@ struct GeneralSettings: View {
     var dictation: DictationController? = nil
     var policy: WorkingPolicyEditor? = nil
     var boost: BoostWatch? = nil
+    var floor: ReviewFloorEditor? = nil
 
     var body: some View {
         Form {
@@ -221,6 +223,7 @@ struct GeneralSettings: View {
             MacLimitsSection()
             BoostSection(preferences: preferences, watch: boost).id(SettingsSection.boost)
             if let policy { WorkingPolicySection(editor: policy) }
+            if let floor { ReviewFloorSection(editor: floor).id(SettingsSection.reviewFloor) }
             if let briefing { BriefingSettings(preferences: preferences, briefing: briefing) }
             if let dictation { DictationSettings(dictation: dictation) }
             Section {

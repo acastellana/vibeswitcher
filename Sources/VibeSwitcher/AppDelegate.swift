@@ -709,7 +709,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 recentProjects: { [weak self] in self?.popoverState.recentProjects.map(\.path) ?? [] },
                 showWelcome: { [weak self] in self?.showWelcome(firstRun: false) }, host: hostClient, briefing: briefing,
                 dictation: dictation, policy: WorkingPolicyEditor(saved: { [weak self] in self?.leadController.lookAtPolicy() }),
-                boost: boostWatch, walletPeers: walletPeers)
+                boost: boostWatch,
+                // The projects whose lead ran here: those the host runs a lead for, and the recent ones with a workflow.md.
+                floor: ReviewFloorEditor(projects: { [weak self] in
+                    guard let self else { return [] }
+                    return hostClient.sessions.filter { LeadTeams.role(label: $0.label) == .lead }.map(\.cwd) + popoverState.recentProjects.map(\.path)
+                }, workerModel: { [weak self] root in
+                    self.flatMap { LeadWorkflow.claudeModel(command: $0.leadController.command(for: root), home: VibePaths.home) }
+                }),
+                walletPeers: walletPeers)
         }
         loadRecentProjects()
         settingsWindow?.show(tab: tab, reveal: reveal)

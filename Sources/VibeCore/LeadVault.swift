@@ -192,6 +192,11 @@ public struct LeadVault: Sendable {
         case guarded(root: String)
         /// The app, or the repository's lead: these settings' hashes, by key, are the lead's now (the others stay).
         case setGuarded(root: String, hashes: [String: String])
+        /// The review rules' floor you set in Settings for the repository (`LeadReviewFloor`; `Reply.reviewFloor`).
+        case reviewFloor(root: String)
+        /// The app only: the review rules' floor, as you set it in Settings (or, `onlyIfUnset`, the project's values
+        /// when the app first starts its lead, kept only while none is recorded).
+        case setReviewFloor(root: String, floor: LeadReviewFloor, onlyIfUnset: Bool)
         /// The app only: you approved merging the task at this commit (see `LeadVault.recordApproval`).
         case approve(root: String, task: String, commit: String)
         /// Whether you approved merging the task at exactly this commit.
@@ -240,6 +245,7 @@ public struct LeadVault: Sendable {
         case startedOver(Double?)
         case move(BaseMove)
         case guarded([String: String]?)
+        case reviewFloor(LeadReviewFloor?)
         case approved(Bool)
         case roster([RosterEntry])
         case unaudited(review: LeadTask.Review?, reported: String?, evidence: LeadDoneEvidence? = nil)
@@ -302,8 +308,12 @@ public struct LeadVault: Sendable {
     /// The lead starts (from VibeSwitcher): a grant for it. `branch` as it is now becomes the head merges start from
     /// only when none is recorded, or when `takeHead` (you said so in the app, having been shown the move): starting
     /// the lead again (anything can ask for that) doesn't make a move nobody merged look like the lead's.
-    public func startLead(root: String, branch: String, takeHead: Bool = false) throws -> String {
+    ///
+    /// `floor`: the review rules' floor at the project's values now, recorded only while none is (see
+    /// `LeadReviewFloor.starting(from:)`): a vault that can't take it leaves the rules as workflow.md says, as before.
+    public func startLead(root: String, branch: String, takeHead: Bool = false, floor: LeadReviewFloor? = nil) throws -> String {
         let grant = try issue(role: .lead, root: root, task: nil)
+        if let floor { _ = try? setReviewFloor(floor, root: root, onlyIfUnset: true) }
         if let now = Self.branchHead(branch, root: root), takeHead || head(root: root, branch: branch) == nil {
             try setHead(now, root: root, branch: branch)
         }
@@ -521,6 +531,9 @@ extension LeadVault {
             /// workflow.md's guard rails as the lead last set them (`LeadVault.guardedHashes`); nil until it did
             /// (optional: older vaults have none).
             var guarded: [String: String]?
+            /// The review rules' floor you set in Settings (`LeadReviewFloor`); nil until the app recorded one
+            /// (optional: older vaults have none).
+            var floor: LeadReviewFloor?
             /// The commits you approved merging, by task, newest last (optional: older vaults have none).
             var approvals: [String: [String]]?
             /// Each task's audit by several finders: their ballots until the vote (optional: older vaults have none).
@@ -951,6 +964,14 @@ extension LeadVault {
                 guard caller == .app || isLead(caller, root) else { return .refused("Only VibeSwitcher or the lead records workflow.md's guard rails.") }
                 change(root, &changed) { $0.guarded = ($0.guarded ?? [:]).merging(hashes) { $1 } }
                 return .ok
+            case .reviewFloor(let root):
+                return .reviewFloor(team(root)?.floor)
+            case .setReviewFloor(let root, let floor, let onlyIfUnset):
+                // Yours alone: the lead and its team are who the floor holds (the host tells the app from the process).
+                guard caller == .app else { return .refused("Only VibeSwitcher sets the review rules' floor, from Settings: it's the user's.") }
+                if onlyIfUnset, team(root)?.floor != nil { return .reviewFloor(team(root)?.floor) }
+                change(root, &changed) { $0.floor = floor }
+                return .reviewFloor(floor)
             case .approve(let root, let task, let commit):
                 // Only your answer in the app approves a merge: not the lead that asks for it, nor a worker whose
                 // work it is, whatever they write on the board.

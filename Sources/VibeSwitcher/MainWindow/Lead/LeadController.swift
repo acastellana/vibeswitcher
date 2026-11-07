@@ -1006,7 +1006,12 @@ final class LeadController: ObservableObject {
                 if askAboutMovedHead, let moved = vault.headMoved(root: root, branch: branch) {
                     takeHead = DispatchQueue.main.sync { self?.askToTakeHead(branch: branch, moved) ?? false }
                 }
-                let grant = try vault.startLead(root: root, branch: branch, takeHead: takeHead)
+                // The review rules' floor starts at the project's values now, the first time (see `LeadReviewFloor`):
+                // with the workers' model (the command they start with, else Claude's settings), so a verifier_model
+                // naming theirs starts the floor at "any model", as the project runs now.
+                let workerModel = LeadWorkflow.claudeModel(command: base, home: home)
+                let grant = try vault.startLead(root: root, branch: branch, takeHead: takeHead,
+                                                floor: LeadReviewFloor.starting(from: workflow, workerModel: workerModel))
                 issued = grant
                 // The role is the new session's from now on: the lead it replaces gets nothing more, and what waited
                 // for it goes to the new one (see `LeadHandover`).
