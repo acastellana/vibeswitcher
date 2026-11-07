@@ -3280,3 +3280,4 @@
 - 2026-11-07 12:00 Merged test-under-load-s: test-under-load's default mode builds inside a scratch home
 - 2026-11-07 12:00 Automatically (auto_advance): Merged test-under-load-s (test-under-load's default mode builds inside a scratch home) into main at 090522d5, on its passing audit and the full test run.
 - 2026-11-07 12:00 Automatically (auto_advance): Cleaned up test-under-load-s (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-11-07 12:15 Released resume-work-cut-off's worker (idle since its done report on d0b3ab37) while its audit runs
