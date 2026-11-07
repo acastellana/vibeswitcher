@@ -243,3 +243,7 @@ F1–F5 are fixed and verified. F6 is a small cost on a rare path and has a prec
 
 On 2026-11-07 the user reported that Run is unreliable and sometimes missing, with no confirmation popup. Today it appears only in Claude window sessions and fails with a bare beep. Asked whether Run should reach other session kinds, the user answered "yes lets unify stuff. make sure tis clean".
 
+## 2026-11-07 19:48:57 For a UI task whose worker will need sandbox probe commands, the lead says in the contract from the start that adding sandbox commands to Sources/VibeSwitcher/Sandbox.swift is accepted. Those commands only drive the sandbox's own windows and pasteboard, and run no commands and write no files. The note goes in before any audit, never after one has started.
+
+The same setback happened twice on 2026-11-07. terminal-panes-text-can and chat-view-copying-text each came back "suspect" with 0 Important findings, only because a sensitive-path edit (Sandbox.swift probes) wasn't covered by a lead note. In the second case the lead's note arrived after auto_advance had already started the verifier. Each cost a second audit round.
+

@@ -82,3 +82,10 @@ Each time the witness noticed ("held long, idle N min"), but nothing ended the r
 Task: tests-long-synchronous
 Check: task turn-this-incident-into-10 turns it into a check that runs before merge.
 
+## 2026-11-07 19:46:01 merge(task) flattened a branch whose job was to merge origin/main. The other Mac's commits landed as rebased copies, so origin/main is not an ancestor of main and push_remote refuses. The other Mac's lead records (decisions.md 31 lines, incidents.md 20, progress.md 152) were dropped when docs/lead was restored to the base copy.
+
+Evidence: merge-github-s-main: the audited branch head 7a263116 is a true merge (`git merge-base --is-ancestor origin/main 7a263116` held, per the audit). After merge(task), main is at 80f93d96 and `git merge-base --is-ancestor origin/main main` fails. fetch_remote now says main is 95 ahead and 80 behind; merge_remote would conflict in AccountUsage.swift, Sandbox.swift, AccountUsageTests, IgnoreUsageLimitsTests, WalletLocalLinkTests and ShellLaunchHostTests; push_remote refuses because it wouldn't be a fast-forward. `git diff --stat 7a263116 80f93d96`: only docs/lead differs (decisions.md -31, incidents.md -20, progress.md -152 lines). Code is identical to the audited merge.
+
+Task: merge-github-s-main
+Check: task turn-this-incident-into-11 turns it into a check that runs before merge.
+
