@@ -607,6 +607,85 @@ struct LeadRemoteTests: LeadTeamFixture {
         #expect(Git.run(["show", "main:docs/lead/decisions.md"], in: scene.root).output.contains("## the other Mac's later decision"))
     }
 
+    /// turn-this-incident-into-12, 2026-11-07 22:10: the same incident a second time, through a batch. auto_advance
+    /// (merge_batching: always) merged redo-the-github-merge, whose branch held a true merge of origin/main (the other
+    /// Mac's commits, its "Lead: decisions and progress" commits among them), together with verifier-isolation "as
+    /// one batch". It landed squashed into one single-parent commit (98df3ea2), so origin/main still wasn't an
+    /// ancestor of main and push_remote was blocked again. (The app then running was built at 17:28, before the fix
+    /// in merge and in batches, `Worktrees.put` with the fetched tip, landed at 20:15.) Whichever place the task takes
+    /// on the stack, the remote's tip lands as itself, an ancestor of main, the batch's other task beside it.
+    @Test(arguments: [true, false])
+    func aBatchWithATaskThatMergedTheRemoteInLandsTheRemotesCommitsAsThemselves(remoteFirst: Bool) async throws {
+        let scene = try makeScene()
+        // The other Mac: code, and lead records committed as the lead commits them.
+        _ = try pushed(scene, "b.txt", "bee\n", message: "Remote b")
+        _ = try pushed(scene, "docs/lead/progress.md", "- the other Mac's progress\n", append: true, message: LeadRecords.subject)
+        let tip = try pushed(scene, "docs/lead/decisions.md", "## the other Mac's decision\n", append: true, message: LeadRecords.subject)
+        // This Mac, meanwhile: its own records, so the worker's merge is a true merge and main lacks the remote's tip.
+        try commit("docs/lead/progress.md", "- local progress\n", in: scene.root, append: true, message: LeadRecords.subject)
+        let runtime = FakeRuntime()
+        let lead = try lead(scene.root, runtime)
+        lead.power = { nil }
+        lead.macLimits = { MacLimits(maxSessions: 12) }
+        lead.batchSize = 2
+        lead.batchWindow = 0
+        let set = lead.call("configure", ["merge_batching": "always"])
+        #expect(!set.isError, "\(set.text)")
+        #expect(!lead.call("fetch_remote", [:]).isError)
+
+        /// `slug`'s worker started, `work` done in its worktree, reported done, and its audit passed.
+        func audited(_ slug: String, _ work: (String) throws -> Void) throws {
+            let added = lead.call("add_task", ["title": slug, "goal": "g", "acceptance": ["a"], "review": "audit", "auto_advance": true])
+            #expect(!added.isError, "\(added.text)")
+            #expect(!lead.call("start_worker", ["task": slug]).isError)
+            try work(Worktrees.path(root: scene.root, slug: slug))
+            #expect(!(try seat("worker-\(slug)", runtime)).call("report", doneReport("done")).isError)
+            let audit = lead.call("audit", ["task": slug])
+            #expect(!audit.isError, "\(audit.text)")
+            let verdict = try seat("verify-\(slug)", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "tests": "passed", "summary": "ok"])
+            #expect(!verdict.isError, "\(verdict.text)")
+        }
+        // redo-the-github-merge: origin/main merged in, the records' conflict resolved by hand.
+        let redo = {
+            try audited("redo-the-github-merge") { worktree in
+                _ = Git.run(["merge", "-q", "--no-edit", "origin/main"], in: worktree)
+                if !Git.run(["diff", "--name-only", "--diff-filter=U"], in: worktree).output.isEmpty {
+                    try "# Progress\n\n- first\n- local progress\n- the other Mac's progress\n"
+                        .write(toFile: worktree + "/docs/lead/progress.md", atomically: true, encoding: .utf8)
+                    Git.run(["add", "docs/lead"], in: worktree)
+                    #expect(Git.run(["commit", "-q", "--no-edit"], in: worktree).ok)
+                }
+                #expect(self.isAncestor(tip, of: "HEAD", in: worktree))
+                #expect(Git.run(["rev-list", "--merges", "--count", "main..HEAD"], in: worktree).output == "1")
+            }
+        }
+        // verifier-isolation: work of its own.
+        let other = { try audited("verifier-isolation") { try self.commit("v.txt", "vee\n", in: $0, message: "Verifier isolation") } }
+        if remoteFirst { try redo(); try other() } else { try other(); try redo() }
+        let before = head(scene.root)
+
+        let advancing = LeadAdvanceTests.Advancing(lead)
+        defer { advancing.stop() }
+        let slugs = ["redo-the-github-merge", "verifier-isolation"]
+        #expect(await advancing.until { slugs.allSatisfy { BoardStore(root: scene.root).load().task($0)?.status == .done } })
+        let tasks = slugs.compactMap { BoardStore(root: scene.root).load().task($0) }
+        #expect(tasks.count == 2 && tasks.allSatisfy { Set($0.merged?.batch ?? []) == Set(slugs) }, "merged one at a time, not as one batch: \(tasks.map { $0.merged?.batch ?? [] })")
+
+        let main = head(scene.root)
+        // The incident: 98df3ea2, one commit with a single parent and the remote's subjects in its message.
+        let log = Git.run(["log", "--format=%h %p %s", "\(before)..\(main)"], in: scene.root).output
+        #expect(isAncestor(tip, of: main, in: scene.root),
+                "origin/main (\(tip.prefix(8))) isn't an ancestor of main (\(main.prefix(8))): the batch squashed or rebased the branch that merged it\n\(log)")
+        #expect(isAncestor(before, of: main, in: scene.root))
+        #expect(Git.run(["show", "\(main):b.txt"], in: scene.root).output == "bee")
+        #expect(Git.run(["show", "\(main):v.txt"], in: scene.root).output == "vee")
+        let progress = Git.run(["show", "\(main):docs/lead/progress.md"], in: scene.root).output
+        #expect(progress.contains("- local progress") && progress.contains("- the other Mac's progress"), "\(progress)")
+        #expect(Git.run(["show", "\(main):docs/lead/decisions.md"], in: scene.root).output.contains("## the other Mac's decision"))
+        let push = lead.call("push_remote", [:])
+        #expect(!push.text.contains("wouldn't be a fast-forward"), "\(push.text)")
+    }
+
     // MARK: Roles
 
     @Test func workersAndVerifiersHaveNeitherTool() throws {
