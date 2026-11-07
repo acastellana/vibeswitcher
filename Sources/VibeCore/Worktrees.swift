@@ -783,11 +783,13 @@ public enum Worktrees {
     /// one (`TestLock.standard()`), tests a scratch one.
     /// The lead's records under `records` (`records_dir`) land as the base has them, conflicted or merged cleanly
     /// (`baseRecords`), and conflicts only in them don't stop it (`takeBaseRecords`).
+    /// A commit that carries commits of `remote` (the remote's tip fetch_remote fetched) the base lacks lands as a true
+    /// merge, its records the base's and the remote's by union (`landAsMerge`).
     /// With `rerun`, a failing test command may run once more (see `runChecks`): `passedOnRerun` when that passes.
     /// `tested` hears the passing test command's output (the rerun's, when that's what passed), for its test count.
     public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
                                      scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout,
-                                     lock: TestLock?, records: String? = nil, rerun: ((String) -> String?)? = nil,
+                                     lock: TestLock?, records: String? = nil, remote: String? = nil, rerun: ((String) -> String?)? = nil,
                                      tested output: ((String) -> Void)? = nil, begun: ((Date) -> Void)? = nil) -> Check {
         let path = scratch.path
         let home = (home ?? scratch.deletingLastPathComponent().appendingPathComponent(scratch.lastPathComponent + "-home")).path
@@ -812,7 +814,7 @@ public enum Worktrees {
             if cancel?.isCancelled == true { return .cancelled }
             return .error(added.error.isEmpty ? "Couldn't set up a worktree to test \(commit.prefix(8)) in." : added.error)
         }
-        if let stopped = put(commit, onto: base, in: path, records: records) { return stopped }
+        if let stopped = put(commit, onto: base, in: path, records: records, remote: remote) { return stopped }
         guard cancel?.isCancelled != true else { return .cancelled }
         let tested = Git.run(["rev-parse", "HEAD"], in: path).output
         let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
@@ -828,8 +830,18 @@ public enum Worktrees {
     /// Puts the worktree at `path`'s detached HEAD, `commit`, on top of `base`: rebased, or squashed into one commit
     /// when it holds a merge; nil when HEAD is the result, else how it stopped (`conflict`, `error`, `cancelled`), with
     /// the worktree back at a clean state. The lead's records under `records` land as the base has them.
-    static func put(_ commit: String, onto base: String, in path: String, records: String?) -> Check? {
+    /// A branch that carries commits of `remote` (the remote's tip fetch_remote fetched) the base lacks lands as a
+    /// true merge instead (`landAsMerge`), so they stay themselves.
+    static func put(_ commit: String, onto base: String, in path: String, records: String?, remote: String? = nil) -> Check? {
         let cancel = ShellCancel.current
+        // merge-github-s-main, 2026-11-06: a branch whose job was to merge origin/main was squashed onto main. The
+        // other Mac's commits landed as copies, so origin/main wasn't an ancestor of main and push_remote refused,
+        // and its lead records were put back to main's copy. Rebased or squashed, the remote's commits would be
+        // copies; merged whole, they're themselves.
+        if let carried = carried(remote, onto: base, in: path) {
+            guard let stopped = landAsMerge(onto: base, carrying: carried, in: path, records: records) else { return nil }
+            return cancel?.isCancelled == true ? .cancelled : stopped
+        }
         // A worker brings its branch up to date by merging the base in. Rebasing would drop that merge and replay
         // the commits before it, conflicts and all, so such a branch lands as one commit on top of the base; either
         // way the base's history stays a line.
@@ -863,17 +875,20 @@ public enum Worktrees {
         let path: String
         let home: String
         let records: String?
+        /// The remote's tip fetch_remote fetched: a commit that carries it lands as a true merge (`put`).
+        let remote: String?
         /// The commit the stack starts from, and each commit pushed on it since (`reset`), in order.
         public private(set) var base: String = ""
         public private(set) var tips: [String] = []
         /// Whether the worktree was made.
         private var made = false
 
-        public init(root: String, scratch: URL, home: URL, records: String?) {
+        public init(root: String, scratch: URL, home: URL, records: String?, remote: String? = nil) {
             self.root = root
             path = scratch.path
             self.home = home.path
             self.records = records
+            self.remote = remote
         }
 
         /// The stack's top: the last commit pushed, else its base.
@@ -896,7 +911,7 @@ public enum Worktrees {
         public func push(_ commit: String) -> Check? {
             let under = top
             if let error = checkout(commit) { return .error(error) }
-            if let stopped = Worktrees.put(commit, onto: under, in: path, records: records) {
+            if let stopped = Worktrees.put(commit, onto: under, in: path, records: records, remote: remote) {
                 _ = checkout(under)
                 return stopped
             }
@@ -1304,6 +1319,93 @@ public enum Worktrees {
             + (subjects.count > 1 ? [""] + subjects.dropFirst().map { "- \($0)" } : [])
         let committed = Git.run(["commit", "-q", "-m", message.joined(separator: "\n")] + (author.isEmpty ? [] : ["--author", author]), in: path)
         return committed.ok ? nil : .error("Committing the branch squashed onto \(base.prefix(8)) failed: \(said(committed))")
+    }
+
+    /// The newest commit of `remote` (the remote's tip as fetch_remote fetched it, from the vault: a remote-tracking
+    /// ref is anyone's to move) that the detached HEAD at `path` holds and `base` lacks; nil when there's none, or no
+    /// `remote`.
+    static func carried(_ remote: String?, onto base: String, in path: String) -> String? {
+        guard let remote, !remote.isEmpty else { return nil }
+        let found = Git.run(["merge-base", "HEAD", remote], in: path)
+        guard found.ok, !found.output.isEmpty else { return nil }
+        return Git.run(["merge-base", "--is-ancestor", found.output, base], in: path).ok ? nil : found.output
+    }
+
+    /// Replaces the detached HEAD at `path` with a merge commit of it on `base` (the base its first parent, so the
+    /// base's first-parent history stays a line), for a branch that carries `carried`, a remote's commit the base
+    /// lacks (`carried(_:onto:in:)`): its commits stay themselves, so the remote's tip stays an ancestor of the base.
+    /// The records under `records` land as the base's and `carried`'s, by union (`remoteRecords`), whatever the
+    /// branch did to them, and conflicts only in them don't stop it. Nil when that's done; `conflict` when the branch
+    /// conflicts with `base` elsewhere; `error`, saying what failed, when something else stops it.
+    static func landAsMerge(onto base: String, carrying carried: String, in path: String, records: String?) -> Check? {
+        let tip = Git.run(["rev-parse", "HEAD"], in: path).output
+        let subject = Git.run(["log", "-1", "--format=%s", tip], in: path).output
+        let author = Git.run(["log", "-1", "--format=%an <%ae>", tip], in: path).output
+        let checkout = Git.run(["checkout", "-q", "--detach", base], in: path)
+        guard checkout.ok else { return .error("Checking out \(base.prefix(8)) to merge the branch into failed: \(said(checkout))") }
+        let back = {
+            Git.run(["merge", "--abort"], in: path)
+            Git.run(["reset", "-q", "--hard"], in: path)
+        }
+        let merge = noEditor(["merge", "--no-ff", "--no-commit", "-q", tip], in: path)
+        if !merge.ok {
+            let unmerged = Git.run(["diff", "--name-only", "-z", "--diff-filter=U"], in: path).output
+                .split(separator: "\0").map(String.init)
+            let logs = Set(records.map(LeadRecords.paths) ?? [])
+            guard !unmerged.isEmpty, unmerged.allSatisfy(logs.contains) else {
+                back()
+                return unmerged.isEmpty ? .error("Merging \(tip.prefix(8)) into \(base.prefix(8)) failed, and not on a conflict: \(said(merge))") : .conflict
+            }
+        }
+        if let records, let failure = remoteRecords(records, base: base, remote: carried, in: path) {
+            back()
+            return .error("Taking \(base.prefix(8))'s and the remote's lead records (\(records)) into the merge failed: \(failure)")
+        }
+        let message = "Merge \(tip.prefix(8))" + (subject.isEmpty ? "" : ": \(subject)")
+        let committed = noEditor(["commit", "-q", "-m", message] + (author.isEmpty ? [] : ["--author", author]), in: path)
+        guard committed.ok else {
+            back()
+            return .error("Committing the merge of \(tip.prefix(8)) into \(base.prefix(8)) failed: \(said(committed))")
+        }
+        return nil
+    }
+
+    /// Puts every one of the lead's records under `records` in the index and worktree at `path` as the union of
+    /// `base`'s and `remote`'s (from their merge base, as merge_remote merges them: both sides' lines kept, the
+    /// base's first where they overlap); one only one side has, as that side has it; gone where neither has it. A
+    /// worker's own edits aren't taken: workers may not edit the records (`LeadLaunch`). Nil when done, else what
+    /// failed.
+    static func remoteRecords(_ records: String, base: String, remote: String, in path: String) -> String? {
+        let ancestor = Git.run(["merge-base", base, remote], in: path).output
+        func blob(_ commit: String, _ file: String) -> String? {
+            guard !commit.isEmpty else { return nil }
+            let found = Git.run(["rev-parse", "--verify", "--quiet", "\(commit):\(file)"], in: path)
+            return found.ok && !found.output.isEmpty ? found.output : nil
+        }
+        // git's empty blob, which every repository has: the merge base of a record only one side's history added.
+        let empty = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+        for file in LeadRecords.paths(records) {
+            let result: String?
+            switch (blob(base, file), blob(remote, file)) {
+            case (nil, nil): result = nil
+            case (let one?, nil), (nil, let one?): result = one
+            case (let ours?, let theirs?) where ours == theirs: result = ours
+            case (let ours?, let theirs?):
+                let merged = Git.run(["merge-file", "--union", "--object-id", ours, blob(ancestor, file) ?? empty, theirs], in: path)
+                guard merged.ok, !merged.output.isEmpty else { return "git merge-file --union on \(file): \(said(merged))" }
+                result = merged.output
+            }
+            if let result {
+                let staged = Git.run(["update-index", "--add", "--cacheinfo", "100644,\(result),\(file)"], in: path)
+                guard staged.ok else { return "staging \(file): \(said(staged))" }
+                let written = Git.run(["checkout-index", "-f", "--", file], in: path)
+                guard written.ok else { return "writing \(file): \(said(written))" }
+            } else {
+                let removed = Git.run(["rm", "-q", "-f", "--ignore-unmatch", "--", file], in: path)
+                guard removed.ok else { return "removing \(file): \(said(removed))" }
+            }
+        }
+        return nil
     }
 
     /// Files Claude Code reads as settings or instructions (project settings and hooks under `.claude/`, `.mcp.json`,

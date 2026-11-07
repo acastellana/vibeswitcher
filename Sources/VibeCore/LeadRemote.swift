@@ -417,6 +417,14 @@ extension LeadToolset {
         return MCPToolResult(text: lines.joined(separator: "\n"))
     }
 
+    /// The remote's tip as fetch_remote last fetched it (the vault's, never the ref's: any session can move that); nil
+    /// before a fetch. merge lands a task that carries commits of it as a true merge (`Worktrees.put`).
+    func fetchedTip(_ workflow: LeadWorkflow) -> String? {
+        let remote = workflow.remoteName
+        guard LeadRemote.isName(remote) else { return nil }
+        return vault.head(root: root, branch: LeadRemote.trackingRef(remote: remote, branch: workflow.base))
+    }
+
     public static func commits(_ count: Int) -> String { "\(count) commit\(count == 1 ? "" : "s")" }
 
     static func outlook(_ outlook: LeadRemote.Outlook, base: String, label: String) -> String {

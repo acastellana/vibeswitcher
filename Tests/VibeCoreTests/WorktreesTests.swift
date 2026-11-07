@@ -360,6 +360,66 @@ struct WorktreesTests {
         #expect(heads(other, "s").tip == head)
     }
 
+    /// merge-github-s-main: a branch that carries commits of the remote's fetched tip the base lacks lands as a true
+    /// merge, whether it merged them in or fast-forwarded onto them (no merge commit, so it would otherwise be rebased
+    /// as copies), through `rebaseAndTest` and a batch's stack alike. The records are the base's and the remote's, by
+    /// union; a conflict outside them still stops it.
+    @Test func aBranchCarryingTheRemotesCommitsLandsAsATrueMerge() throws {
+        let root = try repo()
+        try records(["progress.md": "# Progress\n\n- one\n"], in: root)
+        // The other Mac's line of history, as fetch_remote fetched it.
+        let other = try Worktrees.create(root: root, slug: "other-mac")
+        try commit("r.txt", "r\n", in: other)
+        try records(["progress.md": "# Progress\n\n- one\n- the other Mac's\n"], in: other)
+        let remote = Git.run(["rev-parse", "HEAD"], in: other).output
+        // The worker fast-forwards onto it and adds its own work; the base moves on meanwhile.
+        let worktree = try Worktrees.create(root: root, slug: "w")
+        #expect(Git.run(["merge", "-q", "--ff-only", remote], in: worktree).ok)
+        try commit("w.txt", "w\n", in: worktree)
+        try commit("c.txt", "c\n", in: root)
+        try records(["progress.md": "# Progress\n\n- one\n- the base's\n"], in: root)
+        let main = Git.run(["rev-parse", "main"], in: root).output
+        let tip = Git.run(["rev-parse", "HEAD"], in: worktree).output
+        #expect(Git.run(["rev-list", "--merges", "\(main)..\(tip)"], in: root).output.isEmpty)
+
+        // Without the remote's tip, as before: rebased, the other Mac's commits as copies.
+        guard case .passed(let rebased) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch(), lock: lock,
+                                                                  records: "docs/lead") else { Issue.record("no rebase"); return }
+        #expect(!Git.run(["merge-base", "--is-ancestor", remote, rebased], in: root).ok)
+
+        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f c.txt && test -f r.txt && test -f w.txt",
+                                              scratch: scratch(), lock: lock, records: "docs/lead", remote: remote)
+        guard case .passed(let tested) = checked else { Issue.record("\(checked)"); return }
+        #expect(Git.run(["rev-list", "--parents", "-n", "1", tested], in: root).output == "\(tested) \(main) \(tip)")
+        #expect(Git.run(["merge-base", "--is-ancestor", remote, tested], in: root).ok)
+        let progress = Git.run(["show", "\(tested):docs/lead/progress.md"], in: root).output
+        #expect(progress.contains("- the base's") && progress.contains("- the other Mac's") && !progress.contains("<<<<<<<"), "\(progress)")
+        #expect(heads(root, "w").tip == tip)
+
+        // A batch's stack lands it the same way.
+        let stack = Worktrees.Stack(root: root, scratch: temp.url("wt-scratch").appendingPathComponent("stack"),
+                                    home: temp.url("wt-scratch").appendingPathComponent("stack-home"), records: "docs/lead", remote: remote)
+        defer { stack.remove() }
+        try commit("d.txt", "d\n", in: root)
+        let moved = Git.run(["rev-parse", "main"], in: root).output
+        let branch = try Worktrees.create(root: root, slug: "v")
+        Git.run(["reset", "-q", "--hard", Git.run(["rev-parse", "\(main)~2"], in: root).output], in: branch)
+        #expect(Git.run(["merge", "-q", "--no-edit", remote], in: branch).ok)
+        try commit("v.txt", "v\n", in: branch)
+        let vTip = Git.run(["rev-parse", "HEAD"], in: branch).output
+        #expect(stack.reset(to: moved) == nil)
+        #expect(stack.push(vTip) == nil)
+        #expect(Git.run(["rev-list", "--parents", "-n", "1", stack.top], in: root).output == "\(stack.top) \(moved) \(vTip)")
+        #expect(Git.run(["show", "\(stack.top):v.txt"], in: root).output == "v")
+
+        // A conflict outside the records still stops it, the branch as it was.
+        try commit("w.txt", "the base's w\n", in: root)
+        let conflicting = Git.run(["rev-parse", "main"], in: root).output
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: conflicting, test: "true", scratch: scratch(), lock: lock,
+                                        records: "docs/lead", remote: remote) == .conflict)
+        #expect(heads(root, "w").tip == tip)
+    }
+
     /// The user's own work in progress in the main checkout, on files the merge doesn't change, doesn't stop it,
     /// and is there afterwards as it was: modified, not staged.
     @Test func uncommittedChangesTheMergeDoesntTouchStay() throws {
