@@ -3107,11 +3107,16 @@ final class LiftedGlass {
 
     let window: NSWindow
     private(set) var panes: [Pane] = []
+    /// The window's side panes, found apart from the glass: if a macOS drew them some other way and nothing was lifted,
+    /// `problems` still looks at them.
+    private let sidePanes: [NSView]
 
     /// Lifts `window`'s glass panes (none before macOS 26, or when they're collapsed). Each `restore()` must follow.
     init(window: NSWindow) {
         self.window = window
-        guard #available(macOS 26, *), let root = window.contentView?.superview ?? window.contentView else { return }
+        let root = window.contentView?.superview ?? window.contentView
+        sidePanes = root.map(Self.sidePanes(in:)) ?? []
+        guard #available(macOS 26, *), let root else { return }
         func walk(_ view: NSView) {
             if let glass = view as? NSGlassEffectView, let wrapper = glass.superview,
                String(describing: type(of: wrapper)).contains("SplitViewItemViewWrapper") {
@@ -3121,6 +3126,18 @@ final class LiftedGlass {
             }
         }
         walk(root)
+    }
+
+    /// The split view's panes at an edge of it and narrow enough to be a sidebar or inspector, not the middle.
+    private static func sidePanes(in root: NSView) -> [NSView] {
+        var found: [NSView] = []
+        func walk(_ view: NSView) {
+            guard String(describing: type(of: view)).contains("SplitViewItemViewWrapper") else { return view.subviews.forEach(walk) }
+            guard !view.isHiddenOrHasHiddenAncestor, view.frame.width > 1, view.frame.width <= 420, let split = view.superview else { return }
+            if view.frame.minX < 1 || view.frame.maxX >= split.bounds.width - 1 { found.append(view) }
+        }
+        walk(root)
+        return found
     }
 
     @available(macOS 26, *)
@@ -3186,8 +3203,8 @@ final class LiftedGlass {
     func problems(view: NSView, image: NSBitmapImageRep, sidebarHasRows: Bool) -> [String] {
         let scale = CGFloat(image.pixelsWide) / max(view.bounds.width, 1)
         let dark = window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        return panes.compactMap { pane in
-            let rect = pane.wrapper.convert(pane.wrapper.bounds, to: view)
+        return sidePanes.compactMap { wrapper in
+            let rect = wrapper.convert(wrapper.bounds, to: view)
             let top = view.isFlipped ? rect.minY : view.bounds.height - rect.maxY
             let pixels = CGRect(x: rect.minX * scale, y: top * scale, width: rect.width * scale, height: rect.height * scale)
             let isSidebar = rect.minX < 1
