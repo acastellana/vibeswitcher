@@ -250,3 +250,7 @@ Lead mail's first contract made tell_lead unforgeable but missed direct inbox se
 
 turn-this-incident-into-9 auto-started on the generic brief before the sharpened contract landed (2026-11-03). If it happens again despite this, make a product task so incident tasks wait for the lead's contract.
 
+## 2026-11-08 16:53:35 2026-11-08: GitHub's main (3b271e17, 226 commits from the other Mac) is merged into this Mac's main by a worker (task merge-github-s-main, auto_advance off) as a true merge with the two test conflicts resolved and the full suite passing. The user then fast-forwards main (`git merge --ff-only agent/merge-github-s-main`) and pushes, and the lead installs. merge(task) isn't used for it because the installed tool server rebases a branch onto main.
+
+The user asked to fetch the latest and install. The trial merge conflicts in WalletRobustnessTests and TerminalBridgeTests, which this Mac's handover-tests-stop and the other Mac's 204a442f both changed, so a hand merge by the user would need conflict resolution and testing. A rebase would rewrite 226 published commits.
+

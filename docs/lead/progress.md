@@ -3323,3 +3323,5 @@
 - 2026-11-07 22:29 Automatically (auto_advance): Merged handover-tests-stop (Handover tests stop timing out on a loaded Mac) into main at d5d3617e, on its passing audit and the full test run.
 - 2026-11-07 22:29 Automatically (auto_advance): Cleaned up handover-tests-stop (freed 1.4 GB of build output and temporary folders). It stays done.
 - 2026-11-07 22:29 Update: Today: banner Allow/Deny, Ignore usage limits, safer installs, secrets sweep — **Landed (all audited, full suite at merge):**
+- 2026-11-08 16:53 Planned merge-github-s-main: Merge GitHub's main (226 commits from the other Mac) into this Mac's main
+- 2026-11-08 16:53 Started a worker on merge-github-s-main
