@@ -1409,7 +1409,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         func call(_ data: String, reason: String) -> WalletCardModel {
             let request = WalletRequest(createdAt: Date(timeIntervalSince1970: 1_793_448_000), expiresAt: Date(timeIntervalSince1970: 1_793_534_400),
                                         requestedBy: .init(project: "example", session: "example", label: "Local test"), workspace: "example",
-                                        from: "0x0000000000000000000000000000000000000001", chainId: 4221, action: .call,
+                                        from: "0x0000000000000000000000000000000000000001", chainId: 84532, action: .call,
                                         to: "0x16F7fFed6fc5113b34188d79c632760d7A20915b", asset: "native", amount: "0", data: data, reason: reason)
             return WalletCardModel(request: request, requestedBy: "example-agent", label: "Local test", state: .waiting)
         }
