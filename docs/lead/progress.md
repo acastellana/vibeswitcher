@@ -4215,3 +4215,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 11:23 Automatically (auto_advance): Started the audit of settings-redesign-clear at dfdae16e (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-08 11:32 Audit of settings-redesign-clear: incomplete, clean, round 1: 1 Important open, 3 Nit open
 - 2026-11-08 11:37 Merged config-seal-claude-s: Config seal: Claude's skill-sync bookkeeping doesn't hold the team; folder cards name what changed and when (build f38147da532c)
+- 2026-11-08 11:37 Automatically (auto_advance): Merged config-seal-claude-s (Config seal: Claude's skill-sync bookkeeping doesn't hold the team; folder cards name what changed and when) into main at fff0ce2c, on its passing audit and the full test run.
+- 2026-11-08 11:37 Started a worker on settings-redesign-clear
+- 2026-11-08 11:37 Automatically (auto_advance): Sent settings-redesign-clear's worker the open Important findings settings-redesign-clear:F1 from its audit at dfdae16e (in a new worker: its last one was released during the audit).
+- 2026-11-08 11:37 Automatically (auto_advance): Cleaned up config-seal-claude-s (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-08 11:37 Automatically (auto_advance): Didn't start config-seal-covers: config-seal-covers's worker is still running. Send it what to do with message, or stop_worker first.
