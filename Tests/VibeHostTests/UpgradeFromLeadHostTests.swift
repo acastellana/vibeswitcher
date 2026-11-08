@@ -63,8 +63,12 @@ import Testing
 
     /// The toolchain's part of a cache entry's name: what `swift --version` says (the compiler and the target, the
     /// macOS version in it), hashed. A new toolchain builds the old host again, once.
+    /// The driver leaves a TemporaryDirectory.* folder in its TMPDIR even for this: it gets one of its own, removed after.
     static func toolchainKey(xcrun: String = "/usr/bin/xcrun") throws -> String {
-        let version = try run(xcrun, ["swift", "--version"])
+        let temporary = scratchRoot.appendingPathComponent("swift-version-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let version = try run(xcrun, ["swift", "--version"], temporary: temporary)
         return SHA256.hash(data: Data(version.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
     }
 
