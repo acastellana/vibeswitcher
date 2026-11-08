@@ -80,7 +80,7 @@ extension LeadToolset {
 
     /// Merges `slugs` as one batch (see the extension's comment). Throws, with nothing tested or changed, when the batch
     /// can't start at all (the battery hold, the settings, another merge into the base, the load, no test command).
-    func mergeBatch(_ given: [String]) throws -> BatchResult {
+    func mergeBatch(_ given: [String], locked: (() -> Void)? = nil) throws -> BatchResult {
         var slugs: [String] = []
         for slug in given where !slugs.contains(slug) { slugs.append(slug) }
         guard slugs.count <= Self.batchLimit else { throw Problem(text: "Not merged: a batch takes at most \(Self.batchLimit) tasks; this was \(slugs.count).") }
@@ -126,6 +126,7 @@ extension LeadToolset {
         if let lock = Worktrees.indexLock(blocking: base, root: root) {
             throw Problem(text: "Not merged (nothing was tested): \(Worktrees.refusal(lock))")
         }
+        locked?()
         let names = gates.map(\.task.slug).joined(separator: ", ")
         let waited = try waitForLoad(workflow, slug: names)
 
@@ -549,8 +550,8 @@ extension LeadToolset {
     }
 
     /// auto_advance's batch step: `mergeBatch`, with the records flushed after.
-    func advanceMergeBatch(_ slugs: [String]) throws -> BatchResult {
-        let result = try mergeBatch(slugs)
+    func advanceMergeBatch(_ slugs: [String], locked: (() -> Void)? = nil) throws -> BatchResult {
+        let result = try mergeBatch(slugs, locked: locked)
         records.flush(base: base)
         return result
     }

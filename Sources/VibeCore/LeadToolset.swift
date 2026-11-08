@@ -2951,7 +2951,7 @@ public final class LeadToolset: MCPToolset {
         return MergeGate(task: task, commit: commit, audited: audited, dismissed: dismissed, staleAccepted: staleAccepted)
     }
 
-    private func merge(_ slug: String, acceptStale: String? = nil) throws -> MCPToolResult {
+    private func merge(_ slug: String, acceptStale: String? = nil, locked: (() -> Void)? = nil) throws -> MCPToolResult {
         // The remote's tip, read once: what the gate checks the branch against, what it lands as and whose records are
         // taken after are the same answer, and no answer stops it here, before anything is tested.
         let fetched = try fetchedTip(self.workflow, not: "Not merged (nothing was tested)")
@@ -2977,6 +2977,7 @@ public final class LeadToolset: MCPToolset {
         if let lock = Worktrees.indexLock(blocking: base, root: root) {
             throw Problem(text: "Not merged (nothing was tested): \(Worktrees.refusal(lock))")
         }
+        locked?()
         // Timing-sensitive tests fail on a Mac every project's team is loading: the tests wait (a bounded time) for
         // the load to drop.
         let waited = try waitForLoad(workflow, slug: slug)
@@ -5852,8 +5853,9 @@ extension LeadToolset {
 
     func advanceStart(_ slug: String, when: @escaping (LeadTask) -> Bool) throws -> MCPToolResult { try startWorker(slug, when: when) }
     func advanceAudit(_ slug: String, restarting head: String? = nil) throws -> MCPToolResult { try audit(slug, restart: head != nil, expectedHead: head) }
-    func advanceMerge(_ slug: String) throws -> MCPToolResult {
-        let merged = try merge(slug)
+    /// `locked`: called once the merge holds its locks and is past its refusals, about to wait for its tests.
+    func advanceMerge(_ slug: String, locked: (() -> Void)? = nil) throws -> MCPToolResult {
+        let merged = try merge(slug, locked: locked)
         records.flush(base: base)
         return merged
     }
@@ -5872,6 +5874,13 @@ extension LeadToolset {
     func advanceExclusively<T>(_ body: () throws -> T) throws -> T { try exclusively("advance", body) }
     /// `body` while no configure is between writing workflow.md and recording it in the vault.
     func advanceSettled<T>(_ body: () throws -> T) throws -> T { try exclusively("configure", body) }
+    /// A merge of `slug` itself is under way (merge's own lock, looked at and let go).
+    func mergeUnderWay(_ slug: String) -> Bool {
+        guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else { return true }
+        lock.release()
+        return false
+    }
+
     /// No merge of `slug`, nor into the base branch, is under way (merge's own locks, looked at and let go).
     func mergeIdle(_ slug: String) -> Bool {
         let base = self.base

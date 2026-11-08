@@ -1308,6 +1308,140 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(Git.run(["show", "main:b.txt"], in: root).ok && Git.run(["show", "main:c.txt"], in: root).ok)
     }
 
+    /// A test command whose first run waits for `release` (as a long suite would), having touched `started`.
+    func heldRun(_ then: String) -> (test: String, started: String, release: String) {
+        let gate = temp.url("gate").path, started = temp.url("started").path, release = temp.url("release").path
+        return ("if mkdir '\(gate)' 2>/dev/null; then touch '\(started)'; while [ ! -e '\(release)' ]; do sleep 0.05; done; fi; \(then)", started, release)
+    }
+
+    /// 2026-11-08: one pass ran a merge's whole test run, and an audit sat unstarted for 66 minutes behind it, with
+    /// findings and planned tasks. While the tests run, a done report gets its audit, a verdict's open findings go back
+    /// to the worker, and a planned task starts.
+    @Test func otherTasksMoveOnWhileAMergesTestsRun() async throws {
+        let held = heldRun("echo ran >> '\(log)'")
+        let (root, runtime, lead) = try team(test: held.test, ["max_workers": 5])
+        lead.macLimits = { MacLimits(maxSessions: 12) }
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        defer { FileManager.default.createFile(atPath: held.release, contents: nil) }
+        _ = lead.call("add_task", ["title": "Add b", "goal": "g", "acceptance": ["a"]])
+        _ = lead.call("add_task", ["title": "Audit c", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        _ = lead.call("add_task", ["title": "Findings d", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        #expect(await advancing.until { ["add-b", "audit-c", "findings-d"].allSatisfy { task($0, root)?.status == .running } })
+        try work("findings-d", file: "d.txt", root: root, runtime)
+        #expect(await advancing.until { vault.current(.verifier, root: root, task: "findings-d") != nil })
+
+        try work("add-b", file: "b.txt", root: root, runtime)
+        #expect(await appears(held.started))
+
+        try work("audit-c", file: "c.txt", root: root, runtime)
+        #expect(await advancing.until { vault.current(.verifier, root: root, task: "audit-c")?.auditing == head("agent/audit-c", root)
+            && reports(runtime).contains { $0.contains("Started the audit of audit-c") } }, "\(reports(runtime))")
+
+        let finding: [String: Any] = ["severity": "Important", "file": "d.txt", "line": 1, "evidence": "d.txt says bee, the contract wants d",
+                                      "failure_scenario": "cat d.txt gives bee where the contract wants d", "status": "open"]
+        let verdict = try seat("verify-findings-d", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "one problem",
+                                                                                     "tests": "passed", "findings": [finding]])
+        #expect(!verdict.isError, "\(verdict.text)")
+        #expect(await advancing.until { toWorker("findings-d", root, runtime).contains { $0.contains("F1") && $0.contains("contract wants d") }
+            && task("findings-d", root)?.autoSentBack != nil })
+
+        _ = lead.call("add_task", ["title": "Later e", "goal": "g", "acceptance": ["a"]])
+        #expect(await advancing.until { task("later-e", root)?.status == .running && task("later-e", root)?.worker != nil })
+
+        // All of it with the merge's tests still running.
+        #expect(task("add-b", root)?.status == .review && !Git.run(["show", "main:b.txt"], in: root).ok)
+        FileManager.default.createFile(atPath: held.release, contents: nil)
+        #expect(await advancing.until { task("add-b", root)?.status == .done && reports(runtime).contains { $0.contains("Merged add-b") } })
+        #expect(Git.run(["show", "main:b.txt"], in: root).ok)
+    }
+
+    /// The other half of it: only the merge stays one at a time, by two loops as well, however many passes come while
+    /// it runs. The second merge's run comes after the first's, and the report of each arrives.
+    @Test func mergesStayOneAtATimeWhilePassesGoOn() async throws {
+        let running = temp.url("running").path
+        let held = heldRun("rmdir '\(running)'")
+        let test = "mkdir '\(running)' || { echo overlap >> '\(log)'; exit 1; }; echo run >> '\(log)'; " + held.test
+        let (root, runtime, lead) = try team(test: test, ["max_workers": 2])
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        let other = Advancing(restarted(root, runtime))
+        defer { other.stop() }
+        defer { FileManager.default.createFile(atPath: held.release, contents: nil) }
+        _ = lead.call("add_task", ["title": "Add b", "goal": "g", "acceptance": ["a"]])
+        _ = lead.call("add_task", ["title": "Add c", "goal": "g", "acceptance": ["a"]])
+        #expect(await advancing.until { task("add-b", root)?.status == .running && task("add-c", root)?.status == .running })
+        try work("add-b", file: "b.txt", root: root, runtime)
+        try work("add-c", file: "c.txt", root: root, runtime)
+        #expect(await appears(held.started))
+        // Passes of both loops, each ended, with the first merge still in its tests.
+        for _ in 0..<3 {
+            await advancing.settle()
+            await other.settle()
+        }
+        #expect(try String(contentsOfFile: log, encoding: .utf8) == "run\n")
+        FileManager.default.createFile(atPath: held.release, contents: nil)
+        #expect(await advancing.until { task("add-b", root)?.status == .done && task("add-c", root)?.status == .done })
+        #expect(try String(contentsOfFile: log, encoding: .utf8) == "run\nrun\n")
+        #expect(Git.run(["show", "main:b.txt"], in: root).ok && Git.run(["show", "main:c.txt"], in: root).ok)
+        #expect(await advancing.until { ["Merged add-b", "Merged add-c"].allSatisfy { merged in
+            reports(runtime).contains { $0.contains(merged) } } }, "\(reports(runtime))")
+    }
+
+    /// A merge refused for as long as the user doesn't answer (first on the board): the lead hears it once, passes don't
+    /// spin on it, and the task behind it still merges.
+    @Test func aMergeWaitingOnTheUserNeitherLoopsNorHoldsBackTheNext() async throws {
+        let (root, runtime, lead) = try team(test: nil, ["merge_policy": "ask_sensitive", "sensitive_paths": "secret.txt"])
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Held b", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        #expect(await advancing.until { task("held-b", root)?.status == .running })
+        try work("held-b", file: "secret.txt", root: root, runtime)
+        #expect(await advancing.until { vault.current(.verifier, root: root, task: "held-b") != nil })
+        let verdict = try seat("verify-held-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "checked", "tests": "passed"])
+        #expect(!verdict.isError, "\(verdict.text)")
+        #expect(await advancing.until { reports(runtime).contains { $0.contains("Didn't merge held-b") } }, "\(reports(runtime))")
+
+        _ = lead.call("add_task", ["title": "Next c", "goal": "g", "acceptance": ["a"]])
+        #expect(await advancing.until { task("next-c", root)?.status == .running })
+        try work("next-c", file: "c.txt", root: root, runtime)
+        #expect(await advancing.until { task("next-c", root)?.status == .done && task("next-c", root)?.worktree == nil }, "\(reports(runtime))")
+        #expect(task("held-b", root)?.status == .review && !Git.run(["show", "main:secret.txt"], in: root).ok)
+
+        // Ten looks are ten runs of passes (and the odd one a write to the folder brings), not a spin.
+        await advancing.settle()
+        let before = advancing.passes
+        for _ in 0..<10 { await advancing.settle() }
+        #expect(advancing.passes - before <= 15, "\(advancing.passes - before) runs of passes")
+        #expect(reports(runtime).filter { $0.contains("Didn't merge held-b") }.count == 1, "\(reports(runtime))")
+    }
+
+    /// A task whose merge is running changes under it (the lead asks for an audit, or sets it back to planned): the
+    /// passes during the tests leave it alone, and the merge's end decides.
+    @Test(arguments: ["review", "status"])
+    func aTaskWhoseMergeIsRunningIsntAuditedOrStarted(_ change: String) async throws {
+        let held = heldRun("echo ran >> '\(log)'")
+        let (root, runtime, lead) = try team(test: held.test)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        defer { FileManager.default.createFile(atPath: held.release, contents: nil) }
+        _ = lead.call("add_task", ["title": "Add b", "goal": "g", "acceptance": ["a"]])
+        #expect(await advancing.until { task("add-b", root)?.status == .running })
+        let starts = reports(runtime).filter { $0.contains("Started a worker on add-b") }.count
+        try work("add-b", file: "b.txt", root: root, runtime)
+        #expect(await appears(held.started))
+        let changed = lead.call("update_task", change == "review" ? ["task": "add-b", "review": "audit"] : ["task": "add-b", "status": "planned"])
+        #expect(!changed.isError, "\(changed.text)")
+        await advancing.settle()
+        await advancing.settle()
+        #expect(verifiersSpawned(runtime).isEmpty, "\(verifiersSpawned(runtime))")
+        #expect(vault.current(.verifier, root: root, task: "add-b") == nil)
+        #expect(reports(runtime).filter { $0.contains("Started a worker on add-b") }.count == starts)
+        #expect(!reports(runtime).contains { $0.contains("Didn't start add-b") }, "\(reports(runtime))")
+        FileManager.default.createFile(atPath: held.release, contents: nil)
+        #expect(await advancing.until { reports(runtime).contains { ["Merged add-b", "Didn't merge add-b"].contains(where: $0.contains) } }, "\(reports(runtime))")
+    }
+
     @Test func aNewBuildsLoopTakesWhatsStillDueOnceAndNothingTwice() async throws {
         let (root, runtime, lead) = try team()
         // The old build: it started the worker, then was gone before the report came.

@@ -735,7 +735,9 @@ struct LeadRemoteTests: LeadTeamFixture {
         let advancing = LeadAdvanceTests.Advancing(lead)
         defer { advancing.stop() }
         let slugs = ["redo-the-github-merge", "verifier-isolation"]
-        #expect(await advancing.until { slugs.allSatisfy { BoardStore(root: scene.root).load().task($0)?.status == .done } })
+        // The records are committed after the tasks show done, and a merge runs beside the passes: wait for that commit too.
+        #expect(await advancing.until { slugs.allSatisfy { BoardStore(root: scene.root).load().task($0)?.status == .done }
+            && Git.run(["show", "\(head(scene.root)):docs/lead/progress.md"], in: scene.root).output.contains("- the other Mac's progress") })
         let tasks = slugs.compactMap { BoardStore(root: scene.root).load().task($0) }
         #expect(tasks.count == 2 && tasks.allSatisfy { Set($0.merged?.batch ?? []) == Set(slugs) }, "merged one at a time, not as one batch: \(tasks.map { $0.merged?.batch ?? [] })")
 
