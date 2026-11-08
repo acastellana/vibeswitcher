@@ -4415,3 +4415,4 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-08 21:40 Automatically (auto_advance): Started a worker on the-other-time-limits (The other time limits count awake time, and "still running" names only tests that were running), its after tasks done (turn-this-incident-into-16).
 - 2026-11-08 21:40 Released auto-advance-keeps's worker (idle since its done report on 9feae0f8) while its audit runs
 - 2026-11-08 21:40 Automatically (auto_advance): Started the audit of auto-advance-keeps at 9feae0f8 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 21:50 Audit of anything-needing-a-real: complete, clean, round 1: 1 Nit open, 2 Pre-existing open
