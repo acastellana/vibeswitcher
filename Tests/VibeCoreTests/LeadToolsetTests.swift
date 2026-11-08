@@ -1188,7 +1188,8 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(!merged.isError, "\(merged.text)")
         #expect(merged.text.contains("feature"))
         #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
-        #expect(underRecords("feature", in: root) == Git.run(["rev-parse", "agent/add-b"], in: root).output)
+        // The branch's commit, with the merge's provenance trailers (MergeProvenanceTests).
+        #expect(MergeProvenanceTests.isStamped(underRecords("feature", in: root), from: Git.run(["rev-parse", "agent/add-b"], in: root).output, in: root))
         // main didn't move.
         #expect(Git.run(["ls-tree", "--name-only", "main"], in: root).output == "a.txt")
         // Workers may not switch to it.

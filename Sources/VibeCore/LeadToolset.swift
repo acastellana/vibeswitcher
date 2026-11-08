@@ -2820,7 +2820,7 @@ public final class LeadToolset: MCPToolset {
         let checked = Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
                                               scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
                                               timeout: workflow.testTimeout, lock: heavyLock(workflow), records: workflow.recordsDir,
-                                              remote: fetchedTip(workflow), rerun: { output in
+                                              remote: fetchedTip(workflow), trailers: provenance(gate), rerun: { output in
                                                   rerun = MergeRerun.plan(after: output, workflow: workflow)
                                                   return rerun?.command
                                               }, baseline: baseline(on: current, plan: { rerun }, pairing: pairing),

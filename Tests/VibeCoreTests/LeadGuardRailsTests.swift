@@ -264,8 +264,9 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(!set.isError, "\(set.text)")
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
-        // The lead's records go in a commit of their own on top (LeadRecords).
-        #expect(underRecords("main", in: root) == audited)
+        // The lead's records go in a commit of their own on top (LeadRecords). Under them, the audited commit with the
+        // merge's provenance trailers and nothing else changed (MergeProvenanceTests).
+        #expect(MergeProvenanceTests.isStamped(underRecords("main", in: root), from: audited, in: root))
         #expect(try String(contentsOfFile: root + "/b.txt", encoding: .utf8) == "bee\n")
         #expect(!FileManager.default.fileExists(atPath: root + "/late.txt"))
         // The worker's branch did move; only the audited commit landed.

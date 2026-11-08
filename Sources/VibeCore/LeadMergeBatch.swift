@@ -388,7 +388,7 @@ extension LeadToolset {
             }
             var stacked: [MergeGate] = []
             for gate in pending {
-                switch stack.push(gate.commit) {
+                switch stack.push(gate.commit, trailers: provenance(gate)) {
                 case nil: stacked.append(gate)
                 case .conflict?: conflicted(gate, before: landed + stacked.map(\.task.slug))
                 case .cancelled?:

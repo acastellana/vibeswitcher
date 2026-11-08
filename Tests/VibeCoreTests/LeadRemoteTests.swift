@@ -588,6 +588,14 @@ struct LeadRemoteTests: LeadTeamFixture {
         #expect(!progress.contains("the worker's own line") && !progress.contains("<<<<<<<"), "\(progress)")
         #expect(Git.run(["show", "\(main):docs/lead/decisions.md"], in: scene.root).output.contains("## the other Mac's decision"))
         #expect(Git.run(["show", "\(main):docs/lead/incidents.md"], in: scene.root).output.contains("## the other Mac's incident"))
+        // The true merge (the commit the task landed as) carries its provenance trailers, at the end of its message
+        // (backlog A2).
+        let landed = try #require(BoardStore(root: scene.root).load().task("merge-the-remote")?.merged?.commit)
+        #expect(Git.run(["rev-list", "--parents", "-n", "1", landed], in: scene.root).output.split(separator: " ").count == 3)
+        let trailers = MergeProvenanceTests.trailers(landed, in: scene.root)
+        #expect(trailers[LeadProvenance.task] == ["merge-the-remote"], "\(trailers)")
+        #expect(trailers[LeadProvenance.review] == ["none"] && trailers[LeadProvenance.build] == ["unknown (not an app build)"], "\(trailers)")
+        #expect(MergeProvenanceTests.endsWithProvenance(landed, in: scene.root))
         // So push_remote asks for the push, rather than refusing it as no fast-forward.
         let push = lead.call("push_remote", [:])
         #expect(!push.text.contains("wouldn't be a fast-forward"), "\(push.text)")

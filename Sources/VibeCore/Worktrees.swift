@@ -896,11 +896,13 @@ public enum Worktrees {
     /// (`baseRecords`), and conflicts only in them don't stop it (`takeBaseRecords`).
     /// A commit that carries commits of `remote` (the remote's tip fetch_remote fetched) the base lacks lands as a true
     /// merge, its records the base's and the remote's by union (`landAsMerge`).
+    /// With `trailers`, the commit that lands ends with them (`stamp`): the merge's provenance.
     /// With `rerun`, a failing test command may run once more (see `runChecks`): `passedOnRerun` when that passes;
     /// then `baseline`, record only. `tested` hears the passing test command's output (the rerun's, when that's what passed), for its test count.
     public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
                                      scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout,
-                                     lock: TestLock?, records: String? = nil, remote: String? = nil, rerun: ((String) -> String?)? = nil,
+                                     lock: TestLock?, records: String? = nil, remote: String? = nil, trailers: [Trailer] = [],
+                                     rerun: ((String) -> String?)? = nil,
                                      baseline: Baseline? = nil, tested output: ((String) -> Void)? = nil, begun: ((Date) -> Void)? = nil) -> Check {
         let path = scratch.path
         let home = (home ?? scratch.deletingLastPathComponent().appendingPathComponent(scratch.lastPathComponent + "-home")).path
@@ -925,7 +927,7 @@ public enum Worktrees {
             if cancel?.isCancelled == true { return .cancelled }
             return .error(added.error.isEmpty ? "Couldn't set up a worktree to test \(commit.prefix(8)) in." : added.error)
         }
-        if let stopped = put(commit, onto: base, in: path, records: records, remote: remote) { return stopped }
+        if let stopped = put(commit, onto: base, in: path, records: records, remote: remote, trailers: trailers) { return stopped }
         guard cancel?.isCancelled != true else { return .cancelled }
         let tested = Git.run(["rev-parse", "HEAD"], in: path).output
         let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
@@ -943,7 +945,59 @@ public enum Worktrees {
     /// the worktree back at a clean state. The lead's records under `records` land as the base has them.
     /// A branch that carries commits of `remote` (the remote's tip fetch_remote fetched) the base lacks lands as a
     /// true merge instead (`landAsMerge`), so they stay themselves.
-    static func put(_ commit: String, onto base: String, in path: String, records: String?, remote: String? = nil) -> Check? {
+    /// With `trailers` (the merge's provenance, `LeadProvenance`), the commit that lands on top ends with them
+    /// (`stamp`), before anything is tested: the tested commit is the one that lands.
+    static func put(_ commit: String, onto base: String, in path: String, records: String?, remote: String? = nil,
+                    trailers: [Trailer] = []) -> Check? {
+        if let stopped = place(commit, onto: base, in: path, records: records, remote: remote) { return stopped }
+        return stamp(trailers, onto: base, in: path)
+    }
+
+    /// One git trailer (`Key: value`) a merge ends its landed commit's message with.
+    public struct Trailer: Equatable, Sendable {
+        public let key: String
+        public let value: String
+
+        public init(_ key: String, _ value: String) {
+            self.key = key
+            self.value = value
+        }
+
+        public var line: String { "\(key): \(value)" }
+    }
+
+    /// Ends the message of the detached HEAD at `path` with `trailers` (every line already under one of their keys is
+    /// taken out, so a worker's commit can't bring its own `VS-Build`), its tree, parents and author kept. Nil when that's done, or
+    /// when there's nothing to stamp: no trailers, or HEAD is `base` itself (nothing of the branch lands). Else `error`,
+    /// the worktree as it was.
+    static func stamp(_ trailers: [Trailer], onto base: String, in path: String) -> Check? {
+        guard !trailers.isEmpty else { return nil }
+        let head = Git.run(["rev-parse", "HEAD"], in: path).output
+        let under = Git.run(["rev-parse", "\(base)^{commit}"], in: path).output
+        guard !head.isEmpty, head != under else { return nil }
+        // Every line already under one of these keys goes first (git's ifexists=replace takes out only the nearest
+        // one, so a worker's commit with two `VS-Build:` lines would keep one of its own).
+        let read = Git.run(["log", "-1", "--format=%B", head], in: path)
+        guard read.ok else { return .error("Reading \(head.prefix(8))'s message to add the merge's provenance failed: \(said(read))") }
+        let keys = Set(trailers.map { $0.key.lowercased() })
+        let kept = read.output.components(separatedBy: "\n").filter { line in
+            guard let colon = line.firstIndex(of: ":") else { return true }
+            return !keys.contains(line[..<colon].trimmingCharacters(in: .whitespaces).lowercased())
+        }
+        let message = kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        // trailer.* from anyone's config (where, how, ifExists) would change what lands: set here, for this command only.
+        let amended = noEditor(["-c", "trailer.where=end", "-c", "trailer.ifexists=replace", "-c", "trailer.ifmissing=add",
+                                "-c", "trailer.separators=:", "commit", "--amend", "-q", "-m", message.isEmpty ? "Changes from \(head.prefix(8))" : message,
+                                "--no-verify", "--allow-empty", "--cleanup=verbatim"] + trailers.flatMap { ["--trailer", $0.line] }, in: path)
+        guard amended.ok else {
+            Git.run(["reset", "-q", "--hard", head], in: path)
+            return .error("Adding the merge's provenance trailers to \(head.prefix(8)) failed: \(said(amended))")
+        }
+        return nil
+    }
+
+    /// `put` without the trailers: the commit on top of `base`, as it lands.
+    static func place(_ commit: String, onto base: String, in path: String, records: String?, remote: String? = nil) -> Check? {
         let cancel = ShellCancel.current
         // merge-github-s-main, 2026-11-06: a branch whose job was to merge origin/main was squashed onto main. The
         // other Mac's commits landed as copies, so origin/main wasn't an ancestor of main and push_remote refused,
@@ -1019,10 +1073,11 @@ public enum Worktrees {
         }
 
         /// Puts `commit` on top: nil when it's there (its new commit is `top`), else how it stopped, the stack as it was.
-        public func push(_ commit: String) -> Check? {
+        /// With `trailers` (its task's provenance), the commit it lands as ends with them (`Worktrees.stamp`).
+        public func push(_ commit: String, trailers: [Trailer] = []) -> Check? {
             let under = top
             if let error = checkout(commit) { return .error(error) }
-            if let stopped = Worktrees.put(commit, onto: under, in: path, records: records, remote: remote) {
+            if let stopped = Worktrees.put(commit, onto: under, in: path, records: records, remote: remote, trailers: trailers) {
                 _ = checkout(under)
                 return stopped
             }
