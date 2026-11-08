@@ -197,7 +197,11 @@ struct HookBoundsTests {
         process.terminationHandler = { _ in ended.signal() }
         let start = Date()
         guard (try? process.run()) != nil else { return 0 }
-        if ended.wait(timeout: .now() + hangGuard) == .timedOut { process.terminate() }
+        // Ended, not left running: asked for a status while it still runs, `Process` raises, and the whole test run goes.
+        if ended.wait(timeout: .now() + hangGuard) == .timedOut {
+            process.terminate()
+            _ = ended.wait(timeout: .now() + hangGuard)
+        }
         let seconds = Date().timeIntervalSince(start)
         print("HookBoundsTests: the hook's first run, untimed, took \(seconds) s")
         return seconds
