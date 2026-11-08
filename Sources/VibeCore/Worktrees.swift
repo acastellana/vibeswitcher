@@ -38,19 +38,22 @@ public final class ShellCancel: @unchecked Sendable {
 private final class PipeText: @unchecked Sendable {
     private let lock = NSLock()
     private var data = Data()
-    private var lastRead: Date?
+    private var lastRead: TimeInterval?
+    private let now: () -> TimeInterval
+
+    init(now: @escaping () -> TimeInterval) { self.now = now }
 
     func drain(_ handle: FileHandle) {
         while case let chunk = handle.availableData, !chunk.isEmpty {
             lock.lock()
             data.append(chunk)
-            lastRead = Date()
+            lastRead = now()
             lock.unlock()
         }
     }
 
-    /// When output last came, nil before any.
-    var last: Date? {
+    /// When output last came, on the run's clock (`now`), nil before any.
+    var last: TimeInterval? {
         lock.lock()
         defer { lock.unlock() }
         return lastRead
@@ -251,7 +254,9 @@ public enum Shell {
     /// its `after` is stopped as one past `timeout` is: `timedOut`, with `stall` saying what it was stuck on.
     public static func run(executable: String, args: [String], in directory: String, env: [String: String] = [:],
                            timeout: TimeInterval = 120, grace: TimeInterval = 5, interleaved: Bool = false,
-                           branchCode: Bool = false, ownSession: Bool = false, watch: StallWatch? = nil) -> Git.Result {
+                           branchCode: Bool = false, ownSession: Bool = false, watch: StallWatch? = nil,
+                           time: MacTime = .real) -> Git.Result {
+        let now: () -> TimeInterval = { time.wall().timeIntervalSinceReferenceDate }
         let environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
         let out: ShellPipe, err: ShellPipe
         do {
@@ -276,7 +281,7 @@ public enum Shell {
         // Read while it runs, so a chatty program can't fill the pipe and stall.
         // Their own threads, not the shared pool: callers block too, and many at once (parallel tests, several tool
         // calls) could leave the readers no thread to run on.
-        let output = PipeText(), errors = PipeText()
+        let output = PipeText(now: now), errors = PipeText(now: now)
         let readers = DispatchGroup()
         readers.enter()
         Thread.detachNewThread { output.drain(out.reading); readers.leave() }
@@ -285,26 +290,27 @@ public enum Shell {
             readers.enter()
             Thread.detachNewThread { errors.drain(err.reading); readers.leave() }
         }
-        let began = Date()
-        let deadline = began.addingTimeInterval(timeout)
+        let began = now()
+        let deadline = began + timeout
         let cancel = ShellCancel.current
-        var judge = watch.map { StallWatch.Judge(after: $0.after, loadLimit: $0.loadLimit, start: Date()) }
-        var nextLook = Date(), stall: StallWatch.Stall?
-        while process.isRunning, Date() < deadline, cancel?.isCancelled != true {
-            if let watch, Date() >= nextLook {
+        var judge = watch.map { StallWatch.Judge(after: $0.after, loadLimit: $0.loadLimit, start: Date(timeIntervalSinceReferenceDate: now())) }
+        var nextLook = now(), stall: StallWatch.Stall?
+        while process.isRunning, now() < deadline, cancel?.isCancelled != true {
+            if let watch, now() >= nextLook {
                 let members = StallWatch.tree(of: pid, group: group)
                 let look = StallWatch.Look(output: output.count + errors.count,
                                            cpu: members.map { Dictionary($0.map { ($0.pid, $0.cpu) }, uniquingKeysWith: max) },
                                            load: watch.load())
-                let now = Date()
-                if judge?.observe(look, at: now) == true, process.isRunning {
+                let looked = now()
+                let at = Date(timeIntervalSinceReferenceDate: looked)
+                if judge?.observe(look, at: at) == true, process.isRunning {
                     // What it was stuck on, read before it's stopped: no debugger, no sample; the kernel's records.
                     let (test, tail) = StallWatch.stuck(in: output.text + (interleaved ? "" : "\n" + errors.text))
-                    stall = StallWatch.Stall(idle: judge?.idle(at: now) ?? watch.after, load: look.load, loadLimit: watch.loadLimit,
+                    stall = StallWatch.Stall(idle: judge?.idle(at: at) ?? watch.after, load: look.load, loadLimit: watch.loadLimit,
                                              lastTest: test, processes: StallWatch.lines(members ?? []), tail: tail)
                     break
                 }
-                nextLook = now.addingTimeInterval(watch.every)
+                nextLook = looked + watch.every
             }
             usleep(20_000)
         }
@@ -314,7 +320,7 @@ public enum Shell {
             timedOut = !cancelled
             // How long it had written nothing (since it started, when it never wrote), read before it's stopped.
             let heard = [output.last, errors.last].compactMap { $0 }.max() ?? began
-            quiet = timedOut ? max(0, Date().timeIntervalSince(heard)) : nil
+            quiet = timedOut ? max(0, now() - heard) : nil
             if cancelled { stall = nil }
             // Out of time: its children (a test runner's workers) go too, or they'd keep running in the worktree.
             // Asked first; whatever is still there after `grace` (it ignores TERM) is killed.
@@ -1287,7 +1293,8 @@ public enum Worktrees {
     /// it is a cancel.
     static func runChecks(setup: String?, test: String?, in path: String, home: String, timeout: TimeInterval,
                           lock: TestLock? = nil, as holder: String = "VibeSwitcher's test run", place: String? = nil,
-                          rerun: ((String) -> String?)? = nil, baseline: Baseline? = nil, begun: ((Date) -> Void)? = nil)
+                          rerun: ((String) -> String?)? = nil, baseline: Baseline? = nil, begun: ((Date) -> Void)? = nil,
+                          time: MacTime = .real)
         -> (stopped: Check?, outputs: [(name: String, output: String)]) {
         let cancel = ShellCancel.current
         let tmp = home + "/tmp"
@@ -1347,7 +1354,7 @@ public enum Worktrees {
             let started = Date()
             let stop = progress?.heartbeat { "Running the failing tests once on the base \(baseline.commit.prefix(8)), record only (\(duration(Date().timeIntervalSince(started))) so far)." }
             let run = Shell.run(executable: "/bin/zsh", args: ["-lc", "export HOME=\(RecentProjects.shellQuote(home))\n" + command], in: path, env: env,
-                                timeout: timeout, interleaved: true, branchCode: true, watch: lock?.watch)
+                                timeout: timeout, interleaved: true, branchCode: true, watch: lock?.watch, time: time)
             stop?()
             if run.cancelled || cancel?.isCancelled == true { return true }
             baseline.heard(run.stall != nil || run.timedOut ? .hung : .ran(ok: run.ok, output: run.output))
@@ -1368,7 +1375,7 @@ public enum Worktrees {
             let stop = progress?.heartbeat { "Running the \(name) (\(duration(Date().timeIntervalSince(started))) so far)." }
             // The branch's code (its build, its tests): never the lead to the session host (see `BranchCode`).
             let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path, env: env, timeout: timeout, interleaved: true,
-                                branchCode: true, watch: lock?.watch)
+                                branchCode: true, watch: lock?.watch, time: time)
             stop?()
             // A run stopped for making no progress says so first, then what it was stuck on, after its output.
             // Stopped at test_timeout_min, it says how long it had been silent: a crawl keeps writing, a stuck one doesn't.
