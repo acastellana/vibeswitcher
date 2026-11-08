@@ -42,7 +42,12 @@ final class HostClient: ObservableObject {
     /// The user's host; a test's scratch host instead (it never starts one: see `connectIfRunning`).
     private let socketPath: String
     private let proofKey: () -> SymmetricKey?
-    private var replies: [Int: (HostEvent) -> Void] = [:]
+    private(set) var replies: [Int: (HostEvent) -> Void] = [:]
+    /// Counts the connections made. Each numbers its requests from 1, so a reply's timer speaks only for the connection
+    /// it was armed on: on a later one its number is another request's.
+    private var connectionsMade = 0
+    /// How a reply's wait is timed; a test's own instead.
+    var replyLater: (TimeInterval, @escaping () -> Void) -> Void = { DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1) }
     private var sinks: [UUID: (sink: Sink, cols: Int, rows: Int)] = [:]
     /// When each session's last resize line went to app.log, and the newest one since, held (see `logResize`).
     private var resizeLogs: [UUID: (logged: Date, held: (line: String, count: Int)?)] = [:]
@@ -219,6 +224,7 @@ final class HostClient: ObservableObject {
         if connection != nil { return true }
         guard let connection = try? HostConnection(path: socketPath, queue: .main, appKey: proofKey()) else { return false }
         self.connection = connection
+        connectionsMade += 1
         state = .connecting
         // Each connection proves the app anew.
         proofRefusal = nil
@@ -653,9 +659,12 @@ final class HostClient: ObservableObject {
         guard let reply else { return }
         replies[seq] = reply
         guard let wait else { return }
-        // A reply that never comes must not leave its caller (e.g. a phone request) waiting forever.
-        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
-            self?.replies.removeValue(forKey: seq)?(.error("The session host didn't answer."))
+        // A reply that never comes must not leave its caller (e.g. a phone request) waiting forever. A dropped
+        // connection's waits are over (`connectionLost` answered them): its number now belongs to a request of a later one.
+        let armedOn = connectionsMade
+        replyLater(wait) { [weak self] in
+            guard let self, self.connectionsMade == armedOn else { return }
+            self.replies.removeValue(forKey: seq)?(.error("The session host didn't answer."))
         }
     }
 
