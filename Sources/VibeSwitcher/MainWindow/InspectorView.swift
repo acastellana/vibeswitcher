@@ -39,6 +39,16 @@ struct InspectorView: View {
         }
     }
 
+    /// The tab shown for the one remembered: a Team tab left for a session with no team is Overview there (and Team
+    /// again back on a lead, so the remembered one stays).
+    static func effectiveTab(_ stored: String, team: Bool) -> String {
+        switch stored {
+        case "team": return team ? "team" : "overview"
+        case "activity": return "activity"
+        default: return "overview"
+        }
+    }
+
     var body: some View {
         let selected = model.selectedRow
         let lead = selected.flatMap(leads.lead(for:))
@@ -82,7 +92,7 @@ private struct InspectorTabs: View {
     @AppStorage("inspectorTab") private var tab = "overview"
 
     var body: some View {
-        Picker("Inspector", selection: $tab) {
+        Picker("Inspector", selection: Binding(get: { InspectorView.effectiveTab(tab, team: team) }, set: { tab = $0 })) {
             if team { Text("Team").tag("team") }
             Text("Overview").tag("overview")
             Text("Activity").tag("activity")

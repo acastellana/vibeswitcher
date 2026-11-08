@@ -83,16 +83,17 @@ private struct ProjectRow: View {
     }
 }
 
-private struct Shortcuts: View {
-    private let keys: [(String, String)] = [
+struct Shortcuts: View {
+    /// This page shows while nothing is selected: ⌘N has no project then, so it starts one's lead.
+    static let keys: [(String, String)] = [
         ("⌘K", "Jump to any session or command"), ("⌘J", "Next session needing you"), ("⌘1–9", "Go to a session"),
-        ("⌘N", "New session in this project"), ("⌥⌘F", "Filter the list"), ("⇧⌘H", "This page"),
+        ("⌘N", "Choose a folder and start its project lead"), ("⌥⌘F", "Filter the list"), ("⇧⌘H", "This page"),
         ("Lead", "A project lead: tell it what to build; it runs workers, checks their work, merges"),
     ]
 
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
-            ForEach(keys, id: \.0) { key, text in
+            ForEach(Self.keys, id: \.0) { key, text in
                 GridRow {
                     Text(key).font(.system(size: 12, weight: .medium).monospaced())
                         .padding(.horizontal, 6).padding(.vertical, 2)

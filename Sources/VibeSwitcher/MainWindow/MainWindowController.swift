@@ -249,6 +249,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                 self.pane.attachedIDs.filter { !known.contains($0) }.forEach(self.pane.forget)
             }
             .store(in: &cancellables)
+        // The composer's Send dims while what it types couldn't reach the session; back, the refusal's line goes too.
+        host.$state.map(HostClient.usable).removeDuplicates().receiveLatest(on: RunLoop.main)
+            .sink { [weak self] connected in
+                guard let self else { return }
+                self.chat.hostConnected = connected
+                if connected, self.chat.sendNotice == ChatSync.notConnected { self.chat.sendNotice = nil }
+            }
+            .store(in: &cancellables)
         // Once the host has listed its sessions, unsent messages to ones it doesn't have (lost with a replaced host)
         // go: they'd be restored on every launch with nowhere to go.
         host.$sessions.combineLatest(host.$state).receiveLatest(on: RunLoop.main)
@@ -532,9 +540,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     /// The composer's message, typed into the selected window session (as a paste when its program asked for that).
-    private func sendToSelected(_ text: String) -> Bool {
-        // Not connected to the host (it's reconnecting, or gone): the keys would go nowhere; the text stays in the box.
-        guard let row = model.selectedRow, let id = row.hostID, actions.isLive(row), host.isUsable else {
+    func sendToSelected(_ text: String) -> Bool {
+        // Not connected to the host (it's reconnecting, or gone): the keys would go nowhere; the text stays in the box,
+        // and the box says why.
+        guard host.isUsable else {
+            chat.sendNotice = ChatSync.notConnected
+            return false
+        }
+        guard let row = model.selectedRow, let id = row.hostID, actions.isLive(row) else {
             NSSound.beep()
             return false
         }
@@ -664,6 +677,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private static let homeItem = NSToolbarItem.Identifier("startPage")
     private static let briefItem = NSToolbarItem.Identifier("briefMe")
     static let statisticsItem = NSToolbarItem.Identifier("statistics")
+    /// With nothing selected ⌘N has no project to start in: it asks for a folder and starts that folder's lead.
+    static let newSessionHelp = "New session in the selected project (⌘N). With none selected, choose a folder and start its project lead."
     static let boostItem = NSToolbarItem.Identifier("boostMark")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -752,7 +767,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         guard identifier == Self.newItem else { return nil }
         let item = NSToolbarItem(itemIdentifier: identifier)
         item.label = "New Session"
-        item.toolTip = "New session in the selected project (⌘N)"
+        item.toolTip = Self.newSessionHelp
         item.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New Session")
         item.target = self
         item.action = #selector(newSessionAction(_:))
@@ -767,14 +782,21 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     @objc func showStatisticsAction(_ sender: Any?) { onStatistics() }
 
+    /// The Shell preset New Shell starts; none: the item is off (with no folder, a nil preset would start a project lead).
+    private var shellPreset: LaunchPreset? { actions.presets(selectedFolder).first { $0.kind == .shell } }
+
     @objc func newShellAction(_ sender: Any?) {
-        // No Shell preset: nothing (with no folder, a nil preset would start a project lead).
-        guard let shell = actions.presets(selectedFolder).first(where: { $0.kind == .shell }) else { return NSSound.beep() }
-        actions.newSession(shell, selectedFolder)
+        guard let shellPreset else { return NSSound.beep() }
+        actions.newSession(shellPreset, selectedFolder)
+    }
+
+    /// The selected session when it's a live one of this window's: what End Session… and Stop act on.
+    private var selectedLiveWindowSession: WindowRow? {
+        model.selectedRow.flatMap { $0.hostID != nil && actions.isLive($0) ? $0 : nil }
     }
 
     @objc func endSessionAction(_ sender: Any?) {
-        guard let row = model.selectedRow, row.hostID != nil, actions.isLive(row) else { return NSSound.beep() }
+        guard let row = selectedLiveWindowSession else { return NSSound.beep() }
         actions.endSession(row)
     }
 
@@ -858,8 +880,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         case #selector(findAction(_:)), #selector(findNextAction(_:)), #selector(findPreviousAction(_:)):
             // Something to search: the conversation, or the terminal's scrollback (not the start page).
             return model.selectedRow != nil && (model.chatShown || pane.currentView != nil)
-        case #selector(endSessionAction(_:)):
-            return model.selectedRow.map { $0.hostID != nil && actions.isLive($0) } == true
+        case #selector(endSessionAction(_:)), #selector(stopAction(_:)): return selectedLiveWindowSession != nil
+        case #selector(exportChatAction(_:)): return exportableRow != nil
+        case #selector(newShellAction(_:)): return shellPreset != nil
         case #selector(briefMeAction(_:)): return briefing != nil
         case #selector(briefProjectAction(_:)):
             let lead = model.selectedRow.flatMap(leads.lead(for:))
@@ -910,7 +933,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     /// Sessions (in attention order), window commands, then "New <preset> in <project>" for recent projects.
-    private func paletteItems() -> [PaletteItem] {
+    func paletteItems() -> [PaletteItem] {
         let now = Date()
         let sessions = WindowGroups.attention(model.sections).flatMap(\.rows).map { row in
             let state = row.state(now: now)
@@ -944,6 +967,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let lead = model.selectedRow.flatMap(leads.lead(for:)).map { ($0.root as NSString).lastPathComponent }
         commands += PaletteItem.briefings(available: briefing != nil, leadProject: lead,
                                           all: { [weak self] in self?.briefMeAction(nil) }, project: { [weak self] in self?.briefProjectAction(nil) })
+        commands.append(PaletteItem(id: "cmd:statistics", title: "Statistics…", subtitle: "⌥⌘S", icon: .symbol("chart.bar")) {
+            [weak self] in self?.showStatisticsAction(nil)
+        })
         commands.append(PaletteItem(id: "cmd:settings", title: "Settings…", subtitle: "⌘,", icon: .symbol("gearshape")) {
             [weak self] in self?.actions.settings()
         })
@@ -986,12 +1012,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     @objc func stopAction(_ sender: Any?) {
-        guard let row = model.selectedRow, row.hostID != nil, actions.isLive(row) else { return NSSound.beep() }
+        guard selectedLiveWindowSession != nil else { return NSSound.beep() }
         sendKeys([27])
     }
 
+    /// The selected session when its conversation has something to export.
+    private var exportableRow: WindowRow? {
+        guard let row = model.selectedRow, model.chatPath(for: row) != nil, !chat.log.entries.isEmpty else { return nil }
+        return row
+    }
+
     @objc func exportChatAction(_ sender: Any?) {
-        guard let row = model.selectedRow, model.chatPath(for: row) != nil, !chat.log.entries.isEmpty else { return NSSound.beep() }
+        guard let row = exportableRow else { return NSSound.beep() }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = row.title.replacingOccurrences(of: "/", with: "-") + ".md"
         panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .plainText]

@@ -114,7 +114,7 @@ final class HostClient: ObservableObject {
     /// The bundled host's build (see `HostBuild`); a test's fake build instead.
     private let bundledBuild: () -> Int
     /// How long to wait before each attempt to get back to a host that dropped the connection; then it's gone.
-    private let reconnectDelays: [TimeInterval]
+    var reconnectDelays: [TimeInterval]
 
     /// The reply every request still waiting gets when the connection drops.
     static let wentAway = "The session host went away."
@@ -162,7 +162,9 @@ final class HostClient: ObservableObject {
         Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host")
     }
 
-    var isUsable: Bool {
+    var isUsable: Bool { Self.usable(state) }
+
+    static func usable(_ state: State) -> Bool {
         switch state {
         case .connected, .outdated(_, true): return true
         default: return false

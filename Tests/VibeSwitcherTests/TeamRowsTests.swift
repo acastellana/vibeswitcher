@@ -271,7 +271,7 @@ struct TeamRowsTests {
         raised.review = .audit
         raised.riskRaised = LeadRiskRaise(reason: "it changes 612 lines, over risk_lines (400)", commit: "abc", byModel: false)
         #expect(row(raised).state == "Needs audit" && row(raised).mark == .review)
-        #expect(row(raised).activity == "Audited: it changes 612 lines, over risk_lines (400)")
+        #expect(row(raised).activity == "Raised to audit: it changes 612 lines, over risk_lines (400)")
         raised.verifier = "v-r"
         #expect(row(raised, ["v-r": Self.working]).state == "In review")
     }

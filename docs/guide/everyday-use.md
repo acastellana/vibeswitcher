@@ -158,7 +158,7 @@ goes to ElevenLabs only when you press Brief me, Play or Test voice. The key is 
   <img alt="The Statistics window: this week's scorecard against last week's, then quality figures" src="../images/statistics-light.png">
 </picture>
 
-The **Statistics** window (the chart button in the toolbar, or Statistics… in the menu bar list's gear menu) covers all
+The **Statistics** window (the chart button in the toolbar, Window › Statistics… ⌥⌘S, ⌘K, or Statistics… in the menu bar list's gear menu) covers all
 your projects over today, the last 7 or the last 30 days:
 
 - **The scorecard**, the last 7 days against the 7 before: bugs you reported against those the system found, questions

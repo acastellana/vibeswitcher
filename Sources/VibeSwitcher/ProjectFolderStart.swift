@@ -129,6 +129,12 @@ struct ProjectFolderStart {
     var install: ((_ problem: LaunchPreflight.Problem, _ preflight: @escaping () -> LaunchPreflight.Problem?,
                    _ retry: @escaping () -> Void) -> Void)?
 
+    /// How the window's lead starts (Home's Lead, ⊕ › Project Lead, ⌘K) go: as a folder you chose does, so a plain
+    /// folder gets the offer to make it a repository instead of an error from the lead.
+    static func leadStart(_ flow: @escaping () -> ProjectFolderStart?) -> (String) -> Void {
+        { folder in flow()?.startLead(chosen: folder) }
+    }
+
     func run(preset: LaunchPreset?, folder: String?) {
         let plan = Self.plan(preset: preset, folder: folder)
         switch plan {

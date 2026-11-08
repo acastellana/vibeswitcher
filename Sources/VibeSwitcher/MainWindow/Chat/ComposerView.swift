@@ -49,6 +49,11 @@ struct ComposerView: View {
         composer.attach(url, to: rowID)
     }
 
+    private var sendDimmed: Bool {
+        ComposerSend.dimmed(empty: text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty,
+                            connected: chat.hostConnected, working: working, steerOnly: steerOnly, agent: agent)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if !suggestions.items.isEmpty {
@@ -103,8 +108,7 @@ struct ComposerView: View {
                     Image(systemName: working ? "arrow.turn.down.right" : "arrow.up").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
                         .accessibilityLabel(working ? "Steer" : "Send")
                         .frame(width: 30, height: 30)
-                        .background(Circle().fill(text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty
-                                                  ? Color.secondary.opacity(0.4) : working ? Color.orange : Color.accentColor))
+                        .background(Circle().fill(sendDimmed ? Color.secondary.opacity(0.4) : working ? Color.orange : Color.accentColor))
                 }
                 .buttonStyle(.plain).padding(.bottom, 4)
                 .help(working ? "Steer: send it to the agent's next step (↩)" : "Send (↩)")
@@ -205,6 +209,12 @@ struct ComposerSend {
         /// Refused (not connected, no agent): it's back in the box, as it was.
         case refused
         case sent
+    }
+
+    /// Send looks off: nothing to send, or the session host isn't there to type it in. Still pressable: it says why under
+    /// the box. A steer to Claude goes through its hook, which needs no host.
+    static func dimmed(empty: Bool, connected: Bool, working: Bool, steerOnly: Bool, agent: Agent) -> Bool {
+        empty || (!connected && !steerOnly && !(working && agent == .claude))
     }
 
     /// The box's text, then the attached images as their quoted paths (that's how the agent reads them; the box only

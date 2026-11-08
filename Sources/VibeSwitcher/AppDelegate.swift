@@ -111,10 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         resumeCommand: { [weak self] row in self?.resumeCommandLine(for: row) },
         settings: { [weak self] in self?.showSettings(tab: .general) },
         moveToWindow: { [weak self] in self?.moveToWindow($0) },
-        startLead: { [weak self] folder in
-            self?.showMainWindow()
-            self?.leadController.startLead(in: folder)
-        },
+        startLead: ProjectFolderStart.leadStart { [weak self] in self?.projectFolderStart },
         projectsFolder: { [weak self] in
             ProjectCreation.tildePath(self?.preferences.projectsFolderPath ?? ProjectCreation.expand(ProjectCreation.defaultLocation))
         },

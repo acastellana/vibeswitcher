@@ -126,6 +126,8 @@ enum MainMenu {
             item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
             item("Zoom", #selector(NSWindow.performZoom(_:))),
             .separator(),
+            item("Statistics…", #selector(MainWindowController.showStatisticsAction(_:)), "s", [.command, .option]),
+            .separator(),
             item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:))),
         ])
         // Empty: AppKit puts the menu search field in it.

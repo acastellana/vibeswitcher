@@ -1253,6 +1253,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("shot NAME", "draws each window, light and dark, into the shots folder"),
         ("panes on|off", "shows or collapses the sidebar and inspector, for a shot of the middle alone"),
         ("pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT", "the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views (where, their tooltip); hover moves the pointer onto the message holding TEXT; drag presses on the message holding FROM and lets go on the one holding TO; copy is ⌘C (to a pasteboard of the sandbox's own, never the general one), printing what it copied; menu right-clicks the message holding TEXT and prints its menu"),
+        ("offline on|off", "the app loses its connection to the sandbox's own host and doesn't get it back (the host and fake sessions keep running), as while the host is unreachable; off: it connects again"),
         ("unproved", "connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions"),
         ("quit", "quits (the host and fake sessions end with it)"),
     ]
@@ -2392,6 +2393,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
             split.splitViewItems.filter { $0.behavior != .default }.forEach { $0.isCollapsed = rest == "off" }
             settle { reply(true, "sidebar and inspector \(rest == "off" ? "collapsed" : "shown")") }
         case "pointer": pointer(Array(words.dropFirst()), reply)
+        case "offline":
+            guard rest == "on" || rest == "off" else { return reply(false, "offline on|off") }
+            host.reconnectDelays = rest == "on" ? [3600] : [0.2, 0.5, 1, 2, 3, 5]
+            host.connectAgain()
+            settle { reply(true, "connection to the sandbox's host: \(self.host.state)") }
         case "unproved":
             key.stranger = SymmetricKey(size: .bits256)
             host.confirmKeyReset = { _, _ in false }

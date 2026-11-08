@@ -104,6 +104,22 @@ struct ProjectFolderStartTests {
         #expect(calls.prompts == ["Start Lead Here"] && calls.leads.isEmpty && calls.sessions.isEmpty)
     }
 
+    /// Home's Lead, ⊕ › Project Lead and ⌘K: `WindowActions.startLead`, so a plain folder gets the offer there too.
+    @Test func theWindowsLeadStartsGoThroughTheOfferForAPlainFolder() async throws {
+        let calls = Calls()
+        let flow = start(calls, chosen: nil, git: try scratchGit())
+        let chosen = try folder(["notes.txt": "hello"])
+        ProjectFolderStart.leadStart { flow }(chosen)
+        #expect(await until { calls.asked.count == 1 })
+        #expect(calls.asked.first?.folder == chosen && calls.leads.isEmpty && calls.failures.isEmpty)
+        #expect(calls.prompts.isEmpty, "the folder is known: no panel")
+
+        // And that's what the app gives the window.
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Sources/VibeSwitcher/AppDelegate.swift"), encoding: .utf8)
+        #expect(source.contains("startLead: ProjectFolderStart.leadStart {"))
+    }
+
     @Test func aFolderInNoRepositoryAsksAndCancelOrAPlainSessionLeaveItAsItWas() async throws {
         let git = try scratchGit()
         let chosen = try folder(["main.py": "print(1)\n"])
