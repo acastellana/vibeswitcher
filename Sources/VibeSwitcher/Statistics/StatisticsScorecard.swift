@@ -51,8 +51,9 @@ extension QualityPage {
             detail: "n = \(installed) of \(count(w.merged, "merge")) installed, \(w.notInstalled) not installed yet · the 7 days before: "
                 + "\(duration(p.medianInstall)) (n = \(p.installTimes.count) of \(p.merged)) · "
                 + trend(w.medianInstall, p.medianInstall, n: installed, before: p.installTimes.count, what: "time to install"),
-            help: "From a task's creation to the first install that contained its merge: a build a later merge's receipt records as the one "
-                + "that ran it holds every commit before its own. A merge no recorded build holds yet is not installed yet. n: the merges installed."))
+            help: "From a task's creation to the first install that contained its merge: the installed app (installed when its copy is dated) "
+                + "or a build a later merge's receipt records as the one that ran it, each holding every commit before its own. A merge no "
+                + "recorded build holds yet is not installed yet. n: the merges installed."))
         if !card.installs.isEmpty {
             let shown = card.installs.prefix(Self.installRows)
             var lines = shown.map { install in

@@ -70,6 +70,8 @@ struct ScorecardTests: LeadTeamFixture {
         #expect(line == "Task origins (by creation; last 7 days): 1 user_report, 1 incident, 1 other (n = 3) · the 7 days before: "
             + "1 user_report, 1 audit (n = 2) · bugs you reported 1 vs found by the system 1 this week (1 vs 1 the week before).", "\(line ?? "nil")")
         #expect(LeadOrigins.statusLine([task("old", now - 30 * 86_400, "lead")], now: now) == nil)
+        // Only tasks with no origin said (a board from before origins): no line.
+        #expect(LeadOrigins.statusLine([task("x", now - 3600, nil), task("y", now - 8 * 86_400, nil)], now: now) == nil)
     }
 
     // MARK: Statistics' scorecard
@@ -135,12 +137,13 @@ struct ScorecardTests: LeadTeamFixture {
 
         let now = Date(timeIntervalSince1970: Self.date(11, 8, 12))
         let collector = SetupStatsCollector(home: home, codexHome: nil, calendar: Self.utc, now: { now })
-        // Only build bbbbbbbbbbbb holds u1's merge commit.
+        // Only build bbbbbbbbbbbb holds u1's merge commit; the installed app's build (dddddddddddd, installed Nov 7 08:00) holds n1's.
+        collector.installedApp = { (build: "dddddddddddd", at: Self.date(11, 7, 8)) }
         let asked = Asked()
         collector.installsReader = { _, _ in
             { build, commit in
                 asked.add(build + " " + commit)
-                return build == "bbbbbbbbbbbb" && commit == "c-u1"
+                return (build == "bbbbbbbbbbbb" && commit == "c-u1") || (build == "dddddddddddd" && ["c-u1", "c-a1", "c-n1"].contains(commit))
             }
         }
         let range = DateInterval(start: Date(timeIntervalSince1970: Self.date(11, 2)), end: Date(timeIntervalSince1970: Self.date(11, 9)))
@@ -165,14 +168,21 @@ struct ScorecardTests: LeadTeamFixture {
         // Receipts themselves carry no lead share.
         #expect(stats.quality?.all.cost == 6)
 
-        // u1 was first seen installed when a1 merged on a build holding it; a1 and n1 aren't installed yet.
-        #expect(week.installTimes == [Self.date(11, 4, 14) - Self.date(11, 3)] && week.notInstalled == 2)
+        // u1 was first seen installed when a1 merged on a build holding it; a1 and n1 with the installed app; p1 never.
         #expect(card.installs.map(\.slug) == ["n1", "a1", "u1"])
         #expect(card.installs.first { $0.slug == "u1" }?.toInstall == Self.date(11, 4, 14) - Self.date(11, 3))
-        #expect(card.installs.first { $0.slug == "a1" }?.installedAt == nil)
+        #expect(card.installs.first { $0.slug == "a1" }?.installedAt == Self.date(11, 7, 8))
+        #expect(week.installTimes.sorted() == [Self.date(11, 4, 14) - Self.date(11, 3), Self.date(11, 7, 8) - Self.date(11, 5),
+                                               Self.date(11, 7, 8) - Self.date(11, 3, 6)].sorted() && week.notInstalled == 0)
         #expect(before.installTimes.isEmpty && before.notInstalled == 1)
-        // Each build and merge asked once at most; a build named "unknown …" never.
-        #expect(asked.all.count == Set(asked.all).count && !asked.all.isEmpty)
+        // Each build and merge asked once at most per collect; a build named "unknown …" never.
+        let once = asked.all
+        #expect(once.count == Set(once).count && !once.isEmpty, "\(once)")
+        // Without the app's record, a1 and n1 aren't installed yet.
+        collector.installedApp = { nil }
+        let bare = try #require(await collector.collect(projects: [project.path], range: range).quality?.scorecard)
+        #expect(bare.week.installTimes == [Self.date(11, 4, 14) - Self.date(11, 3)] && bare.week.notInstalled == 2)
+        #expect(bare.installs.first { $0.slug == "a1" }?.installedAt == nil)
     }
 
     @Test func aBuildHoldsTheMergesItsHistoryHas() throws {
@@ -189,6 +199,11 @@ struct ScorecardTests: LeadTeamFixture {
         #expect(!contains(String(first.prefix(12)), second))
         #expect(!contains("0123456789ab", first))
 
+        let commit = String(repeating: "ab", count: 20), at = Date(timeIntervalSince1970: 1_790_000_000)
+        let app = SetupInstalls.installedApp(bundle: "/Applications/VibeSwitcher.app", build: ServerBuild(commit: commit, builtAt: at))
+        #expect(app?.build == String(commit.prefix(12)) && app?.at == at.timeIntervalSince1970)
+        #expect(SetupInstalls.installedApp(bundle: "/Volumes/Work/build/VibeSwitcher.app", build: ServerBuild(commit: commit, builtAt: at)) == nil)
+        #expect(SetupInstalls.installedApp(bundle: "/Applications/VibeSwitcher.app", build: ServerBuild(commit: nil, builtAt: at)) == nil)
         #expect(SetupInstalls.commit(ofBuild: "3f2a1b4c5d6e") == "3f2a1b4c5d6e")
         #expect(SetupInstalls.commit(ofBuild: "3F2A1B4C5D6E with changes not committed") == "3f2a1b4c5d6e")
         #expect(SetupInstalls.commit(ofBuild: "unknown (no commit recorded)") == nil)

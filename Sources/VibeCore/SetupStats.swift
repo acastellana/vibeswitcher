@@ -308,6 +308,8 @@ public final class SetupStatsCollector: @unchecked Sendable {
     /// Says whether a build holds a merge commit, for a project's root and the time its history is read from
     /// (`SetupInstalls.gitContains`; a test gives its own).
     var installsReader: @Sendable (String, Double) -> (String, String) -> Bool = { SetupInstalls.gitContains(root: $0, since: $1) }
+    /// The installed app's own build and when it was installed (`SetupInstalls.installedApp`); a test gives its own.
+    var installedApp: @Sendable () -> (build: String, at: Double)? = { SetupInstalls.installedApp() }
     private let counter = NSLock()
     private var parsed = 0
     private var onMain = 0
@@ -432,7 +434,8 @@ public final class SetupStatsCollector: @unchecked Sendable {
     }
 
     /// When each of `tasks` merged from `since` on was first seen installed: the builds its project's receipts record
-    /// from `since` on (`SetupInstalls`), checked against its git history (`installsReader`), each build's once.
+    /// from `since` on and the installed app's own (`SetupInstalls`), checked against its git history
+    /// (`installsReader`), each build's once.
     private func installs(root: String, tasks: [TaskView], since: Date) -> [String: Double] {
         let t0 = since.timeIntervalSince1970
         let merged = tasks.compactMap { view -> (slug: String, commit: String, at: Double, build: String?)? in
@@ -441,6 +444,7 @@ public final class SetupStatsCollector: @unchecked Sendable {
         }
         let wanted = merged.filter { $0.at >= t0 }.map { (slug: $0.slug, commit: $0.commit) }
         let seen = merged.filter { $0.at >= t0 }.compactMap { merge in merge.build.map { (build: $0, at: merge.at) } }
+            + [installedApp()].compactMap { $0 }
         guard !wanted.isEmpty, !seen.isEmpty else { return [:] }
         return SetupInstalls.firstInstalls(merges: wanted, seen: seen, contains: installsReader(root, t0 - 2 * 86_400))
     }

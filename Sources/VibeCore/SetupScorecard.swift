@@ -11,7 +11,8 @@ import Foundation
 ///   a day with no merge is said apart, not spread. Receipts never carry the lead's share.
 /// - Time to install: from a task's creation to the first install that contained its merge commit, known from the
 ///   builds receipts record (`LeadReceipt.build`: the build that ran a later merge was installed by then, and holds
-///   every commit its source commit descends from); a merge no recorded build contains is "not installed yet".
+///   every commit its source commit descends from) and the installed app's own record (its commit, installed when its
+///   copy is dated: `SetupInstalls.installedApp`); a merge no recorded build contains is "not installed yet".
 ///
 /// A comparison between the weeks is said only when both have at least `trendFloor` (n); below it the figures are
 /// shown with their n and no trend.
@@ -123,6 +124,14 @@ public enum SetupInstalls {
             }
         }
         return found
+    }
+
+    /// The install record the app carries: the build of the app running from /Applications (`ServerBuild.running`) and
+    /// when it was installed (its executable's date: install-app.sh's copy dates it then); nil for any other process
+    /// (tests, the sandbox, a build run from build/) or a build that recorded no commit.
+    public static func installedApp(bundle: String = Bundle.main.bundlePath, build: ServerBuild? = ServerBuild.running) -> (build: String, at: Double)? {
+        guard bundle.hasPrefix("/Applications/"), let build, let commit = build.commit, let at = build.builtAt else { return nil }
+        return (String(commit.prefix(12)), at.timeIntervalSince1970)
     }
 
     /// `contains` for the repository at `root`, by git: the commits each build's history holds since `since` (a merge

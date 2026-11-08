@@ -35,12 +35,13 @@ public struct LeadOrigins: Equatable, Sendable {
     }
 
     /// Status's line: "Task origins (by creation; last 7 days): 2 user_report, 1 incident (n = 3) · the 7 days before:
-    /// … · bugs you reported 2 vs found by the system 1"; nil when no task was created in either week.
+    /// … · bugs you reported 2 vs found by the system 1"; nil when no task created in either week has an origin said
+    /// (a board from before origins: nothing to count, and status stays short).
     public static func statusLine(_ tasks: [LeadTask], now: Double) -> String? {
         let week = 7 * 86_400.0
         let pairs = tasks.filter { $0.removedAt == nil }.map { (createdAt: $0.createdAt, origin: $0.origin) }
         let this = LeadOrigins(pairs, from: now - week, to: now + 1), last = LeadOrigins(pairs, from: now - 2 * week, to: now - week)
-        guard this.total + last.total > 0 else { return nil }
+        guard this.total - this.unsaid + last.total - last.unsaid > 0 else { return nil }
         return "Task origins (by creation; last 7 days): \(this.text) · the 7 days before: \(last.text) · bugs you reported "
             + "\(this.userReported) vs found by the system \(this.systemFound) this week (\(last.userReported) vs \(last.systemFound) the week before)."
     }
