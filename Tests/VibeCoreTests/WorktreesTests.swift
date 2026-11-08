@@ -70,6 +70,28 @@ struct WorktreesTests {
         #expect(!FileManager.default.fileExists(atPath: worktree))
     }
 
+    /// What a branch holds beyond its merge: a rebased, stamped copy on the base isn't, by the head the merge took or
+    /// (a record older than that field) by patch; a commit made after it is; a branch that's gone holds nothing.
+    @Test func aBranchHoldsOnlyWhatDidntMergeNotTheStampedCopy() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "add-b")
+        try commit("b.txt", "bee\n", in: worktree)
+        let merged = Git.run(["rev-parse", "agent/add-b"], in: root).output
+        #expect(Git.run(["cherry-pick", merged], in: root).ok)
+        #expect(Git.run(["commit", "--amend", "-q", "-m", "change b.txt\n\nVS-Task: add-b"], in: root).ok)
+        #expect(Git.run(["rev-parse", "main"], in: root).output != merged)
+        #expect(try Worktrees.unmerged(root: root, slug: "add-b", base: "main", merged: merged).get() == [])
+        #expect(try Worktrees.unmerged(root: root, slug: "add-b", base: "main", merged: nil).get() == [])
+
+        try commit("late.txt", "late\n", in: worktree)
+        let late = Git.run(["rev-parse", "agent/add-b"], in: root).output
+        #expect(try Worktrees.unmerged(root: root, slug: "add-b", base: "main", merged: merged).get() == [late])
+        #expect(try Worktrees.unmerged(root: root, slug: "add-b", base: "main", merged: nil).get() == [late])
+
+        try Worktrees.remove(root: root, slug: "add-b", force: true)
+        #expect(try Worktrees.unmerged(root: root, slug: "add-b", base: "main", merged: merged).get() == [])
+    }
+
     @Test func aPassingBranchFastForwardsMainAndIsCleanedUp() throws {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "add-b")

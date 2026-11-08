@@ -910,6 +910,58 @@ struct LeadAdvanceTests: LeadTeamFixture {
         return true
     }
 
+    /// add-b, review none and out of the loop's hands, merged by the lead (no loop running yet, so nothing cleans it up
+    /// before the test has looked): what landed is a stamped copy, with another hash than the branch's head.
+    func mergedByHand() throws -> (root: String, runtime: FakeRuntime, lead: LeadToolset) {
+        let (root, runtime, lead) = try team()
+        #expect(!lead.call("add_task", ["title": "Add b", "goal": "g", "acceptance": ["a"], "review": "none", "auto_advance": false]).isError)
+        #expect(!lead.call("start_worker", ["task": "add-b"]).isError)
+        try work("add-b", file: "b.txt", root: root, runtime)
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        let record = try #require(task("add-b", root)?.merged)
+        #expect(record.commit != head("agent/add-b", root) && record.branchHead == head("agent/add-b", root), "\(record)")
+        return (root, runtime, lead)
+    }
+
+    /// A commit on a merged task's branch isn't what merged: `git branch -D` would lose it. Auto-cleanup keeps the
+    /// branch and the worktree and says which commit, once; force is the lead's word that it can go.
+    @Test func autoCleanupKeepsABranchWithACommitThatDidntMerge() async throws {
+        let (root, runtime, lead) = try mergedByHand()
+        let worktree = Worktrees.path(root: root, slug: "add-b")
+        try commit("late.txt", "late\n", in: worktree)
+        let late = head("agent/add-b", root)
+        #expect(!lead.call("update_task", ["task": "add-b", "auto_advance": true]).isError)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        await advancing.settle()
+        #expect(await advancing.until { reports(runtime).contains { $0.contains("Didn't cleanup add-b") } })
+        await advancing.settle()
+        let told = reports(runtime).filter { $0.contains("Didn't cleanup add-b") }
+        #expect(told.count == 1 && told[0].contains(String(late.prefix(8))), "\(told)")
+        #expect(head("agent/add-b", root) == late)
+        #expect(FileManager.default.fileExists(atPath: worktree))
+        #expect(task("add-b", root)?.worktree != nil)
+        // Called by hand it's the same refusal, and force drops them.
+        let again = lead.call("cleanup", ["task": "add-b"])
+        #expect(again.isError && again.text.contains(String(late.prefix(8))), "\(again.text)")
+        let forced = lead.call("cleanup", ["task": "add-b", "force": true])
+        #expect(!forced.isError, "\(forced.text)")
+        #expect(Git.run(["branch", "--list", "agent/add-b"], in: root).output.isEmpty)
+    }
+
+    /// A branch holding only what merged goes as it always did, though the commit on the base is a stamped copy of it.
+    @Test func autoCleanupRemovesABranchHoldingOnlyWhatMerged() async throws {
+        let (root, runtime, lead) = try mergedByHand()
+        #expect(!lead.call("update_task", ["task": "add-b", "auto_advance": true]).isError)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        await advancing.settle()
+        #expect(await advancing.until { reports(runtime).contains { $0.contains("Cleaned up add-b") } }, "\(reports(runtime))")
+        #expect(Git.run(["branch", "--list", "agent/add-b"], in: root).output.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: "add-b")))
+    }
+
     /// Tasks add-b and add-c reported done, add-b's merge held in its tests until `release` (the first test run waits
     /// for it, as a long suite would), and `meanwhile` done while it waits.
     func duringAMerge(_ meanwhile: (LeadToolset) -> Void) async throws -> (root: String, runtime: FakeRuntime, advancing: Advancing) {

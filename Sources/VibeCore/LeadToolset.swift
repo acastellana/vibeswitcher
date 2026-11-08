@@ -628,7 +628,7 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "fetch_remote", description: "Fetch the project's remote (workflow.md's remote, origin unless set): only the base branch, into its remote-tracking ref (origin/main); nothing else moves. Says how far the base is ahead and behind, the incoming commits, and whether merge_remote would fast-forward, merge cleanly (the lead's records by union) or stop on a conflict. It takes no arguments: the remote and branch come from workflow.md, never a URL or refspec."),
                 MCPToolInfo(name: "merge_remote", description: "Merge the remote-tracking branch fetch_remote fetched into the base: in a scratch worktree, a fast-forward when the base has nothing of its own, else a true merge commit (so the remote's tip stays an ancestor and a later push is a fast-forward); the lead's records merge by union. The test command runs on the result, and the base fast-forwards to it only when it passes and the base hasn't moved; the main checkout's uncommitted files stay as they are. A conflict outside the records stops it with the files named; it never picks a side. The remote's commits count as the user's work."),
                 MCPToolInfo(name: "push_remote", description: "Ask the user to push the base branch to the project's remote (workflow.md's remote): it records a push request of the base's head now, with the commits it's ahead of what fetch_remote fetched, and pushes nothing. Only the user's click on Push in VibeSwitcher pushes it (Decline doesn't): that very commit, as a fast-forward of the remote's branch, never forced, even if the base moves on meanwhile. It never waits: the outcome (pushed, rejected, an auth or network error) comes as a VibeSwitcher message. Refused before fetch_remote, when the remote has commits the base lacks (merge_remote first), or when nothing is ahead. A newer request replaces an open one. It takes no arguments: the remote, its URL and the branch come from workflow.md and the URL fetch_remote took, never from the call."),
-                MCPToolInfo(name: "cleanup", description: "End a task's sessions and remove its worktree and branch (after merging, or force to abandon it).",
+                MCPToolInfo(name: "cleanup", description: "End a task's sessions and remove its worktree and branch (after merging, or force to abandon it). A merged task whose branch has commits that didn't merge is refused, and keeps them; force drops them.",
                             properties: ["task": task, "force": P(type: "boolean", description: "Also discard unmerged work")], required: ["task"]),
                 MCPToolInfo(name: "accept_git_hooks", description: "Let the tool server's git (merges, cleanups, start_worker, auto_advance) run the repository's git hooks as they are now. It runs only hooks you accepted, from a copy, never the hooks folder a worker can write: status, merge and the rest tell you when that folder isn't as you accepted it. Read each hook first; accept only the user's own.",
                             properties: ["hooks": P(type: "array", description: "The hooks to run, by name (e.g. commit-msg); empty or left out: all that are there now", items: "string")]),
@@ -3110,6 +3110,7 @@ public final class LeadToolset: MCPToolset {
         // Held, re-planned, folded or abandoned by the lead while the tests ran: that word stands, and it doesn't land.
         if let changed = changedMeanwhile(slug, since: task, tests: "passed") { throw changed }
         if let amended = amendedMeanwhile(slug, since: task, tests: "passed") { throw amended }
+        if let moved = movedMeanwhile(slug, since: task, tested: commit, tests: "passed") { throw moved }
         switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tested, from: current) }) {
         case .merged:
             try vault.setHead(tested, root: root, branch: base)
@@ -3128,7 +3129,8 @@ public final class LeadToolset: MCPToolset {
                 guard let index = board.taskIndex(slug) else { return FlakePlan() }
                 board.tasks[index].status = .done
                 board.tasks[index].merged = LeadMergeRecord(commit: tested, tested: workflow.testCommand != nil, onto: current,
-                                                             regression: workflow.regressionCommand.map { _ in true }, audited: audited ? nil : false)
+                                                             regression: workflow.regressionCommand.map { _ in true }, audited: audited ? nil : false,
+                                                             branchHead: commit)
                 board.tasks[index].receipt = LeadReceipt(board.tasks[index], ending: .merged, questions: board.questions, usage: usage,
                                                          tests: workflow.testCommand == nil ? nil : testCount, mergeReruns: flaked == nil ? 0 : 1,
                                                          commits: brought)
@@ -3692,6 +3694,9 @@ public final class LeadToolset: MCPToolset {
         guard [.done, .folded, .abandoned, .reverted].contains(task.status) || force else {
             throw Problem(text: "\(slug) isn't merged. Use force: true to abandon its work.")
         }
+        // Commits that didn't merge: nothing is touched, its worker still running included.
+        let base = workflow.base
+        if let refusal = unmergedRefusal(task, force: force, base: base) { throw refusal }
         // Only the ones still running are ended: a session that's gone (lost with a replaced host) has nothing to kill.
         // Its worker and verifier, and any earlier one still running in its worktree (a verifier a later audit
         // replaced is off the board, not ended).
@@ -3710,6 +3715,10 @@ public final class LeadToolset: MCPToolset {
         // Its sessions' temporary folders and TMPDIRs, found by the worktree's path while it's still there to resolve.
         let worktree = Worktrees.path(root: root, slug: slug)
         let temporary = ClaudeScratch.folders(for: worktree, in: scratchRoot) + SessionTemp.folders(for: worktree, in: sessionTempRoot)
+        // Again now its sessions are ended: a commit made while they were going counts too.
+        if let refusal = unmergedRefusal(task, force: force, base: base) {
+            throw endings.isEmpty ? refusal : Problem(text: refusal.text + " (Its sessions were ended: \(endings.map(\.said).joined(separator: ", ")).)")
+        }
         // Merged work is in main; leftovers in the worktree (build output) can go. Abandoned work goes only on request.
         // The build folder goes first and whatever git makes of the rest: it's most of the space.
         var freed = removeFolder((worktree as NSString).appendingPathComponent(".build"))
@@ -4464,6 +4473,41 @@ public final class LeadToolset: MCPToolset {
         return Problem(text: "Not merged: \(slug)'s contract was amended while its tests ran (they \(tests)): its passing audit \(stale.text). "
                        + "It stays in review, and nothing was changed. audit(\(slug)) again to judge what changed, "
                        + "or merge(\(slug), accept_stale_verdict: \"why\") if this verdict covers v\(stale.current).")
+    }
+
+    /// The branch can move in those minutes too (a worker's commit, its done report on it, with the task still in
+    /// review, so `changedMeanwhile` sees nothing), and the gate only read its head before them: this is the refusal
+    /// when `agent/<slug>` isn't `commit`, the commit the run tested, any more. What's new on it hasn't been audited or
+    /// tested, and landing the old commit would let cleanup delete the new one.
+    func movedMeanwhile(_ slug: String, since started: LeadTask, tested commit: String, tests: String) -> Problem? {
+        let branch = Worktrees.branch(slug)
+        let now = branchHead(branch)
+        guard now != commit else { return nil }
+        let moved = now.map { "\(branch) moved from \(commit.prefix(8)) to \($0.prefix(8))" } ?? "\(branch), at \(commit.prefix(8)) when they started, is gone"
+        let state = Self.shownState(started)
+        try? store.appendProgress("Didn't merge \(slug): \(moved) while its tests ran (they \(tests)); it stays \(state)")
+        return Problem(text: "Not merged: \(moved) while its tests ran (they \(tests), on \(commit.prefix(8)) alone). Nothing landed, and \(slug) stays \(state). "
+                       + "The new head needs its own audit (review none: its worker's done report on it) before it merges.")
+    }
+
+    /// The refusal when `task`, merged, has commits on its branch that didn't merge (`Worktrees.unmerged`), so that
+    /// removing the branch would lose them: only a done task, and not with `force`, the lead's word that they can go.
+    /// An abandoned, folded or reverted task's branch goes as ever.
+    private func unmergedRefusal(_ task: LeadTask, force: Bool, base: String) -> Problem? {
+        guard !force, task.status == .done else { return nil }
+        let slug = task.slug, branch = Worktrees.branch(slug)
+        switch Worktrees.unmerged(root: root, slug: slug, base: base, merged: task.merged?.branchHead) {
+        case .failure(let failure):
+            return Problem(text: "Not cleaned up: can't tell whether \(branch) holds commits that didn't merge (\(failure.description)), so its worktree and branch stay. cleanup(\(slug), force: true) removes them anyway.")
+        case .success(let commits):
+            guard !commits.isEmpty else { return nil }
+            let named = commits.prefix(3).map { commit -> String in
+                let subject = Redaction.secrets(in: Git.run(["log", "-1", "--format=%s", commit], in: root).output)
+                return "\(commit.prefix(8)) (\(Self.clip(subject, 80)))"
+            }.joined(separator: ", ") + (commits.count > 3 ? " and \(commits.count - 3) more" : "")
+            return Problem(text: "Not cleaned up: \(branch) holds \(commits.count) commit\(commits.count == 1 ? "" : "s") \(base) doesn't have, beyond what merged: \(named). "
+                           + "Its worktree, branch and sessions stay. Land that work with a task of its own, or cleanup(\(slug), force: true) to drop it.")
+        }
     }
 
     func setStatus(_ slug: String, _ status: LeadTask.Status, setback: LeadSetback? = nil) throws {

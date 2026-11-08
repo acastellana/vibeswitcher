@@ -182,15 +182,19 @@ public struct LeadMergeRecord: Codable, Equatable, Sendable {
     /// The tasks that landed with it on one test run of a batch (merge_batching, see `LeadToolset.mergeBatch`), in the
     /// order they were stacked, itself among them; nil: it merged on a test run of its own.
     public var batch: [String]?
+    /// The task's branch head the merge took, before it was rebased and stamped (`commit` is the copy that landed, with
+    /// another hash): what's on the branch past this didn't merge (`Worktrees.unmerged`). Nil on older records.
+    public var branchHead: String?
 
     public init(commit: String, tested: Bool, onto: String? = nil, regression: Bool? = nil, audited: Bool? = nil, batch: [String]? = nil,
-                at: Double = Date().timeIntervalSince1970) {
+                branchHead: String? = nil, at: Double = Date().timeIntervalSince1970) {
         self.commit = commit
         self.tested = tested
         self.onto = onto
         self.regression = regression
         self.audited = audited
         self.batch = batch
+        self.branchHead = branchHead
         self.at = at
     }
 

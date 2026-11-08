@@ -1879,6 +1879,20 @@ public enum Worktrees {
         guard deleted.ok else { throw Failure(description: deleted.error) }
     }
 
+    /// The commits on `agent/<slug>` a merge didn't take, newest first: on neither `base` nor behind `merged`, the
+    /// branch's head that merge took (what landed is a rebased, stamped copy with another hash, or a squash, so the base
+    /// alone can't tell). Without `merged` (a record older than the field), by patch: the rebased copies are left out,
+    /// and a squashed merge's commits count as not merged, kept rather than lost. Empty when the branch is gone; a
+    /// failure when git can't say.
+    public static func unmerged(root: String, slug: String, base: String, merged: String?) -> Swift.Result<[String], Failure> {
+        let ref = "refs/heads/\(branch(slug))", onBase = "refs/heads/\(base)"
+        guard Git.run(["rev-parse", "--verify", "--quiet", ref], in: root).ok else { return .success([]) }
+        let listed = merged.map { Git.run(["rev-list", ref, "--not", onBase, $0], in: root) }
+            ?? Git.run(["rev-list", "--cherry-pick", "--right-only", "--no-merges", "\(onBase)...\(ref)"], in: root)
+        guard listed.ok else { return .failure(Failure(description: listed.error)) }
+        return .success(listed.output.split(separator: "\n").map(String.init))
+    }
+
     /// Where `branch` is checked out, if anywhere.
     static func checkout(of branch: String, root: String) -> String? {
         var current: String?

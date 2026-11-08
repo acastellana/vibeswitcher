@@ -295,6 +295,31 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(!merged.text.contains("bystander()") && !merged.text.contains("aFailingTestsHostIsEnded()"), "\(merged.text)")
     }
 
+    /// A commit that lands on the branch while the merge's tests run (the report path can record done on it with the
+    /// task still in review): the run tested the old commit, so that doesn't land, the reply names both, and the new
+    /// commit is still there. The test command makes the commit itself, so it lands during the run, every time.
+    @Test func aCommitOnTheBranchDuringTheMergesTestsKeepsItFromLanding() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let worktree = RecentProjects.shellQuote(Worktrees.path(root: root, slug: "add-b"))
+        configure(lead, ["test_command": "cd \(worktree) && echo late > late.txt && git add late.txt && git commit -q -m late"])
+        try audited(lead, runtime, root: root)
+        let main = Git.run(["rev-parse", "main"], in: root).output
+        let tested = Git.run(["rev-parse", "agent/add-b"], in: root).output
+
+        let merged = lead.call("merge", ["task": "add-b"])
+
+        let late = Git.run(["rev-parse", "agent/add-b"], in: root).output
+        #expect(late != tested)
+        #expect(merged.isError, "\(merged.text)")
+        #expect(merged.text.contains(String(tested.prefix(8))) && merged.text.contains(String(late.prefix(8))), "\(merged.text)")
+        #expect(Git.run(["rev-parse", "main"], in: root).output == main)
+        let task = try #require(BoardStore(root: root).load().task("add-b"))
+        #expect(task.status == .review && task.merged == nil, "\(task.status)")
+        #expect(Git.run(["show", "agent/add-b:late.txt"], in: root).ok)
+    }
+
     @Test func aFilteredRerunRunsOnlyTheFailingTests() throws {
         let root = try repo()
         try fakeSuite(root, passes: "[[ \"$*\" == *--filter* ]]")

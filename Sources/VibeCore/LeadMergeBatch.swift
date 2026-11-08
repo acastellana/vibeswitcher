@@ -239,6 +239,12 @@ extension LeadToolset {
                     stopped = "\(gate.task.slug)'s contract was amended while the tests ran, so the stack tested with it on doesn't land"
                     return false
                 }
+                if let moved = movedMeanwhile(gate.task.slug, since: gate.task, tested: gate.commit, tests: "passed in a batch") {
+                    ends[gate.task.slug] = .refused(moved.text)
+                    results[gate.task.slug] = ("passed", Date(), passing.plan)
+                    stopped = "\(Worktrees.branch(gate.task.slug)) moved while the tests ran, so the stack tested with its older commit doesn't land"
+                    return false
+                }
             }
             switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tip, from: onto) }) {
             case .refused(let reason):
@@ -286,7 +292,8 @@ extension LeadToolset {
                     board.tasks[at].status = .done
                     board.tasks[at].merged = LeadMergeRecord(commit: stack.tips[index], tested: true, onto: under[gate.task.slug],
                                                              regression: workflow.regressionCommand.map { _ in true },
-                                                             audited: gate.audited ? nil : false, batch: order.count > 1 ? order : nil)
+                                                             audited: gate.audited ? nil : false, batch: order.count > 1 ? order : nil,
+                                                             branchHead: gate.commit)
                     board.tasks[at].receipt = LeadReceipt(board.tasks[at], ending: .merged, questions: board.questions,
                                                           usage: usage[gate.task.slug] ?? LeadReceipts.Usage(),
                                                           tests: passing.tests, mergeReruns: flaked == nil ? 0 : 1, commits: brought[gate.task.slug] ?? nil)
