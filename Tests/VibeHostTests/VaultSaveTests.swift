@@ -7,7 +7,7 @@ import Testing
 /// A vault save that fails isn't lost silently: it's logged, by the file's name only, tried again, and goes through when
 /// it can; a save reaches the disk before it takes the vault's place.
 struct VaultSaveTests {
-    let root = "/tmp/vault-save-repo"
+    let root = "/repos/vault-save"
     let temp = Scratch()
     let folder: URL
     init() throws {
