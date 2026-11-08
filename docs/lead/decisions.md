@@ -290,3 +290,7 @@ On 2026-11-08 an install failed on a locked signing keychain. The lead said to u
 
 The lead told the user "at least one merge really did hang" from the hung log, which can't show sleep. The worker checked the power log and the lead confirmed it. The afternoon's slow runs and the "tests stopped at 16:08" reading also fit the Mac sleeping, so neither test width nor battery load was the cause.
 
+## 2026-11-08 23:16:41 From the 2026-11-08 batch retrospective: (1) Before calling a long merge or test run hung, check `pmset -g log` for sleep and the load recorder, and don't tell the user "it hung" until that's done. (2) A task's contract change no longer assumes a running worker has it: task incident-tasks-wait makes record_incident's task wait for the lead's contract and delivers a changed contract to a running worker. (3) The test-width timer is closed with no change: this evening's merge-sized full runs took 423-660 s, around the 600 s line, and the width was never shown to be the cause.
+
+(1) The lead told the user a merge "really did hang" from a log that can't show sleep; the Mac had slept 41 times. (2) The 2026-11-05 decision said to make a product task if an incident task auto-started again on its generic brief. turn-this-incident-into-16 did, and its worker reported that v2 never reached it, which cost a round trip.
+

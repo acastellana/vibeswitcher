@@ -4438,3 +4438,11 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-08 22:48 Automatically (auto_advance): Started the audit of the-other-time-limits at d182f5b6 (Its review is audit).
 - 2026-11-08 23:01 Audit of the-other-time-limits: complete, clean, round 1: 4 Nit open
 - 2026-11-08 23:15 Merged the-other-time-limits: The other time limits count awake time, and "still running" names only tests that were running (build 767537e5ec09)
+- 2026-11-08 23:15 Automatically (auto_advance): Merged the-other-time-limits (The other time limits count awake time, and "still running" names only tests that were running) into main at 47e5410d, on its passing audit and the full test run.
+- 2026-11-08 23:16 Automatically (auto_advance): Cleaned up the-other-time-limits; ended pid 95680 (Worker: The other time limits count awake time, and "still running" names only tests that were running) (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-08 23:16 Planned incident-tasks-wait-for: Incident tasks wait for the lead's contract, and a changed contract reaches its worker (review audit)
+- 2026-11-08 23:16 Update: Today: the review's fixes, Theme and the wait problems are on main — **Landed since 15:00 (17 tasks, all with their tests passing on main):**
+- 2026-11-08 23:16 Started a worker on incident-tasks-wait-for
+- 2026-11-08 23:16 Automatically (auto_advance): Started a worker on incident-tasks-wait-for (Incident tasks wait for the lead's contract, and a changed contract reaches its worker).
+- 2026-11-08 23:16 Update: Retrospective: 17 merges, and most of the delay wasn't in the work — **Went well:** 17 tasks in about 8 hours, no reverts, no audit round lost to a re-roll. Audits caught real problems before merge: a wrong README image, and a name that would have failed the full suite…
+- 2026-11-08 23:20 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
