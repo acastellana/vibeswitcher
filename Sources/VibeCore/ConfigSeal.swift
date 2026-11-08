@@ -1030,11 +1030,16 @@ extension LeadVault {
     private func flushAppWrites() {
         let pending = ConfigSeal.pending(for: folder)
         guard let lines = pending.take() else { return }
-        do { try setGuardedSettings([ConfigSeal.wroteKey: lines.joined(separator: "\n")], root: VibePaths.home) } catch let refused as Refused
-            where !refused.description.hasPrefix("The session host didn't answer") {
-            NSLog("VibeSwitcher: the vault didn't seal the app's own config writes: \(refused)")
+        do {
+            try setGuardedSettings([ConfigSeal.wroteKey: lines.joined(separator: "\n")], root: VibePaths.home)
+            pending.noteTaken()
         } catch {
+            // Kept whoever said no: a refusal can mean only that this connection hasn't proved it's the app yet, and
+            // the vault seals nothing from these but hashes the app's own writes left, however late they come.
             pending.putBack(lines)
+            if let refused = error as? Refused, !refused.description.hasPrefix("The session host didn't answer"), pending.noteRefused(now: Date()) {
+                NSLog("VibeSwitcher: the vault didn't seal the app's own config writes yet: \(refused)")
+            }
         }
     }
 

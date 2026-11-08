@@ -212,14 +212,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         let firstRun = FirstRun.shouldWelcome(
             defaults: .standard, stateDirExists: FileManager.default.fileExists(atPath: VibePaths.stateDir.path),
             hooksInstalled: Dictionary(uniqueKeysWithValues: Agent.allCases.map { ($0, HookInstaller.isInstalled(agent: $0)) }))
-        HookBinary.sync()
         VibePaths.ensurePrivateDirectories()
         PrivateRepair.atLaunch()
         // The sound a dictation silenced when this app last ended without quitting (its marker), put back.
         outputSilencer.recover()
         // Script blocks' files a crash left behind (see `RunnableCommand.Script`).
         RunnableCommand.Script.removeAll()
-        hostClient.connectIfRunning()
+        HookBinary.atLaunch(connect: { hostClient.connectIfRunning() })
         // Leads' witness and questions work with the window closed too.
         _ = leadController
         // Requests filed or sent while the feature was called vault requests, carried over once.
@@ -1181,17 +1180,20 @@ enum HookBinary {
         return url.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
     }
 
-    /// What a launch does about the binary. `connect` makes the app's connection to the host, `replace` the binary's
-    /// write and its seal.
+    /// What a launch does about the binary, in this order. `connect` makes the app's connection to the host, which
+    /// reads the app's key from the Keychain; only then does `replace` write the binary and seal it. Before the key is
+    /// read the host takes the app for no one and refuses the seal, and a new build's first read can wait for your
+    /// click (84 s at the 2026-11-08 13:34 install, in which a lead's look held the new binary and refused a merge).
+    /// Until the write, the binary is still the one sealed, so a look holds nothing. Off the main thread: the seal
+    /// waits on the host.
     static func atLaunch(connect: () -> Void,
                          background: (@escaping () -> Void) -> Void = { DispatchQueue.global(qos: .userInitiated).async(execute: $0) },
                          replace: @escaping () -> Void = {
                              sync()
                              LeadVault.standard.sealAppWrites()
                          }) {
-        _ = background
-        replace()
         connect()
+        background(replace)
     }
 
     /// The app's own write, sealed as written (`LeadVault.appWrite`): an update's new binary never waits for your
@@ -1201,14 +1203,20 @@ enum HookBinary {
         vault.appWrite([target.path], home: home) { write(source: source, to: target) }
     }
 
+    /// One write at a time: launch's, off the main thread, and Settings' or onboarding's share a temporary file.
+    private static let writing = NSLock()
+
     private static func write(source: URL?, to target: URL) -> Bool {
         guard let source, let data = try? Data(contentsOf: source) else { return false }
+        writing.lock()
+        defer { writing.unlock() }
         let folder = target.deletingLastPathComponent()
         if let existing = try? Data(contentsOf: target), existing == data { return true }
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            // Write-then-rename so a hook that is running right now never sees a half-written binary.
-            let temp = folder.appendingPathComponent(".vibeswitcher-hook.tmp")
+            // Write-then-rename so a hook that is running right now never sees a half-written binary. Beside the bin
+            // folder, not in it: the folder is sealed, and a look while the temporary file was there would hold it.
+            let temp = folder.deletingLastPathComponent().appendingPathComponent(".vibeswitcher-hook.tmp")
             try data.write(to: temp)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: temp.path)
             _ = try FileManager.default.replaceItemAt(target, withItemAt: temp)
