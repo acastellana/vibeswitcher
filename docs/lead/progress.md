@@ -4243,3 +4243,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 13:37 Review of turn-this-incident-into-15: audit
 - 2026-11-08 13:37 Planned an-app-wide-appearance: An app-wide appearance setting: Follow macOS, Light or Dark
 - 2026-11-08 13:48 Merged config-seal-covers: Config seal covers plugins and the hook scripts settings name (build f38147da532c)
+- 2026-11-08 13:48 Automatically (auto_advance): Merged config-seal-covers (Config seal covers plugins and the hook scripts settings name) into main at 5d7e459a, on its passing audit and the full test run.
+- 2026-11-08 13:49 Automatically (auto_advance): Cleaned up config-seal-covers (freed 3.0 GB of build output and temporary folders). It stays done.
+- 2026-11-08 13:49 Started a worker on turn-this-incident-into-15
+- 2026-11-08 13:49 Automatically (auto_advance): Started a worker on turn-this-incident-into-15 (An install's own hook-binary write raises no Accept card), its after tasks done (config-seal-covers).
