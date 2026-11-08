@@ -130,3 +130,10 @@ Evidence: progress.md 09:16: "Didn't merge starts-and-audits-wait … ~/.claude/
 Task: config-seal-claude-s
 Check: task turn-this-incident-into-14 turns it into a check that runs before merge.
 
+## 2026-11-08 13:37:18 Installing VibeSwitcher raised an Accept card for ~/.vibeswitcher/bin and refused a passing merge, though the app's own write of its hook binary should be sealed as it's written.
+
+Evidence: The install finished at 13:34:25 (pid 62375). ~/.vibeswitcher/bin/vibeswitcher-hook has mtime 13:34. progress.md 13:35: "Didn't merge config-seal-covers: … ~/.vibeswitcher/bin changed while the team's sessions ran". The user accepted the card for ~/.claude/skills and ~/.vibeswitcher/bin. The lead told the user that installs raise no card; the contract and the audit of branch-code-can-t said the same (F1, "the app seals what it writes itself"). AppDelegate.swift:215 and :1148 call HookBinary.sync.
+
+Task: branch-code-can-t
+Check: task turn-this-incident-into-15 turns it into a check that runs before merge.
+

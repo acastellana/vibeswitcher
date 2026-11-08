@@ -4233,3 +4233,13 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 12:49 Audit of settings-redesign-clear: complete, clean, round 3: 1 Important closed, 3 Nit (1 open)
 - 2026-11-08 13:01 Audit of config-seal-covers: complete, clean, round 3: 2 Important closed, 4 Nit (1 open)
 - 2026-11-08 13:16 Merged settings-redesign-clear: Settings redesign: clear categories, search, and a plain description on every option (build f38147da532c)
+- 2026-11-08 13:16 Automatically (auto_advance): Merged settings-redesign-clear (Settings redesign: clear categories, search, and a plain description on every option) into main at 247c2296, on its passing audit and the full test run.
+- 2026-11-08 13:16 Automatically (auto_advance): Cleaned up settings-redesign-clear (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-08 13:17 Started a worker on settings-plain-language
+- 2026-11-08 13:17 Automatically (auto_advance): Started a worker on settings-plain-language (Settings: plain-language pass over section footers), its after tasks done (settings-redesign-clear).
+- 2026-11-08 13:17 Update: Settings redesign merged — **What changed (main 247c2296):** Settings is now a sidebar of 12 categories with a search field and a plain description on every option. Links that open a specific setting still land on it. The earli…
+- 2026-11-08 13:35 Automatically (auto_advance): Didn't merge config-seal-covers: Not merged: config-seal-covers's tests passed, and after them: ~/.vibeswitcher/bin changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made the change, they accept it there; if not, they set it back first.
+- 2026-11-08 13:37 Incident: Installing VibeSwitcher raised an Accept card for ~/.vibeswitcher/bin and refused a passing merge, though the app's own write of its hook binary should be seale… (in branch-code-can-t); planned turn-this-incident-into-15 to turn it into a check
+- 2026-11-08 13:37 Review of turn-this-incident-into-15: audit
+- 2026-11-08 13:37 Planned an-app-wide-appearance: An app-wide appearance setting: Follow macOS, Light or Dark
+- 2026-11-08 13:48 Merged config-seal-covers: Config seal covers plugins and the hook scripts settings name (build f38147da532c)
