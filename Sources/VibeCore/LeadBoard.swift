@@ -66,6 +66,18 @@ public struct LeadAuditBrief: Codable, Equatable, Sendable {
     }
 }
 
+/// The contract its worker has: the version its brief was written from, or the last amendment sent to it (see
+/// `LeadToolset.sendWorkerContractChange`), with that version's text to tell the next change from.
+public struct LeadWorkerBrief: Codable, Equatable, Sendable {
+    public var version: Int
+    public var contract: LeadContract
+
+    public init(version: Int, contract: LeadContract) {
+        self.version = version
+        self.contract = contract
+    }
+}
+
 /// The verifier's report: what it found in the worker's branch, not what the worker said.
 public struct LeadEvidence: Codable, Equatable, Sendable {
     public enum Completion: String, Codable, Sendable { case complete, incomplete, blocked }
@@ -731,6 +743,11 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var contractVersion: Int?
     /// The contract its running (or last) audit's verifiers have, and the version they judged (see `LeadAuditBrief`).
     public var auditBrief: LeadAuditBrief?
+    /// The contract its worker has (see `LeadWorkerBrief`); nil: no worker started since this was kept.
+    public var workerBrief: LeadWorkerBrief?
+    /// record_incident planned it on its generic brief: it doesn't start by itself (see `waitsForContract`) until the
+    /// lead changes that contract or sets it going (update_task auto_advance: true, start_worker). nil: any other task.
+    public var genericBrief: Bool?
     /// How it went, in the scorecard's numbers, as of the board's last change (see `LeadTaskScore`).
     public var score: LeadTaskScore?
     /// Its review level as the lead set it (for showing, and never lowering: merge goes by the stricter of this and
@@ -855,6 +872,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
 
     /// Its contract's version, 1 until update_task first changes it.
     public var contractRevision: Int { contractVersion ?? 1 }
+    /// Still on the generic brief record_incident wrote and not set going: auto_advance leaves it planned. Any change
+    /// to its contract, by whichever route, is a new version and ends the wait.
+    public var waitsForContract: Bool { genericBrief == true && contractRevision == 1 }
 
     /// "judged contract vN, current vM" when its verdict (or the one a newer report outdated) judged an older version
     /// of its contract than it has now: the lead amended it after its verifiers last heard; nil otherwise.

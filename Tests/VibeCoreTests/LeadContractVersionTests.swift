@@ -119,6 +119,149 @@ struct LeadContractVersionTests: LeadTeamFixture {
         #expect(toldLead(runtime).last?.contains("judged contract") == false)
     }
 
+    // MARK: A worker at work hears of it
+
+    /// A lead whose task "add-b" has a worker running on contract v1.
+    func working() throws -> (root: String, runtime: FakeRuntime, lead: LeadToolset) {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        #expect(!lead.call("configure", ["merge_policy": "ask_all", "test_command": "true"]).isError)
+        #expect(!lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "review": "audit"]).isError)
+        #expect(!lead.call("start_worker", ["task": "add-b"]).isError)
+        return (root, runtime, lead)
+    }
+
+    /// What the task's worker session was sent, oldest first.
+    func toWorker(_ root: String, _ runtime: FakeRuntime) throws -> [String] {
+        let worker = try #require(try task(root).worker)
+        return runtime.steered.filter { $0.target == worker }.map(\.text)
+    }
+
+    /// 2026-11-08: turn-this-incident-into-16's worker worked on v1 after the lead wrote v2, and found its report refused.
+    @Test(arguments: ["goal", "acceptance", "boundaries", "context"])
+    func updateTaskSendsARunningWorkerTheNewVersion(section: String) throws {
+        let (root, runtime, lead) = try working()
+        let new = "the new \(section)"
+        let value: Any = section == "acceptance" || section == "boundaries" ? ["test -f b.txt", new] : new
+        let updated = lead.call("update_task", ["task": "add-b", section: value])
+        #expect(updated.text.contains("contract now v2") && updated.text.contains("v1 to v2"), "\(updated.text)")
+
+        let sent = try toWorker(root, runtime)
+        #expect(sent.count == 1, "\(sent)")
+        let text = try #require(sent.first)
+        #expect(text.contains("contract v2") && text.contains("you had v1") && text.contains(new), "\(text)")
+        let delivered = try #require(runtime.steered.last)
+        #expect(delivered.sender == .lead("lead of \(URL(fileURLWithPath: root).lastPathComponent)"))
+
+        // The same text again is no new version, and nothing is sent; the next change is told from the version it has.
+        _ = lead.call("update_task", ["task": "add-b", section: value])
+        #expect(try toWorker(root, runtime).count == 1)
+        _ = lead.call("update_task", ["task": "add-b", "goal": "the third goal"])
+        let third = try #require(try toWorker(root, runtime).last)
+        #expect(third.contains("contract v3") && third.contains("you had v2") && third.contains("the third goal"), "\(third)")
+    }
+
+    /// Its done report answers to every check of the new version, named as they are now.
+    @Test func theSentVersionListsTheChecksItsReportNeeds() throws {
+        let (root, runtime, lead) = try working()
+        _ = lead.call("update_task", ["task": "add-b", "acceptance": ["the added check", "test -f b.txt"]])
+        let text = try #require(try toWorker(root, runtime).first)
+        #expect(text.contains("1. the added check") && text.contains("2. test -f b.txt"), "\(text)")
+    }
+
+    /// The check on a worker's report is what it was: the current version's checks, whatever the worker was told.
+    @Test func aWorkersReportStillAnswersToEveryCheckOfTheCurrentVersion() throws {
+        let (root, runtime, lead) = try working()
+        let worker = try seat("worker-add-b", runtime)
+        let worktree = Worktrees.path(root: root, slug: "add-b")
+        try "bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "b.txt"], in: worktree)
+        Git.run(["commit", "-q", "-m", "add b"], in: worktree)
+        _ = lead.call("update_task", ["task": "add-b", "acceptance": ["test -f b.txt", "says b"]])
+
+        let refused = worker.call("report", doneReport("added b", checks: 1))
+        #expect(refused.isError && refused.text.contains("no entry for acceptance check 2 (says b)"), "\(refused.text)")
+        #expect(try task(root).status == .running)
+        #expect(!worker.call("report", doneReport("added b", checks: 2)).isError)
+    }
+
+    /// An update_task between the brief's being written and the worker's being on the board reaches it no other way:
+    /// the worker that started on v1 while the lead wrote v2 is the incident itself.
+    @Test func aContractChangedWhileItsWorkerStartsReachesThatWorker() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        #expect(!lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]]).isError)
+        runtime.calls.lock()
+        runtime.onSpawn = { _ in
+            runtime.onSpawn = nil
+            #expect(!lead.call("update_task", ["task": "add-b", "goal": "the goal written during the start"]).isError)
+        }
+        runtime.calls.unlock()
+
+        let started = lead.call("start_worker", ["task": "add-b"])
+        #expect(!started.isError && started.text.contains("v1 to v2"), "\(started.text)")
+        let sent = try toWorker(root, runtime)
+        #expect(sent.count == 1 && sent[0].contains("contract v2") && sent[0].contains("the goal written during the start"), "\(sent)")
+    }
+
+    @Test func aWorkerThatsStoppedOrDoneIsntSentIt() throws {
+        let (root, runtime, lead) = try working()
+        #expect(!lead.call("stop_worker", ["task": "add-b"]).isError)
+        let updated = lead.call("update_task", ["task": "add-b", "goal": "a goal for its next worker"])
+        #expect(updated.text.contains("contract now v2") && !updated.text.contains("v1 to v2"), "\(updated.text)")
+        #expect(try toWorker(root, runtime).isEmpty)
+
+        // Its next worker's brief is written from v2: nothing to send, and the version it has is recorded.
+        #expect(!lead.call("start_worker", ["task": "add-b"]).isError)
+        #expect(try toWorker(root, runtime).isEmpty)
+        _ = lead.call("update_task", ["task": "add-b", "goal": "a third goal"])
+        let third = try #require(try toWorker(root, runtime).last)
+        #expect(third.contains("contract v3") && third.contains("you had v2"), "\(third)")
+    }
+
+    /// One the host couldn't take is said to the lead, and the next change still tells the worker from what it has.
+    @Test func aChangeThatCouldntBeSentIsSaidAndIsntMarkedSent() throws {
+        let (root, runtime, lead) = try working()
+        let worker = try #require(try task(root).worker)
+        runtime.calls.lock()
+        runtime.onSteer = { target, _, _ in
+            if case .session(worker) = target { throw BoardError(text: "the host said no") }
+            return .steered
+        }
+        runtime.calls.unlock()
+        let failed = lead.call("update_task", ["task": "add-b", "goal": "second"])
+        #expect(!failed.isError && failed.text.contains("the host said no") && failed.text.contains("message it"), "\(failed.text)")
+
+        runtime.calls.lock()
+        runtime.onSteer = nil
+        runtime.calls.unlock()
+        _ = lead.call("update_task", ["task": "add-b", "goal": "third"])
+        let told = try #require(try toWorker(root, runtime).last)
+        #expect(told.contains("contract v3") && told.contains("you had v1"), "\(told)")
+    }
+
+    /// Its box kept the message: cleared and typed again, as the loop does for findings; kept again, it isn't marked sent.
+    @Test func aMessageItsBoxKeptIsTypedOnceMoreThenSaid() throws {
+        let (root, runtime, lead) = try working()
+        runtime.calls.lock()
+        runtime.delivery = .notSubmitted("the box")
+        runtime.calls.unlock()
+        let kept = lead.call("update_task", ["task": "add-b", "goal": "second"])
+        #expect(try toWorker(root, runtime).count == 2, "typed, then cleared and typed once more")
+        #expect(runtime.clearedDrafts == 1)
+        #expect(kept.text.contains("couldn't be sent") && kept.text.contains("message it"), "\(kept.text)")
+    }
+
+    /// A worker that reported done is told too (findings may send it back to the new version), and not to start on it.
+    @Test func aWorkerThatReportedDoneIsToldNotToStartOnIt() throws {
+        let (root, runtime, lead) = try reported()
+        _ = lead.call("update_task", ["task": "add-b", "acceptance": ["test -f b.txt", "says b"]])
+        let text = try #require(try toWorker(root, runtime).last)
+        #expect(text.contains("contract v2") && text.contains("reported done"), "\(text)")
+    }
+
     // MARK: A verdict on an older version says so
 
     @Test func aVerdictOnAnOlderVersionSaysSoInTheReportStatusAndBoard() throws {

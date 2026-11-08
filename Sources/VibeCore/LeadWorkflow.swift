@@ -1576,6 +1576,18 @@ public enum LeadPrompts {
             + "\n\nJudge the branch against v\(new): what it accepts is in scope, what it adds is checked. Give contract_version: \(new) in submit_audit."
     }
 
+    /// What a worker is sent when its task's contract changes after its brief (`LeadToolset.sendWorkerContractChange`):
+    /// the new version, what changed since the version it has (the whole contract when that isn't on record), and the
+    /// checks as they're numbered now, which its done report's evidence answers to. `reported`: it has reported done.
+    public static func workerContractAmended(slug: String, from old: Int?, to new: Int, changes: String, acceptance: [String], reported: Bool) -> String {
+        let checks = acceptance.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        return "The lead amended agent/\(slug)'s contract while you work: it's now contract v\(new)" + (old.map { " (you had v\($0))" } ?? "")
+            + (old == nil ? ". It reads:\n\n" : ". What changed:\n\n") + (changes.isEmpty ? "(nothing in the text: the version only)" : changes)
+            + "\n\nWork to v\(new) from here: what it drops is out of scope, what it adds is yours to do."
+            + (checks.isEmpty ? "" : " Your done report's evidence needs one entry for each of its acceptance checks, as they are now:\n\(checks)")
+            + (reported ? "\n\nYou've reported done: don't start on this unless the lead or the audit's findings send you back. Your next report answers to v\(new)." : "")
+    }
+
     static let guideHeading = "## The project's REVIEW.md"
 
     /// The verifier's section of the owner's REVIEW.md, as the base branch has it (`LeadRisk.reviewGuide`); "" without

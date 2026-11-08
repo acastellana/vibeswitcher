@@ -988,11 +988,15 @@ public final class LeadAdvance: @unchecked Sendable {
         }
     }
 
+    /// `task` may start by itself now: planned, not opted out, and not on an incident's generic brief still (2026-11-08:
+    /// turn-this-incident-into-16 started on v1 in the turn the lead wrote v2; see `LeadTask.waitsForContract`).
+    private func startsByItself(_ task: LeadTask) -> Bool { isDue(task, [.planned]) && !task.waitsForContract }
+
     /// The planned tasks whose `after` tasks are done, in board order, while there's room.
     private func starts(_ workflow: LeadWorkflow) {
         for task in lead.store.load().tasks where task.status == .planned && task.autoAdvance != false {
             let board = lead.store.load()
-            guard let task = board.task(task.slug), isDue(task, [.planned]), let waits = waiting(task, board) else { continue }
+            guard let task = board.task(task.slug), startsByItself(task), let waits = waiting(task, board) else { continue }
             // Not startable yet (see `LeadLaunch.codexWorkersUsable`): said once, never tried.
             if task.workerAgent == .codex, !lead.codexWorkers {
                 once("codex|\(task.slug)", "\(task.slug) won't start by itself: \(LeadLaunch.codexUnusable) update_task(\(task.slug), agent: claude) to run it on Claude.")
@@ -1012,7 +1016,7 @@ public final class LeadAdvance: @unchecked Sendable {
             let after = (task.after ?? []).joined(separator: ", ")
             step("start|\(task.slug)") {
                 // Asked again in start_worker's lock: a hold set while the room was counted stands.
-                _ = try lead.advanceStart(task.slug, when: { [self] in isDue($0, [.planned]) })
+                _ = try lead.advanceStart(task.slug, when: { [self] in startsByItself($0) })
                 let routed = lead.store.load().task(task.slug)?.routed
                 return "Started a worker on \(task.slug) (\(task.title))" + (after.isEmpty ? "" : ", its after tasks done (\(after))")
                     + (routed.map { "; its agent is auto, so it went to \($0)." } ?? ".")

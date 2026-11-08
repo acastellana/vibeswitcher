@@ -759,7 +759,7 @@ public final class LeadToolset: MCPToolset {
                             properties: ["entries": P(type: "array", description: "The entries to move, each by its heading (without ##) or its start, e.g. its stamp \"2026-10-17 12:15\" (to the minute or the second)", items: "string"),
                                          "reason": P(type: "string", description: "Why they go, in one line (it heads this batch in the archive)")],
                             required: ["entries", "reason"]),
-                MCPToolInfo(name: "record_incident", description: "Record an incident (something broke the user's work: a hang, a lost message, a reverted merge) in incidents.md, and plan a task that turns it into a check that runs before merge (a test, or a case in regression_command's corpus), so a merge that brings it back is refused.",
+                MCPToolInfo(name: "record_incident", description: "Record an incident (something broke the user's work: a hang, a lost message, a reverted merge) in incidents.md, and plan a task that turns it into a check that runs before merge (a test, or a case in regression_command's corpus), so a merge that brings it back is refused. That task doesn't start by itself until update_task changes its contract, or auto_advance: true or start_worker sets it going.",
                             properties: ["what": P(type: "string", description: "What happened, in one line"),
                                          "evidence": P(type: "string", description: "How it showed: the transcript, log, commit or steps that reproduce it"),
                                          "task": P(type: "string", description: "The task it happened in or came from (its slug), if any")],
@@ -1459,6 +1459,11 @@ public final class LeadToolset: MCPToolset {
                 contractVersion = board.tasks[index].contractVersion
                 changed.append("contract now v\(board.tasks[index].contractRevision)")
             }
+            // auto_advance: true says go, even on record_incident's generic brief (a changed contract ended the wait already).
+            if auto == true, board.tasks[index].genericBrief == true {
+                if board.tasks[index].waitsForContract { changed.append("it starts by itself on record_incident's generic brief") }
+                board.tasks[index].genericBrief = nil
+            }
             if let status {
                 // Re-planned: its next worker's time counts from zero.
                 if status == .planned, board.tasks[index].status != .planned {
@@ -1509,8 +1514,9 @@ public final class LeadToolset: MCPToolset {
             return MCPToolResult(text: (changed.isEmpty ? "" : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded) ") + (try rerollTask(slug)))
         }
         let goOn = budgetCleared && status == nil ? " If its worker stopped for the budget, message(\(slug), …) to tell it to go on." : ""
-        // An audit under way judges the new version: its verifiers are sent what changed, at their next step.
-        let heard = contractVersion == nil ? "" : sendContractChange(slug).map { " " + $0 } ?? ""
+        // An audit under way judges the new version: its verifiers are sent what changed, at their next step. So is a
+        // worker at work: its report answers to the new version.
+        let heard = contractVersion == nil ? "" : [sendContractChange(slug), sendWorkerContractChange(slug)].compactMap { $0.map { " " + $0 } }.joined()
         return MCPToolResult(text: changed.isEmpty ? "Nothing to change on \(slug)." : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded)\(goOn)\(heard)")
     }
 
@@ -1996,14 +2002,19 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].branch = Worktrees.branch(slug)
             board.tasks[index].worktree = worktree
             board.tasks[index].evidence = nil
+            // The contract its brief was written from: an update_task from here on is sent to it (sendWorkerContractChange).
+            board.tasks[index].workerBrief = LeadWorkerBrief(version: briefed.contractRevision, contract: briefed.contract)
+            board.tasks[index].genericBrief = nil
         }
+        // An update_task while it started went to no worker yet (the board named none, or the one before): sent now.
+        let amended = sendWorkerContractChange(slug).map { " " + $0 } ?? ""
         try? store.appendProgress("Started a worker on \(slug)\(routed)")
         let recovered = merging.map { "Its worktree is in the middle of a merge, which the worker was told to finish (start_worker with recover: true aborts it instead): \($0) " }
             ?? stuck.map { "Aborted the \($0.kind.rawValue) its worktree was stuck in; it's back on \($0.branch) at \($0.head.prefix(8)). " } ?? ""
         let runsOn = (codex ? ", Codex" : "") + (launchModel.map { ", on \($0)" } ?? "")
         let audited = codex ? " " + Self.codexStartNote : ""
         let why = route.map { " Its agent is auto, so it went to \($0.why)." } ?? ""
-        return MCPToolResult(text: noTools + offSaid + recovered + locked + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)\(runsOn)).\(why) You'll get a message when it reports, needs input or stalls.\(audited)")
+        return MCPToolResult(text: noTools + offSaid + recovered + locked + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)\(runsOn)).\(why) You'll get a message when it reports, needs input or stalls.\(audited)\(amended)")
     }
 
     private func stopWorker(_ slug: String) throws -> MCPToolResult {
@@ -2839,6 +2850,47 @@ public final class LeadToolset: MCPToolset {
             }
         } catch {
             return "Its audit's verifiers couldn't be sent the change (\(error)): its verdict will say if it judged an older contract than v\(version)."
+        }
+    }
+
+    /// Sends the task's live worker what changed in its contract since the version it has (`LeadTask.workerBrief`),
+    /// through the channel the lead's messages take (at its next step), and makes the new version its own once it was
+    /// sent: 2026-11-08, turn-this-incident-into-16's worker worked on v1 after the lead wrote v2, and its done report
+    /// was refused for a check it had never seen. What the lead's result says of it; nil when no worker is at work on
+    /// it, or it has the current version. Under its own lock: update_task and start_worker may both send it, once.
+    func sendWorkerContractChange(_ slug: String) -> String? {
+        var version = 0
+        do {
+            return try exclusively("contract-worker-\(slug)") { () -> String? in
+                guard let task = store.load().task(slug), let worker = task.worker, worker != task.stopped,
+                      ![.done, .kept, .folded, .abandoned, .reverted].contains(task.status) else { return nil }
+                version = task.contractRevision
+                let had = task.workerBrief
+                guard had.map({ $0.version < version }) ?? true, try listed().contains(where: { $0.id == worker && $0.live }) else { return nil }
+                let text = LeadPrompts.workerContractAmended(slug: slug, from: had?.version, to: version,
+                                                             changes: had.map { task.contract.changes(from: $0.contract) } ?? WorkerBrief.render(task),
+                                                             acceptance: task.contract.acceptance, reported: task.status == .review)
+                let who = "Its worker (session \(worker))"
+                var delivered: LeadDelivery.Delivered
+                do {
+                    delivered = try deliver(slug, worker: worker, text: text, clearDraft: false)
+                    // Typed but kept in its box, in place of the inbox: once more with the box cleared, as the loop's sends do.
+                    if case .notSubmitted = delivered { delivered = try deliver(slug, worker: worker, text: text, clearDraft: true) }
+                } catch {
+                    return "\(who) couldn't be sent the change (\(error)): message it this, or its report answers to a contract it hasn't seen."
+                }
+                if case .notSubmitted(let box) = delivered {
+                    return "\(who) couldn't be sent the change (its box kept it: \(Self.clip(box, 200))): message it this, or its report answers to a contract it hasn't seen."
+                }
+                try store.update { board in
+                    guard let index = board.taskIndex(slug), board.tasks[index].worker == worker else { return }
+                    board.tasks[index].workerBrief = LeadWorkerBrief(version: version, contract: task.contract)
+                }
+                try? store.appendProgress("Sent \(slug)'s worker contract v\(version)" + (had.map { " (it had v\($0.version))" } ?? ""))
+                return "\(who) was sent what changed (contract " + (had.map { "v\($0.version) to " } ?? "") + "v\(version)), at its next step."
+            }
+        } catch {
+            return "Its worker couldn't be sent the change (\(error)): message it contract v\(version)."
         }
     }
 
@@ -4329,6 +4381,7 @@ public final class LeadToolset: MCPToolset {
         let task = try store.update { board -> LeadTask in
             var task = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title, contract: contract)
             task.origin = LeadTask.Origin.incident.rawValue
+            task.genericBrief = true
             board.tasks.append(task)
             return task
         }
@@ -4337,7 +4390,11 @@ public final class LeadToolset: MCPToolset {
         let file = store.recordsDir.map { "\($0)/incidents.md (committed to \(base) with the next batch)" } ?? "incidents.md"
         let regression = workflow.regressionCommand.map { " regression_command is `\($0)`: its check can be a case there." }
             ?? " There's no regression_command yet: when the check is a run of its own (a bench corpus), set it with configure (regression_command), and merge runs it after test_command."
-        return MCPToolResult(text: "Recorded in \(file). Planned task \(task.slug) turns it into a check that runs before merge.\(regression) Start it with start_worker.")
+        let starts = workflow.autoAdvance
+            ? " It waits for you: auto_advance doesn't start it on this generic brief. Give it its contract with update_task (goal, acceptance, boundaries or context) and it starts by itself; "
+                + "to set it going as it is, update_task(\(task.slug), auto_advance: true) or start_worker."
+            : " Give it its contract with update_task, then start it with start_worker."
+        return MCPToolResult(text: "Recorded in \(file). Planned task \(task.slug) turns it into a check that runs before merge.\(regression)\(starts)")
     }
 
     /// The contract of the task an incident becomes: a check that fails while the incident can happen and runs before
@@ -5882,7 +5939,8 @@ public final class LeadToolset: MCPToolset {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             var lines = [String(decoding: try encoder.encode(task), as: UTF8.self)]
             lines.append("\nContract: v\(task.contractRevision)" + (task.staleContract.map { " (its verdict \($0))" } ?? "")
-                + (task.auditBrief.map { brief in task.evidence == nil && brief.version < task.contractRevision ? " (its audit's verifiers have v\(brief.version))" : "" } ?? ""))
+                + (task.auditBrief.map { brief in task.evidence == nil && brief.version < task.contractRevision ? " (its audit's verifiers have v\(brief.version))" : "" } ?? "")
+                + (task.waitsForContract ? " (record_incident's generic brief: it doesn't start by itself until update_task changes its contract, or auto_advance: true or start_worker sets it going)" : ""))
             lines.append("Worker: \(Self.agentText(task))" + (task.codexAudit.map { " (\($0))" } ?? ""))
             lines.append("Review: \(task.reviewLevel.rawValue)" + (task.merged.map { $0.unaudited ? " (merged with no audit)" : "" } ?? "")
                 + (task.riskRaised.map { " (audited: \($0.reason), raised by the risk check at \($0.commit.prefix(8)))" } ?? ""))

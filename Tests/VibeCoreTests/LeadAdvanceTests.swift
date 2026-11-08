@@ -202,6 +202,60 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(prompt.contains(LeadPrompts.Policy.workerCheck(.audit)))
     }
 
+    // MARK: an incident's task waits for its contract
+
+    /// 2026-11-08: turn-this-incident-into-16 started on the generic brief in the same turn the lead wrote v2. The task
+    /// record_incident plans is first on the board here, so the other task's start shows a pass went by it and left it.
+    @Test func recordIncidentsTaskDoesntStartByItselfUntilItsContractChanges() async throws {
+        let (root, runtime, lead) = try team()
+        #expect(!lead.call("record_incident", ["what": "Lost a message", "evidence": "the log"]).isError)
+        let slug = try #require(BoardStore(root: root).load().tasks.last?.slug)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Other work", "goal": "g", "acceptance": ["a"]])
+        #expect(await advancing.until { task("other-work", root)?.status == .running })
+        #expect(task(slug, root)?.status == .planned && task(slug, root)?.worker == nil)
+        #expect(lead.call("board", ["task": slug]).text.contains("Contract: v1 (record_incident's generic brief"))
+
+        // A title isn't a contract: it still waits.
+        #expect(!lead.call("update_task", ["task": slug, "title": "Sharper title"]).isError)
+        await advancing.settle()
+        #expect(task(slug, root)?.status == .planned)
+
+        #expect(!lead.call("update_task", ["task": slug, "goal": "The sharpened goal"]).isError)
+        #expect(await advancing.until { task(slug, root)?.status == .running })
+        let prompt = try String(contentsOf: vault.runFolder(root: root, name: "worker-\(slug)").appendingPathComponent("prompt.md"), encoding: .utf8)
+        #expect(prompt.contains("The sharpened goal"))
+        #expect(toWorker(slug, root, runtime).isEmpty, "A brief written from v2 needs no amendment")
+    }
+
+    @Test(arguments: [true, false])
+    func theLeadCanSetAnIncidentsTaskGoingOnItsGenericBrief(byAutoAdvance: Bool) async throws {
+        let (root, _, lead) = try team()
+        #expect(!lead.call("record_incident", ["what": "Lost a message", "evidence": "the log"]).isError)
+        let slug = try #require(BoardStore(root: root).load().tasks.last?.slug)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        await advancing.settle()
+        #expect(task(slug, root)?.status == .planned)
+        if byAutoAdvance {
+            let going = lead.call("update_task", ["task": slug, "auto_advance": true])
+            #expect(going.text.contains("generic brief"), "\(going.text)")
+        } else {
+            #expect(!lead.call("start_worker", ["task": slug]).isError)
+        }
+        #expect(await advancing.until { task(slug, root)?.status == .running })
+    }
+
+    /// Only record_incident's own task waits: one the lead planned, whatever its origin, starts as it did.
+    @Test func aTaskAddedWithOriginIncidentStartsAsEver() async throws {
+        let (root, _, lead) = try team()
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        #expect(!lead.call("add_task", ["title": "From an incident", "goal": "g", "acceptance": ["a"], "origin": "incident"]).isError)
+        #expect(await advancing.until { task("from-an-incident", root)?.status == .running })
+    }
+
     // MARK: time budget
 
     /// An over_budget report waits on the lead (see `LeadBudget`): the loop neither audits nor merges it, and never
