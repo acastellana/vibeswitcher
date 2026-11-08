@@ -40,12 +40,15 @@ public struct SetupQuality: Equatable, Sendable {
     public var byModel: [QualityGroup]
     /// The 8 weeks (7 days each) up to the range's end, oldest first.
     public var weeks: [QualityWeek]
+    /// The weekly scorecard: the last 7 days against the 7 before (see `SetupScorecard`); nil when not worked out.
+    public var scorecard: SetupScorecard?
 
-    public init(all: QualityFigures, byAgent: [QualityGroup], byModel: [QualityGroup], weeks: [QualityWeek]) {
+    public init(all: QualityFigures, byAgent: [QualityGroup], byModel: [QualityGroup], weeks: [QualityWeek], scorecard: SetupScorecard? = nil) {
         self.all = all
         self.byAgent = byAgent
         self.byModel = byModel
         self.weeks = weeks
+        self.scorecard = scorecard
     }
 }
 
@@ -305,6 +308,10 @@ struct QualitySource {
     var incidents: [String: [Double]]
     /// Its flake ledger: each entry's task and when; nil when its board keeps none.
     var flakes: [(task: String, at: Double?)]?
+    /// Its lead's ledger's days ("2026-11-02": tokens, priced cost, a model with no price), nil when it keeps none.
+    var leadDays: [String: (tokens: Int, cost: Double, unpriced: Bool)]? = nil
+    /// When each merged task (by slug) was first seen installed (`SetupInstalls.firstInstalls`).
+    var installedAt: [String: Double] = [:]
 }
 
 enum SetupQualityMath {
@@ -321,6 +328,9 @@ enum SetupQualityMath {
         var escaped: Bool
         var incident: Bool
         var neededNobody: Bool
+        /// Its project's index among the sources, and when a build containing it was first seen installed.
+        var source = 0
+        var installedAt: Double?
     }
 
     /// A receipt that ended: who worked, from when to when, and the working time.
@@ -344,7 +354,7 @@ enum SetupQualityMath {
     /// The figures of `sources` for `window`; `merges` the recorder's lines by project name and task slug, oldest
     /// first (nil: no recorder file for those days); `weeks` the trend's.
     static func quality(_ sources: [QualitySource], window: SetupStatsCollector.Window, weeks: [DateInterval],
-                        mergeLines: [String: [String: [RecorderLine]]]?) -> SetupQuality {
+                        mergeLines: [String: [String: [RecorderLine]]]?, calendar: Calendar = .current) -> SetupQuality {
         var merges: [Merge] = [], ended: [Ended] = [], sampled: [Sampled] = []
         var questions: [LeadQuestion] = [], untasked: [LeadQuestion] = []
         // Every task's worker (made unique as merges' are), for the flake ledger's entries; and those entries in the range.
@@ -389,7 +399,8 @@ enum SetupQualityMath {
                 let messaged = task.notes?.contains { $0.kind == .message && $0.at > began } ?? false
                 let rerolled = max(task.rerolls?.count ?? 0, task.receipt?.rerolls ?? 0) > 0
                 merges.append(Merge(task: task, view: view, at: at, codex: view.codex, model: model, firstTry: firstTry, sentBack: sentBack,
-                                    escaped: reverted || incident, incident: incident, neededNobody: !asked && !messaged && !rerolled))
+                                    escaped: reverted || incident, incident: incident, neededNobody: !asked && !messaged && !rerolled,
+                                    source: index, installedAt: source.installedAt[slug]))
             }
         }
         merges.sort { $0.at < $1.at }
@@ -421,7 +432,15 @@ enum SetupQualityMath {
             return QualityWeek(start: week.start, end: week.end, merged: mine.count, firstAuditPassRate: card.firstAuditPassRate,
                                costPerMergedTask: costs.isEmpty ? nil : costs.reduce(0, +) / Double(costs.count))
         }
-        return SetupQuality(all: all, byAgent: byAgent, byModel: byModel, weeks: trend)
+        let days = DateFormatter()
+        days.calendar = calendar
+        days.timeZone = calendar.timeZone
+        days.locale = Locale(identifier: "en_US_POSIX")
+        days.dateFormat = "yyyy-MM-dd"
+        let card = scorecard(sources, merges: merges, untasked: untasked, questions: questions, weeks: weeks, now: window.now,
+                             dayKey: { days.string(from: Date(timeIntervalSince1970: $0)) },
+                             dayStart: { days.date(from: $0)?.timeIntervalSince1970 })
+        return SetupQuality(all: all, byAgent: byAgent, byModel: byModel, weeks: trend, scorecard: card)
     }
 
     /// `LeadScorecard` over `tasks` and `questions` alone: its definitions, for a range's merges.

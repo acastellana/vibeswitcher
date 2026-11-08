@@ -732,6 +732,26 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// Its review level as the lead set it (for showing, and never lowering: merge goes by the stricter of this and
     /// the vault's copy, which only the lead writes). nil: none, the default.
     public var review: Review?
+    /// Where the work came from, as add_task was told (`Origin`'s raw value: user_report, incident…), for the scorecard's
+    /// count of bugs the user found against those the system found; nil: not said (tasks from before it was kept).
+    /// Kept as text so a board with a value this build doesn't know still decodes (`originKind` reads it).
+    public var origin: String?
+
+    /// Where a task's work came from (see `origin`). user_report: the user reported it; incident, log_watcher, flake
+    /// and audit: the system found it (an incident record, the log watcher, the flake ledger, an audit's finding);
+    /// lead: the lead's own plan; other: anything else.
+    public enum Origin: String, Codable, Sendable, CaseIterable {
+        case userReport = "user_report", incident, logWatcher = "log_watcher", flake, audit, lead, other
+
+        /// "user_report", " Incident ": the origin; nil for anything else.
+        public init?(text: String) { self.init(rawValue: text.trimmingCharacters(in: .whitespaces).lowercased()) }
+
+        /// Found by the system rather than reported by the user or planned.
+        public var systemFound: Bool { [.incident, .logWatcher, .flake, .audit].contains(self) }
+    }
+
+    /// `origin` as an `Origin`; nil when not said or not one this build knows.
+    public var originKind: Origin? { origin.flatMap(Origin.init(text:)) }
     /// Why its worker's last done report needs an audit before merge though its review is none (its branch touches
     /// sensitive_paths, say), as report found it; nil when it needs none (for showing: merge checks again).
     public var auditNeeded: String?

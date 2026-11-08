@@ -305,6 +305,9 @@ public final class SetupStatsCollector: @unchecked Sendable {
     /// By path: the size and modification time it was parsed at, and what it parsed to. Only on `queue`.
     private var cache: [String: (size: Int64, changed: Double, value: Any)] = [:]
     private let codexReader: CodexUsageReader?
+    /// Says whether a build holds a merge commit, for a project's root and the time its history is read from
+    /// (`SetupInstalls.gitContains`; a test gives its own).
+    var installsReader: @Sendable (String, Double) -> (String, String) -> Bool = { SetupInstalls.gitContains(root: $0, since: $1) }
     private let counter = NSLock()
     private var parsed = 0
     private var onMain = 0
@@ -401,8 +404,12 @@ public final class SetupStatsCollector: @unchecked Sendable {
             let name = (root as NSString).lastPathComponent
             projects.append(SetupStats.Project(name: name, root: root, hasArchive: archive != nil, figures: figures))
             if let board {
-                sources.append((root, QualitySource(name: name, tasks: Self.tasks(board: board, archive: archive ?? []), questions: board.questions,
-                                                   incidents: incidents(root: root), flakes: board.flakes?.map { ($0.task, $0.at) })))
+                let tasks = Self.tasks(board: board, archive: archive ?? [])
+                var source = QualitySource(name: name, tasks: tasks, questions: board.questions,
+                                           incidents: incidents(root: root), flakes: board.flakes?.map { ($0.task, $0.at) })
+                source.leadDays = lead?.days
+                source.installedAt = installs(root: root, tasks: tasks, since: weeks(ending: range.end).suffix(2).first?.start ?? range.start)
+                sources.append((root, source))
             }
         }
         projects.sort { ($0.name, $0.root) < ($1.name, $1.root) }
@@ -414,7 +421,7 @@ public final class SetupStatsCollector: @unchecked Sendable {
         if !sources.isEmpty {
             sources.sort { $0.root < $1.root }
             stats.quality = SetupQualityMath.quality(sources.map(\.source), window: window, weeks: weeks(ending: range.end),
-                                                     mergeLines: mergeLines(range))
+                                                     mergeLines: mergeLines(range), calendar: calendar)
             // A project with a board but no lead ledger for the range: its lead's spend isn't in the sum.
             let unledgered = projects.contains { $0.figures != nil && $0.figures?.leadTokens == nil }
             stats.quality?.all.lead = total?.leadTokens.map {
@@ -422,6 +429,20 @@ public final class SetupStatsCollector: @unchecked Sendable {
             }
         }
         return stats
+    }
+
+    /// When each of `tasks` merged from `since` on was first seen installed: the builds its project's receipts record
+    /// from `since` on (`SetupInstalls`), checked against its git history (`installsReader`), each build's once.
+    private func installs(root: String, tasks: [TaskView], since: Date) -> [String: Double] {
+        let t0 = since.timeIntervalSince1970
+        let merged = tasks.compactMap { view -> (slug: String, commit: String, at: Double, build: String?)? in
+            guard let task = view.lead, let record = task.merged else { return nil }
+            return (task.slug, record.commit, record.at, task.receipt?.build)
+        }
+        let wanted = merged.filter { $0.at >= t0 }.map { (slug: $0.slug, commit: $0.commit) }
+        let seen = merged.filter { $0.at >= t0 }.compactMap { merge in merge.build.map { (build: $0, at: merge.at) } }
+        guard !wanted.isEmpty, !seen.isEmpty else { return [:] }
+        return SetupInstalls.firstInstalls(merges: wanted, seen: seen, contains: installsReader(root, t0 - 2 * 86_400))
     }
 
     /// The trend's 8 weeks, 7 days each, the last ending at `end`; oldest first.
@@ -815,6 +836,9 @@ struct TaskView {
     var importantFindings: Int
     var receipt: ReceiptView?
     var codex: Bool
+    /// When it was put on the board, and where its work came from (`LeadTask.origin`, as text); nil when not said.
+    var createdAt: Double?
+    var origin: String?
 
     init?(_ task: [String: Any], decoder: JSONDecoder? = nil) {
         guard let id = task["id"] as? String else { return nil }
@@ -836,6 +860,9 @@ struct TaskView {
         importantFindings = whole(score?["importantFindings"]) ?? 0
         receipt = object(task["receipt"]).map(ReceiptView.init)
         codex = task["codexWorked"] as? Bool == true || task["agent"] as? String == "codex"
+        // A task removed from the board (made by mistake, never ran) was never work: not counted by creation.
+        createdAt = task["removedAt"] == nil || task["removedAt"] is NSNull ? number(task["createdAt"]) : nil
+        origin = task["origin"] as? String
     }
 }
 

@@ -571,7 +571,8 @@ public final class LeadToolset: MCPToolset {
                                          "context": P(type: "string", description: "What a fresh worker needs to know"),
                                          "from_finding": P(type: "string", description: "A finding as status and board name it, <task>:<id> (e.g. add-b:F2)"),
                                          "review": Self.reviewProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
-                                         "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty]),
+                                         "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty,
+                                         "origin": Self.originProperty]),
                 MCPToolInfo(name: "dismiss_finding", description: "Close one of a task's open audit findings with a reason (it isn't a problem, it's out of scope, the user accepted it): it no longer holds the merge back, and no verifier raises it again.",
                             properties: ["task": task, "id": P(type: "string", description: "The finding's id (F2), or <task>:<id>"),
                                          "reason": P(type: "string", description: "Why, in one line (it's kept with the finding)")],
@@ -901,6 +902,22 @@ public final class LeadToolset: MCPToolset {
         return Int(number)
     }
 
+    static var originProperty: MCPToolInfo.Property {
+        MCPToolInfo.Property(type: "string", description: "Where the work came from, for the scorecard (bugs the user found vs bugs the system found): "
+                             + "user_report (the user reported it: a bug or problem they hit), incident, log_watcher, flake, audit (the system found it), "
+                             + "lead (your own plan) or other. from_finding: audit unless you say otherwise.",
+                             options: LeadTask.Origin.allCases.map(\.rawValue))
+    }
+
+    /// The `origin` passed to add_task; nil when none was. Anything not an `Origin` is refused.
+    static func originArgument(_ arguments: [String: Any]) throws -> LeadTask.Origin? {
+        guard let given = arguments["origin"], !(given is NSNull), !((given as? String)?.isEmpty ?? false) else { return nil }
+        guard let text = given as? String, let origin = LeadTask.Origin(text: text) else {
+            throw Problem(text: "origin is one of " + LeadTask.Origin.allCases.map(\.rawValue).joined(separator: ", ") + ", not \(given). Nothing was added.")
+        }
+        return origin
+    }
+
     static var autoAdvanceProperty: MCPToolInfo.Property {
         MCPToolInfo.Property(type: "boolean", description: "false: VibeSwitcher moves nothing on this task by itself (no automatic start, audit, merge, send-back or cleanup), whatever workflow.md's auto_advance says; true (the default) clears that")
     }
@@ -942,9 +959,11 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "Not added: a Codex task is always audited by a Claude verifier, so its review can't be none. Leave review out (it's audit) or run it on Claude.")
         }
         let review: LeadTask.Review? = agent == .codex ? .audit : givenReview
+        let taskOrigin = try Self.originArgument(arguments) ?? (origin != nil ? .audit : nil)
         let task = try store.update { board -> LeadTask in
             var task = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title, contract: contract)
             task.review = review
+            task.origin = taskOrigin?.rawValue
             if arguments["after"] != nil { task.after = try Self.afterList(strings(arguments["after"]), on: store.withArchive(board), for: task.slug) }
             task.autoAdvance = auto == false ? false : nil
             task.budgetMin = budget
@@ -3112,8 +3131,9 @@ public final class LeadToolset: MCPToolset {
                         return (test, open.slug, true)
                     }
                     let title = "Fix the flaky test " + Self.clip(test, 60)
-                    let fix = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title,
+                    var fix = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title,
                                        contract: MergeRerun.fixContract(test: test, flakes: counted, workflow: workflow, root: root))
+                    fix.origin = LeadTask.Origin.flake.rawValue
                     board.tasks.append(fix)
                     ledger.notePlanned(fix.slug, for: test)
                     return (test, fix.slug, false)
@@ -4057,7 +4077,8 @@ public final class LeadToolset: MCPToolset {
         let contract = Self.incidentContract(what: what, evidence: evidence, task: about, workflow: workflow)
         let title = "Turn this incident into a check: " + Self.clip(what.split(whereSeparator: \.isNewline).joined(separator: " "), 60)
         let task = try store.update { board -> LeadTask in
-            let task = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title, contract: contract)
+            var task = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title, contract: contract)
+            task.origin = LeadTask.Origin.incident.rawValue
             board.tasks.append(task)
             return task
         }
@@ -5092,6 +5113,7 @@ public final class LeadToolset: MCPToolset {
         if let abandoned = Self.abandonedLine(settled, earlier: archived) { lines.append("\n" + abandoned) }
         // The scorecard's cost line: the batch's receipts summed, and its most expensive task.
         if let receipts = LeadReceiptTotals.line(all) { lines.append("\n" + receipts) }
+        if let origins = LeadOrigins.statusLine(all.tasks, now: Date().timeIntervalSince1970) { lines.append("\n" + origins) }
         if !ended.isEmpty {
             lines.append("\nworker ended (\(ended.count)), not running:")
             lines += ended.prefix(Self.statusTasks).map { task, who in
