@@ -161,8 +161,9 @@ struct RunButton: View {
 
     /// Asks first when it must (`confirm`), checks the session is still the one asked about and takes commands the
     /// same way, writes a script's file and has the runner type it. `done`: nil when cancelled; refused with why not
-    /// (also told through `runner.refused` and logged by kind through `runner.log`; the script's file goes then, unless an earlier Run left it there). A refusal
-    /// says why in words and makes no sound, as a shell request card's Run (`ShellDesk.run`).
+    /// (also told through `runner.refused` and logged by kind through `runner.log`; the script's file goes then, unless
+    /// an earlier Run left it there). A refusal says why in words and makes no sound, as a shell request card's Run
+    /// (`ShellDesk.run`).
     static func run(_ runnable: RunnableCommand.Runnable, way: RunnableCommand.Way, with runner: ChatRunner,
                     confirm: (RunnableCommand.Runnable) -> Bool, done: @escaping (RunOutcome?) -> Void = { _ in }) {
         let session = runner.session(), sessionKind = runner.sessionKind()
