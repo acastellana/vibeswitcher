@@ -121,16 +121,16 @@ enum SettingsCatalog {
         Entry("notify-reminders", "Remind me about waiting or stuck sessions", "Reminds you once when a session has waited 10 minutes or shown no progress for 15.", keywords: ["alert", "stuck", "nag"]),
     ])
 
-    private static let appearance = entries(.appearance, "Text", [
-        Entry("font", "Font", "The typeface used for text in terminals.", keywords: ["typeface", "monospaced"]),
-        Entry("font-size", "Size", "How large terminal text is drawn.", keywords: ["font", "zoom", "text size", "points"]),
-    ]) + entries(.appearance, "Colors", [
-        Entry("theme", "Theme", "The terminal's color scheme; choose Custom to set each color yourself.", keywords: ["colors", "dark", "light", "solarized"]),
+    private static let appearance = entries(.appearance, "Colors", [
+        Entry("theme", "Theme", "The look of the app and the terminal. Match System follows macOS; choose Custom to set each terminal color yourself.", keywords: ["dark mode", "light mode", "appearance", "theme", "colors", "solarized"]),
         Entry("color-text", "Text color", "The color of ordinary terminal text in the Custom theme.", keywords: ["foreground"], parent: "theme"),
         Entry("color-background", "Background color", "The terminal's background in the Custom theme.", parent: "theme"),
         Entry("color-cursor", "Cursor color", "The color of the cursor in the Custom theme.", parent: "theme"),
         Entry("color-selection", "Selection color", "The highlight behind selected text in the Custom theme.", parent: "theme"),
         Entry("color-ansi", "ANSI colors", "The 16 colors programs use for their output in the Custom theme.", keywords: ["palette"], parent: "theme"),
+    ]) + entries(.appearance, "Text", [
+        Entry("font", "Font", "The typeface used for text in terminals.", keywords: ["typeface", "monospaced"]),
+        Entry("font-size", "Size", "How large terminal text is drawn.", keywords: ["font", "zoom", "text size", "points"]),
     ]) + entries(.appearance, "Behavior", [
         Entry("cursor-shape", "Cursor", "The shape of the terminal's cursor: block, underline or bar.", keywords: ["caret"]),
         Entry("cursor-blink", "Blinking cursor", "Makes the terminal's cursor blink.", keywords: ["caret"]),

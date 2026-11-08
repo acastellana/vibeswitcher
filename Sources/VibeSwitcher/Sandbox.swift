@@ -76,6 +76,7 @@ enum Sandbox {
                             shots: URL(fileURLWithPath: shotsPath, isDirectory: true),
                             fakeClaude: value("--fake-claude"), minutes: minutes, empty: arguments.contains("--empty"),
                             walletPassage: walletPassage.flatMap { path in walletInbox.map { (path, URL(fileURLWithPath: $0, isDirectory: true)) } })
+        driver.launchTheme = value("--theme").flatMap(TerminalAppearance.Theme.init(rawValue:))
         app.delegate = driver
         withExtendedLifetime(driver) { app.run() }
         exit(0)
@@ -268,6 +269,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
     let host: HostClient
     let model = WindowModel()
     let preferences = Preferences()
+    /// `run --theme NAME`: as if Theme had been set before this launch.
+    var launchTheme: TerminalAppearance.Theme?
     /// Boost mode with the power source, your presence and the usage made up (`boost STATE`): never the Mac's.
     var boostSignals = (onAC: true, away: false, usage: AccountUsage())
     /// The battery's made-up charge for boost (`boost battery-on`, `battery-low`).
@@ -489,6 +492,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Breadcrumbs.shared.note("sandbox: started in \(state.path), quitting in \(minutes) min")
+        if let launchTheme { preferences.appearance.theme = launchTheme }
+        AppLook.follow(preferences, on: NSApp).store(in: &cancellables)
         try? FileManager.default.createDirectory(at: control, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try? FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
         watchTheClock()
@@ -1240,6 +1245,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("settings-pick N|ID", "picks the Nth search result (from 1), or the option with that catalog id, as a click on it does"),
         ("toolchain [dismiss]", "shows or dismisses a fake developer tools notice"),
         ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", ")),
+        ("theme [" + TerminalAppearance.Theme.allCases.map(\.rawValue).joined(separator: "|") + "]", "sets Settings › Appearance › Theme, as its picker does (none: what it is), and says the app's look: the theme, the app's appearance, what macOS says and what each window draws in"),
+        ("looks", "the main window's views by what each draws in (effectiveAppearance) and how many: what a stale or forced part of it is"),
+        ("panes [NAME]", "what SwiftUI resolves inside the main window's sidebar and inspector, and those two views drawn again in a plain window of the app's look: NAME-sidebar-plain.png, NAME-inspector-plain.png"),
+        ("shot-real NAME", "draws each window in the app's own look, nothing overridden: NAME-main-real.png, NAME-settings-real.png… (`shot` sets each window to light, then dark: to see Theme, use this). Either way, these draws can't composite the sidebar's and the inspector's glass: those panes can come out white, black or with dark text in a dark window, and lose rows even in light. `panes` draws them truly"),
         ("close settings|sheet", "closes Settings or the sheet"),
         ("shot NAME", "draws each window, light and dark, into the shots folder"),
         ("panes on|off", "shows or collapses the sidebar and inspector, for a shot of the middle alone"),
@@ -2355,10 +2364,30 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             reply(true, "closed \(rest)")
         case "shot": shot(rest.isEmpty ? "shot" : rest, reply)
+        case "looks":
+            guard let root = window?.window?.contentView?.superview else { return reply(false, "no window") }
+            var counts: [String: Int] = [:]
+            func walk(_ view: NSView) {
+                counts["\(view.effectiveAppearance.name.rawValue)  own=\(view.appearance?.name.rawValue ?? "-")  \(type(of: view))", default: 0] += 1
+                view.subviews.forEach(walk)
+            }
+            walk(root)
+            reply(true, counts.sorted { $0.key < $1.key }.map { "\($0.value)\t\($0.key)" }.joined(separator: "\n"))
+        case "shot-real": shotReal(rest.isEmpty ? "shot" : rest, reply)
+        case "theme":
+            if !rest.isEmpty {
+                guard let theme = TerminalAppearance.Theme(rawValue: rest) else {
+                    return reply(false, "no theme \(rest): " + TerminalAppearance.Theme.allCases.map(\.rawValue).joined(separator: ", "))
+                }
+                preferences.appearance.theme = theme
+            }
+            settle { [weak self] in reply(true, self?.lookReport() ?? "") }
         case "panes":
+            // Two commands share the name: `panes on|off` collapses or shows the two, any other argument names the drawing.
+            guard rest == "on" || rest == "off" else { return panes(rest.isEmpty ? "panes" : rest, reply) }
             // A shot draws a glass sidebar and inspector blank or without their colors on macOS 27: `panes off` leaves them out.
-            guard rest == "on" || rest == "off", let split = window?.window?.contentViewController as? NSSplitViewController else {
-                return reply(false, "panes on|off")
+            guard let split = window?.window?.contentViewController as? NSSplitViewController else {
+                return reply(false, "panes on|off: no main window")
             }
             split.splitViewItems.filter { $0.behavior != .default }.forEach { $0.isCollapsed = rest == "off" }
             settle { reply(true, "sidebar and inspector \(rest == "off" ? "collapsed" : "shown")") }
@@ -2924,6 +2953,91 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     // MARK: Shots
 
+    /// `theme`'s answer: what the setting is, and what the app and each of its windows really are.
+    private func lookReport() -> String {
+        func name(_ appearance: NSAppearance?) -> String { appearance?.name.rawValue ?? "nil (follows macOS)" }
+        // What the global domain says, as AppKit reads it (an argument or this app's own defaults wouldn't count).
+        let macOS = (CFPreferencesCopyAppValue("AppleInterfaceStyle" as CFString, kCFPreferencesAnyApplication) as? String) ?? "Light (no AppleInterfaceStyle)"
+        var lines = ["theme \(preferences.appearance.theme.rawValue)", "NSApp.appearance \(name(NSApp.appearance))",
+                     "NSApp.effectiveAppearance \(NSApp.effectiveAppearance.name.rawValue)", "macOS \(macOS)"]
+        lines += NSApp.windows.filter(\.isVisible).map { "window \($0.title.isEmpty ? String(describing: type(of: $0)) : $0.title): \($0.effectiveAppearance.name.rawValue)" }
+        return lines.joined(separator: "\n")
+    }
+
+    /// `panes NAME`: what the main window's sidebar and inspector really are. A probe inside each says what SwiftUI
+    /// resolves there, and the same two views are drawn again in a plain window of the app's look: NAME-sidebar-plain.png,
+    /// NAME-inspector-plain.png. A difference between those and `shot-real` is the side panes' drawing, not the views' colors.
+    private func panes(_ name: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard let root = window?.window?.contentView?.superview, let actions = windowActions else { return reply(false, "no window") }
+        var wrappers: [NSView] = []
+        func walk(_ view: NSView) {
+            if String(describing: type(of: view)).contains("SplitViewItemViewWrapper") { wrappers.append(view) }
+            view.subviews.forEach(walk)
+        }
+        walk(root)
+        var lines: [String] = []
+        var probes: [NSView] = []
+        for wrapper in wrappers {
+            let probe = NSHostingView(rootView: LookProbe { scheme in
+                var label = ""
+                wrapper.effectiveAppearance.performAsCurrentDrawingAppearance {
+                    label = NSColor.labelColor.usingColorSpace(.sRGB).map { String(format: "r%.2f g%.2f b%.2f a%.2f", $0.redComponent, $0.greenComponent, $0.blueComponent, $0.alphaComponent) } ?? "?"
+                }
+                lines.append("pane at x=\(Int(wrapper.frame.minX)): effective \(wrapper.effectiveAppearance.name.rawValue), SwiftUI \(scheme), labelColor \(label)")
+            })
+            probe.frame = NSRect(x: 0, y: 0, width: 4, height: 4)
+            wrapper.addSubview(probe)
+            probes.append(probe)
+        }
+        let base = Sandbox.fileName(name)
+        let views: [(String, AnyView, CGFloat)] = [
+            ("sidebar", AnyView(SessionListView(model: model, leads: leads, actions: actions)), 260),
+            ("inspector", AnyView(InspectorView(model: model, host: host, leads: leads)), 320),
+        ]
+        let scratch = views.map { name, view, width -> (String, NSWindow) in
+            let hosting = NSHostingView(rootView: view)
+            let made = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 800), styleMask: [.borderless], backing: .buffered, defer: false)
+            made.isReleasedWhenClosed = false
+            made.contentView = hosting
+            Sandbox.hide(made)
+            made.orderFront(nil)
+            return (name, made)
+        }
+        settle { [weak self] in
+            guard let self else { return }
+            probes.forEach { $0.removeFromSuperview() }
+            for (label, made) in scratch {
+                let file = self.shots.appendingPathComponent("\(base)-\(label)-plain.png")
+                lines.append(Sandbox.draw(made, to: file) ? file.path : "couldn't draw \(file.lastPathComponent)")
+                made.close()
+            }
+            reply(true, lines.joined(separator: "\n"))
+        }
+    }
+
+    /// `shot-real`: every window as the app really has it, its appearance not touched.
+    private func shotReal(_ name: String, _ reply: @escaping (Bool, String) -> Void) {
+        let base = Sandbox.fileName(name)
+        var windows: [(label: String, window: NSWindow)] = []
+        if let main = window?.window, main.isVisible { windows.append(("main", main)) }
+        if let sheet, sheet.isVisible { windows.append(("sheet-\(sheetName ?? "sheet")", sheet)) }
+        if let settings = settings?.window, settings.isVisible { windows.append(("settings", settings)) }
+        guard !windows.isEmpty else { return reply(false, "no window to draw") }
+        windows.forEach { $0.window.appearance = nil }
+        if model.showsChat { window?.chat.poll() }
+        window?.pane.reconfigureAll()
+        settle { [weak self] in
+            guard let self else { return }
+            var lines = [self.lookReport()]
+            var ok = true
+            for (label, window) in windows {
+                let file = self.shots.appendingPathComponent("\(base)-\(label)-real.png")
+                if Sandbox.draw(window, to: file) { lines.append(file.path) } else { ok = false; lines.append("couldn't draw \(file.lastPathComponent)") }
+            }
+            reply(ok, lines.joined(separator: "\n"))
+        }
+    }
+
     /// Each window the sandbox shows (the main window, Settings when open, the sheet when shown), drawn in light and in
     /// dark: `NAME-main-light.png`, `NAME-main-dark.png`, `NAME-settings-light.png`…
     private func shot(_ name: String, _ reply: @escaping (Bool, String) -> Void) {
@@ -2957,6 +3071,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
         take([("light", .aqua), ("dark", .darkAqua)][...])
     }
+}
+
+/// `panes`' probe: tells what color scheme SwiftUI resolves where it's placed.
+private struct LookProbe: View {
+    @Environment(\.colorScheme) private var scheme
+    let report: (ColorScheme) -> Void
+    var body: some View { Color.clear.onAppear { report(scheme) } }
 }
 
 // MARK: Soak

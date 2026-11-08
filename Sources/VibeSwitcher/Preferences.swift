@@ -1,8 +1,35 @@
 import AppKit
+import Combine
 import Foundation
 import ServiceManagement
 import UserNotifications
 import VibeCore
+
+/// Settings › Appearance › Theme, for the whole app: every window takes its look from it, the moment it changes.
+enum AppLook {
+    /// The appearance `settings` makes the app: nil (follow macOS) for Match System, or a Custom theme with a background
+    /// that isn't a color; otherwise the one the theme is drawn in, a Custom theme by how light its background is.
+    static func name(for settings: TerminalAppearance) -> NSAppearance.Name? {
+        switch settings.theme {
+        case .system: return nil
+        case .light, .solarizedLight: return .aqua
+        case .dark, .solarizedDark: return .darkAqua
+        case .custom:
+            guard let background = RGB(hex: settings.custom.background) else { return nil }
+            let lightness = 0.2126 * background.red + 0.7152 * background.green + 0.0722 * background.blue
+            return lightness >= 0.5 ? .aqua : .darkAqua
+        }
+    }
+
+    /// Gives `target` (the app; a scratch view in the tests) the Theme's look now and at every change of it, for as long
+    /// as the result is kept. Only a change of look reaches it: a font size doesn't redraw every window.
+    static func follow(_ preferences: Preferences, on target: NSAppearanceCustomization) -> AnyCancellable {
+        preferences.$appearance
+            .map { name(for: $0) }
+            .removeDuplicates()
+            .sink { name in target.appearance = name.flatMap { NSAppearance(named: $0) } }
+    }
+}
 
 /// User-facing toggles, persisted in UserDefaults. Every one is in Settings; the ⚙︎ menu repeats a few.
 final class Preferences: ObservableObject {

@@ -631,20 +631,6 @@ struct TerminalSettings: View {
 
     var body: some View {
         Form {
-            Section("Text") {
-                SettingRow("font") { label in
-                    Picker(selection: $preferences.appearance.fontName) {
-                        Text("System Monospaced").tag("")
-                        ForEach(fonts, id: \.self) { Text($0).tag($0) }
-                    } label: { label }
-                }
-                SettingRow("font-size") { label in
-                    LabeledContent {
-                        Stepper("\(Int(preferences.appearance.fontSize)) pt",
-                                value: $preferences.appearance.fontSize, in: TerminalAppearance.fontSizeRange, step: 1)
-                    } label: { label }
-                }
-            }
             Section("Colors") {
                 SettingRow("theme") { label in
                     Picker(selection: $preferences.appearance.theme) {
@@ -663,6 +649,20 @@ struct TerminalSettings: View {
                             }
                         } label: { label }
                     }
+                }
+            }
+            Section("Text") {
+                SettingRow("font") { label in
+                    Picker(selection: $preferences.appearance.fontName) {
+                        Text("System Monospaced").tag("")
+                        ForEach(fonts, id: \.self) { Text($0).tag($0) }
+                    } label: { label }
+                }
+                SettingRow("font-size") { label in
+                    LabeledContent {
+                        Stepper("\(Int(preferences.appearance.fontSize)) pt",
+                                value: $preferences.appearance.fontSize, in: TerminalAppearance.fontSizeRange, step: 1)
+                    } label: { label }
                 }
             }
             Section("Behavior") {

@@ -195,6 +195,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private static let positionKey = "NSStatusItem Preferred Position VibeSwitcher"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // First, so no window is ever drawn in the wrong look.
+        AppLook.follow(preferences, on: NSApp).store(in: &cancellables)
+        // A status item's popover takes the system's look, not the app's: it follows the setting itself.
+        AppLook.follow(preferences, on: popover).store(in: &cancellables)
         Breadcrumbs.shared.note("app: launched \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") build \(HostBuild.id(ofExecutableAt: Bundle.main.executablePath ?? ""))")
         HangWatchdog.shared.describeState = { [weak self] in
             guard let self else { return "" }
