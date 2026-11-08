@@ -4197,3 +4197,12 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 10:50 Audit of toolbar-the-boost-bolt: complete, clean
 - 2026-11-08 10:52 Audit of config-seal-claude-s: complete, suspect, round 1: 4 Nit open
 - 2026-11-08 10:52 Dismissed config-seal-claude-s:F1: Accepted by the lead: the Sandbox.swift edit adds fixture files under the sandbox's own scratch home so a held folder can be shown (the reviewer confirmed HOME is the sandbox's state folder). The contract should have said so in advance, per the 2026-11-07 19:48 rule; that omission was the lead's. It runs no command and touches nothing of the user's, and the reviewer found it correct and tied to the goal.
+- 2026-11-08 10:55 Audit of config-seal-claude-s: complete, clean, round 2: 4 Nit (3 open)
+- 2026-11-08 10:56 Update: Settings redesign: sidebar, search and plain descriptions (in review) — **What changed:** Settings (⌘,) is now a sidebar of 12 categories with a search field:
+- 2026-11-08 10:56 Planned settings-plain-language: Settings: plain-language pass over section footers
+- 2026-11-08 10:58 Planned readme-and-guides: README and guides describe what VibeSwitcher is today
+- 2026-11-08 10:58 Planned brand-new-app-icon: Brand: new app icon and tagline, options first, then apply the chosen one
+- 2026-11-08 10:58 Started a worker on brand-new-app-icon
+- 2026-11-08 11:05 Update: App icon and tagline options: pick one of each — **Icons (contact sheet attached, at 1024, 128, 32 and 16 pt, light and dark):**
+- 2026-11-08 11:12 Merged toolbar-the-boost-bolt: Toolbar: the Boost bolt and Brief Me sit far apart in their capsule (build f38147da532c)
+- 2026-11-08 11:12 Flaky in toolbar-the-boost-bolt's merge: headlessAnswersQueriesOnlyWhenNoClient(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun

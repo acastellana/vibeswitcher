@@ -286,3 +286,7 @@ A re-roll would throw away a seal the audit has confirmed in order to fix one li
 
 The F6 worker's blind check found all three by reading the code, and a re-audit of F6 alone wouldn't cover them. (1) would hold starts and merges again after every Accept for any hook that logs to a file. (2c) could put a token on the card, which breaks the seal's "never values". (3) breaks the user's always-Accept rule for code (CEDA0180). Fixing them on the branch keeps known-bad gate code out of main; the re-plan restarts its audit rounds, and the next audit judges the whole branch.
 
+## 2026-11-08 10:58:56 Brand update, the user's choice on 2026-11-08 (1A1D1711): the name VibeSwitcher stays. Task brand-new-app-icon makes 4 icon concepts around the lead-and-team idea and 3 taglines with About text. The user picks; only then is the chosen one applied. The GitHub repository's description isn't changed by any task: that's outward-facing, so it waits for the user's say.
+
+The app began as a session switcher and now runs a project lead with a team of agents, so its words and icon no longer describe it. The README rewrite (readme-and-guides) follows the pick so it carries the chosen tagline.
+
