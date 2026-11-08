@@ -109,6 +109,9 @@ public final class HostConnection: @unchecked Sendable {
         guard payload.count <= HostFrame.maxPayload else { throw SendFailure.tooLarge(payload.count) }
         if Self.isHello(request), appKey != nil, !proofFinished {
             helloForProof = HostFrame.encode(.control, payload)
+            // The challenge was answered before this hello (the reader answers it, not `queue`): it goes once the
+            // proof is, as the repeat would, and only then; sent now as well, the host would welcome it twice.
+            if proofSeq != nil { return seq }
         }
         // The hello goes at once: an older host sends no challenge, only its welcome.
         if held != nil, !Self.isHello(request) {

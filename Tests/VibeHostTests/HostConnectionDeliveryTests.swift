@@ -132,6 +132,53 @@ import Testing
         #expect(seen.filter { if case .event(let envelope) = $0, case .welcome = envelope.event { return true } else { return false } }.count == 1)
     }
 
+    /// The host challenges a connection as it takes it, and the reader answers before the caller's hello (the app's
+    /// connection: its main thread is busy, or slow on a loaded Mac): the hello goes once, after the proof, and the
+    /// caller sees one welcome.
+    @Test func aHelloSentAfterTheChallengeGoesOnceAfterTheProof() async throws {
+        let host = try StandIn()
+        let queue = callersQueue()
+        let log = Log()
+        let closed = DispatchSemaphore(value: 0)
+        let connection = try HostConnection(path: host.path, queue: queue, appKey: SymmetricKey(size: .bits256))
+        watch(connection, on: queue, log: log, closed: closed)
+        let marker = UUID()
+        queue.sync {
+            // Once the proof's answer is in, a request of its own: everything sent before it arrives first.
+            connection.onEvent = { envelope in
+                log.note(.event(envelope))
+                if case .ok = envelope.event { _ = try? connection.send(.screen(id: marker)) }
+            }
+        }
+        host.accept()
+        let challenge = HostEventEnvelope(replyTo: nil, event: .challenge(Data(repeating: 5, count: 32), keyless: false))
+        #expect(host.write([try frame(challenge)]))
+        let proof = await offPool { host.requests(1) }
+        guard case .proveApp? = proof.first?.request, let proofSeq = proof.first?.seq else {
+            Issue.record("the challenge wasn't answered: \(proof.map(\.request))")
+            return queue.sync { connection.close() }
+        }
+        let helloSeq = try queue.sync { try connection.send(.hello(protocolVersion: HostProtocol.version, app: "VibeSwitcher")) }
+        let proved = HostEventEnvelope(replyTo: proofSeq, event: .ok)
+        #expect(host.write([try frame(proved)]))
+        var arrived: [HostRequestEnvelope] = []
+        while true {
+            let next = await offPool { host.requests(1) }
+            guard let request = next.first else { break }
+            arrived.append(request)
+            if case .screen(let id) = request.request, id == marker { break }
+        }
+        let hellos = arrived.filter { if case .hello = $0.request { return true } else { return false } }
+        #expect(hellos.map(\.seq) == [helloSeq], "hellos: \(arrived.map(\.request))")
+        // Each hello the host got, welcomed.
+        let welcome = HostEventEnvelope(replyTo: helloSeq, event: .welcome(protocolVersion: HostProtocol.version, hostBuild: 3, sessions: []))
+        #expect(host.write(try hellos.map { _ in try frame(welcome) }))
+        host.hangUp()
+        #expect(await offPool { closed.wait(timeout: .now() + hangGuard) } == .success, "no close")
+        queue.sync {}
+        #expect(log.items == [.event(challenge), .event(proved)] + hellos.map { _ in .event(welcome) } + [.closed])
+    }
+
     /// The challenge is decoded and answered on the reader's queue: a caller's queue held the whole time (the main thread
     /// of a loaded Mac) doesn't hold up the proof, and gets the events once it's free.
     @Test func theChallengeIsAnsweredWhileTheCallersQueueIsHeld() async throws {
