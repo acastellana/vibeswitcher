@@ -67,7 +67,7 @@ struct MergeRunMacSleepTests {
 
     func exists(_ path: String) -> Bool { FileManager.default.fileExists(atPath: path) }
 
-    /// The incident: the Mac sleeps 40 minutes through a merge's 45-minute limit. Awake again, the run goes on and passes.
+    /// The incident: the Mac sleeps 51 minutes through a merge's 45-minute limit. Awake again, the run goes on and passes.
     @Test func aMergeRunTheMacSleepsThroughIsNotCalledHung() async throws {
         let mac = Mac(), (command, started, go) = gated("slept")
         let run = runChecks(command, timeout: 45 * 60, mac: mac)
@@ -88,6 +88,22 @@ struct MergeRunMacSleepTests {
         #expect(await eventually { exists(started) }, "the command never started")
         for _ in 0..<8 {
             mac.sleep(170)
+            #expect(await runHasLooked(mac))
+        }
+        FileManager.default.createFile(atPath: go, contents: nil)
+        let stopped = await run.value
+        #expect(stopped == nil, "\(String(describing: stopped))")
+    }
+
+    /// A run quiet for less than the no-progress limit, awake all the while, then finishing, isn't stopped: 510 awake
+    /// seconds under a limit of 600, in steps too short for a look to count as late.
+    @Test func aMergeRunQuietForLessThanTheLimitIsNotStopped() async throws {
+        let mac = Mac(), (command, started, go) = gated("quiet")
+        let watch = StallWatch(after: 600, every: 0.05, loadLimit: 24, load: { 4.2 })
+        let run = runChecks(command, timeout: 45 * 60, watch: watch, mac: mac)
+        #expect(await eventually { exists(started) }, "the command never started")
+        for _ in 0..<3 {
+            mac.stayAwake(170)
             #expect(await runHasLooked(mac))
         }
         FileManager.default.createFile(atPath: go, contents: nil)
