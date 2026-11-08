@@ -4401,3 +4401,11 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-08 21:07 Automatically (auto_advance): Started the audit of turn-this-incident-into-16 at a35bd5f1 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-08 21:07 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-11-08 21:09 Audit of sandbox-shots-draw-the: complete, clean, round 2: 1 Important closed, 2 Nit open
+- 2026-11-08 21:22 Audit of turn-this-incident-into-16: complete, clean
+- 2026-11-08 21:24 Started a worker on the-board-and-records
+- 2026-11-08 21:24 Automatically (auto_advance): Started a worker on the-board-and-records (The board and records stop growing without bound, and scratch folders are swept), its after tasks done (the-vault-s-no).
+- 2026-11-08 21:24 Started a worker on sandbox-shots-draw-the
+- 2026-11-08 21:24 Automatically (auto_advance): Started a worker on sandbox-shots-draw-the (Sandbox shots draw the sidebar and inspector correctly on macOS 27), its after tasks done (an-app-wide-appearance, readme-and-guides).
+- 2026-11-08 21:24 Released anything-needing-a-real's worker (idle since its done report on 8aa6e23e) while its audit runs
+- 2026-11-08 21:24 Automatically (auto_advance): Started the audit of anything-needing-a-real at 8aa6e23e (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 21:40 Merged turn-this-incident-into-16: A merge's test time counts only while the Mac is awake (build 767537e5ec09)
