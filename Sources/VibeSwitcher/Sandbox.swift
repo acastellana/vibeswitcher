@@ -179,13 +179,24 @@ enum Sandbox {
         screens.contains { $0.intersects(frame) }
     }
 
-    /// Each of the windows drawn as it is, its frame included, into `file` (PNG). False when it couldn't be drawn.
-    static func draw(_ window: NSWindow, to file: URL) -> Bool {
+    /// `window` drawn as it is, its frame included, and the view that was drawn. Nil when it couldn't be drawn.
+    static func bitmap(of window: NSWindow) -> (view: NSView, image: NSBitmapImageRep)? {
         guard let view = window.contentView?.superview ?? window.contentView,
-              let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return false }
+              let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: bitmap)
+        return (view, bitmap)
+    }
+
+    /// `bitmap` as a PNG in `file`. False when it couldn't be written.
+    static func write(_ bitmap: NSBitmapImageRep, to file: URL) -> Bool {
         guard let png = bitmap.representation(using: .png, properties: [:]) else { return false }
         return (try? png.write(to: file)) != nil
+    }
+
+    /// Each of the windows drawn as it is, its frame included, into `file` (PNG). False when it couldn't be drawn.
+    static func draw(_ window: NSWindow, to file: URL) -> Bool {
+        guard let drawn = bitmap(of: window) else { return false }
+        return write(drawn.image, to: file)
     }
 
     /// A file name's part from `text`: letters, digits, `.`, `_` and `-` only.
@@ -855,7 +866,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let contract = LeadContract(goal: "A sandbox task.", acceptance: ["It shows."], boundaries: [], context: "")
         let tasks: [(String, String, LeadTask.Status)] = [
             ("sync-landing-base-with-2", "Sync landing-base with main", .running),
-            ("gen-attention-badge", "Your GEN attention badge counts the right things", .blocked),
+            ("upload-test", "Fix the flaky upload test", .blocked),
             ("ui-consistency-pass", "UI consistency pass over the sidebar", .blocked),
             ("landing-copy", "Landing page copy for the launch", .done),
             ("landing-hero", "Landing hero image and its dark variant", .done),
@@ -1099,7 +1110,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         tool("mcp__vibeswitcher__withdraw_question", ["reason": "User asked to re-ask it."], "Withdrawn.")
         say("Withdrew the sidebar question: I'll ask it again once the review is in.")
         add("user", "[VibeSwitcher · worker ui-consistency-pass, not the user] The worker on ui-consistency-pass asks: "
-            + "Should the GEN badge show 99+ past 99, or the exact count?\nAnswer with message(ui-consistency-pass, …).")
+            + "Should the unread badge show 99+ past 99, or the exact count?\nAnswer with message(ui-consistency-pass, …).")
         tool("mcp__vibeswitcher__message", ["task": "ui-consistency-pass", "text": "99+"], "Sent.")
         add("assistant", [["type": "text", "text": "Told it 99+. Waiting on the two blocked tasks."]], usage: true)
         return (lines.joined(separator: "\n") + "\n", withdrawnAt)
@@ -1248,10 +1259,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("theme [" + TerminalAppearance.Theme.allCases.map(\.rawValue).joined(separator: "|") + "]", "sets Settings › Appearance › Theme, as its picker does (none: what it is), and says the app's look: the theme, the app's appearance, what macOS says and what each window draws in"),
         ("looks", "the main window's views by what each draws in (effectiveAppearance) and how many: what a stale or forced part of it is"),
         ("panes [NAME]", "what SwiftUI resolves inside the main window's sidebar and inspector, and those two views drawn again in a plain window of the app's look: NAME-sidebar-plain.png, NAME-inspector-plain.png"),
-        ("shot-real NAME", "draws each window in the app's own look, nothing overridden: NAME-main-real.png, NAME-settings-real.png… (`shot` sets each window to light, then dark: to see Theme, use this). Either way, these draws can't composite the sidebar's and the inspector's glass: those panes can come out white, black or with dark text in a dark window, and lose rows even in light. `panes` draws them truly"),
+        ("shot-real NAME", "draws each window in the app's own look, nothing overridden: NAME-main-real.png, NAME-settings-real.png… (`shot` sets each window to light, then dark: to see Theme, use this)"),
         ("close settings|sheet", "closes Settings or the sheet"),
-        ("shot NAME", "draws each window, light and dark, into the shots folder"),
-        ("panes on|off", "shows or collapses the sidebar and inspector, for a shot of the middle alone"),
+        ("shot NAME", "draws each window, light and dark, into the shots folder, its side panes out of their glass (a drawing can't composite glass), and fails if one comes out blank or in the wrong look's colors"),
         ("pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT", "the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views (where, their tooltip); hover moves the pointer onto the message holding TEXT; drag presses on the message holding FROM and lets go on the one holding TO; copy is ⌘C (to a pasteboard of the sandbox's own, never the general one), printing what it copied; menu right-clicks the message holding TEXT and prints its menu"),
         ("offline on|off", "the app loses its connection to the sandbox's own host and doesn't get it back (the host and fake sessions keep running), as while the host is unreachable; off: it connects again"),
         ("unproved", "connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions"),
@@ -1350,7 +1360,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     static let walletCards: [(state: String, card: WalletCardModel)] = {
         let request = WalletCardModel(
             id: "example-request", workspace: "example", from: "0x0000000000000000000000000000000000000001", wallet: .hardware,
-            to: "0x0000000000000000000000000000000000000002", chainID: 42424242, asset: "GEN", amount: "12.5",
+            to: "0x0000000000000000000000000000000000000002", chainID: 8453, asset: "ETH", amount: "12.5",
             reason: "Pay the example invoice for the test deployment.", requestedBy: "example-agent", state: .waiting, browserSignable: true)
         func with(_ state: WalletCardModel.State, checks: [WalletCardModel.Check] = []) -> WalletCardModel {
             var card = request
@@ -1370,7 +1380,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                                      .init(name: "Amount", ok: true, detail: "under the daily limit")])),
             ("rejected", with(.rejected(reason: "the amount is over the daily limit"),
                               checks: [.init(name: "Recipient", ok: true, detail: "in the address book"),
-                                       .init(name: "Amount", ok: false, detail: "12.5 GEN is over the 10 GEN daily limit"),
+                                       .init(name: "Amount", ok: false, detail: "12.5 ETH is over the 10 ETH daily limit"),
                                        .init(name: "Chain", ok: true)])),
             ("failed", with(.failed(message: "the hardware wallet was disconnected"))),
             ("expired", with(.expired)),
@@ -1381,7 +1391,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 return card
             }()),
             ("in-browser", with(.inBrowser)),
-            ("sent-from-browser", with(.sentFromBrowser(txHash: hash, explorerURL: URL(string: "https://scan.chain.genlayer.com/tx/" + hash)))),
+            ("sent-from-browser", with(.sentFromBrowser(txHash: hash, explorerURL: URL(string: "https://explorer.example/tx/" + hash)))),
             ("rejected-in-wallet", with(.rejectedInWallet)),
             ("browser-no-answer", with(.browserNoAnswer)),
             ("no-wallet-manager", { var card = with(.waiting); card.setupNeeded = WalletCardModel.noPeerNote; return card }()),
@@ -1394,7 +1404,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             // fork only (its badge beside the line), and a call nothing here decodes.
             ("safe-approve-hash", call("0xd4d9bdcd2ff4171f9c0e4a6b5d3f2817e6a9b0c1d2e3f405162738495a6b7c8d9e0f1a2b",
                                        reason: "LOCAL FORK ONLY\nApprove the example Safe transaction on the forked Safe.")),
-            ("unknown-call", call("0x12345678" + String(repeating: "0", count: 63) + "1", reason: "Send 0 GEN, harmless")),
+            ("unknown-call", call("0x12345678" + String(repeating: "0", count: 63) + "1", reason: "Send 0 ETH, harmless")),
         ]
         func call(_ data: String, reason: String) -> WalletCardModel {
             let request = WalletRequest(createdAt: Date(timeIntervalSince1970: 1_793_448_000), expiresAt: Date(timeIntervalSince1970: 1_793_534_400),
@@ -1435,7 +1445,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
         let address = words.first == "address"
         var values = ["--workspace": "example", "--from": address ? "0x0000000000000000000000000000000000000001" : "example-hardware",
-                      "--chain": "42424242", "--to": "0x0000000000000000000000000000000000000002", "--amount": "12500000000000000000",
+                      "--chain": "8453", "--to": "0x0000000000000000000000000000000000000002", "--amount": "12500000000000000000",
                       "--expires-in": "24h"]
         var rest = words.dropFirst(address ? 1 : 0)
         var data: String?
@@ -1588,7 +1598,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         var url = walletPageURL
         if url == nil {
             let request = WalletRequest.make(requestedBy: .init(project: "sandbox-project", session: UUID().uuidString.lowercased(), label: "example-agent"),
-                                             workspace: "example", from: "0x0000000000000000000000000000000000000001", chainId: 42_424_242,
+                                             workspace: "example", from: "0x0000000000000000000000000000000000000001", chainId: 8453,
                                              action: .transfer, to: "0x0000000000000000000000000000000000000002", asset: "native",
                                              amount: "12500000000000000000", reason: "Pay the example invoice for the test deployment.")
             guard let page = WalletSignPage.html(for: request) else { return reply(false, "no page for the made-up request") }
@@ -1721,7 +1731,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         working.checkpoints = [LeadCheckpoint(text: "Ledger diff written; running the reconciliation tests", at: now - 120)]
         var after = task("Payout report shows reconciled totals", .blocked, since: 18 * 60)
         after.after = [working.slug]
-        let unsaid = task("Stake history pages load under a second", .blocked, since: 18 * 60)
+        let unsaid = task("Add dark mode to the settings page", .blocked, since: 18 * 60)
         var merged = (1...4).map { index -> LeadTask in
             var done = task("Merged task \(index)", .done, since: Double(index) * 3_000)
             done.worktree = nil
@@ -1734,7 +1744,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         audits.rounds = 6
         audits.passed = true
         merged[0].audits = audits
-        var abandoned = task("Old staking widget", .abandoned, since: 9_000)
+        var abandoned = task("Old upload widget", .abandoned, since: 9_000)
         abandoned.abandonedBecause = "Replaced by the payout report."
         // auto_advance audited it again once after its verifier's agent quit; the retry's verifier ended too.
         var twice = task("Attention badge from stored scans", .review, since: 25 * 60)
@@ -1763,7 +1773,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                                         ("The ledger can be fixed now (C) or redesigned (B). C now and plan B as its own task, or B only?", "C now + plan B as its own task"),
                                         ("Keep the old CSV export?", "Yes, for a month"),
                                         ("Run the reconciliation at 02:00 or 04:00 UTC?", "04:00"),
-                                        ("Merge the stake history work with no audit (review none)?", "Yes")].enumerated() {
+                                        ("Merge the dark mode work with no audit (review none)?", "Yes")].enumerated() {
             var question = LeadQuestion(text: text, options: [], at: now - Double(index + 1) * 2_400)
             question.answer = answer
             question.answeredAt = question.askedAt + 300
@@ -1959,8 +1969,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let made: [(String, String, LeadAllDone.Task.Outcome, LeadReceipt?)] = [
             ("payout-ledger", "Payout ledger reconciles nightly", .merged, receipt(worked: 5_400, opus: 14_800_000, fable: 3_100_000, end: now - 900)),
             ("payout-report", "Payout report shows reconciled totals", .merged, receipt(worked: 2_700, opus: 6_200_000, fable: nil, end: now - 600)),
-            ("stake-history", "Stake history pages load under a second", .merged, receipt(worked: 1_800, opus: 4_100_000, fable: nil, end: now - 300)),
-            ("old-widget", "Old staking widget", .folded, nil),
+            ("dark-mode", "Add dark mode to the settings page", .merged, receipt(worked: 1_800, opus: 4_100_000, fable: nil, end: now - 300)),
+            ("old-widget", "Old upload widget", .folded, nil),
         ]
         var tasks: [LeadTask] = []
         for (slug, title, _, receipt) in made {
@@ -1969,9 +1979,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
             tasks.append(task)
         }
         var mark = LeadAllDone(id: "sandbox-all-done", at: now - 60, since: now - 4 * 3_600, tasks: made.map { .init(slug: $0.0, title: $0.1, outcome: $0.2) })
-        mark.summary = .init(headline: "Payouts now reconcile every night, and the stake history loads fast.", bullets: [
+        mark.summary = .init(headline: "Payouts now reconcile every night, and the settings page has a dark mode.", bullets: [
             "The payout ledger is checked against the bank's records each night, and the report shows the reconciled totals.",
-            "Stake history pages load in under a second.",
+            "The settings page follows dark mode.",
         ], byModel: true)
         mark.receipts = LeadReceiptTotals(tasks)
         return mark
@@ -2384,14 +2394,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             settle { [weak self] in reply(true, self?.lookReport() ?? "") }
         case "panes":
-            // Two commands share the name: `panes on|off` collapses or shows the two, any other argument names the drawing.
-            guard rest == "on" || rest == "off" else { return panes(rest.isEmpty ? "panes" : rest, reply) }
-            // A shot draws a glass sidebar and inspector blank or without their colors on macOS 27: `panes off` leaves them out.
-            guard let split = window?.window?.contentViewController as? NSSplitViewController else {
-                return reply(false, "panes on|off: no main window")
-            }
-            split.splitViewItems.filter { $0.behavior != .default }.forEach { $0.isCollapsed = rest == "off" }
-            settle { reply(true, "sidebar and inspector \(rest == "off" ? "collapsed" : "shown")") }
+            panes(rest.isEmpty ? "panes" : rest, reply)
         case "pointer": pointer(Array(words.dropFirst()), reply)
         case "offline":
             guard rest == "on" || rest == "off" else { return reply(false, "offline on|off") }
@@ -3032,16 +3035,27 @@ private final class Driver: NSObject, NSApplicationDelegate {
         windows.forEach { $0.window.appearance = nil }
         if model.showsChat { window?.chat.poll() }
         window?.pane.reconfigureAll()
+        let lifts = windows.map { LiftedGlass(window: $0.window) }
+        lifts.forEach { $0.followWindow() }
         settle { [weak self] in
-            guard let self else { return }
+            guard let self else { lifts.forEach { $0.restore() }; return }
             var lines = [self.lookReport()]
             var ok = true
-            for (label, window) in windows {
+            for ((label, _), lift) in zip(windows, lifts) {
                 let file = self.shots.appendingPathComponent("\(base)-\(label)-real.png")
-                if Sandbox.draw(window, to: file) { lines.append(file.path) } else { ok = false; lines.append("couldn't draw \(file.lastPathComponent)") }
+                if let problem = self.drawChecked(lift, label: label, to: file) { ok = false; lines.append(problem) } else { lines.append(file.path) }
             }
+            lifts.forEach { $0.restore() }
             reply(ok, lines.joined(separator: "\n"))
         }
+    }
+
+    /// Draws `lift`'s window into `file`, then checks its panes. What went wrong, or nil. A file with a bad pane is still
+    /// written, to be looked at.
+    private func drawChecked(_ lift: LiftedGlass, label: String, to file: URL) -> String? {
+        guard let drawn = Sandbox.bitmap(of: lift.window), Sandbox.write(drawn.image, to: file) else { return "couldn't draw \(file.lastPathComponent)" }
+        let problems = lift.problems(view: drawn.view, image: drawn.image, sidebarHasRows: label == "main" && !store.sessions.isEmpty)
+        return problems.isEmpty ? nil : "bad panes in \(file.lastPathComponent): " + problems.joined(separator: "; ")
     }
 
     /// Each window the sandbox shows (the main window, Settings when open, the sheet when shown), drawn in light and in
@@ -3058,24 +3072,196 @@ private final class Driver: NSObject, NSApplicationDelegate {
         if model.showsChat { window?.chat.poll() }
         var written: [String] = []
         var failed: [String] = []
+        let lifts = windows.map { LiftedGlass(window: $0.window) }
         func take(_ appearances: ArraySlice<(String, NSAppearance.Name)>) {
             guard let (mode, appearance) = appearances.first else {
+                lifts.forEach { $0.restore() }
                 windows.forEach { $0.window.appearance = nil }
                 window?.pane.reconfigureAll()
-                return reply(failed.isEmpty, (written + failed.map { "couldn't draw \($0)" }).joined(separator: "\n"))
+                return reply(failed.isEmpty, (written + failed).joined(separator: "\n"))
             }
             windows.forEach { $0.window.appearance = NSAppearance(named: appearance) }
+            lifts.forEach { $0.followWindow() }
             window?.pane.reconfigureAll()
             settle { [weak self] in
-                guard let self else { return }
-                for (label, window) in windows {
+                guard let self else { lifts.forEach { $0.restore() }; return }
+                for ((label, _), lift) in zip(windows, lifts) {
                     let file = self.shots.appendingPathComponent("\(base)-\(label)-\(mode).png")
-                    if Sandbox.draw(window, to: file) { written.append(file.path) } else { failed.append(file.lastPathComponent) }
+                    if let problem = self.drawChecked(lift, label: label, to: file) { failed.append(problem) } else { written.append(file.path) }
                 }
                 take(appearances.dropFirst())
             }
         }
         take([("light", .aqua), ("dark", .darkAqua)][...])
+    }
+}
+
+/// A window's glass side panes, their content out of the glass while `shot` draws. `cacheDisplay` can't composite an
+/// NSGlassEffectView: inside one, a sidebar's list doesn't draw and vibrant colors, with nothing behind them to blend
+/// with, come out white or black. Out of it the same views, state and all, draw on the window's plain background.
+final class LiftedGlass {
+    struct Pane {
+        let wrapper: NSView
+        let restore: () -> Void
+    }
+
+    let window: NSWindow
+    private(set) var panes: [Pane] = []
+
+    /// Lifts `window`'s glass panes (none before macOS 26, or when they're collapsed). Each `restore()` must follow.
+    init(window: NSWindow) {
+        self.window = window
+        guard #available(macOS 26, *), let root = window.contentView?.superview ?? window.contentView else { return }
+        func walk(_ view: NSView) {
+            if let glass = view as? NSGlassEffectView, let wrapper = glass.superview,
+               String(describing: type(of: wrapper)).contains("SplitViewItemViewWrapper") {
+                if let pane = Self.lift(glass, from: wrapper) { panes.append(pane) }
+            } else {
+                view.subviews.forEach(walk)
+            }
+        }
+        walk(root)
+    }
+
+    @available(macOS 26, *)
+    private static func lift(_ glass: NSGlassEffectView, from wrapper: NSView) -> Pane? {
+        guard !wrapper.isHiddenOrHasHiddenAncestor, wrapper.frame.width > 1, let content = glass.contentView else { return nil }
+        let appearance = wrapper.appearance
+        let translated = content.translatesAutoresizingMaskIntoConstraints
+        glass.contentView = nil
+        glass.isHidden = true
+        wrapper.addSubview(content)
+        // The glass held it by constraints, so a frame alone would be laid out to nothing.
+        content.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([content.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+                                     content.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
+                                     content.topAnchor.constraint(equalTo: wrapper.topAnchor),
+                                     content.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor)])
+        let selections = Self.flattenSelections(in: content)
+        return Pane(wrapper: wrapper, restore: {
+            selections()
+            content.translatesAutoresizingMaskIntoConstraints = translated
+            glass.contentView = content
+            glass.isHidden = false
+            wrapper.appearance = appearance
+        })
+    }
+
+    /// A list's selection is an NSVisualEffectView, which draws solid black here: a flat fill stands in for each.
+    /// Returns what puts them back.
+    private static func flattenSelections(in root: NSView) -> () -> Void {
+        var effects: [NSVisualEffectView] = []
+        func walk(_ view: NSView) {
+            if let effect = view as? NSVisualEffectView, !effect.isHidden { effects.append(effect) }
+            view.subviews.forEach(walk)
+        }
+        walk(root)
+        let fills = effects.compactMap { effect -> NSView? in
+            effect.isHidden = true
+            guard let row = effect.superview, String(describing: type(of: row)).contains("RowView") else { return nil }
+            let fill = SelectionFill(frame: effect.frame)
+            fill.autoresizingMask = effect.autoresizingMask
+            row.addSubview(fill, positioned: .below, relativeTo: effect)
+            return fill
+        }
+        return {
+            fills.forEach { $0.removeFromSuperview() }
+            effects.forEach { $0.isHidden = false }
+        }
+    }
+
+    /// Gives the panes the window's own plain look: left to themselves they stay vibrant.
+    func followWindow() {
+        let dark = window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        panes.forEach { $0.wrapper.appearance = NSAppearance(named: dark ? .darkAqua : .aqua) }
+    }
+
+    func restore() {
+        panes.forEach { $0.restore() }
+        panes = []
+    }
+
+    /// What's wrong with this window's panes in `image`, a drawing of `view`; empty when they drew. The sidebar is
+    /// expected to hold a list when `sidebarHasRows`.
+    func problems(view: NSView, image: NSBitmapImageRep, sidebarHasRows: Bool) -> [String] {
+        let scale = CGFloat(image.pixelsWide) / max(view.bounds.width, 1)
+        let dark = window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return panes.compactMap { pane in
+            let rect = pane.wrapper.convert(pane.wrapper.bounds, to: view)
+            let top = view.isFlipped ? rect.minY : view.bounds.height - rect.maxY
+            let pixels = CGRect(x: rect.minX * scale, y: top * scale, width: rect.width * scale, height: rect.height * scale)
+            let isSidebar = rect.minX < 1
+            let problem = PaneCheck.problem(in: image, pane: pixels, scale: scale, dark: dark, expectsList: isSidebar && sidebarHasRows)
+            return problem.map { (isSidebar ? "sidebar: " : "inspector: ") + $0 }
+        }
+    }
+}
+
+/// Stands in for a list's selection in a shot: the color of a selection in a window that isn't key, as the sandbox's is.
+private final class SelectionFill: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.unemphasizedSelectedContentBackgroundColor.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 10, yRadius: 10).fill()
+    }
+}
+
+/// Whether a side pane in a shot really drew: `shot` fails on a blank pane, or one in the wrong look's colors.
+enum PaneCheck {
+    /// The heights (points) of a sidebar's fixed parts, above and below its list.
+    static let sidebarHeader: CGFloat = 96, sidebarFooter: CGFloat = 70
+    /// At or above this share of one color, an area has nothing drawn in it.
+    static let blankShare = 0.995
+
+    /// What's wrong with the pane at `pane` (in `image`'s pixels, from its top left); nil when it drew.
+    static func problem(in image: NSBitmapImageRep, pane: CGRect, scale: CGFloat, dark: Bool, expectsList: Bool) -> String? {
+        guard let whole = census(image, pane) else { return "nothing to read in its area" }
+        if whole.share >= blankShare { return "blank: one color" }
+        if whole.luminance > 0.5, dark { return "light (\(String(format: "%.2f", whole.luminance))) in a dark window" }
+        if whole.luminance < 0.5, !dark { return "dark (\(String(format: "%.2f", whole.luminance))) in a light window" }
+        guard expectsList else { return nil }
+        let inset = pane.trimmed(top: sidebarHeader * scale, bottom: sidebarFooter * scale)
+        guard let list = census(image, inset), list.share < blankShare else { return "its list is blank" }
+        return nil
+    }
+
+    /// The share of `area`'s pixels in its commonest color (to 5 bits a channel) and that color's luminance, 0 to 1.
+    private static func census(_ image: NSBitmapImageRep, _ area: CGRect) -> (share: Double, luminance: Double)? {
+        let area = area.integral.intersection(CGRect(x: 0, y: 0, width: image.pixelsWide, height: image.pixelsHigh))
+        guard !area.isEmpty, let cropped = image.cgImage?.cropping(to: area), let pixels = rgba(cropped) else { return nil }
+        var counts: [UInt32: Int] = [:]
+        var total = 0
+        for row in stride(from: 0, to: cropped.height, by: 2) {
+            for column in stride(from: 0, to: cropped.width, by: 2) {
+                let at = row * cropped.width * 4 + column * 4
+                let key = UInt32(pixels[at] >> 3) << 10 | UInt32(pixels[at + 1] >> 3) << 5 | UInt32(pixels[at + 2] >> 3)
+                counts[key, default: 0] += 1
+                total += 1
+            }
+        }
+        guard total > 0, let top = counts.max(by: { $0.value < $1.value }) else { return nil }
+        let channel = { (shift: UInt32) in Double((top.key >> shift) & 31) / 31 }
+        return (Double(top.value) / Double(total), 0.2126 * channel(10) + 0.7152 * channel(5) + 0.0722 * channel(0))
+    }
+
+    /// `image` as 8-bit sRGB RGBA bytes, its top row first, on opaque black: a drawing's own format varies.
+    private static func rgba(_ image: CGImage) -> [UInt8]? {
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let drew = bytes.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8,
+                                          bytesPerRow: image.width * 4, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.setFillColor(CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            return true
+        }
+        return drew ? bytes : nil
+    }
+}
+
+private extension CGRect {
+    func trimmed(top: CGFloat, bottom: CGFloat) -> CGRect {
+        CGRect(x: minX, y: minY + top, width: width, height: max(0, height - top - bottom))
     }
 }
 

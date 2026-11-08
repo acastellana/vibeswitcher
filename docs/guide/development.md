@@ -138,7 +138,6 @@ bash scripts/sandbox-app.sh lead             # a fake project lead; then: team, 
 bash scripts/sandbox-app.sh settings phone   # Settings on a category
 bash scripts/sandbox-app.sh sheet all-done   # a sheet: new-project, results, all-done, lead-team, …
 bash scripts/sandbox-app.sh shot NAME        # light and dark PNGs of each window in .build/sandbox-shots/
-bash scripts/sandbox-app.sh panes off        # collapse the sidebar and inspector first, for a shot of the middle: on macOS 27 a shot draws them without their lists and colors
 bash scripts/sandbox-app.sh quit
 ```
 
