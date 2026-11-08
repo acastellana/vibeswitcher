@@ -23,12 +23,12 @@ import Testing
     }
 
     /// RSS (KB), footprint (KB) and CPU time so far of `pid`.
-    static func sample(_ pid: pid_t) -> Sample {
-        let ps = run("/bin/ps", ["-o", "rss=,time=", "-p", String(pid)]).split(whereSeparator: \.isWhitespace)
+    static func sample(_ pid: pid_t) async -> Sample {
+        let ps = await run("/bin/ps", ["-o", "rss=,time=", "-p", String(pid)]).split(whereSeparator: \.isWhitespace)
         let rss = ps.first.flatMap { Int($0) } ?? 0
         // "M:SS.ss" or "H:MM:SS.ss"
         let cpu = ps.dropFirst().first.map { $0.split(separator: ":").reduce(0.0) { $0 * 60 + (Double($1) ?? 0) } } ?? 0
-        let footprint = run("/usr/bin/footprint", [String(pid)]).components(separatedBy: "Footprint: ").dropFirst().first.map { text -> Int in
+        let footprint = await run("/usr/bin/footprint", [String(pid)]).components(separatedBy: "Footprint: ").dropFirst().first.map { text -> Int in
             let parts = text.split(separator: " ")
             let value = Double(parts.first ?? "") ?? 0
             switch parts.dropFirst().first {
@@ -45,8 +45,23 @@ import Testing
     /// Access password dialog an attach (lldb, sample) puts up (2026-10-23, see ChatTextPrepareLeakTests.leaksLimit).
     static let toolLimit: TimeInterval = 120
 
-    /// What `tool` prints, "" (and an issue) when it gives no answer within `limit` seconds and is ended.
-    static func run(_ tool: String, _ arguments: [String], limit: TimeInterval = toolLimit) -> String {
+    /// What `tool` prints, "" (and an issue) when it gives no answer within `limit` seconds and is ended. Awaited, its
+    /// waits on a thread of their own (`offPool`): a 120 s footprint holds no thread of the cooperative pool.
+    static func run(_ tool: String, _ arguments: [String], limit: TimeInterval = toolLimit) async -> String {
+        let (output, issue) = await offPool { outcome(tool, arguments, limit: limit) }
+        if let issue { Issue.record(issue) }
+        return output
+    }
+
+    /// `run`, blocking: for a condition `eventually` polls (a `ps`, which answers at once).
+    static func runNow(_ tool: String, _ arguments: [String], limit: TimeInterval = toolLimit) -> String {
+        let (output, issue) = outcome(tool, arguments, limit: limit)
+        if let issue { Issue.record(issue) }
+        return output
+    }
+
+    /// What `tool` printed, and the issue to record when it gave no answer in time; blocks until then.
+    static func outcome(_ tool: String, _ arguments: [String], limit: TimeInterval) -> (String, Comment?) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = arguments
@@ -55,7 +70,7 @@ import Testing
         process.standardError = FileHandle.nullDevice
         let ended = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in ended.signal() }
-        guard (try? process.run()) != nil else { return "" }
+        guard (try? process.run()) != nil else { return ("", nil) }
         let read = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var data = Data()
         Thread.detachNewThread {
@@ -64,35 +79,38 @@ import Testing
         }
         if ended.wait(timeout: .now() + limit) == .timedOut {
             kill(process.processIdentifier, SIGKILL)
-            ended.wait()
-            Issue.record(Comment(rawValue: "\(tool) (pid \(process.processIdentifier)) gave no answer in \(Int(limit)) s and was ended. "
-                                 + "Is a Developer Tools Access password dialog waiting on the screen? An attach (lldb, sample) puts one "
-                                 + "up and it waits behind it."))
-            return ""
+            // Killed: its exit and its output's end come at once.
+            _ = ended.wait(timeout: .now() + hangGuard)
+            return ("", Comment(rawValue: "\(tool) (pid \(process.processIdentifier)) gave no answer in \(Int(limit)) s and was ended. "
+                                + "Is a Developer Tools Access password dialog waiting on the screen? An attach (lldb, sample) puts one "
+                                + "up and it waits behind it."))
         }
-        read.wait()
-        return String(decoding: data, as: UTF8.self)
+        guard read.wait(timeout: .now() + hangGuard) == .success else {
+            return ("", Comment(rawValue: "\(tool) (pid \(process.processIdentifier)) ended, but its output never did"))
+        }
+        return (String(decoding: data, as: UTF8.self), nil)
     }
 
-    @Test func aToolThatGivesNoAnswerIsEnded() {
+    @Test func aToolThatGivesNoAnswerIsEnded() async {
         let start = Date()
-        withKnownIssue {
-            #expect(Self.run("/bin/sleep", ["600"], limit: 1) == "")
+        await withKnownIssue {
+            #expect(await Self.run("/bin/sleep", ["600"], limit: 1) == "")
         } matching: { issue in
             issue.comments.contains { $0.rawValue.hasPrefix("/bin/sleep") && $0.rawValue.contains("gave no answer in 1 s and was ended") }
         }
         #expect(Date().timeIntervalSince(start) < 30)
     }
 
+    /// Blocking (one `ps`): it's looked at in the conditions `eventually` polls.
     static func parsers(of host: pid_t) -> [pid_t] {
-        run("/bin/ps", ["-ax", "-o", "pid=,ppid=,command="]).split(separator: "\n").compactMap { line in
+        runNow("/bin/ps", ["-ax", "-o", "pid=,ppid=,command="]).split(separator: "\n").compactMap { line in
             let fields = line.split(separator: " ", maxSplits: 2)
             guard fields.count == 3, pid_t(fields[1]) == host, fields[2].contains("--parse-session") else { return nil }
             return pid_t(fields[0])
         }
     }
 
-    @Test(.enabled(if: binary != nil)) func measure() throws {
+    @Test(.enabled(if: binary != nil)) func measure() async throws {
         let binary = try #require(Self.binary)
         let dir = "\(shortScratchRoot)/vshm-\(UUID().uuidString.prefix(8))", home = dir + "/home", socket = dir + "/h.sock"
         try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
@@ -109,20 +127,27 @@ import Testing
             TestHosts.end(host)
             try? FileManager.default.removeItem(atPath: dir)
         }
-        #expect(eventually { FileManager.default.fileExists(atPath: socket) })
+        #expect(await eventually { FileManager.default.fileExists(atPath: socket) })
         let client = try TestClient(socket: socket, appKey: key)
         let commands: [String?] = [nil, nil, nil, nil, Self.printer, Self.printer, Self.printer, Self.printer, Self.fullScreen, Self.burst]
-        sessions = try commands.map { try client.spawn($0) }
-        sessions.forEach { client.attach($0.id) }
+        for command in commands { sessions.append(try await client.spawn(command)) }
+        for session in sessions { await client.attach(session.id) }
         let pid = host.processIdentifier
-        let hasParsers = !Self.parsers(of: pid).isEmpty
-        #expect(eventually { !hasParsers || Self.parsers(of: pid).count == sessions.count })
+        let hasParsers = await !Self.parsers(of: pid).isEmpty
+        var parsersUp = !hasParsers
+        let parsersDeadline = Date().addingTimeInterval(hangGuard)
+        while !parsersUp, Date() < parsersDeadline, !Task.isCancelled {
+            parsersUp = Self.parsers(of: pid).count == sessions.count
+            if !parsersUp { await pause(0.02) }
+        }
+        #expect(parsersUp)
 
-        func measure(_ phase: String, seconds: TimeInterval = 10) {
-            let processes = [pid] + Self.parsers(of: pid)
-            let before = processes.map(Self.sample)
-            Thread.sleep(forTimeInterval: seconds)
-            let after = processes.map(Self.sample)
+        func measure(_ phase: String, seconds: TimeInterval = 10) async {
+            let processes = await [pid] + Self.parsers(of: pid)
+            var before: [Sample] = [], after: [Sample] = []
+            for process in processes { before.append(await Self.sample(process)) }
+            await pause(seconds)
+            for process in processes { after.append(await Self.sample(process)) }
             let cpu = zip(before, after).map { ($1.cpu - $0.cpu) / seconds * 100 }
             let parserRSS = after.dropFirst().map(\.rss), parserFootprint = after.dropFirst().map(\.footprint)
             var lines = ["[\(phase)] \(binary)",
@@ -137,10 +162,10 @@ import Testing
             print(lines.joined(separator: "\n"))
         }
 
-        Thread.sleep(forTimeInterval: 3)
-        measure("idle, 10 sessions")
+        await pause(3)
+        await measure("idle, 10 sessions")
         for session in sessions[4...] { client.send(.input(id: session.id, bytes: Data("go\r".utf8), reply: false)) }
-        Thread.sleep(forTimeInterval: 3)
-        measure("printing (4 printers, a full-screen redraw, after a 20,000-line burst)")
+        await pause(3)
+        await measure("printing (4 printers, a full-screen redraw, after a 20,000-line burst)")
     }
 }

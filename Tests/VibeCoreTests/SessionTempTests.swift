@@ -67,8 +67,9 @@ struct SessionTempTests {
                                      SessionNote.roleVariable: "lead"])
         #expect(worker.environment == ["TMPDIR": SessionTemp.folder(cwd: worktree, name: "worker-x", in: sessions).path + "/",
                                      SessionNote.roleVariable: "worker"])
+        // A verifier's also runs its commands as branch code, with no auto-memory (`LeadLaunch.verifierEnvironment`).
         #expect(verifier.environment == ["TMPDIR": SessionTemp.folder(cwd: worktree, name: "verify-x", in: sessions).path + "/",
-                                     SessionNote.roleVariable: "verifier"])
+                                     SessionNote.roleVariable: "verifier"].merging(LeadLaunch.verifierEnvironment(server: "/s")) { $1 })
         for launch in [lead, worker, verifier] {
             let tmpdir = try #require(launch.environment["TMPDIR"])
             #expect(try mode(tmpdir) == 0o700)
@@ -168,13 +169,13 @@ struct SessionTempTests {
 
     func end(_ process: Process) {
         kill(process.processIdentifier, SIGKILL)
-        process.waitUntilExit()
+        waitForEnd(process)
     }
 
     /// While a session lives, its TMPDIR loses what pytest keeps of earlier runs (a worker's pytest left 2.6 GB there on
     /// 2026-10-22, 3 GB free on the disk): each pytest-of-*'s pytest-N but the newest, and never one a live process
     /// holds. pytest's own pytest-current link and anything else stay.
-    @Test func theSweepKeepsTheNewestPytestRunAndWhatALiveProcessHolds() throws {
+    @Test func theSweepKeepsTheNewestPytestRunAndWhatALiveProcessHolds() async throws {
         let sessions = try folder("tmpdirs")
         let worktree = "/Users/x/dev/TGE/.vibeswitcher/worktrees/one"
         let command = "claude --append-system-prompt-file '/p' --name 'worker-one' -- 'Go.'"
@@ -196,7 +197,7 @@ struct SessionTempTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: pytest.path).sorted() == ["pytest-2", "pytest-4", "pytest-current"])
         #expect(FileManager.default.fileExists(atPath: live.appendingPathComponent("notes.txt").path))
         // Let go: it goes at the next sweep; the newest stays.
-        end(holder)
+        await end(holder)
         #expect(SessionTemp.sweep(sessions: list, in: sessions, handovers: nil).map(\.path) == [runs[1].path])
         #expect(SessionTemp.sweep(sessions: list, in: sessions, handovers: nil) == [])
         #expect(FileManager.default.fileExists(atPath: runs[3].appendingPathComponent("test_a0/data.bin").path))
@@ -209,7 +210,7 @@ struct SessionTempTests {
     /// session host's handover tests leave in /tmp when their run is killed (vsho-XXXXXXXX, 6 of them 275 MB on
     /// 2026-10-22) once untouched past `handoverSettle`: never a recent one, one a live process holds, a link, or
     /// another name.
-    @Test func theSweepRemovesEndedSessionsFoldersAndHandoverTestsLeftovers() throws {
+    @Test func theSweepRemovesEndedSessionsFoldersAndHandoverTestsLeftovers() async throws {
         let sessions = try folder("tmpdirs")
         let worktree = "/Users/x/dev/app/.vibeswitcher/worktrees/one"
         let ended = try #require(SessionTemp.make(cwd: worktree, name: "verify-one", in: sessions))

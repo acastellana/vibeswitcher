@@ -58,6 +58,7 @@ struct ChatContainer: View {
                 }
                 BaseMovePrompt(moves: leads.baseMoves, root: lead.root)
                 PushRequestPrompt(pushes: leads.pushes, root: lead.root)
+                ConfigHeldPrompt(holds: leads.configHolds, root: lead.root)
             } else if let todos = chat.log.todos, todos.contains(where: { $0.status != .done }) {
                 TodoPanel(todos: todos)
             }
@@ -80,6 +81,9 @@ struct ChatContainer: View {
                 // Its questions that closed without your answer, where they closed (only open ones are pinned under it).
                 .onChange(of: lead?.board.questions ?? [], initial: true) { _, questions in chat.showQuestions(questions, notices: leads.answerNotices) }
                 .onChange(of: leads.answerNotices) { _, notices in chat.showQuestions(lead?.board.questions ?? [], notices: notices) }
+            if let id = model.selectedRow?.hostID, let notice = leads.rotationNotices[id] {
+                LeadRotationNotice(text: notice)
+            }
             if let wallet, let session = model.selectedRow?.hostID {
                 WalletRequestStrip(desk: wallet, session: session)
             }
@@ -101,7 +105,8 @@ struct ChatContainer: View {
                                      if sent { chat.scrollToBottom() }
                                      return sent
                                  }, steer: composer.steer, stop: composer.stop, cycleMode: composer.cycleMode),
-                                 cardKeys: cardKeys, project: row.session?.project, folder: row.cwd)
+                                 cardKeys: cardKeys, project: row.session?.project, folder: row.cwd,
+                                 onTyping: { if let id = row.hostID { leads.noteLeadInput(id) } })
                     // A text box of its own per session: nothing typed for one can end up in another.
                     .id(row.id)
                 } else if let session = row.session, session.inTerminalApp, session.agent == .claude, session.status == .working {
@@ -587,7 +592,7 @@ private struct ChatItemView: View, Equatable {
 }
 
 /// What a row of the conversation shows. `reached` (the pointer has been over it, or VoiceOver is on) adds the row's
-/// menus and tooltip, never by wrapping its text in a branch of its own: the row's first hover comes as a drag ends
+/// SwiftUI menus and its mark's tooltip, never by wrapping its text in a branch of its own: the row's first hover comes as a drag ends
 /// on it (or brings it into view), and a new text view would drop its part of the selection.
 struct ChatItemRow: View {
     @AppStorage(ChatFont.key) private var chatFontSize = ChatFont.standard
@@ -651,9 +656,13 @@ struct ChatItemRow: View {
             if case .reply(let text) = entry.kind {
                 // The mark beside the text, as an HStack would place it, without the HStack's sizing: it measures the reply
                 // at no width and at any width to share the row out, every paragraph's text again each time.
+                // Its time is the text view's own tooltip from the start, not once the row is reached: given as the pointer
+                // came in, the tooltip's area was made with the pointer already inside it, and AppKit tells an area only
+                // of entries after it's made, so the first hover over a reply showed nothing (and a reply that came in or
+                // scrolled under a still pointer was never reached at all).
                 let when = entry.at.map { $0.formatted(date: .abbreviated, time: .shortened) }
                 ChatMessageText(text: text, kind: .markdown, fontSize: CGFloat(chatFontSize),
-                                menu: [ChatTextMenuItem(title: "Copy as Markdown") { Pasteboard.copy(text) }], help: reached ? when : nil)
+                                menu: [ChatTextMenuItem(title: "Copy as Markdown") { Pasteboard.copy(text) }], help: when)
                     .frame(maxWidth: .infinity, minHeight: 21, alignment: .topLeading)
                     .padding(.leading, 30)
                     .overlay(alignment: .topLeading) {
@@ -1386,5 +1395,14 @@ private extension ChatItem {
     var isTools: Bool {
         if case .tools = self { return true }
         return false
+    }
+}
+
+
+/// The scheduled rotation's line, in the successor's chat.
+struct LeadRotationNotice: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.system(size: 12)).foregroundStyle(.secondary).padding(8)
     }
 }

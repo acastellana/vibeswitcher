@@ -264,8 +264,9 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(!set.isError, "\(set.text)")
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
-        // The lead's records go in a commit of their own on top (LeadRecords).
-        #expect(underRecords("main", in: root) == audited)
+        // The lead's records go in a commit of their own on top (LeadRecords). Under them, the audited commit with the
+        // merge's provenance trailers and nothing else changed (MergeProvenanceTests).
+        #expect(MergeProvenanceTests.isStamped(underRecords("main", in: root), from: audited, in: root))
         #expect(try String(contentsOfFile: root + "/b.txt", encoding: .utf8) == "bee\n")
         #expect(!FileManager.default.fileExists(atPath: root + "/late.txt"))
         // The worker's branch did move; only the audited commit landed.
@@ -452,7 +453,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
     /// pkill takes the `-n` after a pattern as a second pattern, which every role's `--name` matches (and "cat" is in
     /// /Applications). Shown on a scratch process shaped like a role's session, with pgrep (which only lists), among
     /// this test process's children only: the machine's other processes are no business of this test.
-    @Test func aStrayPkillIsRefusedToEveryRole() throws {
+    @Test func aStrayPkillIsRefusedToEveryRole() async throws {
         let token = "vsguard-\(UUID().uuidString.prefix(8))"
         let scratch = Process()
         scratch.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -463,7 +464,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         // Its group: the sleep too.
         defer {
             kill(-scratch.processIdentifier, SIGTERM)
-            scratch.waitUntilExit()
+            #expect(await exited(scratch), "pid \(scratch.processIdentifier) still running")
         }
         let pgrep = Process()
         pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
@@ -473,7 +474,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         pgrep.standardOutput = out
         try pgrep.run()
         let listed = out.fileHandleForReading.readDataToEndOfFile()
-        pgrep.waitUntilExit()
+        #expect(await exited(pgrep), "pid \(pgrep.processIdentifier) still running")
         let matched = String(decoding: listed, as: UTF8.self).split(separator: "\n")
         #expect(matched.contains("\(scratch.processIdentifier)"), "-n read as a pattern matches a role's --name")
 

@@ -17,7 +17,7 @@ struct SandboxSoakBenchTests {
     /// fails it. The user's 11-01 install grew ~15 MB a real hour, about 5 MB per 20 sessions churned.
     static let limit = 30.0
 
-    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly)) func theFootprintIsFlatOverFiveSimulatedHours() throws {
+    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly)) func theFootprintIsFlatOverFiveSimulatedHours() async throws {
         let app = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("VibeSwitcher")
         #expect(FileManager.default.isExecutableFile(atPath: app.path))
         let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -37,7 +37,7 @@ struct SandboxSoakBenchTests {
         process.terminationHandler = { _ in ended.signal() }
         try process.run()
         // The script bounds its own run (the soak's minutes); this only guards a script that never ends.
-        if ended.wait(timeout: .now() + 3 * hangGuard) == .timedOut {
+        if await offPool({ ended.wait(timeout: .now() + 3 * hangGuard) }) == .timedOut {
             process.terminate()
             Issue.record("the soak bench hung")
             return

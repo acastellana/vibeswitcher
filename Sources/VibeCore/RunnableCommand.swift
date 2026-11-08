@@ -10,16 +10,35 @@ import Foundation
 /// (`if`/`fi`, `{ … }`, a quote across lines, a `;` at a line's end) isn't joined with `&&`: it runs as one script,
 /// its text exactly as shown, from a private file (`Script`).
 public enum RunnableCommand {
-    static let shells: Set<String> = ["bash", "sh", "zsh", "shell", "console", "terminal"]
+    static let shells: Set<String> = ["bash", "sh", "zsh", "shell", "shellscript", "console", "terminal"]
+
+    /// How a session takes a command: Claude Code and Codex run a prompt that starts with `!` in their shell (Codex
+    /// CLI's `!cmd`, its "user shell command"), a plain shell at its prompt takes the command as it is.
+    public enum Way: Equatable, Sendable {
+        case bang
+        case shell
+    }
 
     public struct Runnable: Equatable, Sendable {
-        /// Exactly what's typed into the session.
-        public let prompt: String
-        /// More than one line, or not plainly harmless: ask first, showing what runs: `prompt` as it is, or a
+        /// The command line the block runs, as a shell reads it: its commands joined with `&&`, or what runs a script's
+        /// file.
+        public let command: String
+        /// More than one line, or not plainly harmless: ask first, showing what runs: what's typed as it is, or a
         /// script's text.
         public let needsConfirmation: Bool
-        /// A block run as one script: `prompt` runs its file, which `Script.write` makes first.
+        /// A block run as one script: `command` runs its file, which `Script.write` makes first.
         public var script: Script? = nil
+
+        /// Exactly what's typed into a session that takes it `way`.
+        public func typed(_ way: Way) -> String {
+            switch way {
+            case .bang: return "! " + command
+            case .shell: return command
+            }
+        }
+
+        /// What's typed into Claude Code or Codex.
+        public var prompt: String { typed(.bang) }
     }
 
     /// A block run as one script: its text byte for byte, in a file only you can read under `folder`, run by `shell`
@@ -41,10 +60,10 @@ public enum RunnableCommand {
             file = folder.appendingPathComponent("block-\(digest).sh")
         }
 
-        /// What's typed: the shell runs the file, then it's removed (also when the script exits early or fails).
-        public var prompt: String {
+        /// What runs it: the shell runs the file, then it's removed (also when the script exits early or fails).
+        public var command: String {
             let path = Self.quoted(file.path)
-            return "! \(shell) \(path); rm -f \(path)"
+            return "\(shell) \(path); rm -f \(path)"
         }
 
         /// Writes the file (0600, its folder 0700) with the block's text exactly.
@@ -69,13 +88,14 @@ public enum RunnableCommand {
     }
 
     /// The shell a script block runs in, by its language.
-    static let scriptShells: [String: String] = ["bash": "bash", "sh": "sh", "zsh": "zsh", "shell": "bash"]
+    static let scriptShells: [String: String] = ["bash": "bash", "sh": "sh", "zsh": "zsh", "shell": "bash", "shellscript": "bash"]
 
     /// `visibleLines`: how many of the block's lines are on screen (nil: all of them). `scripts`: where a script's
     /// file goes.
     public static func runnable(code: String, language: String?, visibleLines: Int? = nil,
                                 scripts: URL = Script.folder) -> Runnable? {
-        let language = language?.lowercased()
+        // The info string's first word: ```bash title="setup" is a bash block.
+        let language = language?.lowercased().split(whereSeparator: \.isWhitespace).first.map(String.init)
         let raw = code.components(separatedBy: "\n")
         if let visibleLines, raw.dropFirst(visibleLines).contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) {
             return nil
@@ -114,8 +134,7 @@ public enum RunnableCommand {
         guard commands.allSatisfy(readsAsTyped), commands.count == 1 || commands.allSatisfy(joinsCleanly) else {
             return script(code: code, lines: lines, sourceLines: sourceLines, language: language, folder: scripts)
         }
-        let prompt = "! " + commands.joined(separator: " && ")
-        return Runnable(prompt: prompt, needsConfirmation: sourceLines > 1 || !plainlyHarmless(commands[0]))
+        return Runnable(command: commands.joined(separator: " && "), needsConfirmation: sourceLines > 1 || !plainlyHarmless(commands[0]))
     }
 
     /// Several lines of a bash, sh, zsh or shell block that only mean something together, as one script; nil for one
@@ -128,7 +147,7 @@ public enum RunnableCommand {
               !content.contains(where: { $0.contains(String(repeating: " ", count: 8)) || $0.contains("\t\t") })
         else { return nil }
         let script = Script(text: code, shell: shell, folder: folder)
-        return Runnable(prompt: script.prompt, needsConfirmation: true, script: script)
+        return Runnable(command: script.command, needsConfirmation: true, script: script)
     }
 
     // MARK: What's refused

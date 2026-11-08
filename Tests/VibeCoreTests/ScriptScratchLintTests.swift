@@ -168,7 +168,7 @@ struct ScriptScratchLintTests {
 
     /// The helper's scratch: a short folder under /tmp, 0700, TMPDIR its tmp/ (0700), removed when the script exits:
     /// normally, on Ctrl-C (SIGINT) and on TERM, after the script's own exit hooks, keeping its exit status.
-    @Test func theHelpersScratchGoesWhenTheScriptExits() throws {
+    @Test func theHelpersScratchGoesWhenTheScriptExits() async throws {
         let script = temp.url("script.sh")
         try """
             set -uo pipefail
@@ -207,7 +207,7 @@ struct ScriptScratchLintTests {
             #expect(try FileManager.default.attributesOfItem(atPath: tmpdir)[.posixPermissions] as? Int == 0o700)
             if let signal { kill(process.processIdentifier, signal) } else { try cue.fileHandleForWriting.close() }
             output += pipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
+            #expect(await exited(process), "pid \(process.processIdentifier) still running")
             #expect(!FileManager.default.fileExists(atPath: scratch), "\(signal.map { "signal \($0)" } ?? "exit"): \(scratch) is still there")
             #expect(String(decoding: output, as: UTF8.self).contains("hook \(scratch)"))
             if signal == nil { #expect(process.terminationStatus == 3) }

@@ -63,6 +63,11 @@ final class ChatSync {
     /// a local command's picker is read off it (`ScreenMenu.parsePicker` tells rows from headings by where they start,
     /// and the pane's read trims that). Nil when it couldn't be read; answered on the main thread.
     var hostScreen: (UUID, @escaping ([String]?) -> Void) -> Void
+    /// What the session's agent's input box shows, read off the host's screen with how it's drawn (its dim
+    /// placeholder and suggestions aren't typed); nil when it couldn't be read. Answered on the main thread.
+    var hostBox: (UUID, @escaping (LeadDelivery.Box?) -> Void) -> Void
+    /// Whether the plain shell in that session is at its prompt (no program of its own runs in the foreground).
+    var shellAtPrompt: (UUID) -> Bool = { _ in false }
     /// Whether the program in that session asked for bracketed paste.
     var bracketedPaste: (UUID) -> Bool = { _ in false }
     /// Whether that session's terminal pane has the keyboard (is first responder).
@@ -146,6 +151,10 @@ final class ChatSync {
         hostScreen = { [weak host] id, done in
             guard let host else { return done(nil) }
             host.styledScreen(id) { done($0?.text.components(separatedBy: "\n")) }
+        }
+        hostBox = { [weak host] id, done in
+            guard let host else { return done(nil) }
+            host.styledScreen(id) { done($0.map(LeadDelivery.box(in:))) }
         }
     }
 
@@ -562,7 +571,11 @@ final class ChatSync {
     /// outbox keeps it until the host confirms it (and the conversation shows it). With a question, permission
     /// prompt or picker open, it would go into that as keys: it's the question's free-text answer when the question
     /// takes one, else it waits until the question is answered.
-    func type(_ text: String) -> Bool {
+    /// `composer`: the composer's message (in its outbox): with a question open that takes free text, it goes in as the
+    /// answer. Anything else (a code block's Run) is refused then: a command isn't an answer.
+    func type(_ text: String) -> Bool { type(text, composer: true) }
+
+    func type(_ text: String, composer: Bool) -> Bool {
         guard let target = target(), host.isUsable else { return false }
         guard agentRunning(target) else {
             chat.sendNotice = Self.noAgent
@@ -584,7 +597,7 @@ final class ChatSync {
         readScreen()
         // A menu on the pane's last read not taken yet, or the card's while it's going: the message waits for it.
         if let menu = onScreenNow ?? (paneSettling ? chat.menu : nil) {
-            if let field = freeTextRow(menu), !text.hasPrefix("/") {
+            if composer, let field = freeTextRow(menu), !text.hasPrefix("/") {
                 Breadcrumbs.shared.note("composer: sent as the question's free-text answer")
                 choose(field, typing: text, drawn: menu)
                 if chat.answering {
@@ -593,6 +606,11 @@ final class ChatSync {
                     return true
                 }
             }
+            // Not the composer's (a Run, a chip): refused, saying so, since nothing would send it later.
+            guard chat.held(key: target.key, message: text) else {
+                chat.sendNotice = menu.picker || menu.commands ? Self.pickerOpen : Self.questionOpen
+                return false
+            }
             if menu.picker || menu.commands {
                 // Typed in now it would go into the picker as keys (text and ↩ choose whatever is highlighted).
                 chat.sendNotice = "A picker is open in the terminal: choose above, or close it (Esc). Your message waits until it's closed."
@@ -600,14 +618,54 @@ final class ChatSync {
             } else {
                 chat.sendNotice = "Waiting for your answer to the question above: typed in now, it would go into the question as keys."
             }
-            // Not the composer's (a Run, a chip): refused, so whoever sent it knows it didn't go.
-            guard chat.held(key: target.key, message: text) else { return false }
             Breadcrumbs.shared.note("composer: held while a question is open")
             return true
         }
         typeIn(text, to: target)
         return true
     }
+
+    /// A code block's Run, typed into the shown session (`RunButton`): into its agent (Claude Code, a lead, Codex:
+    /// `text` starts with `!`) when its input box holds nothing typed (else the command would join that draft and go to
+    /// the agent as a message) and nothing on screen takes keys instead; into a plain shell only at its prompt. `done`:
+    /// nil once it's typed, or why not, in one short line.
+    func run(_ text: String, done: @escaping (String?) -> Void) {
+        guard let target = target(), host.isUsable else { return done(Self.notConnected) }
+        guard let agent = target.agent else {
+            // No agent: typed in, the command runs in the shell, which must be at its prompt to read it as one.
+            guard shellAtPrompt(target.id) else { return done(Self.shellBusy) }
+            Breadcrumbs.shared.note("chat: a code block typed at a shell's prompt (\(text.count) chars)")
+            // On a fresh line: a ^C at the prompt drops what was half-typed there (`git checkout `) or a loop left open
+            // (`for f in *; do`), which the command would otherwise join.
+            let writes = [HostInput.Write(bytes: [3], delay: 0)]
+                + ComposerText.writes(text, bracketed: bracketedPaste(target.id)).enumerated().map { index, write in
+                    index == 0 ? HostInput.Write(bytes: write.bytes, delay: Self.freshLine) : write
+                }
+            host.send(target.id, writes: writes, gate: nil) { ok in
+                if !ok { Breadcrumbs.shared.note("chat: the host didn't confirm a code block typed at a shell") }
+            }
+            return done(nil)
+        }
+        hostBox(target.id) { [weak self] box in
+            guard let self else { return }
+            guard self.target()?.id == target.id else { return done(RunRefusal.otherSession) }
+            if case .draft = box { return done(Self.behindDraft(agent)) }
+            self.chat.sendNotice = nil
+            guard self.type(text, composer: false) else { return done(self.chat.sendNotice ?? Self.notTaken(agent)) }
+            done(nil)
+        }
+    }
+
+    /// How long a shell gets to draw its fresh prompt after the ^C before a Run's command is typed.
+    static let freshLine: TimeInterval = 0.1
+    static let notConnected = "Not run: the app isn't connected to its sessions right now. Run it again in a moment."
+    static let shellBusy = "Not run: a program is running in this terminal, not its shell prompt. Run it again once it's back at the prompt."
+    static let pickerOpen = "Not sent: a picker is open in the terminal. Choose there or close it (Esc), then try again."
+    static let questionOpen = "Not sent: a question is open in the terminal. Answer it, then try again."
+    static func behindDraft(_ agent: Agent) -> String {
+        "Not run: \(agent.displayName)'s prompt box in the terminal has text in it. Send or clear it there, then Run again."
+    }
+    static func notTaken(_ agent: Agent) -> String { "Not run: \(agent.displayName) didn't take it. Try again in a moment." }
 
     private func typeIn(_ text: String, to target: Target) {
         let key = target.key
@@ -706,7 +764,7 @@ final class ChatSync {
 
     /// The selected window session as dictation drives Claude's /voice in it (`ClaudeVoiceRun`), when it's `key`'s
     /// composer's and runs Claude Code; nil otherwise. Its keys go in raw and at once (key repeats can't wait out a
-    /// unit's gap), its screen is the host's with how it's drawn (Claude's live transcript is dim, not typed), and a
+    /// unit's gap), a held Space's repeats from off the main thread (`HostClient.directKeys`), its screen is the host's with how it's drawn (Claude's live transcript is dim, not typed), and a
     /// command is typed as the composer's messages are, only while that session is still the one shown.
     func claudeVoice(key: String, folder: String? = nil) -> ClaudeVoiceSession? {
         guard let target = target(), target.key == key, target.agent == .claude, host.isUsable else { return nil }
@@ -715,6 +773,11 @@ final class ChatSync {
             guard let self, self.host.isUsable else { return false }
             self.host.send(id, bytes: Data(bytes), reply: false)
             return true
+        }, offMainKeys: { [weak self] in
+            guard let keys = self?.host.directKeys(id) else { return nil }
+            return { keys.send(Data($0)) }
+        }, checkKeys: { [weak self] in
+            self?.host.checkDirectKeys(id)
         }, screen: { [weak self] done in
             guard let self else { return done(nil) }
             self.host.styledScreen(id, completion: done)

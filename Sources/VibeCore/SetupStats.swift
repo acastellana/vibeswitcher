@@ -222,6 +222,24 @@ public struct Freezes: Equatable, Sendable {
     public var byLoad: [LoadBucket]?
     /// Freezes with no load sample within 2 minutes.
     public var unsampled: Int
+    /// Every local day of the range in order, with its freezes and the hours of it counted: the daily trend of the rate.
+    public var days: [Day] = []
+
+    /// One local day: its freezes, and its hours counted (none before the oldest report left, or not yet gone).
+    public struct Day: Equatable, Sendable {
+        /// "2026-11-07".
+        public var day: String
+        public var freezes: Int
+        public var hours: Double
+        /// Nil when none of its hours were counted.
+        public var perHour: Double? { hours > 0 ? Double(freezes) / hours : nil }
+
+        public init(day: String, freezes: Int, hours: Double) {
+            self.day = day
+            self.freezes = freezes
+            self.hours = hours
+        }
+    }
 
     public struct LoadBucket: Equatable, Sendable {
         /// "24-36", "150+".
@@ -287,6 +305,11 @@ public final class SetupStatsCollector: @unchecked Sendable {
     /// By path: the size and modification time it was parsed at, and what it parsed to. Only on `queue`.
     private var cache: [String: (size: Int64, changed: Double, value: Any)] = [:]
     private let codexReader: CodexUsageReader?
+    /// Says whether a build holds a merge commit, for a project's root and the time its history is read from
+    /// (`SetupInstalls.gitContains`; a test gives its own).
+    var installsReader: @Sendable (String, Double) -> (String, String) -> Bool = { SetupInstalls.gitContains(root: $0, since: $1) }
+    /// The installed app's own build and when it was installed (`SetupInstalls.installedApp`); a test gives its own.
+    var installedApp: @Sendable () -> (build: String, at: Double)? = { SetupInstalls.installedApp() }
     private let counter = NSLock()
     private var parsed = 0
     private var onMain = 0
@@ -383,8 +406,12 @@ public final class SetupStatsCollector: @unchecked Sendable {
             let name = (root as NSString).lastPathComponent
             projects.append(SetupStats.Project(name: name, root: root, hasArchive: archive != nil, figures: figures))
             if let board {
-                sources.append((root, QualitySource(name: name, tasks: Self.tasks(board: board, archive: archive ?? []), questions: board.questions,
-                                                   incidents: incidents(root: root), flakes: board.flakes?.map { ($0.task, $0.at) })))
+                let tasks = Self.tasks(board: board, archive: archive ?? [])
+                var source = QualitySource(name: name, tasks: tasks, questions: board.questions,
+                                           incidents: incidents(root: root), flakes: board.flakes?.map { ($0.task, $0.at) })
+                source.leadDays = lead?.days
+                source.installedAt = installs(root: root, tasks: tasks, since: weeks(ending: range.end).suffix(2).first?.start ?? range.start)
+                sources.append((root, source))
             }
         }
         projects.sort { ($0.name, $0.root) < ($1.name, $1.root) }
@@ -396,7 +423,7 @@ public final class SetupStatsCollector: @unchecked Sendable {
         if !sources.isEmpty {
             sources.sort { $0.root < $1.root }
             stats.quality = SetupQualityMath.quality(sources.map(\.source), window: window, weeks: weeks(ending: range.end),
-                                                     mergeLines: mergeLines(range))
+                                                     mergeLines: mergeLines(range), calendar: calendar)
             // A project with a board but no lead ledger for the range: its lead's spend isn't in the sum.
             let unledgered = projects.contains { $0.figures != nil && $0.figures?.leadTokens == nil }
             stats.quality?.all.lead = total?.leadTokens.map {
@@ -404,6 +431,22 @@ public final class SetupStatsCollector: @unchecked Sendable {
             }
         }
         return stats
+    }
+
+    /// When each of `tasks` merged from `since` on was first seen installed: the builds its project's receipts record
+    /// from `since` on and the installed app's own (`SetupInstalls`), checked against its git history
+    /// (`installsReader`), each build's once.
+    private func installs(root: String, tasks: [TaskView], since: Date) -> [String: Double] {
+        let t0 = since.timeIntervalSince1970
+        let merged = tasks.compactMap { view -> (slug: String, commit: String, at: Double, build: String?)? in
+            guard let task = view.lead, let record = task.merged else { return nil }
+            return (task.slug, record.commit, record.at, task.receipt?.build)
+        }
+        let wanted = merged.filter { $0.at >= t0 }.map { (slug: $0.slug, commit: $0.commit) }
+        let seen = merged.filter { $0.at >= t0 }.compactMap { merge in merge.build.map { (build: $0, at: merge.at) } }
+            + [installedApp()].compactMap { $0 }
+        guard !wanted.isEmpty, !seen.isEmpty else { return [:] }
+        return SetupInstalls.firstInstalls(merges: wanted, seen: seen, contains: installsReader(root, t0 - 2 * 86_400))
     }
 
     /// The trend's 8 weeks, 7 days each, the last ending at `end`; oldest first.
@@ -690,7 +733,17 @@ public final class SetupStatsCollector: @unchecked Sendable {
         } else {
             unsampled = hangs.count
         }
-        return Freezes(count: hangs.count, hours: hours, partial: start > window.t0, perDay: perDay, byLoad: byLoad, unsampled: unsampled)
+        // Each day of the range: its freezes over the hours of it counted (from the oldest report left, up to now).
+        var days: [Freezes.Day] = []
+        var day = calendar.startOfDay(for: Date(timeIntervalSince1970: window.t0))
+        while day.timeIntervalSince1970 < window.t1, days.count < 3_660, let next = calendar.date(byAdding: .day, value: 1, to: day) {
+            let from = max(day.timeIntervalSince1970, window.t0, coveredFrom), to = min(next.timeIntervalSince1970, window.t1, window.now)
+            let key = dayFormat.string(from: day)
+            days.append(Freezes.Day(day: key, freezes: perDay[key] ?? 0, hours: max(0, to - from) / 3600))
+            day = next
+        }
+        return Freezes(count: hangs.count, hours: hours, partial: start > window.t0, perDay: perDay, byLoad: byLoad, unsampled: unsampled,
+                       days: days)
     }
 
     /// The sample nearest `at` within 2 minutes (`samples` sorted by time), by binary search.
@@ -787,6 +840,9 @@ struct TaskView {
     var importantFindings: Int
     var receipt: ReceiptView?
     var codex: Bool
+    /// When it was put on the board, and where its work came from (`LeadTask.origin`, as text); nil when not said.
+    var createdAt: Double?
+    var origin: String?
 
     init?(_ task: [String: Any], decoder: JSONDecoder? = nil) {
         guard let id = task["id"] as? String else { return nil }
@@ -808,6 +864,9 @@ struct TaskView {
         importantFindings = whole(score?["importantFindings"]) ?? 0
         receipt = object(task["receipt"]).map(ReceiptView.init)
         codex = task["codexWorked"] as? Bool == true || task["agent"] as? String == "codex"
+        // A task removed from the board (made by mistake, never ran) was never work: not counted by creation.
+        createdAt = task["removedAt"] == nil || task["removedAt"] is NSNull ? number(task["createdAt"]) : nil
+        origin = task["origin"] as? String
     }
 }
 
@@ -830,12 +889,15 @@ struct ReceiptView {
         var tokens: Int?
         /// Of them, Codex's (`LeadTokens.codex`); nil when not said.
         var codex: Int?
+        /// The verifier's: it ran on the worker's model (`LeadTokens.sameModel`); nil when not said.
+        var sameModel: Bool?
 
         init(_ role: [String: Any]) {
             cost = number(role["cost"])
             let parts = ["input", "output", "cacheRead", "cacheWrite"].compactMap { whole(role[$0]) }
             tokens = parts.isEmpty ? nil : parts.reduce(0, &+)
             codex = whole(role["codex"])
+            sameModel = role["sameModel"] as? Bool
         }
     }
 
@@ -892,6 +954,15 @@ struct BoardView {
         }
         flakes = (board["flakes"] as? [Any]).map { entries in
             entries.compactMap { $0 as? [String: Any] }.map { ($0["test"] as? String ?? "", $0["task"] as? String ?? "", number($0["at"])) }
+        }
+        // The flake ledger's own file, where boards' flakes moved (`FlakeLedgerStore`): its flakes after the board's
+        // (a board not moved yet still keeps some), each once.
+        let ledger = ((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent("flakes/ledger.jsonl")
+        if FileManager.default.fileExists(atPath: ledger) {
+            let kept = (board["flakes"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
+            let seen = Set(kept.map { "\($0["test"] as? String ?? "")\n\($0["task"] as? String ?? "")\n\($0["commit"] as? String ?? "")\n\(number($0["at"]) ?? 0)" })
+            let moved = FlakeLedgerStore.read(ledger).flakes.filter { !seen.contains("\($0.test)\n\($0.task)\n\($0.commit)\n\($0.at)") }
+            flakes = (flakes ?? []) + moved.map { ($0.test, $0.task, $0.at) }
         }
     }
 }

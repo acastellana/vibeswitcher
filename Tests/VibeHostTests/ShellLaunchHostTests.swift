@@ -8,7 +8,7 @@ import Testing
 /// request is placed in that new session and stamped for it, as the host does for any session the user opened, so its
 /// card shows under that session (`WalletAsk.filed` gives it, for that session, and the stamp is the host's).
 extension LeadVaultHostTests {
-    @Test func aRunShellRunsItsCommandStaysOpenAndItsWalletRequestsAreStampedForIt() throws {
+    @Test func aRunShellRunsItsCommandStaysOpenAndItsWalletRequestsAreStampedForIt() async throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let project = folder.appendingPathComponent("project", isDirectory: true)
         try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
@@ -30,10 +30,10 @@ extension LeadVaultHostTests {
         let request = ShellRequest(session: asker, cwd: String(cString: realpath(project.path, nil)),
                                    command: "sh '\(script)' && echo program-ended # done", label: "Program", createdAt: Date())
         let seq = app.send(.spawn(ShellAsk.spawnRequest(request, cols: 80, rows: 24)))
-        #expect(eventually { app.reply(to: seq) != nil })
+        #expect(await eventually { app.reply(to: seq) != nil })
         guard case .spawned(let shell)? = app.reply(to: seq) else { Issue.record("not spawned: \(String(describing: app.reply(to: seq)))"); return }
         #expect(shell.label == "Shell: Program" && shell.agent == nil)
-        #expect(eventually { (try? String(contentsOfFile: folder.path + "/ran-in", encoding: .utf8)) == request.cwd + "\n" })
+        #expect(await eventually { (try? String(contentsOfFile: folder.path + "/ran-in", encoding: .utf8)) == request.cwd + "\n" })
 
         // From inside it: placed in the new session, and sealed for it.
         let mine = shell.id.uuidString.lowercased()
@@ -43,7 +43,7 @@ extension LeadVaultHostTests {
         let digest = WalletStamp.digest(try wallet.encoded())
         try frames([.vault(.walletSession), .vault(.sealWalletRequest(session: mine, digest: digest))]).write(to: requests)
         FileManager.default.createFile(atPath: folder.appendingPathComponent("go").path, contents: nil)
-        #expect(eventually { answered(answers, 2...3) })
+        #expect(await eventually { answered(answers, 2...3) })
         FileManager.default.createFile(atPath: folder.appendingPathComponent("stop").path, contents: nil)
         let got = try replies(Data(contentsOf: answers))
         #expect(got[2] == .vault(.session(mine)), "\(String(describing: got[2]))")
@@ -55,10 +55,10 @@ extension LeadVaultHostTests {
         #expect(book.answer(.verifyWalletRequests(filed.requests.compactMap { filed.stamps[$0.id] }), from: .app) == .verified([true]))
 
         // The command ended; the shell is still there, interactive, taking what's typed into it.
-        #expect(eventually { FileManager.default.fileExists(atPath: folder.appendingPathComponent("done").path) })
-        #expect(eventually { app.screen(shell.id)?.contains("program-ended") == true })
+        #expect(await eventually { FileManager.default.fileExists(atPath: folder.appendingPathComponent("done").path) })
+        #expect(await eventually { app.screen(shell.id)?.contains("program-ended") == true })
         app.send(.input(id: shell.id, bytes: Data("echo still-$((40 + 2))\r".utf8), reply: false))
-        #expect(eventually { app.screen(shell.id)?.contains("still-42") == true }, "\(app.screen(shell.id) ?? "")")
+        #expect(await eventually { app.screen(shell.id)?.contains("still-42") == true }, "\(app.screen(shell.id) ?? "")")
         #expect(app.latest(shell.id)?.isLive != false)
         app.send(.kill(id: shell.id))
     }

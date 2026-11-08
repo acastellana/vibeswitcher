@@ -16,7 +16,7 @@ import Testing
 @Suite(.serialized) struct WorkerToolsTests {
     let temp = Scratch()
 
-    @Test func aWorkerStartedByTheLeadGetsItsTools() throws {
+    @Test func aWorkerStartedByTheLeadGetsItsTools() async throws {
         let mcp = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")
         // Short: the host's socket is reached through a link under the scratch home, and a socket's path is limited.
@@ -70,7 +70,7 @@ import Testing
 
         // The lead's session: its tool server starts once the app bound its role.
         FileManager.default.createFile(atPath: lead + "/a.in", contents: nil)
-        let leadSession = try app.spawn("set +m; export \(env); cd '\(root)'; while [ ! -f '\(lead)/go' ]; do sleep 0.05; done; "
+        let leadSession = try await app.spawn("set +m; export \(env); cd '\(root)'; while [ ! -f '\(lead)/go' ]; do sleep 0.05; done; "
             + "tail -n +1 -f '\(lead)/a.in' | '\(mcp)' --root '\(root)' --role lead > '\(lead)/a.out' 2> '\(lead)/a.err' & wait", cwd: root)
         guard case .grant(let grant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else {
             Issue.record("no lead grant"); return
@@ -80,16 +80,16 @@ import Testing
 
         // The host ends every session as the test ends (the lead's and its worker's, their tool servers with them).
         let server = LeadToolServerHandoverTests.Server(folder: lead, name: "a")
-        #expect(try server.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(server.errors)")
-        #expect(try server.tools(2).contains("start_worker"), "stderr: \(server.errors)")
-        guard let added = try server.call(3, "add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"],
+        await #expect(try server.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(server.errors)")
+        await #expect(try server.tools(2).contains("start_worker"), "stderr: \(server.errors)")
+        guard let added = try await server.call(3, "add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"],
                                                          "boundaries": ["only b.txt"]]) else {
             Issue.record("add_task didn't answer: \(server.errors)"); return
         }
         #expect(!added.isError, "\(added.text)")
 
         let asked = Date()
-        let started = try server.call(4, "start_worker", ["task": "add-b"])
+        let started = try await server.call(4, "start_worker", ["task": "add-b"])
         #expect(started?.isError == false, "start_worker: \(started?.text ?? "no answer"); stderr: \(server.errors)")
         // Within 20 s of the lead asking, the worker's tools/list has its tools.
         let tools = { () -> Set<String> in
@@ -100,7 +100,7 @@ import Testing
                 names.formUnion(list.compactMap { $0["name"] as? String })
             }
         }
-        let got = eventually(timeout: max(0, 20 - Date().timeIntervalSince(asked))) { tools().isSuperset(of: ["progress", "report"]) }
+        let got = await eventually(timeout: max(0, 20 - Date().timeIntervalSince(asked))) { tools().isSuperset(of: ["progress", "report"]) }
         let workerErrors = (try? String(contentsOfFile: worker + "/err", encoding: .utf8)) ?? ""
         #expect(got, "the worker's tools: \(tools()); its server's stderr: \(workerErrors)")
     }
@@ -108,8 +108,8 @@ import Testing
 
 extension LeadToolServerHandoverTests.Server {
     /// A tool call with arguments: its text and whether it's an error.
-    func call(_ id: Int, _ tool: String, _ arguments: [String: Any]) throws -> (text: String, isError: Bool)? {
-        guard let result = try ask(id, "tools/call", ["name": tool, "arguments": arguments]) else { return nil }
+    func call(_ id: Int, _ tool: String, _ arguments: [String: Any]) async throws -> (text: String, isError: Bool)? {
+        guard let result = try await ask(id, "tools/call", ["name": tool, "arguments": arguments]) else { return nil }
         let text = ((result["content"] as? [[String: Any]]) ?? []).compactMap { $0["text"] as? String }.joined(separator: "\n")
         return (text, result["isError"] as? Bool ?? true)
     }

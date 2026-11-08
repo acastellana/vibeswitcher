@@ -189,6 +189,14 @@ def load_tasks(folder):
     for task in (board or {}).get("tasks", []):
         tasks[task["id"]] = task
     flakes = (board or {}).get("flakes") if board is not None else None
+    # The flake ledger's own file (flakes/ledger.jsonl), where boards' flakes moved: its flake lines, after the board's
+    # (a board not moved yet still keeps some), each once.
+    ledger = read_jsonl(os.path.join(folder, "flakes", "ledger.jsonl"))
+    if ledger is not None:
+        seen = {(f.get("test"), f.get("task"), f.get("commit"), f.get("at")) for f in flakes or [] if isinstance(f, dict)}
+        moved = [f for f in ledger if isinstance(f, dict) and f.get("kind") == "flake"
+                 and (f.get("test"), f.get("task"), f.get("commit"), f.get("at")) not in seen]
+        flakes = (flakes or []) + moved
     return list(tasks.values()), flakes, board is not None, archived is not None
 
 def receipt_cost(receipt):

@@ -12,6 +12,7 @@ struct SessionListView: View {
     /// updates views: the model publishing right then is a fault ("Publishing changes from within view updates"),
     /// one for each view that watches it.
     @State private var selection: String?
+    @State private var showingToolchain = false
 
     init(model: WindowModel, leads: LeadController, actions: WindowActions) {
         self.model = model
@@ -66,14 +67,36 @@ struct SessionListView: View {
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            Picker("Group", selection: $model.grouping) {
-                Text("Attention").tag(WindowGrouping.attention)
-                Text("Projects").tag(WindowGrouping.projects)
+            VStack(spacing: 0) {
+                if let note = leads.toolchainNote {
+                    HStack {
+                        Button { showingToolchain.toggle() } label: {
+                            Label("Developer tools notice", systemImage: "exclamationmark.triangle")
+                                .font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .popover(isPresented: $showingToolchain) { ToolchainNoteView(note: note) }
+                        Button {
+                            showingToolchain = false
+                            leads.dismissToolchainNote()
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .accessibilityLabel("Dismiss developer tools notice")
+                        .help("Dismiss developer tools notice")
+                    }
+                    .buttonStyle(.plain)
+                    .padding(10)
+                    Divider()
+                }
+                Picker("Group", selection: $model.grouping) {
+                    Text("Attention").tag(WindowGrouping.attention)
+                    Text("Projects").tag(WindowGrouping.projects)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
@@ -396,5 +419,18 @@ struct NewSessionMenu: View {
     static func leadItem(folder: String?, actions: WindowActions) -> (title: String, action: () -> Void) {
         guard let folder else { return ("Project Lead…", actions.chooseFolderForLead) }
         return ("Project Lead", { actions.startLead(folder) })
+    }
+}
+
+/// The same persistent note is available even when macOS notifications are disabled.
+struct ToolchainNoteView: View {
+    let note: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Developer tools", systemImage: "exclamationmark.triangle").font(.headline)
+            Text(.init(note)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(20)
+        .frame(width: 480, alignment: .leading)
     }
 }

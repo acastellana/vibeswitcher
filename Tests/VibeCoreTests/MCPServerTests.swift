@@ -29,7 +29,7 @@ struct MCPServerTests {
     /// A server whose input ends (its lead closed or restarted) cancels its running calls and returns once they've
     /// ended, their cleanup run: it exited at once, leaving a merge's tests running on unlocked and its scratch
     /// worktree behind (process audit 2026-10-22, #6).
-    @Test func aServerWhoseInputEndsEndsItsCallsFirst() throws {
+    @Test func aServerWhoseInputEndsEndsItsCallsFirst() async throws {
         let temp = Scratch()
         let marks = temp.url("mcp-stop").path
         try FileManager.default.createDirectory(atPath: marks, withIntermediateDirectories: true)
@@ -42,13 +42,13 @@ struct MCPServerTests {
         }
         input.fileHandleForWriting.write(Data((#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sleep","arguments":{}}}"# + "\n").utf8))
         let pidFile = marks + "/sleep"
-        #expect(eventually { (try? String(contentsOfFile: pidFile, encoding: .utf8))?.hasSuffix("\n") == true })
+        #expect(await eventually { (try? String(contentsOfFile: pidFile, encoding: .utf8))?.hasSuffix("\n") == true })
         let sleep = try #require((try? String(contentsOfFile: pidFile, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
         #expect(kill(sleep, 0) == 0)
         try input.fileHandleForWriting.close()
-        #expect(done.wait(timeout: .now() + hangGuard) == .success)
+        #expect(await offPool { done.wait(timeout: .now() + hangGuard) } == .success)
         #expect(FileManager.default.fileExists(atPath: marks + "/cleaned"), "the call's cleanup didn't run")
-        #expect(eventually(timeout: 5) { kill(sleep, 0) != 0 })
+        #expect(await eventually(timeout: 5) { kill(sleep, 0) != 0 })
         // It answered that it was cancelled, the client still reading.
         try output.fileHandleForWriting.close()
         let said = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
@@ -65,12 +65,12 @@ struct MCPServerTests {
             ended.signal()
         }
         open.fileHandleForWriting.write(Data((#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sleep","arguments":{}}}"# + "\n").utf8))
-        #expect(eventually { (try? String(contentsOfFile: pidFile, encoding: .utf8))?.hasSuffix("\n") == true })
+        #expect(await eventually { (try? String(contentsOfFile: pidFile, encoding: .utf8))?.hasSuffix("\n") == true })
         let second = try #require((try? String(contentsOfFile: pidFile, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
         again.stop()
-        #expect(ended.wait(timeout: .now() + hangGuard) == .success)
+        #expect(await offPool { ended.wait(timeout: .now() + hangGuard) } == .success)
         #expect(FileManager.default.fileExists(atPath: marks + "/cleaned"))
-        #expect(eventually(timeout: 5) { kill(second, 0) != 0 })
+        #expect(await eventually(timeout: 5) { kill(second, 0) != 0 })
         try open.fileHandleForWriting.close()
         try quiet.fileHandleForWriting.close()
     }

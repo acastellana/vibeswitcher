@@ -59,7 +59,7 @@ struct WorkerToolsWaitTests: LeadTeamFixture {
         #expect(BoardStore(root: root).load().task("add-b")?.status == .planned)
     }
 
-    @Test func aWorkerWhoseToolServerAsksIsStarted() throws {
+    @Test func aWorkerWhoseToolServerAsksIsStarted() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -79,7 +79,7 @@ struct WorkerToolsWaitTests: LeadTeamFixture {
         }
         let started = lead.call("start_worker", ["task": "add-b"])
         #expect(!started.isError, "\(started.text)")
-        #expect(asked.wait(timeout: .now() + 30) == .success)
+        #expect(await offPool { asked.wait(timeout: .now() + 30) } == .success)
         #expect(runtime.killed.isEmpty)
         #expect(BoardStore(root: root).load().task("add-b")?.status == .running)
     }

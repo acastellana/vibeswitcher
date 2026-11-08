@@ -9,8 +9,9 @@
 # -j N alone isn't N cores: it builds N modules at once and gives each module's swiftc -jN too, N frontends each, and
 # swift test compiles the test targets side by side: with -j 4, 12 swift-frontends at ~1100 % CPU (measured 2026-11-01,
 # 12 cores). Two modules at once, each with D frontends (the -Xswiftc -j comes after SwiftPM's and wins), keeps it near
-# VS_HEAVY_CORES. The tests' own parallelism isn't bounded: Swift Testing (6.1) runs them on Swift's cooperative pool, one
-# thread a core, with no width to give (--num-workers is XCTest's, with --parallel); they use far less than the build.
+# VS_HEAVY_CORES. The tests' own parallelism is a test a core: Swift Testing runs them on Swift's cooperative pool with no
+# width of its own (--num-workers is XCTest's, with --parallel), and scripts/test.sh gives it one
+# (SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH); they use far less than the build.
 # It calls `swift` as the caller has it: module-cache.sh's function when that's in use. Exported, for the bash vs-heavy
 # runs.
 #

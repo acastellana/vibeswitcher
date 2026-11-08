@@ -11,11 +11,17 @@ import Foundation
 /// 2026-10-25: a one-off review of these logs found four real bugs (freezes, 392-row terminals, memory growth,
 /// duplicate verifiers) no one had been told about.
 public enum AppHealth {
+    /// A digest's actionable sections: new app work, crash signatures or error kinds. Repeats and trends are FYI.
+    static func wakes(_ text: String) -> Bool {
+        text.contains("Turn what's a real bug into a task") || text.contains("Crashes (reports in ")
+            || text.contains("Error lines in app.log within ") || text.contains("\nProposed task ")
+    }
+
     /// Who the lead's told it's from: "VibeSwitcher (not the user) reports (app health)".
     public static let sender = "app health"
     /// Events within this long of the first are told together, in one digest.
     public static let window: TimeInterval = 10 * 60
-    /// The same freeze (or crash) seen again this soon after it was told is counted, not told again.
+    /// A crash or error kind seen again this soon is FYI; freeze signatures stay FYI for the trend's history.
     public static let repeatWithin: TimeInterval = 24 * 3600
     /// The programs whose crash reports are VibeSwitcher's.
     public static let programs = ["VibeSwitcher", "vibeswitcher-host", "vibeswitcher-mcp"]
@@ -785,6 +791,9 @@ public enum AppHealth {
         public var lookedOn: String?
         /// Digests no lead could take yet (none ran with watch_app_logs on): sent at the next look.
         public var pending: [String] = []
+        /// Freezes, error lines and failure notices counted by cause (see `AppHealthCauses.swift`, `causes`); optional
+        /// so a state file from before it still decodes.
+        public var causeLog: AppHealth.Causes?
 
         public struct Told: Codable, Equatable, Sendable {
             public var at: Double
@@ -828,6 +837,7 @@ public enum AppHealth {
 
         /// New app.log lines: their error kinds, counted into the digest under way.
         public mutating func saw(lines: [String], now: Date) {
+            countCauses(lines: lines, now: now)
             let kinds = lines.compactMap(AppHealth.errorKind)
             guard !kinds.isEmpty else { return }
             open(now)
@@ -855,10 +865,14 @@ public enum AppHealth {
                 if let digest = digest(now: now, folders: folders) { pending.append(digest) }
             }
             let today = Self.day(now)
-            if let last = lookedOn, last < today, let trend = trend(of: last, now: now, memory: memory) {
-                pending.append(trend)
-                // Its repeats are told now.
-                for key in told.keys { told[key]?.repeats = 0 }
+            if let last = lookedOn, last < today {
+                if let trend = trend(of: last, now: now, memory: memory) {
+                    pending.append(trend)
+                    // Its repeats are told now.
+                    for key in told.keys { told[key]?.repeats = 0 }
+                }
+                // What keeps coming back, as tasks: one proposal per cause, in one message.
+                if causeLog != nil, let proposals = causes.propose(closing: last) { pending.append(proposals) }
             }
             lookedOn = today
             prune(now: now)
@@ -866,14 +880,14 @@ public enum AppHealth {
             pending = Array(pending.suffix(10))
         }
 
-        /// The digest under way, read from its files; nil when nothing in it is news (every freeze and crash told within
-        /// `repeatWithin`, and no new error kind), each repeat counted.
+        /// The digest under way, read from its files; known freezes are FYI, with repeats also in the daily trend.
         mutating func digest(now: Date, folders: Folders) -> String? {
             let at = now.timeIntervalSince1970
             // A freeze that began moments ago may not have its sample yet (`sample` takes 3 s, after the .log): it
             // goes in the next digest, read whole.
             let read = hangs.sorted().map(folders.hang)
             let unsampled = read.filter { $0.sampled == false && at - ($0.since?.timeIntervalSince1970 ?? 0) < Self.sampleWait }
+            countCauses(hangs: read.filter { hang in !unsampled.contains { $0.name == hang.name } }, now: now)
             defer {
                 opened = unsampled.isEmpty ? nil : at
                 hangs = unsampled.map(\.name)
@@ -890,10 +904,11 @@ public enum AppHealth {
             for (_, group) in groups.sorted(by: { $0.value[0].name < $1.value[0].name }) {
                 guard let signature = group[0].signature else {
                     freezes.append(Self.line(group))
+                    if group[0].verdict == .starved { starved += 1 }
                     continue
                 }
                 let key = "hang " + signature + mark(group[0])
-                if let last = told[key], at - last.at < AppHealth.repeatWithin {
+                if let last = told[key] {
                     told[key]?.repeats += group.count
                     repeated.append("\(group.count == 1 ? "a freeze" : "\(group.count) freezes") like \(last.first) (\(signature + mark(group[0])))")
                     continue
@@ -915,8 +930,11 @@ public enum AppHealth {
                 crashLines.append(Self.line(crash))
             }
             let newKinds = errors.keys.filter { kind in errorKindsTold[kind].map { at - $0 >= AppHealth.repeatWithin } ?? true }
-            guard !freezes.isEmpty || !crashLines.isEmpty || !newKinds.isEmpty else { return nil }
-            for kind in errors.keys { errorKindsTold[kind] = at }
+            for kind in errors.keys.sorted() where !newKinds.contains(kind) {
+                repeated.append("error kind \(kind) ×\(errors[kind, default: 0])")
+            }
+            guard !freezes.isEmpty || !crashLines.isEmpty || !newKinds.isEmpty || !repeated.isEmpty else { return nil }
+            for kind in newKinds { errorKindsTold[kind] = at }
             var parts = ["VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):"]
             if !freezes.isEmpty {
                 parts.append("Freezes of its main thread (reports in ~/.vibeswitcher/debug, .txt the sampled stacks, .log the state):")
@@ -926,18 +944,18 @@ public enum AppHealth {
                 parts.append("Crashes (reports in ~/Library/Logs/DiagnosticReports):")
                 parts += crashLines
             }
-            if !errors.isEmpty {
-                let counted = errors.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+            if !newKinds.isEmpty {
+                let counted = errors.filter { newKinds.contains($0.key) }.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
                 parts.append("Error lines in app.log within \(Int(AppHealth.window / 60)) min, by kind: "
                              + counted.map { "\($0.key) ×\($0.value)" }.joined(separator: ", "))
             }
             if !repeated.isEmpty {
-                parts.append("Seen again, told within 24 h, so only counted (the daily trend has the counts): " + repeated.joined(separator: "; "))
+                parts.append("Seen again, already reported, so only counted (the daily trend has the counts): " + repeated.joined(separator: "; "))
             }
-            if starved > 0, starved == freezes.count, crashLines.isEmpty, errors.isEmpty {
+            if starved > 0, starved == freezes.count, crashLines.isEmpty, newKinds.isEmpty {
                 parts.append("\(starved == 1 ? "That freeze looks" : "Those freezes look") like starvation (the Mac loaded or paging), not the app's work: no task for "
                              + "\(starved == 1 ? "it" : "them"); the reports have the full stacks.")
-            } else {
+            } else if !freezes.isEmpty || !crashLines.isEmpty || !newKinds.isEmpty {
                 parts.append("Turn what's a real bug into a task (one already on the board needs nothing"
                              + (starved > 0 ? "; one marked likely starvation needs none" : "") + "); read the reports for the full stacks.")
             }
@@ -1018,12 +1036,13 @@ public enum AppHealth {
             return Redaction.secrets(in: parts.joined(separator: " "))
         }
 
-        /// What was told two days ago or more is forgotten, and days older than the trend's week.
+        /// Keep freeze signatures with the trend's history; other signatures expire after two days.
         mutating func prune(now: Date) {
             let at = now.timeIntervalSince1970
-            told = told.filter { at - $0.value.at < 2 * AppHealth.repeatWithin }
+            told = told.filter { at - $0.value.at < ($0.key.hasPrefix("hang ") ? 8 * 86_400 : 2 * AppHealth.repeatWithin) }
             errorKindsTold = errorKindsTold.filter { at - $0.value < 2 * AppHealth.repeatWithin }
             if let oldest = Self.day(Self.day(now), offset: -8) { days = days.filter { $0.key >= oldest } }
+            if causeLog != nil { causes.prune(today: Self.day(now)) }
         }
 
         /// yyyy-MM-dd in this Mac's time zone.

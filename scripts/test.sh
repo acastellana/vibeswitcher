@@ -38,6 +38,7 @@
 #
 # scripts/test.sh [swift test options], e.g. scripts/test.sh --filter HomeIsolationTests
 # scripts/test.sh --perf [swift test options]: only the benches (no web tests), on a scratch home as above.
+# scripts/test.sh --width: only the width Swift Testing would get here (`slot_width`, below; TestScriptWidthTests).
 # scripts/test.sh --leftovers MARK: only the check, for the processes whose environment or arguments hold MARK
 #   (LeftoverCheckTests); exit 1 when it ended any.
 # scripts/test.sh --web DIR: only the web tests, DIR/*.test.mjs (DIR from the repository's root, or absolute), on a
@@ -132,9 +133,40 @@ perf_tests=(
     AccessibilityTreeBenchTests
     HostingViewDepthTests
     SandboxSoakBenchTests/theFootprintIsFlatOverFiveSimulatedHours
+    FreezeCausesTests/aRowsSpokenLabelCostsAFractionOfTheFormatter
 )
 
 source scripts/lib/processes.sh
+
+# Swift Testing's width, SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH: at most a test a core at once (a caller's own
+# width kept). Swift Testing gives no width of its own: it starts every test as a task on the cooperative pool, and only
+# tests blocking a pool thread used to bound it, one a core. With their waits awaited (2026-11-05) a full run started
+# hundreds at once, and their hosts and scripts took the Mac from load 18 to 193 in three minutes; 23 tests judged by
+# time failed. Set before vs-heavy takes a slot.
+suite_width() {
+    export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH=${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-$(cpu_count)}
+}
+# Then, on the slot vs-heavy gives the run, at most its share of the cores, VS_HEAVY_CORES (a caller's narrower width
+# kept), as the build is (scripts/lib/swift-jobs.sh): a test a core of the whole Mac in each of 3 boosted slots ran up
+# to 36 tests at once on 12 cores, and at 03:40–03:55 on 2026-11-08 an audit's full suite and other runs side by side
+# took the load to 100–225 and froze the app about 40 times. Without a VS_HEAVY_CORES (a whole number above 0), the
+# width as it was. Exported, for the bash vs-heavy runs.
+slot_width() {
+    local width=${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-}
+    if [[ ${VS_HEAVY_CORES:-} =~ ^[0-9]+$ ]] && (( 10#$VS_HEAVY_CORES >= 1 )); then
+        [[ $width =~ ^[0-9]+$ ]] && (( 10#$width <= 10#$VS_HEAVY_CORES )) || width=$(( 10#$VS_HEAVY_CORES ))
+    fi
+    export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH=$width
+}
+export -f slot_width
+
+# Only the width swift test would get here, for the environment as given (no slot taken): TestScriptWidthTests.
+if [[ ${1:-} == --width ]]; then
+    suite_width
+    slot_width
+    echo "$SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH"
+    exit
+fi
 
 if [[ ${1:-} == --leftovers ]]; then
     end_leftovers "${2:?scripts/test.sh --leftovers MARK}"
@@ -241,8 +273,10 @@ else
     defaults_before=$(build_defaults)
     # A failed build leaves a mark, so what needs its products is skipped rather than failed (or run on an older build).
     export VS_BUILD_FAILED_MARK=$tool_scratch/build-failed
-    # Both on the slot's share of the cores, VS_HEAVY_CORES (scripts/lib/swift-jobs.sh).
-    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
+    # A test a core, then at most the slot's share (`suite_width`, `slot_width` above).
+    suite_width
+    # Both on the slot's share of the cores, VS_HEAVY_CORES (scripts/lib/swift-jobs.sh), and so are the tests.
+    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
     status=$?
     check_preferences "$preferences_before" "$defaults_before" || status=1
     # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf.

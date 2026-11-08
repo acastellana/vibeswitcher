@@ -66,7 +66,7 @@ extension LeadToolsetTests {
 
     /// E-17: a test command that never exits is stopped at test_timeout_min with what it started; the merge says
     /// the tests hung, records no failure, and leaves no lock or scratch worktree behind.
-    @Test func aMergeWhoseTestsHangIsStoppedAndSaysSo() throws {
+    @Test func aMergeWhoseTestsHangIsStoppedAndSaysSo() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -86,7 +86,7 @@ extension LeadToolsetTests {
         #expect(task.status == .review && task.setback == nil)
         #expect(Git.run(["rev-parse", "main"], in: root).output == main)
         mergeLeftNothingBehind(root)
-        if let child = pid(in: marks + "/child") { #expect(eventually { kill(child, 0) != 0 }) }
+        if let child = pid(in: marks + "/child") { #expect(await eventually { kill(child, 0) != 0 }) }
         // With the limit raised and tests that end, the same audit merges.
         #expect(!call(lead, "configure", ["test_timeout_min": "", "test_command": "test -f b.txt"]).isError)
         let again = call(lead, "merge", ["task": "add-b"])
@@ -95,7 +95,7 @@ extension LeadToolsetTests {
 
     /// E-12: a merge cancelled through MCP (notifications/cancelled) stops its tests, removes its scratch worktree,
     /// says cancelled, and doesn't fail the task.
-    @Test func aCancelledMergeIsCancelledNotFailed() throws {
+    @Test func aCancelledMergeIsCancelledNotFailed() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -111,9 +111,9 @@ extension LeadToolsetTests {
             }
         }
         send(["jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": ["name": "merge", "arguments": ["task": "add-b"]]])
-        #expect(eventually { pid(in: marks + "/child") != nil })
+        #expect(await eventually { pid(in: marks + "/child") != nil })
         send(["jsonrpc": "2.0", "method": "notifications/cancelled", "params": ["requestId": 7]])
-        #expect(eventually { !replies.get().isEmpty })
+        #expect(await eventually { !replies.get().isEmpty })
         let result = try #require(replies.get().first?["result"] as? [String: Any])
         let text = ((result["content"] as? [[String: Any]])?.first?["text"] as? String) ?? ""
         #expect(text.contains("cancelled") && !text.contains("fails"), "\(text)")
@@ -121,7 +121,7 @@ extension LeadToolsetTests {
         #expect(task.status == .review && task.setback == nil)
         mergeLeftNothingBehind(root)
         let child = try #require(pid(in: marks + "/child"))
-        #expect(eventually { kill(child, 0) != 0 })
+        #expect(await eventually { kill(child, 0) != 0 })
     }
 
     /// E-15: a merge stopped by something else than a conflict says what stopped it, and doesn't send the worker to

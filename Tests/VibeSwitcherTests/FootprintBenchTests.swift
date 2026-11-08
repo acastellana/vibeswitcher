@@ -28,7 +28,7 @@ struct FootprintBenchTests {
         MacLimits.load(from: URL(fileURLWithPath: VibePaths.accountHome).appendingPathComponent(".vibeswitcher/mac-limits.json")).loadLimit
     }
 
-    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly)) func theWindowClosedIsUnder150MBAndChurnGrowsItAtMost10Percent() throws {
+    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly)) func theWindowClosedIsUnder150MBAndChurnGrowsItAtMost10Percent() async throws {
         let app = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("VibeSwitcher")
         #expect(FileManager.default.isExecutableFile(atPath: app.path))
         // Short: the bench's private session host puts its socket in this home, and a socket's path is limited to 104 bytes.
@@ -50,7 +50,7 @@ struct FootprintBenchTests {
         let ended = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in ended.signal() }
         try process.run()
-        if ended.wait(timeout: .now() + hangGuard) == .timedOut {
+        if await offPool({ ended.wait(timeout: .now() + hangGuard) }) == .timedOut {
             process.terminate()
             Issue.record("the bench hung")
             return

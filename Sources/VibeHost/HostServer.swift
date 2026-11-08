@@ -522,7 +522,10 @@ public final class HostServer {
             // The session a message to seal is for (a lead's own loop seals its reports only for its own agent).
             var agentSession: String?
             if case .seal(let message) = request { agentSession = session(of: message.agentPid) }
-            var answer = vault.answer(request, from: from, userOpened: opened, agentSession: agentSession)
+            // Which sessions run now, for the agents' config seal (`ConfigSeal`): asked only when it's recorded.
+            var live: Set<String>?
+            if case .setGuarded = request { live = Set(sessions.filter { $0.value.info.isLive }.map { $0.key.uuidString }) }
+            var answer = vault.answer(request, from: from, userOpened: opened, agentSession: agentSession, liveSessions: live)
             // A verifier that gave its verdict has no job left: it ends once its grace is over (see `endSubmitted`).
             if case .submitVerdict = request, case .session(let id) = from {
                 switch answer {

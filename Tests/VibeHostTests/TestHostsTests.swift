@@ -34,27 +34,26 @@ import Testing
     func exists(_ pid: pid_t) -> Bool { kill(pid, 0) == 0 || errno == EPERM }
 
     /// A test that fails with its host still running and live sessions on it, never stopping it: the host goes.
-    @Test func aFailingTestsHostIsEnded() throws {
+    @Test func aFailingTestsHostIsEnded() async throws {
         var pid: pid_t = 0, dir = "", session: pid_t = 0
-        withKnownIssue("the body fails on purpose, its host still running") {
-            let host = try ScratchHostProcess()
+        await withKnownIssue("the body fails on purpose, its host still running") {
+            let host = try await ScratchHostProcess()
             // Kept until the body throws (Swift may otherwise let it go after its last use).
-            try withExtendedLifetime(host) {
-                pid = host.pid
-                dir = host.dir
-                let (client, _, _, _, _, _, _) = try TestClient.welcomed(host.socket, appKey: host.appKey)
-                session = try client.spawn(keepRunning).childPID
-                // Running on its terminal (a session the host leaves before it has one never sees it hang up).
-                #expect(eventually { (ProcessTable.info(pid: session)?.comm ?? "") == "sleep" })
-                #expect(exists(pid) && TestHosts.running.contains(pid))
-                throw Failure()
-            }
+            defer { withExtendedLifetime(host) {} }
+            pid = host.pid
+            dir = host.dir
+            let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+            session = try await client.spawn(keepRunning).childPID
+            // Running on its terminal (a session the host leaves before it has one never sees it hang up).
+            #expect(await eventually { (ProcessTable.info(pid: session)?.comm ?? "") == "sleep" })
+            #expect(exists(pid) && TestHosts.running.contains(pid))
+            throw Failure()
         }
         #expect(pid > 0)
         #expect(!exists(pid) && !TestHosts.running.contains(pid))
         #expect(!FileManager.default.fileExists(atPath: dir))
         // Its session lost its terminal with it.
-        #expect(eventually(timeout: 30) { !exists(session) })
+        #expect(await eventually(timeout: 30) { !exists(session) })
     }
 
     /// A test past its time limit (cancelled) still asks its host to end before it kills it: the host goes on SIGTERM,
@@ -63,7 +62,7 @@ import Testing
         let (host, socket, home) = host(idleExit: 600)
         defer { remove(socket, home) }
         try TestHosts.run(host)
-        #expect(eventually { FileManager.default.fileExists(atPath: socket) })
+        #expect(await eventually { FileManager.default.fileExists(atPath: socket) })
         // Ended from a task that is cancelled already, as a test past its limit is.
         let ending = Task.detached {
             while !Task.isCancelled { await Task.yield() }
@@ -76,52 +75,52 @@ import Testing
     }
 
     /// A handover scene whose test fails before it ends it: the host goes.
-    @Test func aFailingSceneIsEnded() throws {
+    @Test func aFailingSceneIsEnded() async throws {
         var pid: pid_t = 0
-        withKnownIssue("the body fails on purpose") {
-            let scene = try HostHandoverTests().scene()
-            try withExtendedLifetime(scene.host) {
-                pid = scene.host.pid
-                if scene.background > 0 { kill(scene.background, SIGKILL) }
-                #expect(scene.host.process.isRunning)
-                throw Failure()
-            }
+        await withKnownIssue("the body fails on purpose") {
+            let scene = try await HostHandoverTests().scene()
+            // Kept until the body throws (Swift may otherwise let it go after its last use).
+            defer { withExtendedLifetime(scene.host) {} }
+            pid = scene.host.pid
+            if scene.background > 0 { kill(scene.background, SIGKILL) }
+            #expect(scene.host.process.isRunning)
+            throw Failure()
         }
         #expect(pid > 0 && !exists(pid))
     }
 
     /// The runner dies (killed, crashed, stopped as hung): its hosts' watchdogs end them, sessions and all.
-    @Test func aHostWhoseRunnerDiedIsEnded() throws {
+    @Test func aHostWhoseRunnerDiedIsEnded() async throws {
         let runner = Process()
         runner.executableURL = URL(fileURLWithPath: "/bin/sleep")
         runner.arguments = ["600"]
         try runner.run()
         let (host, socket, home) = host(idleExit: 600)
         defer {
-            if runner.isRunning { kill(runner.processIdentifier, SIGKILL); runner.waitUntilExit() }
+            if runner.isRunning { kill(runner.processIdentifier, SIGKILL); waitForEnd(runner) }
             TestHosts.end(host)
             remove(socket, home)
         }
         let key = try TestHosts.authorize(host)
         try TestHosts.run(host, owner: runner.processIdentifier)
-        #expect(eventually { FileManager.default.fileExists(atPath: socket) })
+        #expect(await eventually { FileManager.default.fileExists(atPath: socket) })
         let client = try TestClient(socket: socket, appKey: key)
-        let session = try client.spawn(keepRunning)
+        let session = try await client.spawn(keepRunning)
         // Its program running: one still starting (a fresh launcher copy waits on its first exec on a busy Mac) has no
         // terminal yet, so the hangup when its host dies never reaches it.
-        #expect(eventually { (ProcessTable.info(pid: session.childPID)?.comm ?? "") == "sleep" })
+        #expect(await eventually { (ProcessTable.info(pid: session.childPID)?.comm ?? "") == "sleep" })
         // Never idle while its session runs: nothing but the watchdog would end it.
-        Thread.sleep(forTimeInterval: 2)
+        await pause(2)
         #expect(host.isRunning)
         kill(runner.processIdentifier, SIGKILL)
-        runner.waitUntilExit()
-        try #require(eventually(timeout: 10) { !host.isRunning })
+        #expect(await exited(runner), "pid \(runner.processIdentifier) still running")
+        try #require(await eventually(timeout: 10) { !host.isRunning })
         #expect(host.terminationReason == .uncaughtSignal && host.terminationStatus == SIGKILL)
-        #expect(eventually(timeout: 30) { !exists(session.childPID) })
+        #expect(await eventually(timeout: 30) { !exists(session.childPID) })
     }
 
     /// Waits for `pid`'s exit (any process, not only a child: a kqueue watch), up to `timeout`. True once it's gone.
-    func waitForExit(of pid: pid_t, timeout: TimeInterval) -> Bool {
+    func waitForExit(of pid: pid_t, timeout: TimeInterval) async -> Bool {
         let gone = DispatchSemaphore(value: 0)
         let watch = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .global())
         watch.setEventHandler { gone.signal() }
@@ -129,12 +128,12 @@ import Testing
         defer { watch.cancel() }
         // Gone before the watch began: no exit comes.
         if kill(pid, 0) != 0, errno == ESRCH { return true }
-        return gone.wait(timeout: .now() + timeout) == .success
+        return await offPool { gone.wait(timeout: .now() + timeout) } == .success
     }
 
     /// `--exit-with PID` (a bench's host, audit P2 #3 of 2026-10-22): its owner killed outright, the host ends every
     /// session and exits by itself, well before any watchdog.
-    @Test func aHostWhoseOwnerIsKilledEndsItsSessionsAndExits() throws {
+    @Test func aHostWhoseOwnerIsKilledEndsItsSessionsAndExits() async throws {
         let bench = Process()
         bench.executableURL = URL(fileURLWithPath: "/bin/sleep")
         bench.arguments = ["600"]
@@ -143,7 +142,7 @@ import Testing
         let (host, socket, home) = host(idleExit: 600, log: log)
         host.arguments! += ["--exit-with", String(bench.processIdentifier)]
         defer {
-            if bench.isRunning { kill(bench.processIdentifier, SIGKILL); bench.waitUntilExit() }
+            if bench.isRunning { kill(bench.processIdentifier, SIGKILL); waitForEnd(bench) }
             TestHosts.end(host)
             remove(socket, home)
             unlink(log)
@@ -153,27 +152,28 @@ import Testing
         let key = try TestHosts.authorize(host)
         try TestHosts.run(host)
         var connected: TestClient?
-        #expect(eventually { connected = try? TestClient(socket: socket, appKey: key); return connected != nil })
+        #expect(await eventually { connected = try? TestClient(socket: socket, appKey: key); return connected != nil })
         let client = try #require(connected)
-        let sessions = try (0..<2).map { _ in try client.spawn(keepRunning).childPID }
-        #expect(eventually { sessions.allSatisfy { (ProcessTable.info(pid: $0)?.comm ?? "") == "sleep" } })
+        var sessions: [pid_t] = []
+        for _ in 0..<2 { sessions.append(try await client.spawn(keepRunning).childPID) }
+        #expect(await eventually { sessions.allSatisfy { (ProcessTable.info(pid: $0)?.comm ?? "") == "sleep" } })
         #expect(host.isRunning)
         kill(bench.processIdentifier, SIGKILL)
-        bench.waitUntilExit()
-        try #require(hostEnded.wait(timeout: .now() + 10) == .success, "the host outlived its owner")
+        #expect(await exited(bench), "pid \(bench.processIdentifier) still running")
+        try #require(await offPool { hostEnded.wait(timeout: .now() + 10) } == .success, "the host outlived its owner")
         #expect(host.terminationReason == .exit && host.terminationStatus == 0)
-        for session in sessions { #expect(waitForExit(of: session, timeout: 10), "session pid \(session) outlived the host") }
+        for session in sessions { #expect(await waitForExit(of: session, timeout: 10), "session pid \(session) outlived the host") }
         let lines = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
         #expect(lines.contains("host: owner pid \(bench.processIdentifier) is gone, ending 2 sessions and exiting"))
         #expect(!FileManager.default.fileExists(atPath: socket))
     }
 
     /// An owner already gone when the host starts (the bench died while it launched): the host doesn't stay.
-    @Test func aHostWhoseOwnerIsAlreadyGoneExits() throws {
+    @Test func aHostWhoseOwnerIsAlreadyGoneExits() async throws {
         let bench = Process()
         bench.executableURL = URL(fileURLWithPath: "/usr/bin/true")
         try bench.run()
-        bench.waitUntilExit()
+        #expect(await exited(bench), "pid \(bench.processIdentifier) still running")
         let (host, socket, home) = host(idleExit: 600)
         host.arguments! += ["--exit-with", String(bench.processIdentifier)]
         defer {
@@ -183,13 +183,13 @@ import Testing
         let hostEnded = DispatchSemaphore(value: 0)
         host.terminationHandler = { _ in hostEnded.signal() }
         try TestHosts.run(host)
-        try #require(hostEnded.wait(timeout: .now() + 10) == .success, "the host outlived its owner")
+        try #require(await offPool { hostEnded.wait(timeout: .now() + 10) } == .success, "the host outlived its owner")
         #expect(host.terminationReason == .exit && host.terminationStatus == 0)
     }
 
     /// `--idle-exit`: a host whose last client went away, with no session, exits once it's been idle that long, and
     /// not while the client is there.
-    @Test func aHostWithNoClientLeftExitsWhenIdle() throws {
+    @Test func aHostWithNoClientLeftExitsWhenIdle() async throws {
         let log = scratchRoot.appendingPathComponent("vsh-idle-\(UUID().uuidString.prefix(8)).log").path
         let (host, socket, home) = host(idleExit: 2, log: log)
         defer {
@@ -200,16 +200,16 @@ import Testing
         let key = try TestHosts.authorize(host)
         try TestHosts.run(host)
         var connected: TestClient?
-        #expect(eventually { connected = try? TestClient(socket: socket, appKey: key); return connected != nil })
+        #expect(await eventually { connected = try? TestClient(socket: socket, appKey: key); return connected != nil })
         let client = try #require(connected)
         let seq = client.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
-        #expect(eventually { client.reply(to: seq) != nil })
+        #expect(await eventually { client.reply(to: seq) != nil })
         // A client counts: well past the idle time, still running.
-        Thread.sleep(forTimeInterval: 4)
+        await pause(4)
         #expect(host.isRunning)
         client.close()
         let gone = Date()
-        try #require(eventually(timeout: 10) { !host.isRunning })
+        try #require(await eventually(timeout: 10) { !host.isRunning })
         #expect(Date().timeIntervalSince(gone) < 6)
         #expect(host.terminationReason == .exit && host.terminationStatus == 0)
         let lines = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""

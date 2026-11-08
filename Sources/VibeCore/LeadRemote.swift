@@ -247,9 +247,11 @@ public enum LeadRemote {
         return .success(Incoming(head: head, tip: tip, ahead: ahead, behind: behind, subjects: subjects, outlook: outlook))
     }
 
-    /// One of the lead's records (`LeadRecords.paths`), which merge by union.
+    /// One of the lead's records (`LeadRecords.paths`), which merge by union; or the product inventory, which both
+    /// Macs' records commits make (`ProductInventory`): taken by union too, and made again from the merged code by the
+    /// records commit after merge_remote, so a conflict in it never stops one.
     static func isRecord(_ file: String, records: String?) -> Bool {
-        records.map { LeadRecords.paths($0).contains(file) } ?? false
+        records.map { LeadRecords.paths($0).contains(file) || file == ProductInventory.output } ?? false
     }
 
     /// How merge_remote's run went.
@@ -262,7 +264,7 @@ public enum LeadRemote {
         /// The merge conflicts in these files outside the lead's records; nothing was made.
         case conflict([String])
         case failed(String)
-        case hung(command: String, after: TimeInterval, output: String)
+        case hung(command: String, after: TimeInterval, output: String, stall: StallWatch.Stall?)
         case cancelled
         case error(String)
     }
@@ -331,7 +333,7 @@ public enum LeadRemote {
         switch stopped {
         case nil: return .passed(commit: made, merged: !forward)
         case .failed(let output)?: return .failed(output)
-        case .hung(let command, let after, let output)?: return .hung(command: command, after: after, output: output)
+        case .hung(let command, let after, let output, let stall)?: return .hung(command: command, after: after, output: output, stall: stall)
         case .cancelled?: return .cancelled
         case .error(let text)?: return .error(text)
         case .passed?, .passedOnRerun?, .conflict?: return .error("unexpected")
@@ -417,6 +419,50 @@ extension LeadToolset {
         return MCPToolResult(text: lines.joined(separator: "\n"))
     }
 
+    /// The remote's tip as fetch_remote last fetched it (the vault's, never the ref's: any session can move that); nil
+    /// before a fetch. merge lands a task that carries commits of it as a true merge (`Worktrees.put`).
+    func fetchedTip(_ workflow: LeadWorkflow) -> String? {
+        let remote = workflow.remoteName
+        guard LeadRemote.isName(remote) else { return nil }
+        return vault.head(root: root, branch: LeadRemote.trackingRef(remote: remote, branch: workflow.base))
+    }
+
+    /// Refuses a task whose branch holds commits of the remote's branch that fetch_remote didn't fetch (nothing fetched
+    /// yet, or the remote-tracking ref moved past what it fetched): merge lands a branch that carries the remote's
+    /// commits as a true merge and takes the remote's records as fetch_remote fetched them (`foldRemoteRecords`), so
+    /// records past that would be dropped for good (merge_remote then has nothing to merge).
+    func checkRemoteCarried(_ slug: String, commit: String) throws {
+        let workflow = self.workflow
+        let remote = workflow.remoteName
+        guard LeadRemote.isName(remote), let base = branchHead(workflow.base) else { return }
+        let ref = Git.run(["rev-parse", "--verify", "--quiet", LeadRemote.trackingRef(remote: remote, branch: workflow.base) + "^{commit}"], in: root)
+        guard ref.ok, !ref.output.isEmpty else { return }
+        let found = Git.run(["merge-base", commit, ref.output], in: root)
+        guard found.ok, !found.output.isEmpty, !Git.run(["merge-base", "--is-ancestor", found.output, base], in: root).ok else { return }
+        let label = "\(remote)/\(workflow.base)"
+        guard let fetched = fetchedTip(workflow) else {
+            throw Problem(text: "Not merged (nothing was tested): agent/\(slug) holds commits of \(label) (up to \(found.output.prefix(8))) that \(workflow.base) lacks, and fetch_remote hasn't fetched \(label). Run fetch_remote, then merge again: a branch that carries the remote's commits lands as a true merge, with the remote's records as fetch_remote fetched them.")
+        }
+        guard Git.run(["merge-base", "--is-ancestor", found.output, fetched], in: root).ok else {
+            throw Problem(text: "Not merged (nothing was tested): agent/\(slug) holds commits of \(label) (up to \(found.output.prefix(8))) past what fetch_remote fetched (\(fetched.prefix(8))). Run fetch_remote, then merge again: the remote's records are taken as fetch_remote fetched them.")
+        }
+        // turn-this-incident-into-12: a branch carrying the remote lands as a true merge only through a gate that does
+        // that; the installed one may predate it.
+        if let lag = gateLag(workflow) {
+            throw Problem(text: lag.refusal(base: workflow.base, what: "agent/\(slug) holds commits of \(label) (up to \(found.output.prefix(8))), and its merge"))
+        }
+    }
+
+    /// After a merge moved the base from `base` to `landed`: the lead's records the remote's commits it brought in have
+    /// (as fetch_remote fetched them), taken into the main checkout's (`LeadRecords.takeRemote`), for the flush after
+    /// the merge to commit. A failure is said in progress; the code has landed either way.
+    func foldRemoteRecords(landed: String, from base: String) {
+        guard let carried = Worktrees.carried(fetchedTip(workflow), head: landed, onto: base, in: root) else { return }
+        if let failure = records.takeRemote(carried, since: base) {
+            try? store.appendProgress("The remote's lead records (\(carried.prefix(8))) weren't taken into ours after the merge: \(failure)")
+        }
+    }
+
     public static func commits(_ count: Int) -> String { "\(count) commit\(count == 1 ? "" : "s")" }
 
     static func outlook(_ outlook: LeadRemote.Outlook, base: String, label: String) -> String {
@@ -443,6 +489,8 @@ extension LeadToolset {
         guard LeadRemote.isName(remote) else { throw Problem(text: "workflow.md's remote, \"\(remote)\", isn't a remote's name: set it with configure (remote).") }
         let tracked = Git.run(["rev-parse", "--verify", "--quiet", LeadRemote.trackingRef(remote: remote, branch: base) + "^{commit}"], in: root)
         guard tracked.ok, !tracked.output.isEmpty else { throw Problem(text: "There's no \(label) to merge: run fetch_remote first.") }
+        // turn-this-incident-into-12: the other Mac's commits land through the installed build's gate.
+        if let lag = gateLag(workflow) { throw Problem(text: lag.refusal(base: base, what: "merge_remote")) }
         let tip = tracked.output
         let fetched = vault.head(root: root, branch: LeadRemote.trackingRef(remote: remote, branch: base))
         guard fetched == tip else {
@@ -471,6 +519,10 @@ extension LeadToolset {
             throw Problem(text: "Not merged (nothing was tested): \(Worktrees.refusal(lock))")
         }
         let waited = try waitForLoad(workflow, slug: label, doing: "merge_remote", done: "merged")
+        // The remote's code runs from here, outside any session: the team isn't quiet (`ConfigSeal`). Unmarked, it
+        // doesn't run.
+        let mark = try markBranchRun(not: "Not merged (nothing was tested)")
+        defer { endBranchRun(mark) }
         let landing = LeadRemote.mergeAndTest(root: root, head: current, tip: tip, label: label, records: workflow.recordsDir,
                                               setup: workflow.initCommand, test: workflow.mergeChecks,
                                               scratch: vault.scratch(root: root, "merge-remote"), home: vault.scratch(root: root, "merge-remote-home"),
@@ -480,7 +532,10 @@ extension LeadToolset {
         switch landing {
         case .upToDate:
             return MCPToolResult(text: "Nothing to merge: \(base) has everything \(label) has (\(tip.prefix(8))).")
-        case .passed(let commit, let isMerge): (made, merged) = (commit, isMerge)
+        case .passed(let commit, let isMerge):
+            // What its tests wrote outside the checkout (the agents' config) holds the merge, whatever they said.
+            try checkConfig(not: "Not merged: the tests of \(label) passed, and after them")
+            (made, merged) = (commit, isMerge)
         case .conflict(let files):
             try? store.appendProgress("merge_remote stopped: \(label) conflicts with \(base) in \(Self.clip(files.joined(separator: ", "), 300))")
             throw Problem(text: "Not merged: \(label) (\(tip.prefix(8))) conflicts with \(base) in \(files.prefix(12).joined(separator: ", "))\(files.count > 12 ? ", …" : ""). "
@@ -490,9 +545,9 @@ extension LeadToolset {
             try? store.appendProgress("merge_remote stopped: the tests fail on \(label) merged into \(base)")
             throw Problem(text: "Not merged: the tests fail on \(label) merged into \(base); \(unmoved) "
                           + (saved.map { "Their output: \($0). " } ?? "") + "The end of it:\n" + Self.tail(output))
-        case .hung(let command, let after, let output):
+        case .hung(let command, let after, let output, let stall):
             let saved = saveMergeLog(output, slug: "merge-remote")
-            throw Problem(text: "Not merged: \(command == "init_command" ? "init_command" : "the tests") hung after \(Worktrees.duration(after)) on \(label) merged into \(base), and \(command == "init_command" ? "it was" : "they were") stopped; \(unmoved) "
+            throw Problem(text: "Not merged: \(command == "init_command" ? "init_command" : "the tests") \(Worktrees.hung(after: after, stall: stall)) on \(label) merged into \(base), and \(command == "init_command" ? "it was" : "they were") stopped; \(unmoved) "
                           + (saved.map { "The output so far: \($0)." } ?? ""))
         case .cancelled:
             throw Problem(text: "merge_remote was cancelled; nothing was merged, and \(unmoved)")
@@ -509,7 +564,7 @@ extension LeadToolset {
             try vault.setHead(made, root: root, branch: base)
             let brought = Int(Git.run(["rev-list", "--count", "\(current)..\(tip)"], in: root).output) ?? 0
             let how = merged ? "a merge commit, \(made.prefix(8))" : "a fast-forward"
-            try? store.appendProgress("Merged \(label) into \(base): \(Self.commits(brought)) from the remote, as \(how); the tests passed on it")
+            try? store.appendProgress("Merged \(label) into \(base): \(Self.commits(brought)) from the remote, as \(how); the tests passed on it" + buildNote)
             let patience = waited.map { " (The tests waited \(Worktrees.duration($0.after)) for the Mac's load to drop.)" } ?? ""
             return MCPToolResult(text: "Merged \(label) into \(base) as \(how): \(Self.commits(brought)) from the remote, the test command passing on the result. "
                                  + "\(label) (\(tip.prefix(8))) is an ancestor of \(base) now, so pushing \(base) is a fast-forward.\(patience)")

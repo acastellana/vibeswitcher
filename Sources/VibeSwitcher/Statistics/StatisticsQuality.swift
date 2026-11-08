@@ -61,7 +61,7 @@ struct QualityPage: Equatable {
 
     init(_ quality: SetupQuality, calendar: Calendar = .current) {
         let all = quality.all
-        sections = [Self.quality(all), Self.autonomy(all), Self.time(all), Self.cost(all)]
+        sections = (quality.scorecard.map { [Self.scorecard($0)] } ?? []) + [Self.quality(all), Self.autonomy(all), Self.time(all), Self.cost(all)]
         compared = ComparedPage(all: all, byAgent: quality.byAgent)
         breakdown = quality.byAgent.flatMap { group -> [BreakdownRow] in
             let row = BreakdownRow(name: group.name, model: false, cells: Self.cells(group.figures))
@@ -100,6 +100,22 @@ struct QualityPage: Equatable {
         figures.append(Figure(label: "Important findings per audited task", value: f.importantPerAudited.map { StatisticsPage.number($0) } ?? none,
                               detail: audited ? "\(f.importantFindings) over \(count(f.audited, "audited merge"))" : noAudit,
                               help: "The Important findings the audits raised and most finders confirmed, per audited merge."))
+        let same = f.sameModelAudited, other = f.otherModelAudited
+        figures.append(Figure(label: "Important per audit, by verifier model",
+                              value: same + other == 0 ? none : [("same", f.sameModelImportantPerAudited), ("other", f.otherModelImportantPerAudited)]
+                                  .map { "\($0.0) \($0.1.map { StatisticsPage.number($0) } ?? none)" }.joined(separator: " · "),
+                              detail: same + other == 0 ? (audited ? "no receipt says which model verified" : noAudit)
+                                  : "same model as the worker: \(f.sameModelImportant) over \(count(same, "audited merge")) · "
+                                      + "another model: \(f.otherModelImportant) over \(count(other, "audited merge"))",
+                              help: "The Important findings per audited merge, split by whether its verifier ran on its worker's model (an audit that "
+                                  + "wasn't independent, as the receipt records it) or on another. Merges whose receipt doesn't say are in neither."))
+        figures.append(Figure(label: "Sampled audits of review none", value: f.sampledImportantRate.map(percent) ?? none,
+                              detail: f.sampledAudits > 0 ? "n = \(f.sampledAudits): \(f.sampledImportant) raised an Important finding"
+                                  : "none sampled in the range",
+                              meter: f.sampledImportantRate.map(share),
+                              help: "auto_advance audits a random share (audit_sample_percent, 10 by default) of the review none tasks that report done. "
+                                  + "Of those drawn in the range that ended with an audit, the share whose audits raised an Important finding: what the "
+                                  + "unaudited path would have let through. A small n: a tripwire, not a statistic."))
         if let o = f.findings {
             let parts = [(o.fixed, "fixed by the worker"), (o.disagreementAccepted, "disagreement accepted by the verifier"),
                          (o.dismissedByLead, "dismissed by the lead"), (o.movedToTask, "moved to a task"),
@@ -200,9 +216,11 @@ struct QualityPage: Equatable {
                    help: "What the merges' test reruns cost: receipts count a rerun but don't price it."),
             lead(f.lead),
             Figure(label: "Codex tokens", value: f.codexTokens.map { LeadReceipt.count($0) } ?? (merged ? notRecorded : none),
-                   detail: f.codexTokens != nil ? "not in the cost: Codex has no price here" : merged ? "no merge's receipt read a Codex worker's tokens" : nil,
-                   help: "The tokens Codex workers spent on the merged tasks, from Codex's own records. Codex has no price in the price table, "
-                       + "so they aren't in any cost here."),
+                   detail: f.codexTokens != nil ? "in the cost at Codex's prices of \(LeadPrices.codexAsOf) (receipts from before then: not in it)"
+                       : merged ? "no merge's receipt read a Codex worker's tokens" : nil,
+                   help: "The tokens Codex workers spent on the merged tasks, from Codex's own records, priced from the Codex price table "
+                       + "(LeadPrices.codex); a model not in it leaves that receipt's cost unknown. Receipts made before Codex was priced "
+                       + "kept them out of their cost."),
         ])
     }
 

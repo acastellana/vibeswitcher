@@ -8,19 +8,19 @@ import VibeCore
 /// reaps their programs: its closed sessions no longer do, and a host that runs on (the test runner) kept each as a
 /// zombie, 431 in one full suite's runner on 2026-11-01.
 struct HostStopReapsTests {
-    @Test(hostTestLimit) func stoppingAHostReapsItsSessionsPrograms() throws {
+    @Test(hostTestLimit) func stoppingAHostReapsItsSessionsPrograms() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let running = try client.spawn(keepRunning)
+        let running = try await client.spawn(keepRunning)
         host.server.stop(terminateSessions: true)
         // Its program gets SIGHUP, SIGKILL 5 s on: gone from the process table, not left a zombie.
-        #expect(eventually(timeout: 60) { Self.state(of: running.childPID) == nil },
+        #expect(await eventually(timeout: 60) { Self.state(of: running.childPID) == nil },
                 "pid \(running.childPID) is \(Self.state(of: running.childPID) == SZOMB ? "a zombie" : "still running")")
     }
 
     /// A session told to end and closed at once (as the host's stop does, and tests that start sessions themselves)
     /// reaps its program as it goes.
-    @Test(hostTestLimit) func aSessionToldToEndAndClosedReapsItsProgram() throws {
+    @Test(hostTestLimit) func aSessionToldToEndAndClosedReapsItsProgram() async throws {
         let probe = SessionProbe()
         let request = SpawnRequest(cwd: scratchRoot.path, command: "echo up; \(keepRunning)", env: [:], cols: 80, rows: 24,
                                    keepShell: false, label: "T", agent: nil)
@@ -30,10 +30,10 @@ struct HostStopReapsTests {
             probe.attach(session)
             return session
         }
-        #expect(eventually { probe.text.contains("up") })
+        #expect(await eventually { probe.text.contains("up") })
         let pid = probe.queue.sync { session.info.childPID }
         probe.queue.sync { session.terminate(); session.close() }
-        #expect(eventually(timeout: 60) { Self.state(of: pid) == nil },
+        #expect(await eventually(timeout: 60) { Self.state(of: pid) == nil },
                 "pid \(pid) is \(Self.state(of: pid) == SZOMB ? "a zombie" : "still running")")
     }
 

@@ -178,7 +178,7 @@ struct LeadRecordsTests: LeadTeamFixture {
 
     /// The timer's commit runs as the tool server's background work: a new build's switch waits for one under way,
     /// so it's never cut between the branch's update and the vault's head (a move "outside the lead" for the next merge).
-    @Test func anInstallsSwitchWaitsForACommitUnderWay() throws {
+    @Test func anInstallsSwitchWaitsForACommitUnderWay() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -224,7 +224,7 @@ struct LeadRecordsTests: LeadTeamFixture {
             }
             return "main"
         }
-        #expect(started.wait(timeout: .now() + 30) == .success)
+        #expect(await offPool { started.wait(timeout: .now() + 30) } == .success)
         build.set(BinaryWatch.Identity(modified: 2, size: 2, inode: 2))
         // The server reads and answers a request (it looks whether to switch first): no switch while the commit runs.
         let ping = Data(#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#.utf8) + Data([0x0A])
@@ -236,7 +236,7 @@ struct LeadRecordsTests: LeadTeamFixture {
         #expect(switches.get() == 0)
         // Once it ends, the switch is tried: the commit is on the branch and the vault has it as the lead's.
         release.signal()
-        #expect(asked.wait(timeout: .now() + 30) == .success)
+        #expect(await offPool { asked.wait(timeout: .now() + 30) } == .success)
         #expect(switches.get() >= 1)
         #expect(head("main~1", root) == first)
         #expect(vault.head(root: root, branch: "main") == head("main", root))
@@ -371,7 +371,7 @@ struct LeadRecordsTests: LeadTeamFixture {
         #expect(Git.run(["rev-list", "--merges", "main"], in: root).output.isEmpty)
     }
 
-    @Test func noRecordsCommitLandsWhileAMergeTests() throws {
+    @Test func noRecordsCommitLandsWhileAMergeTests() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         try workflow(root, "---\ntest_command: sleep 2 && test -f b.txt\n---")
@@ -388,10 +388,10 @@ struct LeadRecordsTests: LeadTeamFixture {
             done.signal()
         }
         // While its tests run, a batch is due: it waits for the merge.
-        Thread.sleep(forTimeInterval: 1)
+        await pause(1)
         #expect(lead.records.flush(base: "main") == .waiting("a merge into main is running."))
         #expect(head("main", root) == before)
-        done.wait()
+        #expect(await offPool { done.wait(timeout: .now() + hangGuard) } == .success)
         #expect(box.result?.isError == false, "\(box.result?.text ?? "")")
         // Then right after it: the tested commit is what landed, the records on top.
         #expect(underRecords("main", in: root) == BoardStore(root: root).load().task("add-b")?.merged?.commit)

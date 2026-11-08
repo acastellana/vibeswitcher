@@ -2,8 +2,14 @@ import CryptoKit
 import Darwin
 import Foundation
 
-/// The app's end of the session host socket. Every call and callback is on `queue`; its writes aren't (see `Writer`).
-public final class HostConnection {
+/// The app's end of the session host socket. Every call and callback is on `queue` (a serial one), but `send`, which may
+/// be called from any thread (a held key's repeats go from a queue of their own, never waiting on the main thread:
+/// `ClaudeVoiceRun`); its writes are on the writer's (see `Writer`). What the host sends is read and decoded on a queue
+/// of its own, never `queue`: the app's connection is on the main thread, where decoding its events took 255 of 1396
+/// samples (hang-20261107-115721). Only the decoded events are handed to `queue`, in the order they arrived; the
+/// host's challenge is answered there too, so a busy main thread doesn't hold up the proof.
+public final class HostConnection: @unchecked Sendable {
+    // The handlers are `queue`'s: set, called and let go of there only.
     public var onEvent: ((HostEventEnvelope) -> Void)?
     public var onOutput: ((UUID, Data) -> Void)?
     /// The connection ended (the host quit or crashed, or sent something unreadable). Called once.
@@ -19,14 +25,38 @@ public final class HostConnection {
 
     private let fd: Int32
     private let queue: DispatchQueue
+    /// Where the socket is read and its frames decoded; `decoder` is its only.
+    private let reading = DispatchQueue(label: "vibeswitcher.host-connection.reader", qos: .userInitiated)
     private var decoder = HostFrameDecoder()
-    private var readSource: DispatchSourceRead?
+    /// Cancelled once closed (from either queue: cancelling is safe from any thread, and again).
+    private let readSource: DispatchSourceRead
+    /// What the reader did, on its queue (tests: where decoding runs, when it stopped for a backlog, saw the end).
+    enum ReaderTap { case decoded(HostEventEnvelope), paused, ended }
+    private let tap: ((ReaderTap) -> Void)?
     /// The sources on `fd` not cancelled yet, and the writes still to make on it: it's closed once there are none
     /// (libdispatch's rule, as the read source's own cancel handler closing it could while a write source was still on it).
     private let sources = DispatchGroup()
     private let writer: Writer
     private var nextSeq = 1
     private var closed = false
+    /// How much decoded and not yet delivered on `queue` stops the reader: a held main thread (a loaded Mac) would
+    /// otherwise have it take all the host sends into memory, where before the socket filled and the host held back.
+    struct Backlog: Equatable {
+        var bytes: Int
+        var batches: Int
+        static let bound = Backlog(bytes: 4 << 20, batches: 64)
+    }
+    private let backlogBound: Backlog
+    /// Handed to `queue` and not delivered yet, and the most it has been (tests). Under `sending`.
+    private var backlog = Backlog(bytes: 0, batches: 0)
+    private var backlogPeak = 0
+    /// The read source is suspended for the backlog: resumed once `queue` has delivered half of it, or once closed (a
+    /// suspended source never runs its cancel handler, so `fd` would stay open, and freeing one is a crash). Under
+    /// `sending`, with the suspend and resume made under it too, so each resume follows its suspend.
+    private var paused = false
+    /// What sending touches (the next number, the held requests, the proof's state, `closed`), and the handing over
+    /// to the writer, under one lock: requests sent from any thread get their numbers in the order they go out.
+    private let sending = NSLock()
     /// The app's key (see `AppProof`): set by the app only, for every connection it makes (its tool calls too).
     nonisolated(unsafe) public static var appKey: SymmetricKey?
     private let appKey: SymmetricKey?
@@ -43,25 +73,29 @@ public final class HostConnection {
         try self.init(path: path, queue: queue, appKey: appKey, patience: patience, write: { Darwin.write($0, $1, $2) })
     }
 
-    init(path: String, queue: DispatchQueue, appKey: SymmetricKey?, patience: TimeInterval = 0, write: @escaping Write) throws {
+    init(path: String, queue: DispatchQueue, appKey: SymmetricKey?, patience: TimeInterval = 0, write: @escaping Write,
+         backlog: Backlog = .bound, tap: ((ReaderTap) -> Void)? = nil) throws {
         fd = try UnixSocket.connect(path: path, patience: patience)
         self.queue = queue
+        backlogBound = backlog
+        self.tap = tap
         writer = Writer(fd: fd, write: write, sources: sources)
         self.appKey = appKey
         held = appKey == nil ? nil : Data()
-        let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+        let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: reading)
+        readSource = source
         source.setEventHandler { [weak self] in self?.readAvailable() }
         sources.enter()
         source.setCancelHandler { [sources] in sources.leave() }
-        sources.notify(queue: queue) { [fd] in Darwin.close(fd) }
-        readSource = source
+        sources.notify(queue: reading) { [fd] in Darwin.close(fd) }
         source.resume()
         writer.failed = { [weak self, queue] in queue.async { self?.finish(notify: true) } }
     }
 
     deinit {
         writer.stop()
-        readSource?.cancel()
+        readSource.cancel()
+        if paused { readSource.resume() }
     }
 
     /// Why a request didn't go out: none of it was sent.
@@ -83,13 +117,18 @@ public final class HostConnection {
     /// large for a frame): nothing of it was sent, and nothing will answer it.
     @discardableResult
     public func send(_ request: HostRequest) throws -> Int {
+        sending.lock()
+        defer { sending.unlock() }
         guard !closed else { throw SendFailure.closed }
         let seq = nextSeq
         nextSeq += 1
         guard let payload = try? HostCoding.encode(HostRequestEnvelope(seq: seq, request: request)) else { throw SendFailure.tooLarge(0) }
         guard payload.count <= HostFrame.maxPayload else { throw SendFailure.tooLarge(payload.count) }
-        if appKey != nil, !proofFinished, Self.isHello(request) {
+        if Self.isHello(request), appKey != nil, !proofFinished {
             helloForProof = HostFrame.encode(.control, payload)
+            // The challenge was answered before this hello (the reader answers it, not `queue`): it goes once the
+            // proof is, as the repeat would, and only then; sent now as well, the host would welcome it twice.
+            if proofSeq != nil { return seq }
         }
         // The hello goes at once: an older host sends no challenge, only its welcome.
         if held != nil, !Self.isHello(request) {
@@ -107,6 +146,8 @@ public final class HostConnection {
 
     /// The host's challenge, answered (and the key given first to a host that holds none); then what was held.
     private func answer(_ challenge: Data, keyless: Bool) {
+        sending.lock()
+        defer { sending.unlock() }
         guard let appKey, held != nil else { return }
         let proof = keyless ? [HostRequest.enrollApp(key: appKey.data), .proveApp(answer: AppProof.answer(challenge, key: appKey))]
             : [.proveApp(answer: AppProof.answer(challenge, key: appKey))]
@@ -119,6 +160,7 @@ public final class HostConnection {
         release()
     }
 
+    /// Under `sending`.
     private func release() {
         guard let pending = held else { return }
         held = nil
@@ -127,78 +169,187 @@ public final class HostConnection {
 
     /// A control message as is (tests: what a newer or broken client might send).
     func sendRaw(_ payload: Data) {
+        sending.lock()
+        defer { sending.unlock() }
         enqueue(HostFrame.encode(.control, payload))
     }
 
+    /// On `queue`. Nothing is called after it, not even an `onClose` for an end the reader saw first.
     public func close() { finish(notify: false) }
 
-    /// Hands `bytes` to the writer, after everything handed to it before; nothing once the connection is closed.
+    /// Hands `bytes` to the writer, after everything handed to it before; nothing once the connection is closed. Under
+    /// `sending`.
     private func enqueue(_ bytes: Data) {
         guard !closed, !bytes.isEmpty else { return }
         writer.enqueue(bytes)
     }
 
+    /// What the reader hands `queue`, in the order it came.
+    private enum Delivery {
+        case event(HostEventEnvelope)
+        case output(UUID, Data)
+        case proofRefused(String)
+    }
+
+    /// On `reading`.
     private func readAvailable() {
         var buffer = [UInt8](repeating: 0, count: 65_536)
         var received = 0
-        while !closed, received < 256 * 1024 {
+        while sendingState({ !closed && !paused }), received < 256 * 1024 {
             let count = Darwin.read(fd, &buffer, buffer.count)
             if count > 0 {
                 received += count
                 decoder.append(Data(buffer[0..<count]))
-                deliver()
+                if !decodeAndHand() { return ended() }
+                if pauseForBacklog() { return }
                 continue
             }
             if count < 0, errno == EINTR { continue }
             if count < 0, errno == EAGAIN { return }
-            deliver()
-            return finish(notify: true)
+            _ = decodeAndHand()
+            return ended()
         }
-        if !closed { queue.async { [weak self] in self?.readAvailable() } }
+        // The rest on another turn, so a host that sends without pause doesn't hold this queue's thread for good.
+        if sendingState({ !closed && !paused }) { reading.async { [weak self] in self?.readAvailable() } }
     }
 
-    private func deliver() {
+    /// Suspends the read source while `queue` has more than `backlogBound` still to deliver: the host's bytes wait in
+    /// the socket, and the host holds back once it's full, as it did when the reading was on `queue`. On `reading`.
+    private func pauseForBacklog() -> Bool {
+        let pausing = sendingState { () -> Bool in
+            guard !closed, !paused, backlog.bytes > backlogBound.bytes || backlog.batches > backlogBound.batches else { return false }
+            paused = true
+            readSource.suspend()
+            return true
+        }
+        if pausing { tap?(.paused) }
+        return pausing
+    }
+
+    /// A batch of `bytes` (its frames' payloads) delivered on `queue`: the reader goes on once half the backlog is.
+    private func delivered(_ bytes: Int) {
+        sendingState {
+            backlog.bytes -= bytes
+            backlog.batches -= 1
+            guard paused, backlog.bytes <= backlogBound.bytes / 2, backlog.batches <= backlogBound.batches / 2 else { return }
+            paused = false
+            readSource.resume()
+        }
+    }
+
+    /// The most ever handed to `queue` and not delivered yet, in bytes (tests).
+    var peakBacklog: Int { sendingState { backlogPeak } }
+
+    /// The frames whole so far, decoded and handed to `queue` in one go. False when the stream can't be read on (a
+    /// broken frame): what came before it is still handed over. On `reading`.
+    private func decodeAndHand() -> Bool {
+        var batch: [Delivery] = []
+        var bytes = 0
+        var readable = true
         do {
-            while !closed, let frame = try decoder.next() {
+            while !isClosed, let frame = try decoder.next() {
+                bytes += frame.payload.count
                 switch frame.kind {
                 case .control:
                     // An event this app doesn't know (a newer host) is skipped, not fatal.
                     guard let envelope = try? HostCoding.decode(HostEventEnvelope.self, from: frame.payload) else { break }
-                    if let proofSeq, envelope.replyTo == proofSeq {
-                        proofFinished = true
-                        if case .error(let reason) = envelope.event { onProofRefused?(reason) }
-                        if let hello = helloForProof {
-                            helloForProof = nil
-                            enqueue(hello)
+                    tap?(.decoded(envelope))
+                    if let proofSeq = sendingState({ proofSeq }), envelope.replyTo == proofSeq {
+                        if case .error(let reason) = envelope.event { batch.append(.proofRefused(reason)) }
+                        sendingState {
+                            proofFinished = true
+                            if let hello = helloForProof {
+                                helloForProof = nil
+                                enqueue(hello)
+                            }
                         }
                     }
                     if case .challenge(let challenge, let keyless) = envelope.event {
                         // No key to answer with: the host takes this connection for no one, as it would a wrong proof.
-                        if appKey == nil { onProofRefused?(Self.noKey) }
+                        if appKey == nil { batch.append(.proofRefused(Self.noKey)) }
                         answer(challenge, keyless: keyless)
                     } else if case .welcome = envelope.event {
-                        if proofSeq != nil, !proofFinished { continue }
+                        if sendingState({ proofSeq != nil && !proofFinished }) { continue }
                         // A host that sent no challenge first (older than it) won't send one.
-                        helloForProof = nil
-                        proofFinished = true
-                        release()
+                        sendingState {
+                            helloForProof = nil
+                            proofFinished = true
+                            release()
+                        }
                     }
-                    onEvent?(envelope)
+                    batch.append(.event(envelope))
                 case .output:
-                    if let (id, bytes) = HostFrame.parseOutput(frame.payload) { onOutput?(id, bytes) }
+                    if let (id, bytes) = HostFrame.parseOutput(frame.payload) { batch.append(.output(id, bytes)) }
                 }
             }
         } catch {
-            finish(notify: true)
+            readable = false
+        }
+        hand(batch, bytes: bytes)
+        return readable
+    }
+
+    /// `batch` to the handlers, on `queue`, after what was handed before. A handler that closes the connection lets go
+    /// of them all, so nothing after that is called.
+    private func hand(_ batch: [Delivery], bytes: Int) {
+        guard !batch.isEmpty else { return }
+        sendingState {
+            backlog.bytes += bytes
+            backlog.batches += 1
+            backlogPeak = max(backlogPeak, backlog.bytes)
+        }
+        queue.async { [weak self] in
+            guard let self else { return }
+            for delivery in batch {
+                switch delivery {
+                case .event(let envelope): onEvent?(envelope)
+                case .output(let id, let bytes): onOutput?(id, bytes)
+                case .proofRefused(let reason): onProofRefused?(reason)
+                }
+            }
+            delivered(bytes)
         }
     }
 
+    private var isClosed: Bool { sendingState { closed } }
+
+    /// `body` under `sending`.
+    private func sendingState<T>(_ body: () -> T) -> T {
+        sending.lock()
+        defer { sending.unlock() }
+        return body()
+    }
+
+    /// Closed now, by this call (false: it already was): nothing more is sent or read.
+    private func markClosed() -> Bool {
+        sendingState { () -> Bool in
+            guard !closed else { return false }
+            closed = true
+            writer.stop()
+            readSource.cancel()
+            if paused {
+                paused = false
+                readSource.resume()
+            }
+            return true
+        }
+    }
+
+    /// On `queue`.
     private func finish(notify: Bool) {
-        guard !closed else { return }
-        closed = true
-        writer.stop()
-        readSource?.cancel()
-        readSource = nil
+        if markClosed() || !notify { letGo(notify: notify) }
+    }
+
+    /// The host ended the connection or sent something unreadable: on `reading`. `onClose` is called on `queue` after
+    /// every event handed over before, unless `close` came first.
+    private func ended() {
+        guard markClosed() else { return }
+        tap?(.ended)
+        queue.async { [self] in letGo(notify: true) }
+    }
+
+    /// On `queue`.
+    private func letGo(notify: Bool) {
         if notify { onClose?() }
         // Handlers that hold the connection (`HostCall`'s send on it) would keep it, and all they captured, for good:
         // each of the app's one-shot calls did, several a second with a few leads (10-26). Nothing is delivered now.
@@ -232,7 +383,8 @@ extension HostConnection {
             self.sources = sources
         }
 
-        /// From the connection's queue while `fd` is open: each pending write counts as a source, so it stays open.
+        /// Under the connection's `sending` lock while it isn't closed (so while `fd` is open): each pending write counts
+        /// as a source, so it stays open.
         func enqueue(_ bytes: Data) {
             sources.enter()
             queue.async { [self] in

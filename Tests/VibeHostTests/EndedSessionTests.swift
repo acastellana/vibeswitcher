@@ -6,7 +6,7 @@ import Testing
 
 /// E-16: an ended session lets go of its PTY, replay buffer and terminal, and still shows its last screen and exit.
 @Suite(hostTestLimit) struct EndedSessionTests {
-    @Test func anEndedSessionKeepsItsLastScreenOnly() throws {
+    @Test func anEndedSessionKeepsItsLastScreenOnly() async throws {
         let probe = SessionProbe()
         let request = SpawnRequest(cwd: "/tmp", command: "printf '\\033[31mred\\033[0m line-%s\\n' 1 2 3; exit 4", env: [:], cols: 80, rows: 24,
                                    keepShell: false, label: "Test", agent: nil)
@@ -16,7 +16,7 @@ import Testing
             probe.attach(session)
             return session
         }
-        #expect(eventually { probe.lastChange?.exit != nil })
+        #expect(await eventually { probe.lastChange?.exit != nil })
         probe.queue.sync {
             #expect(session.info.exit?.status == 4)
             #expect(!session.holdsLiveResources)
@@ -31,7 +31,7 @@ import Testing
 
     /// Spawns and ends sessions on a host of its own (a process, so other tests' descriptors don't count) and
     /// counts that host's open descriptors.
-    @Test func endedSessionsCloseTheirPTYs() throws {
+    @Test func endedSessionsCloseTheirPTYs() async throws {
         let home = scratchRoot.appendingPathComponent("vsh-home-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         let socket = scratchSocketPath()
@@ -49,45 +49,46 @@ import Testing
             unlink(socket + ".lock")
             try? FileManager.default.removeItem(at: home)
         }
-        #expect(eventually { FileManager.default.fileExists(atPath: socket) })
+        #expect(await eventually { FileManager.default.fileExists(atPath: socket) })
         let client = try TestClient(socket: socket, appKey: key)
         func ended(_ id: UUID) -> Bool {
             client.hasEvent { if case .sessionChanged(let s) = $0 { return s.id == id && s.exit != nil }; return false }
         }
 
-        let warmUp = try client.spawn("exit 0")
-        #expect(eventually { ended(warmUp.id) })
+        let warmUp = try await client.spawn("exit 0")
+        #expect(await eventually { ended(warmUp.id) })
         // The rest of what's open, once the warm-up has let go of its PTY.
-        #expect(eventually { ptyMasters(of: host.processIdentifier) == 0 })
+        #expect(await eventually { ptyMasters(of: host.processIdentifier) == 0 })
         let baseline = openDescriptors(of: host.processIdentifier)
 
         let count = 20
         // Each ends when told to, so all are still live when counted, however long starting 20 takes.
-        let sessions = try (0..<count).map { try client.spawn("echo waiting; read go; echo ended-\($0)") }
+        var sessions: [HostSession] = []
+        for index in 0..<count { sessions.append(try await client.spawn("echo waiting; read go; echo ended-\(index)")) }
         #expect(openDescriptors(of: host.processIdentifier) >= baseline + count, "each live session holds its PTY")
         #expect(ptyMasters(of: host.processIdentifier) == count)
         for session in sessions {
-            #expect(eventually { client.screen(session.id)?.contains("waiting") == true })
+            #expect(await eventually { client.screen(session.id)?.contains("waiting") == true })
             client.send(.input(id: session.id, bytes: Data("go\r".utf8), reply: false))
         }
-        #expect(eventually { sessions.allSatisfy { ended($0.id) } })
-        #expect(eventually { openDescriptors(of: host.processIdentifier) == baseline },
+        #expect(await eventually { sessions.allSatisfy { ended($0.id) } })
+        #expect(await eventually { openDescriptors(of: host.processIdentifier) == baseline },
                 "open: \(openDescriptors(of: host.processIdentifier)), at first: \(baseline)")
 
         // Still listed for their day, with their last screen.
         let hello = client.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
-        #expect(eventually { client.reply(to: hello) != nil })
+        #expect(await eventually { client.reply(to: hello) != nil })
         guard case .welcome(_, _, let listed, _, _, _) = client.reply(to: hello) else { Issue.record("no welcome"); return }
         #expect(Set(sessions.map(\.id)).isSubset(of: Set(listed.filter { $0.exit != nil }.map(\.id))))
         let screen = client.send(.screen(id: sessions[7].id))
-        #expect(eventually { client.reply(to: screen) != nil })
+        #expect(await eventually { client.reply(to: screen) != nil })
         #expect(client.reply(to: screen).map { if case .screenText(_, let text) = $0 { return text.contains("ended-7") }; return false } == true)
-        client.attach(sessions[7].id)
-        #expect(eventually { client.text(sessions[7].id).contains("ended-7") })
+        await client.attach(sessions[7].id)
+        #expect(await eventually { client.text(sessions[7].id).contains("ended-7") })
 
         let shutdown = client.send(.shutdown)
-        #expect(eventually { client.reply(to: shutdown) == .ok })
-        #expect(eventually { !host.isRunning })
+        #expect(await eventually { client.reply(to: shutdown) == .ok })
+        #expect(await eventually { !host.isRunning })
     }
 
     /// The PTYs' own ends (`/dev/ptmx`) the process has open.
@@ -115,7 +116,7 @@ import Testing
 
 /// E-29: a reply too large for a frame is answered with an error instead of vanishing.
 struct TooLargeReplyTests {
-    @Test func aReplyTooLargeToSendBecomesAnError() throws {
+    @Test func aReplyTooLargeToSendBecomesAnError() async throws {
         var fds: [Int32] = [0, 0]
         #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &fds) == 0)
         defer { close(fds[1]) }
@@ -134,7 +135,7 @@ struct TooLargeReplyTests {
         var decoder = HostFrameDecoder()
         var received: [HostEventEnvelope] = []
         var buffer = [UInt8](repeating: 0, count: 65_536)
-        #expect(eventually {
+        #expect(await eventually {
             let count = read(fds[1], &buffer, buffer.count)
             if count > 0 { decoder.append(Data(buffer[0..<count])) }
             while let frame = try? decoder.next() {

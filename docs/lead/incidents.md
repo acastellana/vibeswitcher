@@ -89,3 +89,44 @@ Likely cause, from reading the code:
 
 Check: task turn-this-incident-into-9 turns it into a check that runs before merge.
 
+## 2026-11-06 22:39:58 Hung test runs hold a Mac-wide heavy slot, and the merge gate, for 30–60 minutes at 0% CPU, until their outer timeout. This happened 5 times between 2026-11-05 and 2026-11-06.
+
+Evidence: The five runs:
+- 2026-11-05: the merge test of c92b6242 (remote-push-remote-one) hung 45 min.
+- 2026-11-05: the merge test of 3501a204 (main-thread-freezes-with) sat idle 21+ min, then was stopped at 45.
+- 2026-11-05: main-thread-freezes-with's worker's full run sat at 0% CPU for 11+ min; wallet-manager's lead reported it.
+- 2026-11-05: tests-long-synchronous's first verifier run, vs-heavy pid 96473, idle 33 min.
+- 2026-11-06 22:39: tests-long-synchronous's verifier run, vs-heavy 86975 → swift-test 87373 → swiftpm-testing-helper 87433, at 0.0% CPU for 30+ min while the Mac's load was 4.2.
+Each time the witness noticed ("held long, idle N min"), but nothing ended the run before test_timeout_min (45) or vs-heavy --timeout (1h). Merges and other projects' work queued behind it.
+
+Task: tests-long-synchronous
+Check: task turn-this-incident-into-10 turns it into a check that runs before merge.
+
+## 2026-11-07 19:46:01 merge(task) flattened a branch whose job was to merge origin/main. The other Mac's commits landed as rebased copies, so origin/main is not an ancestor of main and push_remote refuses. The other Mac's lead records (decisions.md 31 lines, incidents.md 20, progress.md 152) were dropped when docs/lead was restored to the base copy.
+
+Evidence: merge-github-s-main: the audited branch head 7a263116 is a true merge (`git merge-base --is-ancestor origin/main 7a263116` held, per the audit). After merge(task), main is at 80f93d96 and `git merge-base --is-ancestor origin/main main` fails. fetch_remote now says main is 95 ahead and 80 behind; merge_remote would conflict in AccountUsage.swift, Sandbox.swift, AccountUsageTests, IgnoreUsageLimitsTests, WalletLocalLinkTests and ShellLaunchHostTests; push_remote refuses because it wouldn't be a fast-forward. `git diff --stat 7a263116 80f93d96`: only docs/lead differs (decisions.md -31, incidents.md -20, progress.md -152 lines). Code is identical to the audited merge.
+
+Task: merge-github-s-main
+Check: task turn-this-incident-into-11 turns it into a check that runs before merge.
+
+## 2026-11-07 22:19:51 The same incident a second time, after its fix merged: redo-the-github-merge's true merge of origin/main (af82338b) landed on main squashed into one single-parent commit (98df3ea2, in a batch with verifier-isolation). origin/main is still not an ancestor of main, so the push is blocked again.
+
+Evidence: The audited head ed0f9e66 had merge commit b32522b7 (parents a4fbbd9b + af82338b); the verifier confirmed `git merge-base --is-ancestor af82338b HEAD`. auto_advance merged it at 22:10 "as one batch" with verifier-isolation (merge_batching: always). On main: 98df3ea2 has parents=c9c6f74a only; its message lists the squashed commits ("- Lead: decisions and progress" ×10, "- AccountUsageTests read the usage at a fixed time…"). `git merge-base --is-ancestor af82338b main` fails, and `git rev-parse origin/main` = af82338b. turn-this-incident-into-11 (merged 4fb98121 / 3b10a688) claimed Worktrees.put lands a branch carrying the vault's fetched tip as a true merge, including through Stack (batches). Either the batch path doesn't pass it, or the vault's fetched tip isn't af82338b (the remote poller fetched af82338b; fetch_remote last fetched e8b183a8), or the carried check fails. The remote's code did land (docs/security/SECRET-SWEEP-2026-11-07.md is on main).
+
+Task: redo-the-github-merge
+Check: task turn-this-incident-into-12 turns it into a check that runs before merge.
+
+## 2026-11-08 03:34:22 A merge's test run hung for 45 min inside the build, before any test started, while the Mac's load reached 100+ on 12 cores. The hang report said only "no test started and never finished", which doesn't name the build phase.
+
+Evidence: .vibeswitcher/flakes/2026-11-08-freezes-remove-the-top-fc504a93-hung.log: its last 60 lines are compiler warnings (LeadRemoteTests.swift:743, LeadRecordsTests.swift:212), with no test output. The merge test log is at ~/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/freezes-remove-the-top/merge-test.log. The load average at 03:27 was { 101.71 55.28 47.51 }, with swiftpm-testing-helper at 250% CPU and only 2 team sessions running. Six app hangs at 03:16-03:26 came at a 1-minute load of 52-117. The retry of the same batch merged fine (7ed9b62a, bba06c82).
+
+Task: freezes-remove-the-top
+Check: task turn-this-incident-into-13 turns it into a check that runs before merge.
+
+## 2026-11-08 09:58:41 The config seal held every worker start and a passing merge because Claude's own skill sync rewrote two bookkeeping files in ~/.claude/skills/synced/. The card named only the folder, with a wrong time.
+
+Evidence: progress.md 09:16: "Didn't merge starts-and-audits-wait … ~/.claude/skills changed while the team's sessions ran", and the same refusal for toolbar-the-boost-bolt and settings-redesign-clear. Only the synced account folder, its .last-complete-round and its manifest.json had mtimes after the 08:05 install, all at 09:15. The user's screenshot at 09:49 shows "changed 23:34". The user accepted the card and work resumed. Check: config-seal-claude-s's tests.
+
+Task: config-seal-claude-s
+Check: task turn-this-incident-into-14 turns it into a check that runs before merge.
+

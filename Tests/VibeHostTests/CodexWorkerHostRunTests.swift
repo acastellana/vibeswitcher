@@ -30,7 +30,7 @@ import Testing
     static let codexHome = ProcessInfo.processInfo.environment["VIBESWITCHER_REAL_CODEX_HOME"]
 
     @Test(.enabled(if: codexHome != nil, "spends Codex usage: set VIBESWITCHER_REAL_CODEX_HOME to run it"))
-    func aRealCodexWorkerGetsItsToolsReportsAndTakesAMessageWhileIdle() throws {
+    func aRealCodexWorkerGetsItsToolsReportsAndTakesAMessageWhileIdle() async throws {
         let mcp = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")
         let made = temp.adopt(URL(fileURLWithPath: "\(shortScratchRoot)/vscx-\(UUID().uuidString.prefix(8))"))
@@ -77,7 +77,7 @@ import Testing
         try "---\nauto_advance: false\n---\n".write(toFile: root + "/.vibeswitcher/workflow.md", atomically: true, encoding: .utf8)
 
         FileManager.default.createFile(atPath: lead + "/a.in", contents: nil)
-        let leadSession = try app.spawn("set +m; export \(env); cd '\(root)'; while [ ! -f '\(lead)/go' ]; do sleep 0.05; done; "
+        let leadSession = try await app.spawn("set +m; export \(env); cd '\(root)'; while [ ! -f '\(lead)/go' ]; do sleep 0.05; done; "
             + "tail -n +1 -f '\(lead)/a.in' | '\(mcp)' --root '\(root)' --role lead > '\(lead)/a.out' 2> '\(lead)/a.err' & wait", cwd: root)
         guard case .grant(let grant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else {
             Issue.record("no lead grant"); return
@@ -86,8 +86,8 @@ import Testing
         FileManager.default.createFile(atPath: lead + "/go", contents: nil)
 
         let server = LeadToolServerHandoverTests.Server(folder: lead, name: "a")
-        #expect(try server.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(server.errors)")
-        guard let added = try server.call(3, "add_task", [
+        await #expect(try server.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(server.errors)")
+        guard let added = try await server.call(3, "add_task", [
             "title": "Add hello", "goal": "hello.txt holds the line `hi`, committed on this branch.", "agent": "codex",
             "acceptance": ["`git show HEAD:hello.txt` prints hi"], "boundaries": ["hello.txt only"],
             "context": "A scratch repository: no tests, no lints, no load runs, no screenshots. Your blind check: say in blind_check that you skipped it (a scratch task). "
@@ -108,7 +108,7 @@ import Testing
         }
         let styled = { (id: UUID) -> LeadDelivery.Screen? in
             let seq = app.send(.styledScreen(id: id))
-            guard eventually(timeout: 10, { app.reply(to: seq) != nil }) else { return nil }
+            guard eventuallyBlocking(timeout: 10, { app.reply(to: seq) != nil }) else { return nil }
             switch app.reply(to: seq) {
             case .styledScreenText(_, let text, let runs, let focus)?: return LeadDelivery.Screen(text: text, runs: runs, focusEvents: focus)
             case .screenText(_, let text)?: return LeadDelivery.Screen(text: text)
@@ -117,15 +117,16 @@ import Testing
         }
         // What it shows while it starts, kept for a start that fails (its session is ended then).
         nonisolated(unsafe) var seen = ""
-        let watching = Thread {
+        // A task of its own, pausing between looks.
+        let watching = Task {
             let until = Date().addingTimeInterval(55)
             while Date() < until {
                 if let id = workerSession(), let text = styled(id)?.text { seen = text }
-                Thread.sleep(forTimeInterval: 1)
+                await pause(1)
             }
         }
-        watching.start()
-        let started = try server.call(4, "start_worker", ["task": "add-hello"])
+        defer { watching.cancel() }
+        let started = try await server.call(4, "start_worker", ["task": "add-hello"])
         if started?.isError != false {
             print("CODEX SCREEN WHILE STARTING:\n\(seen)")
             let logs = FileManager.default.enumerator(atPath: vibe)?.compactMap { $0 as? String }.filter { $0.contains("mcp") && !$0.hasSuffix(".sock") } ?? []
@@ -139,7 +140,7 @@ import Testing
         let worker = try #require(board()?.worker.flatMap(UUID.init(uuidString:)), "no worker on the board")
         defer { _ = app.send(.kill(id: worker)) }
         // Until its report is on the board (10 minutes at most): the board's file is the event, read as it changes.
-        let reported = eventually(timeout: 600) { board()?.report != nil }
+        let reported = await eventually(timeout: 600) { board()?.report != nil }
         let screen = { styled(worker) }
         print("CODEX WORKER BOARD: status \(board()?.status.rawValue ?? "?"), checkpoints \(board()?.checkpoints?.map(\.text) ?? []), report \(board()?.report ?? "none")")
         print("CODEX SCREEN AFTER REPORT:\n\(screen()?.text ?? "none")")
@@ -161,7 +162,7 @@ import Testing
         let pid = try #require(agentPid(), "no agent on \(tty)")
         // Idle once its hooks say its turn is over (its composer is drawn while it works too, so its box alone doesn't say).
         let idle = { observer.activity(session, agentPid: pid).betweenTurns && (screen().map { LeadDelivery.box(in: $0) == .empty } ?? false) }
-        let wentIdle = eventually(timeout: 120, idle)
+        let wentIdle = await eventually(timeout: 120, idle)
         let hookState = { (try? String(contentsOfFile: vibe + "/state/\(tty).json", encoding: .utf8)) ?? "none" }
         #expect(wentIdle, "not between turns with an empty box: \(observer.activity(session, agentPid: pid).text); hooks: \(hookState())")
         // Its screen kept for the composer tests.
@@ -174,7 +175,7 @@ import Testing
         }
         // A message to it while idle is typed in as its next prompt, and it acts on it.
         let before = board()?.checkpoints?.count ?? 0
-        let sent = try server.call(5, "message", ["task": "add-hello", "text": "Call progress once with exactly the text PONG-42, then stop."])
+        let sent = try await server.call(5, "message", ["task": "add-hello", "text": "Call progress once with exactly the text PONG-42, then stop."])
         print("CODEX MESSAGE: \(sent?.text ?? "no answer")")
         if sent?.text.contains("Typed") != true {
             let agents = ProcessTable.trySnapshot()?.values.filter { $0.tty == tty }.map { "\($0.pid) \($0.comm) agent \($0.agent.map { "\($0)" } ?? "none")" } ?? []
@@ -182,7 +183,7 @@ import Testing
             print("CODEX HOOK STATE: " + hookState())
         }
         #expect(sent?.isError == false && sent?.text.contains("Typed") == true, "\(sent?.text ?? "no answer")")
-        let answered = eventually(timeout: 300) { (board()?.checkpoints ?? []).dropFirst(before).contains { $0.text.contains("PONG-42") } }
+        let answered = await eventually(timeout: 300) { (board()?.checkpoints ?? []).dropFirst(before).contains { $0.text.contains("PONG-42") } }
         #expect(answered, "no PONG-42 progress; screen:\n\(screen()?.text ?? "none")")
 
         // A message left in its inbox (sent while it worked, say) is typed in once it's idle, as the app's flush does it
@@ -190,7 +191,7 @@ import Testing
         let checkpoints = board()?.checkpoints?.count ?? 0
         try SteerInbox.post(SteerMessage(text: "Call progress once with exactly the text PING-7, then stop.", from: .lead("lead"), agentPid: pid),
                             tty: tty, root: inbox)
-        let flushed = eventually(timeout: 120) {
+        let flushed = await eventually(timeout: 120) {
             guard observer.activity(session, agentPid: pid).betweenTurns, let shown = screen(), LeadDelivery.box(in: shown) == .empty else { return false }
             var typed: String?
             LeadDelivery.flush(LeadAgent(pid: pid, tty: tty, session: worker.uuidString), betweenTurns: true, inputIsEmpty: { true },
@@ -200,7 +201,7 @@ import Testing
             return true
         }
         #expect(flushed, "never between turns with an empty box: \(observer.activity(session, agentPid: pid).text); screen:\n\(screen()?.text ?? "none")")
-        let pinged = eventually(timeout: 300) { (board()?.checkpoints ?? []).dropFirst(checkpoints).contains { $0.text.contains("PING-7") } }
+        let pinged = await eventually(timeout: 300) { (board()?.checkpoints ?? []).dropFirst(checkpoints).contains { $0.text.contains("PING-7") } }
         #expect(pinged, "no PING-7 progress; screen:\n\(screen()?.text ?? "none")")
     }
 

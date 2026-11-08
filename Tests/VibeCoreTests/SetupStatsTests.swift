@@ -40,7 +40,7 @@ struct SetupStatsTests {
     }
 
     /// load-report.sh's output for `days` on `home`, in UTC.
-    func loadReport(home: URL, _ days: [String]) throws -> String {
+    func loadReport(home: URL, _ days: [String]) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [KeychainLintTests.repo.appendingPathComponent("scripts/load-report.sh").path, "--home", home.path] + days
@@ -53,8 +53,12 @@ struct SetupStatsTests {
         process.standardError = pipe
         process.standardInput = FileHandle.nullDevice
         try process.run()
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+        // The tool's run read to its end and waited for on a thread of its own, not the cooperative pool.
+        let output = await offPool { () -> String in
+            let read = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            waitForEnd(process)
+            return read
+        }
         return output
     }
 
@@ -63,7 +67,7 @@ struct SetupStatsTests {
     @Test func itMatchesImpactMetricsOnTheFixtureDay() async throws {
         let script = ImpactMetricsScriptTests()
         let (project, home) = try layout()
-        let run = try script.metrics(["2026-10-20..2026-10-20", "--project", project.path, "--home", home.path])
+        let run = try await script.metrics(["2026-10-20..2026-10-20", "--project", project.path, "--home", home.path])
         #expect(run.status == 0, "\(run.output)")
         let out = run.output
         let stats = await collector(home: home).collect(projects: [project.path], range: Self.fixtureDay)
@@ -119,9 +123,30 @@ struct SetupStatsTests {
         #expect(out.contains("    unsampled \(freezes.unsampled) (no load sample within 2 minutes)"))
     }
 
+    /// The freezes' daily trend: every day of the range, each with its freezes over the hours of it counted (none before
+    /// the oldest report left, none not yet gone), so the rate reads the same for a whole day and a partial one.
+    @Test func freezesComeDayByDayWithTheHoursOfEachCounted() async throws {
+        let home = temp.url("freeze-days"), debug = home.appendingPathComponent("debug")
+        try FileManager.default.createDirectory(at: debug, withIntermediateDirectories: true)
+        // The oldest report left: Nov 5 12:00. Then 2 on Nov 5, 24 on Nov 6, 3 on Nov 7 (a .txt and a .log: one).
+        var names = ["hang-20261105-120000.txt", "hang-20261105-120000.log", "hang-20261105-230000.txt"]
+        names += (0..<24).map { String(format: "hang-20261106-%02d1500.txt", $0) }
+        names += ["hang-20261107-010000.txt", "hang-20261107-020000.log", "hang-20261107-055959.txt"]
+        for name in names { FileManager.default.createFile(atPath: debug.appendingPathComponent(name).path, contents: Data()) }
+        let range = DateInterval(start: Self.date(2026, 11, 2), end: Self.date(2026, 11, 9))
+        let stats = await collector(home: home, now: Self.date(2026, 11, 7, 6)).collect(projects: [], range: range)
+        let freezes = try #require(stats.mac.freezes)
+        #expect(freezes.count == 29 && freezes.partial && freezes.hours == 42)
+        #expect(freezes.days.map(\.day) == (2...8).map { String(format: "2026-11-%02d", $0) })
+        #expect(freezes.days.map(\.freezes) == [0, 0, 0, 2, 24, 3, 0])
+        #expect(freezes.days.map(\.hours) == [0, 0, 0, 12, 24, 6, 0])
+        #expect(freezes.days.map(\.perHour) == [nil, nil, nil, 2.0 / 12, 1, 0.5, nil])
+        #expect(freezes.days.reduce(0) { $0 + $1.freezes } == freezes.count && freezes.days.reduce(0) { $0 + $1.hours } == freezes.hours)
+    }
+
     @Test func itMatchesLoadReportOnTheFixtureDay() async throws {
         let (_, home) = try layout()
-        let out = try loadReport(home: home, ["2026-10-20", "2026-10-20"])
+        let out = try await loadReport(home: home, ["2026-10-20", "2026-10-20"])
         let stats = await collector(home: home).collect(projects: [], range: Self.fixtureDay)
         // 10:00–10:59 at load 30, 20:00–21:59 at 50.
         let load = try #require(stats.mac.load)
@@ -649,6 +674,50 @@ struct SetupStatsTests {
         #expect(quality.byModel[0].figures.merged == 1 && quality.byModel[0].figures.firstAuditPassRate == 1)
         #expect(quality.byModel[1].figures.merged == 1 && quality.byModel[1].figures.firstAuditPassRate == 0)
         #expect(quality.byModel[1].figures.rerolls == 1 && quality.byModel[1].figures.neededNobody == 0)
+    }
+
+    /// The sampled audits of review none (`LeadAuditSample`): their Important rate with its n; and audited merges split
+    /// by whether their verifier ran on the worker's model (`LeadTokens.sameModel`).
+    @Test func itCountsSampledAuditsAndSplitsAuditsBySameModel() async throws {
+        let root = temp.url("quality-sampled")
+        let at = Self.date(2026, 10, 20, 12).timeIntervalSince1970
+        func audited(_ slug: String, important: Int, sameModel: Bool?, sampled: Bool? = nil) -> LeadTask {
+            var task = Self.merged(slug, at: at, model: "opus")
+            var ledger = LeadAuditLedger()
+            ledger.rounds = 1
+            ledger.passed = true
+            ledger.findings = (0..<important).map { Self.finding("F\($0 + 1)", .important, .fixed, closedBy: "verifier") }
+            task.audits = ledger
+            var verifier = Self.tokens(cost: 1)
+            verifier.sameModel = sameModel
+            task.receipt = LeadReceipt(ending: .merged, startedAt: at - 3600, endedAt: at, worked: 3600, worker: Self.tokens(cost: 1),
+                                       verifier: verifier, rounds: 1)
+            if let sampled { task.auditSample = LeadAuditSample(seed: 7, percent: sampled ? 100 : 0, commit: "c", at: at - 100) }
+            return task
+        }
+        var board = LeadBoard()
+        // Opus → Opus: a (2 Important) and b (0); Opus → Fable: c (1) and d (sampled, 1); e's receipt doesn't say.
+        // Sampled: d (Important) and f (clean); g drawn and not sampled; h sampled two weeks before the range.
+        var h = audited("h", important: 1, sameModel: nil, sampled: true)
+        h.auditSample?.at = Self.date(2026, 10, 6).timeIntervalSince1970
+        board.tasks = [audited("a", important: 2, sameModel: true), audited("b", important: 0, sameModel: true),
+                       audited("c", important: 1, sameModel: false), audited("d", important: 1, sameModel: false, sampled: true),
+                       audited("e", important: 3, sameModel: nil), audited("f", important: 0, sameModel: nil, sampled: true),
+                       audited("g", important: 1, sameModel: nil, sampled: false), h]
+        let project = try project("sampled", board: board, in: root)
+        let stats = await collector(home: root.appendingPathComponent("home"), now: Self.date(2026, 10, 21))
+            .collect(projects: [project.path], range: Self.fixtureDay)
+        let all = try #require(stats.quality?.all)
+        #expect(all.sampledAudits == 2 && all.sampledImportant == 1 && all.sampledImportantRate == 0.5)
+        #expect(all.sameModelAudited == 2 && all.sameModelImportant == 2 && all.sameModelImportantPerAudited == 1)
+        #expect(all.otherModelAudited == 2 && all.otherModelImportant == 2 && all.otherModelImportantPerAudited == 1)
+        // By model: all on opus here, so opus's split is everyone's.
+        #expect(stats.quality?.byModel.first?.figures.sampledAudits == 2)
+        #expect(stats.quality?.byAgent.last?.figures.sampledAudits == 0)
+        // None sampled, no receipt saying: no rate, never 0.
+        let bare = await collector(home: root.appendingPathComponent("home"), now: Self.date(2026, 10, 21))
+            .collect(projects: [project.path], range: DateInterval(start: Self.date(2026, 9, 1), end: Self.date(2026, 9, 2)))
+        #expect(bare.quality?.all.sampledImportantRate == nil && bare.quality?.all.sameModelImportantPerAudited == nil)
     }
 
     @Test func itKeepsAnEightWeekTrend() async throws {

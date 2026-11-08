@@ -18,7 +18,7 @@ struct ChatMessageText: View {
     var hugs = false
     /// What the message's context menu offers after Copy and Select All.
     var menu: [ChatTextMenuItem] = []
-    /// Its tooltip (a reply's time, once the pointer has reached its row).
+    /// Its tooltip (a reply's time): the text view's own, an AppKit tooltip area on it from the start.
     var help: String?
     /// The code blocks (by index) shown in full.
     @State private var expanded: Set<Int> = []
@@ -823,6 +823,9 @@ final class ChatTextView: NSTextView {
     /// The messages the last drag selected across, in order. Weak: a message scrolled out of the chat goes.
     private static var group: [Weak] = []
     private struct Weak { weak var view: ChatTextView? }
+    /// Where the last press in a message went down (the message, the character): a shift-click extends from there,
+    /// through the messages between.
+    private static var anchor: (message: Weak, start: Int)?
 
     convenience init() {
         // The text view makes and owns its TextKit 1 objects; a stack made here and handed to it was owned by no one,
@@ -1251,18 +1254,52 @@ final class ChatTextView: NSTextView {
         messages.forEach { $0.needsDisplay = true }
     }
 
+    /// The press that brings the window forward (its window not key, or the app not active) comes here too, so a drag
+    /// that starts on a message selects at once: before, AppKit kept that press to make the window key, and the first
+    /// drag over a message in a window you'd come back to selected nothing. A click that only brings the window forward
+    /// still does only that (`mouseDown`).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        if let event, event.type == .leftMouseDown, !(NSApp?.isActive == true && window?.isKeyWindow == true) {
+            bringsForward = event.timestamp
+        }
+        return true
+    }
+
+    /// The timestamp of the press `acceptsFirstMouse` let through to bring the window forward.
+    private var bringsForward: TimeInterval?
+
+    /// A press's next event until the button comes up: the window's (a test's own, made up).
+    var nextTrackingEvent: (NSWindow) -> NSEvent? = { $0.nextEvent(matching: [.leftMouseDragged, .leftMouseUp, .periodic]) }
+
     override func mouseDown(with event: NSEvent) {
-        // Double and triple clicks select a word or a paragraph, shift-click extends: in this message, as AppKit does.
-        guard event.clickCount == 1, event.modifierFlags.intersection([.shift, .command, .option, .control]).isEmpty,
-              let window else { return super.mouseDown(with: event) }
-        let pressed = press(at: event.locationInWindow)
-        var messages = pressed.messages
-        let start = pressed.start
+        let forward = bringsForward == event.timestamp
+        bringsForward = nil
+        let modifiers = event.modifierFlags.intersection([.shift, .command, .option, .control])
+        // A shift-click extends the selection from where the last press went down, into this message from another.
+        if event.clickCount == 1, modifiers == .shift, !forward, let window, extend(from: event, nextEvent: { self.nextTrackingEvent(window) }) {
+            return
+        }
+        // Double and triple clicks select a word or a paragraph (and shift-click with nothing pressed before extends):
+        // in this message, as AppKit does. Not on the press that brings the window forward, which did nothing but that
+        // before.
+        guard event.clickCount == 1, modifiers.isEmpty, let window else {
+            if !forward { super.mouseDown(with: event) }
+            return
+        }
+        track(from: event, bringingForward: forward) { self.nextTrackingEvent(window) }
+    }
+
+    /// A press's tracking until the button comes up (`nextEvent`, the window's next event of the drag): a drag selects from
+    /// where it went down, through the messages it crosses; a click places nothing but the caret there and opens a link
+    /// under it. A press that brought the window forward (`bringingForward`) makes this message first responder only
+    /// once it's dragged: as a click it leaves the focus (the composer's) and the selections as they were.
+    func track(from event: NSEvent, bringingForward: Bool, nextEvent: () -> NSEvent?) {
+        var pressed = bringingForward ? nil : press(at: event.locationInWindow)
         var last = event
         var dragged = false
         NSEvent.startPeriodicEvents(afterDelay: 0.1, withPeriod: 0.05)
         defer { NSEvent.stopPeriodicEvents() }
-        tracking: while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp, .periodic]) {
+        tracking: while let next = nextEvent() {
             switch next.type {
             case .leftMouseUp:
                 break tracking
@@ -1273,15 +1310,41 @@ final class ChatTextView: NSTextView {
             default:
                 guard dragged else { continue }
             }
+            if pressed == nil { pressed = press(at: event.locationInWindow) }
+            guard var current = pressed else { continue }
             // Scrolled: the chat may have made the rows coming into view.
+            if autoscroll(with: last) { current.messages = self.messages(); pressed = current }
+            Self.select(in: current.messages, from: self, at: current.start, to: last.locationInWindow)
+        }
+        if !dragged, let pressed {
+            let index = pressed.messages.firstIndex { $0 === self } ?? 0
+            Self.select(in: pressed.messages, from: (index, pressed.start), to: (index, pressed.start))
+            click(at: pressed.start)
+        }
+    }
+
+    /// A shift-press: the selection runs from the last press's place (in this window's chat, this message's or
+    /// another's) to here, and on as the shift-drag goes, until the button comes up. False, and nothing done, with no
+    /// such place: AppKit's own shift-click then.
+    func extend(from event: NSEvent, nextEvent: () -> NSEvent?) -> Bool {
+        guard let anchor = Self.anchor, let from = anchor.message.view, from.window === window, window != nil else { return false }
+        var messages = messages()
+        guard messages.contains(where: { $0 === from }) else { return false }
+        window?.makeFirstResponder(self)
+        Self.select(in: messages, from: from, at: anchor.start, to: event.locationInWindow)
+        NSEvent.startPeriodicEvents(afterDelay: 0.1, withPeriod: 0.05)
+        defer { NSEvent.stopPeriodicEvents() }
+        var last = event
+        tracking: while let next = nextEvent() {
+            switch next.type {
+            case .leftMouseUp: break tracking
+            case .leftMouseDragged: last = next
+            default: break
+            }
             if autoscroll(with: last) { messages = self.messages() }
-            Self.select(in: messages, from: self, at: start, to: last.locationInWindow)
+            Self.select(in: messages, from: from, at: anchor.start, to: last.locationInWindow)
         }
-        if !dragged {
-            let index = messages.firstIndex { $0 === self } ?? 0
-            Self.select(in: messages, from: (index, start), to: (index, start))
-            click(at: start)
-        }
+        return true
     }
 
     /// The button going down at `location` (in the window): this message becomes the window's first responder (so
@@ -1291,6 +1354,7 @@ final class ChatTextView: NSTextView {
         let messages = messages()
         let start = characterIndexForInsertion(at: convert(location, from: nil))
         window?.makeFirstResponder(self)
+        Self.anchor = (Weak(view: self), start)
         Self.select(in: messages, from: self, at: start, to: location)
         return (messages, start)
     }

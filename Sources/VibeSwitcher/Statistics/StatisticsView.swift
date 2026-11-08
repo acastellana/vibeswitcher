@@ -88,6 +88,9 @@ struct FigureRow: View {
             if let meter = figure.meter {
                 UsageMeter(meter: meter).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
             }
+            if let trend = figure.trend, trend.count > 1 {
+                DailyTrend(days: trend).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.bottom] - 2 }
+            }
             Text(figure.value)
                 .monospacedDigit()
                 .foregroundStyle(figure.value == StatisticsPage.notRecorded ? .secondaryInk : .primary)
@@ -118,6 +121,37 @@ struct UsageMeter: View {
         // a11y: the row's label says the percentage and the pace.
         .accessibilityHidden(true)
     }
+}
+
+/// A figure day by day: a bar each, as tall as its value against the range's highest; a day not counted is a dot.
+/// Hovering a bar says its day and value.
+struct DailyTrend: View {
+    let days: [StatisticsPage.TrendDay]
+    static let height: CGFloat = 22
+
+    var body: some View {
+        let highest = days.compactMap(\.value).max() ?? 0
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(days) { day in
+                Group {
+                    if let value = day.value {
+                        RoundedRectangle(cornerRadius: 1).fill(Color.accentColor)
+                            .frame(width: Self.barWidth(days.count), height: max(1.5, highest > 0 ? Self.height * value / highest : 0))
+                    } else {
+                        Circle().fill(.quaternary).frame(width: 3, height: 3)
+                            .frame(width: Self.barWidth(days.count))
+                    }
+                }
+                .frame(height: Self.height, alignment: .bottom)
+                .help("\(day.label): \(day.text)")
+            }
+        }
+        // a11y: the row's label reads each day.
+        .accessibilityHidden(true)
+    }
+
+    /// Narrower bars for a longer range: 30 days fit in the width a usage bar takes and a little more.
+    static func barWidth(_ count: Int) -> CGFloat { count > 10 ? 4 : 10 }
 }
 
 /// The projects, a column per figure, their totals last.

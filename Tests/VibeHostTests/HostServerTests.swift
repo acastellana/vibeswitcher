@@ -101,34 +101,35 @@ final class TestClient {
     }
 
     /// Spawns a scratch program and waits for the reply. `label`: as the app or a lead names it ("Worker: fix-x").
-    func spawn(_ command: String?, cwd: String = "/tmp", label: String = "Test") throws -> HostSession {
+    func spawn(_ command: String?, cwd: String = "/tmp", label: String = "Test") async throws -> HostSession {
         let seq = send(.spawn(SpawnRequest(cwd: cwd, command: command, env: [:], cols: 80, rows: 24, keepShell: false,
                                            label: label, agent: nil)))
-        #expect(eventually { reply(to: seq) != nil })
+        #expect(await eventually { reply(to: seq) != nil })
         guard case .spawned(let session) = reply(to: seq) else { throw CancellationError() }
         return session
     }
 
-    func attach(_ id: UUID) {
+    func attach(_ id: UUID) async {
         let seq = send(.attach(id: id, cols: 80, rows: 24))
-        #expect(eventually { reply(to: seq) == .attached(id: id) })
+        #expect(await eventually { reply(to: seq) == .attached(id: id) })
     }
 
-    /// The session's screen as the host draws it now: asks, and waits for the answer.
+    /// The session's screen as the host draws it now: asks, and waits for the answer. Blocking (one round trip): the
+    /// conditions `eventually` polls read it.
     func screen(_ id: UUID) -> String? {
         let seq = send(.screen(id: id))
-        guard eventually({ reply(to: seq) != nil }), case .screenText(_, let text) = reply(to: seq) else { return nil }
+        guard eventuallyBlocking({ reply(to: seq) != nil }), case .screenText(_, let text) = reply(to: seq) else { return nil }
         return text
     }
 }
 
 struct HostServerTests {
-    @Test func helloListsSessionsAndTheBuild() throws {
+    @Test func helloListsSessionsAndTheBuild() async throws {
         let host = try TestHost(build: 42)
         let client = try TestClient(host)
-        let session = try client.spawn(keepRunning)
+        let session = try await client.spawn(keepRunning)
         let seq = client.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
-        #expect(eventually { client.reply(to: seq) != nil })
+        #expect(await eventually { client.reply(to: seq) != nil })
         guard case .welcome(let version, let build, let sessions, let capabilities, let pid, let startedAt) = client.reply(to: seq) else {
             Issue.record("no welcome"); return
         }
@@ -143,25 +144,25 @@ struct HostServerTests {
         #expect(startedAt.map { $0.timeIntervalSince(host.startedAt) > -0.001 && host.readyAt.timeIntervalSince($0) > -0.001 } == true)
     }
 
-    @Test func inputAndOutputFlowThroughAnAttachedSession() throws {
+    @Test func inputAndOutputFlowThroughAnAttachedSession() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try client.spawn("read x; echo got:$x; \(keepRunning)")
-        client.attach(session.id)
+        let session = try await client.spawn("read x; echo got:$x; \(keepRunning)")
+        await client.attach(session.id)
         client.send(.input(id: session.id, bytes: Data("hi\r".utf8), reply: false))
-        #expect(eventually { client.text(session.id).contains("got:hi") })
+        #expect(await eventually { client.text(session.id).contains("got:hi") })
     }
 
-    @Test func reattachReplaysEarlierOutput() throws {
+    @Test func reattachReplaysEarlierOutput() async throws {
         let host = try TestHost()
         let first = try TestClient(host)
-        let session = try first.spawn("echo first-line; \(keepRunning)")
-        first.attach(session.id)
-        #expect(eventually { first.text(session.id).contains("first-line") })
+        let session = try await first.spawn("echo first-line; \(keepRunning)")
+        await first.attach(session.id)
+        #expect(await eventually { first.text(session.id).contains("first-line") })
         first.close()
         let second = try TestClient(host)
-        second.attach(session.id)
-        #expect(eventually { second.text(session.id).contains("first-line") })
+        await second.attach(session.id)
+        #expect(await eventually { second.text(session.id).contains("first-line") })
     }
 
     @Test func aSecondHostRefusesToStart() throws {
@@ -172,26 +173,26 @@ struct HostServerTests {
         #expect(throws: HostServer.Failure.alreadyRunning) { try HostServer(config: config).start() }
     }
 
-    @Test func repliesFromNonPrimaryClientAreDropped() throws {
+    @Test func repliesFromNonPrimaryClientAreDropped() async throws {
         let host = try TestHost()
         let a = try TestClient(host)
-        let session = try a.spawn("read x; echo got:$x; \(keepRunning)")
-        a.attach(session.id)
+        let session = try await a.spawn("read x; echo got:$x; \(keepRunning)")
+        await a.attach(session.id)
         let b = try TestClient(host)
-        b.attach(session.id)   // the latest to attach is primary
+        await b.attach(session.id)   // the latest to attach is primary
         a.send(.input(id: session.id, bytes: Data("zzz".utf8), reply: true))
         b.send(.input(id: session.id, bytes: Data("ok\r".utf8), reply: true))
-        #expect(eventually { b.text(session.id).contains("got:") })
+        #expect(await eventually { b.text(session.id).contains("got:") })
         #expect(b.text(session.id).contains("got:ok"))
         #expect(!b.text(session.id).contains("zzz"))
     }
 
-    @Test func slowClientGetsResyncAndProgramKeepsRunning() throws {
+    @Test func slowClientGetsResyncAndProgramKeepsRunning() async throws {
         let host = try TestHost()
         let watcher = try TestClient(host)
         // Half as much again as a client may have queued: a client that never reads must overflow. It starts once
         // the slow client is attached (told to go), however long that takes.
-        let session = try watcher.spawn("read go; head -c \(ClientConnection.maxQueued * 3 / 2) /dev/zero | tr '\\0' x; echo; echo all-done; "
+        let session = try await watcher.spawn("read go; head -c \(ClientConnection.maxQueued * 3 / 2) /dev/zero | tr '\\0' x; echo; echo all-done; "
             + keepRunning)
         // A client that attaches and then never reads: the host must not wait for it.
         let fd = try UnixSocket.connect(path: host.socket)
@@ -201,13 +202,13 @@ struct HostServerTests {
         var decoder = HostFrameDecoder()
         var buffer = [UInt8](repeating: 0, count: 65_536)
         /// Reads what the slow client has been sent until `done` says stop (or the hang guard passes).
-        func readSlowClient(until done: (HostEvent) -> Bool) throws -> Bool {
+        func readSlowClient(until done: (HostEvent) -> Bool) async throws -> Bool {
             let deadline = Date().addingTimeInterval(hangGuard)
             while Date() < deadline {
                 let count = read(fd, &buffer, buffer.count)
                 // Closed by the host: nothing more will come.
                 if count == 0 { return false }
-                if count > 0 { decoder.append(Data(buffer[0..<count])) } else { Thread.sleep(forTimeInterval: 0.01) }
+                if count > 0 { decoder.append(Data(buffer[0..<count])) } else { await pause(0.01) }
                 while let frame = try decoder.next() {
                     if frame.kind == .control, let envelope = try? HostCoding.decode(HostEventEnvelope.self, from: frame.payload),
                        done(envelope.event) { return true }
@@ -216,7 +217,7 @@ struct HostServerTests {
             return false
         }
         // It reads only until it's attached, and never again.
-        #expect(try readSlowClient { event in
+        #expect(try await readSlowClient { event in
             if case .challenge(let challenge, _) = event {
                 let proof = HostFrame.encode(.control, try! HostCoding.encode(HostRequestEnvelope(seq: 0,
                     request: .proveApp(answer: AppProof.answer(challenge, key: host.appKey)))))
@@ -228,79 +229,79 @@ struct HostServerTests {
         watcher.send(.input(id: session.id, bytes: Data("go\r".utf8), reply: false))
         // The program finishes (its output wasn't blocked), which the host reports on screen. Blocked, it never
         // would; the time is the host taking in 24 MB, which a busy Mac stretches (10 s alone, 12-16 s in the suite).
-        #expect(eventually { watcher.screen(session.id)?.contains("all-done") == true })
+        #expect(await eventually { watcher.screen(session.id)?.contains("all-done") == true })
         // Now drain the slow client: somewhere in its stream is a resync.
-        #expect(try readSlowClient { $0 == .resync(id: session.id) })
+        #expect(try await readSlowClient { $0 == .resync(id: session.id) })
     }
 
     /// Scrollback of wide lines (3-byte box drawing) can exceed a frame: the reply is trimmed to fit,
     /// never dropped (the phone would wait for it forever).
-    @Test func historyLargerThanAFrameIsTrimmedNotDropped() throws {
+    @Test func historyLargerThanAFrameIsTrimmedNotDropped() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
         let seq0 = client.send(.spawn(SpawnRequest(cwd: "/tmp", command: "perl -CS -e 'print qq(\\x{2500}) x 900, qq(\\n) for 1..2000; print qq(wide-done\\n)'; \(keepRunning)",
                                                    env: [:], cols: 1000, rows: 24, keepShell: false, label: "Test", agent: nil)))
-        #expect(eventually { client.reply(to: seq0) != nil })
+        #expect(await eventually { client.reply(to: seq0) != nil })
         guard case .spawned(let session) = client.reply(to: seq0) else { Issue.record("no spawn"); return }
         // The host takes in 5 MB of wide lines first, which a busy Mac stretches (over 20 s at load 110).
-        #expect(eventually { client.screen(session.id)?.contains("wide-done") == true })
+        #expect(await eventually { client.screen(session.id)?.contains("wide-done") == true })
         let seq = client.send(.history(id: session.id, lines: 5_000))
-        #expect(eventually { client.reply(to: seq) != nil })
+        #expect(await eventually { client.reply(to: seq) != nil })
         guard case .historyText(_, let history, _) = client.reply(to: seq) else { Issue.record("no history reply"); return }
         #expect(!history.isEmpty)
         #expect(history.utf8.count < HostFrame.maxPayload)
     }
 
-    @Test func killEndsTheSessionAndRemoveForgetsIt() throws {
+    @Test func killEndsTheSessionAndRemoveForgetsIt() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try client.spawn("\(keepRunning) & \(keepRunning); wait")
+        let session = try await client.spawn("\(keepRunning) & \(keepRunning); wait")
         let early = client.send(.remove(id: session.id))
-        #expect(eventually { client.reply(to: early) != nil })
+        #expect(await eventually { client.reply(to: early) != nil })
         #expect(client.reply(to: early) == .error("The session is still running."))
         client.send(.kill(id: session.id))
-        #expect(eventually { client.hasEvent { if case .sessionChanged(let s) = $0 { return s.id == session.id && s.exit != nil }; return false } })
+        #expect(await eventually { client.hasEvent { if case .sessionChanged(let s) = $0 { return s.id == session.id && s.exit != nil }; return false } })
         let seq = client.send(.remove(id: session.id))
-        #expect(eventually { client.reply(to: seq) == .ok })
-        #expect(eventually { client.hasEvent { $0 == .sessionRemoved(id: session.id) } })
+        #expect(await eventually { client.reply(to: seq) == .ok })
+        #expect(await eventually { client.hasEvent { $0 == .sessionRemoved(id: session.id) } })
     }
 
-    @Test func spawnInAMissingFolderIsAnError() throws {
+    @Test func spawnInAMissingFolderIsAnError() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
         let seq = client.send(.spawn(SpawnRequest(cwd: "/no/such/folder", command: "true", env: [:], cols: 80, rows: 24,
                                                   keepShell: false, label: "Test", agent: nil)))
-        #expect(eventually { client.reply(to: seq) != nil })
+        #expect(await eventually { client.reply(to: seq) != nil })
         #expect(client.reply(to: seq) == .error("No such folder: /no/such/folder"))
     }
 
-    @Test func shutdownWaitsForLiveSessions() throws {
+    @Test func shutdownWaitsForLiveSessions() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        _ = try client.spawn(keepRunning)
+        _ = try await client.spawn(keepRunning)
         let seq = client.send(.shutdown)
-        #expect(eventually { client.reply(to: seq) != nil })
+        #expect(await eventually { client.reply(to: seq) != nil })
         #expect(client.reply(to: seq) == .error("Sessions are running."))
     }
 
     /// E-38: a spawn that arrives once a shutdown was accepted is refused, not started and torn down with the host.
-    @Test func noSpawnOnceAShutdownWasAccepted() throws {
+    @Test func noSpawnOnceAShutdownWasAccepted() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
         let other = try TestClient(host)
         let shutdown = client.send(.shutdown)
         let spawn = client.send(.spawn(SpawnRequest(cwd: "/tmp", command: keepRunning, env: [:], cols: 80, rows: 24,
                                                     keepShell: false, label: "Test", agent: nil)))
-        #expect(eventually { client.reply(to: spawn) != nil })
+        #expect(await eventually { client.reply(to: spawn) != nil })
         #expect(client.reply(to: shutdown) == .ok)
         #expect(client.reply(to: spawn) == .error(HostProtocol.shuttingDown))
         #expect(!other.hasEvent { if case .sessionChanged = $0 { return true }; return false })
-        #expect(eventually { other.closed })
+        #expect(await eventually { other.closed })
     }
 
     /// E-07: a paste larger than the host's input buffer into a program that isn't reading yet: every piece either
     /// goes in, in order, or is answered with an error naming how many of its bytes didn't.
-    @Test func inputBeyondTheBufferIsRefusedOutLoudNeverLost() throws {
+    @Test func inputBeyondTheBufferIsRefusedOutLoudNeverLost() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
         let out = scratchRoot.appendingPathComponent("paste-\(UUID().uuidString.prefix(8))").path
@@ -308,14 +309,14 @@ struct HostServerTests {
         // It reads nothing until the test says go (a file appears), however long sending 3 MB takes.
         let go = out + ".go"
         defer { unlink(go) }
-        let session = try client.spawn("stty raw -echo; echo ready; while [ ! -e \(go) ]; do sleep 0.05; done; exec cat > \(out)")
-        client.attach(session.id)
-        #expect(eventually { client.text(session.id).contains("ready") })
+        let session = try await client.spawn("stty raw -echo; echo ready; while [ ! -e \(go) ]; do sleep 0.05; done; exec cat > \(out)")
+        await client.attach(session.id)
+        #expect(await eventually { client.text(session.id).contains("ready") })
         let piece = 64 << 10
         let pieces = (0..<48).map { Data(repeating: UInt8(ascii: "A") + UInt8($0 % 26), count: piece) }   // 3 MB
         let seqs = pieces.map { client.send(.input(id: session.id, bytes: $0, reply: false)) }
         let receipt = client.send(.screen(id: session.id))
-        #expect(eventually { client.reply(to: receipt) != nil })
+        #expect(await eventually { client.reply(to: receipt) != nil })
         let refused = seqs.indices.filter { client.reply(to: seqs[$0]) != nil }
         for index in refused {
             #expect(client.reply(to: seqs[index]).map { if case .error(let m) = $0 { return m.contains("\(piece) bytes") }; return false } == true)
@@ -323,7 +324,7 @@ struct HostServerTests {
         #expect(!refused.isEmpty, "3 MB fit into a program that wasn't reading?")
         #expect(FileManager.default.createFile(atPath: go, contents: nil))
         let expected = seqs.indices.filter { !refused.contains($0) }.reduce(into: Data()) { $0.append(pieces[$1]) }
-        #expect(eventually { (try? Data(contentsOf: URL(fileURLWithPath: out)))?.count == expected.count })
+        #expect(await eventually { (try? Data(contentsOf: URL(fileURLWithPath: out)))?.count == expected.count })
         #expect((try? Data(contentsOf: URL(fileURLWithPath: out))) == expected)
     }
 
@@ -338,16 +339,16 @@ struct HostServerTests {
 }
 
 struct HostCallTests {
-    @Test func inputIsSentWithoutWaitingForAReplyThatNeverComes() throws {
+    @Test func inputIsSentWithoutWaitingForAReplyThatNeverComes() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try client.spawn("cat")
-        client.attach(session.id)
+        let session = try await client.spawn("cat")
+        await client.attach(session.id)
         let started = Date()
         try HostCall.send(.input(id: session.id, bytes: Data("ping\n".utf8), reply: false), socket: host.socket, appKey: host.appKey, timeout: hangGuard)
         // Well inside its own timeout: it returned on the host's answer to what followed, not by giving up.
         #expect(Date().timeIntervalSince(started) < hangGuard / 2)
-        #expect(eventually { client.text(session.id).contains("ping") })
+        #expect(await eventually { client.text(session.id).contains("ping") })
         // A request the host doesn't answer still times out through `request`, so callers must use `send` for it.
         // (The host never answers it: a busy Mac can only make this time out, as it should.)
         #expect(throws: HostCall.Failure.self) {
@@ -355,7 +356,7 @@ struct HostCallTests {
         }
     }
 
-    @Test func inputLargerThanTheSocketBufferReachesABusyHost() throws {
+    @Test func inputLargerThanTheSocketBufferReachesABusyHost() async throws {
         // E-06: `send` used to close 50 ms after queueing; a host busy for longer than that lost what was still
         // waiting to go out (over ~8 KB), while the caller reported the message as typed.
         let path = "\(shortScratchRoot)/busy-\(UUID().uuidString.prefix(8)).sock"
@@ -412,17 +413,17 @@ struct HostCallTests {
             }
         }
         try HostCall.send(.input(id: UUID(), bytes: Data(repeating: 0x61, count: 64_000), reply: false), socket: path, timeout: hangGuard)
-        #expect(finished.wait(timeout: .now() + hangGuard) == .success)
+        #expect(await offPool { finished.wait(timeout: .now() + hangGuard) } == .success)
         #expect(seen.bytes == 64_000)
     }
 
     /// E-07: input the host refuses (the program isn't reading and the buffer is full) fails the call.
-    @Test func refusedInputIsAnError() throws {
+    @Test func refusedInputIsAnError() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try client.spawn("stty raw -echo; echo ready; \(keepRunning)")
-        client.attach(session.id)
-        #expect(eventually { client.text(session.id).contains("ready") })
+        let session = try await client.spawn("stty raw -echo; echo ready; \(keepRunning)")
+        await client.attach(session.id)
+        #expect(await eventually { client.text(session.id).contains("ready") })
         var refusal: String?
         for _ in 0..<6 where refusal == nil {
             do {
@@ -437,11 +438,11 @@ struct HostCallTests {
 
     /// E-29: input too large for one frame (base64 takes ~786 KB past 1 MiB) used to be skipped without a word, and
     /// the screen read sent after it was then taken as the host's receipt: the call said it went in.
-    @Test func inputTooLargeForOneFrameIsAnErrorNotAReceipt() throws {
+    @Test func inputTooLargeForOneFrameIsAnErrorNotAReceipt() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try client.spawn("cat")
-        client.attach(session.id)
+        let session = try await client.spawn("cat")
+        await client.attach(session.id)
         let huge = Data(repeating: 0x61, count: 900 << 10)
         #expect(throws: HostCall.Failure.self) {
             try HostCall.send(.input(id: session.id, bytes: huge, reply: false), socket: host.socket, appKey: host.appKey, timeout: hangGuard)
@@ -453,20 +454,20 @@ struct HostCallTests {
         }
         // Nothing of it went in, and the connection still works for what fits.
         try HostCall.send(.input(id: session.id, bytes: Data("after\n".utf8), reply: false), socket: host.socket, appKey: host.appKey, timeout: hangGuard)
-        #expect(eventually { client.text(session.id).contains("after") })
+        #expect(await eventually { client.text(session.id).contains("after") })
         #expect(!client.text(session.id).contains("aaaa"))
     }
 
     /// E-05: a lead's 30 KB message to an idle agent is typed into its terminal whole (a scratch PTY: a program that
     /// copies what it reads to a file).
-    @Test func aLongLeadMessageIsTypedWholeIntoAnIdleSession() throws {
+    @Test func aLongLeadMessageIsTypedWholeIntoAnIdleSession() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
         let out = scratchRoot.appendingPathComponent("typed-\(UUID().uuidString.prefix(8))").path
         defer { unlink(out) }
-        let session = try client.spawn("stty raw -echo; echo ready; exec cat > \(out)")
-        client.attach(session.id)
-        #expect(eventually { client.text(session.id).contains("ready") })
+        let session = try await client.spawn("stty raw -echo; echo ready; exec cat > \(out)")
+        await client.attach(session.id)
+        #expect(await eventually { client.text(session.id).contains("ready") })
         let brief = (0..<600).map { "Line \($0): " + String(repeating: "brief ", count: 8) }.joined(separator: "\n")
         #expect(brief.utf8.count > 30_000)
         let rule = String(repeating: "─", count: 40)
@@ -486,7 +487,7 @@ struct HostCallTests {
         #expect(delivered == .typed)
         // As typed: a paste of the marked message (trailing spaces dropped), then Enter.
         let typed = "\u{1b}[200~" + LeadDelivery.typed(brief, from: .lead("lead")).trimmingCharacters(in: .whitespaces) + "\u{1b}[201~\r"
-        #expect(eventually { (try? String(contentsOfFile: out, encoding: .utf8)) == typed })
+        #expect(await eventually { (try? String(contentsOfFile: out, encoding: .utf8)) == typed })
         #expect(SteerInbox.pending(tty: agent.tty, root: root).isEmpty)
     }
 
@@ -499,26 +500,26 @@ struct HostCallTests {
         #expect(throws: HostConnection.SendFailure.closed) { try client.queue.sync { try client.connection.send(.screen(id: UUID())) } }
     }
 
-    @Test func aOneShotSenderDoesntTakeTheSessionFromTheApp() throws {
+    @Test func aOneShotSenderDoesntTakeTheSessionFromTheApp() async throws {
         let host = try TestHost()
         let app = try TestClient(host)
-        let session = try app.spawn("cat")
-        app.attach(session.id)
+        let session = try await app.spawn("cat")
+        await app.attach(session.id)
         try HostCall.send(.input(id: session.id, bytes: Data("typed\n".utf8), reply: false), socket: host.socket, appKey: host.appKey, timeout: hangGuard)
-        #expect(eventually { app.text(session.id).contains("typed") })
+        #expect(await eventually { app.text(session.id).contains("typed") })
         // The app's terminal still answers the program (its replies go through only from the primary client).
         app.send(.input(id: session.id, bytes: Data("answer\n".utf8), reply: true))
-        #expect(eventually { app.text(session.id).contains("answer") })
+        #expect(await eventually { app.text(session.id).contains("answer") })
     }
 
-    @Test func anUnknownRequestIsAnsweredNotFatal() throws {
+    @Test func anUnknownRequestIsAnsweredNotFatal() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
         // A newer app's request this host doesn't know.
         client.queue.sync { client.connection.sendRaw(Data(#"{"seq":77,"request":{"teleport":{"to":"mars"}}}"#.utf8)) }
-        #expect(eventually { client.reply(to: 77).map { if case .error = $0 { return true } else { return false } } ?? false })
+        #expect(await eventually { client.reply(to: 77).map { if case .error = $0 { return true } else { return false } } ?? false })
         let seq = client.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
-        #expect(eventually { client.reply(to: seq) != nil })
+        #expect(await eventually { client.reply(to: seq) != nil })
         #expect(!client.closed)
     }
 }

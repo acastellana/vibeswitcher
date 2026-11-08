@@ -150,8 +150,6 @@ public enum HostCall {
         -> (sessions: [HostSession], reply: HostEvent?, refusal: String?, capable: Bool) {
         let queue = DispatchQueue(label: "vibeswitcher.host-call")
         let patience = min(connectPatience, timeout / 2)
-        let connection = try HostConnection(path: socket, queue: queue, appKey: appKey, patience: patience)
-        defer { queue.sync { connection.close() } }
         let done = DispatchSemaphore(value: 0)
         var sessions: [HostSession]?
         var reply: HostEvent?
@@ -161,40 +159,47 @@ public enum HostCall {
         var closed = false
         var capable = true
         var unsent: Error?
-        connection.onClose = {
-            closed = true
-            done.signal()
-        }
-        connection.onEvent = { envelope in
-            if case .welcome(_, _, let list, let capabilities, _, _) = envelope.event, sessions == nil {
-                sessions = list
-                if let requires, !(capabilities ?? []).contains(requires) {
-                    capable = false
-                    done.signal()
-                } else if let request {
-                    // It didn't go out (too large for a frame): nothing that follows may be taken as its receipt.
-                    do {
-                        waitingFor = try connection.send(request)
-                    } catch {
-                        unsent = error
-                        done.signal()
-                        return
-                    }
-                    requestSeq = waitingFor
-                    // Its answer is the follow-up's: it comes once the host has read both.
-                    if let follow { waitingFor = try? connection.send(follow) }
-                    // Nothing comes back for it: give the write a moment to leave, then we're done.
-                    else if !expectsReply { queue.asyncAfter(deadline: .now() + 0.05) { done.signal() } }
-                } else {
-                    done.signal()
-                }
-            } else if follow != nil, envelope.replyTo == requestSeq, case .error(let message) = envelope.event {
-                refusal = message
-            } else if let waitingFor, envelope.replyTo == waitingFor {
-                reply = envelope.event
+        // Made on `queue`, with its handlers, in one go: what the reader hands over (the host's challenge, an end) comes
+        // after them, never to a connection with none yet, nor while they're being set.
+        let connection = try queue.sync { () throws -> HostConnection in
+            let connection = try HostConnection(path: socket, queue: queue, appKey: appKey, patience: patience)
+            connection.onClose = {
+                closed = true
                 done.signal()
             }
+            connection.onEvent = { envelope in
+                if case .welcome(_, _, let list, let capabilities, _, _) = envelope.event, sessions == nil {
+                    sessions = list
+                    if let requires, !(capabilities ?? []).contains(requires) {
+                        capable = false
+                        done.signal()
+                    } else if let request {
+                        // It didn't go out (too large for a frame): nothing that follows may be taken as its receipt.
+                        do {
+                            waitingFor = try connection.send(request)
+                        } catch {
+                            unsent = error
+                            done.signal()
+                            return
+                        }
+                        requestSeq = waitingFor
+                        // Its answer is the follow-up's: it comes once the host has read both.
+                        if let follow { waitingFor = try? connection.send(follow) }
+                        // Nothing comes back for it: give the write a moment to leave, then we're done.
+                        else if !expectsReply { queue.asyncAfter(deadline: .now() + 0.05) { done.signal() } }
+                    } else {
+                        done.signal()
+                    }
+                } else if follow != nil, envelope.replyTo == requestSeq, case .error(let message) = envelope.event {
+                    refusal = message
+                } else if let waitingFor, envelope.replyTo == waitingFor {
+                    reply = envelope.event
+                    done.signal()
+                }
+            }
+            return connection
         }
+        defer { queue.sync { connection.close() } }
         try queue.sync { _ = try connection.send(.hello(protocolVersion: HostProtocol.version, app: "vibeswitcher-mcp")) }
         guard done.wait(timeout: .now() + timeout) == .success else { throw Failure(description: "The session host didn't answer in time.") }
         if let unsent = queue.sync(execute: { unsent }) { throw Failure(description: "\(unsent)") }

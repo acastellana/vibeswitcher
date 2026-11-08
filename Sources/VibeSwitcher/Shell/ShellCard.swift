@@ -3,8 +3,12 @@ import VibeCore
 
 /// A shell an agent asked for (`ShellDesk.Card`): who asks, the folder, and the exact command as one monospaced block
 /// (all of it: wrapped, and scrolled when long, never cut), then Run and Decline while it waits, or what became of it.
+/// A Run that didn't go says why as the chat's Run does (`RunShown`, `RunRefusal`): Not run on the button, why in its
+/// tooltip and in a line on the card, and no sound.
 struct ShellCard: View {
     let card: ShellDesk.Card
+    /// Why its last Run didn't go (`ShellDesk.refused`), while that shows.
+    var refused: String? = nil
     var act: (ShellDesk.Action) -> Void = { _ in }
     @IncreasedContrast private var increased
 
@@ -25,7 +29,7 @@ struct ShellCard: View {
         case .started(_, let auto): return auto ? "Started without asking" : "Started"
         case .declined: return "Declined"
         case .expired: return "Expired"
-        case .failed: return "Didn't start"
+        case .failed: return "Not run"
         }
     }
 
@@ -51,7 +55,7 @@ struct ShellCard: View {
             return "Running in the session “\(name)”" + (auto ? ", started without asking (Settings › Agents)." : ".")
         case .declined: return "You declined it; nothing ran. The agent was told."
         case .expired: return "No answer in 30 minutes; nothing ran. The agent was told."
-        case .failed(let why): return "It didn't start: \(why)"
+        case .failed(let why): return RunRefusal.shellNotStarted(why)
         }
     }
 
@@ -92,12 +96,24 @@ struct ShellCard: View {
                 .font(.system(size: 12)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
+            if let notice = Self.notice(refused, card) {
+                Label(notice, systemImage: RunShown.refused(notice).symbol)
+                    .font(.system(size: 12)).foregroundStyle(Color(nsColor: .systemRed))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
             buttons
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(tint.opacity(increased ? 0 : 0.06)))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(tint.opacity(increased ? 1 : 0.4), lineWidth: 1.5))
         .contextMenu { Button("Copy Command") { Pasteboard.copy(card.request.command) } }
+    }
+
+    /// The "Not run: …" line under the detail, unless the detail already says the same (a start that failed).
+    static func notice(_ refused: String?, _ card: ShellDesk.Card) -> String? {
+        guard let refused, refused != detail(card) else { return nil }
+        return refused
     }
 
     private func label(_ text: String) -> some View {
@@ -138,7 +154,10 @@ struct ShellCard: View {
             switch card.state {
             case .waiting:
                 Button("Decline") { act(.decline) }
-                Button("Run") { act(.run) }.buttonStyle(.borderedProminent)
+                let shown = refused.map(RunShown.refused) ?? .ready
+                Button { act(.run) } label: { Label(shown.label, systemImage: shown.symbol) }
+                    .buttonStyle(.borderedProminent)
+                    .help(shown.reason ?? "Opens a new shell session in this folder that runs the command")
                     // No key: Return in the composer must never start a shell.
             case .starting:
                 EmptyView()
@@ -161,7 +180,7 @@ struct ShellRequestStrip: View {
             ScrollView {
                 LazyVStack(spacing: 10) {
                     ForEach(cards) { card in
-                        ShellCard(card: card) { action in desk.act(action, on: card.id) }
+                        ShellCard(card: card, refused: desk.refused[card.id]) { action in desk.act(action, on: card.id) }
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 10)

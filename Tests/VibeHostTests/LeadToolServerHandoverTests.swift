@@ -34,19 +34,19 @@ import Testing
         }
 
         /// Asks and waits for the answer.
-        func ask(_ id: Int, _ method: String, _ params: [String: Any] = [:]) throws -> [String: Any]? {
+        func ask(_ id: Int, _ method: String, _ params: [String: Any] = [:]) async throws -> [String: Any]? {
             try send(id, method, params)
-            _ = eventually { reply(id) != nil }
+            _ = await eventually { reply(id) != nil }
             return reply(id)
         }
 
-        func tools(_ id: Int) throws -> [String] {
-            ((try ask(id, "tools/list")?["tools"] as? [[String: Any]]) ?? []).compactMap { $0["name"] as? String }
+        func tools(_ id: Int) async throws -> [String] {
+            await ((try ask(id, "tools/list")?["tools"] as? [[String: Any]]) ?? []).compactMap { $0["name"] as? String }
         }
 
         /// A tool call's text and whether it's an error.
-        func call(_ id: Int, _ tool: String) throws -> (text: String, isError: Bool)? {
-            guard let result = try ask(id, "tools/call", ["name": tool, "arguments": [String: Any]()]) else { return nil }
+        func call(_ id: Int, _ tool: String) async throws -> (text: String, isError: Bool)? {
+            guard let result = try await ask(id, "tools/call", ["name": tool, "arguments": [String: Any]()]) else { return nil }
             let text = ((result["content"] as? [[String: Any]]) ?? []).compactMap { $0["text"] as? String }.joined(separator: "\n")
             return (text, result["isError"] as? Bool ?? true)
         }
@@ -54,10 +54,10 @@ import Testing
         var errors: String { (try? String(contentsOfFile: "\(folder)/\(name).err", encoding: .utf8)) ?? "" }
     }
 
-    @Test func theLeadsToolServerKeepsItsGrantThroughAHandoverAndWhenStartedAgain() throws {
+    @Test func theLeadsToolServerKeepsItsGrantThroughAHandoverAndWhenStartedAgain() async throws {
         let mcp = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")
-        let host = try ScratchHostProcess()
+        let host = try await ScratchHostProcess()
         var sessions: [HostSession] = []
         defer {
             for session in sessions where kill(session.childPID, 0) == 0 { kill(-session.childPID, SIGKILL) }
@@ -81,44 +81,44 @@ import Testing
             "while [ ! -f '\(folder)/go-\(name)' ]; do sleep 0.05; done; "
                 + "tail -n +1 -f '\(folder)/\(name).in' | '\(mcp)' --root '\(root)' --role lead > '\(folder)/\(name).out' 2> '\(folder)/\(name).err' &"
         }
-        let (app, _, _, _, _, _, _) = try TestClient.welcomed(host.socket, appKey: host.appKey)
+        let (app, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
         // Its home is the scratch one, for Foundation too (which reads CFFIXED_USER_HOME, not HOME): never the user's host.
         // No job control (the session's shell is interactive): the servers stay in its process group, which the end kills.
-        let lead = try app.spawn("set +m; export HOME='\(host.home)' CFFIXED_USER_HOME='\(host.home)'; cd '\(root)'; \(server("a")) \(server("b")) wait", cwd: root)
+        let lead = try await app.spawn("set +m; export HOME='\(host.home)' CFFIXED_USER_HOME='\(host.home)'; cd '\(root)'; \(server("a")) \(server("b")) wait", cwd: root)
         sessions = [lead]
         guard case .grant(let grant)? = app.vault(.issue(role: .lead, root: root, task: nil, auditing: nil)) else {
             Issue.record("the app got no lead grant: \(host.log)"); return
         }
-        #expect(app.vault(.bind(grant: grant, root: root, session: lead.id.uuidString)) == .ok)
+        await #expect(app.vault(.bind(grant: grant, root: root, session: lead.id.uuidString)) == .ok)
         FileManager.default.createFile(atPath: "\(folder)/go-a", contents: nil)
 
         let a = Server(folder: folder, name: "a")
-        let initialized = try a.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil
+        let initialized = try await a.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil
         #expect(initialized, "stderr: \(a.errors)")
-        let toolsA = try a.tools(2)
+        let toolsA = try await a.tools(2)
         #expect(toolsA.contains("merge"), "tools: \(toolsA)")
-        let before = try a.call(3, "status")
+        let before = try await a.call(3, "status")
         #expect(before?.isError == false, "status: \(before?.text ?? "no answer")")
 
         // The install: the app hands the host over to the new build, which carries the vault in memory.
         let seq = app.send(.handover(executable: host.newBinary))
-        #expect(eventually { app.reply(to: seq) != nil })
-        #expect(eventually { host.log.contains("took over") }, "host log: \(host.log)")
+        #expect(await eventually { app.reply(to: seq) != nil })
+        #expect(await eventually { host.log.contains("took over") }, "host log: \(host.log)")
         #expect(host.log.contains("bytes of secrets"))
-        let (again, _, build, _, _, _, _) = try TestClient.welcomed(host.socket, appKey: host.appKey)
+        let (again, _, build, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
         #expect(build == host.newBuild)
 
         // The server that was running still serves the lead.
-        let through = try a.call(4, "status")
+        let through = try await a.call(4, "status")
         #expect(through?.isError == false, "status: \(through?.text ?? "no answer")")
         // Started again in the same session (the new build's server, as /mcp starts it): the lead's tools, same grant.
         FileManager.default.createFile(atPath: "\(folder)/go-b", contents: nil)
         let b = Server(folder: folder, name: "b")
-        let restarted = try b.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil
+        let restarted = try await b.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil
         #expect(restarted, "stderr: \(b.errors)")
-        let toolsB = try b.tools(2)
+        let toolsB = try await b.tools(2)
         #expect(toolsB.contains("merge"), "tools: \(toolsB)")
-        let after = try b.call(3, "status")
+        let after = try await b.call(3, "status")
         #expect(after?.isError == false, "status: \(after?.text ?? "no answer")")
         guard case .member(let current?)? = again.vault(.current(role: .lead, root: root, task: nil)) else {
             Issue.record("the lead's role is gone after the handover"); return
@@ -130,6 +130,6 @@ import Testing
             return reply
         }
         #expect(try vault.rebindLead(root: root, session: lead.id.uuidString)?.id == grant)
-        #expect(try b.call(4, "status")?.isError == false)
+        await #expect(try b.call(4, "status")?.isError == false)
     }
 }

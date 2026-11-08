@@ -363,6 +363,8 @@ final class HostClient: ObservableObject {
         connection = nil
         hostCapabilities = []
         sentInput = [:]
+        directKeys.values.forEach { $0.revoke() }
+        directKeys = [:]
         let pending = replies
         replies = [:]
         pending.values.forEach { $0(.error(Self.wentAway)) }
@@ -747,7 +749,11 @@ final class HostClient: ObservableObject {
             return
         }
         // Taken on the way: none of it goes to the session (a replaced lead's, see `LeadController.takeInput`).
-        if let inputGate, inputGate(id, bytes) { done?(true); return }
+        if let inputGate, inputGate(id, bytes) {
+            revokeDirectKeys(id)
+            done?(true)
+            return
+        }
         if done == nil, pacedInput[id] == nil, bytes.count <= Self.inputPiece {
             guard let connection else {
                 inputCut(id, 0, bytes.count, "VibeSwitcher isn't connected to the session host.")
@@ -767,6 +773,59 @@ final class HostClient: ObservableObject {
 
     /// Looks at input for a session before it's sent (not the terminal's answers to queries): true when it took it.
     var inputGate: ((UUID, Data) -> Bool)?
+    /// Whether `inputGate` takes a session's input now, asked without handing it any: no `DirectKeys` for it then.
+    var inputTaken: ((UUID) -> Bool)?
+
+    /// Keys for a session sent from any thread, never waiting on the main thread: a held key's repeats (Claude's
+    /// dictation, `ClaudeVoiceRun`), which a main thread stalled past Claude's 120 ms took for the key let go. They go
+    /// straight onto the connection (`HostConnection.send`, safe from any thread), so in the order they were handed
+    /// over with everything else sent to the session, and not through `inputGate`: nil when that takes the session's
+    /// input now (`inputTaken`), or with no connection. It takes no more (its `send` is false) once its connection
+    /// goes, the gate takes input for the session, or `check` finds the gate would. Main thread, but its `send`.
+    func directKeys(_ id: UUID) -> DirectKeys? {
+        guard isUsable, let connection, inputTaken?(id) != true else { return nil }
+        directKeys[id]?.revoke()
+        let keys = DirectKeys(id: id, connection: connection)
+        directKeys[id] = keys
+        return keys
+    }
+
+    /// The gate takes the session's input now: its `DirectKeys` take no more. Main thread.
+    func checkDirectKeys(_ id: UUID) {
+        if inputTaken?(id) == true { revokeDirectKeys(id) }
+    }
+
+    private var directKeys: [UUID: DirectKeys] = [:]
+
+    private func revokeDirectKeys(_ id: UUID) {
+        directKeys.removeValue(forKey: id)?.revoke()
+    }
+
+    /// One session's keys from any thread (see `HostClient.directKeys`).
+    final class DirectKeys: @unchecked Sendable {
+        let id: UUID
+        private let lock = NSLock()
+        private weak var connection: HostConnection?
+
+        init(id: UUID, connection: HostConnection) {
+            self.id = id
+            self.connection = connection
+        }
+
+        /// Sent (handed to the connection's writer); false once revoked, or when the connection is closed.
+        func send(_ bytes: Data) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let connection, !bytes.isEmpty else { return false }
+            return (try? connection.send(.input(id: id, bytes: bytes, reply: false))) != nil
+        }
+
+        func revoke() {
+            lock.lock()
+            connection = nil
+            lock.unlock()
+        }
+    }
 
     /// Largest piece of input sent in one message (a frame holds ~768 KB of input once encoded).
     static let inputPiece = 256 * 1024

@@ -32,6 +32,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// How many minutes merge lets init_command and test_command run before they're taken as hung and stopped
     /// (`test_timeout_min:`).
     public var testTimeoutMinutes: Double = Worktrees.testTimeout / 60
+    /// How many minutes a merge's or audit's init_command and test_command (and its sessions' vs-heavy runs) may go
+    /// without progress (no new output, almost no CPU, the Mac under load_threshold) before they're taken as hung and
+    /// stopped, well before test_timeout_min (`stall_min:`; 0: never, only the timeout; see `StallWatch`).
+    public var stallMinutes: Double = StallWatch.defaultMinutes
     /// A task's time budget in minutes when it sets none of its own (`task_budget_min:`; 0: no budget): once its
     /// worker's working time reaches it, the worker is told to stop and report over_budget (see `LeadBudget`).
     public var taskBudgetMinutes = LeadBudget.defaultMinutes
@@ -69,9 +73,18 @@ public struct LeadWorkflow: Equatable, Sendable {
     public var riskLines = LeadRisk.defaultLines
     /// The risk check's model pass (`risk_model:`; false: the deterministic triggers only).
     public var riskModel = true
+    /// The share of review none tasks auto_advance audits anyway, at random, when their worker reports done
+    /// (`audit_sample_percent:`, 0 to 100; 0: off; see `LeadAuditSample`): a tripwire on what the unaudited path lets
+    /// through, not a statistic.
+    public var auditSamplePercent = LeadAuditSample.defaultPercent
     /// This project's lead gets VibeSwitcher's own health digests (`watch_app_logs:`, see `AppHealth`): its freezes,
     /// crashes and error lines, and a daily trend. Off for every project but the one that builds VibeSwitcher.
     public var watchAppLogs = false
+    /// The review rules' floor the user set in Settings (`LeadReviewFloor`), as the lead's tool server read it from the
+    /// vault; nil: none (none recorded, or not read here). Never in the file: what's in force joins it with the file's
+    /// values (`sensitiveGlobs`, `strictGlobs`, `findersInForce`, `policyInForce`, `riskLinesInForce`, `riskModelInForce`,
+    /// `samplePercentInForce`, `auditModel`), while the file's own stay as written for the guard rails' hashes.
+    public var floor: LeadReviewFloor?
     public var notes = ""
     /// Each setting in the front matter as written (a key's last line), whatever the key: what the vault's hashes of
     /// the guard rails are of (`LeadVault.guardedKeys`).
@@ -125,6 +138,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "disk_warning_gb": workflow.diskWarningGB = gigabytes(value) ?? 10
                 case "disk_floor_gb": workflow.diskFloorGB = gigabytes(value) ?? 3
                 case "test_timeout_min": workflow.testTimeoutMinutes = minutes(value) ?? Worktrees.testTimeout / 60
+                case "stall_min": workflow.stallMinutes = Double(value).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } ?? StallWatch.defaultMinutes
                 case "task_budget_min": workflow.taskBudgetMinutes = Int(value).map { max(0, $0) } ?? LeadBudget.defaultMinutes
                 case _ where macKeys.contains(key):
                     if !value.isEmpty, !workflow.ignoredKeys.contains(key) { workflow.ignoredKeys.append(key) }
@@ -141,6 +155,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "merge_batching": workflow.mergeBatching = MergeBatching(text: value) ?? .off
                 case "risk_lines": workflow.riskLines = Int(value).map { max(0, $0) } ?? LeadRisk.defaultLines
                 case "risk_model": workflow.riskModel = flag(value) ?? true
+                case "audit_sample_percent": workflow.auditSamplePercent = Int(value).map { min(100, max(0, $0)) } ?? LeadAuditSample.defaultPercent
                 case "watch_app_logs": workflow.watchAppLogs = flag(value) ?? false
                 default: break
                 }
@@ -236,7 +251,8 @@ public struct LeadWorkflow: Equatable, Sendable {
     public static let defaultSensitivePaths = [".claude/", ".mcp.json", "CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".github/",
                                                ".env", ".env.*", "*.entitlements", "*.pem"]
 
-    public var sensitiveGlobs: [String] { sensitivePaths ?? Self.defaultSensitivePaths }
+    /// sensitive_paths (the defaults when it names none) joined with the floor's.
+    public var sensitiveGlobs: [String] { LeadReviewFloor.clean((sensitivePaths ?? Self.defaultSensitivePaths) + (floor?.sensitivePaths ?? [])) }
 
     /// A comma-separated list of globs; nil when it names none.
     static func globs(_ value: String) -> [String]? {
@@ -245,9 +261,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     }
 
     /// The changed files in `strict_paths`: on a branch that touches any, an unconfirmed Important finding holds the
-    /// merge too. Empty when strict_paths names none.
+    /// merge too. Empty when strict_paths (joined with the floor's) names none.
     public func strictTouched(_ changed: [String]) -> [String] {
-        guard let strictPaths else { return [] }
+        guard let strictPaths = strictGlobs else { return [] }
         return changed.filter { path in strictPaths.contains { Self.matches(path, glob: $0) } }
     }
 
@@ -255,7 +271,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// ask_sensitive); nil when it needs none. Under ask_all that's every file (an empty list for a commit that
     /// changes none still asks).
     public func filesNeedingApproval(_ changed: [String]) -> [String]? {
-        switch mergePolicy ?? .askSensitive {
+        switch policyInForce ?? .askSensitive {
         case .auto: return nil
         case .askAll: return changed
         case .askSensitive:
@@ -315,6 +331,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     }
 
     var testTimeout: TimeInterval { testTimeoutMinutes * 60 }
+
+    /// stall_min in seconds; nil when it's 0 (no stall watch, only test_timeout_min).
+    public var stall: TimeInterval? { stallMinutes > 0 ? stallMinutes * 60 : nil }
 
     /// Reads `workflow.md` whatever its line endings, BOM or stray bytes; `problem` says when it couldn't be used.
     public static func load(from path: String) -> LeadWorkflow {
@@ -378,9 +397,23 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// most capable, or opus when the workers run fable already. The aliases, as Claude Code 2.1.310 resolves them here
     /// (2026-10-25): fable → claude-fable-5-1, opus → claude-opus-5-5, sonnet → claude-sonnet-5-5; Claude's default
     /// for this user's workers is opus (its settings' "model").
-    public func auditModel(workerModel: String?) -> String {
-        if let verifierModel, !verifierModel.isEmpty { return verifierModel }
-        return Self.otherModel(than: workerModel)
+    /// Under a floor that says audits run on a different model than the workers', a verifier_model naming theirs is
+    /// passed over for that other one.
+    /// Under that floor, a task's own model (`taskModel`, add_task's model) counts as the workers' too, and a
+    /// verifier_model that names no model this knows (an alias such as default) is passed over as well: it may be theirs.
+    /// The task's model is board.json's, which any session of the team can write, so it only adds a model to keep the
+    /// audit off, never takes the workers' off that list: a worker started on the workers' model that writes another
+    /// as its task's still gets an audit on neither (fable, else opus, else sonnet; Claude's default counts as opus).
+    public func auditModel(workerModel: String?, taskModel: String? = nil) -> String {
+        let different = floor?.verifierDifferent == true
+        if let verifierModel, !verifierModel.isEmpty {
+            if !different { return verifierModel }
+            if LeadReviewFloor.knownModel(verifierModel), !LeadReviewFloor.sameModel(verifierModel, LeadReviewFloor.workersModel(workerModel)),
+               !LeadReviewFloor.sameModel(verifierModel, taskModel) { return verifierModel }
+        }
+        guard different else { return Self.otherModel(than: workerModel) }
+        let workers = LeadReviewFloor.workersModel(workerModel)
+        return ["fable", "opus", "sonnet"].first { !LeadReviewFloor.sameModel($0, workers) && !LeadReviewFloor.sameModel($0, taskModel) } ?? "sonnet"
     }
 
     /// A model at least as capable as `worker` and not it: fable, or opus for a worker on fable.
@@ -405,9 +438,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     }
 
     public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "remote", "verifier_model", "max_workers",
-                                      "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "task_budget_min",
+                                      "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "stall_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
-                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "watch_app_logs", "agent_default"]
+                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "watch_app_logs", "agent_default"]
 
     /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
     /// time (`BoardStore.prepare`), the lead's `configure` after.
@@ -587,6 +620,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     # Whether the risk check also asks headless Claude (the diff's stat, the contract and REVIEW.md; no code): it can
     # only raise a task to audit. Empty: true.
     risk_model: true
+    # The share of review none tasks, in percent, that auto_advance audits anyway when their worker reports done: a
+    # seeded random draw, recorded on the task, tells how often the unaudited path lets problems through. 0: off.
+    # Empty: 10.
+    audit_sample_percent: 10
     ---
     Notes for the lead: conventions, priorities, what not to touch. The lead reads this at the start of every session.
     """
@@ -595,6 +632,12 @@ public struct LeadWorkflow: Equatable, Sendable {
 /// What each role is told (appended to Claude Code's own system prompt).
 public enum LeadPrompts {
     public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, dismiss_finding, record_decision, archive_decisions, record_incident, merge, revert, cleanup, fetch_remote, merge_remote, push_remote, configure"
+
+    /// Read before proposing or asking (backlog A5, the cheap A4): on 2026-11-07 the lead proposed four chat features
+    /// that already existed (⌘F search, tool groups, Latest, Copy as Markdown).
+    static let productCheck = "Before you propose a feature or ask the user anything, check the code, "
+        + "docs/process/product-inventory.md, decisions.md and the backlog (docs/process/backlog.md), where the project has them: "
+        + "propose only what's missing, and ask only what none of them answers."
 
     /// What workers and verifiers are told about putting load on the Mac: a verifier once ran four times its
     /// contract's load on a Mac other sessions and the user were using, and a turn that ended left its burners running.
@@ -869,20 +912,24 @@ public enum LeadPrompts {
     /// back merges and deletions a fresh lead can't otherwise know about). `goal`: one given with `vibeswitcher --lead`.
     /// `replaced`: the lead this one replaces (its terminal) and the file holding its last turns (see `LastTurns`):
     /// what the user told it there never reached the board (it had no tools), so it's read and acted on first.
-    public static func leadStart(root: String, goal: String?, note: String, replaced: (tty: String, turnsFile: String)? = nil) -> String {
+    public static func leadStart(root: String, goal: String?, note: String, replaced: (tty: String, turnsFile: String)? = nil, scheduledNote: String? = nil) -> String {
         let store = BoardStore(root: root)
         let memory = "Read status, the workflow notes, \(store.recordPath("decisions.md")) (every decision: one may hold a task back from "
             + "merging or its branch from deletion) and the end of \(store.recordPath("progress.md"))"
+        let scheduled = scheduledNote.map { " This is a scheduled rotation. Read \($0) first (open threads, promises made to the user, timers due)." } ?? ""
         let handover = replaced.map {
-            " You replace the lead on \($0.tty), whose tools are off now: what the user told it may never have reached the board. Before greeting, read "
+            if scheduledNote != nil {
+                return " You replace the lead on \($0.tty). Read \($0.turnsFile), its last turns with the user, and reconcile them with the board before acting. Continue open work without repeating completed actions; workers and verifiers keep running."
+            }
+            return " You replace the lead on \($0.tty), whose tools are off now: what the user told it may never have reached the board. Before greeting, read "
                 + "\($0.turnsFile) (its last turns: what the user asked, what it answered) and act on what the user asked there "
                 + "(add the tasks, start the workers, answer what's open), then say in your greeting what you took over from it."
         } ?? ""
         if let goal {
-            return "\(startOpening)\(handover) A goal given with vibeswitcher --lead (\(note)): \(goal)\n"
+            return "\(startOpening)\(scheduled)\(handover) A goal given with vibeswitcher --lead (\(note)): \(goal)\n"
                 + "\(memory); then plan the goal into tasks with contracts, start the workers, and tell the user your plan in a few lines."
         }
-        return "\(startOpening)\(handover) \(memory); then greet the user in one short line: what's on the board, and "
+        return "\(startOpening)\(scheduled)\(handover) \(memory); then greet the user in one short line: what's on the board, and "
             + "what they'd like to build next. Merge or clean up nothing a decision or the user holds back."
     }
 
@@ -903,7 +950,7 @@ public enum LeadPrompts {
         0. Set up the project's workflow yourself: when status says workflow.md has a problem or no test_command, \
         set it with configure (status suggests a command from the repository; run it once first if unsure) and tell \
         the user what you set. Don't ask the user to edit workflow.md.
-        1. Understand what the user wants. Ask only what you truly need (direction, product choices, anything risky or \
+        1. Understand what the user wants. \(productCheck) Ask only what you truly need (direction, product choices, anything risky or \
         irreversible) with ask_user. It doesn't block: keep working while the user answers; the answer arrives as a \
         message. For a reversible choice, prefer proposing your answer with a timer (ask_user with proposal, one of \
         the options, and decide_in minutes, 10 by default): the user can pick another option or hold it, and if no \
@@ -1048,6 +1095,7 @@ public enum LeadPrompts {
         fails timing-sensitive tests. start_worker and audit refuse while its load (the greater of its 1- and 5-minute averages, so a dip after a spike \
         doesn't count as room) is above load_threshold (\(limit)) or the workers and verifiers of all projects together are at mac_max_sessions \
         (\(limits.maxSessions)); both are set once for the Mac by the user in VibeSwitcher's Settings, not in workflow.md. \
+        They refuse too while the Mac is short of memory (its memory pressure at warning or above, or swapping out fast: status's Mac line says). \
         The user's Boost mode may raise them, and max_workers, for a while (when they're away on AC power, or on demand) and drop them \
         back at once: status says which limits hold now ("boost: on (…)"). \
         After such a refusal VibeSwitcher sends you one message once there's room again. merge waits up to test_timeout_min (\(MacLoad.number(workflow.testTimeoutMinutes)) min) for \
@@ -1069,7 +1117,7 @@ public enum LeadPrompts {
     /// follow without asking again.
     static func mergePolicy(_ workflow: LeadWorkflow) -> String {
         let options = LeadWorkflow.MergePolicy.allCases.map { "\($0.rawValue) (\($0.meaning))" }.joined(separator: "; ")
-        guard let policy = workflow.mergePolicy else {
+        guard let policy = workflow.policyInForce else {
             return """
             Merge policy: the owner hasn't chosen one yet (merge_policy in workflow.md). Ask them once, early, with \
             ask_user: a short question on how they want merges handled, with the three options (\(options)) and your \
@@ -1472,10 +1520,26 @@ public enum LeadPrompts {
 
         \(WorkerBrief.render(task))
 
+        \(contractVersionRule(task.contractRevision))
+
         \(guideSection(guide, base: workflow.base))\(securitySection(security))\(reportSection(report))
 
         \(notesSection(notes))
         """
+    }
+
+    /// The verifier's word on its contract's version: the lead may amend it during the audit (see `contractAmended`).
+    static func contractVersionRule(_ version: Int) -> String {
+        "This is contract v\(version). If the lead amends it while you audit, the change comes as a message from the lead naming the new "
+            + "version: judge the branch against the newest, and give the version you judged as contract_version in submit_audit."
+    }
+
+    /// What a verifier at work is sent when update_task changes its task's contract (`LeadToolset.sendContractChange`):
+    /// the new version, and what changed since the version it has.
+    public static func contractAmended(slug: String, from old: Int, to new: Int, changes: String) -> String {
+        "The lead amended agent/\(slug)'s contract while you audit: it's now contract v\(new) (you had v\(old)). What changed:\n\n"
+            + (changes.isEmpty ? "(nothing in the text: the version only)" : changes)
+            + "\n\nJudge the branch against v\(new): what it accepts is in scope, what it adds is checked. Give contract_version: \(new) in submit_audit."
     }
 
     static let guideHeading = "## The project's REVIEW.md"

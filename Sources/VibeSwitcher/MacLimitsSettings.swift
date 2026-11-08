@@ -21,6 +21,9 @@ final class MacLimitsEditor: ObservableObject {
     static let usageLimitsChanged = Notification.Name("VibeSwitcher.MacLimits.usageLimitsChanged")
     @Published private(set) var problem: String?
     private let file: URL
+    /// The memory holds as the file has them (no control here: kept as they are on each save).
+    private var memoryPressure: String?
+    private var swapOutRate: Double?
     private var loading = false
 
     init(file: URL = MacLimits.file) {
@@ -30,16 +33,20 @@ final class MacLimitsEditor: ObservableObject {
         loadThreshold = limits.loadThreshold
         heavySlots = limits.heavySlots
         ignoreUsageLimits = limits.ignoreUsageLimits
+        memoryPressure = limits.memoryPressure
+        swapOutRate = limits.swapOutRate
     }
 
     /// The limits as the leads read them (a value out of range as it's kept).
     var limits: MacLimits { MacLimits(maxSessions: maxSessions, loadThreshold: loadThreshold, heavySlots: heavySlots,
-                                     ignoreUsageLimits: ignoreUsageLimits) }
+                                     ignoreUsageLimits: ignoreUsageLimits, memoryPressure: memoryPressure, swapOutRate: swapOutRate) }
 
     /// The file as it is now.
     func reload() {
         let limits = MacLimits.load(from: file)
         loading = true
+        memoryPressure = limits.memoryPressure
+        swapOutRate = limits.swapOutRate
         maxSessions = limits.maxSessions
         loadThreshold = limits.loadThreshold
         heavySlots = limits.heavySlots

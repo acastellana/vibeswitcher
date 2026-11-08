@@ -243,6 +243,7 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(starved.hasSuffix("That freeze looks like starvation (the Mac loaded or paging), not the app's work: no task for it; the reports have the full stacks."),
                 "\(starved)")
         #expect(!starved.contains("into a task"))
+        #expect(!SteerMessage(text: starved, from: .system(AppHealth.sender), agentPid: 1).wakesLead)
         noSecrets(starved)
 
         // The same frames doing real work two hours on: told as before, not counted as a repeat of the starved one.
@@ -257,6 +258,7 @@ struct AppHealthTests: LeadTeamFixture {
                               + "(100% of its sample inside the stall) — main thread's sample: 2600 samples on 235 top-of-stack PCs"), "\(work)")
         #expect(work.contains(": real work; 1-minute load 23.4 on 10 cores"))
         #expect(!work.contains("likely starvation"))
+        #expect(SteerMessage(text: work, from: .system(AppHealth.sender), agentPid: 1).wakesLead)
         #expect(work.hasSuffix("Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks."), "\(work)")
 
         // Both in one digest: each told, the task line says the starved one needs none.
@@ -370,7 +372,7 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(watch.days[AppHealth.Watch.day(start)]?.hangs == 3)
     }
 
-    @Test func aRepeatWithin24HoursIsCountedNotSent() throws {
+    @Test func aRepeatWithin24HoursIsQueuedWithoutWaking() throws {
         let folders = try folders()
         var watch = AppHealth.Watch()
         try writeHang("hang-20261025-140210", in: folders)
@@ -378,12 +380,15 @@ struct AppHealthTests: LeadTeamFixture {
         watch.look(now: start.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
         #expect(watch.pending.count == 1)
         watch.pending = []
-        // The same top frames two hours on: counted against the digest told, no new one.
+        // The same top frames two hours on: an FYI, also counted in the daily trend.
         let later = start.addingTimeInterval(2 * 3600)
         try writeHang("hang-20261025-160210", in: folders)
         watch.saw(hangs: folders.hangNames(), crashes: [], now: later)
         watch.look(now: later.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
-        #expect(watch.pending.isEmpty)
+        let repeated = try #require(watch.pending.first)
+        #expect(!SteerMessage(text: repeated, from: .system(AppHealth.sender), agentPid: 1).wakesLead)
+        #expect(repeated.contains("Seen again, already reported"))
+        watch.pending = []
         let key = "hang " + (folders.hang("hang-20261025-140210").signature ?? "")
         #expect(watch.told[key]?.repeats == 1)
         #expect(watch.told[key]?.first == "hang-20261025-140210")
@@ -397,15 +402,16 @@ struct AppHealthTests: LeadTeamFixture {
         let digest = try #require(watch.pending.first)
         #expect(digest.contains("hang-20261025-170100:"))
         #expect(!digest.contains("hang-20261025-170000:"))
-        #expect(digest.contains("Seen again, told within 24 h, so only counted"))
+        #expect(digest.contains("Seen again, already reported, so only counted"))
         #expect(watch.told[key]?.repeats == 2)
-        // Past 24 h it's news again.
+        // A known freeze still needs no new judgement after 24 h.
         watch.pending = []
         let nextDay = start.addingTimeInterval(25 * 3600)
         try writeHang("hang-20261026-150210", in: folders)
         watch.saw(hangs: folders.hangNames(), crashes: [], now: nextDay)
         watch.look(now: nextDay.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
-        #expect(watch.pending.contains { $0.contains("hang-20261026-150210:") })
+        #expect(watch.pending.contains { $0.contains("Seen again, already reported") })
+        #expect(watch.pending.allSatisfy { !SteerMessage(text: $0, from: .system(AppHealth.sender), agentPid: 1).wakesLead })
     }
 
     /// A `sample` report the size and shape of the biggest real ones (hang-20261028-070725's: 1.9 MB, 9401 lines, its
@@ -585,12 +591,57 @@ struct AppHealthTests: LeadTeamFixture {
         let digest = try #require(watch.pending.first)
         #expect(digest.contains("Error lines in app.log within 10 min, by kind: composer: couldn't ×2, lead: couldn't ×1"), "\(digest)")
         noSecrets(digest)
-        // The same kinds within 24 h: counted, no message.
+        #expect(AppHealth.wakes(digest))
+        // Known kinds remain visible without waking the lead again within the repeat window.
         watch.pending = []
         watch.saw(lines: ["15:00:00.000 composer: couldn't save the outbox"], now: start.addingTimeInterval(3600))
         watch.look(now: start.addingTimeInterval(3600 + AppHealth.window), folders: folders, memory: nil)
-        #expect(watch.pending.isEmpty)
+        #expect(watch.pending.count == 1)
+        #expect(watch.pending.first.map(AppHealth.wakes) == false)
+        #expect(watch.pending.first?.contains("error kind composer: couldn't ×1") == true)
         #expect(watch.days[AppHealth.Watch.day(start)]?.errors == 4)
+        watch.pending = []
+        watch.saw(lines: ["16:00:00.000 composer: couldn't save the outbox", "16:00:01.000 spawn failed: no such folder"],
+                  now: start.addingTimeInterval(7200))
+        watch.look(now: start.addingTimeInterval(7200 + AppHealth.window), folders: folders, memory: nil)
+        let mixed = try #require(watch.pending.first)
+        #expect(AppHealth.wakes(mixed))
+        #expect(mixed.contains("by kind: spawn failed: failed ×1"))
+        #expect(mixed.contains("error kind composer: couldn't ×1"))
+        watch.pending = []
+        let next = start.addingTimeInterval(AppHealth.repeatWithin + AppHealth.window)
+        watch.saw(lines: ["16:00:00.000 composer: couldn't save the outbox"], now: next)
+        watch.look(now: next.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
+        #expect(watch.pending.contains(where: AppHealth.wakes))
+    }
+
+    @Test func repeatedCrashesStayFyiUntilTheRepeatWindowExpires() throws {
+        let folders = try folders()
+        var watch = AppHealth.Watch()
+        for (index, offset) in [0.0, 3600, AppHealth.repeatWithin + AppHealth.window].enumerated() {
+            let name = "vibeswitcher-host-2026-10-25-14021\(index).ips"
+            try Self.ips().write(to: folders.reports.appendingPathComponent(name), atomically: true, encoding: .utf8)
+            let now = start.addingTimeInterval(offset)
+            watch.pending = []
+            watch.saw(hangs: [], crashes: folders.crashFiles(), now: now)
+            watch.look(now: now.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
+            let digest = try #require(watch.pending.first)
+            #expect(AppHealth.wakes(digest) == (index != 1))
+            if index == 1 {
+                #expect(digest.contains("a crash like vibeswitcher-host-2026-10-25-140210.ips"))
+                #expect(watch.days[AppHealth.Watch.day(start)]?.crashes == 2)
+            }
+        }
+    }
+
+    @Test func freezeSignaturesExpireWithTheTrendHistory() {
+        var watch = AppHealth.Watch()
+        let at = start.timeIntervalSince1970
+        watch.told["hang recent"] = .init(at: at - 6 * 86_400, repeats: 1, first: "recent")
+        watch.told["hang old"] = .init(at: at - 8 * 86_400 - 1, repeats: 1, first: "old")
+        watch.told["crash old"] = .init(at: at - 3 * 86_400, repeats: 1, first: "crash")
+        watch.prune(now: start)
+        #expect(Set(watch.told.keys) == ["hang recent"])
     }
 
     // MARK: The daily trend

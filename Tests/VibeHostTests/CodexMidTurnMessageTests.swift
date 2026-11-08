@@ -220,7 +220,7 @@ struct CodexMidTurnHostRunTests {
     done
     """#
 
-    @Test func aWorkingFakeCodexGetsTheLeadsMessageInItsComposerAndTakesItIntoItsTurn() throws {
+    @Test func aWorkingFakeCodexGetsTheLeadsMessageInItsComposerAndTakesItIntoItsTurn() async throws {
         let dir = temp.url("codex-midturn")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let script = dir.appendingPathComponent("codex.sh").path
@@ -229,17 +229,17 @@ struct CodexMidTurnHostRunTests {
 
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try client.spawn("exec /bin/bash -c \"exec -a codex /bin/bash '\(script)' '\(dir.path)'\"", cwd: dir.path)
+        let session = try await client.spawn("exec /bin/bash -c \"exec -a codex /bin/bash '\(script)' '\(dir.path)'\"", cwd: dir.path)
         let id = session.id
         defer { _ = client.send(.kill(id: id)) }
         let screen = { HostCall.styledScreen(id, socket: host.socket, appKey: host.appKey) }
         // Drawn: working, its composer empty (its placeholder faint, so not typed text).
-        #expect(eventually { screen().map { $0.text.contains("Working") && LeadDelivery.box(in: $0) == .empty } ?? false },
+        #expect(await eventually { screen().map { $0.text.contains("Working") && LeadDelivery.box(in: $0) == .empty } ?? false },
                 "screen:\n\(screen()?.text ?? "none")")
 
         // The agent on its terminal, as the tool server finds it: Codex.
         var found: LeadAgent?
-        #expect(eventually {
+        #expect(await eventually {
             found = ProcessTable.trySnapshot().flatMap { LeadAgent.running(on: session.tty, session: id.uuidString, in: $0) }
             return found?.agent == .codex
         }, "found \(String(describing: found)) on \(session.tty)")
@@ -263,7 +263,8 @@ struct CodexMidTurnHostRunTests {
         let prompt = LeadDelivery.typed(text, from: .lead("lead of wallet-manager"))
         var cleared = 0
         var waited = false
-        let delivered = try LeadDelivery.deliver(
+        // The delivery blocks (its pauses, its host calls): on a thread of its own, not the cooperative pool.
+        let delivered = try await offPool { try LeadDelivery.deliver(
             text, from: .lead("lead of wallet-manager"), to: agent, activity: activity, styledScreen: screen,
             typeInto: { (try? HostCall.type(ComposerText.writes($0, bracketed: true), into: id, socket: host.socket, appKey: host.appKey)) != nil },
             clearDraft: true, clear: { cleared += 1; return true },
@@ -274,18 +275,19 @@ struct CodexMidTurnHostRunTests {
             pause: {
                 guard !waited else { return }
                 waited = true
-                _ = eventually { log("taken.log").contains(prompt) }
+                let deadline = Date().addingTimeInterval(hangGuard)
+                while !log("taken.log").contains(prompt), Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
             },
-            root: dir.appendingPathComponent("inbox"))
+            root: dir.appendingPathComponent("inbox")) }
         try #require(delivered == .typedWhileWorking)
         // It arrived in its composer, and Enter handed it to the running turn: once, nothing left in the inbox, and
         // its turn never interrupted (no ^C, no Esc).
-        #expect(eventually { log("taken.log") == prompt + "\n" }, "taken: \(log("taken.log"))")
+        #expect(await eventually { log("taken.log") == prompt + "\n" }, "taken: \(log("taken.log"))")
         #expect(log("composer.log") == prompt + "\n")
         #expect(log("interrupts.log").isEmpty && cleared == 0)
         #expect(SteerInbox.pending(tty: agent.tty, root: dir.appendingPathComponent("inbox")).isEmpty)
         // Still working, its composer empty again, the message in its transcript (wrapped at 80 columns).
-        #expect(eventually { screen().map { $0.text.contains("Working") && LeadDelivery.box(in: $0) == .empty && $0.text.contains("Yes: merge it into") } ?? false },
+        #expect(await eventually { screen().map { $0.text.contains("Working") && LeadDelivery.box(in: $0) == .empty && $0.text.contains("Yes: merge it into") } ?? false },
                 "screen:\n\(screen()?.text ?? "none")")
     }
 }

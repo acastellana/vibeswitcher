@@ -42,8 +42,9 @@ extension MergeRate {
 }
 
 extension Freezes {
-    public static func make(count: Int, hours: Double, partial: Bool, perDay: [String: Int], byLoad: [LoadBucket]?, unsampled: Int) -> Self {
-        Self(count: count, hours: hours, partial: partial, perDay: perDay, byLoad: byLoad, unsampled: unsampled)
+    public static func make(count: Int, hours: Double, partial: Bool, perDay: [String: Int], byLoad: [LoadBucket]?, unsampled: Int,
+                            days: [Day] = []) -> Self {
+        Self(count: count, hours: hours, partial: partial, perDay: perDay, byLoad: byLoad, unsampled: unsampled, days: days)
     }
 }
 

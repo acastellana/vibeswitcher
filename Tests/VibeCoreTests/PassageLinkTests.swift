@@ -231,7 +231,7 @@ struct PassageLinkTests {
     }
 
     /// A result taken while passage send still runs (the listener heard it) is kept when the send returns.
-    @Test func resultsTakenDuringASendAreKept() throws {
+    @Test func resultsTakenDuringASendAreKept() async throws {
         let fake = try FakePassage(scratch)
         try Data().write(to: fake.file("send-hold"))
         let courier = courier(fake, log: Log())
@@ -243,11 +243,11 @@ struct PassageLinkTests {
             outcome = courier.send(request)
             done.signal()
         }
-        #expect(eventually { FileManager.default.fileExists(atPath: fake.file("send-started").path) })
+        #expect(await eventually { FileManager.default.fileExists(atPath: fake.file("send-started").path) })
         try fake.receive(Self.result(request, .rejected, sequence: 1))
         #expect(courier.poll().map(\.status) == [.rejected])
         try Data().write(to: fake.file("send-go"))
-        #expect(done.wait(timeout: .now() + hangGuard) == .success)
+        #expect(await offPool { done.wait(timeout: .now() + hangGuard) } == .success)
         #expect(outcome == .passage(.sent))
         #expect(courier.record(request.id)?.results.map(\.status) == [.rejected])
         #expect(courier.record(request.id)?.state == .sent)
@@ -458,18 +458,18 @@ struct PassageLinkTests {
 
     /// A line `passage listen` prints is heard as it's printed, while passage keeps running: not once 4 KiB have piled
     /// up or it ends (FileHandle's read(upToCount:) waits on a pipe for both; found by scripts/e2e/loop-passage).
-    @Test func aListenLineIsHeardWhilePassageRuns() throws {
+    @Test func aListenLineIsHeardWhilePassageRuns() async throws {
         let fake = try FakePassage(scratch)
         try "\(Self.peer)\twallet-result-x.json\t/made/up/path\n".write(to: fake.file("listen-line"), atomically: true, encoding: .utf8)
         let link = try #require(PassageLink(command: fake.command, walletPeer: Self.peer, inboxFolder: fake.inbox))
         let heard = DispatchSemaphore(value: 0)
         let listener = try link.listen { heard.signal() }
         defer { listener.stop() }
-        #expect(heard.wait(timeout: .now() + hangGuard) == .success)
+        #expect(await offPool { heard.wait(timeout: .now() + hangGuard) } == .success)
         #expect(listener.isRunning)
     }
 
-    @Test func passageListenRunsOnlyWhileARequestIsOutstanding() throws {
+    @Test func passageListenRunsOnlyWhileARequestIsOutstanding() async throws {
         let fake = try FakePassage(scratch)
         let log = Log()
         let courier = courier(fake, log: log)
@@ -481,7 +481,7 @@ struct PassageLinkTests {
         #expect(courier.send(request) == .passage(.sent))
         let pid = try #require(courier.listenerPID)
         // The script it started is the one with that pid.
-        #expect(eventually { fake.text("listen.pid") != nil })
+        #expect(await eventually { fake.text("listen.pid") != nil })
         #expect(fake.text("listen.pid")?.trimmingCharacters(in: .whitespacesAndNewlines) == "\(pid)")
         #expect(kill(pid, 0) == 0)
         // A final result: nothing outstanding, and it's stopped by its pid (TERM), reaped.
@@ -495,7 +495,7 @@ struct PassageLinkTests {
     }
 
     /// Passage.app's binary runs as its CLI only with `cli` first: send, inbox and listen all put it there.
-    @Test func passageAppsBinaryIsRunWithCliFirst() throws {
+    @Test func passageAppsBinaryIsRunWithCliFirst() async throws {
         let fake = try FakePassage(scratch, app: true)
         #expect(fake.command == PassageCommand(executable: fake.executable, leading: ["cli"]))
         let log = Log()
@@ -504,7 +504,7 @@ struct PassageLinkTests {
         let request = Self.request()
         #expect(courier.send(request) == .passage(.sent))
         let pid = try #require(courier.listenerPID)
-        #expect(eventually { fake.text("listen.pid") != nil })
+        #expect(await eventually { fake.text("listen.pid") != nil })
         #expect(fake.text("listen.pid")?.trimmingCharacters(in: .whitespacesAndNewlines) == "\(pid)")
         try fake.receive(Self.result(request, .submitted, sequence: 1))
         #expect(courier.poll().count == 1)

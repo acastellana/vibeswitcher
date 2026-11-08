@@ -20,7 +20,7 @@ extension LeadAdvanceTests {
 
     /// An audit task whose worker (idle between turns when `idle`) reported done, its audit started by the loop: the
     /// worker, the head, and the verifiers spawned by the time each session was killed.
-    func releasedAudit(idle: Bool, _ root: String, _ runtime: FakeRuntime, _ advancing: Advancing, _ lead: LeadToolset)
+    func releasedAudit(idle: Bool, _ root: String, _ runtime: FakeRuntime, _ advancing: Advancing, _ lead: LeadToolset) async
         throws -> (worker: String, head: String, kills: () -> [String: [String]]) {
         let kills = NSLock()
         var seen: [String: [String]] = [:]
@@ -32,12 +32,12 @@ extension LeadAdvanceTests {
         }
         runtime.calls.unlock()
         _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "review": "audit"])
-        #expect(advancing.until { task("add-b", root)?.status == .running })
+        #expect(await advancing.until { task("add-b", root)?.status == .running })
         let worker = try #require(task("add-b", root)?.worker)
         if idle { setStatus(worker, LeadActivity.idle(background: nil).text, runtime) }
         try work("add-b", file: "b.txt", root: root, runtime)
         let head = head("agent/add-b", root)
-        #expect(advancing.until { vault.current(.verifier, root: root, task: "add-b")?.auditing == head && task("add-b", root)?.verifier != nil })
+        #expect(await advancing.until { vault.current(.verifier, root: root, task: "add-b")?.auditing == head && task("add-b", root)?.verifier != nil })
         return (worker, head, {
             kills.lock()
             defer { kills.unlock() }
@@ -45,20 +45,20 @@ extension LeadAdvanceTests {
         })
     }
 
-    @Test func anIdleWorkerIsReleasedOnceItsAuditsVerifierIsUpAndNoOtherTasksWorker() throws {
+    @Test func anIdleWorkerIsReleasedOnceItsAuditsVerifierIsUpAndNoOtherTasksWorker() async throws {
         let (root, runtime, lead) = try team()
         let advancing = Advancing(lead)
         defer { advancing.stop() }
         // Another task at work, between turns too: never its worker.
         _ = lead.call("add_task", ["title": "Add c", "goal": "c.txt exists", "acceptance": ["test -f c.txt"], "review": "audit"])
-        #expect(advancing.until { task("add-c", root)?.status == .running })
+        #expect(await advancing.until { task("add-c", root)?.status == .running })
         let other = try #require(task("add-c", root)?.worker)
         setStatus(other, LeadActivity.idle(background: nil).text, runtime)
-        let (worker, head, kills) = try releasedAudit(idle: true, root, runtime, advancing, lead)
-        #expect(advancing.until { killed(worker, runtime) && task("add-b", root)?.released == worker })
+        let (worker, head, kills) = try await releasedAudit(idle: true, root, runtime, advancing, lead)
+        #expect(await advancing.until { killed(worker, runtime) && task("add-b", root)?.released == worker })
         // Ended after its verifier was spawned, never before.
         #expect(kills()[worker] == ["Verifier: Add b"], "\(kills())")
-        advancing.settle()
+        await advancing.settle()
         #expect(!killed(other, runtime))
         let after = try #require(task("add-b", root))
         #expect(after.stopped == worker && after.status == .review && after.worktree != nil)
@@ -78,22 +78,22 @@ extension LeadAdvanceTests {
 
     /// The worker had only just reported: mid-turn at the audit's start, or on a prompt, it's left; once its turn ends
     /// (the app's witness nudges the loop), it's released.
-    @Test func aWorkerMidTurnAtTheAuditsStartIsReleasedOnlyOnceItsTurnEnds() throws {
+    @Test func aWorkerMidTurnAtTheAuditsStartIsReleasedOnlyOnceItsTurnEnds() async throws {
         let (root, runtime, lead) = try team()
         let advancing = Advancing(lead)
         defer { advancing.stop() }
-        let (worker, _, kills) = try releasedAudit(idle: false, root, runtime, advancing, lead)
-        advancing.settle()
+        let (worker, _, kills) = try await releasedAudit(idle: false, root, runtime, advancing, lead)
+        await advancing.settle()
         #expect(!killed(worker, runtime) && task("add-b", root)?.released == nil)
         // Waiting on its background task, or on a prompt: still mid-turn.
         setStatus(worker, LeadActivity.idle(background: "swift test").text, runtime)
-        advancing.settle()
+        await advancing.settle()
         #expect(!killed(worker, runtime))
         runtime.calls.lock()
         runtime.statuses[worker] = LeadActivity.idle(background: nil).text
         runtime.waiting[worker] = PendingPrompt(text: "Run: ls?")
         runtime.calls.unlock()
-        advancing.settle()
+        await advancing.settle()
         #expect(!killed(worker, runtime))
         // Its turn ends: the witness sees it between turns and nudges the loop.
         runtime.calls.lock()
@@ -103,7 +103,7 @@ extension LeadAdvanceTests {
         let idle = LeadWitness.Seen(live: true, status: .done, activity: .idle(background: nil))
         #expect(LeadWitness.releasableForAdvance(board: board, seen: [worker: idle]) == [worker])
         LeadAdvance.nudge(root: root)
-        #expect(advancing.until { killed(worker, runtime) && task("add-b", root)?.released == worker })
+        #expect(await advancing.until { killed(worker, runtime) && task("add-b", root)?.released == worker })
         #expect(kills()[worker] == ["Verifier: Add b"])
         #expect(reports(runtime).contains { $0.contains("Released add-b's worker, idle since its done report") }, "\(reports(runtime))")
         board = BoardStore(root: root).load()
@@ -112,12 +112,12 @@ extension LeadAdvanceTests {
 
     /// The lead's message goes in between the release's look at the idle worker and its end: the worker's new turn
     /// hasn't begun (its hooks still say finished), but it isn't ended, then or at a later pass.
-    @Test func aMessageBetweenTheReleasesLookAndItsEndKeepsTheWorker() throws {
+    @Test func aMessageBetweenTheReleasesLookAndItsEndKeepsTheWorker() async throws {
         let (root, runtime, lead) = try team()
         let advancing = Advancing(lead)
         defer { advancing.stop() }
         _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "review": "audit"])
-        #expect(advancing.until { task("add-b", root)?.status == .running })
+        #expect(await advancing.until { task("add-b", root)?.status == .running })
         let worker = try #require(task("add-b", root)?.worker)
         setStatus(worker, LeadActivity.idle(background: nil).text, runtime)
         // The first look at the sessions once the verifier is on the board is the release's: the message goes in then.
@@ -143,18 +143,18 @@ extension LeadAdvanceTests {
         sent.unlock()
         let result = try #require(reply, "the lead's message never went in: the release's look at the sessions never came")
         #expect(!result.isError, "\(result.text)")
-        #expect(advancing.until { reports(runtime).contains { $0.contains("Started the audit of add-b") } })
-        advancing.settle()
+        #expect(await advancing.until { reports(runtime).contains { $0.contains("Started the audit of add-b") } })
+        await advancing.settle()
         #expect(!killed(worker, runtime) && task("add-b", root)?.released == nil)
         #expect(toWorker("add-b", root, runtime).contains { $0.contains("rename b.txt") })
     }
 
-    @Test func openImportantFindingsAfterAReleaseGoToAFreshWorkerInTheSameWorktree() throws {
+    @Test func openImportantFindingsAfterAReleaseGoToAFreshWorkerInTheSameWorktree() async throws {
         let (root, runtime, lead) = try team()
         let advancing = Advancing(lead)
         defer { advancing.stop() }
-        let (worker, head, _) = try releasedAudit(idle: true, root, runtime, advancing, lead)
-        #expect(advancing.until { killed(worker, runtime) && task("add-b", root)?.released == worker })
+        let (worker, head, _) = try await releasedAudit(idle: true, root, runtime, advancing, lead)
+        #expect(await advancing.until { killed(worker, runtime) && task("add-b", root)?.released == worker })
         // No alarm for its end: in review, and failed on the verdict alike.
         let gone = LeadWitness.Seen(live: false, exit: 143, cause: "killed by SIGTERM")
         var board = BoardStore(root: root).load()
@@ -166,7 +166,7 @@ extension LeadAdvanceTests {
         let verdict = try seat("verify-add-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "one problem",
                                                                                 "tests": "passed", "findings": [finding]])
         #expect(!verdict.isError, "\(verdict.text)")
-        #expect(advancing.until { task("add-b", root)?.worker != worker && toWorker("add-b", root, runtime).contains { $0.contains("F1: ") }
+        #expect(await advancing.until { task("add-b", root)?.worker != worker && toWorker("add-b", root, runtime).contains { $0.contains("F1: ") }
             && reports(runtime).contains { $0.contains("Sent add-b's worker the open Important findings add-b:F1") } })
         let fresh = try #require(task("add-b", root))
         #expect(fresh.status == .running && fresh.released == nil && fresh.stopped == nil && fresh.autoSentBack == head)
@@ -183,19 +183,19 @@ extension LeadAdvanceTests {
         #expect(sent.contains("at \(head.prefix(8))") && sent.contains("git log main..HEAD") && sent.contains("Its done report: added b.txt"), "\(sent)")
         #expect(sent.contains("contract wants b") && sent.contains("answer_findings"), "\(sent)")
         #expect(reports(runtime).contains { $0.contains("(in a new worker: its last one was released during the audit)") }, "\(reports(runtime))")
-        advancing.settle()
+        await advancing.settle()
         #expect(toWorker("add-b", root, runtime).filter { $0.contains("F1: ") }.count == 1)
     }
 
-    @Test func aCleanVerdictAfterAReleaseMergesWithNoWorker() throws {
+    @Test func aCleanVerdictAfterAReleaseMergesWithNoWorker() async throws {
         let (root, runtime, lead) = try team()
         let advancing = Advancing(lead)
         defer { advancing.stop() }
-        let (worker, _, _) = try releasedAudit(idle: true, root, runtime, advancing, lead)
-        #expect(advancing.until { killed(worker, runtime) && task("add-b", root)?.released == worker })
+        let (worker, _, _) = try await releasedAudit(idle: true, root, runtime, advancing, lead)
+        #expect(await advancing.until { killed(worker, runtime) && task("add-b", root)?.released == worker })
         let verdict = try seat("verify-add-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "checked", "tests": "passed"])
         #expect(!verdict.isError, "\(verdict.text)")
-        #expect(advancing.until { task("add-b", root)?.status == .done && reports(runtime).contains { $0.contains("Merged add-b") } })
+        #expect(await advancing.until { task("add-b", root)?.status == .done && reports(runtime).contains { $0.contains("Merged add-b") } })
         #expect(Git.run(["show", "main:b.txt"], in: root).output == "bee")
         #expect(spawnedLabels(runtime).filter { $0.hasPrefix("Worker:") }.count == 1, "\(spawnedLabels(runtime))")
         // Its audit is over: the board says nothing of a release any more.

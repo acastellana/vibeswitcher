@@ -71,27 +71,22 @@ struct ChatSyncTests {
         #expect(card.position == nil)
     }
 
-    /// A question's card is up within 1.2 s of the terminal drawing it, on the window's 1 s heartbeat: the read that
-    /// first sees it isn't taken (two reads must agree), and the confirm read it asks for is (`ChatSync.confirmAfter`),
-    /// not the next heartbeat's a second later. The heartbeat's first read comes 0.3 s after the terminal drew it.
+    /// A question's card is up within one heartbeat of the terminal drawing it (the window's 1 s timer; on a calm Mac
+    /// 0.3 s + `confirmAfter`, under 1.2 s): the read that first sees it isn't taken (two reads must agree), and the
+    /// confirm read it asks for is (`ChatSync.confirmAfter`), not the next heartbeat's a second later. Counted in
+    /// heartbeats, not seconds: on a loaded Mac the wall clock between the draw and that confirm read ran 1.27, 2.4 and
+    /// 4 s in three merges' runs (2026-11-07), the card still up on the one heartbeat.
     @Test func aQuestionsCardIsUpWithin1Point2SOfTheTerminalDrawingIt() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
         h.tell(["op": "ask", "questions": [Self.fruit]])
-        try await h.paneShows { $0.contains("Which fruit?") }
-        let drawn = Date()
-        let heartbeat = Task { @MainActor in
-            try await Task.sleep(nanoseconds: 300_000_000)
-            while !Task.isCancelled {
-                h.tickNow()
-                try await Task.sleep(nanoseconds: 1_000_000_000)
-            }
-        }
-        defer { heartbeat.cancel() }
-        #expect(await until(timeout: 30) { h.chat.menu != nil })
-        let took = Date().timeIntervalSince(drawn)
-        #expect(took < 1.2, "the card took \(took) s")
+        // All of it drawn, down to its footer: a read of half a redraw rightly waits for the next heartbeat.
+        try await h.paneShows { $0.contains("Which fruit?") && $0.contains("Esc to cancel") }
+        await h.tick()   // the one heartbeat: its read, then the confirm read that asks for
+        #expect(h.chat.menu != nil, "the card waited for the next heartbeat")
         #expect(h.card?.question == "Which fruit?")
+        // The heartbeat's first read 0.3 s after the draw, the confirm read this long after it: under 1.2 s.
+        #expect((h.sync.confirmAfter ?? .infinity) < 0.9, "confirmAfter: \(String(describing: h.sync.confirmAfter))")
     }
 
     @Test func aClickInChatMovesTheTerminalAndTheCardKeepsUp() async throws {
@@ -1001,13 +996,15 @@ enum HarnessError: Error { case timedOut }
 /// something else on it, the app's terminal, the dictation's reads and the wait itself stood still meanwhile. On
 /// 2026-11-05 a full suite's ClaudeDictationTests timed out showing "Voice: processing…" long gone in the fake agent:
 /// another main-actor test held the main thread (BenchDefaultsTests waiting there for a new build's first launch).
+/// Measured on the time the Mac was awake (as `until` is): a Mac asleep between two looks isn't a held main thread.
 @MainActor
 final class MainThreadHeld {
-    private var last: Date?
+    private var last: TimeInterval?
     private(set) var longest: TimeInterval = 0
 
-    func look(now: Date = Date()) {
-        if let last { longest = max(longest, now.timeIntervalSince(last)) }
+    /// `now`: seconds awake (`MacTime.awake`).
+    func look(now: TimeInterval = MacTime.real.awake()) {
+        if let last { longest = max(longest, now - last) }
         last = now
     }
 

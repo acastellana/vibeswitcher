@@ -337,9 +337,9 @@ struct LeadReceiptTests: LeadTeamFixture {
         // Since the task: input 8000 of which 5200 cached; output 650.
         #expect(codex.input == 2800 && codex.cacheRead == 5200 && codex.output == 650 && codex.cacheWrite == 0, "\(codex)")
         #expect(codex.total == 8650 && codex.codex == 8650 && codex.sessions == 1 && codex.models == ["gpt-6.1-sol"])
-        // Codex has no price here: its tokens are left out of the estimate, never priced wrong, and say so.
-        #expect(codex.cost == 0 && codex.unpriced == nil)
-        #expect(codex.text.hasSuffix("; gpt-6.1-sol; 8.7k of them Codex's, not in the cost)"), "\(codex.text)")
+        // Priced from LeadPrices.codex (gpt-6.1-sol: $2 in, $0.10 cached, $10 out), not $0: 2800×2 + 5200×0.10 + 650×10.
+        #expect(abs((codex.cost ?? -1) - 0.01262) < 1e-9 && codex.unpriced == nil, "\(codex)")
+        #expect(codex.text.hasSuffix("; gpt-6.1-sol; 8.7k of them Codex's)"), "\(codex.text)")
 
         // With the task's Claude transcripts too: one worker, both summed.
         try fixtures(root: root, slug: "change", start: start)
@@ -347,8 +347,8 @@ struct LeadReceiptTests: LeadTeamFixture {
         let worker = try #require(usage.worker)
         #expect(worker.input == 16 + 2800 && worker.output == 3500 + 650 && worker.cacheRead == 180_000 + 5200 && worker.sessions == 3)
         #expect(worker.codex == 8650 && worker.models == ["claude-opus-5-5", "gpt-6.1-sol"])
-        // The receipt's cost stays its Claude sessions' estimate, as before Codex tokens were read: not unknown.
-        #expect(abs((worker.cost ?? -1) - 0.127064) < 1e-9 && worker.unpriced == nil)
+        // The receipt's cost is its Claude sessions' estimate plus its Codex session's.
+        #expect(abs((worker.cost ?? -1) - (0.127064 + 0.01262)) < 1e-9 && worker.unpriced == nil)
         #expect(usage.verifier?.codex == nil)
         // Without Codex's home, as before.
         #expect(LeadReceipts.usage(root: root, slug: "change", since: start, home: home).worker?.codex == nil)
@@ -367,6 +367,41 @@ struct LeadReceiptTests: LeadTeamFixture {
         let receipt = LeadReceipt(task, ending: .merged, questions: [], usage: lead.receiptUsage(task), now: start + 30)
         let saved = String(decoding: try JSONEncoder().encode(receipt), as: UTF8.self)
         #expect(saved.contains("\"codex\":8650") && !saved.contains("SECRET") && !saved.contains(worktree))
+        // Its line shows the Codex cost in its estimate, and the Codex prices' date.
+        #expect(receipt.codexPricesAsOf == LeadPrices.codexAsOf)
+        #expect(receipt.line.contains("Codex's of \(LeadPrices.codexAsOf)") && receipt.line.contains("est. $0.47"), "\(receipt.line)")
+    }
+
+    @Test func codexTokensArePricedFromTheTableAndAModelWithNoPriceLeavesTheCostUnknown() throws {
+        let root = temp.url("repo").path
+        let worktree = Worktrees.path(root: root, slug: "change")
+        let codexHome = temp.url("codex").path
+        let start = Date().timeIntervalSince1970
+        try writeRollout("a", Self.rollout(session: "s-a", cwd: worktree, model: "gpt-6-astra", totals: [(start + 10, 1_000_000, 400_000, 100_000)]),
+                         codexHome: codexHome, at: start)
+        let astra = try #require(LeadReceipts.codex(root: root, slug: "change", since: start, codexHome: codexHome))
+        // 600k uncached × $10 + 400k cached × $1 + 100k out × $50 = $6 + $0.40 + $5.
+        #expect(abs((astra.cost ?? -1) - 11.4) < 1e-9 && astra.unpriced == nil, "\(astra)")
+
+        let other = temp.url("codex2").path
+        try writeRollout("b", Self.rollout(session: "s-b", cwd: worktree, model: "gpt-daybreak-blue-latest", totals: [(start + 10, 1000, 0, 100)]),
+                         codexHome: other, at: start)
+        let unknown = try #require(LeadReceipts.codex(root: root, slug: "change", since: start, codexHome: other))
+        #expect(unknown.cost == nil && unknown.unpriced == ["gpt-daybreak-blue-latest"])
+        let receipt = LeadReceipt(ending: .merged, startedAt: start, endedAt: start + 60, worked: 60, worker: unknown, verifier: nil)
+        let line = receipt.line
+        #expect(receipt.cost == nil)
+        #expect(line.contains("cost unknown (no price for gpt-daybreak-blue-latest)"), "\(line)")
+
+        // The table in one place: names as rollouts give them, with a date suffix too; anything else has no price.
+        #expect(LeadPrices.codexPrice("GPT-6.1-Sol") == LeadPrices.codex["gpt-6.1-sol"])
+        #expect(LeadPrices.codexPrice("gpt-6-astra-2026-09-30") == LeadPrices.codex["gpt-6-astra"])
+        #expect(LeadPrices.codexPrice("claude-opus-5-5") == nil && LeadPrices.price("gpt-6-astra") == nil)
+        // A receipt from before Codex was priced says its Codex tokens aren't in its cost.
+        var old = LeadReceipt(ending: .merged, startedAt: start, endedAt: start + 60, worked: 60, worker: LeadTokens(input: 10, cost: 0, codex: 10), verifier: nil)
+        #expect(old.line.contains("Codex's tokens not in it"), "\(old.line)")
+        old.codexPricesAsOf = "2026-11-08"
+        #expect(old.line.contains("Codex's of 2026-11-08"))
     }
 
     @Test func receiptsFromBeforeCodexTokensDecodeWithNone() throws {
@@ -428,5 +463,39 @@ struct LeadReceiptTests: LeadTeamFixture {
         #expect(receipt.line == "Receipt (merged; cost an estimate at prices of \(LeadPrices.asOf)): 3 h 1 min worked, 5 h wall · "
             + "worker 10 tokens (in 1, out 2, cache read 3, cache write 4; claude-opus-5-5) · est. $1.50 · 2 audit rounds, 1 re-roll, 1 merge rerun · "
             + "9 tests in the merge's run · 1 question to you, 4.0 min waiting · 3 commits abcdef12..12345678; rollback point abcdef12", "\(receipt.line)")
+    }
+
+    /// Each receipt stamps `verifier.sameModel` from the models its worker and verifier were started on
+    /// (`launchedModels`), by family: Opus → Opus is the same model (an audit that wasn't independent), Opus → Fable not.
+    @Test func theVerifierTokensSayWhetherItRanOnTheWorkersModel() throws {
+        func receipt(worker: String?, verifier: String?, answered: [String] = ["claude-opus-5-5"]) -> LeadReceipt {
+            var task = LeadTask(slug: "t", title: "T", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""), status: .done)
+            task.worker = "w"
+            task.verifier = "v"
+            if let worker { task.launched(["w"], on: worker) }
+            if let verifier { task.launched(["v"], on: verifier) }
+            let usage = LeadReceipts.Usage(worker: LeadTokens(output: 1, sessions: 1, models: answered), verifier: LeadTokens(output: 1, sessions: 1, models: answered))
+            return LeadReceipt(task, ending: .merged, questions: [], usage: usage, now: 100)
+        }
+        let opusOpus = receipt(worker: "opus", verifier: "claude-opus-5-5")
+        #expect(opusOpus.verifier?.sameModel == true && opusOpus.worker?.sameModel == nil)
+        #expect(opusOpus.line.contains("on the worker's model"), "\(opusOpus.line)")
+        let opusFable = receipt(worker: "opus", verifier: "fable")
+        #expect(opusFable.verifier?.sameModel == false && !opusFable.line.contains("on the worker's model"))
+        // A worker on Claude's default ("") goes by the model that answered in its transcripts.
+        #expect(receipt(worker: nil, verifier: "opus").verifier?.sameModel == true)
+        #expect(receipt(worker: nil, verifier: "fable").verifier?.sameModel == false)
+        // Neither side known: not said.
+        #expect(receipt(worker: nil, verifier: "fable", answered: []).verifier?.sameModel == nil)
+        // A Codex worker is never the Claude verifier's model.
+        #expect(receipt(worker: "codex:gpt-6.1-sol", verifier: "opus").verifier?.sameModel == false)
+        // It's kept in the board's JSON as verifier.sameModel; receipts from before it decode with none.
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(opusOpus)) as? [String: Any]
+        #expect((json?["verifier"] as? [String: Any])?["sameModel"] as? Bool == true)
+        var old = try #require(json)
+        var verifier = try #require(old["verifier"] as? [String: Any])
+        verifier["sameModel"] = nil
+        old["verifier"] = verifier
+        #expect(try JSONDecoder().decode(LeadReceipt.self, from: JSONSerialization.data(withJSONObject: old)).verifier?.sameModel == nil)
     }
 }

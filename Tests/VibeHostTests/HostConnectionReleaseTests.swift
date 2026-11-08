@@ -7,7 +7,7 @@ import Testing
 /// calls (the app's vault calls, screen reads and typed input, several a second with a few leads) send from their
 /// `onEvent`, which held each connection for good, with the host's whole session list and the reply it captured.
 @Suite struct HostConnectionReleaseTests {
-    @Test func aClosedConnectionLetsGoOfHandlersThatHoldIt() throws {
+    @Test func aClosedConnectionLetsGoOfHandlersThatHoldIt() async throws {
         let host = try TestHost()
         let queue = DispatchQueue(label: "connection-release")
         let answered = DispatchSemaphore(value: 0)
@@ -27,7 +27,7 @@ import Testing
             _ = try connection.send(.hello(protocolVersion: HostProtocol.version, app: "vibeswitcher-mcp"))
             released = connection
         }
-        #expect(answered.wait(timeout: .now() + hangGuard) == .success)
+        #expect(await offPool { answered.wait(timeout: .now() + hangGuard) } == .success)
         queue.sync { released?.close() }
         #expect(queue.sync { released } == nil, "the closed connection is still held by its handlers")
     }

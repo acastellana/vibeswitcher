@@ -5,7 +5,8 @@ import Foundation
 /// of task time was finished work waiting for the lead, often overnight, and about 1.15 of 5 worker slots were used.
 /// Each pass looks at the board and the vault as they are and takes the steps that are due:
 /// - a review none task whose worker reported done on its branch's head merges (merge's full test run is its check),
-///   unless the risk check (`LeadRisk`) raises it to audit from what its branch changes: then it's audited instead;
+///   unless the risk check (`LeadRisk`) raises it to audit from what its branch changes, or the audit sample
+///   (`LeadAuditSample`, audit_sample_percent of them at random) draws it: then it's audited instead;
 /// - an audit task reported done gets its audit, and a passing verdict on its head merges;
 /// - a verdict that left Important findings open sends its worker the open ids to answer with answer_findings (once
 ///   per verdict), or starts a worker to get them when its own has ended; a verdict the round cap says to reconsider
@@ -262,6 +263,16 @@ public final class LeadAdvance: @unchecked Sendable {
         }
     }
 
+    /// Only successful housekeeping is FYI. Unknown outcomes and refusals still need judgement.
+    static func wakes(_ text: String) -> Bool {
+        if text.localizedCaseInsensitiveContains("decide") { return true }
+        let outcomes = text.components(separatedBy: "\n").filter { $0.hasPrefix("- ") }.map { String($0.dropFirst(2)) }
+        guard !outcomes.isEmpty else { return true }
+        return outcomes.contains { line in
+            return !["Started a worker on ", "Started the audit of ", "Released ", "Cleaned up ", "Resumed after sleep: "].contains { line.hasPrefix($0) }
+        }
+    }
+
     private func tell(_ report: [String]) {
         let text = "VibeSwitcher moved finished work on by itself (auto_advance):\n" + report.map { "- " + $0 }.joined(separator: "\n")
             + "\nThe judgement calls stay yours: holds (update_task kept or blocked), re-plans, questions to the user, and post_update for a merge the user would notice."
@@ -322,12 +333,15 @@ public final class LeadAdvance: @unchecked Sendable {
 
     /// One look at the board, taking the steps that are due.
     func pass() {
+        guard let rotationGate = FileLock.attempt(LeadRotation.gate(lead.root), shared: true) else { return }
+        defer { rotationGate.release() }
         guard (try? lead.authenticate()) != nil else { return }
         // The file and the vault's record of it as one (a configure under way finishes first).
         guard let (workflow, changed) = try? lead.advanceSettled({ () -> (LeadWorkflow, [(key: String, value: String)]?) in
             let workflow = lead.workflow
             return (workflow, try? lead.vault.changedSettings(workflow, root: lead.root))
         }) else { return }
+        resumeAfterSleep()
         guard workflow.autoAdvance else { return }
         // Off as the lead set it, whatever a worker wrote into workflow.md since.
         if let changed, changed.contains(where: { $0.key == "auto_advance" }) {
@@ -385,6 +399,78 @@ public final class LeadAdvance: @unchecked Sendable {
         if batching { mergeReady(busy: busy) } else { readySince = [:] }
     }
 
+    /// A gate or session-host refusal leaves all pending interruptions visible and keeps one room-again retry.
+    private func deferSleepRecovery(_ recovery: LeadSleepRecovery.Store) {
+        for remaining in (try? recovery.pending()) ?? [] { try? recovery.release(remaining) }
+        // Retry even with auto_advance off, without needing another interruption or power change.
+        let what = LeadSleepRecovery.retryWait
+        if !lead.roomWaits.waits().contains(where: { $0.wait.root == lead.root && $0.wait.auto == true && $0.wait.what == what }) {
+            lead.roomWaits.record(root: lead.root, what: what, need: 0, auto: true)
+        }
+    }
+
+    /// Recovery is independent of auto_advance's task planning switch. Gate refusals leave the interruption visible
+    /// to the lead and register a room-again nudge; no stale or missing power/load reading grants permission to resume.
+    private func resumeAfterSleep() {
+        let recovery = LeadSleepRecovery.Store(root: lead.root)
+        guard let pending = try? recovery.pending(), !pending.isEmpty else { return }
+        for event in pending {
+            guard let power = lead.power(), !(power.onBattery && power.heldUnder != nil),
+                  let load = lead.runtime.steadyLoad(), load <= lead.macLimits().loadLimit else {
+                deferSleepRecovery(recovery)
+                return
+            }
+            // The timestamp must still describe the last turn. A lead/user may have resumed it while held.
+            guard let sessions = try? lead.advanceSessions() else {
+                deferSleepRecovery(recovery)
+                return
+            }
+            let task = lead.store.load().task(event.slug)
+            let current = event.verifier
+                ? task?.status == .review && task?.evidence == nil && task?.awaitedVerifiers.contains(event.session) == true
+                : [.running, .failed].contains(task?.status ?? .done) && task?.worker == event.session && task?.stopped != event.session
+            let info = sessions.first { $0.id == event.session }
+            let path = try? lead.runtime.transcript(of: event.session)
+            let tail = path.flatMap { TranscriptTail.read(url: URL(fileURLWithPath: $0)) }
+            let sleepError: Bool
+            if case .turnOver(let error)? = tail?.state { sleepError = LeadSleepRecovery.isSleepError(error) } else { sleepError = false }
+            let stillInterrupted = sleepError && tail?.at == event.at && tail?.usageLimit == nil
+            let actionable = current && info.map { $0.live && $0.usageLimit == nil && lead.runtime.agentEnding($0) == nil } == true && stillInterrupted
+            guard let allowed = try? recovery.claim(event, now: Date().timeIntervalSince1970, attempting: actionable) else { continue }
+            guard actionable else {
+                try? recovery.release(event)
+                once("sleep|\(event.key)", "Not resumed after sleep: the \(event.verifier ? "verifier" : "worker") on \(event.slug) could not be confirmed as still interrupted on its last turn. Check its session and resume it yourself if needed.")
+                continue
+            }
+            guard allowed else {
+                try? recovery.release(event)
+                once("sleep|\(event.key)", "The \(event.verifier ? "verifier" : "worker") on \(event.slug) stopped on the sleep API error a third time in an hour; it needs you to resume it (two automatic resumes already).")
+                continue
+            }
+            step("sleep|\(event.key)") {
+                do {
+                    if event.verifier {
+                        guard let entry = try lead.vault.roster(root: lead.root).first(where: { $0.session == event.session }),
+                              entry.holds, entry.submittedAt == nil, let head = lead.vault.current(.verifier, root: lead.root, task: event.slug)?.auditing else {
+                            throw LeadToolset.Problem(text: "Not resumed after sleep: the interrupted audit of \(event.slug) no longer holds its verifier grant. Check its audit before restarting it.")
+                        }
+                        guard lead.advanceHead(event.slug) == head else {
+                            throw LeadToolset.Problem(text: "The branch moved since the interrupted audit; audit \(event.slug) yourself on its new commit.")
+                        }
+                        _ = try lead.advanceAudit(event.slug, restarting: head)
+                        return "Resumed after sleep: restarted the audit of \(event.slug) on the same commit, \(head.prefix(8))."
+                    }
+                    let sent = try lead.advanceMessage(event.slug, LeadSleepRecovery.message, clearDraft: false)
+                    if case .notSubmitted = sent.delivered { throw LeadToolset.Problem(text: "Sleep resume was not submitted: " + sent.result.text) }
+                    return "Resumed after sleep: sent \(event.slug)'s worker one go-on message."
+                } catch {
+                    try? recovery.release(event)
+                    throw error
+                }
+            }
+        }
+    }
+
     /// A task in review: its merge, or its audit, when due.
     private func review(_ slug: String, busy: Bool, batching: Bool) {
         guard due(slug, [.review]) != nil, let head = lead.advanceHead(slug) else { return }
@@ -401,25 +487,61 @@ public final class LeadAdvance: @unchecked Sendable {
         if vault.current(.verifier, root: root, task: slug)?.auditing == head { return auditAgain(slug, head: head, busy: busy) }
         // The risk check runs here too (`LeadRisk`): a review none task whose change it flags is audited, not merged.
         if let needed = lead.advanceReviewNeeded(slug, commit: head) {
-            let finders = lead.workflow.auditFinders
-            guard !busy, hasRoom(slug, need: finders) else {
-                // Raised: the lead hears why now, though its audit waits for the Mac's room.
-                if let raised = lead.store.load().task(slug)?.riskRaised {
-                    once("risk|\(slug)|\(raised.commit)", "\(slug) is audited, not merged: \(raised.reason) (the risk check raised it from review none). Its audit starts once the Mac has room.")
-                }
-                return roomWait("audit(\(slug))", need: finders)
-            }
-            if usageHeld(model: lead.auditModel(lead.workflow)) { return }
-            step("audit|\(slug)|\(head)") {
-                guard let before = due(slug, [.review]) else { throw NotDue() }
-                _ = try lead.advanceAudit(slug)
-                return "Started the audit of \(slug) at \(head.prefix(8)) (\(needed.trimmingCharacters(in: CharacterSet(charactersIn: "."))))." + releasedText(slug, worker: before.worker)
-            }
-            return
+            // One the sample drew is audit from then on: its audit says why, however long it waits for room.
+            let sampled = lead.store.load().task(slug)?.auditSample.flatMap { $0.sampled ? $0 : nil }
+            return audit(slug, head: head, busy: busy, why: sampled.map { "Sampled for audit: \($0.text)." } ?? needed)
         }
         // review none: on its worker's done report on this head (one on an older commit waits for its next report).
         guard (try? vault.unaudited(root: root, task: slug))?.reported == head else { return }
+        // A random share of them is audited anyway (audit_sample_percent, see `LeadAuditSample`): drawn once per task.
+        if let sample = sample(slug, head: head), sample.sampled {
+            return audit(slug, head: head, busy: busy, why: "Sampled for audit: \(sample.text).")
+        }
         toMerge(Ready(slug: slug, head: head, audited: false), busy: busy, batching: batching)
+    }
+
+    /// Starts `slug`'s audit at `head` (`why`: what sends it there) once the Mac has room for its finders.
+    private func audit(_ slug: String, head: String, busy: Bool, why needed: String) {
+        let finders = lead.workflow.findersInForce
+        guard !busy, hasRoom(slug, need: finders) else {
+            // Raised: the lead hears why now, though its audit waits for the Mac's room.
+            if let raised = lead.store.load().task(slug)?.riskRaised {
+                once("risk|\(slug)|\(raised.commit)", "\(slug) is audited, not merged: \(raised.reason) (the risk check raised it from review none). Its audit starts once the Mac has room.")
+            }
+            return roomWait("audit(\(slug))", need: finders)
+        }
+        if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug))) { return }
+        step("audit|\(slug)|\(head)") {
+            guard let before = due(slug, [.review]) else { throw NotDue() }
+            _ = try lead.advanceAudit(slug)
+            return "Started the audit of \(slug) at \(head.prefix(8)) (\(needed.trimmingCharacters(in: CharacterSet(charactersIn: "."))))." + releasedText(slug, worker: before.worker)
+        }
+    }
+
+    /// `slug`'s audit sample: the one drawn at its first done report on review none's path, or, when none was and
+    /// audit_sample_percent isn't 0, one drawn now from `lead.auditSampleSeed` and recorded on the task with its seed.
+    /// A sampled task's review becomes audit (the vault's too, so no merge takes it unaudited) and the lead's progress
+    /// log says so. nil: sampling is off and nothing was drawn, or the task isn't due.
+    private func sample(_ slug: String, head: String) -> LeadAuditSample? {
+        guard let task = due(slug, [.review]) else { return nil }
+        if let drawn = task.auditSample { return drawn }
+        let percent = lead.workflow.samplePercentInForce
+        guard percent > 0 else { return nil }
+        let drawn = LeadAuditSample(seed: lead.auditSampleSeed(), percent: percent, commit: head)
+        var kept: LeadAuditSample?
+        try? lead.store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            if let earlier = board.tasks[index].auditSample { kept = earlier; return }
+            board.tasks[index].auditSample = drawn
+            if drawn.sampled { board.tasks[index].review = .audit }
+            kept = drawn
+        }
+        guard let kept else { return nil }
+        if kept == drawn, drawn.sampled {
+            try? lead.vault.setReview(.audit, root: lead.root, task: slug)
+            try? lead.store.appendProgress("Sampled \(slug) for audit from review none (at \(head.prefix(8))): \(drawn.text)")
+        }
+        return kept
     }
 
     /// A task ready to merge: merged now, or, while batching, kept for the pass's batch (`mergeReady`); one a batch fell
@@ -547,9 +669,9 @@ public final class LeadAdvance: @unchecked Sendable {
                 + "read_session(\(slug), who: verifier) to see why, then audit(\(slug)) again or tell the user.")
             return
         }
-        let finders = lead.workflow.auditFinders
+        let finders = lead.workflow.findersInForce
         guard !busy, hasRoom(slug, need: finders) else { return roomWait("audit(\(slug))", need: finders) }
-        if usageHeld(model: lead.auditModel(lead.workflow)) { return }
+        if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug))) { return }
         step("audit|\(slug)|\(head)|again") {
             guard let task = due(slug, [.review]), task.evidence == nil, endedVerifier(task)?.session == ended.session else { throw NotDue() }
             _ = try lead.advanceAudit(slug)
@@ -717,12 +839,12 @@ public final class LeadAdvance: @unchecked Sendable {
     }
 
     /// The Mac has room for `need` more team sessions on `slug` (its own worktree's not counted, as start_worker and
-    /// audit count it).
+    /// audit count it), and isn't short of memory.
     private func hasRoom(_ slug: String, need: Int) -> Bool {
         guard let sessions = try? lead.advanceSessions(),
               let mac = try? lead.macLoad(sessions, load: lead.runtime.steadyLoad(), except: Worktrees.path(root: lead.root, slug: slug)) else { return false }
         let limits = lead.macLimits()
-        return !mac.isBusy(threshold: limits.loadLimit) && mac.sessions + need <= limits.maxSessions
+        return !mac.isBusy(threshold: limits.loadLimit) && mac.memoryShortage(limits) == nil && mac.sessions + need <= limits.maxSessions
             && lead.roomWaits.heldFor(root: lead.root, need: need, mac: mac, limits: limits) == nil
     }
 
@@ -842,5 +964,61 @@ extension LeadToolset {
         let advance = LeadAdvance(lead: self, run: run)
         advancing = advance
         advance.start()
+    }
+}
+
+/// auto_advance's audit sample: a random share (audit_sample_percent, 10 by default) of the review none tasks whose
+/// worker reported done is audited before merge anyway, so how often the unaudited path lets a problem through is
+/// known, not assumed zero (216 merges went unaudited by 2026-11-07). One draw per task, at its first done report on
+/// that path, kept on it (`LeadTask.auditSample`) with its seed: the draw is the seed's first SplitMix64 output, so
+/// anyone can check it. At about 15 sampled audits a month it's a tripwire, not a statistic.
+public struct LeadAuditSample: Codable, Equatable, Sendable {
+    /// How a sampled task's audits went (`LeadTaskScore.sampleVerdict`): an Important finding raised (the unaudited
+    /// path would have let it through), passed with none, or a verdict that didn't pass with none raised.
+    public enum Verdict: String, Codable, Sendable { case important, clean, failed }
+
+    public static let defaultPercent = 10
+
+    /// The random source's seed (under 2^53, so every JSON reader keeps it exact) and the draw it gives, in 0..<100.
+    public var seed: Int
+    public var draw: Double
+    /// audit_sample_percent when it was drawn; sampled: the draw was under it.
+    public var percent: Int
+    public var sampled: Bool
+    /// The commit its worker reported done on, and when it was drawn.
+    public var commit: String
+    public var at: Double
+
+    public init(seed: Int, percent: Int, commit: String, at: Double = Date().timeIntervalSince1970) {
+        self.seed = seed
+        draw = Self.draw(seed: seed)
+        self.percent = percent
+        sampled = draw < Double(percent)
+        self.commit = commit
+        self.at = at
+    }
+
+    /// A seed from the system's random source.
+    public static func randomSeed() -> Int { Int.random(in: 0..<(1 << 53)) }
+
+    /// `seed`'s draw, in 0..<100: SplitMix64's first output for it, its top 53 bits as a fraction.
+    public static func draw(seed: Int) -> Double {
+        var z = UInt64(truncatingIfNeeded: seed) &+ 0x9E37_79B9_7F4A_7C15
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        z ^= z >> 31
+        return Double(z >> 11) / Double(UInt64(1) << 53) * 100
+    }
+
+    /// "draw 4.21 under audit_sample_percent 10 (seed 123456)", or "… not under …".
+    public var text: String {
+        "draw \(String(format: "%.2f", draw)) \(sampled ? "under" : "not under") audit_sample_percent \(percent) (seed \(seed))"
+    }
+
+    /// How `audits` went for a sampled task; nil while none is recorded.
+    public static func verdict(_ audits: LeadAuditLedger?) -> Verdict? {
+        guard let audits, audits.rounds > 0 else { return nil }
+        if audits.findings.contains(where: { $0.severity == .important && $0.status != .unconfirmed }) { return .important }
+        return audits.passed == true ? .clean : .failed
     }
 }

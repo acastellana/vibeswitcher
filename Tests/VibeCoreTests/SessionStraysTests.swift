@@ -57,22 +57,22 @@ struct SessionStraysTests {
     }
 
     /// A worktree's removal ends what runs in it, and only that.
-    @Test func endingInsideAFolderSparesWhatRunsElsewhere() throws {
+    @Test func endingInsideAFolderSparesWhatRunsElsewhere() async throws {
         let worktree = try folder("strays-wt"), elsewhere = try folder("strays-wt-2")
         let inside = try sleeper(in: worktree + "/")
         let outside = try sleeper(in: elsewhere)
         defer { outside.terminate() }
-        #expect(eventually { SessionStrays.inside(folder: worktree).map(\.pid) == [inside.processIdentifier] })
+        #expect(await eventually { SessionStrays.inside(folder: worktree).map(\.pid) == [inside.processIdentifier] })
         let ended = SessionStrays.endInside(folder: worktree)
         #expect(ended.map(\.pid) == [inside.processIdentifier])
-        #expect(eventually { !inside.isRunning })
+        #expect(await eventually { !inside.isRunning })
         // (Read only once it ended: a running process's raise.)
         if !inside.isRunning { #expect(inside.terminationReason == .uncaughtSignal && inside.terminationStatus == SIGTERM) }
         #expect(outside.isRunning)
     }
 
     /// One that ignores SIGTERM is killed at the end of the grace.
-    @Test func whatIgnoresTheTermIsKilled() throws {
+    @Test func whatIgnoresTheTermIsKilled() async throws {
         let worktree = try folder("strays-stubborn")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
@@ -87,7 +87,7 @@ struct SessionStraysTests {
         let started = Date()
         #expect(SessionStrays.endInside(folder: worktree, grace: 0.5).count == 1)
         #expect(Date().timeIntervalSince(started) >= 0.5)
-        #expect(eventually { !process.isRunning })
+        #expect(await eventually { !process.isRunning })
         if !process.isRunning { #expect(process.terminationStatus == SIGKILL) }
     }
 }

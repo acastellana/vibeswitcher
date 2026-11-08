@@ -85,7 +85,7 @@ extension AccountUsageTests {
 }
 
 extension LeadAdvanceTests {
-    @Test func ignoringUsageLimitsAutoAdvanceStartsAPlannedTaskAtEightyPercent() throws {
+    @Test func ignoringUsageLimitsAutoAdvanceStartsAPlannedTaskAtEightyPercent() async throws {
         let (root, _, lead) = try team()
         let now = AccountUsageTests.now
         lead.usageClock = { now }
@@ -96,14 +96,14 @@ extension LeadAdvanceTests {
         let advancing = Advancing(lead)
         defer { advancing.stop() }
         _ = lead.call("add_task", ["title": "First", "goal": "g", "acceptance": ["a"]])
-        #expect(advancing.until { task("first", root)?.status == .running })
+        #expect(await advancing.until { task("first", root)?.status == .running })
     }
 }
 
 extension LeadAdvanceTests {
     /// The blind check's case: work auto_advance already holds at 85 % starts once the setting is turned on and the
     /// app nudges the lead (`LeadController.nudgeLeads`), not at the limit's reset.
-    @Test func ignoringUsageLimitsTurnedOnReleasesWhatAutoAdvanceHolds() throws {
+    @Test func ignoringUsageLimitsTurnedOnReleasesWhatAutoAdvanceHolds() async throws {
         let (root, runtime, lead) = try team()
         let now = AccountUsageTests.now
         lead.usageClock = { now }
@@ -115,12 +115,12 @@ extension LeadAdvanceTests {
         let advancing = Advancing(lead)
         defer { advancing.stop() }
         _ = lead.call("add_task", ["title": "First", "goal": "g", "acceptance": ["a"]])
-        #expect(advancing.until { reports(runtime).contains { $0.contains("The account's usage is near a limit") } }, "\(reports(runtime))")
-        advancing.settle()
+        #expect(await advancing.until { reports(runtime).contains { $0.contains("The account's usage is near a limit") } }, "\(reports(runtime))")
+        await advancing.settle()
         #expect(task("first", root)?.status == .planned)
         ignoring.value = true
         LeadAdvance.nudge(root: root)
-        #expect(advancing.until { task("first", root)?.status == .running })
+        #expect(await advancing.until { task("first", root)?.status == .running })
     }
 
     final class Flag: @unchecked Sendable {

@@ -49,7 +49,7 @@ enum ChatBench {
         // VIBESWITCHER_BENCH_UPDATES=1: the model publishes every 20 ms (a busy session: transcript lines, screen
         // reads, steering), so every layout the chat asks for gets its chance to run.
         let updates = env["VIBESWITCHER_BENCH_UPDATES"] == "1"
-        chat.runner.canRun = whole && !ticks
+        chat.runner.way = whole && !ticks ? .bang : nil
         let view = BenchRoot(chat: chat, row: row, whole: whole,
                              board: env["VIBESWITCHER_BENCH_BOARD"].map { BoardStore(root: $0).load() }, folder: env["VIBESWITCHER_BENCH_FOLDER"])
         // VIBESWITCHER_BENCH_STACK=1: inside a VStack with a composer-like view below, as the window has it.
@@ -215,7 +215,7 @@ enum ChatBench {
             }
             let sweeping = ProcessInfo.processInfo.environment["VIBESWITCHER_BENCH_SWEEP"] != nil
             if ticks, chat.state == .ready {
-                chat.runner.canRun = whole
+                chat.runner.way = whole ? .bang : nil
                 chat.focusComposer()
                 chat.objectWillChange.send()
             }

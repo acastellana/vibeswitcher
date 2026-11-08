@@ -125,15 +125,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             let preset = presets.first { $0.agent == .claude && $0.place == .window } ?? presets.first { $0.agent == .claude }
             return preset.flatMap(LaunchPlan.command(for:)) ?? "claude"
         }
+        controller.teamActivity = TeamActivity()
         controller.alert = { [weak self] event in self?.notifier?.post(event) }
         controller.select = { [weak self] id in self?.showMainWindow(select: id) }
         controller.keepAwake.mode = { [weak self] in self?.preferences.keepAwake ?? .never }
         // Read off the main thread from now on, and at each change the system posts (see `PowerSourceCache`).
         let power = PowerSourceCache.shared
         controller.watchPower(limit: { [weak self] in self?.preferences.batteryHoldBelow ?? PowerWatch.defaultLimit }) { power.state }
+        controller.rotationMode = { [weak self] in self?.preferences.leadRotation ?? .never }
         controller.watchPolicy()
         controller.watchHeavySlots()
         controller.tellUser = { [weak self] title, body in self?.notifier?.postInfo(title: title, body: body) }
+        controller.watchToolchain()
         controller.watchHeavyJobs()
         controller.watchRoom()
         // The all-done cards' summaries, by headless Claude (benches and tests leave it unset: the written fallback).
@@ -706,7 +709,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 recentProjects: { [weak self] in self?.popoverState.recentProjects.map(\.path) ?? [] },
                 showWelcome: { [weak self] in self?.showWelcome(firstRun: false) }, host: hostClient, briefing: briefing,
                 dictation: dictation, policy: WorkingPolicyEditor(saved: { [weak self] in self?.leadController.lookAtPolicy() }),
-                boost: boostWatch, walletPeers: walletPeers)
+                boost: boostWatch,
+                // The projects whose lead ran here: those the host runs a lead for, and the recent ones with a workflow.md.
+                floor: ReviewFloorEditor(projects: { [weak self] in
+                    guard let self else { return [] }
+                    return hostClient.sessions.filter { LeadTeams.role(label: $0.label) == .lead }.map(\.cwd) + popoverState.recentProjects.map(\.path)
+                }, workerModel: { [weak self] root in
+                    self.flatMap { LeadWorkflow.claudeModel(command: $0.leadController.command(for: root), home: VibePaths.home) }
+                }),
+                walletPeers: walletPeers)
         }
         loadRecentProjects()
         settingsWindow?.show(tab: tab, reveal: reveal)
@@ -1129,6 +1140,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
 
 /// Installs the hook binary and both agents' hook configs, and trusts the Codex hooks.
 /// Returns human-readable problems (empty on success). Blocking: call off the main thread.
+/// Each write of the agents' config here is the app's own, sealed as written (`LeadVault.appWrite`): an install or an
+/// update never waits for your Accept in a lead's chat, and what anyone else changed is still held.
 enum HookSetup {
     static func installAll() -> [String] {
         var problems: [String] = []
@@ -1136,14 +1149,27 @@ enum HookSetup {
             problems.append("The hook binary could not be installed to \(VibePaths.hookBinary.path).")
         }
         for agent in Agent.allCases {
-            do { try HookInstaller.install(agent: agent) } catch {
+            do { try LeadVault.standard.appWrite([HookInstaller.configURL(for: agent).path]) { try HookInstaller.install(agent: agent) } } catch {
                 problems.append("\(agent.displayName): \(error.localizedDescription)")
             }
         }
-        do { try CodexTrust.trustOurHooks() } catch {
+        do { try trustCodex() } catch {
             problems.append("Codex hooks are installed but not trusted (\(error.localizedDescription)). Run /hooks in Codex and trust the vibeswitcher-hook entries.")
         }
+        // Sealed before returning (`--install-hooks` exits right after).
+        LeadVault.standard.sealAppWrites()
         return problems
+    }
+
+    /// Takes VibeSwitcher's hooks out of `agent`'s config, sealed as written (see above).
+    static func uninstall(agent: Agent) throws {
+        try LeadVault.standard.appWrite([HookInstaller.configURL(for: agent).path]) { try HookInstaller.uninstall(agent: agent) }
+    }
+
+    /// Trusts VibeSwitcher's Codex hooks (`CodexTrust`): what it records in ~/.codex/config.toml is sealed as written.
+    @discardableResult
+    static func trustCodex() throws -> Int {
+        try LeadVault.standard.appWrite([(VibePaths.home as NSString).appendingPathComponent(".codex/config.toml")]) { try CodexTrust.trustOurHooks() }
     }
 }
 
@@ -1155,8 +1181,14 @@ enum HookBinary {
         return url.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
     }
 
+    /// The app's own write, sealed as written (`LeadVault.appWrite`): an update's new binary never waits for your
+    /// Accept.
     @discardableResult
     static func sync() -> Bool {
+        LeadVault.standard.appWrite([VibePaths.hookBinary.path]) { write() }
+    }
+
+    private static func write() -> Bool {
         guard let source = bundled, let data = try? Data(contentsOf: source) else { return false }
         let target = VibePaths.hookBinary
         if let existing = try? Data(contentsOf: target), existing == data { return true }

@@ -82,7 +82,7 @@ struct StatisticsModelTests {
         #expect(try figure("Load").detail == "1.5 h at 24 or more, 12 min at 36 or more · 14 cores")
         #expect(try figure("Merges per hour").value == "0.5")
         // Not kept anywhere: said so, never 0.
-        #expect(try figure("Freezes").value == "Not recorded")
+        #expect(try figure("Freezes per hour").value == "Not recorded")
         #expect(try figure("Boost hours").value == "Not recorded")
         #expect(try figure("Boost hours").detail == nil)
         #expect(try figure("Codex usage").value == "Not recorded")
@@ -107,13 +107,37 @@ struct StatisticsModelTests {
         #expect(total.cells == ["3", "1", "2 · 3", "2", "7.5 h", "≥ $12.50", "17%", "1 h"])
     }
 
+    /// Freezes per hour, with each day's rate as its trend (backlog B3: the rate is a tracked number).
+    @Test func freezesReadPerHourWithTheirDailyTrend() throws {
+        let range = StatisticsRange.week.interval(now: Self.now, calendar: Self.utc)
+        var stats = Self.stats(range: range)
+        let days = [Freezes.Day(day: "2026-10-31", freezes: 0, hours: 0), Freezes.Day(day: "2026-11-01", freezes: 120, hours: 12),
+                    Freezes.Day(day: "2026-11-02", freezes: 30, hours: 15)]
+        stats.mac.freezes = Freezes.make(count: 150, hours: 27, partial: true, perDay: ["2026-11-01": 120, "2026-11-02": 30], byLoad: nil,
+                                         unsampled: 0, days: days)
+        let page = StatisticsPage(stats, calendar: Self.utc)
+        let figure = try #require(page.mac.first { $0.label == "Freezes per hour" })
+        #expect(figure.value == "5.56")
+        #expect(figure.detail == "150 freezes in 27 h counted; hang reports kept for a week: the hours before the oldest aren't counted")
+        #expect(figure.trend == [StatisticsPage.TrendDay(label: "Oct 31", value: nil, text: "not counted"),
+                                 StatisticsPage.TrendDay(label: "Nov 1", value: 10, text: "10 an hour (120)"),
+                                 StatisticsPage.TrendDay(label: "Nov 2", value: 2, text: "2 an hour (30)")])
+        #expect(figure.spoken.hasSuffix("by day: Oct 31 not counted, Nov 1 10 an hour (120), Nov 2 2 an hour (30)"))
+        // One day: no trend read out.
+        stats.mac.freezes = Freezes.make(count: 1, hours: 4, partial: false, perDay: ["2026-11-02": 1], byLoad: nil, unsampled: 0,
+                                         days: [Freezes.Day(day: "2026-11-02", freezes: 1, hours: 4)])
+        let today = try #require(StatisticsPage(stats, calendar: Self.utc).mac.first { $0.label == "Freezes per hour" })
+        #expect(today.value == "0.25" && today.detail == "1 freeze in 4 h counted" && !today.spoken.contains("by day"))
+        #expect(StatisticsPage.dayLabel("2026-12-25") == "Dec 25" && StatisticsPage.dayLabel("bad") == "bad")
+    }
+
     @Test func nothingReadableIsNotRecordedEverywhere() {
         let range = StatisticsRange.today.interval(now: Self.now, calendar: Self.utc)
         let page = StatisticsPage(SetupStats(range: range, at: Self.now, projects: [], total: nil, mac: SetupStats.MacWide()), calendar: Self.utc)
         #expect(page.span == "Nov 2, 2026")
         #expect(page.total == nil)
         #expect(page.projects.isEmpty)
-        #expect(page.mac.map(\.label) == ["Load", "Freezes", "Boost hours", "Merges per hour", "Claude usage", "Codex usage"])
+        #expect(page.mac.map(\.label) == ["Load", "Freezes per hour", "Boost hours", "Merges per hour", "Claude usage", "Codex usage"])
         #expect(page.mac.allSatisfy { $0.value == "Not recorded" && $0.meter == nil })
         // Cost: nothing ended is $0 spent; every task's cost known is that cost.
         #expect(StatisticsPage.row(name: "idle", note: nil, ProjectFigures(), id: "idle").cells[5] == "$0.00")
@@ -203,6 +227,9 @@ struct StatisticsModelTests {
         #expect(try figure("Cost per merged task").value == "$4.50")
         #expect(try figure("Implementation (worker)").value == "$6.00 · 67%")
         #expect(try figure("Verification (verifier)").value == "$3.00 · 33%")
+        // The verifier-model split and the sampled audits: none in the fixture's figures.
+        #expect(try figure("Important per audit, by verifier model").value == "–")
+        #expect(try figure("Sampled audits of review none").value == "–" && figure("Sampled audits of review none").detail == "none sampled in the range")
         // Not kept: said so, never 0.
         #expect(try figure("Waiting for its audit").value == "Not recorded")
         #expect(try figure("Merge reruns").value == "Not recorded")
@@ -211,6 +238,92 @@ struct StatisticsModelTests {
             #expect(figure.help?.isEmpty == false, "\(figure.label)")
             #expect(figure.spoken.hasPrefix("\(figure.label): \(figure.value)"))
         }
+    }
+
+    /// The scorecard: two weeks, each line with its n; a trend only when both weeks have n ≥ 10.
+    static func scorecardWeek(_ start: Double, merged: Int, costed: Int, cost: Double, lead: Double, installs: [Double], notInstalled: Int,
+                              origins: LeadOrigins, questions: Int, minutes: Double) -> ScorecardWeek {
+        var week = ScorecardWeek(start: Date(timeIntervalSince1970: start), end: Date(timeIntervalSince1970: start + 7 * 86_400))
+        week.origins = origins
+        (week.merged, week.questions, week.userMinutes) = (merged, questions, minutes)
+        (week.costed, week.cost, week.leadSpread, week.leadKept) = (costed, cost, lead, true)
+        week.installTimes = installs
+        week.notInstalled = notInstalled
+        return week
+    }
+
+    @Test func theScorecardShowsBothWeeksWithTheirNAndNoTrendUnderTen() throws {
+        let start = Self.now.timeIntervalSince1970 - 7 * 86_400
+        let small = Self.scorecardWeek(start, merged: 4, costed: 3, cost: 9, lead: 2, installs: [3600, 7200], notInstalled: 2,
+                                       origins: LeadOrigins(counts: [.userReport: 2, .audit: 1, .lead: 1]), questions: 2, minutes: 20)
+        let before = Self.scorecardWeek(start - 7 * 86_400, merged: 12, costed: 12, cost: 48, lead: 6, installs: Array(repeating: 10_800, count: 12),
+                                        notInstalled: 0, origins: LeadOrigins(counts: [.userReport: 5], unsaid: 7), questions: 6, minutes: 30)
+        let install = ScorecardInstall(slug: "a", title: "Paste images", createdAt: start, mergedAt: start + 3600, installedAt: start + 7200)
+        let pending = ScorecardInstall(slug: "b", title: "Scorecard", createdAt: start, mergedAt: start + 3600, installedAt: nil)
+        var quality = SetupQuality(all: QualityFigures(), byAgent: [], byModel: [], weeks: [])
+        quality.scorecard = SetupScorecard(week: small, previous: before, installs: [install, pending])
+        let page = QualityPage(quality, calendar: Self.utc)
+        let section = try #require(page.sections.first)
+        #expect(section.title == QualityPage.scorecardTitle)
+        func figure(_ label: String) throws -> StatisticsPage.Figure { try #require(section.figures.first { $0.label == label }) }
+
+        let bugs = try figure("Bugs you reported vs found by the system")
+        #expect(bugs.value == "2 vs 1")
+        #expect(bugs.detail == "Tasks created: 2 user_report, 1 audit, 1 lead (n = 4) · the 7 days before: 5 vs 0; 5 user_report, 7 not said (n = 12) · "
+            + "n < 10 in a week: no trend", "\(bugs.detail ?? "")")
+        let questions = try figure("Questions per delivered task")
+        #expect(questions.value == "0.5")
+        #expect(questions.detail == "n = 4 merges: 2 questions, 5 min of your waiting per task · the 7 days before: 0.5, 2.5 min waiting (n = 12) · "
+            + "n < 10 in a week: no trend", "\(questions.detail ?? "")")
+        // $9 over 3 costed + the lead's $2 over 4 merges = $3.50.
+        let cost = try figure("Cost per merged task, with the lead's share")
+        #expect(cost.value == "$3.50")
+        #expect(cost.detail?.hasPrefix("n = 3 of 4 merges with a known cost: receipts $3.00 per task + lead $0.50 per task") == true, "\(cost.detail ?? "")")
+        #expect(cost.detail?.contains("the 7 days before: $4.50 (n = 12)") == true)
+        let time = try figure("Time to install")
+        #expect(time.value == "median 1.5 h" && time.detail?.hasPrefix("n = 2 of 4 merges installed, 2 not installed yet") == true, "\(time.detail ?? "")")
+        let rows = try figure("Time to install, per task")
+        #expect(rows.detail == "Paste images: 2 h to install\nScorecard: not installed yet", "\(rows.detail ?? "")")
+        // Every line says its n; none claims a trend while a week has fewer than 10.
+        for line in section.figures.dropLast() {
+            #expect(line.detail?.contains("n = ") == true, "\(line.label)")
+            #expect(line.detail?.contains("no trend") == true && line.detail?.contains("from the week before") == false, "\(line.label)")
+            #expect(line.help?.isEmpty == false)
+        }
+
+        // Both weeks at n ≥ 10: the trend is said.
+        var big = before
+        big.start = small.start
+        big.cost = 60
+        quality.scorecard = SetupScorecard(week: big, previous: before, installs: [])
+        let grown = try #require(QualityPage(quality, calendar: Self.utc).sections.first)
+        let grownCost = try #require(grown.figures.first { $0.label == "Cost per merged task, with the lead's share" })
+        #expect(grownCost.detail?.hasSuffix("cost per task: up from the week before") == true, "\(grownCost.detail ?? "")")
+        #expect(grown.figures.first { $0.label == "Questions per delivered task" }?.detail?.hasSuffix("questions per task: same as the week before") == true)
+        #expect(!grown.figures.contains { $0.label == "Time to install, per task" })
+        // No scorecard worked out: no section.
+        #expect(QualityPage(SetupQuality(all: QualityFigures(), byAgent: [], byModel: [], weeks: []), calendar: Self.utc).sections.first?.title == "Quality")
+    }
+
+    @Test func thePageShowsSampledAuditsWithTheirNAndAuditsSplitBySameModel() throws {
+        var all = QualityFigures()
+        all.merged = 20
+        all.audited = 10
+        all.sampledAudits = 4
+        all.sampledImportant = 1
+        all.sameModelAudited = 3
+        all.sameModelImportant = 1
+        all.otherModelAudited = 7
+        all.otherModelImportant = 7
+        let page = QualityPage(SetupQuality(all: all, byAgent: [], byModel: [], weeks: []), calendar: Self.utc)
+        func figure(_ label: String) throws -> StatisticsPage.Figure {
+            try #require(page.sections.flatMap(\.figures).first { $0.label == label })
+        }
+        let sampled = try figure("Sampled audits of review none")
+        #expect(sampled.value == "25%" && sampled.detail == "n = 4: 1 raised an Important finding")
+        let split = try figure("Important per audit, by verifier model")
+        #expect(split.value == "same 0.3 · other 1", "\(split.value)")
+        #expect(split.detail == "same model as the worker: 1 over 3 audited merges · another model: 7 over 7 audited merges")
     }
 
     @Test func theBreakdownSplitsClaudeCodexAndModels() throws {
@@ -306,9 +419,9 @@ struct StatisticsModelTests {
         // All: the lead's $1.50 spread over 3 merges, the baseline's 2 carry $1.
         #expect(cost.cells.map(\.value) == ["≥ 40%", "≥ 33%", "Not recorded"])
         #expect(cost.cells[0].detail == "$4.00 of $10.00 over 2 merges · lead $1.00 (2 of 3 merges' share of $1.50), verifiers $3.00 "
-            + "· not recorded: 1 merge rerun · Codex tokens 1.5M, not in the cost")
+            + "· not recorded: 1 merge rerun · Codex tokens 1.5M, not in the baseline")
         #expect(cost.cells[1].detail == "$3.00 of $9.00 over 2 merges · verifiers $3.00 · not recorded: the lead's (in All only), 1 merge rerun")
-        #expect(cost.cells[2].detail == "Codex tokens have no price: 1.5M, not in the cost")
+        #expect(cost.cells[2].detail == "Codex-worked merges are left out of the solo baseline: 1.5M Codex tokens")
         // Caught beside escaped.
         #expect(try row("Important findings fixed").cells.map(\.value) == ["50", "50", "Not recorded"])
         #expect(try row("Important findings fixed").cells[0].detail == "1 finding over 2 merges whose audits are kept")
@@ -369,7 +482,7 @@ struct StatisticsModelTests {
         #expect(try figure("Worker working").value == "37%" && figure("The rest").value == "53%")
         #expect(try figure("Verifier hours").value == StatisticsPage.hours(1.25))
         #expect(try figure("Project lead").value == "$1.50" && figure("Project lead").detail == "2.4M tokens")
-        #expect(try figure("Codex tokens").value == "1.5M" && figure("Codex tokens").detail == "not in the cost: Codex has no price here")
+        #expect(try figure("Codex tokens").value == "1.5M" && figure("Codex tokens").detail == "in the cost at Codex's prices of \(LeadPrices.codexAsOf) (receipts from before then: not in it)")
         #expect(try figure("Merge reruns").value == "Not recorded", "receipts still don't price a rerun")
         // Not kept: said so.
         var bare = QualityFigures()

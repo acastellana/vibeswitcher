@@ -33,7 +33,7 @@ struct ProcessTableTests {
     }
 
     /// A process started just before is in it, and gone just after it ended (a zombie isn't a process that runs).
-    @Test func aSnapshotIsCurrent() throws {
+    @Test func aSnapshotIsCurrent() async throws {
         let child = Process()
         child.executableURL = URL(fileURLWithPath: "/bin/sleep")
         child.arguments = ["30"]
@@ -42,7 +42,7 @@ struct ProcessTableTests {
         defer { if child.isRunning { kill(pid, SIGKILL) } }
         #expect(ProcessTable.trySnapshot()?[pid]?.comm == "sleep")
         kill(pid, SIGKILL)
-        child.waitUntilExit()
+        #expect(await exited(child), "pid \(child.processIdentifier) still running")
         #expect(ProcessTable.trySnapshot().map { $0[pid] == nil } == true)
     }
 
@@ -69,7 +69,7 @@ struct ProcessTableTests {
         var burners: [Process] = []
         defer {
             for burner in burners where burner.isRunning { kill(burner.processIdentifier, SIGKILL) }
-            for burner in burners { burner.waitUntilExit() }
+            for burner in burners { waitForEnd(burner) }
         }
         // As scripts/test-under-load.sh would: 2 × ncpu at most, only on a Mac not already that loaded, killed by pid.
         if ambient.allows {
@@ -120,7 +120,7 @@ struct ProcessTableTests {
     /// A pseudo-terminal is named as devname() names it (without its scan of /dev). One closed before it was named
     /// (some process still has it as its own) has no name, and that isn't kept: the next one opened on its number is
     /// named.
-    @Test func aTerminalIsNamedByItsNumber() throws {
+    @Test func aTerminalIsNamedByItsNumber() async throws {
         let names = TerminalNames()
         let open = try openPty()
         defer { close(open.master) }
@@ -129,7 +129,7 @@ struct ProcessTableTests {
         let (master, device, name) = try openPty()
         close(master)
         var node = stat()
-        #expect(eventually { stat("/dev/" + name, &node) != 0 })
+        #expect(await eventually { stat("/dev/" + name, &node) != 0 })
         // Unless another session opened one on its number meanwhile.
         #expect(names.name(device) == nil || stat("/dev/" + name, &node) == 0)
         // Pseudo-terminals are numbered lowest free first: the next ones opened take its number again, unless another
@@ -157,7 +157,7 @@ struct ProcessTableTests {
 
     /// A read past its time limit leaves its caller at the limit, told nil; while it's still stuck in the kernel the
     /// next caller is told nil at once; once it's done, reads go on.
-    @Test func aCallerWaitsTheTimeLimitAtMost() {
+    @Test func aCallerWaitsTheTimeLimitAtMost() async {
         let reads = BoundedReads()
         let release = DispatchSemaphore(value: 0)
         let started = Date()
@@ -168,7 +168,7 @@ struct ProcessTableTests {
         #expect(reads.read(within: 5) { _ in 2 } == nil)
         #expect(Date().timeIntervalSince(behind) < 1)
         release.signal()
-        #expect(eventually { reads.read(within: 5) { _ in 3 } == 3 })
+        #expect(await eventually { reads.read(within: 5) { _ in 3 } == 3 })
         // A read that gives up at its own deadline is told as such: nil, not a value.
         #expect(reads.read(within: 5) { (_: Date) -> Int? in nil } == nil)
         #expect(reads.read(within: 5) { _ in 4 } == 4)
@@ -187,8 +187,8 @@ struct ProcessTableTests {
 
     /// One of the user's terminal processes whose argv can't be read (so whether it's an agent is unknown) is in the
     /// table as unknown: no agent, not a session's end, not the table's loss. Told once more after a pause, not more.
-    @Test func aProcessThatCantBeToldIsUnknown() throws {
-        let (terminal, pid) = try sleeperOnATerminal()
+    @Test func aProcessThatCantBeToldIsUnknown() async throws {
+        let (terminal, pid) = try await sleeperOnATerminal()
         defer { stop(terminal) }
         let reads = Reads()
         let blind = ArgumentCache { $0 == pid ? (reads.next(), []).1 : ProcessTable.readArguments(pid: $0) }
@@ -206,8 +206,8 @@ struct ProcessTableTests {
     }
 
     /// One whose argv can be read after a moment is told: an agent, or not one, never unknown.
-    @Test func aProcessToldOnTheRetryIsKnown() throws {
-        let (terminal, pid) = try sleeperOnATerminal()
+    @Test func aProcessToldOnTheRetryIsKnown() async throws {
+        let (terminal, pid) = try await sleeperOnATerminal()
         defer { stop(terminal) }
         let reads = Reads()
         let late = ArgumentCache { $0 == pid ? (reads.next() == 1 ? [] : ["/Users/me/.local/bin/claude"]) : ProcessTable.readArguments(pid: $0) }
@@ -218,8 +218,8 @@ struct ProcessTableTests {
     }
 
     /// A read that has its undecided processes to tell again and no time left for the pause is past its deadline: nil.
-    @Test func noTimeForThePauseIsNoTable() throws {
-        let (terminal, pid) = try sleeperOnATerminal()
+    @Test func noTimeForThePauseIsNoTable() async throws {
+        let (terminal, pid) = try await sleeperOnATerminal()
         defer { stop(terminal) }
         let blind = ArgumentCache { $0 == pid ? [] : ProcessTable.readArguments(pid: $0) }
         #expect(ProcessTable.readTable(until: Date().addingTimeInterval(5), arguments: blind, pause: 60) == nil)
@@ -228,16 +228,16 @@ struct ProcessTableTests {
     /// Processes are mid-exec all the time on a Mac running builds and tests: a terminal's process whose argv can't be
     /// read yet doesn't cost the table. Fifty snapshots in a row while shells on a terminal fork and exec as fast as
     /// they can are all read, and each has a process that runs throughout.
-    @Test func execsOnATerminalDontCostTheTable() throws {
+    @Test func execsOnATerminalDontCostTheTable() async throws {
         let ambient = AmbientLoad()
         let one = "i=0; while [ $i -lt 100000 ] && kill -0 $PPID 2>/dev/null; do /bin/date >/dev/null; i=$((i+1)); done"
         let loop = try onATerminal((0..<4).map { _ in "(\(one)) &" }.joined(separator: " ") + " wait")
         defer { stop(loop) }
-        try snapshotsStayWhole(while: loop, pause: 0.01, ambient: ambient)
+        try await snapshotsStayWhole(while: loop, pause: 0.01, ambient: ambient)
     }
 
     /// The same while a `swift build` of a tiny package runs on a terminal (its compilers and linkers exec there).
-    @Test func aBuildOnATerminalDoesntCostTheTable() throws {
+    @Test func aBuildOnATerminalDoesntCostTheTable() async throws {
         let ambient = AmbientLoad()
         let package = scratch.url("tiny-package")
         try FileManager.default.createDirectory(at: package.appendingPathComponent("Sources/Tiny"), withIntermediateDirectories: true)
@@ -249,13 +249,13 @@ struct ProcessTableTests {
         try "print(\"tiny\")\n".write(to: package.appendingPathComponent("Sources/Tiny/main.swift"), atomically: true, encoding: .utf8)
         let build = try onATerminal("swift build --package-path '\(package.path)'")
         defer { stop(build) }
-        try snapshotsStayWhole(while: build, pause: 0.1, ambient: ambient)
+        try await snapshotsStayWhole(while: build, pause: 0.1, ambient: ambient)
     }
 
     /// An exec'd process on a terminal whose argv can't be read twice in a row (an exec in progress on a loaded Mac)
     /// doesn't cost the table: it's in it.
-    @Test func aProcessMidExecIsInTheTable() throws {
-        let (terminal, pid) = try sleeperOnATerminal()
+    @Test func aProcessMidExecIsInTheTable() async throws {
+        let (terminal, pid) = try await sleeperOnATerminal()
         defer { stop(terminal) }
         let reads = Reads()
         let midExec = ArgumentCache { $0 == pid && reads.next() <= 2 ? [] : ProcessTable.readArguments(pid: $0) }
@@ -264,17 +264,17 @@ struct ProcessTableTests {
     }
 
     /// `/bin/sleep 60` on a terminal of its own (exec'd by the terminal's shell), and its pid.
-    private func sleeperOnATerminal() throws -> (terminal: Process, pid: pid_t) {
+    private func sleeperOnATerminal() async throws -> (terminal: Process, pid: pid_t) {
         let terminal = try onATerminal("exec /bin/sleep 60")
         var pid: pid_t = 0
-        let started = eventually(timeout: 30) {
+        let started = await eventually(timeout: 30) {
             var children = [pid_t](repeating: 0, count: 4)
             let count = children.withUnsafeMutableBytes { proc_listchildpids(terminal.processIdentifier, $0.baseAddress, Int32($0.count)) }
             guard count > 0, let info = ProcessTable.info(pid: children[0]), info.comm == "sleep", info.tty != nil else { return false }
             pid = children[0]
             return true
         }
-        if !started { stop(terminal) }
+        if !started { await stop(terminal) }
         try #require(started)
         return (terminal, pid)
     }
@@ -292,7 +292,7 @@ struct ProcessTableTests {
     /// back never lacks it (never part of the table), at any load; every one comes back only when the Mac was under
     /// scripts/test-under-load.sh's threshold when the test started (`ambient`, taken before its load): over it, those
     /// not read in time are counted and printed, not failed.
-    private func snapshotsStayWhole(while load: Process, pause: TimeInterval, ambient: AmbientLoad) throws {
+    private func snapshotsStayWhole(while load: Process, pause: TimeInterval, ambient: AmbientLoad) async throws {
         let sleeper = Process()
         sleeper.executableURL = URL(fileURLWithPath: "/bin/sleep")
         sleeper.arguments = ["120"]
@@ -304,13 +304,13 @@ struct ProcessTableTests {
         for _ in 0..<50 {
             guard let table = ProcessTable.trySnapshot() else {
                 unread += 1
-                Thread.sleep(forTimeInterval: pause)
+                try? await Task.sleep(nanoseconds: UInt64(pause * 1_000_000_000))
                 continue
             }
             if table[sleeper.processIdentifier]?.comm != "sleep" { partial += 1 }
             // The load's shell is on its terminal (else its processes would never be in question).
             if table.values.contains(where: { $0.ppid == load.processIdentifier && $0.tty != nil }) { onATerminal = true }
-            Thread.sleep(forTimeInterval: pause)
+            try? await Task.sleep(nanoseconds: UInt64(pause * 1_000_000_000))
         }
         var load1 = [Double](repeating: 0, count: 3)
         getloadavg(&load1, 3)
@@ -358,7 +358,7 @@ struct ProcessTableTests {
             kill(child, SIGKILL)
         }
         if process.isRunning { kill(pid, SIGKILL) }
-        process.waitUntilExit()
+        waitForEnd(process)
     }
 
     /// The hook and the MCP server find their session among `ancestors`: nearest first, up to launchd and never past

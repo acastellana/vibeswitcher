@@ -11,7 +11,7 @@ struct SessionHeaderLineTests {
     @Test func aLongDraftGivesTheReplacedLeadsLineNoMoreThanTheHeaderShows() {
         var replaced = ReplacedLead(root: "/project-c", project: "project-c", tty: "ttys004", live: UUID())
         replaced.draft = String(repeating: "split the layer out\nand then the next one ", count: 5_000)
-        let line = SessionHeaderView.replacedLine(replaced)
+        let line = SessionHeaderBar.replacedLine(replaced)
         #expect(line.count == 401)
         #expect(line.hasPrefix("replaced — continue in Lead · project-c  ·  Enter sends to Lead · project-c: split the layer out and then"))
         #expect(line.hasSuffix("…"))
@@ -21,13 +21,13 @@ struct SessionHeaderLineTests {
     @Test func aLineTheHeaderCanShowIsGivenAsItIs() {
         var replaced = ReplacedLead(root: "/project-c", project: "project-c", tty: "ttys004", live: UUID())
         replaced.draft = "split the layer out\nnow"
-        #expect(SessionHeaderView.replacedLine(replaced)
+        #expect(SessionHeaderBar.replacedLine(replaced)
                 == "replaced — continue in Lead · project-c  ·  Enter sends to Lead · project-c: split the layer out now")
         // Up to 400 characters as they are; one more is cut.
         let prefix = "replaced — continue in Lead · project-c  ·  Enter sends to Lead · project-c: "
         replaced.draft = String(repeating: "a", count: 400 - prefix.count)
-        #expect(SessionHeaderView.replacedLine(replaced) == prefix + replaced.draft)
+        #expect(SessionHeaderBar.replacedLine(replaced) == prefix + replaced.draft)
         replaced.draft += "b"
-        #expect(SessionHeaderView.replacedLine(replaced) == prefix + replaced.draft.dropLast() + "…")
+        #expect(SessionHeaderBar.replacedLine(replaced) == prefix + replaced.draft.dropLast() + "…")
     }
 }

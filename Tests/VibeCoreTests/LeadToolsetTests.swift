@@ -32,6 +32,8 @@ final class FakeRuntime: LeadRuntime {
     /// Set: the 1- and 5-minute averages apart, in place of `load`.
     var averages: MacLoad.Averages?
     var loadReads = 0
+    /// The Mac's memory as start_worker, audit and auto_advance read it (`LeadRuntime.memoryReading`); nil: not read.
+    var memory: MacMemory?
     /// Sessions of other projects' teams the host also lists.
     var others: [LeadSessionInfo] = []
     /// Sessions of other projects' teams the host doesn't list this lead (since PR #1) but counts in its census.
@@ -143,6 +145,11 @@ final class FakeRuntime: LeadRuntime {
         if let averages { return averages }
         return (loadReadings.isEmpty ? load : loadReadings.removeFirst()).map { MacLoad.Averages(one: $0, five: $0) }
     }
+    func memoryReading() -> MacMemory? {
+        calls.lock()
+        defer { calls.unlock() }
+        return memory
+    }
     func transcript(of session: String) throws -> String? {
         calls.lock()
         defer { calls.unlock() }
@@ -185,6 +192,7 @@ final class FakeSeat: LeadRuntime {
     func currentAgent() -> LeadAgent? { agent }
     func isRunning(_ agent: LeadAgent) -> Bool { shared.isRunning(agent) }
     func loadAverages() -> MacLoad.Averages? { shared.loadAverages() }
+    func memoryReading() -> MacMemory? { shared.memoryReading() }
     func agentEnding(_ session: LeadSessionInfo) -> String? { shared.agentEnding(session) }
 }
 
@@ -195,6 +203,9 @@ protocol LeadTeamFixture {
     var vault: LeadVault { get }
 }
 
+/// A seed whose audit sample draw (`LeadAuditSample.draw`) is 99 or more: under no audit_sample_percent but 100.
+let unsampledSeed = (0...).first { LeadAuditSample.draw(seed: $0) >= 99 }!
+
 private let booksLock = NSLock()
 nonisolated(unsafe) private var books: [String: LeadVault.Book] = [:]
 
@@ -202,6 +213,8 @@ extension LeadTeamFixture {
     static func newVault(in temp: Scratch) -> LeadVault {
         let folder = temp.url("vault")
         let book = LeadVault.Book()
+        // The agents' config it seals (`ConfigSeal`): a scratch home of its own, never the Mac's or another test's.
+        book.configHome = temp.url("config-home").path
         booksLock.lock()
         books[folder.path] = book
         booksLock.unlock()
@@ -232,6 +245,8 @@ extension LeadTeamFixture {
         lead.roomWaits = roomWaits
         // The account's usage kept in the vault's folder (removed with it), never the Mac's.
         lead.usageStore = usageStore
+        // auto_advance's audit sample never draws these leads' review none tasks: a test that wants a draw injects its seed.
+        lead.auditSampleSeed = { unsampledSeed }
         return lead
     }
 
@@ -311,6 +326,59 @@ struct LeadToolsetTests: LeadTeamFixture {
     }
 
     func call(_ tools: LeadToolset, _ name: String, _ arguments: [String: Any] = [:]) -> MCPToolResult { tools.call(name, arguments) }
+
+    @Test(arguments: [false, true])
+    func incidentWorkerBriefUsesTheContractAtLaunch(updateDuringStart: Bool) throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.power = { nil }
+        #expect(!lead.call("record_incident", ["what": "Original incident", "evidence": "Original log"]).isError)
+        let slug = try #require(BoardStore(root: root).load().tasks.last?.slug)
+        let replace = {
+            let result = lead.call("update_task", ["task": slug, "title": "Current title", "goal": "Current goal",
+                "acceptance": ["Current acceptance"], "boundaries": ["Current boundaries"], "context": "Current context",
+                "review": "audit", "budget_min": 17])
+            #expect(!result.isError, "\(result.text)")
+        }
+        if updateDuringStart {
+            // A lead update lands after start_worker's first board read, while it checks the host.
+            runtime.onSessions = { runtime.onSessions = nil; replace() }
+        } else {
+            replace()
+        }
+        let started = lead.call("start_worker", ["task": slug])
+        #expect(!started.isError, "\(started.text)")
+        let prompt = try String(contentsOf: vault.runFolder(root: root, name: "worker-\(slug)").appendingPathComponent("prompt.md"), encoding: .utf8)
+        for current in ["# Task: Current title", "Current goal", "Current acceptance", "Current boundaries", "Current context", "17 min"] {
+            #expect(prompt.contains(current), "Missing \(current)")
+        }
+        #expect(!prompt.contains("Original incident") && !prompt.contains("Original log"))
+        #expect(prompt.contains(LeadPrompts.Policy.workerCheck(.audit)))
+    }
+
+    @Test(arguments: [LeadTask.Status.kept, .blocked, .folded, .abandoned, .done, .reverted, .review])
+    func workerStartupRechecksTheRefreshedTaskStatus(status: LeadTask.Status) throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.power = { nil }
+        #expect(!lead.call("add_task", ["title": "Held task", "goal": "g", "acceptance": ["a"]]).isError)
+        runtime.onSessions = {
+            runtime.onSessions = nil
+            do {
+                try BoardStore(root: root).update { board in
+                    let index = try #require(board.taskIndex("held-task"))
+                    board.tasks[index].status = status
+                }
+            } catch { Issue.record(error) }
+        }
+        let result = lead.call("start_worker", ["task": "held-task"])
+        #expect(result.isError, "\(result.text)")
+        #expect(runtime.spawned.isEmpty)
+        let task = try #require(BoardStore(root: root).load().task("held-task"))
+        #expect(task.status == status && task.worker == nil)
+    }
 
     @Test func aLeadStartedOnASymlinkedFolderNamesItsProjectAsTheVaultDoes() throws {
         let root = try repo()
@@ -858,6 +926,40 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(runtime.steered.count == 2)
     }
 
+    @Test(arguments: [true, false])
+    func aDoneReportSupersedesOlderCodexLeadMessagesButKeepsNewAndOtherSenders(codex: Bool) throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = call(lead, "add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
+        let issued = try issued(.worker, task: "one", root: root, runtime)
+        let session = try #require(issued.runtime.currentAgent()?.session)
+        let agent = LeadAgent(pid: 6000, tty: "tty" + UUID().uuidString.prefix(8), session: session, agent: codex ? .codex : .claude)
+        let seat = FakeSeat(runtime, agent: agent)
+        let worker = LeadToolset(root: root, runtime: seat, vault: vault(for: seat))
+        try BoardStore(root: root).update { board in
+            board.tasks[0].worker = agent.session
+            board.tasks[0].agent = codex ? .codex : .claude
+            board.tasks[0].status = .running
+        }
+        let inbox = VibePaths.root
+        let sender = SteerMessage.Sender.lead("lead of \(lead.project)")
+        let old = SteerMessage(text: "The merge failed: earlier output", from: sender, agentPid: agent.pid, at: 1)
+        let later = SteerMessage(text: "A new merge failure", from: sender, agentPid: agent.pid,
+                                 at: Date().timeIntervalSince1970 + 3600)
+        let other = SteerMessage(text: "A user request", from: .system("another sender"), agentPid: agent.pid, at: 1)
+        for message in [old, later, other] { try SteerInbox.post(message, tty: agent.tty, root: inbox) }
+        // Blocked isn't completion: genuinely undelivered messages still wait.
+        #expect(!call(worker, "report", ["status": "blocked", "summary": "waiting"]).isError)
+        #expect(SteerInbox.pending(tty: agent.tty, root: inbox).map(\.id) == [old, later, other].map(\.id))
+        #expect(!call(worker, "report", doneReport("fixed the latest failure")).isError)
+        #expect(SteerInbox.pending(tty: agent.tty, root: inbox).map(\.id) == (codex ? [later, other] : [old, later, other]).map(\.id))
+        var typed: [String] = []
+        _ = LeadDelivery.flush(agent, betweenTurns: true, inputIsEmpty: { true },
+                               typeInto: { typed.append($0); return true }, root: inbox)
+        if codex { #expect(!typed.contains { $0.contains(old.text) }) }
+    }
+
     /// A task "fix" whose worker committed b.txt and reported `report`; the lead's tools and the verifier prompt reader.
     func reportedFix(_ root: String, _ runtime: FakeRuntime, report: String = "added b.txt") throws -> LeadToolset {
         let lead = try lead(root, runtime)
@@ -1096,7 +1198,8 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(!merged.isError, "\(merged.text)")
         #expect(merged.text.contains("feature"))
         #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
-        #expect(underRecords("feature", in: root) == Git.run(["rev-parse", "agent/add-b"], in: root).output)
+        // The branch's commit, with the merge's provenance trailers (MergeProvenanceTests).
+        #expect(MergeProvenanceTests.isStamped(underRecords("feature", in: root), from: Git.run(["rev-parse", "agent/add-b"], in: root).output, in: root))
         // main didn't move.
         #expect(Git.run(["ls-tree", "--name-only", "main"], in: root).output == "a.txt")
         // Workers may not switch to it.
@@ -1253,4 +1356,3 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
     }
 }
-

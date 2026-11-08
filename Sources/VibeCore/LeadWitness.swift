@@ -620,25 +620,78 @@ public enum LeadWitness {
     }
 
     /// Watches the Mac-wide test and build slots (the app looks once a minute, see `TestLock`): a slot held over
-    /// `TestLock.longAfter` is told to every running lead once per holder, as long. Only said: nothing is ended (it may
-    /// be another project's, and a long suite isn't a hung one).
+    /// `TestLock.longAfter` is told to its owner once per holder. Unowned runs go only to projects queued behind them.
     public struct HeavySlots {
         let lock: TestLock?
         /// The long holders told, by slot, note and since: one that's let go is forgotten.
         public private(set) var told: Set<String> = []
+        private var toldTo: [String: Set<String>] = [:]
 
         public init(lock: TestLock? = TestLock.standard()) { self.lock = lock }
 
         /// What to tell the leads now, if anything.
         public mutating func look(now: Date = Date()) -> String? {
-            guard let lock else { return nil }
+            let new = newHolders(now: now)
+            return new.isEmpty ? nil : LeadWitness.longSlotText(new, now: now)
+        }
+
+        /// Only the owning project can act on its run. A bare run is relevant to its queued waiters.
+        public mutating func look(roots: Set<String>, now: Date = Date()) -> [String: String] {
+            guard let lock else { return [:] }
+            let holders = lock.holders().filter { $0.isLong(now: now) }
+            let keys = Set(holders.map(Self.key))
+            let waiters = lock.waiters()
+            var out: [String: String] = [:]
+            for root in roots {
+                var sent = (toldTo[root] ?? []).intersection(keys)
+                let fresh = holders.filter { !sent.contains(Self.key($0)) }
+                let reports = Self.reports(holders: fresh, waiters: waiters, roots: [root], now: now)
+                if let text = reports[root] {
+                    out[root] = text
+                    // Mark only the holders routed to this root, so a later waiter still hears about a bare run.
+                    for holder in fresh where !Self.reports(holders: [holder], waiters: waiters, roots: [root], now: now).isEmpty {
+                        sent.insert(Self.key(holder))
+                    }
+                }
+                toldTo[root] = sent
+            }
+            return out
+        }
+
+        public static func reports(holders: [TestLock.Holder], waiters: [TestLock.Waiter], roots: Set<String>, now: Date,
+                                   isRepository: (String) -> Bool = LoadStats.isRepository) -> [String: String] {
+            func belongs(_ holder: TestLock.Holder, to root: String) -> Bool {
+                if let directory = holder.directory {
+                    return directory == root || directory.hasPrefix(root + "/")
+                }
+                return holder.project == TestLock.whose(root).project
+            }
+            var reports: [String: String] = [:]
+            for root in roots {
+                let relevant = holders.filter { holder in
+                    // vs-heavy records PWD's basename as "project" even outside a repository.
+                    let owned = roots.contains { belongs(holder, to: $0) }
+                        || (holder.directory.map { LoadStats.project(ofFolder: $0, isRepository: isRepository) != nil } ?? (holder.project != nil))
+                    if owned { return belongs(holder, to: root) }
+                    return waiters.contains { $0.slots >= holder.slot && belongs($0.who, to: root) }
+                }
+                if !relevant.isEmpty { reports[root] = LeadWitness.longSlotText(relevant, now: now) }
+            }
+            return reports
+        }
+
+        private static func key(_ holder: TestLock.Holder) -> String {
+            "\(holder.slot)|\(holder.note ?? "")|\(holder.since?.timeIntervalSince1970 ?? 0)"
+        }
+
+        private mutating func newHolders(now: Date) -> [TestLock.Holder] {
+            guard let lock else { return [] }
             let long = lock.holders().filter { $0.isLong(now: now) }
-            let keyed = long.map { (holder: $0, key: "\($0.slot)|\($0.note ?? "")|\($0.since?.timeIntervalSince1970 ?? 0)") }
+            let keyed = long.map { (holder: $0, key: Self.key($0)) }
             told.formIntersection(keyed.map(\.key))
             let new = keyed.filter { !told.contains($0.key) }
-            guard !new.isEmpty else { return nil }
             told.formUnion(new.map(\.key))
-            return LeadWitness.longSlotText(new.map(\.holder), now: now)
+            return new.map(\.holder)
         }
     }
 
@@ -771,6 +824,11 @@ extension LeadWitness {
         /// A wait this old is dropped untold: its lead has moved on, or ended.
         public static let expiry: TimeInterval = 12 * 3600
 
+        /// The sleep ledger reader, injected by tests to check which thread takes its lock and reads its file.
+        var pendingSleep: (String) -> Bool = { root in
+            (try? LeadSleepRecovery.Store(root: root).pending().isEmpty) == false
+        }
+
         public init(folder: URL = RoomWaits.folder) { self.folder = folder }
 
         /// Keeps a refusal for the lead of `root` until there's room for it.
@@ -792,7 +850,7 @@ extension LeadWitness {
 
         /// What to tell each refused lead now that the Mac has room, one message per project: the waits `mac` has
         /// room for under `limits` (the load, `MacLoad.Averages.steady`, not over load_threshold, and with a wait's sessions the team
-        /// sessions within mac_max_sessions). Those told are removed; the rest stay until there's room for them too.
+        /// sessions within mac_max_sessions and the Mac not short of memory, `MacMemory.shortage`). Those told are removed; the rest stay until there's room for them too.
         /// A project whose automatic steps were refused is nudged (`LeadAdvance.nudge`) instead: its lead's tool server
         /// tries them again, and only the lead's own refusals are told.
         /// While boosted, the room is shared out in turn instead (`Self.inTurn`): the project the user last worked in
@@ -802,7 +860,9 @@ extension LeadWitness {
             var due: [String: [Wait]] = [:]
             var kept: [(file: URL, wait: Wait)] = []
             for (file, wait) in waits() {
-                if now.timeIntervalSince1970 - wait.at > Self.expiry {
+                // A sleep interruption stays pending through a long battery/load hold, even overnight.
+                if now.timeIntervalSince1970 - wait.at > Self.expiry
+                    && !(wait.auto == true && wait.what == LeadSleepRecovery.retryWait && pendingSleep(wait.root)) {
                     try? FileManager.default.removeItem(at: file)
                     continue
                 }
@@ -841,7 +901,8 @@ extension LeadWitness {
 
         static func hasRoom(for wait: Wait, mac: MacLoad, limits: MacLimits) -> Bool {
             guard !mac.isBusy(threshold: limits.loadLimit) else { return false }
-            return wait.need == 0 || mac.sessions + wait.need <= limits.maxSessions
+            // A merge's wait (no session) waits on the load alone, as merge does; starts and audits on memory too.
+            return wait.need == 0 || (mac.memoryShortage(limits) == nil && mac.sessions + wait.need <= limits.maxSessions)
         }
 
         private typealias Holder = MacLoad.Holder
@@ -880,7 +941,8 @@ extension LeadWitness {
     /// still wanted." Naming no project but the lead's `root`'s: the lead may copy it into its repo's records.
     public static func roomText(_ whats: [String], mac: MacLoad, limits: MacLimits, root: String) -> String {
         "The Mac has room again for what was refused: \(whats.joined(separator: ", ")). Now: load \(mac.loadText) "
-            + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessionsText)). "
+            + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessionsText))"
+            + (mac.memory.map { ", \($0.text)" } ?? "") + ". "
             + "Retry what's still wanted; other projects' leads may take the room too."
     }
 }

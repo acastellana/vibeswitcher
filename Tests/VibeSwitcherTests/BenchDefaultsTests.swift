@@ -60,7 +60,7 @@ struct BenchDefaultsTests {
         process.standardError = pipe
         try process.run()
         let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+        waitForEnd(process)
         #expect(process.terminationStatus == 0, "\(output)")
     }
 

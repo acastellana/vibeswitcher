@@ -26,16 +26,16 @@ struct EndingASessionTests {
         text.components(separatedBy: "\(name)=").dropFirst().first.flatMap { pid_t($0.prefix { $0.isNumber }) }
     }
 
-    @Test func endingASessionEndsWhatItStartedOnly() throws {
+    @Test func endingASessionEndsWhatItStartedOnly() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
         // A setsid'd child (launchd's once the shell ends; forked first, since the job it's in leads its group and a
         // group's leader can't start a session), and a job in a group of its own that ignores SIGHUP: neither is in a
         // group the session's SIGHUP reaches. Apple's perl: its environment can't be read.
-        let session = try client.spawn("perl -MPOSIX -e 'if (fork) { wait; exit } POSIX::setsid() == $$ or die; $|=1; print qq(s=$$\\n); sleep 300' & "
+        let session = try await client.spawn("perl -MPOSIX -e 'if (fork) { wait; exit } POSIX::setsid() == $$ or die; $|=1; print qq(s=$$\\n); sleep 300' & "
             + "perl -e 'setpgrp(0, 0); $SIG{HUP} = q(IGNORE); $|=1; print qq(b=$$\\n); sleep 300' & \(keepRunning)")
-        client.attach(session.id)
-        #expect(eventually { Self.pid("s", in: client.text(session.id)) != nil && Self.pid("b", in: client.text(session.id)) != nil },
+        await client.attach(session.id)
+        #expect(await eventually { Self.pid("s", in: client.text(session.id)) != nil && Self.pid("b", in: client.text(session.id)) != nil },
                 "\(client.text(session.id).debugDescription)")
         let setsid = try #require(Self.pid("s", in: client.text(session.id)))
         let job = try #require(Self.pid("b", in: client.text(session.id)))
@@ -57,11 +57,11 @@ struct EndingASessionTests {
             [carryingInput, otherInput, noneInput].forEach { try? $0.fileHandleForWriting.close() }
             [setsid, job].forEach { kill($0, SIGKILL) }
         }
-        #expect(eventually { SessionStrays.carrying(session: session.id).map(\.pid) == [carrying.processIdentifier] })
+        #expect(await eventually { SessionStrays.carrying(session: session.id).map(\.pid) == [carrying.processIdentifier] })
 
         let ended = Date()
         client.send(.kill(id: session.id))
-        #expect(eventually(timeout: 10) { kill(setsid, 0) != 0 && kill(job, 0) != 0 && !carrying.isRunning },
+        #expect(await eventually(timeout: 10) { kill(setsid, 0) != 0 && kill(job, 0) != 0 && !carrying.isRunning },
                 "setsid \(kill(setsid, 0) == 0), job \(kill(job, 0) == 0), carrying \(carrying.isRunning)")
         // Asked first, not killed: the 5 s mark is for what doesn't end on that. The tool server ends on SIGTERM by
         // itself (exit 0, as on its input's end) once it has set that up, a few ms after it started, and by the signal
@@ -72,7 +72,7 @@ struct EndingASessionTests {
             #expect(reason == .uncaughtSignal ? status == SIGTERM : status == 0, "ended by \(reason == .uncaughtSignal ? "signal" : "exit") \(status)")
         }
         // Past the 5 s mark too, the others run.
-        Thread.sleep(until: ended.addingTimeInterval(6))
+        await pause(max(0, ended.addingTimeInterval(6).timeIntervalSinceNow))
         for process in spared { #expect(process.isRunning, "\(process.executableURL?.path ?? "") was signalled") }
     }
 }

@@ -113,7 +113,7 @@ struct HomeIsolationTests {
     /// The test bundle, started the way `swift test` starts it, on the account's own folder (VIBESWITCHER_HOME): it
     /// stops as it loads with the one message, and no test body runs. Only `guardProbe`, which writes nothing, is
     /// asked for, so a broken guard costs nothing either.
-    @Test func aRunOnTheAccountsFolderStopsBeforeAnyTest() throws {
+    @Test func aRunOnTheAccountsFolderStopsBeforeAnyTest() async throws {
         let bundle = try #require(Bundle(for: TestBundleAnchor.self).executablePath)
         let helper = try #require(Self.testingHelper, "no swiftpm-testing-helper to start the bundle with")
         let home = temp.url("home")
@@ -123,7 +123,7 @@ struct HomeIsolationTests {
         environment["HOME"] = home.path
         environment["CFFIXED_USER_HOME"] = home.path
         environment["VIBESWITCHER_GUARD_PROBE"] = "1"
-        let (status, output) = try Self.run(helper, ["--test-bundle-path", bundle, bundle, "--testing-library", "swift-testing",
+        let (status, output) = try await Self.run(helper, ["--test-bundle-path", bundle, bundle, "--testing-library", "swift-testing",
                                                      "--filter", "HomeIsolationTests/guardProbe"], environment: environment)
         #expect(status == 78, "\(output)")
         #expect(!output.contains("guard probe: the test body ran"))
@@ -136,7 +136,7 @@ struct HomeIsolationTests {
     /// adds nothing to the user's own ~/.vibeswitcher (looked at, never written). That folder is live (the installed app,
     /// its host and every session write there all the time), so only what the hook could write there is compared:
     /// `hookWrites`.
-    @Test func theHookOnAScratchHomeWritesThereAndNotInTheUsersFolder() throws {
+    @Test func theHookOnAScratchHomeWritesThereAndNotInTheUsersFolder() async throws {
         let hook = Bundle(for: TestBundleAnchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-hook").path
         try #require(FileManager.default.isExecutableFile(atPath: hook), "build it first: swift build")
         let home = temp.url("home")
@@ -150,13 +150,13 @@ struct HomeIsolationTests {
         // it has no agent above it (a test run inside a Claude session would otherwise give it that session's TTY).
         let event = #"{"hook_event_name":"UserPromptSubmit","session_id":"\#(session)","cwd":"/tmp","prompt":"hi"}"#
         let script = #"/usr/bin/script -q /dev/null /bin/sh -c 'printf %s "$1" | "$2" claude' sh "$EVENT" "$HOOK" </dev/null >/dev/null 2>&1 &"#
-        let (status, output) = try Self.run("/bin/sh", ["-c", script],
+        let (status, output) = try await Self.run("/bin/sh", ["-c", script],
                                             environment: ["HOME": home.path, "PATH": "/usr/bin:/bin", "EVENT": event, "HOOK": hook])
         #expect(status == 0, "\(output)")
 
         let state = home.appendingPathComponent(".vibeswitcher/state")
         var written: [String] = []
-        #expect(eventually(timeout: 30) {
+        #expect(await eventually(timeout: 30) {
             written = ((try? FileManager.default.contentsOfDirectory(atPath: state.path)) ?? []).filter { $0.hasSuffix(".json") }
             return !written.isEmpty
         }, "no state file under \(state.path)")
@@ -249,7 +249,7 @@ struct HomeIsolationTests {
     /// The test bundle with only HOME set (no CFFIXED_USER_HOME, so `NSHomeDirectory()` is the user's, and no
     /// VIBESWITCHER_HOME) installs both agents' hooks into the scratch home's ~/.claude and ~/.codex, then uninstalls
     /// them there; the user's own config files are only stat'd, before and after, and nothing changes or appears.
-    @Test func theInstallerOnAScratchHomeWritesThereAndNotInTheUsersFiles() throws {
+    @Test func theInstallerOnAScratchHomeWritesThereAndNotInTheUsersFiles() async throws {
         let bundle = try #require(Bundle(for: TestBundleAnchor.self).executablePath)
         let helper = try #require(Self.testingHelper, "no swiftpm-testing-helper to start the bundle with")
         let home = temp.url("home")
@@ -257,7 +257,7 @@ struct HomeIsolationTests {
         let before = Self.configListing(home: VibePaths.accountHome)
         let files = Agent.allCases.map { HookInstaller.configURL(for: $0, home: home.path) }
 
-        func probe(_ mode: String) throws -> String {
+        func probe(_ mode: String) async throws -> String {
             var environment = ["HOME": home.path, "PATH": "/usr/bin:/bin", "VIBESWITCHER_INSTALLER_PROBE": mode]
             // Where the bundle finds XCTest and Testing, as `swift test` told this process: Swift Build's per-target
             // bundles (Swift 6.4's default layout) have no rpath to the platform's frameworks, so without these the
@@ -265,14 +265,14 @@ struct HomeIsolationTests {
             for key in ["DYLD_FRAMEWORK_PATH", "DYLD_LIBRARY_PATH"] {
                 environment[key] = ProcessInfo.processInfo.environment[key]
             }
-            let (status, output) = try Self.run(helper, ["--test-bundle-path", bundle, bundle, "--testing-library", "swift-testing",
+            let (status, output) = try await Self.run(helper, ["--test-bundle-path", bundle, bundle, "--testing-library", "swift-testing",
                                                          "--filter", "HomeIsolationTests/installerProbe"], environment: environment)
             #expect(status == 0, "\(output)")
             #expect(!output.contains("isn't under HOME"), "\(output)")
             return output
         }
 
-        let installed = try probe("install")
+        let installed = try await probe("install")
         for (agent, file) in zip(Agent.allCases, files) {
             #expect(installed.contains("installer probe: \(agent.rawValue) installed=true at \(file.path)"), "\(installed)")
             let config = try HookInstaller.readConfigThrowing(file)
@@ -282,7 +282,7 @@ struct HomeIsolationTests {
             #expect(text.contains(home.path + "/.vibeswitcher/bin/vibeswitcher-hook"), "\(text)")
         }
 
-        let uninstalled = try probe("uninstall")
+        let uninstalled = try await probe("uninstall")
         for (agent, file) in zip(Agent.allCases, files) {
             #expect(uninstalled.contains("installer probe: \(agent.rawValue) installed=false at \(file.path)"), "\(uninstalled)")
             #expect(!HookInstaller.isInstalled(in: try HookInstaller.readConfigThrowing(file)), "\(file.path)")
@@ -389,15 +389,21 @@ struct HomeIsolationTests {
     static var testingHelper: String? {
         let own = CommandLine.arguments.first ?? ""
         if URL(fileURLWithPath: own).lastPathComponent == "swiftpm-testing-helper" { return own }
-        guard let swift = try? run("/usr/bin/xcrun", ["--find", "swift"], environment: ProcessInfo.processInfo.environment),
+        guard let swift = try? runNow("/usr/bin/xcrun", ["--find", "swift"], environment: ProcessInfo.processInfo.environment),
               swift.status == 0 else { return nil }
         let helper = URL(fileURLWithPath: swift.output.trimmingCharacters(in: .whitespacesAndNewlines))
             .deletingLastPathComponent().appendingPathComponent("../libexec/swift/pm/swiftpm-testing-helper").standardizedFileURL.path
         return FileManager.default.isExecutableFile(atPath: helper) ? helper : nil
     }
 
-    /// Runs `path` with `arguments` to its end: its status, and its output and errors together.
-    static func run(_ path: String, _ arguments: [String], environment: [String: String]) throws -> (status: Int32, output: String) {
+    /// Runs `path` with `arguments` to its end: its status, and its output and errors together. Awaited, the run (the
+    /// whole test bundle, a bash script) waited for on a thread of its own, not the cooperative pool.
+    static func run(_ path: String, _ arguments: [String], environment: [String: String]) async throws -> (status: Int32, output: String) {
+        try await offPool { try runNow(path, arguments, environment: environment) }
+    }
+
+    /// `run`, blocking: for `testingHelper`, which a trait reads before any test (one `xcrun --find`).
+    static func runNow(_ path: String, _ arguments: [String], environment: [String: String]) throws -> (status: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
@@ -408,7 +414,7 @@ struct HomeIsolationTests {
         process.standardInput = FileHandle.nullDevice
         try process.run()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        waitForEnd(process)
         return (process.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 }

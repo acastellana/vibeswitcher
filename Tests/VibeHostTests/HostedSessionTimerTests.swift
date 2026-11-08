@@ -60,10 +60,11 @@ struct HostedSessionTimerTests {
 
     /// Kills the program and waits for its reap. The poll looks at each turn (its clock is the test's): the exit
     /// event can come before the program can be reaped (see `HostedSession.exitEvent`), and then only a look reaps it.
+    /// Blocking, for a `defer`: a SIGKILL's program ends at once.
     func end(_ session: HostedSession, probe: SessionProbe, timers: FakeTimers) {
         let pid = probe.queue.sync { session.info.childPID }
         kill(pid, SIGKILL)
-        _ = eventually {
+        _ = eventuallyBlocking {
             if probe.queue.sync(execute: { session.info.exit != nil }) { return true }
             timers.made(.exitPoll).forEach(timers.fire)
             return false
@@ -71,7 +72,7 @@ struct HostedSessionTimerTests {
     }
 
     /// A look 50 ms in, then at 1 and 5 s, then every 30 s, each scheduled once the one before looked.
-    @Test func theExitPollBacksOff() throws {
+    @Test func theExitPollBacksOff() async throws {
         let probe = SessionProbe()
         let timers = FakeTimers(queue: probe.queue)
         let session = try start("exec sleep 600", probe: probe, timers: timers)
@@ -92,15 +93,15 @@ struct HostedSessionTimerTests {
     /// then stops. Under load the event can come a moment before the program can be reaped (see
     /// `anExitEventBeforeTheProgramCanBeReapedLooksAgainSoon`): the poll then looks again soon, here when the test
     /// fires it, its clock being the test's.
-    @Test func theExitSourceReapsAtOnce() throws {
+    @Test func theExitSourceReapsAtOnce() async throws {
         let probe = SessionProbe()
         let timers = FakeTimers(queue: probe.queue)
         let session = try start("exec sleep 600", probe: probe, timers: timers)
         let poll = try #require(timers.made(.exitPoll).first)
         let pid = probe.queue.sync { session.info.childPID }
-        #expect(eventually { (ProcessTable.info(pid: pid)?.comm ?? "") == "sleep" })
+        #expect(await eventually { (ProcessTable.info(pid: pid)?.comm ?? "") == "sleep" })
         kill(pid, SIGTERM)
-        #expect(eventually {
+        #expect(await eventually {
             let (ended, early) = probe.queue.sync { (session.info.exit != nil, poll.schedules.count > 1) }
             if !ended, early { timers.fire(poll) }
             return ended
@@ -112,7 +113,7 @@ struct HostedSessionTimerTests {
 
     /// The exit source's event can come a moment before the program can be reaped (the kernel posts it first): the
     /// poll then looks again at its shortest delay, then every second, not at its next look up to 30 s off.
-    @Test func anExitEventBeforeTheProgramCanBeReapedLooksAgainSoon() throws {
+    @Test func anExitEventBeforeTheProgramCanBeReapedLooksAgainSoon() async throws {
         let probe = SessionProbe()
         let timers = FakeTimers(queue: probe.queue)
         let session = try start("exec sleep 600", probe: probe, timers: timers)
@@ -137,7 +138,7 @@ struct HostedSessionTimerTests {
 
     /// The watchdog runs while the parser has work, stops at its first look that finds none, and starts again with
     /// the parser's next work.
-    @Test func theParserWatchdogStopsWhileIdleAndStartsWhenBusy() throws {
+    @Test func theParserWatchdogStopsWhileIdleAndStartsWhenBusy() async throws {
         let probe = SessionProbe()
         let timers = FakeTimers(queue: probe.queue)
         let session = try start("printf 'ready\\n'; exec cat", probe: probe, timers: timers)
@@ -146,17 +147,17 @@ struct HostedSessionTimerTests {
         // A quarter of the stall limit (10 s), at most 1 s, repeated.
         let schedule = try #require(probe.queue.sync { first.schedules.first })
         #expect(schedule.after == 1 && schedule.repeating == 1 && schedule.leeway == .milliseconds(250))
-        #expect(eventually { probe.text.contains("ready") })
+        #expect(await eventually { probe.text.contains("ready") })
         // Looks while the parser catches up keep it running; the first that finds it idle stops it.
-        #expect(eventually { timers.fire(first); return probe.queue.sync { first.cancelled } })
+        #expect(await eventually { timers.fire(first); return probe.queue.sync { first.cancelled } })
         #expect(timers.made(.parserWatchdog).count == 1)
 
         // Output: the parser has work, and the watchdog runs again.
         session.write(Data("again\r".utf8), on: probe.queue)
-        #expect(eventually { timers.made(.parserWatchdog).count == 2 }, "\(probe.diagnosis(session))")
+        #expect(await eventually { timers.made(.parserWatchdog).count == 2 }, "\(probe.diagnosis(session))")
         let second = try #require(timers.made(.parserWatchdog).last)
         #expect(probe.queue.sync { !second.cancelled && second.schedules.count == 1 })
-        #expect(eventually { timers.fire(second); return probe.queue.sync { second.cancelled } })
+        #expect(await eventually { timers.fire(second); return probe.queue.sync { second.cancelled } })
         // Idle again, it stays stopped.
         #expect(timers.made(.parserWatchdog).count == 2)
     }

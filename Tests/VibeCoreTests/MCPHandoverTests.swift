@@ -55,7 +55,7 @@ final class ScratchToolServer {
         try? input.fileHandleForWriting.close()
         if process.isRunning {
             process.terminate()
-            process.waitUntilExit()
+            waitForEnd(process)
         }
     }
 
@@ -100,9 +100,9 @@ final class ScratchToolServer {
     }
 
     /// The reply to request `id`, once it's come.
-    func reply(_ id: Int) throws -> [String: Any] {
+    func reply(_ id: Int) async throws -> [String: Any] {
         var found: [String: Any]?
-        _ = eventually {
+        _ = await eventually {
             lock.lock()
             found = replies[id]
             lock.unlock()
@@ -112,13 +112,13 @@ final class ScratchToolServer {
     }
 
     /// A tool call's text: the build that answered and its process, then any notice.
-    func texts(_ id: Int) throws -> [String] {
-        let content = try #require((try reply(id)["result"] as? [String: Any])?["content"] as? [[String: Any]])
+    func texts(_ id: Int) async throws -> [String] {
+        let content = try #require((try await reply(id)["result"] as? [String: Any])?["content"] as? [[String: Any]])
         return content.compactMap { $0["text"] as? String }
     }
 
-    func tools(_ id: Int) throws -> [String] {
-        try #require((try reply(id)["result"] as? [String: Any])?["tools"] as? [[String: Any]]).compactMap { $0["name"] as? String }
+    func tools(_ id: Int) async throws -> [String] {
+        try #require((try await reply(id)["result"] as? [String: Any])?["tools"] as? [[String: Any]]).compactMap { $0["name"] as? String }
     }
 
     /// The ids of the replies so far, in the order they came.
@@ -169,63 +169,63 @@ final class ScratchToolServer {
 struct MCPHandoverTests {
     let scratch = Scratch()
 
-    @Test func aClientKeepsItsSessionAcrossANewBuild() throws {
+    @Test func aClientKeepsItsSessionAcrossANewBuild() async throws {
         let server = try ScratchToolServer(scratch)
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize + [server.call(2, "build")])
-        let initialized = try #require(try server.reply(0)["result"] as? [String: Any])
+        let initialized = try await #require(try server.reply(0)["result"] as? [String: Any])
         #expect((initialized["capabilities"] as? [String: Any])?["tools"] as? [String: Bool] == ["listChanged": true])
-        #expect(try server.tools(1) == ["build", "slow", "only-A"])
+        await #expect(try server.tools(1) == ["build", "slow", "only-A"])
         let pid = server.process.processIdentifier
-        #expect(try server.texts(2) == ["A \(pid)"])
+        await #expect(try server.texts(2) == ["A \(pid)"])
 
         try server.install(build: "B")
         // Two calls in one write: the second is input the old build read but never handled.
         try server.send([server.call(3, "build"), server.call(4, "build")])
-        #expect(try server.texts(3) == ["B \(pid)"])
-        #expect(try server.texts(4) == ["B \(pid)"])
+        await #expect(try server.texts(3) == ["B \(pid)"])
+        await #expect(try server.texts(4) == ["B \(pid)"])
         // The same process, still running, on the same pipes: no disconnect, no new initialize.
         #expect(server.process.isRunning)
         #expect(server.notifications == ["notifications/tools/list_changed"])
         try server.send([["jsonrpc": "2.0", "id": 5, "method": "tools/list"]])
-        #expect(try server.tools(5) == ["build", "slow", "only-B"])
+        await #expect(try server.tools(5) == ["build", "slow", "only-B"])
         #expect(server.log.contains("switched in place to the new build"))
 
         // And on to the next build, the same way.
         try server.install(build: "C")
         try server.send([server.call(6, "build")])
-        #expect(try server.texts(6) == ["C \(pid)"])
+        await #expect(try server.texts(6) == ["C \(pid)"])
         #expect(server.notifications == ["notifications/tools/list_changed", "notifications/tools/list_changed"])
     }
 
     /// The old build finishes what it has in hand, answering it, before the new one takes over.
-    @Test func aCallInHandIsFinishedByTheOldBuild() throws {
+    @Test func aCallInHandIsFinishedByTheOldBuild() async throws {
         let server = try ScratchToolServer(scratch)
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize + [server.call(2, "slow", ["seconds": 3])])
-        _ = try server.reply(1)
+        _ = try await server.reply(1)
         let pid = server.process.processIdentifier
         try server.install(build: "B")
         // While the slow call runs, the old build goes on serving.
         try server.send([server.call(3, "build")])
-        #expect(try server.texts(3) == ["A \(pid)"])
-        #expect(try server.texts(2) == ["A \(pid)"])
+        await #expect(try server.texts(3) == ["A \(pid)"])
+        await #expect(try server.texts(2) == ["A \(pid)"])
         try server.send([server.call(4, "build")])
-        #expect(try server.texts(4) == ["B \(pid)"])
+        await #expect(try server.texts(4) == ["B \(pid)"])
         #expect(server.process.isRunning)
     }
 
-    @Test func aBuildThatCantTakeOverLeavesTheOldOneServing() throws {
+    @Test func aBuildThatCantTakeOverLeavesTheOldOneServing() async throws {
         let server = try ScratchToolServer(scratch)
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize)
-        _ = try server.reply(1)
+        _ = try await server.reply(1)
         let pid = server.process.processIdentifier
 
         // A build that won't run.
         try server.install("#!/bin/sh\necho 'this build is broken' >&2\nexit 3\n")
         try server.send([server.call(2, "build")])
-        let broken = try server.texts(2)
+        let broken = try await server.texts(2)
         #expect(broken.first == "A \(pid)")
         #expect(broken.count == 2 && broken[1].contains("couldn't switch to the new build (its probe exited with status 3)"))
         #expect(server.log.contains("this build is broken"))
@@ -234,31 +234,31 @@ struct MCPHandoverTests {
         // One that can't be executed at all.
         try server.install("#!/bin/sh\nexit 0\n", mode: 0o644)
         try server.send([server.call(3, "build")])
-        #expect(try server.texts(3).first == "A \(pid)")
+        await #expect(try server.texts(3).first == "A \(pid)")
         #expect(server.log.contains("it couldn't start: Permission denied"))
 
         // One that refuses the session: an answer that isn't the probe's.
         try server.install("#!/bin/sh\necho 'vibeswitcher-mcp handover 999 ok'\n")
         try server.send([server.call(4, "build")])
-        #expect(try server.texts(4).first == "A \(pid)")
+        await #expect(try server.texts(4).first == "A \(pid)")
         #expect(server.log.contains("its probe said vibeswitcher-mcp handover 999 ok"))
         // Through all of it the old build kept its tools.
         try server.send([["jsonrpc": "2.0", "id": 5, "method": "tools/list"]])
-        #expect(try server.tools(5) == ["build", "slow", "only-A"])
+        await #expect(try server.tools(5) == ["build", "slow", "only-A"])
 
         // A good build then takes over at once.
         try server.install(build: "B")
         try server.send([server.call(6, "build")])
-        #expect(try server.texts(6) == ["B \(pid)"])
+        await #expect(try server.texts(6) == ["B \(pid)"])
     }
 
     /// Requests written back to back across the switch, the last one split over two writes: each is answered once, by
     /// the new build, in the order sent; none is lost in the old build's read buffer, none answered by both.
-    @Test func pipelinedRequestsAcrossASwitchAreEachAnsweredOnceInOrder() throws {
+    @Test func pipelinedRequestsAcrossASwitchAreEachAnsweredOnceInOrder() async throws {
         let server = try ScratchToolServer(scratch)
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize)
-        _ = try server.reply(1)
+        _ = try await server.reply(1)
         let pid = server.process.processIdentifier
 
         try server.install(build: "B")
@@ -271,22 +271,22 @@ struct MCPHandoverTests {
         }
         let last = try JSONSerialization.data(withJSONObject: server.call(42, "build")) + Data([0x0A])
         server.write(burst + last.prefix(10))
-        #expect(eventually { server.replyOrder.contains(41) })
+        #expect(await eventually { server.replyOrder.contains(41) })
         server.write(last.dropFirst(10))
-        #expect(try server.texts(42) == ["B \(pid)"])
+        await #expect(try server.texts(42) == ["B \(pid)"])
         #expect(server.replyOrder == [0, 1] + Array(2...42))
-        #expect(try server.tools(40) == ["build", "slow", "only-B"])
+        await #expect(try server.tools(40) == ["build", "slow", "only-B"])
         #expect(server.notifications == ["notifications/tools/list_changed"])
         #expect(server.log.components(separatedBy: "switched in place to the new build").count == 2)
     }
 
     /// An install that replaces the file again while the build before it is being probed: the server never executes a
     /// build that didn't answer its probe, and settles on the last one with a switch to it, not a switch per change.
-    @Test func aBuildReplacedDuringItsProbeIsNeverExecutedUnprobed() throws {
+    @Test func aBuildReplacedDuringItsProbeIsNeverExecutedUnprobed() async throws {
         let server = try ScratchToolServer(scratch)
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize)
-        _ = try server.reply(1)
+        _ = try await server.reply(1)
         let pid = server.process.processIdentifier
         let record = server.dir.appendingPathComponent("c-ran").path
         let next = server.dir.appendingPathComponent("next").path
@@ -299,45 +299,45 @@ struct MCPHandoverTests {
         try server.install("#!/bin/sh\nif [ \"$1\" = \(MCPHandover.probeFlag) ]; then cp '\(cScript)' '\(next)' && mv '\(next)' '\(server.installed)'; fi\n"
                            + "VIBESWITCHER_MCP_TEST_BUILD=B exec '\(toolServer)' \"$@\"\n")
         try server.send([server.call(2, "build")])
-        let first = try server.texts(2)
+        let first = try await server.texts(2)
         #expect(first == ["A \(pid)"] || first == ["C \(pid)"], "\(first)")
         try server.send([server.call(3, "build")])
-        #expect(try server.texts(3) == ["C \(pid)"])
+        await #expect(try server.texts(3) == ["C \(pid)"])
         // C answered a probe before it ran, and runs once: one switch, to it.
         #expect((try? String(contentsOfFile: record, encoding: .utf8)) == "probe\nrun\n")
         try server.send([server.call(4, "build")])
-        #expect(try server.texts(4) == ["C \(pid)"])
+        await #expect(try server.texts(4) == ["C \(pid)"])
         #expect(server.log.components(separatedBy: "switched in place to the new build").count == 2)
         #expect(!server.log.contains("couldn't switch"))
     }
 
     /// The installed binary gone (mid-install, or the app moved): the old build serves on and says so once.
-    @Test func aMissingBinaryLeavesTheOldBuildServingAndIsSaidOnce() throws {
+    @Test func aMissingBinaryLeavesTheOldBuildServingAndIsSaidOnce() async throws {
         let server = try ScratchToolServer(scratch)
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize)
-        _ = try server.reply(1)
+        _ = try await server.reply(1)
         let pid = server.process.processIdentifier
         #expect(unlink(server.installed) == 0)
         for id in 2...4 {
             try server.send([server.call(id, "build")])
-            #expect(try server.texts(id) == ["A \(pid)"])
+            await #expect(try server.texts(id) == ["A \(pid)"])
         }
-        #expect(eventually { server.log.contains("is gone") })
+        #expect(await eventually { server.log.contains("is gone") })
         #expect(server.log.components(separatedBy: "\(server.installed) is gone (an install under way, or the app moved); this build serves on").count == 2)
         // Back, as a new build: it takes over.
         try server.install(build: "B")
         try server.send([server.call(5, "build")])
-        #expect(try server.texts(5) == ["B \(pid)"])
+        await #expect(try server.texts(5) == ["B \(pid)"])
     }
 
     /// A build the kernel won't run (no code signature) never replaces the running one; the first result after says
     /// why, once.
-    @Test func anUnsignedBuildLeavesTheOldOneServing() throws {
+    @Test func anUnsignedBuildLeavesTheOldOneServing() async throws {
         let server = try ScratchToolServer(scratch)
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize)
-        _ = try server.reply(1)
+        _ = try await server.reply(1)
         let pid = server.process.processIdentifier
         let unsigned = server.dir.appendingPathComponent("unsigned").path
         try FileManager.default.copyItem(atPath: toolServer, toPath: unsigned)
@@ -345,32 +345,32 @@ struct MCPHandoverTests {
         strip.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
         strip.arguments = ["--remove-signature", unsigned]
         try strip.run()
-        strip.waitUntilExit()
+        #expect(await exited(strip), "pid \(strip.processIdentifier) still running")
         #expect(strip.terminationStatus == 0)
         #expect(rename(unsigned, server.installed) == 0)
         try server.send([server.call(2, "build")])
-        let texts = try server.texts(2)
+        let texts = try await server.texts(2)
         #expect(texts.first == "A \(pid)")
         #expect(texts.count == 2 && texts[1].contains("couldn't switch to the new build (its probe was killed by signal 9)"), "\(texts)")
         try server.send([server.call(3, "build")])
-        #expect(try server.texts(3) == ["A \(pid)"])
+        await #expect(try server.texts(3) == ["A \(pid)"])
         #expect(server.log.contains("couldn't switch to the new build at \(server.installed): its probe was killed by signal 9; this build serves on"))
     }
 
     /// A build that fails its probe each time it's tried again is said once, not at each retry.
-    @Test func aBuildRefusedAtEachRetryIsSaidOnce() throws {
+    @Test func aBuildRefusedAtEachRetryIsSaidOnce() async throws {
         // Tried again every 0.2 s rather than every minute.
         let server = try ScratchToolServer(scratch, environment: ["VIBESWITCHER_MCP_TEST_RETRY": "0.2"])
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize)
-        _ = try server.reply(1)
+        _ = try await server.reply(1)
         let pid = server.process.processIdentifier
         let probes = server.dir.appendingPathComponent("probes").path
         try server.install("#!/bin/sh\necho probed >> '\(probes)'\necho 'this build is broken' >&2\nexit 3\n")
         // An idle server looks every second: three probes, each refused.
-        #expect(eventually { ((try? String(contentsOfFile: probes, encoding: .utf8)) ?? "").split(separator: "\n").count >= 3 })
+        #expect(await eventually { ((try? String(contentsOfFile: probes, encoding: .utf8)) ?? "").split(separator: "\n").count >= 3 })
         try server.send([server.call(2, "build")])
-        let texts = try server.texts(2)
+        let texts = try await server.texts(2)
         #expect(texts.first == "A \(pid)")
         #expect(texts.count == 2 && texts[1].contains("its probe exited with status 3"))
         #expect(server.log.components(separatedBy: "couldn't switch to the new build at").count == 2, "\(server.log)")
@@ -399,89 +399,89 @@ struct MCPHostRestartTests {
         if let role { try Data(role.utf8).write(to: URL(fileURLWithPath: path)) } else { try? FileManager.default.removeItem(atPath: path) }
     }
 
-    @Test func aSwitchWhileTheHostIsDownGetsTheRoleOnceItsBack() throws {
+    @Test func aSwitchWhileTheHostIsDownGetsTheRoleOnceItsBack() async throws {
         let path = scratch.url("host").path
         try host(path, "worker")
         let server = try server(hostEnvironment(path))
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize + [server.call(2, "build")])
         let pid = server.process.processIdentifier
-        #expect(try server.texts(2) == ["A worker \(pid)"])
+        await #expect(try server.texts(2) == ["A worker \(pid)"])
 
         try host(path, nil)
         try server.install(build: "B")
         try server.send([server.call(3, "build")])
         // Not a refusal: the new build waits for the host's answer.
-        #expect(try server.texts(3) == [MCPHostedToolset.waiting])
+        await #expect(try server.texts(3) == [MCPHostedToolset.waiting])
         #expect(server.log.contains("switched in place to the new build"))
         #expect(server.log.contains("the session host can't be asked yet"))
 
         try host(path, "worker")
-        #expect(eventually { server.notifications == ["notifications/tools/list_changed"] })
+        #expect(await eventually { server.notifications == ["notifications/tools/list_changed"] })
         try server.send([server.call(4, "build"), ["jsonrpc": "2.0", "id": 5, "method": "tools/list"]])
-        #expect(try server.texts(4) == ["B worker \(pid)"])
-        #expect(try server.tools(5) == ["build", "slow", "only-B"])
+        await #expect(try server.texts(4) == ["B worker \(pid)"])
+        await #expect(try server.tools(5) == ["build", "slow", "only-B"])
     }
 
     /// Optionally better still: no switch until the host answers, so the new build gets its role at once.
-    @Test func aSwitchWaitsForTheHost() throws {
+    @Test func aSwitchWaitsForTheHost() async throws {
         let path = scratch.url("host").path
         try host(path, "lead")
         let server = try server(hostEnvironment(path, hold: true))
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize)
-        _ = try server.reply(1)
+        _ = try await server.reply(1)
         let pid = server.process.processIdentifier
 
         try host(path, nil)
         try server.install(build: "B")
         try server.send([server.call(2, "build")])
-        #expect(try server.texts(2) == ["A lead \(pid)"])
+        await #expect(try server.texts(2) == ["A lead \(pid)"])
         try host(path, "lead")
         try server.send([server.call(3, "build")])
-        #expect(try server.texts(3) == ["B lead \(pid)"])
+        await #expect(try server.texts(3) == ["B lead \(pid)"])
     }
 
     /// A fresh start with the host down: no tools for a moment, then the role's, and the client is told.
-    @Test func aFreshStartWithTheHostDownGetsItsRoleWhenItsBack() throws {
+    @Test func aFreshStartWithTheHostDownGetsItsRoleWhenItsBack() async throws {
         let path = scratch.url("host").path
         let server = try server(hostEnvironment(path))
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize + [server.call(2, "build")])
-        #expect(try server.tools(1) == [])
-        #expect(try server.texts(2) == [MCPHostedToolset.waiting])
+        await #expect(try server.tools(1) == [])
+        await #expect(try server.texts(2) == [MCPHostedToolset.waiting])
         try host(path, "verifier")
-        #expect(eventually { server.notifications == ["notifications/tools/list_changed"] })
+        #expect(await eventually { server.notifications == ["notifications/tools/list_changed"] })
         try server.send([["jsonrpc": "2.0", "id": 3, "method": "tools/list"], server.call(4, "build")])
-        #expect(try server.tools(3) == ["build", "slow", "only-A"])
-        #expect(try server.texts(4) == ["A verifier \(server.process.processIdentifier)"])
+        await #expect(try server.tools(3) == ["build", "slow", "only-A"])
+        await #expect(try server.texts(4) == ["A verifier \(server.process.processIdentifier)"])
     }
 
     /// The host's answer is final: a session with no role stays without, whatever happens after.
-    @Test func noRoleFromTheHostIsFinal() throws {
+    @Test func noRoleFromTheHostIsFinal() async throws {
         let path = scratch.url("host").path
         try host(path, "")
         let server = try server(hostEnvironment(path))
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize + [server.call(2, "build")])
-        #expect(try server.tools(1) == [])
-        #expect(try server.texts(2) == ["A has no role"])
+        await #expect(try server.tools(1) == [])
+        await #expect(try server.texts(2) == ["A has no role"])
         try host(path, "lead")
         try server.send([server.call(3, "build")])
-        #expect(try server.texts(3) == ["A has no role"])
+        await #expect(try server.texts(3) == ["A has no role"])
         #expect(!server.log.contains("can't be asked"))
     }
 
-    @Test func aHostThatNeverAnswersIsGivenUpOn() throws {
+    @Test func aHostThatNeverAnswersIsGivenUpOn() async throws {
         let server = try server(hostEnvironment(scratch.url("host").path, patience: 1))
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize)
-        _ = try server.reply(1)
+        _ = try await server.reply(1)
         var id = 2
-        #expect(eventually {
+        #expect(await eventuallyAsync {
             defer { id += 1 }
             try? server.send([server.call(id, "build")])
-            return (try? server.texts(id)) == ["A has no role"]
+            return (try? await server.texts(id)) == ["A has no role"]
         })
         #expect(server.log.contains("the session host didn't answer for 1 s; giving up"))
     }
@@ -503,7 +503,7 @@ struct MCPHostedToolsetTests {
         #expect(count.settled == 0)
     }
 
-    @Test func aHostThatCantBeAskedIsAskedAgainUntilItAnswers() {
+    @Test func aHostThatCantBeAskedIsAskedAgainUntilItAnswers() async {
         let lock = NSLock()
         let count = Count()
         let toolset = MCPHostedToolset(firstDelay: 0.01, longestDelay: 0.02, attempt: {
@@ -523,13 +523,13 @@ struct MCPHostedToolsetTests {
             let waiting = toolset.call("echo", ["text": "hi"])
             #expect(waiting.text == MCPHostedToolset.waiting && waiting.isError)
         }
-        #expect(eventually { lock.lock(); defer { lock.unlock() }; return count.settled == 1 })
+        #expect(await eventually { lock.lock(); defer { lock.unlock() }; return count.settled == 1 })
         #expect(toolset.settled)
         #expect(toolset.call("echo", ["text": "hi"]).text == "echo: hi")
         #expect(count.attempts == 4)
     }
 
-    @Test func patienceRunsOut() {
+    @Test func patienceRunsOut() async {
         final class Refuses: MCPToolset {
             var tools: [MCPToolInfo] { [] }
             func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult { MCPToolResult(text: "no host", isError: true) }
@@ -537,7 +537,7 @@ struct MCPHostedToolsetTests {
         let toolset = MCPHostedToolset(patience: 0.1, firstDelay: 0.01, longestDelay: 0.02, attempt: { nil }, giveUp: { Refuses() })
         let settled = DispatchSemaphore(value: 0)
         toolset.start { settled.signal() }
-        #expect(settled.wait(timeout: .now() + hangGuard) == .success)
+        #expect(await offPool { settled.wait(timeout: .now() + hangGuard) } == .success)
         #expect(toolset.call("echo", [:]).text == "no host")
     }
 }
@@ -584,7 +584,7 @@ struct MCPSessionTests {
 
     /// The new build's side, in this process: it answers the input carried over first, and tells a client that got
     /// another build's tools to ask again.
-    @Test func aResumedServerGoesOnWithTheSession() throws {
+    @Test func aResumedServerGoesOnWithTheSession() async throws {
         var session = MCPSession()
         session.initialized = true
         session.announcesToolChanges = true
@@ -602,7 +602,7 @@ struct MCPSessionTests {
             done.signal()
         }
         try input.fileHandleForWriting.close()
-        #expect(done.wait(timeout: .now() + hangGuard) == .success)
+        #expect(await offPool { done.wait(timeout: .now() + hangGuard) } == .success)
         try output.fileHandleForWriting.close()
         let lines = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).split(separator: "\n")
         #expect(lines.count == 2)

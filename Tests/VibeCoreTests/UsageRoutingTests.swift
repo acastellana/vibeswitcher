@@ -339,7 +339,7 @@ struct UsageRoutingTests: LeadTeamFixture {
         #expect(runtime.spawned.count == 1)
     }
 
-    @Test func autoAdvanceStartsAnAutoTaskOnCodexPastClaudesHoldAndSaysWhy() throws {
+    @Test func autoAdvanceStartsAnAutoTaskOnCodexPastClaudesHoldAndSaysWhy() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try routingLead(root, runtime)
@@ -348,7 +348,7 @@ struct UsageRoutingTests: LeadTeamFixture {
         let advancing = LeadAdvanceTests.Advancing(lead)
         defer { advancing.stop() }
         _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "agent": "auto"])
-        #expect(advancing.until { task("add-b", root)?.status == .running })
+        #expect(await advancing.until { task("add-b", root)?.status == .running })
         let worker = try #require(task("add-b", root)?.worker)
         #expect(runtime.agents[worker] == "codex")
         #expect(progress(root).contains("Started a worker on add-b (auto → Codex: Claude weekly 84%"), "\(progress(root))")
@@ -357,7 +357,7 @@ struct UsageRoutingTests: LeadTeamFixture {
             defer { runtime.calls.unlock() }
             return runtime.steered.map(\.text)
         }
-        #expect(advancing.until { told().contains { $0.contains("Started a worker on add-b") && $0.contains("its agent is auto, so it went to Codex: Claude weekly 84%") } },
+        #expect(await advancing.until { told().contains { $0.contains("Started a worker on add-b") && $0.contains("its agent is auto, so it went to Codex: Claude weekly 84%") } },
                 "\(told())")
     }
 

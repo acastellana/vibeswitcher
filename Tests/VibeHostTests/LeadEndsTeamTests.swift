@@ -10,13 +10,13 @@ struct LeadEndsTeamTests {
     let root = "/tmp/lead-ends-team-repo"
     let temp = Scratch()
 
-    @Test func theLeadEndsAReplacedVerifierAndIsToldNoForAStranger() throws {
+    @Test func theLeadEndsAReplacedVerifierAndIsToldNoForAStranger() async throws {
         let book = LeadVault.Book()
         let host = try TestHost(vault: book)
         let app = try TestClient(host)
         let leadCourier = try Courier(temp.url("lead").path, socket: host.socket)
-        let lead = try app.spawn(leadCourier.command)
-        let replaced = try app.spawn("sleep 60"), current = try app.spawn("sleep 60"), stranger = try app.spawn("sleep 60")
+        let lead = try await app.spawn(leadCourier.command)
+        let replaced = try await app.spawn("sleep 60"), current = try await app.spawn("sleep 60"), stranger = try await app.spawn("sleep 60")
         defer { for session in [lead, replaced, current, stranger] { _ = app.send(.kill(id: session.id)) } }
 
         guard case .grant(let leadGrant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else {
@@ -31,12 +31,12 @@ struct LeadEndsTeamTests {
             #expect(book.answer(.bind(grant: grant, root: root, session: verifier.id.uuidString), from: asLead) == .ok)
         }
 
-        let answers = try leadCourier.send([.kill(id: replaced.id), .kill(id: stranger.id)])
+        let answers = try await leadCourier.send([.kill(id: replaced.id), .kill(id: stranger.id)])
         #expect(answers[2] == .ok, "\(String(describing: answers[2]))")
-        #expect(eventually { app.latest(replaced.id)?.isLive == false })
+        #expect(await eventually { app.latest(replaced.id)?.isLive == false })
         guard case .error(let refusal)? = answers[3] else { Issue.record("a stranger's kill: \(String(describing: answers[3]))"); return }
         #expect(refusal.contains("not authorized"))
-        Thread.sleep(forTimeInterval: 0.3)
+        await pause(0.3)
         #expect(app.latest(stranger.id)?.isLive != false && kill(stranger.childPID, 0) == 0)
     }
 }

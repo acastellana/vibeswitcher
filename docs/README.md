@@ -35,6 +35,7 @@ Written by the project lead, and only by it.
 
 - [lead-rules.md](process/lead-rules.md): every rule the lead follows, and what enforces each.
 - [verifier-eval.md](process/verifier-eval.md): the verifier's evaluation set, built from real misses.
+- [backlog.md](process/backlog.md): ranked improvement ideas for the lead, each with its sources.
 
 ### Security: [security/](security)
 

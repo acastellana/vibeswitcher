@@ -27,7 +27,11 @@
 # SwiftPM's lock on .build. The bundles are whatever the build produced: Swift Build's (the default since Swift 6.4) one
 # per test target, run in turn, or the deprecated native build system's one for the package; a bundle missing, one not
 # the package's, or a run in which no test ran (a filter matching nothing) fails the run rather than pass it.
-# Logs: .build/test-under-load/run-N.log. Everything else (the TMPDIRs, the burner) is gone when it exits, Ctrl-C too.
+# Logs: .build/test-under-load/run-N.log. A suite run's record, .build/test-under-load/result.json (git-ignored, as all
+# of .build), is what a worker's done report is checked against (LeadToolset's checkLoadProof): the filter, the runs,
+# the load, whether all passed, the result line, HEAD, and the git blob of each test file as the run had it, so a test
+# changed since is seen as unproven. It's removed when a suite run starts and written when it ends; a run stopped
+# (Ctrl-C, its owner gone) leaves none. A `-- COMMAND` run neither writes nor removes it. Everything else (the TMPDIRs, the burner) is gone when it exits, Ctrl-C too.
 # scripts/test-under-load-selfcheck.sh shows the cleanup and the refusals work.
 #
 # scripts/test-under-load.sh [--load N] [--memory-floor PCT] [--max-load L] [--max-time S] [--wait S]
@@ -55,6 +59,8 @@ unset VIBESWITCHER_HOME
 
 cores=$(cpu_count)
 [[ -n $cores ]] || { echo "the cores couldn't be counted (sysctl -n hw.ncpu, getconf _NPROCESSORS_ONLN)"; exit 1; }
+# At most a test a core at once in each run's bundles, as scripts/test.sh runs them (it says why); a caller's own kept.
+export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH=${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-$cores}
 cap=$((2 * cores))
 usage="usage: scripts/test-under-load.sh [--load N] [--memory-floor PCT] [--max-load L] [--max-time S] [--wait S]"
 usage+=" [--pid-file FILE] [--check-only] [-r RUNS] [-f FILTER] [-- COMMAND...]"
@@ -284,6 +290,8 @@ if [[ $inner -eq 0 ]]; then
 fi
 
 logs=.build/test-under-load
+# The run's record for the done check; LeadToolset.recordsRuns looks for this path to know this script writes it.
+record=.build/test-under-load/result.json
 scratch="" burners=() tests=() watchdog=""
 script=$$
 
@@ -362,10 +370,18 @@ if [[ ${#command[@]} -eq 0 ]]; then
         exit 1
     fi
 
+    # SwiftPM compiles the manifest too, before target module-cache options apply. Keep its cache writes
+    # in a writable scratch home, as test.sh does (a Codex worker cannot write the real ~/.cache).
+    mkdir -p "$tool_scratch/home" || exit 1
+    export HOME=$tool_scratch/home CFFIXED_USER_HOME=$tool_scratch/home
     echo "building…"
     # On this run's slot's share of the cores, VS_HEAVY_CORES from the vs-heavy it runs under (scripts/lib/swift-jobs.sh),
     # as test.sh's and build-app.sh's builds: left to itself SwiftPM compiles on every core, beside the busy loops.
-    heavy_swift build --build-tests > /dev/null 2>&1 8>&- || { echo "the build failed: run swift build --build-tests"; exit 1; }
+    if ! heavy_swift build --build-tests > "$tool_scratch/build.log" 2>&1 8>&-; then
+        echo "the build failed (last 40 lines):"
+        tail -n 40 "$tool_scratch/build.log"
+        exit 1
+    fi
     bin=$(swift build $(swiftpm_options) --show-bin-path 2>/dev/null 8>&- | tail -n 1)
     [[ -d $bin ]] || { echo "no build folder at ${bin:-?} (swift build --show-bin-path)"; exit 1; }
     helper="$(dirname "$(xcrun --find swift)")/../libexec/swift/pm/swiftpm-testing-helper"
@@ -402,7 +418,7 @@ if [[ ${#command[@]} -eq 0 ]]; then
     failures="$bin/vibeswitcher-mcp"
     [[ -x $failures ]] || { echo "no $failures to name a failed run's tests with"; exit 1; }
     mkdir -p "$logs"
-    rm -f "$logs"/run-*.log
+    rm -f "$logs"/run-*.log "$record"
 fi
 
 # Short: host tests put sockets under it, and a socket's path is limited to 104 bytes.
@@ -604,7 +620,7 @@ else
             sed -E 's/\x1B\[[0-9;]*m//g' "$logs/run-$run.log" | grep -E "^=== |^[^ ]+ Test run with [0-9]+ tests? " | sed 's/^/    /'
         fi
         # What the run left in its TMPDIR, by prefix (the name without its UUID or random tail).
-        left=$(ls -A "$(tmpdir "$run")")
+        left=$(tmpdir_leftovers "$(tmpdir "$run")")
         if [[ -n $left ]]; then
             failed=1
             echo "    left in TMPDIR ($(wc -l <<< "$left" | tr -d ' ') entries), by prefix:"
@@ -630,7 +646,25 @@ if [[ -e $scratch/memory-low ]]; then
     failed=1
     echo "STOPPED: free memory fell to $(cat "$scratch/memory-low") % (under $memory_stop %); the load and the runs were ended"
 fi
+result_line="failed: see the runs above and $logs/run-N.log"
 if [[ $failed -eq 0 && ${#command[@]} -eq 0 ]]; then
-    echo "all $runs runs passed and left nothing behind ($(printf '%s\n' ${counts[@]+"${counts[@]}"} | sort -un | paste -sd, - | sed 's/,/, /g') tests each)"
+    result_line="all $runs runs passed and left nothing behind ($(printf '%s\n' ${counts[@]+"${counts[@]}"} | sort -un | paste -sd, - | sed 's/,/, /g') tests each)"
+    echo "$result_line"
+fi
+if [[ ${#command[@]} -eq 0 ]]; then
+    # The test files as this run had them (tracked or not, ignored ones aside): any path naming a test or a spec, a
+    # superset of what the done check counts as a test file.
+    paths=$(git ls-files -co --exclude-standard 2>/dev/null | grep -iE 'test|spec' | while IFS= read -r path; do
+        [[ -f $path ]] && echo "$path"
+    done)
+    hashes=""
+    [[ -n $paths ]] && hashes=$(paste <(echo "$paths") <(git hash-object --stdin-paths <<< "$paths"))
+    jq -n --arg commit "$(git rev-parse -q --verify HEAD 2>/dev/null)" --arg filter "$filter" --argjson runs "$runs" \
+        --argjson load "$load" --argjson passed "$([[ $failed -eq 0 ]] && echo true || echo false)" --arg result "$result_line" \
+        --argjson counts "[$(IFS=,; echo "${counts[*]-}")]" --argjson finished "$(date +%s)" --arg hashes "$hashes" \
+        '{version: 1, commit: $commit, filter: $filter, runs: $runs, load: $load, passed: $passed, result: $result,
+          tests: $counts, finished: $finished,
+          files: ($hashes | split("\n") | map(select(length > 0) | split("\t") | {(.[0]): .[1]}) | add // {})}' \
+        > "$record.new" && mv "$record.new" "$record"
 fi
 exit $failed

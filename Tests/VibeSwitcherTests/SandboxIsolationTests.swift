@@ -60,8 +60,14 @@ struct SandboxIsolationTests {
     }
 
     /// Runs scripts/sandbox-app.sh with `arguments` (after the options that keep it in this test's scratch): its exit
-    /// status and what it printed.
-    func sandbox(_ arguments: String..., dir: URL, shots: URL, app: URL) throws -> (status: Int32, output: String) {
+    /// status and what it printed. A build and a launch take minutes on a busy Mac: awaited, the script waited for on
+    /// a thread of its own (`offPool`), not on the cooperative pool.
+    func sandbox(_ arguments: String..., dir: URL, shots: URL, app: URL) async throws -> (status: Int32, output: String) {
+        try await offPool { try sandboxNow(arguments, dir: dir, shots: shots, app: app) }
+    }
+
+    /// `sandbox`, blocking: for a cleanup that can't await (a `defer`).
+    func sandboxNow(_ arguments: [String], dir: URL, shots: URL, app: URL) throws -> (status: Int32, output: String) {
         let script = Process()
         script.executableURL = URL(fileURLWithPath: "/bin/bash")
         script.arguments = [Self.repo.appendingPathComponent("scripts/sandbox-app.sh").path, "--binary", app.path,
@@ -72,16 +78,16 @@ struct SandboxIsolationTests {
         script.standardInput = FileHandle.nullDevice
         try script.run()
         let data = output.fileHandleForReading.readDataToEndOfFile()
-        script.waitUntilExit()
+        waitForEnd(script)
         return (script.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 
     /// Whether `condition` holds within the hang guard, checked every 50 ms (a file the sandbox writes as it goes).
-    func eventually(_ condition: () -> Bool) -> Bool {
-        let deadline = Date().addingTimeInterval(hangGuard)
-        while Date() < deadline {
+    func eventually(time: MacTime = .real, _ condition: () -> Bool) async -> Bool {
+        let deadline = time.awake() + hangGuard
+        while time.awake() < deadline {
             if condition() { return true }
-            usleep(50_000)
+            await pause(0.05)
         }
         return condition()
     }
@@ -91,7 +97,7 @@ struct SandboxIsolationTests {
         return data.range(of: Data(text.utf8)) != nil
     }
 
-    @Test func aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone() throws {
+    @Test func aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone() async throws {
         let app = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("VibeSwitcher")
         try #require(FileManager.default.isExecutableFile(atPath: app.path))
         let dir = scratch.url("sandbox-dir"), shots = scratch.url("sandbox-shots")
@@ -110,13 +116,13 @@ struct SandboxIsolationTests {
         defer {
             // Only on a failure (a clean run's quit was seen through): this test's own sandbox, and what it started.
             if !quitSeen {
-                _ = try? sandbox("quit", dir: dir, shots: shots, app: app)
+                _ = try? sandboxNow(["quit"], dir: dir, shots: shots, app: app)
                 for pid in pids where kill(pid, 0) == 0 { kill(pid, SIGKILL) }
             }
         }
-        let run = try sandbox("run", dir: dir, shots: shots, app: app)
+        let run = try await sandbox("run", dir: dir, shots: shots, app: app)
         try #require(run.status == 0, "the sandbox didn't start:\n\(run.output)")
-        func command(_ words: [String]) throws -> String {
+        func command(_ words: [String]) async throws -> String {
             let script = Process()
             script.executableURL = URL(fileURLWithPath: "/bin/bash")
             script.arguments = [Self.repo.appendingPathComponent("scripts/sandbox-app.sh").path, "--dir", dir.path,
@@ -126,14 +132,16 @@ struct SandboxIsolationTests {
             script.standardError = output
             script.standardInput = FileHandle.nullDevice
             try script.run()
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            script.waitUntilExit()
-            let text = String(decoding: data, as: UTF8.self)
-            #expect(script.terminationStatus == 0, "\(words.joined(separator: " ")): \(text)")
+            let (status, text) = await offPool {
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                waitForEnd(script)
+                return (script.terminationStatus, String(decoding: data, as: UTF8.self))
+            }
+            #expect(status == 0, "\(words.joined(separator: " ")): \(text)")
             return text
         }
 
-        let status = try command(["status"])
+        let status = try await command(["status"])
         state = try #require(status.split(separator: "\n").first { $0.hasPrefix("state ") }.map { String($0.dropFirst("state ".count)) })
         let pid = try #require(status.split(separator: "\n").first { $0.hasPrefix("pid ") }.flatMap { Int32($0.dropFirst("pid ".count)) })
         pids.append(pid)
@@ -151,21 +159,21 @@ struct SandboxIsolationTests {
         #expect(hostArguments.contains("--exit-with") && hostArguments.contains(String(pid)))
         #expect(status.contains("host connected on "), "\(status)")
 
-        _ = try command(["chat"])
-        _ = try command(["type", marker])
+        _ = try await command(["chat"])
+        _ = try await command(["type", marker])
         // The draft is the sandbox's: its defaults, in its own folder, hold it (and the window's frame, off screen).
         let defaults = state + "/defaults.plist"
-        #expect(eventually { Self.contains(FileManager.default.contents(atPath: defaults), marker) }, "the sandbox's defaults never held the draft")
-        #expect(eventually { Self.contains(FileManager.default.contents(atPath: defaults), "-20000 -20000 1280 800") })
-        _ = try command(["send"])
+        #expect(await eventually { Self.contains(FileManager.default.contents(atPath: defaults), marker) }, "the sandbox's defaults never held the draft")
+        #expect(await eventually { Self.contains(FileManager.default.contents(atPath: defaults), "-20000 -20000 1280 800") })
+        _ = try await command(["send"])
         // The fake Claude took it: it's in the session's transcript, in the sandbox's home.
         let projects = state + "/home/.claude/projects"
-        #expect(eventually {
+        #expect(await eventually {
             (FileManager.default.subpaths(atPath: projects) ?? []).contains { Self.contains(FileManager.default.contents(atPath: projects + "/" + $0), "Got: " + marker) }
         }, "the fake Claude never answered")
-        _ = try command(["settings", "agents"])
-        _ = try command(["sheet", "new-project"])
-        let shot = try command(["shot", "isolation"])
+        _ = try await command(["settings", "agents"])
+        _ = try await command(["sheet", "new-project"])
+        let shot = try await command(["shot", "isolation"])
         for name in ["main", "settings", "sheet-new-project"] {
             for mode in ["light", "dark"] {
                 let file = shots.appendingPathComponent("isolation-\(name)-\(mode).png").path
@@ -176,7 +184,7 @@ struct SandboxIsolationTests {
         }
 
         // While it runs: never active, never on screen, nothing refused, its window off every screen.
-        let during = try command(["status"])
+        let during = try await command(["status"])
         #expect(during.contains("active false, activation policy 2"), "\(during)")
         #expect(!during.contains("\non screen ") && !during.contains("\nrefused "), "\(during)")
         #expect(during.contains("{{-20000, -20000}, {1280, 800}} alpha 0.0"), "\(during)")
@@ -196,9 +204,10 @@ struct SandboxIsolationTests {
         #expect(sandboxSource.contains("AppProof.MemoryStore()") && sandboxSource.contains("AppProof.MemorySecret()"))
         #expect(!FileManager.default.fileExists(atPath: state + "/home/.vibeswitcher/lead/vault.sealed"))
 
-        _ = try command(["quit"])
-        #expect(BenchHostTests.waitForExit(of: pid, timeout: hangGuard), "the sandbox didn't quit")
-        let hostGone = BenchHostTests.waitForExit(of: host.pid, timeout: hangGuard)
+        _ = try await command(["quit"])
+        #expect(await offPool { BenchHostTests.waitForExit(of: pid, timeout: hangGuard) }, "the sandbox didn't quit")
+        let hostPid = host.pid
+        let hostGone = await offPool { BenchHostTests.waitForExit(of: hostPid, timeout: hangGuard) }
         #expect(hostGone, "the sandbox's host outlived it")
         quitSeen = hostGone && kill(pid, 0) != 0
         #expect(!FileManager.default.fileExists(atPath: state), "quit left the state folder")

@@ -17,11 +17,11 @@ struct SubmittedVerifierEndsTests {
 
     /// Teams as the lead starts them: a lead, a worker and a verifier, each in a session of its own; the worker and
     /// verifier send what the test gives them from inside their sessions.
-    func team(_ book: LeadVault.Book, _ app: TestClient, socket: String) throws
+    func team(_ book: LeadVault.Book, _ app: TestClient, socket: String) async throws
         -> (lead: HostSession, worker: (HostSession, Courier), verifier: (HostSession, Courier)) {
         let workerCourier = try Courier(temp.url("worker").path, socket: socket)
         let verifierCourier = try Courier(temp.url("verifier").path, socket: socket)
-        let lead = try app.spawn("sleep 60"), worker = try app.spawn(workerCourier.command), verifier = try app.spawn(verifierCourier.command)
+        let lead = try await app.spawn("sleep 60"), worker = try await app.spawn(workerCourier.command), verifier = try await app.spawn(verifierCourier.command)
         guard case .grant(let leadGrant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else { throw CancellationError() }
         #expect(book.answer(.bind(grant: leadGrant, root: root, session: lead.id.uuidString), from: .app) == .ok)
         let asLead = LeadVault.Caller.session(lead.id.uuidString)
@@ -34,27 +34,27 @@ struct SubmittedVerifierEndsTests {
         return (lead, (worker, workerCourier), (verifier, verifierCourier))
     }
 
-    @Test func aVerifierEndsOnceItsVerdictIsInAndNothingElseDoes() throws {
+    @Test func aVerifierEndsOnceItsVerdictIsInAndNothingElseDoes() async throws {
         let book = LeadVault.Book()
         let log = temp.url("host.log").path
         let grace: TimeInterval = 2
         let host = try TestHost(vault: book, log: log, submittedGrace: grace)
         let app = try TestClient(host)
-        let (lead, worker, verifier) = try team(book, app, socket: host.socket)
+        let (lead, worker, verifier) = try await team(book, app, socket: host.socket)
         defer { for session in [lead, worker.0, verifier.0] { _ = app.send(.kill(id: session.id)) } }
         let submit = HostRequest.vault(.submitVerdict(root: root, completion: .complete, integrity: .clean, summary: "ok"))
 
         // The worker's shell can't give a verdict: refused, and it isn't ended for trying.
-        let refused = try worker.1.send([submit])
+        let refused = try await worker.1.send([submit])
         guard case .vault(.refused)? = refused[2] else { Issue.record("a worker's verdict: \(String(describing: refused[2]))"); return }
 
         let asked = Date()
-        let answers = try verifier.1.send([submit])
+        let answers = try await verifier.1.send([submit])
         guard case .vault(.verdict(let verdict?))? = answers[2] else { Issue.record("the verdict: \(String(describing: answers[2]))"); return }
         #expect(verdict.session == verifier.0.id.uuidString)
         // Not before its grace (its tool server records the verdict on the board and tells the lead meanwhile).
         if Date().timeIntervalSince(asked) < grace - 0.5 { #expect(kill(verifier.0.childPID, 0) == 0) }
-        #expect(eventually { app.latest(verifier.0.id)?.isLive == false })
+        #expect(await eventually { app.latest(verifier.0.id)?.isLive == false })
         #expect(Date().timeIntervalSince(asked) >= grace)
         // Ended as the host's own kill, said in its log.
         let said = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
@@ -65,21 +65,21 @@ struct SubmittedVerifierEndsTests {
         #expect(book.answer(.verdict(root: root, task: "t"), from: .app) == .verdict(verdict))
 
         // The lead and the worker run on.
-        Thread.sleep(forTimeInterval: 0.5)
+        await pause(0.5)
         for session in [lead, worker.0] { #expect(app.latest(session.id)?.isLive != false && kill(session.childPID, 0) == 0) }
     }
 
     /// A verdict stored while no host scheduled its end (a handover in between): the housekeeping ends it.
-    @Test func theHousekeepingEndsASubmittedVerifierTheHostDidntSchedule() throws {
+    @Test func theHousekeepingEndsASubmittedVerifierTheHostDidntSchedule() async throws {
         let book = LeadVault.Book()
         let host = try TestHost(vault: book, submittedGrace: 0.5, housekeeping: 0.5)
         let app = try TestClient(host)
-        let (lead, worker, verifier) = try team(book, app, socket: host.socket)
+        let (lead, worker, verifier) = try await team(book, app, socket: host.socket)
         defer { for session in [lead, worker.0, verifier.0] { _ = app.send(.kill(id: session.id)) } }
         let stored = book.answer(.submitVerdict(root: root, completion: .incomplete, integrity: .clean, summary: "no"),
                                  from: .session(verifier.0.id.uuidString))
         guard case .verdict(_?) = stored else { Issue.record("not stored: \(stored)"); return }
-        #expect(eventually { app.latest(verifier.0.id)?.isLive == false })
+        #expect(await eventually { app.latest(verifier.0.id)?.isLive == false })
         #expect(app.latest(worker.0.id)?.isLive != false && kill(worker.0.childPID, 0) == 0)
     }
 }

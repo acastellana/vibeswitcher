@@ -259,7 +259,7 @@ struct ClearDraftTests {
 
     /// A scratch program in a real host session draws Claude's box with a dim suggestion and draws it again on ^C;
     /// what's typed into it is written to a file.
-    @Test func aScratchSessionsSuggestionIsClearedAndTypedOver() throws {
+    @Test func aScratchSessionsSuggestionIsClearedAndTypedOver() async throws {
         let root = scratch()
         let typedFile = root.appendingPathComponent("typed").path
         let rule = String(repeating: "─", count: 40)
@@ -275,13 +275,13 @@ struct ClearDraftTests {
         """.write(toFile: script, atomically: true, encoding: .utf8)
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try client.spawn("/bin/sh \(script)")
+        let session = try await client.spawn("/bin/sh \(script)")
         let id = session.id
         let older = { () -> LeadDelivery.Screen? in
             if case .screenText(_, let text)? = try? HostCall.request(.screen(id: id), socket: host.socket, appKey: host.appKey) { return LeadDelivery.Screen(text: text) }
             return nil
         }
-        #expect(eventually { older()?.text.contains("open rotate.html") == true })
+        #expect(await eventually { older()?.text.contains("open rotate.html") == true })
         #expect(older().map(LeadDelivery.box(in:)) == .draft("open rotate.html so I can try it"))
         let typeInto = { (text: String) -> Bool in
             for write in ComposerText.writes(text, bracketed: true) {
@@ -298,24 +298,24 @@ struct ClearDraftTests {
             return sent
         }, root: root)
         #expect(delivered == .typed)
-        #expect(eventually { (try? String(contentsOfFile: typedFile, encoding: .utf8))?.contains("go on with the tests") == true })
+        #expect(await eventually { (try? String(contentsOfFile: typedFile, encoding: .utf8))?.contains("go on with the tests") == true })
         #expect((try? String(contentsOfFile: typedFile + ".log", encoding: .utf8)) == "cleared\n")
         // The host that says what's dim: the suggestion is an empty box, typed into without a ^C.
         let styled = try LeadDelivery.deliver("and then report", from: .lead("lead"), to: agent, activity: .idle(background: nil),
                                               styledScreen: { HostCall.styledScreen(id, socket: host.socket, appKey: host.appKey) }, typeInto: typeInto, root: root)
         #expect(styled == .typed)
-        #expect(eventually { (try? String(contentsOfFile: typedFile, encoding: .utf8))?.contains("and then report") == true })
+        #expect(await eventually { (try? String(contentsOfFile: typedFile, encoding: .utf8))?.contains("and then report") == true })
     }
 }
 
 /// Scratch programs only (`/bin/sh -c …`).
 struct StyledScreenHostTests {
-    @Test func theHostAnswersWithHowTheScreenIsDrawn() throws {
+    @Test func theHostAnswersWithHowTheScreenIsDrawn() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try client.spawn("printf 'typed \\033[2mfaint\\033[22m\\n'; \(keepRunning)")
+        let session = try await client.spawn("printf 'typed \\033[2mfaint\\033[22m\\n'; \(keepRunning)")
         var screen: LeadDelivery.Screen?
-        #expect(eventually {
+        #expect(await eventually {
             screen = HostCall.styledScreen(session.id, socket: host.socket, appKey: host.appKey)
             return screen?.text.contains("faint") == true
         })
@@ -325,7 +325,7 @@ struct StyledScreenHostTests {
     }
 
     /// A host older than `styledScreen` says it doesn't know the request: the plain screen is read.
-    @Test func anOlderHostGivesThePlainScreen() throws {
+    @Test func anOlderHostGivesThePlainScreen() async throws {
         let path = scratchSocketPath()
         let listener = try UnixSocket.listen(path: path)
         // It answers every connection until the test is done (a busy Mac can make a call give up and ask again), and
@@ -376,7 +376,7 @@ struct StyledScreenHostTests {
             }
         }
         // Each call gives up after its own 10 s; it's asked until one is answered.
-        #expect(eventually { HostCall.styledScreen(UUID(), socket: path) == LeadDelivery.Screen(text: "❯ plain", runs: nil) })
+        #expect(await eventually { HostCall.styledScreen(UUID(), socket: path) == LeadDelivery.Screen(text: "❯ plain", runs: nil) })
     }
 }
 

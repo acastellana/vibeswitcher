@@ -44,7 +44,7 @@ import Testing
 
     /// pick_developer_dir with `xcodes` (the Xcode apps to look in), DEVELOPER_DIR `developerDir` or unset: its status,
     /// what it said, and the developer_dir, test_frameworks, test_libraries and exported DEVELOPER_DIR it left.
-    func pick(_ xcodes: [String], developerDir: String? = nil) throws -> (status: Int32, said: String, values: [String: String]) {
+    func pick(_ xcodes: [String], developerDir: String? = nil) async throws -> (status: Int32, said: String, values: [String: String]) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = ["-c", """
@@ -63,8 +63,12 @@ import Testing
         process.standardOutput = pipe
         process.standardError = pipe
         try process.run()
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+        // The tool's run read to its end and waited for on a thread of its own, not the cooperative pool.
+        let output = await offPool { () -> String in
+            let read = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            waitForEnd(process)
+            return read
+        }
         var said: [Substring] = []
         var values: [String: String] = [:]
         for line in output.split(separator: "\n") {
@@ -80,11 +84,11 @@ import Testing
     /// The Mac this was reported on (2026-10-31): xcode-select at the Command Line Tools, which have Testing.framework
     /// but no macOS platform, and an Xcode beside them. Their own frameworks, as `swift test` uses: the same toolchain
     /// test.sh builds with, and nothing exported.
-    @Test func commandLineToolsSelectedAreUsedWithTheirOwnFrameworks() throws {
+    @Test func commandLineToolsSelectedAreUsedWithTheirOwnFrameworks() async throws {
         let tools = try commandLineTools("CommandLineTools")
         let xcode = try xcode("Xcode")
         try select(tools)
-        let run = try pick([root.appendingPathComponent("Xcode.app").path])
+        let run = try await pick([root.appendingPathComponent("Xcode.app").path])
         #expect(run.status == 0, "\(run.said)")
         #expect(run.values["developer_dir"] == tools)
         #expect(run.values["test_frameworks"] == "\(tools)/Library/Developer/Frameworks")
@@ -93,10 +97,10 @@ import Testing
         #expect(!run.values["test_frameworks", default: ""].contains(xcode))
     }
 
-    @Test func anXcodeSelectedIsUsedThroughItsPlatform() throws {
+    @Test func anXcodeSelectedIsUsedThroughItsPlatform() async throws {
         let xcode = try xcode("Xcode")
         try select(xcode)
-        let run = try pick([])
+        let run = try await pick([])
         let platform = "\(xcode)/Platforms/MacOSX.platform/Developer"
         #expect(run.status == 0, "\(run.said)")
         #expect(run.values["developer_dir"] == xcode)
@@ -106,20 +110,20 @@ import Testing
     }
 
     /// Command Line Tools without Swift Testing selected: the first Xcode that has it, exported so the build uses it too.
-    @Test func withoutTestingSelectedAnXcodeIsFoundAndExported() throws {
+    @Test func withoutTestingSelectedAnXcodeIsFoundAndExported() async throws {
         try select(try commandLineTools("CommandLineTools", testing: false))
         let xcode = try xcode("Xcode")
-        let run = try pick([root.appendingPathComponent("Missing.app").path, root.appendingPathComponent("Xcode.app").path])
+        let run = try await pick([root.appendingPathComponent("Missing.app").path, root.appendingPathComponent("Xcode.app").path])
         #expect(run.status == 0, "\(run.said)")
         #expect(run.values["developer_dir"] == xcode)
         #expect(run.values["exported"] == xcode)
     }
 
     /// The caller's DEVELOPER_DIR comes first, over a selected folder that would do.
-    @Test func theCallersDeveloperDirIsRespected() throws {
+    @Test func theCallersDeveloperDirIsRespected() async throws {
         try select(try commandLineTools("CommandLineTools"))
         let xcode = try xcode("Xcode")
-        let run = try pick([], developerDir: xcode)
+        let run = try await pick([], developerDir: xcode)
         #expect(run.status == 0, "\(run.said)")
         #expect(run.values["developer_dir"] == xcode)
         #expect(run.values["exported"] == xcode)
@@ -127,11 +131,11 @@ import Testing
 
     /// DEVELOPER_DIR given as the Xcode.app itself, as xcrun and swift take it: its Contents/Developer, the caller's
     /// DEVELOPER_DIR left as it was.
-    @Test func aCallersXcodeAppIsTakenAsItsDeveloperFolder() throws {
+    @Test func aCallersXcodeAppIsTakenAsItsDeveloperFolder() async throws {
         try select(try commandLineTools("CommandLineTools"))
         let xcode = try xcode("Xcode")
         let app = root.appendingPathComponent("Xcode.app").path
-        let run = try pick([], developerDir: app)
+        let run = try await pick([], developerDir: app)
         #expect(run.status == 0, "\(run.said)")
         #expect(run.values["developer_dir"] == xcode)
         #expect(run.values["test_frameworks", default: ""].hasPrefix("\(xcode)/Platforms/MacOSX.platform/"))
@@ -139,20 +143,20 @@ import Testing
     }
 
     /// One without Testing.framework is an error, not passed over for another.
-    @Test func aCallersDeveloperDirWithoutTestingFailsInOneLine() throws {
+    @Test func aCallersDeveloperDirWithoutTestingFailsInOneLine() async throws {
         try select(try commandLineTools("CommandLineTools"))
         let empty = try commandLineTools("Empty", testing: false)
-        let run = try pick([], developerDir: empty)
+        let run = try await pick([], developerDir: empty)
         #expect(run.status != 0)
         #expect(run.said.split(separator: "\n").count == 1, "\(run.said)")
         #expect(run.said.contains("DEVELOPER_DIR is \(empty)"), "\(run.said)")
         #expect(run.values["developer_dir"] == "")
     }
 
-    @Test func noXcodeFoundFailsInOneClearLine() throws {
+    @Test func noXcodeFoundFailsInOneClearLine() async throws {
         try select(try commandLineTools("CommandLineTools", testing: false))
         let missing = root.appendingPathComponent("Xcode.app").path
-        let run = try pick([missing])
+        let run = try await pick([missing])
         #expect(run.status != 0)
         #expect(run.said.split(separator: "\n").count == 1, "\(run.said)")
         #expect(run.said.hasPrefix("no Xcode found"), "\(run.said)")
@@ -161,11 +165,11 @@ import Testing
     }
 
     /// xcode-select failing (no developer folder chosen), and no Xcode: the same line.
-    @Test func noSelectedFolderAndNoXcodeFailsInOneLine() throws {
+    @Test func noSelectedFolderAndNoXcodeFailsInOneLine() async throws {
         let script = bin.appendingPathComponent("xcode-select")
         try "#!/bin/bash\necho 'xcode-select: error: unable to get active developer directory' >&2\nexit 2\n".write(to: script, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-        let run = try pick([root.appendingPathComponent("Xcode.app").path])
+        let run = try await pick([root.appendingPathComponent("Xcode.app").path])
         #expect(run.status != 0)
         #expect(run.said.split(separator: "\n").count == 1, "\(run.said)")
         #expect(run.said.hasPrefix("no Xcode found"), "\(run.said)")

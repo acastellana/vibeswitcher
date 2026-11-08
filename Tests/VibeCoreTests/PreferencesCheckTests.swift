@@ -18,7 +18,7 @@ struct PreferencesCheckTests {
     }
 
     /// `scripts/test.sh --preferences DIR -- bash -c SCRIPT` (SCRIPT run in DIR): its exit status and all of its output.
-    func run(_ dir: URL, _ script: String) throws -> (status: Int32, output: String) {
+    func run(_ dir: URL, _ script: String) async throws -> (status: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [Self.repo.appendingPathComponent("scripts/test.sh").path, "--preferences", dir.path, "--",
@@ -28,37 +28,41 @@ struct PreferencesCheckTests {
         process.standardError = pipe
         process.standardInput = FileHandle.nullDevice
         try process.run()
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+        // The tool's run read to its end and waited for on a thread of its own, not the cooperative pool.
+        let output = await offPool { () -> String in
+            let read = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            waitForEnd(process)
+            return read
+        }
         return (process.terminationStatus, output)
     }
 
-    @Test func aRunThatLeavesThePreferencesAlonePasses() throws {
+    @Test func aRunThatLeavesThePreferencesAlonePasses() async throws {
         let dir = try preferences(["VibeSwitcher.plist": "before", "com.apple.dock.plist": "dock"])
-        let (status, output) = try run(dir, "cat VibeSwitcher.plist > /dev/null")
+        let (status, output) = try await run(dir, "cat VibeSwitcher.plist > /dev/null")
         #expect(status == 0, "\(output)")
         #expect(!output.contains("PREFERENCE"), "\(output)")
     }
 
-    @Test func aRunThatChangesTheBuildsDefaultsFailsNamingThem() throws {
+    @Test func aRunThatChangesTheBuildsDefaultsFailsNamingThem() async throws {
         let dir = try preferences(["VibeSwitcher.plist": "before"])
-        let (status, output) = try run(dir, "echo after > VibeSwitcher.plist")
+        let (status, output) = try await run(dir, "echo after > VibeSwitcher.plist")
         #expect(status == 1, "\(output)")
         #expect(output.contains("PREFERENCES CHANGED: the run changed \(dir.path)/VibeSwitcher.plist"), "\(output)")
         #expect(output.contains("BenchDefaults"), "\(output)")
     }
 
     /// Made where there was none (a bench on a Mac that never had one) counts too.
-    @Test func aRunThatMakesTheBuildsDefaultsFails() throws {
+    @Test func aRunThatMakesTheBuildsDefaultsFails() async throws {
         let dir = try preferences([:])
-        let (status, output) = try run(dir, "echo new > VibeSwitcher.plist")
+        let (status, output) = try await run(dir, "echo new > VibeSwitcher.plist")
         #expect(status == 1, "\(output)")
         #expect(output.contains("PREFERENCES CHANGED"), "\(output)")
     }
 
-    @Test func aRunThatAddsATestsSuiteFileFailsNamingIt() throws {
+    @Test func aRunThatAddsATestsSuiteFileFailsNamingIt() async throws {
         let dir = try preferences(["VibeSwitcher.plist": "before"])
-        let (status, output) = try run(dir, "echo x > dev.vibeswitcher.tests.0B9E.plist")
+        let (status, output) = try await run(dir, "echo x > dev.vibeswitcher.tests.0B9E.plist")
         #expect(status == 1, "\(output)")
         #expect(output.contains("PREFERENCE FILES LEFT: the run added 1 to \(dir.path)"), "\(output)")
         #expect(output.contains("  dev.vibeswitcher.tests.0B9E.plist"), "\(output)")
@@ -66,9 +70,9 @@ struct PreferencesCheckTests {
     }
 
     /// The installed app's own defaults change as you use it, during a run too: never the run's failure.
-    @Test func theInstalledAppsDefaultsStayOutOfIt() throws {
+    @Test func theInstalledAppsDefaultsStayOutOfIt() async throws {
         let dir = try preferences(["VibeSwitcher.plist": "before", "dev.vibeswitcher.VibeSwitcher.plist": "app"])
-        let (status, output) = try run(dir, "echo used > dev.vibeswitcher.VibeSwitcher.plist")
+        let (status, output) = try await run(dir, "echo used > dev.vibeswitcher.VibeSwitcher.plist")
         #expect(status == 0, "\(output)")
         #expect(!output.contains("PREFERENCE"), "\(output)")
     }
@@ -77,7 +81,7 @@ struct PreferencesCheckTests {
     @Test func theFullRunChecksTheBuildsDefaults() throws {
         let lines = try String(contentsOf: Self.repo.appendingPathComponent("scripts/test.sh"), encoding: .utf8)
             .components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-        let build = #"Resources/bin/vs-heavy --as scripts/test.sh bash -c 'heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@""#
+        let build = #"Resources/bin/vs-heavy --as scripts/test.sh bash -c 'slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@""#
         let before = lines.firstIndex(of: "defaults_before=$(build_defaults)")
         let swift = lines.firstIndex(of: build)
         let check = lines.firstIndex(of: #"check_preferences "$preferences_before" "$defaults_before" || status=1"#)

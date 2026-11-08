@@ -17,6 +17,53 @@ public struct LeadContract: Codable, Equatable, Sendable {
         self.boundaries = boundaries
         self.context = context
     }
+
+    /// What changed from `old` to this, section by section, for a verifier briefed on `old` (see
+    /// `LeadToolset.sendContractChange`): a goal given whole, the checks and boundaries added and dropped, the context
+    /// added to it (or given whole when it was replaced). Empty when nothing did.
+    public func changes(from old: LeadContract) -> String {
+        var parts: [String] = []
+        if goal != old.goal { parts.append("## Goal (replaced)\n\(goal)") }
+        func listed(_ heading: String, _ now: [String], _ was: [String]) {
+            let added = now.filter { !was.contains($0) }, dropped = was.filter { !now.contains($0) }
+            guard !added.isEmpty || !dropped.isEmpty else {
+                if now != was { parts.append("## \(heading) (reordered)\n" + now.map { "- \($0)" }.joined(separator: "\n")) }
+                return
+            }
+            parts.append("## \(heading)\n" + (added.map { "Added: \($0)" } + dropped.map { "Dropped: \($0)" }).joined(separator: "\n"))
+        }
+        listed("Acceptance checks", acceptance, old.acceptance)
+        listed("Boundaries", boundaries, old.boundaries)
+        if context != old.context {
+            let was = old.context.trimmingCharacters(in: .whitespacesAndNewlines)
+            let now = context.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !was.isEmpty, now.hasPrefix(was) {
+                parts.append("## Context (added to)\n" + now.dropFirst(was.count).trimmingCharacters(in: .whitespacesAndNewlines))
+            } else {
+                parts.append("## Context (replaced)\n" + (now.isEmpty ? "(now empty)" : now))
+            }
+        }
+        return parts.joined(separator: "\n\n")
+    }
+}
+
+/// The contract its audit's verifiers have: the version their brief was written from, or the last amendment sent to
+/// them while they audit (see `LeadToolset.sendContractChange`), with that version's text to tell the next change
+/// from. `briefed`: the version their brief was written from, which a verifier that doesn't say what it judged is
+/// taken to have judged (an amendment sent reaches it only at its next step). `judged`: the lowest version a verifier
+/// that submitted judged (a finder that submitted before an amendment judged the older one).
+public struct LeadAuditBrief: Codable, Equatable, Sendable {
+    public var version: Int
+    public var contract: LeadContract
+    public var briefed: Int?
+    public var judged: Int?
+
+    public init(version: Int, contract: LeadContract, judged: Int? = nil) {
+        self.version = version
+        self.contract = contract
+        self.briefed = version
+        self.judged = judged
+    }
 }
 
 /// The verifier's report: what it found in the worker's branch, not what the worker said.
@@ -29,12 +76,17 @@ public struct LeadEvidence: Codable, Equatable, Sendable {
     public var at: Double
     /// The branch's commit the verifier looked at: only that commit may be merged on this verdict.
     public var commit: String?
+    /// The version of the task's contract its verifiers judged (see `LeadTask.contractVersion`); nil on verdicts from
+    /// before contracts had versions.
+    public var contract: Int?
 
-    public init(completion: Completion, integrity: Integrity, summary: String, commit: String? = nil, at: Double = Date().timeIntervalSince1970) {
+    public init(completion: Completion, integrity: Integrity, summary: String, commit: String? = nil, contract: Int? = nil,
+                at: Double = Date().timeIntervalSince1970) {
         self.completion = completion
         self.integrity = integrity
         self.summary = summary
         self.commit = commit
+        self.contract = contract
         self.at = at
     }
 
@@ -670,17 +722,45 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var rerolls: [LeadReroll]?
     /// The lead's notes on it since its contract (appended context, messages to its worker), oldest first.
     public var notes: [LeadNote]?
+    /// Its contract's version: each update_task that changes the goal, acceptance, boundaries or context adds one.
+    /// nil: version 1, the contract add_task gave it (see `contractRevision`).
+    public var contractVersion: Int?
+    /// The contract its running (or last) audit's verifiers have, and the version they judged (see `LeadAuditBrief`).
+    public var auditBrief: LeadAuditBrief?
     /// How it went, in the scorecard's numbers, as of the board's last change (see `LeadTaskScore`).
     public var score: LeadTaskScore?
     /// Its review level as the lead set it (for showing, and never lowering: merge goes by the stricter of this and
     /// the vault's copy, which only the lead writes). nil: none, the default.
     public var review: Review?
+    /// Where the work came from, as add_task was told (`Origin`'s raw value: user_report, incident…), for the scorecard's
+    /// count of bugs the user found against those the system found; nil: not said (tasks from before it was kept).
+    /// Kept as text so a board with a value this build doesn't know still decodes (`originKind` reads it).
+    public var origin: String?
+
+    /// Where a task's work came from (see `origin`). user_report: the user reported it; incident, log_watcher, flake
+    /// and audit: the system found it (an incident record, the log watcher, the flake ledger, an audit's finding);
+    /// lead: the lead's own plan; other: anything else.
+    public enum Origin: String, Codable, Sendable, CaseIterable {
+        case userReport = "user_report", incident, logWatcher = "log_watcher", flake, audit, lead, other
+
+        /// "user_report", " Incident ": the origin; nil for anything else.
+        public init?(text: String) { self.init(rawValue: text.trimmingCharacters(in: .whitespaces).lowercased()) }
+
+        /// Found by the system rather than reported by the user or planned.
+        public var systemFound: Bool { [.incident, .logWatcher, .flake, .audit].contains(self) }
+    }
+
+    /// `origin` as an `Origin`; nil when not said or not one this build knows.
+    public var originKind: Origin? { origin.flatMap(Origin.init(text:)) }
     /// Why its worker's last done report needs an audit before merge though its review is none (its branch touches
     /// sensitive_paths, say), as report found it; nil when it needs none (for showing: merge checks again).
     public var auditNeeded: String?
     /// The risk check raised it from review none to audit (see `LeadRisk`): why, on which commit, and by what. For
     /// showing (status's "audited: <reason>", its score); the vault's review audit is what merge goes by.
     public var riskRaised: LeadRiskRaise?
+    /// auto_advance's audit sample draw for it (see `LeadAuditSample`), made once at its first done report on review
+    /// none's path, with its seed; sampled: its review became audit. nil: none drawn (sampling off, or never on that path).
+    public var auditSample: LeadAuditSample?
     /// The tasks (their slugs) that must be done before it starts by itself (add_task's and update_task's `after`; see
     /// `LeadAdvance`); nil or empty: none.
     public var after: [String]?
@@ -768,6 +848,16 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
 
     /// Its review level: none unless the lead set audit.
     public var reviewLevel: Review { review ?? .none }
+
+    /// Its contract's version, 1 until update_task first changes it.
+    public var contractRevision: Int { contractVersion ?? 1 }
+
+    /// "judged contract vN, current vM" when its verdict (or the one a newer report outdated) judged an older version
+    /// of its contract than it has now: the lead amended it after its verifiers last heard; nil otherwise.
+    public var staleContract: String? {
+        guard let judged = (evidence ?? outdatedEvidence)?.contract, judged < contractRevision else { return nil }
+        return "judged contract v\(judged), current v\(contractRevision)"
+    }
 
     /// Its worker's answers given since the last audit `ledger` records, by finding id: the ones the next audit judges.
     public func currentAnswers(_ ledger: LeadAuditLedger?) -> [String: LeadFindingAnswer] {
@@ -1090,7 +1180,8 @@ public struct LeadReport: Codable, Equatable, Sendable {
     }
 }
 
-/// A test that failed a merge's test run and passed its rerun (`MergeRerun`): one entry in the board's flake ledger.
+/// A test that failed a merge's test run and passed its rerun (`MergeRerun`): one entry in the flake ledger
+/// (`FlakeLedgerStore`).
 public struct LeadFlake: Codable, Equatable, Sendable {
     /// As `TestFailures` names it (`MergeRerun.unnamed` when the run named none).
     public var test: String
@@ -1098,7 +1189,7 @@ public struct LeadFlake: Codable, Equatable, Sendable {
     public var task: String
     public var commit: String
     public var at: Double
-    /// The task planned to fix it, on the flake that made it due (`LeadBoard.recordFlakes`).
+    /// The task planned to fix it, on the flake that made it due (`FlakeLedger.recordFlakes`).
     public var planned: String?
     /// The file in the repository's ignored folder (relative to its root; absolute in older entries) that keeps its
     /// failure lines from the failing run (`MergeRerun.evidence`) with the merge's other flakes'
@@ -1106,6 +1197,12 @@ public struct LeadFlake: Codable, Equatable, Sendable {
     /// here would grow the board by kilobytes an entry. Optional: older entries have none, and a run that named no
     /// test's lines has none. (Entries that kept their lines here still decode; the lines are dropped on the next write.)
     public var log: String?
+    /// The Mac's 1-minute load average when the merge's run started, and whether the rerun that passed ran only the
+    /// failing tests (else the whole test command). Optional: entries before the ledger's file have neither.
+    public var load: Double?
+    public var filtered: Bool?
+    /// The fix task (`LeadFlakeFix.fixedBy`) this is the first flake since: the lead was told it flaked again.
+    public var recurred: String?
 
     public init(test: String, task: String, commit: String, at: Double, planned: String? = nil, log: String? = nil) {
         self.test = test
@@ -1137,8 +1234,8 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     /// Each moment the board cleared after merges (see `BatchSummary`), oldest first, with its summary once written.
     /// Optional: older boards have none.
     public var allDone: [LeadAllDone]?
-    /// The flake ledger: each test that failed a merge's test run and passed its rerun (`MergeRerun`), oldest first,
-    /// at most `keptFlakes`. Optional: older boards have none.
+    /// The flake ledger as boards kept it before it had a file of its own (`FlakeLedgerStore`), at most 200 entries:
+    /// moved there once (`FlakeLedgerStore.migrate`), then nil. Optional: boards since, and older ones, have none.
     public var flakes: [LeadFlake]?
     /// What the tasks moved to the archive (`BoardStore.archive`) add to the scorecard, so it counts every merge from
     /// this file alone. Optional: boards before the archive have none.
@@ -1149,7 +1246,6 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     public var archivedBatch: [LeadTask]?
 
     public static let keptReports = 50
-    public static let keptFlakes = 200
     /// A test that flakes `flakeLimit` times within `flakeWindow` becomes a task to fix it, once.
     public static let flakeLimit = 3
     public static let flakeWindow: Double = 7 * 86_400
@@ -1186,32 +1282,6 @@ public struct LeadBoard: Codable, Equatable, Sendable {
 
     // MARK: Flakes
 
-    /// Records each of `tests` as having flaked in `task`'s merge (tested at `commit`), those in `logged` with the `log`
-    /// that keeps their lines. Returns those that flaked `flakeLimit` times within `flakeWindow` since a task was
-    /// last planned for them, each with the merges it held up and those flakes (oldest first): the caller plans one task
-    /// each and marks it (`planned`), so a test makes one task, not one per flake. A flake recorded under
-    /// `MergeRerun.unnamed` names no test, and plans nothing.
-    public mutating func recordFlakes(_ tests: [String], task: String, commit: String, now: Double, logged: Set<String> = [],
-                                      log: String? = nil) -> [(test: String, merges: [String], flakes: [LeadFlake])] {
-        var ledger = flakes ?? []
-        var due: [(test: String, merges: [String], flakes: [LeadFlake])] = []
-        for test in tests {
-            ledger.append(LeadFlake(test: test, task: task, commit: commit, at: now, log: logged.contains(test) ? log : nil))
-            guard test != MergeRerun.unnamed else { continue }
-            let since = ledger.last { $0.test == test && $0.planned != nil }?.at ?? -.infinity
-            let counted = ledger.filter { $0.test == test && $0.at > since && now - $0.at <= Self.flakeWindow }
-            if counted.count >= Self.flakeLimit { due.append((test, counted.map(\.task), counted)) }
-        }
-        flakes = Array(ledger.suffix(Self.keptFlakes))
-        return due
-    }
-
-    /// Marks `test`'s latest flake as the one `slug` was planned for.
-    public mutating func notePlanned(_ slug: String, for test: String) {
-        guard let index = flakes?.lastIndex(where: { $0.test == test }) else { return }
-        flakes?[index].planned = slug
-    }
-
     /// The open task (planned, running, in review or blocked) whose title or goal names `test`, first on the board:
     /// a due flake goes there instead of a new task (twice on 2026-10-28 the ledger planned a fix for a test an open
     /// task was already fixing, and auto_advance started it). Named as `TestFailures` names it ("foo()",
@@ -1237,24 +1307,6 @@ public struct LeadBoard: Codable, Equatable, Sendable {
             }
         }
         return tasks.first { [.planned, .running, .review, .blocked].contains($0.status) && (namesIt($0.title) || namesIt($0.contract.goal)) }
-    }
-
-    /// For status: the tests that flaked within `flakeWindow` of `now`, the most flakes first, each with the merges
-    /// it held up and the task planned for it; nil when none did.
-    public func flakeLine(now: Double) -> String? {
-        let recent = (flakes ?? []).filter { now - $0.at <= Self.flakeWindow }
-        guard !recent.isEmpty else { return nil }
-        var order: [String] = []
-        for flake in recent.reversed() where !order.contains(flake.test) { order.append(flake.test) }
-        let counts = Dictionary(grouping: recent, by: \.test)
-        order.sort { counts[$0]!.count > counts[$1]!.count }
-        let shown = order.prefix(8).map { test -> String in
-            let flakes = counts[test]!
-            let planned = (self.flakes ?? []).last { $0.test == test && $0.planned != nil }?.planned
-            return "\(test) ×\(flakes.count) (\(flakes.map(\.task).joined(separator: ", ")))" + (planned.map { " → task \($0)" } ?? "")
-        }
-        return "Flaky tests in the last \(Int(Self.flakeWindow / 86_400)) days (\(recent.count) flake\(recent.count == 1 ? "" : "s"): each failed a merge's test run, passed its rerun, and the merge went ahead; "
-            + "\(Self.flakeLimit) of one test become a task to fix it): " + shown.joined(separator: "; ") + (order.count > 8 ? "; …" : "") + "."
     }
 
     // MARK: Questions
@@ -1432,11 +1484,11 @@ public final class FileLock {
 
     private init(fd: Int32) { self.fd = fd }
 
-    public static func attempt(_ path: String) -> FileLock? {
+    public static func attempt(_ path: String, shared: Bool = false) -> FileLock? {
         try? VibePaths.ensurePrivate(URL(fileURLWithPath: (path as NSString).deletingLastPathComponent, isDirectory: true))
         let fd = open(path, O_CREAT | O_RDWR, 0o600)
         guard fd >= 0 else { return nil }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+        guard flock(fd, (shared ? LOCK_SH : LOCK_EX) | LOCK_NB) == 0 else {
             close(fd)
             return nil
         }

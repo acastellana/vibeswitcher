@@ -21,6 +21,11 @@ import Foundation
 ///   summed, of the merges whose working time is known. Parallelism: the worker hours of the receipts that ended in
 ///   the range over the wall-clock hours from start to end of any of them.
 /// - Cost: the receipts of the merges whose cost is known, worker (implementation) and verifier (verification).
+/// - A sampled audit: a review none task auto_advance's audit sample sent to audit (`LeadAuditSample`), drawn in the
+///   range, ended (merged, folded or abandoned) with an audit recorded; its Important rate is the share whose audits
+///   raised an Important finding, said with its n (a tripwire on the unaudited path, not a statistic).
+/// - Same model: an audited merge whose receipt says its verifier ran on its worker's model (`LeadTokens.sameModel`);
+///   audited merges whose receipt doesn't say are in neither split.
 /// - Who: Codex when a Codex worker worked on it (`codexWorked`, or agent codex), else Claude; the model is the one
 ///   its worker session was started on (`launchedModels`), by family.
 ///
@@ -35,12 +40,15 @@ public struct SetupQuality: Equatable, Sendable {
     public var byModel: [QualityGroup]
     /// The 8 weeks (7 days each) up to the range's end, oldest first.
     public var weeks: [QualityWeek]
+    /// The weekly scorecard: the last 7 days against the 7 before (see `SetupScorecard`); nil when not worked out.
+    public var scorecard: SetupScorecard?
 
-    public init(all: QualityFigures, byAgent: [QualityGroup], byModel: [QualityGroup], weeks: [QualityWeek]) {
+    public init(all: QualityFigures, byAgent: [QualityGroup], byModel: [QualityGroup], weeks: [QualityWeek], scorecard: SetupScorecard? = nil) {
         self.all = all
         self.byAgent = byAgent
         self.byModel = byModel
         self.weeks = weeks
+        self.scorecard = scorecard
     }
 }
 
@@ -150,6 +158,18 @@ public struct QualityFigures: Equatable, Sendable {
     public var importantPerAudited: Double? { audited > 0 ? Double(importantFindings) / Double(audited) : nil }
     /// Nil when no merge's audits are kept.
     public var findings: FindingOutcomes?
+    /// The sampled audits (see `SetupQuality`), and those that raised an Important finding.
+    public var sampledAudits = 0
+    public var sampledImportant = 0
+    public var sampledImportantRate: Double? { sampledAudits > 0 ? Double(sampledImportant) / Double(sampledAudits) : nil }
+    /// The audited merges whose verifier ran on the worker's model, and on another (`LeadTokens.sameModel`), with
+    /// their Important findings (as `importantFindings` counts them).
+    public var sameModelAudited = 0
+    public var sameModelImportant = 0
+    public var otherModelAudited = 0
+    public var otherModelImportant = 0
+    public var sameModelImportantPerAudited: Double? { sameModelAudited > 0 ? Double(sameModelImportant) / Double(sameModelAudited) : nil }
+    public var otherModelImportantPerAudited: Double? { otherModelAudited > 0 ? Double(otherModelImportant) / Double(otherModelAudited) : nil }
     /// Nil when the merges recorder has no line for any of the merges.
     public var mergeFirstTry: MergeFirstTry?
     public var rerolls = 0
@@ -211,7 +231,8 @@ public struct QualityFigures: Equatable, Sendable {
     public var verificationShare: Double? { cost > 0 ? verifierCost / cost : nil }
     /// The merges' test reruns' cost: nil, not recorded (receipts count a rerun, not what it cost).
     public var mergeRerunCost: Double?
-    /// The merges' workers' Codex tokens (`LeadTokens.codex`): not in the cost (`LeadPrices` has no Codex price); nil
+    /// The merges' workers' Codex tokens (`LeadTokens.codex`): in the cost at `LeadPrices.codex` (receipts from before
+    /// Codex was priced: not); nil
     /// when no merge's receipt read any.
     public var codexTokens: Int?
     /// The project lead's own spend on the range's days, every project's (`ProjectFigures.leadTokens`): only on
@@ -288,6 +309,10 @@ struct QualitySource {
     var incidents: [String: [Double]]
     /// Its flake ledger: each entry's task and when; nil when its board keeps none.
     var flakes: [(task: String, at: Double?)]?
+    /// Its lead's ledger's days ("2026-11-02": tokens, priced cost, a model with no price), nil when it keeps none.
+    var leadDays: [String: (tokens: Int, cost: Double, unpriced: Bool)]? = nil
+    /// When each merged task (by slug) was first seen installed (`SetupInstalls.firstInstalls`).
+    var installedAt: [String: Double] = [:]
 }
 
 enum SetupQualityMath {
@@ -304,6 +329,9 @@ enum SetupQualityMath {
         var escaped: Bool
         var incident: Bool
         var neededNobody: Bool
+        /// Its project's index among the sources, and when a build containing it was first seen installed.
+        var source = 0
+        var installedAt: Double?
     }
 
     /// A receipt that ended: who worked, from when to when, and the working time.
@@ -317,12 +345,21 @@ enum SetupQualityMath {
         var verifier: Double?
     }
 
+    /// A sampled audit (see `SetupQuality`): who worked, and whether its audits raised an Important finding.
+    struct Sampled {
+        var codex: Bool
+        var model: String?
+        var important: Bool
+    }
+
     /// The figures of `sources` for `window`; `merges` the recorder's lines by project name and task slug, oldest
     /// first (nil: no recorder file for those days); `weeks` the trend's.
     static func quality(_ sources: [QualitySource], window: SetupStatsCollector.Window, weeks: [DateInterval],
-                        mergeLines: [String: [String: [RecorderLine]]]?) -> SetupQuality {
-        var merges: [Merge] = [], ended: [Ended] = []
-        var questions: [LeadQuestion] = [], untasked: [LeadQuestion] = []
+                        mergeLines: [String: [String: [RecorderLine]]]?, calendar: Calendar = .current) -> SetupQuality {
+        var merges: [Merge] = [], ended: [Ended] = [], sampled: [Sampled] = []
+        // `untasked`: questions about no task asked in the range; `anyUntasked`: all of them, for the scorecard's two
+        // weeks, which don't follow the range picked.
+        var questions: [LeadQuestion] = [], untasked: [LeadQuestion] = [], anyUntasked: [LeadQuestion] = []
         // Every task's worker (made unique as merges' are), for the flake ledger's entries; and those entries in the range.
         var who: [String: (codex: Bool, model: String?)] = [:], flakes: [String]?
         for (index, source) in sources.enumerated() {
@@ -331,8 +368,9 @@ enum SetupQualityMath {
                 if let task = question.task {
                     question.task = prefix + task
                     questions.append(question)
-                } else if window.within(question.askedAt) {
-                    untasked.append(question)
+                } else {
+                    anyUntasked.append(question)
+                    if window.within(question.askedAt) { untasked.append(question) }
                 }
             }
             let askedAbout = Set(source.questions.compactMap(\.task))
@@ -350,6 +388,9 @@ enum SetupQualityMath {
                     ended.append(Ended(codex: view.codex, model: model, start: receipt.startedAt ?? view.startedAt, end: receipt.endedAt!,
                                        worked: worked, verifier: receipt.waits?.verifierTime))
                 }
+                if let sample = task.auditSample, sample.sampled, window.within(sample.at), let verdict = LeadAuditSample.verdict(task.audits) {
+                    sampled.append(Sampled(codex: view.codex, model: model, important: verdict == .important))
+                }
                 guard LeadScorecard.counts(task), let at = task.merged?.at else { continue }
                 let lines = mergeLines.map { $0[source.name]?[slug] ?? [] }
                 let first = lines.flatMap { $0.first }
@@ -362,7 +403,8 @@ enum SetupQualityMath {
                 let messaged = task.notes?.contains { $0.kind == .message && $0.at > began } ?? false
                 let rerolled = max(task.rerolls?.count ?? 0, task.receipt?.rerolls ?? 0) > 0
                 merges.append(Merge(task: task, view: view, at: at, codex: view.codex, model: model, firstTry: firstTry, sentBack: sentBack,
-                                    escaped: reverted || incident, incident: incident, neededNobody: !asked && !messaged && !rerolled))
+                                    escaped: reverted || incident, incident: incident, neededNobody: !asked && !messaged && !rerolled,
+                                    source: index, installedAt: source.installedAt[slug]))
             }
         }
         merges.sort { $0.at < $1.at }
@@ -374,6 +416,9 @@ enum SetupQualityMath {
             let tasks = Set(mine.map(\.task.slug))
             var f = figures(mine, ended: ended.filter { keep($0.codex, $0.model) },
                             questions: about.filter { tasks.contains($0.task ?? "") } + extra, now: window.now)
+            let samples = sampled.filter { keep($0.codex, $0.model) }
+            f.sampledAudits = samples.count
+            f.sampledImportant = samples.filter(\.important).count
             // A flake whose task isn't on the board any more is no agent's: in everyone's only.
             f.flakesCaught = flakes?.filter { slug in everyone || who[slug].map { keep($0.codex, $0.model) } == true }.count
             return f
@@ -391,7 +436,15 @@ enum SetupQualityMath {
             return QualityWeek(start: week.start, end: week.end, merged: mine.count, firstAuditPassRate: card.firstAuditPassRate,
                                costPerMergedTask: costs.isEmpty ? nil : costs.reduce(0, +) / Double(costs.count))
         }
-        return SetupQuality(all: all, byAgent: byAgent, byModel: byModel, weeks: trend)
+        let days = DateFormatter()
+        days.calendar = calendar
+        days.timeZone = calendar.timeZone
+        days.locale = Locale(identifier: "en_US_POSIX")
+        days.dateFormat = "yyyy-MM-dd"
+        let card = scorecard(sources, merges: merges, untasked: anyUntasked, questions: questions, weeks: weeks, now: window.now,
+                             dayKey: { days.string(from: Date(timeIntervalSince1970: $0)) },
+                             dayStart: { days.date(from: $0)?.timeIntervalSince1970 })
+        return SetupQuality(all: all, byAgent: byAgent, byModel: byModel, weeks: trend, scorecard: card)
     }
 
     /// `LeadScorecard` over `tasks` and `questions` alone: its definitions, for a range's merges.
@@ -417,7 +470,18 @@ enum SetupQualityMath {
         for merge in merges {
             let task = merge.task
             let score = LeadTaskScore(task, questions: [], now: now)
-            if score.roundsToPass != nil { f.importantFindings += score.importantFindings }
+            if score.roundsToPass != nil {
+                f.importantFindings += score.importantFindings
+                switch merge.view.receipt?.verifier?.sameModel ?? task.receipt?.verifier?.sameModel {
+                case true?:
+                    f.sameModelAudited += 1
+                    f.sameModelImportant += score.importantFindings
+                case false?:
+                    f.otherModelAudited += 1
+                    f.otherModelImportant += score.importantFindings
+                case nil: break
+                }
+            }
             if let audits = task.audits {
                 var o = outcomes ?? FindingOutcomes()
                 let disagreed = Set((task.answers ?? []).filter { $0.kind == .disagree }.map { $0.id.uppercased() })

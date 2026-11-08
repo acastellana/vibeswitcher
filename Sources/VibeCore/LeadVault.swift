@@ -148,6 +148,7 @@ public struct LeadVault: Sendable {
         /// `finder`: a verifier that's one of an audit's finders; it replaces only the task's verifiers from other
         /// audits (and the same finder of its own).
         case issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String?, finder: Finder? = nil)
+        case rotateLead(root: String, expected: String, session: String, restoring: Member? = nil)
         case bind(grant: String, root: String, session: String)
         case revoke(grant: String, root: String)
         /// The task is over: its worker's and verifier's grants and its verdict go (the lead).
@@ -191,6 +192,11 @@ public struct LeadVault: Sendable {
         case guarded(root: String)
         /// The app, or the repository's lead: these settings' hashes, by key, are the lead's now (the others stay).
         case setGuarded(root: String, hashes: [String: String])
+        /// The review rules' floor you set in Settings for the repository (`LeadReviewFloor`; `Reply.reviewFloor`).
+        case reviewFloor(root: String)
+        /// The app only: the review rules' floor, as you set it in Settings (or, `onlyIfUnset`, the project's values
+        /// when the app first starts its lead, kept only while none is recorded).
+        case setReviewFloor(root: String, floor: LeadReviewFloor, onlyIfUnset: Bool)
         /// The app only: you approved merging the task at this commit (see `LeadVault.recordApproval`).
         case approve(root: String, task: String, commit: String)
         /// Whether you approved merging the task at exactly this commit.
@@ -239,6 +245,7 @@ public struct LeadVault: Sendable {
         case startedOver(Double?)
         case move(BaseMove)
         case guarded([String: String]?)
+        case reviewFloor(LeadReviewFloor?)
         case approved(Bool)
         case roster([RosterEntry])
         case unaudited(review: LeadTask.Review?, reported: String?, evidence: LeadDoneEvidence? = nil)
@@ -301,12 +308,21 @@ public struct LeadVault: Sendable {
     /// The lead starts (from VibeSwitcher): a grant for it. `branch` as it is now becomes the head merges start from
     /// only when none is recorded, or when `takeHead` (you said so in the app, having been shown the move): starting
     /// the lead again (anything can ask for that) doesn't make a move nobody merged look like the lead's.
-    public func startLead(root: String, branch: String, takeHead: Bool = false) throws -> String {
+    ///
+    /// `floor`: the review rules' floor at the project's values now, recorded only while none is (see
+    /// `LeadReviewFloor.starting(from:)`): a vault that can't take it leaves the rules as workflow.md says, as before.
+    public func startLead(root: String, branch: String, takeHead: Bool = false, floor: LeadReviewFloor? = nil) throws -> String {
         let grant = try issue(role: .lead, root: root, task: nil)
+        if let floor { _ = try? setReviewFloor(floor, root: root, onlyIfUnset: true) }
         if let now = Self.branchHead(branch, root: root), takeHead || head(root: root, branch: branch) == nil {
             try setHead(now, root: root, branch: branch)
         }
         return grant
+    }
+
+    /// Scheduled replacement, only after the successor spawned. A stale start cannot displace a newer lead.
+    public func rotateLead(root: String, expected: String, session: String, restoring: Member? = nil) throws {
+        _ = try call(.rotateLead(root: root, expected: expected, session: session, restoring: restoring))
     }
 
     /// The lead that's still running when VibeSwitcher starts again (a relaunch, an install): its role bound to its
@@ -515,6 +531,9 @@ extension LeadVault {
             /// workflow.md's guard rails as the lead last set them (`LeadVault.guardedHashes`); nil until it did
             /// (optional: older vaults have none).
             var guarded: [String: String]?
+            /// The review rules' floor you set in Settings (`LeadReviewFloor`); nil until the app recorded one
+            /// (optional: older vaults have none).
+            var floor: LeadReviewFloor?
             /// The commits you approved merging, by task, newest last (optional: older vaults have none).
             var approvals: [String: [String]]?
             /// Each task's audit by several finders: their ballots until the vote (optional: older vaults have none).
@@ -535,6 +554,16 @@ extension LeadVault {
             var evidence: [String: LeadDoneEvidence]?
             /// The push the lead asked you for and you haven't clicked on yet (optional: older vaults have none).
             var push: LeadPush.Request?
+            /// When the main checkout's agents' config (`ConfigSeal`) was last sealed, or found as sealed (optional:
+            /// older vaults have none). Your home's is the Mac's (`State.config`).
+            var configSealedAt: Double?
+            /// When the team's branch code last ran, as far as the vault saw: a worker or verifier bound, a merge's or
+            /// an audit's run begun (`ConfigSeal.runKey`), or one of its sessions running as the config was looked at.
+            var branchCodeAt: Double?
+            /// The branch runs begun (`ConfigSeal.runKey`) and not ended yet (`ConfigSeal.runEndKey`), by id: when each
+            /// began. Each counts as running at every look until it ends, or for `maxOpenRun` (a host that went away
+            /// mid-run never ends it).
+            var openRuns: [String: Double]?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`, with the role and task each held.
@@ -576,12 +605,25 @@ extension LeadVault {
             /// When this vault began empty because the one kept before couldn't be read (an earlier session host's,
             /// sealed with a Keychain key this build can't read): what it held, verdicts included, is lost.
             var startedOver: Double?
+            /// Your home's agents' config as VibeSwitcher last sealed it (`ConfigSeal`): the Mac's, one for every team
+            /// (optional: older vaults have none, and kept it in each team's `guarded`).
+            var config: MacSeal?
+        }
+
+        /// The Mac-wide seal of your home's agents' config (`ConfigSeal.isHome`): its hashes (with their per-key
+        /// hashes), what's held (`ConfigSeal.heldKey`'s value), and when it was last sealed or found as sealed.
+        struct MacSeal: Codable {
+            var hashes: [String: String] = [:]
+            var held: String?
+            var sealedAt: Double?
         }
 
         private var state: State
         private let lock = NSLock()
         /// The whole state, encoded, after each change (the host keeps it sealed on disk).
         public var onChange: ((Data) -> Void)?
+        /// The home whose agents' config this vault seals (`ConfigSeal`): its own process's (a test's scratch one).
+        public var configHome = VibePaths.home
 
         /// A vault as it was saved (`saved`, from `onChange` or `serialized`), or a new one when there's none or it
         /// doesn't read. `startingOver`: a new one stands in for one that was kept but couldn't be read.
@@ -660,13 +702,27 @@ extension LeadVault {
         /// `userOpened`: the caller's session is one the app opened (the host knows; no session started it), so the
         /// git commands it records are the user's while it holds no role in the team. `agentSession`: for `.seal`,
         /// the session the message's agent runs in, as the host tells from its pid (nil: none it started).
-        public func answer(_ request: Request, from caller: Caller, userOpened: Bool = false, agentSession: String? = nil) -> Reply {
+        /// `liveSessions`: the sessions the host runs now, by id (nil: not known, and every worker or verifier the team
+        /// has, holding its role or former, counts as running; see `ConfigSeal`).
+        public func answer(_ request: Request, from caller: Caller, userOpened: Bool = false, agentSession: String? = nil,
+                           liveSessions: Set<String>? = nil) -> Reply {
             // It reads git: outside the lock.
             if case .acceptMove(let root, let branch) = request { return acceptMove(root: root, branch: branch, from: caller) }
+            // The agents' config, hashed here (never taken from the caller) and outside the lock: it reads files.
+            var config: [String: String]?
+            if case .setGuarded(let root, let hashes) = request {
+                // A branch run's end is a look as well (`sealConfig`).
+                if hashes[ConfigSeal.checkKey] != nil || hashes[ConfigSeal.runEndKey] != nil {
+                    config = ConfigSeal.hashes(home: configHome, root: root)
+                } else if hashes[ConfigSeal.wroteKey] != nil {
+                    config = ConfigSeal.hashes(of: ConfigSeal.homeWatched(home: configHome))
+                }
+            }
             lock.lock()
             defer { lock.unlock() }
             var changed = false
-            let reply = answer(request, from: caller, userOpened: userOpened, agentSession: agentSession, changed: &changed)
+            let reply = answer(request, from: caller, userOpened: userOpened, agentSession: agentSession, liveSessions: liveSessions,
+                               config: config, changed: &changed)
             if changed, let onChange, let data = try? JSONEncoder().encode(state) { onChange(data) }
             return reply
         }
@@ -732,7 +788,8 @@ extension LeadVault {
 
         // MARK: Rules
 
-        private func answer(_ request: Request, from caller: Caller, userOpened: Bool, agentSession: String?, changed: inout Bool) -> Reply {
+        private func answer(_ request: Request, from caller: Caller, userOpened: Bool, agentSession: String?, liveSessions: Set<String>?,
+                            config: [String: String]? = nil, changed: inout Bool) -> Reply {
             switch request {
             case .issue(let role, let root, let task, let auditing, let finder):
                 if role == .lead {
@@ -760,6 +817,24 @@ extension LeadVault {
                     team.members.append(member)
                 }
                 return .grant(member.id)
+            case .rotateLead(let root, let expected, let session, let restoring):
+                guard caller == .app else { return .refused("Only VibeSwitcher rotates a lead.") }
+                guard let old = team(root)?.members.first(where: { $0.role == .lead }), old.session == expected,
+                      team(root)?.members.contains(where: { $0.session == session }) == false else {
+                    return .refused("The running lead changed; rotation cancelled.")
+                }
+                if let restoring {
+                    guard restoring.role == .lead, restoring.task == nil, restoring.session == session, restoring.issuer == .app else {
+                        return .refused("Only the original lead member may be restored.")
+                    }
+                }
+                let member = restoring ?? Member(id: UUID().uuidString, role: .lead, task: nil, session: session,
+                                                 issuedAt: Date().timeIntervalSince1970, issuer: caller)
+                change(root, &changed) { team in
+                    team.remove { $0.role == .lead }
+                    team.members.append(member)
+                }
+                return .ok
             case .bind(let grant, let root, let session):
                 guard let member = team(root)?.members.first(where: { $0.id == grant }), member.issuer == caller else {
                     return .refused("That grant isn't yours to bind (or it was withdrawn).")
@@ -771,6 +846,8 @@ extension LeadVault {
                 change(root, &changed) { team in
                     guard let index = team.members.firstIndex(where: { $0.id == grant }) else { return }
                     if team.members[index].session == nil { team.members[index].boundAt = Date().timeIntervalSince1970 }
+                    // A worker's or verifier's commands run from now on (`ConfigSeal`).
+                    if team.members[index].role != .lead { team.branchCodeAt = Date().timeIntervalSince1970 }
                     team.members[index].session = session
                 }
                 return .ok
@@ -920,13 +997,25 @@ extension LeadVault {
             case .acceptMove:
                 return .refused("Asked outside the lock.")
             case .guarded(let root):
-                return .guarded(team(root)?.guarded)
+                return .guarded(guardedAnswer(root))
             case .setGuarded(let root, let hashes):
                 // Its commands run as the lead in merge, and its limits hold the team: a worker's or verifier's
                 // session (or anything outside the sessions) that wrote workflow.md doesn't get them taken as the lead's.
                 guard caller == .app || isLead(caller, root) else { return .refused("Only VibeSwitcher or the lead records workflow.md's guard rails.") }
-                change(root, &changed) { $0.guarded = ($0.guarded ?? [:]).merging(hashes) { $1 } }
+                if let refusal = sealConfig(root: root, asked: hashes, now: config, caller: caller, live: liveSessions, changed: &changed) {
+                    return .refused(refusal)
+                }
+                let rails = hashes.filter { !ConfigSeal.isVaultKey($0.key) }
+                if !rails.isEmpty { change(root, &changed) { $0.guarded = ($0.guarded ?? [:]).merging(rails) { $1 } } }
                 return .ok
+            case .reviewFloor(let root):
+                return .reviewFloor(team(root)?.floor)
+            case .setReviewFloor(let root, let floor, let onlyIfUnset):
+                // Yours alone: the lead and its team are who the floor holds (the host tells the app from the process).
+                guard caller == .app else { return .refused("Only VibeSwitcher sets the review rules' floor, from Settings: it's the user's.") }
+                if onlyIfUnset, team(root)?.floor != nil { return .reviewFloor(team(root)?.floor) }
+                change(root, &changed) { $0.floor = floor }
+                return .reviewFloor(floor)
             case .approve(let root, let task, let commit):
                 // Only your answer in the app approves a merge: not the lead that asks for it, nor a worker whose
                 // work it is, whatever they write on the board.
@@ -1060,7 +1149,7 @@ extension LeadVault {
         /// a lead's, the app's (passing them on) or a lead's own, under its own project's name only (`leadNames`), so a
         /// lead's Bash can't sign a line as another project's lead; VibeSwitcher's, the app's, but for the reports a
         /// worker's or verifier's tool server sends its lead (`worker <task>`, `verifier <task>`), which the
-        /// session holding that role seals about itself, and auto_advance's (`LeadAdvance.sender`), which the lead's
+        /// session holding that role seals about itself, and the automatic loops' (`LeadAdvance.sender`, `LeadRemotePoller.sender`), which the lead's
         /// own tool server runs: a lead's session seals those only for an agent in that same session (`agentSession`),
         /// itself. So a worker's Bash can't seal a line as its lead's, the witness's, auto_advance's or another
         /// worker's (it can only say, as itself, what its report tool says), and a lead can't pass auto_advance's
@@ -1096,10 +1185,10 @@ extension LeadVault {
                     return "A lead seals its line (lead of <project>) only for a session of its own team: another project's lead takes tell_lead."
                 }
                 return nil
-            case .system(let about) where about == LeadAdvance.sender:
+            case .system(let about) where about == LeadAdvance.sender || about == LeadRemotePoller.sender:
                 guard case .session(let session) = caller, agentSession == session,
                       state.teams.values.contains(where: { $0.members.contains { $0.role == .lead && $0.session == session } })
-                else { return "Only VibeSwitcher, or a project lead's own tool server about its loop's work and for that lead, seals a message as auto_advance's." }
+                else { return "Only VibeSwitcher, or a project lead's own tool server about its loop's work and for that lead, seals a message as its automatic loop's." }
                 return nil
             case .system(let about):
                 let words = about.split(separator: " ", maxSplits: 1).map(String.init)
@@ -1117,6 +1206,232 @@ extension LeadVault {
         static func leadNames(root: String) -> Set<String> {
             let project = LeadMail.project(of: root)
             return ["lead of " + project, LeadMail.senderPrefix + project]
+        }
+
+        /// The agents' config (`ConfigSeal`), when `asked` holds its keys: `runKey` and `runEndKey` mark a branch run
+        /// begun and ended, and
+        /// `checkKey` takes `now`, the hashes this vault made itself (whatever else `asked` says of them is ignored).
+        /// Two seals: your home's files are the Mac's, one seal for every team (`State.config`); the main checkout's
+        /// are the team's (`Team.guarded`). A thing not recorded yet is recorded as it is; one as recorded is found
+        /// unchanged. One that differs is sealed anew by the app (your click), or by the lead only while its seal is
+        /// quiet and it doesn't execute (`ConfigSeal.executes`): quiet, no worker, verifier or branch run of any team
+        /// still in use (`retired`) ran since that seal was last sealed or found as sealed. Otherwise it's refused and
+        /// held, named under `heldKey`, until you accept it in the app. nil when it's taken.
+        private func sealConfig(root: String, asked: [String: String], now hashes: [String: String]?, caller: Caller, live: Set<String>?,
+                                changed: inout Bool) -> String? {
+            let marks = asked.keys.filter(ConfigSeal.isVaultKey)
+            guard !marks.isEmpty else { return nil }
+            if let wrote = asked[ConfigSeal.wroteKey] {
+                guard caller == .app else { return "Only VibeSwitcher seals what it wrote itself." }
+                sealAppWrites(wrote, now: hashes, changed: &changed)
+                return nil
+            }
+            let now = Date().timeIntervalSince1970
+            let own = LeadVault.key(root)
+            if state.teams[own] == nil { change(root, &changed) { _ in } }
+            migrateHomeSeal(own, changed: &changed)
+            // Every team's sessions, looked at now: one running counts as running now, recorded, so a look after it
+            // ended still knows it ran (another team's worker can write ~/.claude/CLAUDE.md too). Retired teams never count.
+            let ids = live.map { Set($0.map { $0.lowercased() }) }
+            // A branch run (a merge's, an audit's tests) is no session: it counts as running from its mark to its end.
+            // Its end is a look too (`hashes`): what changed since the last look is held (the run was open), and a
+            // seal made at it comes after the run, when nothing of the team runs on (`endedOnly`).
+            var endedOnly = false
+            for (id, team) in state.teams where !Self.retired(team, live: ids, now: now) || id == own {
+                let sessions = team.members.filter { $0.role != .lead }.compactMap(\.session) + (team.former ?? [])
+                var running = ids.map { ids in sessions.contains { ids.contains($0.lowercased()) } } ?? !sessions.isEmpty
+                var runs = (team.openRuns ?? [:]).filter { $0.value > now - Self.maxOpenRun }
+                if id == own, let begun = asked[ConfigSeal.runKey] { runs[begun] = now }
+                if id == own, let ended = asked[ConfigSeal.runEndKey] {
+                    runs[ended] = nil
+                    endedOnly = !running && runs.isEmpty
+                    running = true
+                }
+                running = running || !runs.isEmpty
+                if runs != team.openRuns ?? [:] {
+                    state.teams[id]?.openRuns = runs.isEmpty ? nil : runs
+                    changed = true
+                }
+                if running {
+                    state.teams[id]?.branchCodeAt = now
+                    changed = true
+                }
+            }
+            guard let hashes else { return nil }
+            let inUse = state.teams.filter { $0.key == own || !Self.retired($0.value, live: ids, now: now) }.map(\.value)
+            // Quiet since `sealedAt`: no team's branch code ran at or after it (a run as it was sealed is as new).
+            func quiet(since sealedAt: Double?) -> Bool { !inUse.contains { ($0.branchCodeAt ?? -1) >= (sealedAt ?? 0) } }
+            let watchedNow = hashes.filter { ConfigSeal.isWatchedKey($0.key) }
+            var mac = state.config ?? MacSeal()
+            var team = state.teams[own] ?? Team(root: LeadVault.canonical(root))
+            var guarded = team.guarded ?? [:]
+            let home = Self.judge(watchedNow.filter { ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &mac.hashes, held: &mac.held,
+                                  quiet: quiet(since: mac.sealedAt), caller: caller)
+            var projectHeld = guarded[ConfigSeal.heldKey]
+            let project = Self.judge(watchedNow.filter { !ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &guarded, held: &projectHeld,
+                                     quiet: quiet(since: team.configSealedAt), caller: caller)
+            guarded[ConfigSeal.heldKey] = projectHeld
+            // Sealed, or found as sealed, now: what ran before is seen. A session still running is as new (not quiet).
+            if home { mac.sealedAt = now }
+            if project { team.configSealedAt = now }
+            // A run that ended at this look, with nothing of the team running on, ran until just before it: a seal
+            // made now saw all it wrote, so the next look is quiet unless something runs since. One ulp, so it's
+            // still after every seal made before this look.
+            if endedOnly, team.branchCodeAt == now { team.branchCodeAt = now.nextDown }
+            team.guarded = guarded
+            state.config = mac
+            state.teams[own] = team
+            changed = true
+            // The end's own look holds what it holds (named under `heldKey`, for the app and every next look), but
+            // the end itself is recorded: told so, not refused.
+            guard asked[ConfigSeal.checkKey] != nil || asked[ConfigSeal.runEndKey] == nil else { return nil }
+            return home && project ? nil : ConfigSeal.heldRefusal
+        }
+
+        /// One seal's look (`sealConfig`): `now` its watched things' hashes as they are, `hashes` with their per-key
+        /// hashes, `recorded` and `held` (`heldKey`'s value) as sealed, updated here. True when nothing is held: all of
+        /// it sealed or found as sealed.
+        private static func judge(_ now: [String: String], hashes: [String: String], recorded: inout [String: String], held: inout String?,
+                                  quiet: Bool, caller: Caller) -> Bool {
+            let differ = now.filter { recorded[$0.key] != nil && recorded[$0.key] != $0.value }
+            // Your click seals only what its card showed you: each held thing as it was when held. One that moved
+            // since (or changed and was never shown) is held anew, for the card to show. For the lead: a change while
+            // the seal was quiet is yours and sealed, unless it executes: that waits for your click whoever made it.
+            let before = ConfigSeal.heldLines(in: [ConfigSeal.heldKey: held ?? ""])
+            // Something already held is never the lead's look's to seal, quiet or not: only your click clears it.
+            let unseen = caller == .app ? differ.filter { before[$0.key]?.hash != $0.value }
+                : differ.filter { !quiet || ConfigSeal.executes(key: $0.key) || before[$0.key] != nil }
+            // Held, and not told now (`~/.claude.json` read mid-write): still held, as it was, until it reads whole.
+            let unread = before.filter { now[$0.key] == nil && recorded[$0.key] != nil }
+            guard !unseen.isEmpty else {
+                seal(now.keys, from: hashes, into: &recorded)
+                held = heldValue(unread)
+                return unread.isEmpty
+            }
+            // Held, named, for the app to show you: names and hashes only, never contents. What the lead's look may
+            // seal (quiet, instructions only) is sealed meanwhile.
+            let sealed = caller == .app ? [:] : differ.filter { unseen[$0.key] == nil }
+            let holding = differ.filter { sealed[$0.key] == nil }
+            // Changed outside a team session: seen so now, or seen so before and not moved since.
+            let outside = Set(holding.keys.filter { key in
+                (quiet && caller != .app) || (before[key]?.outside == true && before[key]?.hash == holding[key])
+            })
+            // Which keys changed, from the per-key hashes as sealed: names, for the card, never values.
+            var changes: [String: String] = [:]
+            for key in holding.keys {
+                let keys = ConfigSeal.keysKey(of: key)
+                changes[key] = ConfigSeal.changedKeys(from: recorded[keys], to: hashes[keys])
+            }
+            seal(sealed.keys, from: hashes, into: &recorded)
+            held = ConfigSeal.heldValue(holding.merging(unread.mapValues(\.hash)) { $1 }, outside: outside.union(unread.filter(\.value.outside).keys),
+                                        changes: changes.merging(unread.mapValues(\.changes)) { $1 })
+            return false
+        }
+
+        /// A team no longer in use: none of its sessions (its lead's included) runs, and nothing of it (a grant issued
+        /// or bound, a branch run, a look) for `retiredAfter`. Its runs never make another team's seal not quiet. Never
+        /// when which sessions run isn't known.
+        static func retired(_ team: Team, live ids: Set<String>?, now: Double) -> Bool {
+            guard let ids else { return false }
+            let sessions = team.members.compactMap(\.session) + (team.former ?? [])
+            guard !sessions.contains(where: { ids.contains($0.lowercased()) }) else { return false }
+            let last = (team.members.flatMap { [$0.issuedAt, $0.boundAt ?? 0] } + [team.branchCodeAt ?? 0, team.configSealedAt ?? 0]).max() ?? 0
+            return last < now - retiredAfter
+        }
+
+        static let retiredAfter: Double = 7 * 24 * 3600
+
+        /// How long a branch run begun and never ended counts as running (`Team.openRuns`).
+        static let maxOpenRun: Double = 24 * 3600
+
+        /// A team's home seal from before the Mac-wide one (`State.config`): what the Mac-wide seal doesn't have yet
+        /// comes from the team's own record (as sealed at its `configSealedAt`), held lines included; the team's
+        /// copies go. Another team's never reaches it: its own goes at its own next look.
+        private func migrateHomeSeal(_ own: String, changed: inout Bool) {
+            guard var team = state.teams[own], var guarded = team.guarded else { return }
+            let homeKeys = guarded.keys.filter(ConfigSeal.isHome(key:))
+            let teamHeld = ConfigSeal.heldLines(in: guarded)
+            let homeHeld = teamHeld.filter { ConfigSeal.isHome(key: $0.key) }
+            guard !homeKeys.isEmpty || !homeHeld.isEmpty else { return }
+            var mac = state.config ?? MacSeal()
+            let fresh = mac.hashes.isEmpty
+            for key in homeKeys where mac.hashes[key] == nil { mac.hashes[key] = guarded[key] }
+            var macHeld = ConfigSeal.heldLines(in: [ConfigSeal.heldKey: mac.held ?? ""])
+            for (key, line) in homeHeld where macHeld[key] == nil { macHeld[key] = line }
+            mac.held = Self.heldValue(macHeld)
+            if fresh, mac.sealedAt == nil { mac.sealedAt = team.configSealedAt }
+            for key in homeKeys { guarded[key] = nil }
+            guarded[ConfigSeal.heldKey] = Self.heldValue(teamHeld.filter { !ConfigSeal.isHome(key: $0.key) })
+            team.guarded = guarded
+            state.teams[own] = team
+            state.config = mac
+            changed = true
+        }
+
+        /// `heldKey`'s value for `held` (`ConfigSeal.heldLines`'), nil when nothing is.
+        private static func heldValue(_ held: [String: (hash: String, outside: Bool, changes: String)]) -> String? {
+            let value = ConfigSeal.heldValue(held.mapValues(\.hash), outside: Set(held.filter(\.value.outside).keys), changes: held.mapValues(\.changes))
+            return value.isEmpty ? nil : value
+        }
+
+        /// What the vault answers for `guarded`: the team's guard rails and its checkout's seal, with your home's from
+        /// the Mac-wide seal, their held lines as one; never the per-key hashes (`ConfigSeal.keysKey`: only what's
+        /// held says which keys changed).
+        private func guardedAnswer(_ root: String) -> [String: String]? {
+            let guarded = team(root)?.guarded
+            guard let mac = state.config else { return guarded.map { $0.filter { !$0.key.hasPrefix(ConfigSeal.keysPrefix) } } }
+            var answer = (guarded ?? [:]).filter { !ConfigSeal.isHome(key: $0.key) && !$0.key.hasPrefix(ConfigSeal.keysPrefix) }
+            for (key, hash) in mac.hashes where !key.hasPrefix(ConfigSeal.keysPrefix) { answer[key] = hash }
+            var held = ConfigSeal.heldLines(in: guarded).filter { !ConfigSeal.isHome(key: $0.key) }
+            held.merge(ConfigSeal.heldLines(in: [ConfigSeal.heldKey: mac.held ?? ""])) { $1 }
+            answer[ConfigSeal.heldKey] = Self.heldValue(held)
+            return guarded == nil && answer.isEmpty ? nil : answer
+        }
+
+        /// Records `keys` (watched keys) as `now` has them, each with its per-key hashes (none kept when `now` has
+        /// none).
+        private static func seal(_ keys: some Sequence<String>, from now: [String: String], into guarded: inout [String: String]) {
+            for key in keys {
+                guarded[key] = now[key]
+                guarded[ConfigSeal.keysKey(of: key)] = now[ConfigSeal.keysKey(of: key)]
+            }
+        }
+
+        /// The app's own writes (`ConfigSeal.wroteKey`'s lines, `LeadVault.appWrite`: your home's files), sealed in the
+        /// Mac-wide seal where each thing was sealed as the first write found it, as far as the chain of writes
+        /// reaches: only hashes the app's writes left are ever sealed so, so anything else (someone's change before
+        /// the app's write, or after it) stays for the next look to hold.
+        private func sealAppWrites(_ text: String, now: [String: String]?, changed: inout Bool) {
+            guard let now else { return }
+            var writes: [String: [(before: String, after: String)]] = [:]
+            for line in text.split(separator: "\n") {
+                let parts = line.split(separator: "\t").map(String.init)
+                let key = ConfigSeal.keyPrefix + (parts.first ?? "")
+                guard parts.count == 3, ConfigSeal.isWatchedKey(key), ConfigSeal.isHome(key: key), now[key] != nil else { continue }
+                writes[key, default: []].append((parts[1], parts[2]))
+            }
+            guard !writes.isEmpty, var mac = state.config else { return }
+            var held = ConfigSeal.heldLines(in: [ConfigSeal.heldKey: mac.held ?? ""])
+            var sealed = false
+            for (key, chain) in writes {
+                guard var at = mac.hashes[key] else { continue }
+                for write in chain where write.before == at { at = write.after }
+                guard at != mac.hashes[key] else { continue }
+                if at == now[key] {
+                    Self.seal([key], from: now, into: &mac.hashes)
+                    held[key] = nil
+                } else {
+                    // What the app wrote, though not what's there now: an app write since (its line still to come,
+                    // asked apart) or someone else's change, which the next look holds. Its keys aren't known.
+                    mac.hashes[key] = at
+                    mac.hashes[ConfigSeal.keysKey(of: key)] = nil
+                }
+                sealed = true
+            }
+            guard sealed else { return }
+            mac.held = Self.heldValue(held)
+            state.config = mac
+            changed = true
         }
 
         private func isLead(_ caller: Caller, _ root: String) -> Bool {

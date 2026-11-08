@@ -59,7 +59,7 @@ struct UIBenchScriptTests {
         process.standardError = pipe
         try process.run()
         let output = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        waitForEnd(process)
         return (process.terminationStatus, String(decoding: output, as: UTF8.self))
     }
 

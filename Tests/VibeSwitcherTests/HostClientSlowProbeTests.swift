@@ -86,11 +86,11 @@ import Testing
         func stop() {
             if process.isRunning {
                 kill(pid, SIGTERM)
-                let deadline = Date().addingTimeInterval(10)
-                while process.isRunning, Date() < deadline { usleep(20_000) }
+                let deadline = MacTime.real.awake() + 10
+                while process.isRunning, MacTime.real.awake() < deadline { usleep(20_000) }
                 if process.isRunning { kill(pid, SIGKILL) }
             }
-            process.waitUntilExit()
+            waitForEnd(process)
             try? FileManager.default.removeItem(atPath: dir)
         }
 

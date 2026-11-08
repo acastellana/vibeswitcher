@@ -36,6 +36,12 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
     /// Where its time went waiting on audits and the merge's test runs (`LeadWaits`), as of its end; nil for receipts
     /// from before they were kept, and for a task that waited on neither.
     public var waits: LeadWaits?
+    /// Merged: the build of the tool server that ran the merge (`ServerBuild.label`: its source commit, else its time);
+    /// nil for receipts from before it was kept, and when no build is known.
+    public var build: String?
+    /// The date of the Codex prices its Codex tokens are in `cost` at (`LeadPrices.codexAsOf`); nil when it read no
+    /// Codex tokens, or for a receipt from before Codex was priced (its Codex tokens aren't in `cost`).
+    public var codexPricesAsOf: String?
 
     public init(ending: Ending, startedAt: Double?, endedAt: Double, worked: Double?, worker: LeadTokens?, verifier: LeadTokens?,
                 rounds: Int = 0, rerolls: Int = 0, mergeReruns: Int = 0, tests: Int? = nil, questions: Int = 0, waitingOnUser: Double = 0,
@@ -68,6 +74,26 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
                   questions: asked.count, waitingOnUser: asked.reduce(0) { $0 + $1.waitingOnUser(now: now) },
                   onto: merged?.onto, commit: merged?.commit, commits: commits)
         waits = task.waits.map { $0.closed(at: now) }
+        verifier?.sameModel = Self.sameModel(task, worker: usage.worker, verifier: usage.verifier)
+        if (usage.worker?.codex ?? 0) > 0 || (usage.verifier?.codex ?? 0) > 0 { codexPricesAsOf = LeadPrices.codexAsOf }
+    }
+
+    /// Whether `task`'s verifier ran on its worker's model, so its audit wasn't independent (32 % of audits from
+    /// 2026-11-01 were Opus → Opus while the Fable quota was out): from the models its sessions were started on
+    /// (`LeadTask.launchedModels`), by family (opus, fable…; Codex as one); a session started on Claude's default ("")
+    /// goes by the model that answered most in its role's transcripts (`LeadTokens.models`). True when any of its
+    /// verifiers (several finders) ran on the worker's; nil when either side's model isn't known.
+    static func sameModel(_ task: LeadTask, worker: LeadTokens?, verifier: LeadTokens?) -> Bool? {
+        func family(_ model: String?) -> String? {
+            guard let name = model?.trimmingCharacters(in: .whitespaces).lowercased(), !name.isEmpty else { return nil }
+            return name.hasPrefix("codex") ? "codex" : SetupStatsMath.family(name) ?? name
+        }
+        let launched = task.launchedModels ?? [:]
+        guard let workerModel = family(task.worker.flatMap { launched[$0] }) ?? family(worker?.models.first) else { return nil }
+        let sessions = [task.verifier].compactMap { $0 } + (task.panel?.sessions ?? [])
+        var verifiers = sessions.compactMap { family(launched[$0]) }
+        if verifiers.isEmpty, let answered = family(verifier?.models.first) { verifiers = [answered] }
+        return verifiers.isEmpty ? nil : verifiers.contains(workerModel)
     }
 
     /// Seconds from its first worker's start to its end.
@@ -90,7 +116,9 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
         // A time that wasn't counted (boards from before the witness counted it) is left out, not shown as 0.
         let time = [worked.map { "\(LeadToolset.age($0)) worked" }, wall.map { "\(LeadToolset.age($0)) wall" }].compactMap { $0 }
         if !time.isEmpty { parts.append(time.joined(separator: ", ")) }
-        let roles = [("worker", worker), ("verifier", verifier)].compactMap { name, tokens in tokens.map { "\(name) \($0.text)" } }
+        let roles = [("worker", worker), ("verifier", verifier)].compactMap { name, tokens in
+            tokens.map { "\(name) \($0.text)" + ($0.sameModel == true ? " on the worker's model" : "") }
+        }
         parts.append(roles.isEmpty ? "tokens unknown (no transcripts of its sessions found)" : roles.joined(separator: ", "))
         if !roles.isEmpty { parts.append(cost.map { "est. \(Self.dollars($0))" } ?? "cost unknown" + Self.unpricedNote([worker, verifier])) }
         var runs = ["\(rounds) audit round\(rounds == 1 ? "" : "s")"]
@@ -105,7 +133,12 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
             let count = commits.map { "\($0) commit\($0 == 1 ? "" : "s")" } ?? "its commits"
             parts.append("\(count) \(onto.prefix(8))..\(commit.prefix(8)); rollback point \(onto.prefix(8))")
         }
-        return "Receipt (\(ending.rawValue); cost an estimate at prices of \(pricesAsOf)): " + parts.joined(separator: " · ")
+        if let build { parts.append("merged by build \(build)") }
+        var prices = pricesAsOf
+        if (worker?.codex ?? 0) + (verifier?.codex ?? 0) > 0 {
+            prices += codexPricesAsOf.map { ", Codex's of \($0)" } ?? ", Codex's tokens not in it (a receipt from before Codex was priced)"
+        }
+        return "Receipt (\(ending.rawValue); cost an estimate at prices of \(prices)): " + parts.joined(separator: " · ")
     }
 
     /// " (no price for claude-x)" for the models that left a cost unknown.
@@ -165,11 +198,15 @@ public struct LeadTokens: Codable, Equatable, Sendable {
     public var cost: Double?
     public var unpriced: [String]?
     /// Of `total`, the tokens Codex sessions spent (a Codex worker's, read from its rollouts: `LeadReceipts.codex`);
-    /// nil when none was read (receipts from before they were, and Claude-only roles). They aren't in `cost`.
+    /// nil when none was read (receipts from before they were, and Claude-only roles). They're in `cost` at
+    /// `LeadPrices.codex`'s prices (receipts from before Codex was priced kept them out: their cost is Claude's only).
     public var codex: Int?
+    /// The verifier's only: it ran on the worker's model (`LeadReceipt.sameModel`), an audit that wasn't independent;
+    /// false, another model; nil: not known, or receipts from before it was stamped.
+    public var sameModel: Bool?
 
     public init(input: Int = 0, output: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, cacheWrite1h: Int = 0, sessions: Int = 0,
-                models: [String] = [], cost: Double? = 0, unpriced: [String]? = nil, codex: Int? = nil) {
+                models: [String] = [], cost: Double? = 0, unpriced: [String]? = nil, codex: Int? = nil, sameModel: Bool? = nil) {
         self.input = input
         self.output = output
         self.cacheRead = cacheRead
@@ -180,16 +217,17 @@ public struct LeadTokens: Codable, Equatable, Sendable {
         self.cost = cost
         self.unpriced = unpriced
         self.codex = codex
+        self.sameModel = sameModel
     }
 
     public var total: Int { input + output + cacheRead + cacheWrite }
 
     /// "15.5M tokens (in 202, out 73.2k, cache read 15.2M, cache write 298k; claude-opus-5-5)", with "; 8.7k of them
-    /// Codex's, not in the cost" when Codex's are among them.
+    /// Codex's" when Codex's are among them (priced from `LeadPrices.codex`).
     public var text: String {
         "\(LeadReceipt.count(total)) tokens (in \(LeadReceipt.count(input)), out \(LeadReceipt.count(output)), cache read "
             + "\(LeadReceipt.count(cacheRead)), cache write \(LeadReceipt.count(cacheWrite))" + (models.isEmpty ? "" : "; \(models.joined(separator: ", "))")
-            + (codex.map { $0 > 0 ? "; \(LeadReceipt.count($0)) of them Codex's, not in the cost" : "" } ?? "") + ")"
+            + (codex.map { $0 > 0 ? "; \(LeadReceipt.count($0)) of them Codex's" : "" } ?? "") + ")"
     }
 }
 
@@ -235,6 +273,28 @@ public enum LeadPrices {
         "claude-haiku-5-5": Price(input: 0.10, output: 0.50, longOver: 100_000, longInput: 0.50, longOutput: 2.50),
         "claude-haiku-4-5": Price(input: 1, output: 5),
     ]
+
+    /// Codex's models, in US dollars per million tokens, and the date they were taken. OpenAI's published API rates
+    /// as reported for 2026-11-08 (gpt-6-astra $10 in / $50 out / $1 cached; gpt-6.1-sol $2 / $10 / $0.10; gpt-5.4
+    /// $2.50 / $15, its cached rate a tenth of input as for the rest of the family). A Codex worker runs on its plan's
+    /// credits, so this is what its tokens would cost on the API: the same footing as Claude's estimates. Codex counts
+    /// cached input inside its input; `LeadReceipts.codex` splits it out as cache reads. A model not here has no
+    /// price: "cost unknown (no price for …)", never $0.
+    public static let codexAsOf = "2026-11-08"
+    public static let codex: [String: Price] = [
+        "gpt-6-astra": Price(input: 10, output: 50, cacheRead: 1),
+        "gpt-6.1-sol": Price(input: 2, output: 10, cacheRead: 0.10),
+        "gpt-5.4": Price(input: 2.50, output: 15, cacheRead: 0.25),
+    ]
+
+    /// The price of Codex's `model` as its rollout names it (any case, also with a date suffix: "-2026-10-01" or
+    /// "-20261001"); nil for any other.
+    public static func codexPrice(_ model: String) -> Price? {
+        let id = model.trimmingCharacters(in: .whitespaces).lowercased()
+        if let price = codex[id] { return price }
+        if let match = id.range(of: #"-(\d{8}|\d{4}-\d{2}-\d{2})$"#, options: .regularExpression) { return codex[String(id[..<match.lowerBound])] }
+        return nil
+    }
 
     /// The price of `model` as a transcript names it: its id, also with a context suffix ("[1m]"), a date
     /// ("-20251001") or a platform prefix ("anthropic.", "us.anthropic."); nil for any other.
@@ -356,8 +416,7 @@ public enum LeadReceipts {
         return usage
     }
 
-    /// `a` and `b` summed: one role's Claude and Codex sessions. The cost is unknown when either's is (Codex's never is:
-    /// it's left out).
+    /// `a` and `b` summed: one role's Claude and Codex sessions. The cost is unknown when either's is.
     static func combined(_ a: LeadTokens?, _ b: LeadTokens) -> LeadTokens {
         guard var sum = a else { return b }
         let (first, second) = a!.total >= b.total ? (a!, b) : (b, a!)
@@ -413,10 +472,17 @@ public enum LeadReceipts {
             byModel[session.model ?? "codex", default: 0] += session.total
         }
         tokens.models = byModel.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.map(\.key)
-        // Codex runs on its plan's credits and `LeadPrices` has no Codex price: its tokens are counted (`codex`) and
-        // left out of the estimate, never priced wrong, and they don't make the Claude sessions' estimate unknown (a
-        // receipt's cost stays what it was before Codex tokens were read: its Claude roles').
-        tokens.cost = 0
+        // Priced from `LeadPrices.codex` by each session's model; a session on a model with no price (or none named)
+        // leaves the cost unknown, never $0 (before 2026-11-08 it was always $0: the self-audit's finding).
+        var cost = 0.0, unpriced = Set<String>()
+        for session in bySession.values {
+            let model = session.model ?? "codex"
+            guard let price = LeadPrices.codexPrice(model) else { unpriced.insert(model); continue }
+            cost += LeadPrices.cost(Response(model: model, input: session.input, output: session.output, cacheRead: session.cacheRead,
+                                             cacheWrite: session.cacheWrite), price: price)
+        }
+        tokens.cost = unpriced.isEmpty ? cost : nil
+        tokens.unpriced = unpriced.isEmpty ? nil : unpriced.sorted()
         tokens.codex = tokens.total
         return tokens
     }

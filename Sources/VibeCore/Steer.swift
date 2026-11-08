@@ -29,6 +29,21 @@ public struct SteerMessage: Codable, Equatable, Sendable, Identifiable {
     /// through its UserPromptSubmit hook, not at a Stop or a step before it (a prompt typed while the agent was busy
     /// waits for its turn to end). Outside the seal.
     public var wokenAt: Double?
+    /// False for FYIs: kept in the inbox, but they need no turn of their own. Nil is an older report.
+    public var wakes: Bool?
+    /// Part of a batch whose delivery already began: its remaining parts may follow at subsequent hooks.
+    /// Outside the seal, like `handedOver` and `wokenAt`.
+    var admitted: Bool?
+
+    public var wakesLead: Bool { wakes ?? Self.wakes(from: from, text: text) }
+
+    /// Decide once as a report enters the queue, from its kind and the outcomes in its batch.
+    static func wakes(from sender: Sender, text: String) -> Bool {
+        guard case .system(let kind) = sender else { return true }
+        if kind == LeadAdvance.sender { return LeadAdvance.wakes(text) }
+        if kind == AppHealth.sender { return AppHealth.wakes(text) }
+        return true
+    }
 
     /// Whether it waits for the wake-up prompt typed for it, at `now` (see `LeadWake.heldFor`).
     public func heldForWake(at now: Double) -> Bool {
@@ -44,6 +59,7 @@ public struct SteerMessage: Codable, Equatable, Sendable, Identifiable {
         self.from = from
         self.agentPid = agentPid
         self.at = at
+        self.wakes = Self.wakes(from: from, text: text)
     }
 }
 
@@ -107,8 +123,9 @@ public enum SteerInbox {
     /// file is gone: removing a file still works on a full disk, where writing a record of it wouldn't.
     @discardableResult
     public static func deliver(tty: String, agentPid: Int32, root: URL = VibePaths.root,
+                               wholeBatch: Bool = false,
                                through hand: ([SteerMessage]) -> Int) -> [SteerMessage] {
-        deliver(tty: tty, agentPid: agentPid, root: root, check: { writeCheck($0, ids: $1) }, through: hand)
+        deliver(tty: tty, agentPid: agentPid, root: root, check: { writeCheck($0, ids: $1) }, wholeBatch: wholeBatch, through: hand)
     }
 
     /// As above, with who checks seals (nil: the folder's own, see `SteerSeal.for`) and how the write is checked
@@ -119,7 +136,8 @@ public enum SteerInbox {
     /// `holding` (a hook's now, but for UserPromptSubmit's): the messages from the first one a wake-up prompt was typed
     /// for (`SteerMessage.heldForWake`) wait for that prompt, so they don't come at this event and again as the prompt.
     static func deliver(tty: String, agentPid: Int32, root: URL, sealer: SteerSeal? = nil, check: (URL, [String]) -> Bool,
-                        inParts: Bool = false, holding: Double? = nil, through hand: ([SteerMessage]) -> Int) -> [SteerMessage] {
+                        inParts: Bool = false, holding: Double? = nil, wakingOnly: Bool = false, wholeBatch: Bool = false,
+                        through hand: ([SteerMessage]) -> Int) -> [SteerMessage] {
         guard let url = try? file(tty, "jsonl", root: root), FileManager.default.fileExists(atPath: url.path),
               let probe = try? file(tty, "check", root: root) else { return [] }
         let sealer = sealer ?? .for(root)
@@ -132,7 +150,10 @@ public enum SteerInbox {
             // In order: none after a held one either.
             let free = holding.map { now in Array(mine.prefix { !$0.heldForWake(at: now) }) } ?? mine
             let ready = verified(free, sealer: sealer)
-            let batch = Array(ready.prefix(SteerReply.fitting(ready)))
+            // Decide on the whole queue before fitting a part: a long FYI must not hide an actionable report.
+            let admitting = !wakingOnly || ready.contains(where: \.wakesLead)
+            guard admitting || ready.contains(where: { $0.admitted == true }) else { return }
+            let batch = wholeBatch ? ready : Array(ready.prefix(SteerReply.fitting(ready)))
             guard !batch.isEmpty else { return }
             let armed = FileManager.default.fileExists(atPath: probe.path)
             guard check(probe, batch.map(\.id)) else {
@@ -144,6 +165,9 @@ public enum SteerInbox {
             }
             let count = min(max(hand(batch), 0), batch.count)
             delivered = Array(batch.prefix(count))
+            // Keep this batch's admission after its actionable report has been consumed. Later FYIs do not
+            // inherit it unless another actionable report or a new prompt admits a fresh batch.
+            let admittedIds = admitting && count > 0 ? Set(ready.map(\.id)) : []
             // A part that isn't the last: the message stays, with how far it got.
             var partial: SteerMessage?
             if inParts, count == 1, let part = SteerReply.nextPart(batch[0]), part.range.upperBound < batch[0].text.count {
@@ -161,6 +185,7 @@ public enum SteerInbox {
                 // A prompt went in with what it could hold (the wake-up's, or one typed): what's left, the rest of a long
                 // one or what didn't fit, comes at the next steps as ever, no longer held for a prompt.
                 if holding == nil, count > 0 { message.wokenAt = nil }
+                if admittedIds.contains(message.id) { message.admitted = true }
                 rest.append(try JSONEncoder().encode(message))
                 rest.append(0x0A)
             }
@@ -223,7 +248,7 @@ public enum SteerInbox {
             try handle.seek(toOffset: 0)
             var messages = decode(try handle.readToEnd() ?? Data())
             let reports = LeadWake.reports(messages, agentPid: agentPid)
-            guard !reports.isEmpty, type(reports) else { return }
+            guard reports.contains(where: \.wakesLead), type(reports) else { return }
             let ids = Set(reports.map(\.id))
             var rest = Data()
             for index in messages.indices {
@@ -302,6 +327,7 @@ public enum SteerInbox {
         case .lead(let name): fields += ["lead", name]
         case .system(let about): fields += ["system", about]
         }
+        if message.from != .user, let wakes = message.wakes { fields += ["wakes", String(wakes)] }
         let body = (try? JSONEncoder().encode(fields)) ?? Data()
         return Data(HMAC<SHA256>.authenticationCode(for: body, using: key)).base64EncodedString()
     }
@@ -423,8 +449,9 @@ public enum SteerReply {
         // Reports a wake-up prompt was typed for come with that prompt, never at a Stop or a step before it.
         let holding = event == "UserPromptSubmit" ? nil : now
         if holding == nil { SteerInbox.release(tty: tty, agentPid: agentPid, root: root) }
-        SteerInbox.deliver(tty: tty, agentPid: agentPid, root: root, check: check, inParts: true, holding: holding) { messages in
-            guard let output = output(event: event, messages: messages), write(output) else { return 0 }
+        SteerInbox.deliver(tty: tty, agentPid: agentPid, root: root, check: check, inParts: true, holding: holding,
+                           wakingOnly: event != "UserPromptSubmit") { messages in
+            guard let output = batchOutput(event: event, messages: messages), write(output) else { return 0 }
             written = output
             return messages.count
         }
@@ -435,6 +462,12 @@ public enum SteerReply {
     /// and goes on with the turn, showing "Stop hook feedback: …"; a block (`decision: block`, or exit 2) would show
     /// "Stop hook error: …", which reads as a failure (docs/eval/stop-hook-shapes).
     public static func output(event: String, messages: [SteerMessage]) -> Data? {
+        guard event == "UserPromptSubmit" || messages.contains(where: \.wakesLead) else { return nil }
+        return batchOutput(event: event, messages: messages)
+    }
+
+    /// `answer` has checked whether the whole queue needs a turn while holding its lock; this may be one FYI part.
+    private static func batchOutput(event: String, messages: [SteerMessage]) -> Data? {
         guard takesMessages(event: event), !messages.isEmpty else { return nil }
         let object = ["hookSpecificOutput": ["hookEventName": event, "additionalContext": context(messages)]]
         return try? JSONSerialization.data(withJSONObject: object)

@@ -73,6 +73,14 @@ struct ShellDeskTests {
         _ = await until { done }
     }
 
+    /// A card's Run through `ShellDesk.run`, as the card's button does: what came of it.
+    func ran(_ desk: ShellDesk, _ id: String) async -> RunOutcome? {
+        var outcome: RunOutcome?
+        desk.run(id) { outcome = $0 }
+        _ = await until { outcome != nil }
+        return outcome
+    }
+
     @Test func aRequestWaitsForRunThenStartsOnceAndTheAskerHearsTheName() async throws {
         let folder = temp.url("shells"), seen = Seen(), clock = Clock()
         let desk = desk(seen, clock: clock, folder: folder)
@@ -172,6 +180,115 @@ struct ShellDeskTests {
         await acted(desk, .run, request.id)
         #expect(desk.cards.first?.state == .failed("No such folder: /work/example"))
         #expect(seen.told.first?.text.contains("didn't start (No such folder: /work/example)") == true)
+    }
+}
+
+/// A shell card's Run follows the chat's one Run rule: it ends in ran or in a "Not run: …" line from `RunRefusal`
+/// (the card shows it, `ShellDesk.refused`), and a pressed Run starts its shell exactly once, a double press included.
+/// Its command is never typed: `launch` gets the request, nothing else.
+@MainActor
+@Suite(.serialized)
+struct ShellCardRunTests {
+    let base = ShellDeskTests()
+
+    @Test func aRunStartsOnceAndAnswersRanAndASecondPressSaysWhyNot() async throws {
+        let folder = base.temp.url("shells"), seen = ShellDeskTests.Seen(), clock = ShellDeskTests.Clock()
+        let desk = base.desk(seen, clock: clock, folder: folder)
+        let request = try base.file(folder)
+        await base.refreshed(desk)
+        // Pressed twice before the first one's shell is up: one start; the second press says it was answered.
+        var outcomes: [RunOutcome] = []
+        desk.run(request.id) { outcomes.append($0) }
+        desk.run(request.id) { outcomes.append($0) }
+        _ = await until { outcomes.count == 2 }
+        #expect(seen.launched == [request])
+        #expect(outcomes.contains(.ran))
+        #expect(outcomes.contains(.refused(RunRefusal.shellAnswered)))
+        #expect(desk.cards.first?.state == .started(name: "Shell: Local test", auto: false))
+        // Once started, Run again: refused with the same words, nothing starts.
+        #expect(await base.ran(desk, request.id) == .refused(RunRefusal.shellAnswered))
+        #expect(seen.launched.count == 1)
+    }
+
+    @Test func aRunThatCantGoSaysWhyInTheChatsWordsOnTheCard() async throws {
+        let folder = base.temp.url("shells"), seen = ShellDeskTests.Seen(), clock = ShellDeskTests.Clock()
+        let desk = base.desk(seen, clock: clock, folder: folder)
+        var refuse = true
+        let launch = desk.launch
+        desk.launch = { request, then in
+            refuse ? then(.failure(ShellAsk.Refusal("No such folder: /work/example"))) : launch(request, then)
+        }
+        let failing = try base.file(folder, command: "make serve")
+        let declined = try base.file(folder, command: "make watch")
+        let late = try base.file(folder, command: "make late")
+        await base.refreshed(desk)
+
+        // The session didn't start: the card's state and its line say the same "Not run: …".
+        let notStarted = RunRefusal.shellNotStarted("No such folder: /work/example")
+        #expect(await base.ran(desk, failing.id) == .refused(notStarted))
+        #expect(desk.refused[failing.id] == notStarted)
+        let card = try #require(desk.cards.first { $0.id == failing.id })
+        #expect(card.state == .failed("No such folder: /work/example"))
+        #expect(ShellCard.title(card.state) == "Not run" && ShellCard.detail(card) == notStarted)
+        // The detail already says it: no second line.
+        #expect(ShellCard.notice(desk.refused[failing.id], card) == nil)
+
+        // Declined, then Run: refused, and the card's line says why.
+        refuse = false
+        await base.acted(desk, .decline, declined.id)
+        #expect(await base.ran(desk, declined.id) == .refused(RunRefusal.shellAnswered))
+        let declinedCard = try #require(desk.cards.first { $0.id == declined.id })
+        #expect(ShellCard.notice(desk.refused[declined.id], declinedCard) == RunRefusal.shellAnswered)
+
+        // A Run that goes answers ran, and its card shows no "Not run" line.
+        let fine = try base.file(folder, command: "make fine")
+        await base.refreshed(desk)
+        #expect(await base.ran(desk, fine.id) == .ran)
+        #expect(desk.refused[fine.id] == nil)
+
+        // Past its 30 minutes but not yet redrawn as expired: refused as expired, and the card then says Expired.
+        clock.now = late.expiresAt
+        #expect(await base.ran(desk, late.id) == .refused(RunRefusal.shellExpired))
+        #expect(desk.cards.first { $0.id == late.id }?.state == .expired)
+
+        // A request that's gone.
+        #expect(await base.ran(desk, "no-such-request") == .refused(RunRefusal.shellGone))
+
+        #expect(seen.launched == [fine])
+        for reason in [notStarted, RunRefusal.shellAnswered, RunRefusal.shellExpired, RunRefusal.shellGone] {
+            #expect(reason.hasPrefix("Not run: "), "\(reason)")
+        }
+    }
+
+    @Test func aCardsNotRunLineGoesInItsTimeWhateverOtherCardsDo() async throws {
+        let folder = base.temp.url("shells"), seen = ShellDeskTests.Seen(), clock = ShellDeskTests.Clock()
+        let desk = base.desk(seen, clock: clock, folder: folder)
+        var clears: [() -> Void] = []
+        desk.later = { _, clear in clears.append(clear) }
+        let refused = try base.file(folder, command: "make serve")
+        let other = try base.file(folder, command: "make watch")
+        await base.refreshed(desk)
+        await base.acted(desk, .decline, refused.id)
+        #expect(await base.ran(desk, refused.id) == .refused(RunRefusal.shellAnswered))
+        // Another card's Runs before this one's line has shown its time: they don't keep it up.
+        #expect(await base.ran(desk, other.id) == .ran)
+        #expect(await base.ran(desk, other.id) == .refused(RunRefusal.shellAnswered))
+        #expect(desk.refused[refused.id] == RunRefusal.shellAnswered)
+        clears.first?()
+        #expect(desk.refused[refused.id] == nil)
+        #expect(desk.refused[other.id] == RunRefusal.shellAnswered)
+        // A later refusal of the same card outlives an earlier one's time.
+        #expect(await base.ran(desk, refused.id) == .refused(RunRefusal.shellAnswered))
+        clears[1]()
+        #expect(desk.refused[refused.id] == RunRefusal.shellAnswered)
+        clears.last?()
+        #expect(desk.refused[refused.id] == nil)
+    }
+
+    @Test func theCardsRunButtonShowsWhatTheChatsShows() {
+        #expect(RunShown(.ran) == .sent && RunShown(.refused("Not run: x")) == .refused("Not run: x"))
+        #expect(RunShown.ready.label == "Run" && RunShown.refused("Not run: x").label == "Not run")
+        #expect(RunShown.refused("Not run: x").reason == "Not run: x" && RunShown.ready.reason == nil)
     }
 }
 

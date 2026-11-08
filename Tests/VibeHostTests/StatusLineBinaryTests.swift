@@ -32,7 +32,7 @@ struct StatusLineBinaryTests {
         }
         try process.run()
         if output == nil { try gone.fileHandleForReading.close() }
-        process.waitUntilExit()
+        waitForEnd(process)
         return (process.terminationStatus, process.terminationReason)
     }
 
@@ -50,16 +50,16 @@ struct StatusLineBinaryTests {
         return Data((head + String(repeating: "a", count: max(0, size - head.utf8.count - 2)) + #""}"#).utf8)
     }
 
-    @Test func aBigInputToAStatusLineThatDoesntReadItStillShowsItsOutput() throws {
+    @Test func aBigInputToAStatusLineThatDoesntReadItStillShowsItsOutput() async throws {
         let home = try home(statusLine: "echo mine")
         let output = temp.url("status-output")
-        let ran = try run(input: input(size: 100_000), home: home, output: output)
+        let ran = try await run(input: input(size: 100_000), home: home, output: output)
         #expect(ran.reason == .exit && ran.status == 0, "\(ran)")
         #expect(try Data(contentsOf: output) == Data("mine\n".utf8))
         #expect(AccountUsageStore(file: URL(fileURLWithPath: home + "/.vibeswitcher/account-usage.json")).load().limits.map(\.usedPercent) == [55])
     }
 
-    @Test func claudeCodeStoppingTheStatusLineStopsYourCommandToo() throws {
+    @Test func claudeCodeStoppingTheStatusLineStopsYourCommandToo() async throws {
         let mcp = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")
         let started = temp.url("status-started")
@@ -76,21 +76,21 @@ struct StatusLineBinaryTests {
         process.standardError = FileHandle.nullDevice
         try process.run()
         var pid: pid_t = 0
-        #expect(eventually { pid = (try? String(contentsOf: started, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0; return pid > 0 })
+        #expect(await eventually { pid = (try? String(contentsOf: started, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0; return pid > 0 })
         try #require(pid > 0)
         // Claude Code gives up on it: TERM, to its process alone (as Node's child.kill sends it).
         kill(process.processIdentifier, SIGTERM)
-        process.waitUntilExit()
+        #expect(await exited(process), "pid \(process.processIdentifier) still running")
         #expect(process.terminationReason == .exit && process.terminationStatus == 0, "\(process.terminationReason) \(process.terminationStatus)")
         // Your command (its shell) and its whole process group are gone, not left running.
         func gone(_ target: pid_t) -> Bool { kill(target, 0) == -1 && errno == ESRCH }
-        #expect(eventually { gone(pid) && gone(-pid) })
+        #expect(await eventually { gone(pid) && gone(-pid) })
         #expect(AccountUsageStore(file: URL(fileURLWithPath: home + "/.vibeswitcher/account-usage.json")).load().limits.map(\.usedPercent) == [55])
     }
 
-    @Test func anOutputWhoseReaderHasGoneStillKeepsTheUsage() throws {
+    @Test func anOutputWhoseReaderHasGoneStillKeepsTheUsage() async throws {
         let home = try home(statusLine: "head -c 10 >/dev/null; echo mine")
-        let ran = try run(input: input(size: 100_000), home: home, output: nil)
+        let ran = try await run(input: input(size: 100_000), home: home, output: nil)
         #expect(ran.reason == .exit && ran.status == 0, "\(ran)")
         #expect(AccountUsageStore(file: URL(fileURLWithPath: home + "/.vibeswitcher/account-usage.json")).load().limits.map(\.usedPercent) == [55])
     }

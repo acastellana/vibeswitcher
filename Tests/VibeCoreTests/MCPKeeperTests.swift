@@ -10,9 +10,9 @@ struct MCPKeeperTests {
     let scratch = Scratch()
 
     /// The keeper's one child, the tool server, once it runs: not `previous`.
-    func child(of server: ScratchToolServer, not previous: pid_t? = nil) throws -> pid_t {
+    func child(of server: ScratchToolServer, not previous: pid_t? = nil) async throws -> pid_t {
         var found: pid_t?
-        _ = eventually {
+        _ = await eventually {
             found = SessionStrays.children(of: server.process.processIdentifier).first { $0 != previous }
             return found != nil
         }
@@ -29,26 +29,26 @@ struct MCPKeeperTests {
 
     // MARK: The real binary
 
-    @Test func aKilledServerIsStartedAgainAndTheClientGoesOnWithNoNewInitialize() throws {
+    @Test func aKilledServerIsStartedAgainAndTheClientGoesOnWithNoNewInitialize() async throws {
         let server = try ScratchToolServer(scratch, keeper: true)
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize + [server.call(2, "build")])
-        #expect(try server.tools(1) == ["build", "slow", "only-A"])
-        let first = try child(of: server)
-        #expect(try server.texts(2) == ["A \(first)"])
+        await #expect(try server.tools(1) == ["build", "slow", "only-A"])
+        let first = try await child(of: server)
+        await #expect(try server.texts(2) == ["A \(first)"])
 
         // A call in hand when it dies: the ping after it is answered once the server has it (it reads in order).
         try server.send([server.call(3, "slow", ["seconds": 60]), ["jsonrpc": "2.0", "id": 4, "method": "ping"]])
-        _ = try server.reply(4)
+        _ = try await server.reply(4)
         #expect(kill(first, SIGKILL) == 0)
-        let failed = try server.reply(3)
+        let failed = try await server.reply(3)
         let message = try #require((failed["error"] as? [String: Any])?["message"] as? String, "\(failed)")
         #expect(message.contains("stopped while this ran (it was killed by signal 9") && message.contains("started again"))
 
         // The next call is answered by a new server, the client having sent nothing but the call.
         try server.send([server.call(5, "build")])
-        let second = try child(of: server, not: first)
-        #expect(try server.texts(5) == ["A \(second)"])
+        let second = try await child(of: server, not: first)
+        await #expect(try server.texts(5) == ["A \(second)"])
         #expect(second != first && kill(first, 0) != 0)
         // The same keeper, on the same pipes; the replayed initialize's reply never reached the client, and the
         // client was told to ask for its tools again.
@@ -57,7 +57,7 @@ struct MCPKeeperTests {
         #expect(server.replyOrder == [0, 1, 2, 4, 3, 5])
         #expect(server.notifications == ["notifications/tools/list_changed"])
         try server.send([["jsonrpc": "2.0", "id": 6, "method": "tools/list"]])
-        #expect(try server.tools(6) == ["build", "slow", "only-A"])
+        await #expect(try server.tools(6) == ["build", "slow", "only-A"])
 
         // The restart is in the keeper's log, with how the server ended.
         let log = server.mcpLog(server.process.processIdentifier)
@@ -65,70 +65,70 @@ struct MCPKeeperTests {
         #expect(log.contains("keeper: started the tool server again, pid \(second), the client's initialize replayed"), "\(log)")
     }
 
-    @Test func aServerThatKeepsStoppingIsStartedAgainFiveTimesThenItsKeeperEnds() throws {
+    @Test func aServerThatKeepsStoppingIsStartedAgainFiveTimesThenItsKeeperEnds() async throws {
         let server = try ScratchToolServer(scratch, environment: ["VIBESWITCHER_MCP_TEST_EXIT": "3"], keeper: true)
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize)
         // Its first start and five more, a little later each time (3.75 s in all), then the keeper gives up.
-        #expect(eventually(timeout: 60) { !server.process.isRunning }, "the keeper still runs; its stderr: \(server.log)")
+        #expect(await eventually(timeout: 60) { !server.process.isRunning }, "the keeper still runs; its stderr: \(server.log)")
         #expect(server.process.terminationStatus == 1)
         #expect(server.log.contains("vibeswitcher-mcp keeper: the tool server stopped 6 times within 60 s (last: it exited with status 3); not starting it again"),
                 "\(server.log)")
         // Nothing hangs: the client's initialize got an error, not silence.
-        #expect((try server.reply(0)["error"] as? [String: Any]) != nil)
+        await #expect((try server.reply(0)["error"] as? [String: Any]) != nil)
         let log = server.mcpLog(server.process.processIdentifier)
         #expect(log.components(separatedBy: "; starting it again").count - 1 == 5, "\(log)")
         #expect(log.contains("restart 5 of 5 within 60 s"), "\(log)")
     }
 
     /// A new build takes over in the child, in place, as without a keeper; a restart after that starts the new build.
-    @Test func aSwitchOfBuildsHappensInTheKeptServer() throws {
+    @Test func aSwitchOfBuildsHappensInTheKeptServer() async throws {
         let server = try ScratchToolServer(scratch, keeper: true)
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize + [server.call(2, "build")])
-        let first = try child(of: server)
-        #expect(try server.texts(2) == ["A \(first)"])
+        let first = try await child(of: server)
+        await #expect(try server.texts(2) == ["A \(first)"])
 
         try server.install(build: "B")
         try server.send([server.call(3, "build")])
-        #expect(try server.texts(3) == ["B \(first)"])
+        await #expect(try server.texts(3) == ["B \(first)"])
         #expect(server.log.contains("switched in place to the new build"))
         #expect(server.notifications == ["notifications/tools/list_changed"])
         try server.send([["jsonrpc": "2.0", "id": 4, "method": "tools/list"]])
-        #expect(try server.tools(4) == ["build", "slow", "only-B"])
+        await #expect(try server.tools(4) == ["build", "slow", "only-B"])
 
         #expect(kill(first, SIGKILL) == 0)
         // Asked once the new one runs: a call the keeper reads before it hears of the end is one in hand, and fails.
-        let second = try child(of: server, not: first)
+        let second = try await child(of: server, not: first)
         try server.send([server.call(5, "build")])
-        #expect(try server.texts(5) == ["B \(second)"])
+        await #expect(try server.texts(5) == ["B \(second)"])
         #expect(server.notifications == ["notifications/tools/list_changed", "notifications/tools/list_changed"])
     }
 
-    @Test func theKeeperEndsWithItsClientAndTakesItsServerWithIt() throws {
+    @Test func theKeeperEndsWithItsClientAndTakesItsServerWithIt() async throws {
         let server = try ScratchToolServer(scratch, keeper: true)
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize)
-        _ = try server.reply(1)
-        let kept = try child(of: server)
+        _ = try await server.reply(1)
+        let kept = try await child(of: server)
         server.closeInput()
-        #expect(eventually { !server.process.isRunning })
+        #expect(await eventually { !server.process.isRunning })
         #expect(server.process.terminationStatus == 0)
-        #expect(eventually { kill(kept, 0) != 0 })
+        #expect(await eventually { kill(kept, 0) != 0 })
         #expect(!server.mcpLog(server.process.processIdentifier).contains("; starting it again"))
     }
 
     /// The host's orphan sweep ends a tool server with SIGTERM: the keeper passes it on and ends with its server.
-    @Test func aSigtermToTheKeeperEndsItsServerAndThenItself() throws {
+    @Test func aSigtermToTheKeeperEndsItsServerAndThenItself() async throws {
         let server = try ScratchToolServer(scratch, keeper: true)
         defer { server.stop() }
         try server.send(ScratchToolServer.initialize)
-        _ = try server.reply(1)
-        let kept = try child(of: server)
+        _ = try await server.reply(1)
+        let kept = try await child(of: server)
         #expect(kill(server.process.processIdentifier, SIGTERM) == 0)
-        #expect(eventually { !server.process.isRunning })
+        #expect(await eventually { !server.process.isRunning })
         #expect(server.process.terminationStatus == 0)
-        #expect(eventually { kill(kept, 0) != 0 })
+        #expect(await eventually { kill(kept, 0) != 0 })
         let log = server.mcpLog(server.process.processIdentifier)
         #expect(log.contains("keeper: stopping: signal 15") && !log.contains("; starting it again"), "\(log)")
     }

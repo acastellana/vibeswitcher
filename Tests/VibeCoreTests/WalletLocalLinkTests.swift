@@ -273,7 +273,7 @@ struct WalletLocalLinkTests {
         let ended = Process()
         ended.executableURL = URL(fileURLWithPath: "/usr/bin/true")
         try ended.run()
-        ended.waitUntilExit()
+        #expect(waitForEnd(ended))
 
         let missing = try Manager(scratch, accepting: false)
         try expectUnreachable(missing, says: Self.notAccepting + " (no readable .listening in to-wm)", "no .listening")
@@ -506,7 +506,7 @@ struct WalletLocalLinkTests {
 
     /// While a request is outstanding from-wm is watched, and a result is taken as its file appears, with no one
     /// asking; once none is outstanding the watch stops. No process is started for it.
-    @Test func aResultIsTakenAsItsFileAppearsWhileARequestIsOutstanding() throws {
+    @Test func aResultIsTakenAsItsFileAppearsWhileARequestIsOutstanding() async throws {
         let manager = try Manager(scratch)
         let log = Log()
         let courier = courier(manager, log: log)
@@ -521,21 +521,21 @@ struct WalletLocalLinkTests {
         #expect(!FileManager.default.fileExists(atPath: WalletCourier.ListenRecord.file(in: courier.store.folder).path))
 
         try manager.answer(Self.result(request, .received, sequence: 1))
-        #expect(eventually { taken.all.map(\.sequence) == [1] })
+        #expect(await eventually { taken.all.map(\.sequence) == [1] })
         // Several at once: all are taken, in order.
         try manager.answer(Self.result(request, .proposed, sequence: 2))
         try manager.answer(Self.result(request, .signed, sequence: 3))
         try manager.answer(Self.result(request, .submitted, sequence: 4))
-        #expect(eventually { taken.all.map(\.sequence) == [1, 2, 3, 4] })
+        #expect(await eventually { taken.all.map(\.sequence) == [1, 2, 3, 4] })
         #expect(courier.record(request.id)?.finished == true)
-        #expect(eventually { !courier.isListening })
+        #expect(await eventually { !courier.isListening })
         #expect(log.lines.contains("the watch on from-wm stopped: no request outstanding"))
     }
 
     /// The look the watch asks for runs on a queue of the courier's own, not on GCD's shared utility queue: that one
     /// gave it no thread while the rest of the process kept every core busy (a full test run does), and every `poll`
     /// asked meanwhile waited behind the look. A courier over Passage looks where it always did.
-    @Test func aLookTheWatchAsksForRunsOnTheCouriersOwnQueue() throws {
+    @Test func aLookTheWatchAsksForRunsOnTheCouriersOwnQueue() async throws {
         let manager = try Manager(scratch)
         let courier = courier(manager)
         defer { courier.close() }
@@ -544,7 +544,7 @@ struct WalletLocalLinkTests {
         let request = Self.request()
         #expect(courier.send(request) == .passage(.sent))
         try manager.answer(Self.result(request, .received, sequence: 1))
-        #expect(eventually { !ran.lines.isEmpty })
+        #expect(await eventually { !ran.lines.isEmpty })
         #expect(ran.lines == [WalletCourier.looksLabel])
 
         let passage = WalletCourier(link: try PassageLinkTests.FakePassage(scratch).link, store: WalletRequestStore(folder: scratch.url("passage-requests")),
@@ -555,14 +555,14 @@ struct WalletLocalLinkTests {
 
     /// The watch ends when from-wm itself goes (the Wallet Manager made the pair again): the folder that has the name
     /// now is not the one that was watched.
-    @Test func theWatchEndsWhenTheFolderIsReplaced() throws {
+    @Test func theWatchEndsWhenTheFolderIsReplaced() async throws {
         let manager = try Manager(scratch)
         let heard = Taken()
         let watch = try manager.link.watch { heard.add([]) }
         defer { watch.stop(grace: 0) }
         #expect(watch.isRunning && watch.process == nil)
         try FileManager.default.moveItem(at: manager.from, to: scratch.url("old-from"))
-        #expect(eventually { !watch.isRunning })
+        #expect(await eventually { !watch.isRunning })
         // No watch on a from-wm that fails the folder checks.
         #expect(throws: WalletLocalLink.Failure(description: "from-wm is missing")) { _ = try manager.link.watch {} }
     }
@@ -570,7 +570,7 @@ struct WalletLocalLinkTests {
     /// A retired courier (Settings › Wallet no longer has the Wallet Manager on this Mac chosen) stops its watch, starts
     /// none again and reads nothing more from from-wm, though its request is still outstanding; its record stays, and
     /// a courier made over it later takes what waited.
-    @Test func aRetiredCourierNeitherWatchesNorReadsAgain() throws {
+    @Test func aRetiredCourierNeitherWatchesNorReadsAgain() async throws {
         let manager = try Manager(scratch)
         let log = Log()
         let store = WalletRequestStore(folder: scratch.url("requests"))
@@ -590,7 +590,7 @@ struct WalletLocalLinkTests {
         courier.syncListener()
         #expect(!courier.isListening)
         courier.heardListenLine()
-        #expect(eventually { courier.pollsPending == 0 })
+        #expect(await eventually { courier.pollsPending == 0 })
         #expect(taken.all.isEmpty)
         #expect(courier.outstanding == [request])
         #expect(store.load().first?.results.isEmpty == true)

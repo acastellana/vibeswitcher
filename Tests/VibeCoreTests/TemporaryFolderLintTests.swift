@@ -53,7 +53,7 @@ struct TemporaryFolderLintTests {
     }
 
     /// What scripts/temporary-folder-lint.sh names under `root`, as "file:line", and its exit status.
-    static func harnessLint(under root: URL) throws -> (status: Int32, flagged: [String]) {
+    static func harnessLint(under root: URL) async throws -> (status: Int32, flagged: [String]) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [script, root.path]
@@ -61,8 +61,12 @@ struct TemporaryFolderLintTests {
         process.standardOutput = pipe
         process.standardError = pipe
         try process.run()
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+        // The tool's run read to its end and waited for on a thread of its own, not the cooperative pool.
+        let output = await offPool { () -> String in
+            let read = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            waitForEnd(process)
+            return read
+        }
         let flagged = output.split(separator: "\n").map { $0.split(separator: ":", maxSplits: 2).prefix(2).joined(separator: ":") }
         return (process.terminationStatus, flagged)
     }
@@ -86,10 +90,10 @@ struct TemporaryFolderLintTests {
     }
 
     /// The load harness runs the same lint, and it names what this test names: nothing, on this tree.
-    @Test func theLoadHarnessAgrees() throws {
+    @Test func theLoadHarnessAgrees() async throws {
         let harness = try String(contentsOf: Self.repo.appendingPathComponent("scripts/test-under-load.sh"), encoding: .utf8)
         #expect(harness.contains("scripts/temporary-folder-lint.sh"))
-        let lint = try Self.harnessLint(under: Self.repo)
+        let lint = try await Self.harnessLint(under: Self.repo)
         let flagged = try Self.uses(under: Self.repo).flagged
         #expect(lint.flagged == flagged)
         #expect(lint.status == 0, "the harness's lint names \(lint.flagged.joined(separator: ", "))")
@@ -97,7 +101,7 @@ struct TemporaryFolderLintTests {
 
     /// A new test file using the temporary folder fails here and in the harness, on the same lines; what's only a
     /// comment, or a name that merely starts with "tmp", doesn't.
-    @Test func aTestUsingTheTemporaryFolderIsNamedWithItsLine() throws {
+    @Test func aTestUsingTheTemporaryFolderIsNamedWithItsLine() async throws {
         let root = temp.url("lint")
         let folder = root.appendingPathComponent("Tests/VibeCoreTests")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -113,7 +117,7 @@ struct TemporaryFolderLintTests {
         try example.write(to: folder.appendingPathComponent("ScratchTests.swift"), atomically: true, encoding: .utf8)
         let expected = (3...6).map { "Tests/VibeCoreTests/ScratchTests.swift:\($0)" }
         #expect(try Self.uses(under: root).flagged == expected)
-        let lint = try Self.harnessLint(under: root)
+        let lint = try await Self.harnessLint(under: root)
         #expect(lint.flagged == expected)
         #expect(lint.status == 1)
     }

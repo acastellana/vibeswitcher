@@ -43,11 +43,11 @@ struct SetupSystem {
             hooksInstalled: { Dictionary(uniqueKeysWithValues: Agent.allCases.map { ($0, HookInstaller.isInstalled(agent: $0)) }) },
             installHooks: { HookSetup.installAll() },
             uninstallHooks: { agent in
-                do { try HookInstaller.uninstall(agent: agent); return nil } catch {
+                do { try HookSetup.uninstall(agent: agent); return nil } catch {
                     return "\(agent.displayName): \(error.localizedDescription)"
                 }
             },
-            trustCodex: { Result { try CodexTrust.trustOurHooks() } },
+            trustCodex: { Result { try HookSetup.trustCodex() } },
             terminalAccess: { TerminalControl.access(ask: $0) },
             notificationAccess: { done in
                 guard let notifier else { return done(.off) }

@@ -213,7 +213,7 @@ struct HeavyJobsTests {
 
     // MARK: The kernel reads
 
-    @Test func usageCwdAndCommandNameReadARealProcess() throws {
+    @Test func usageCwdAndCommandNameReadARealProcess() async throws {
         let temp = Scratch()
         let folder = temp.url("heavy-jobs-cwd")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -228,7 +228,7 @@ struct HeavyJobsTests {
         try process.run()
         defer {
             try? input.fileHandleForWriting.close()
-            process.waitUntilExit()
+            #expect(await exited(process), "pid \(process.processIdentifier) still running")
         }
         let pid = process.processIdentifier
         let usage = try #require(ProcessTable.usage(of: pid))

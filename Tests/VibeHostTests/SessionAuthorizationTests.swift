@@ -5,7 +5,7 @@ import Testing
 
 extension LeadVaultHostTests {
     /// The request sender is an actual nc child of a hosted scratch session, not a test-supplied identity.
-    func checkSessionPermissions(readerIsLead: Bool) throws {
+    func checkSessionPermissions(readerIsLead: Bool) async throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let book = LeadVault.Book()
         let host = try TestHost(vault: book)
@@ -16,10 +16,10 @@ extension LeadVaultHostTests {
         let go = folder.appendingPathComponent("access.go")
         let stop = folder.appendingPathComponent("access.stop")
         let done = folder.appendingPathComponent("access.done")
-        let reader = try app.spawn("while [ ! -f '\(go.path)' ]; do sleep 0.02; done; "
+        let reader = try await app.spawn("while [ ! -f '\(go.path)' ]; do sleep 0.02; done; "
             + nc(host, requests, answers, until: stop) + "; touch '\(done.path)'; " + keepRunning)
-        let member = try app.spawn("echo SYNTHETIC_TEAM_DATA; exec /bin/cat")
-        let outsider = try app.spawn("echo SYNTHETIC_OTHER_PROJECT; " + keepRunning)
+        let member = try await app.spawn("echo SYNTHETIC_TEAM_DATA; exec /bin/cat")
+        let outsider = try await app.spawn("echo SYNTHETIC_OTHER_PROJECT; " + keepRunning)
         let leadID = readerIsLead ? reader.id : member.id
         let workerID = readerIsLead ? member.id : reader.id
         guard case .grant(let lead) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else {
@@ -38,9 +38,9 @@ extension LeadVaultHostTests {
             .styledScreen(id: outsider.id),
         ]).write(to: requests)
         FileManager.default.createFile(atPath: go.path, contents: nil)
-        #expect(eventually { answered(answers, 2...8) })
+        #expect(await eventually { answered(answers, 2...8) })
         FileManager.default.createFile(atPath: stop.path, contents: nil)
-        #expect(eventually { FileManager.default.fileExists(atPath: done.path) })
+        #expect(await eventually { FileManager.default.fileExists(atPath: done.path) })
         let got = try replies(Data(contentsOf: answers))
         guard case .screenText? = got[2] else { Issue.record("Own screen refused"); return }
         if readerIsLead {
@@ -58,11 +58,11 @@ extension LeadVaultHostTests {
         #expect(Set(visible.map(\.id)) == (readerIsLead ? Set([reader.id, member.id]) : Set([reader.id])))
     }
 
-    @Test func aLeadCanReadAndTypeIntoItsWorkerButCannotAccessAnotherProject() throws {
-        try checkSessionPermissions(readerIsLead: true)
+    @Test func aLeadCanReadAndTypeIntoItsWorkerButCannotAccessAnotherProject() async throws {
+        try await checkSessionPermissions(readerIsLead: true)
     }
 
-    @Test func aWorkerCanReadItselfButCannotReadOrTypeIntoItsLeadOrAnotherProject() throws {
-        try checkSessionPermissions(readerIsLead: false)
+    @Test func aWorkerCanReadItselfButCannotReadOrTypeIntoItsLeadOrAnotherProject() async throws {
+        try await checkSessionPermissions(readerIsLead: false)
     }
 }

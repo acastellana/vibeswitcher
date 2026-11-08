@@ -38,19 +38,35 @@ public final class ShellCancel: @unchecked Sendable {
 private final class PipeText: @unchecked Sendable {
     private let lock = NSLock()
     private var data = Data()
+    private var lastRead: Date?
 
     func drain(_ handle: FileHandle) {
         while case let chunk = handle.availableData, !chunk.isEmpty {
             lock.lock()
             data.append(chunk)
+            lastRead = Date()
             lock.unlock()
         }
+    }
+
+    /// When output last came, nil before any.
+    var last: Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        return lastRead
     }
 
     var text: String {
         lock.lock()
         defer { lock.unlock() }
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Bytes read so far.
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return data.count
     }
 }
 
@@ -111,6 +127,117 @@ public enum BranchCode {
 
     /// Whether `pid` is the wrapper (only the user's own processes' arguments can be read).
     public static func isRunner(pid: Int32) -> Bool { isRunner(ProcessTable.commandLine(pid: pid)) }
+
+    // MARK: A verifier's commands
+
+    /// The variable that marks the tool server's binary as a verifier session's shell prefix (`prefix`): set with
+    /// `CLAUDE_CODE_SHELL_PREFIX` in the verifier's environment, and taken out of what the prefix runs.
+    public static let prefixVariable = "VIBESWITCHER_BRANCH_CODE_PREFIX"
+
+    /// A verifier runs the branch it audits (its tests, its scripts): every command its session runs is that branch's
+    /// code, never the verifier to the session host (audit of 2026-11-07: a test that ran `vibeswitcher-mcp --role
+    /// verifier`, or spoke to host.sock, submitted the verdict as the verifier). Claude Code runs each of its shell
+    /// commands as `<CLAUDE_CODE_SHELL_PREFIX> '<command>'`: the Bash and Monitor tools' (after the permission rules
+    /// have judged the command as written: a PreToolUse hook rewriting it would have them judge the rewrite, and on
+    /// 2.1.319 a denied `touch` then ran), hooks, the status line, and MCP servers' start (all seen on 2.1.319). With
+    /// the tool server's binary as the prefix (`prefixEnvironment`), each runs under the wrapper, except one: its own
+    /// tool server, started as itself (`prefix`), which the host knows as the verifier.
+    /// The prefix is the binary's path with no options: Claude Code starts an MCP server with the whole prefix as the
+    /// program, and quotes a Bash command's prefix up to its last " -" (a path holding one is refused, by `prefixable`).
+    public static func prefixEnvironment(server: String) -> [String: String] {
+        ["CLAUDE_CODE_SHELL_PREFIX": server, prefixVariable: "1"]
+    }
+
+    /// Whether `server` can be a shell prefix as it is: an absolute path with no " -" in it.
+    public static func prefixable(_ server: String) -> Bool { server.hasPrefix("/") && !server.contains(" -") }
+
+    /// Whether this process, started with `arguments` in `environment`, is a verifier session's shell prefix: marked,
+    /// and given one command line (none of the binary's own modes, which all start with an option).
+    public static func isPrefix(_ arguments: [String], environment: [String: String]) -> Bool {
+        environment[prefixVariable] == "1" && arguments.count == 2 && !arguments[1].hasPrefix("-")
+    }
+
+    /// What the prefix runs for `command`: the tool server itself when the command line is exactly `executable` with
+    /// `MCPKeeper.flag` first (an MCP server's start, the session's own: the words are run as they are, never through
+    /// a shell), else `shell -c <command>` under the wrapper. Starting the tool server so gives a process nothing it
+    /// lacked: the prefix is under the wrapper whenever its caller is, and so is all it runs.
+    public static func prefix(_ command: String, executable: String, shell: String) -> [String] {
+        if let words = words(command), words.count >= 2, words[1] == MCPKeeper.flag, sameFile(words[0], executable) {
+            return [executable] + words.dropFirst()
+        }
+        return wrapper + [shell, "-c", command]
+    }
+
+    /// The shell Claude Code built the command for: its `CLAUDE_CODE_SHELL`, else your `SHELL` when it's zsh or bash,
+    /// else zsh.
+    public static func prefixShell(_ environment: [String: String]) -> String {
+        let usable = { (path: String?) -> String? in
+            guard let path, path.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: path) else { return nil }
+            return path
+        }
+        if let shell = usable(environment["CLAUDE_CODE_SHELL"]) { return shell }
+        if let shell = usable(environment["SHELL"]), ["zsh", "bash"].contains((shell as NSString).lastPathComponent) { return shell }
+        return "/bin/zsh"
+    }
+
+    /// Becomes what `prefix` says to run for `arguments[1]`, its environment without `prefixVariable`; returns only
+    /// when that can't start (the error is printed, and the command fails).
+    public static func runPrefix(_ arguments: [String], environment: [String: String], executable: String) -> Int32 {
+        let argv = prefix(arguments[1], executable: executable, shell: prefixShell(environment))
+        var passed = environment
+        passed[prefixVariable] = nil
+        let cArgs = argv.map { strdup($0) } + [nil]
+        let cEnv = passed.map { strdup("\($0.key)=\($0.value)") } + [nil]
+        execve(argv[0], cArgs, cEnv)
+        let code = errno
+        FileHandle.standardError.write(Data("vibeswitcher: couldn't run \(argv[0]): \(String(cString: strerror(code)))\n".utf8))
+        return 126
+    }
+
+    static func sameFile(_ a: String, _ b: String) -> Bool {
+        let resolved = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path }
+        return a.hasPrefix("/") && resolved(a) == resolved(b)
+    }
+
+    /// The words of a command line made only of words a shell takes literally, as Claude Code quotes an MCP server's
+    /// command and arguments (`/x/y --keeper 'a b' 'it'"'"'s'`): plain characters, single quotes, and double quotes
+    /// holding nothing a shell expands, separated by spaces. nil for anything else (an expansion, an operator, a glob,
+    /// a backslash, a newline), which `prefix` then runs as a command, wrapped.
+    static func words(_ line: String) -> [String]? {
+        let plain = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@%+=:,./_-")
+        var words: [String] = []
+        var current = "", inWord = false
+        var characters = line.makeIterator()
+        while let character = characters.next() {
+            switch character {
+            case " ":
+                if inWord { words.append(current); current = ""; inWord = false }
+            case "'":
+                inWord = true
+                var closed = false
+                while let next = characters.next() {
+                    if next == "'" { closed = true; break }
+                    current.append(next)
+                }
+                guard closed else { return nil }
+            case "\"":
+                inWord = true
+                var closed = false
+                while let next = characters.next() {
+                    if next == "\"" { closed = true; break }
+                    guard !"$`\\!".contains(next) else { return nil }
+                    current.append(next)
+                }
+                guard closed else { return nil }
+            default:
+                guard plain.contains(character) else { return nil }
+                inWord = true
+                current.append(character)
+            }
+        }
+        if inWord { words.append(current) }
+        return words
+    }
 }
 
 /// Runs a program and captures its output.
@@ -120,9 +247,11 @@ public enum Shell {
     /// as `BranchCode` says: under its wrapper, in a session of its own. With `ownSession`, only in a session of its own:
     /// no controlling terminal, so an interactive shell (`-i`) started from a process that has one (the tool server, under
     /// the lead's terminal) isn't stopped by SIGTTOU as it takes the terminal from a background group.
+    /// With `watch`, a run that makes no progress (no new output, almost no CPU in its tree, the Mac not loaded) for
+    /// its `after` is stopped as one past `timeout` is: `timedOut`, with `stall` saying what it was stuck on.
     public static func run(executable: String, args: [String], in directory: String, env: [String: String] = [:],
                            timeout: TimeInterval = 120, grace: TimeInterval = 5, interleaved: Bool = false,
-                           branchCode: Bool = false, ownSession: Bool = false) -> Git.Result {
+                           branchCode: Bool = false, ownSession: Bool = false, watch: StallWatch? = nil) -> Git.Result {
         let environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
         let out: ShellPipe, err: ShellPipe
         do {
@@ -156,13 +285,37 @@ public enum Shell {
             readers.enter()
             Thread.detachNewThread { errors.drain(err.reading); readers.leave() }
         }
-        let deadline = Date().addingTimeInterval(timeout)
+        let began = Date()
+        let deadline = began.addingTimeInterval(timeout)
         let cancel = ShellCancel.current
-        while process.isRunning, Date() < deadline, cancel?.isCancelled != true { usleep(20_000) }
-        var timedOut = false, cancelled = false
+        var judge = watch.map { StallWatch.Judge(after: $0.after, loadLimit: $0.loadLimit, start: Date()) }
+        var nextLook = Date(), stall: StallWatch.Stall?
+        while process.isRunning, Date() < deadline, cancel?.isCancelled != true {
+            if let watch, Date() >= nextLook {
+                let members = StallWatch.tree(of: pid, group: group)
+                let look = StallWatch.Look(output: output.count + errors.count,
+                                           cpu: members.map { Dictionary($0.map { ($0.pid, $0.cpu) }, uniquingKeysWith: max) },
+                                           load: watch.load())
+                let now = Date()
+                if judge?.observe(look, at: now) == true, process.isRunning {
+                    // What it was stuck on, read before it's stopped: no debugger, no sample; the kernel's records.
+                    let (test, tail) = StallWatch.stuck(in: output.text + (interleaved ? "" : "\n" + errors.text))
+                    stall = StallWatch.Stall(idle: judge?.idle(at: now) ?? watch.after, load: look.load, loadLimit: watch.loadLimit,
+                                             lastTest: test, processes: StallWatch.lines(members ?? []), tail: tail)
+                    break
+                }
+                nextLook = now.addingTimeInterval(watch.every)
+            }
+            usleep(20_000)
+        }
+        var timedOut = false, cancelled = false, quiet: TimeInterval?
         if process.isRunning {
             cancelled = cancel?.isCancelled == true
             timedOut = !cancelled
+            // How long it had written nothing (since it started, when it never wrote), read before it's stopped.
+            let heard = [output.last, errors.last].compactMap { $0 }.max() ?? began
+            quiet = timedOut ? max(0, Date().timeIntervalSince(heard)) : nil
+            if cancelled { stall = nil }
             // Out of time: its children (a test runner's workers) go too, or they'd keep running in the worktree.
             // Asked first; whatever is still there after `grace` (it ignores TERM) is killed.
             stop(process, group: group, grace: grace)
@@ -181,7 +334,7 @@ public enum Shell {
             _ = readers.wait(timeout: .now() + grace)
         }
         return Git.Result(status: process.terminationStatus, output: output.text, error: errors.text, timedOut: timedOut, cancelled: cancelled,
-                          signaled: process.signaled)
+                          signaled: process.signaled, stall: timedOut ? stall : nil, quiet: quiet)
     }
 
     /// Stops a program and everything it started: its family and its process group, asked with TERM, then, once it's
@@ -342,13 +495,21 @@ public enum Worktrees {
         /// Rebasing onto main conflicted; the rebase was undone.
         case conflict
         /// A command (`init_command` or `test command`) ran past `after` seconds and was stopped, with everything it
-        /// started; what it wrote until then. Not a failure: nothing says the work is wrong.
-        case hung(command: String, after: TimeInterval, output: String)
+        /// started; what it wrote until then. Not a failure: nothing says the work is wrong. With `stall`, it was
+        /// stopped `after` seconds in for making no progress (stall_min, `StallWatch`), not at test_timeout_min.
+        case hung(command: String, after: TimeInterval, output: String, stall: StallWatch.Stall?)
         /// The run was cancelled (the tool call was), and stopped.
         case cancelled
         case error(String)
 
         public var isFailure: Bool { if case .failed = self { return true } else { return false } }
+    }
+
+    /// "hung after 45 min" (past test_timeout_min), or, stopped for making no progress, "hung: no progress for 10 min
+    /// (…; last test started: X), stopped 12 min in": as the lead's messages say a hung run.
+    public static func hung(after: TimeInterval, stall: StallWatch.Stall?) -> String {
+        guard let stall else { return "hung after \(duration(after))" }
+        return "hung: \(Redaction.secrets(in: stall.summary)), stopped \(duration(after)) in"
     }
 
     /// "45 min", "90 s": how long a time limit is, as a message says it.
@@ -746,12 +907,16 @@ public enum Worktrees {
     /// one (`TestLock.standard()`), tests a scratch one.
     /// The lead's records under `records` (`records_dir`) land as the base has them, conflicted or merged cleanly
     /// (`baseRecords`), and conflicts only in them don't stop it (`takeBaseRecords`).
-    /// With `rerun`, a failing test command may run once more (see `runChecks`): `passedOnRerun` when that passes.
-    /// `tested` hears the passing test command's output (the rerun's, when that's what passed), for its test count.
+    /// A commit that carries commits of `remote` (the remote's tip fetch_remote fetched) the base lacks lands as a true
+    /// merge, its records the base's and the remote's by union (`landAsMerge`).
+    /// With `trailers`, the commit that lands ends with them (`stamp`): the merge's provenance.
+    /// With `rerun`, a failing test command may run once more (see `runChecks`): `passedOnRerun` when that passes;
+    /// then `baseline`, record only. `tested` hears the passing test command's output (the rerun's, when that's what passed), for its test count.
     public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
                                      scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout,
-                                     lock: TestLock?, records: String? = nil, rerun: ((String) -> String?)? = nil,
-                                     tested output: ((String) -> Void)? = nil, begun: ((Date) -> Void)? = nil) -> Check {
+                                     lock: TestLock?, records: String? = nil, remote: String? = nil, trailers: [Trailer] = [],
+                                     rerun: ((String) -> String?)? = nil,
+                                     baseline: Baseline? = nil, tested output: ((String) -> Void)? = nil, begun: ((Date) -> Void)? = nil) -> Check {
         let path = scratch.path
         let home = (home ?? scratch.deletingLastPathComponent().appendingPathComponent(scratch.lastPathComponent + "-home")).path
         let cancel = ShellCancel.current
@@ -775,11 +940,11 @@ public enum Worktrees {
             if cancel?.isCancelled == true { return .cancelled }
             return .error(added.error.isEmpty ? "Couldn't set up a worktree to test \(commit.prefix(8)) in." : added.error)
         }
-        if let stopped = put(commit, onto: base, in: path, records: records) { return stopped }
+        if let stopped = put(commit, onto: base, in: path, records: records, remote: remote, trailers: trailers) { return stopped }
         guard cancel?.isCancelled != true else { return .cancelled }
         let tested = Git.run(["rev-parse", "HEAD"], in: path).output
         let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
-                                           as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root, rerun: rerun, begun: begun)
+                                           as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root, rerun: rerun, baseline: baseline, begun: begun)
         if let stopped { return stopped }
         if let last = outputs.last, last.name != "init_command" { output?(last.output) }
         if let again = outputs.last, again.name == "rerun", let first = outputs.dropLast().last {
@@ -791,8 +956,70 @@ public enum Worktrees {
     /// Puts the worktree at `path`'s detached HEAD, `commit`, on top of `base`: rebased, or squashed into one commit
     /// when it holds a merge; nil when HEAD is the result, else how it stopped (`conflict`, `error`, `cancelled`), with
     /// the worktree back at a clean state. The lead's records under `records` land as the base has them.
-    static func put(_ commit: String, onto base: String, in path: String, records: String?) -> Check? {
+    /// A branch that carries commits of `remote` (the remote's tip fetch_remote fetched) the base lacks lands as a
+    /// true merge instead (`landAsMerge`), so they stay themselves.
+    /// With `trailers` (the merge's provenance, `LeadProvenance`), the commit that lands on top ends with them
+    /// (`stamp`), before anything is tested: the tested commit is the one that lands.
+    static func put(_ commit: String, onto base: String, in path: String, records: String?, remote: String? = nil,
+                    trailers: [Trailer] = []) -> Check? {
+        if let stopped = place(commit, onto: base, in: path, records: records, remote: remote) { return stopped }
+        return stamp(trailers, onto: base, in: path)
+    }
+
+    /// One git trailer (`Key: value`) a merge ends its landed commit's message with.
+    public struct Trailer: Equatable, Sendable {
+        public let key: String
+        public let value: String
+
+        public init(_ key: String, _ value: String) {
+            self.key = key
+            self.value = value
+        }
+
+        public var line: String { "\(key): \(value)" }
+    }
+
+    /// Ends the message of the detached HEAD at `path` with `trailers` (every line already under one of their keys is
+    /// taken out, so a worker's commit can't bring its own `VS-Build`), its tree, parents and author kept. Nil when that's done, or
+    /// when there's nothing to stamp: no trailers, or HEAD is `base` itself (nothing of the branch lands). Else `error`,
+    /// the worktree as it was.
+    static func stamp(_ trailers: [Trailer], onto base: String, in path: String) -> Check? {
+        guard !trailers.isEmpty else { return nil }
+        let head = Git.run(["rev-parse", "HEAD"], in: path).output
+        let under = Git.run(["rev-parse", "\(base)^{commit}"], in: path).output
+        guard !head.isEmpty, head != under else { return nil }
+        // Every line already under one of these keys goes first (git's ifexists=replace takes out only the nearest
+        // one, so a worker's commit with two `VS-Build:` lines would keep one of its own).
+        let read = Git.run(["log", "-1", "--format=%B", head], in: path)
+        guard read.ok else { return .error("Reading \(head.prefix(8))'s message to add the merge's provenance failed: \(said(read))") }
+        let keys = Set(trailers.map { $0.key.lowercased() })
+        let kept = read.output.components(separatedBy: "\n").filter { line in
+            guard let colon = line.firstIndex(of: ":") else { return true }
+            return !keys.contains(line[..<colon].trimmingCharacters(in: .whitespaces).lowercased())
+        }
+        let message = kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        // trailer.* from anyone's config (where, how, ifExists) would change what lands: set here, for this command only.
+        let amended = noEditor(["-c", "trailer.where=end", "-c", "trailer.ifexists=replace", "-c", "trailer.ifmissing=add",
+                                "-c", "trailer.separators=:", "commit", "--amend", "-q", "-m", message.isEmpty ? "Changes from \(head.prefix(8))" : message,
+                                "--no-verify", "--allow-empty", "--cleanup=verbatim"] + trailers.flatMap { ["--trailer", $0.line] }, in: path)
+        guard amended.ok else {
+            Git.run(["reset", "-q", "--hard", head], in: path)
+            return .error("Adding the merge's provenance trailers to \(head.prefix(8)) failed: \(said(amended))")
+        }
+        return nil
+    }
+
+    /// `put` without the trailers: the commit on top of `base`, as it lands.
+    static func place(_ commit: String, onto base: String, in path: String, records: String?, remote: String? = nil) -> Check? {
         let cancel = ShellCancel.current
+        // merge-github-s-main, 2026-11-06: a branch whose job was to merge origin/main was squashed onto main. The
+        // other Mac's commits landed as copies, so origin/main wasn't an ancestor of main and push_remote refused,
+        // and its lead records were put back to main's copy. Rebased or squashed, the remote's commits would be
+        // copies; merged whole, they're themselves.
+        if carried(remote, onto: base, in: path) != nil {
+            guard let stopped = landAsMerge(onto: base, in: path, records: records) else { return nil }
+            return cancel?.isCancelled == true ? .cancelled : stopped
+        }
         // A worker brings its branch up to date by merging the base in. Rebasing would drop that merge and replay
         // the commits before it, conflicts and all, so such a branch lands as one commit on top of the base; either
         // way the base's history stays a line.
@@ -826,17 +1053,20 @@ public enum Worktrees {
         let path: String
         let home: String
         let records: String?
+        /// The remote's tip fetch_remote fetched: a commit that carries it lands as a true merge (`put`).
+        let remote: String?
         /// The commit the stack starts from, and each commit pushed on it since (`reset`), in order.
         public private(set) var base: String = ""
         public private(set) var tips: [String] = []
         /// Whether the worktree was made.
         private var made = false
 
-        public init(root: String, scratch: URL, home: URL, records: String?) {
+        public init(root: String, scratch: URL, home: URL, records: String?, remote: String? = nil) {
             self.root = root
             path = scratch.path
             self.home = home.path
             self.records = records
+            self.remote = remote
         }
 
         /// The stack's top: the last commit pushed, else its base.
@@ -856,10 +1086,11 @@ public enum Worktrees {
         }
 
         /// Puts `commit` on top: nil when it's there (its new commit is `top`), else how it stopped, the stack as it was.
-        public func push(_ commit: String) -> Check? {
+        /// With `trailers` (its task's provenance), the commit it lands as ends with them (`Worktrees.stamp`).
+        public func push(_ commit: String, trailers: [Trailer] = []) -> Check? {
             let under = top
             if let error = checkout(commit) { return .error(error) }
-            if let stopped = Worktrees.put(commit, onto: under, in: path, records: records) {
+            if let stopped = Worktrees.put(commit, onto: under, in: path, records: records, remote: remote, trailers: trailers) {
                 _ = checkout(under)
                 return stopped
             }
@@ -875,13 +1106,14 @@ public enum Worktrees {
         /// Runs `setup` and `test` (as `rebaseAndTest` does, in a scratch home made empty first) on the stack's first
         /// `count` commits: `passed` with the commit tested, `passedOnRerun`, `failed`, `hung`, `cancelled`, `error`.
         public func test(prefix count: Int, setup: String?, test: String?, timeout: TimeInterval, lock: TestLock?,
-                         rerun: ((String) -> String?)?, tested output: ((String) -> Void)? = nil, begun: ((Date) -> Void)? = nil) -> Check {
+                         rerun: ((String) -> String?)?, baseline: Baseline? = nil, tested output: ((String) -> Void)? = nil,
+                         begun: ((Date) -> Void)? = nil) -> Check {
             let tip = count == 0 ? base : tips[count - 1]
             if let error = checkout(tip) { return .error(error) }
             try? FileManager.default.removeItem(atPath: home)
             guard ShellCancel.current?.isCancelled != true else { return .cancelled }
             let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
-                                               as: "VibeSwitcher's batch merge test of \(tip.prefix(8))", place: root, rerun: rerun, begun: begun)
+                                               as: "VibeSwitcher's batch merge test of \(tip.prefix(8))", place: root, rerun: rerun, baseline: baseline, begun: begun)
             if let stopped { return stopped }
             if let last = outputs.last, last.name != "init_command" { output?(last.output) }
             if let again = outputs.last, again.name == "rerun", let first = outputs.dropLast().last {
@@ -920,7 +1152,7 @@ public enum Worktrees {
         case conflict([String])
         /// A command failed; all of its output.
         case failed(String)
-        case hung(command: String, after: TimeInterval, output: String)
+        case hung(command: String, after: TimeInterval, output: String, stall: StallWatch.Stall?)
         case cancelled
         case error(String)
     }
@@ -997,11 +1229,43 @@ public enum Worktrees {
         switch stopped {
         case nil: return .passed(made)
         case .failed(let output): return .failed(output)
-        case .hung(let command, let after, let output): return .hung(command: command, after: after, output: output)
+        case .hung(let command, let after, let output, let stall): return .hung(command: command, after: after, output: output, stall: stall)
         case .cancelled: return .cancelled
         case .error(let text): return .error(text)
         case .passed, .passedOnRerun, .conflict: return .error("unexpected")
         }
+    }
+
+    /// A merge's paired base run (`runChecks`): after the rerun, the failing tests once on the base the branch was
+    /// rebased onto, so a branch's red test can be told from a flaky one (red on the base too). Record only.
+    public struct Baseline {
+        /// The base's commit.
+        public var commit: String
+        /// Given the first run's failing output, the command to run on `commit`; nil: none runs (the caller notes why).
+        public var command: (String) -> String?
+        /// Hears how it went, when a command was given.
+        public var heard: (Run) -> Void
+
+        public enum Run: Equatable, Sendable {
+            /// It ran to its end: whether it exited 0, and its output.
+            case ran(ok: Bool, output: String)
+            /// Stopped by the timeout or for making no progress.
+            case hung
+            /// The base couldn't be checked out: why.
+            case unchecked(String)
+        }
+
+        public init(commit: String, command: @escaping (String) -> String?, heard: @escaping (Run) -> Void) {
+            self.commit = commit
+            self.command = command
+            self.heard = heard
+        }
+    }
+
+    /// The run's header line on the cores its commands get (`TestLock.coresVariable`) holding one of `slots` slots: a
+    /// hung merge's log showed no -j anywhere (2026-11-08), so whether its build was capped couldn't be read from it.
+    static func coresLine(slots: Int, cores: Int = ProcessInfo.processInfo.processorCount) -> String {
+        "\(TestLock.coresVariable): \(TestLock.coreBudget(slots: slots, cores: cores)), the slot's share of \(cores) cores (\(slots) slot\(slots == 1 ? "" : "s")): builds and test runners take it as their parallelism\n"
     }
 
     /// The first line of a rerun's output (`runChecks`' `rerun`).
@@ -1018,9 +1282,12 @@ public enum Worktrees {
     /// (`MergeRerun`: the failing tests again), in the same worktree and home, holding the same slot: its output,
     /// named "rerun", decides. It's never asked again, whatever the rerun does. `begun` hears when the commands start
     /// (the slot taken): the merge's stats line times the run from there (`MergeSample`).
+    /// After a rerun, `baseline` runs its command once on its commit, in the same worktree and home, holding the same
+    /// slot, with the same timeout: record only (`Baseline`). Its result changes nothing returned here; a cancel during
+    /// it is a cancel.
     static func runChecks(setup: String?, test: String?, in path: String, home: String, timeout: TimeInterval,
                           lock: TestLock? = nil, as holder: String = "VibeSwitcher's test run", place: String? = nil,
-                          rerun: ((String) -> String?)? = nil, begun: ((Date) -> Void)? = nil)
+                          rerun: ((String) -> String?)? = nil, baseline: Baseline? = nil, begun: ((Date) -> Void)? = nil)
         -> (stopped: Check?, outputs: [(name: String, output: String)]) {
         let cancel = ShellCancel.current
         let tmp = home + "/tmp"
@@ -1046,6 +1313,7 @@ public enum Worktrees {
             switch outcome {
             case .held(let taken, let waited, let after):
                 held = taken
+                header += coresLine(slots: lock.slots)
                 if !after.isEmpty {
                     header += "Waited \(duration(waited)) for a slot of the Mac-wide test and build lock, \(slots) held: \(recorded(after)).\n"
                 }
@@ -1060,6 +1328,31 @@ public enum Worktrees {
         begun?(Date())
         var outputs: [(name: String, output: String)] = []
         var steps = [("init_command", setup), ("test command", test)][...]
+        // The first run's failure, once a rerun is planned: what the baseline pairs with.
+        var firstFailure: String?
+        /// The baseline's run after the rerun; true when it was cancelled.
+        func pairOnBase() -> Bool {
+            guard let baseline, let failed = firstFailure, let command = baseline.command(failed) else { return false }
+            let moved = Git.run(["checkout", "-q", "-f", "--detach", baseline.commit], in: path)
+            guard moved.ok else {
+                baseline.heard(.unchecked("the base \(baseline.commit.prefix(8)) couldn't be checked out: \(said(moved))"))
+                return cancel?.isCancelled == true
+            }
+            Git.run(["clean", "-q", "-f", "-d"], in: path)
+            var env = ["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"]
+            if let held, let lock {
+                env[TestLock.heldVariable] = held.path
+                env[TestLock.coresVariable] = String(TestLock.coreBudget(slots: lock.slots))
+            }
+            let started = Date()
+            let stop = progress?.heartbeat { "Running the failing tests once on the base \(baseline.commit.prefix(8)), record only (\(duration(Date().timeIntervalSince(started))) so far)." }
+            let run = Shell.run(executable: "/bin/zsh", args: ["-lc", "export HOME=\(RecentProjects.shellQuote(home))\n" + command], in: path, env: env,
+                                timeout: timeout, interleaved: true, branchCode: true, watch: lock?.watch)
+            stop?()
+            if run.cancelled || cancel?.isCancelled == true { return true }
+            baseline.heard(run.stall != nil || run.timedOut ? .hung : .ran(ok: run.ok, output: run.output))
+            return false
+        }
         while let (name, command) = steps.popFirst() {
             guard let command, !command.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
             // HOME only once the login shell has read the user's own startup files (their PATH, from their home); the
@@ -1075,21 +1368,30 @@ public enum Worktrees {
             let stop = progress?.heartbeat { "Running the \(name) (\(duration(Date().timeIntervalSince(started))) so far)." }
             // The branch's code (its build, its tests): never the lead to the session host (see `BranchCode`).
             let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path, env: env, timeout: timeout, interleaved: true,
-                                branchCode: true)
+                                branchCode: true, watch: lock?.watch)
             stop?()
-            let said = (name == "rerun" ? rerunHeader : "") + header + run.output
+            // A run stopped for making no progress says so first, then what it was stuck on, after its output.
+            // Stopped at test_timeout_min, it says how long it had been silent: a crawl keeps writing, a stuck one doesn't.
+            let silent = run.stall == nil ? run.quiet.map { "\n\n" + MergeRerun.quietNote($0) } : nil
+            let said = (name == "rerun" ? rerunHeader : "") + header + run.output + (run.stall.map { "\n\n" + $0.report } ?? silent ?? "")
             outputs.append((name, said))
             if run.cancelled || cancel?.isCancelled == true { return (.cancelled, outputs) }
-            if run.timedOut { return (.hung(command: name, after: timeout, output: said), outputs) }
+            if let stall = run.stall {
+                return (.hung(command: name, after: Date().timeIntervalSince(started), output: said, stall: stall), outputs)
+            }
+            if run.timedOut { return (.hung(command: name, after: timeout, output: said, stall: nil), outputs) }
             guard run.ok else {
                 let failed = (name == "init_command" ? "init_command failed:\n" : "") + said
                 // Once, and only after the test command: a rerun that fails is the failure.
                 if name == "test command", let again = rerun?(failed) {
+                    firstFailure = failed
                     steps.append(("rerun", again))
                     continue
                 }
+                if name == "rerun", pairOnBase() { return (.cancelled, outputs) }
                 return (.failed(failed), outputs)
             }
+            if name == "rerun", pairOnBase() { return (.cancelled, outputs) }
         }
         return (nil, outputs)
     }
@@ -1133,7 +1435,7 @@ public enum Worktrees {
         switch stopped {
         case nil: outcome = outputs.contains { $0.name == "test command" } ? .passed : .noTests
         case .failed: outcome = .failed(outputs.last?.name ?? "test command")
-        case .hung(let command, let after, _): outcome = .hung(command, after: after)
+        case .hung(let command, let after, _, let stall): outcome = .hung(command, after: after, stall: stall?.summary)
         case .cancelled: outcome = .cancelled
         case .error(let text): outcome = .error(text)
         case .passed, .passedOnRerun, .conflict: outcome = .error("unexpected")
@@ -1151,7 +1453,8 @@ public enum Worktrees {
             case noTests
             /// That command failed (init_command or the test command).
             case failed(String)
-            case hung(String, after: TimeInterval)
+            /// With `stall`, stopped for making no progress: its summary (`StallWatch.Stall.summary`).
+            case hung(String, after: TimeInterval, stall: String? = nil)
             case cancelled
             case error(String)
 
@@ -1161,7 +1464,8 @@ public enum Worktrees {
                 case .passed: return "the test command passed"
                 case .noTests: return "no test_command is set, so no tests ran"
                 case .failed(let command): return "\(command) failed"
-                case .hung(let command, let after): return "\(command) hung, stopped after \(Worktrees.duration(after))"
+                case .hung(let command, let after, let stall):
+                    return "\(command) hung, stopped after \(Worktrees.duration(after))" + (stall.map { ": \($0)" } ?? "")
                 case .cancelled: return "cancelled"
                 case .error(let text): return "it couldn't run: \(text)"
                 }
@@ -1261,6 +1565,107 @@ public enum Worktrees {
             + (subjects.count > 1 ? [""] + subjects.dropFirst().map { "- \($0)" } : [])
         let committed = Git.run(["commit", "-q", "-m", message.joined(separator: "\n")] + (author.isEmpty ? [] : ["--author", author]), in: path)
         return committed.ok ? nil : .error("Committing the branch squashed onto \(base.prefix(8)) failed: \(said(committed))")
+    }
+
+    /// The newest commit of `remote` (the remote's tip as fetch_remote fetched it, from the vault: a remote-tracking
+    /// ref is anyone's to move) that `head` holds and `base` lacks; nil when there's none, or no `remote`.
+    static func carried(_ remote: String?, head: String = "HEAD", onto base: String, in path: String) -> String? {
+        guard let remote, !remote.isEmpty else { return nil }
+        let found = Git.run(["merge-base", head, remote], in: path)
+        guard found.ok, !found.output.isEmpty else { return nil }
+        return Git.run(["merge-base", "--is-ancestor", found.output, base], in: path).ok ? nil : found.output
+    }
+
+    /// Replaces the detached HEAD at `path` with a merge commit of it on `base` (the base its first parent, so the
+    /// base's first-parent history stays a line), for a branch that carries `carried`, a remote's commit the base
+    /// lacks (`carried(_:head:onto:in:)`): its commits stay themselves, so the remote's tip stays an ancestor of the
+    /// base. The records under `records` land as the base has them (`baseRecords`), as in a rebase or a squash, so the
+    /// fast-forward never meets the lead's lines not committed yet; merge then takes the remote's lines into the main
+    /// checkout's records (`LeadRecords.takeRemote`). Conflicts only in them don't stop it. Nil when that's done;
+    /// `conflict` when the branch conflicts with `base` elsewhere; `error`, saying what failed, when something else
+    /// stops it.
+    static func landAsMerge(onto base: String, in path: String, records: String?) -> Check? {
+        let tip = Git.run(["rev-parse", "HEAD"], in: path).output
+        let subject = Git.run(["log", "-1", "--format=%s", tip], in: path).output
+        let author = Git.run(["log", "-1", "--format=%an <%ae>", tip], in: path).output
+        let checkout = Git.run(["checkout", "-q", "--detach", base], in: path)
+        guard checkout.ok else { return .error("Checking out \(base.prefix(8)) to merge the branch into failed: \(said(checkout))") }
+        let back = {
+            Git.run(["merge", "--abort"], in: path)
+            Git.run(["reset", "-q", "--hard"], in: path)
+        }
+        let merge = noEditor(["merge", "--no-ff", "--no-commit", "-q", tip], in: path)
+        if !merge.ok {
+            let unmerged = Git.run(["diff", "--name-only", "-z", "--diff-filter=U"], in: path).output
+                .split(separator: "\0").map(String.init)
+            let logs = Set(records.map(LeadRecords.paths) ?? [])
+            guard !unmerged.isEmpty, unmerged.allSatisfy(logs.contains) else {
+                back()
+                return unmerged.isEmpty ? .error("Merging \(tip.prefix(8)) into \(base.prefix(8)) failed, and not on a conflict: \(said(merge))") : .conflict
+            }
+        }
+        if let records, !baseRecords(records, base: base, in: path) {
+            back()
+            return .error("Taking \(base.prefix(8))'s lead records (\(records)) into the merge failed.")
+        }
+        let message = "Merge \(tip.prefix(8))" + (subject.isEmpty ? "" : ": \(subject)")
+        let committed = noEditor(["commit", "-q", "-m", message] + (author.isEmpty ? [] : ["--author", author]), in: path)
+        guard committed.ok else {
+            back()
+            return .error("Committing the merge of \(tip.prefix(8)) into \(base.prefix(8)) failed: \(said(committed))")
+        }
+        return nil
+    }
+
+    /// The records at `paths` (relative to `root`) as `ours` has them (the main checkout's, committed or not) with
+    /// `theirs`' lines taken in, by union from `ancestor` (as merge_remote merges them: both sides' lines kept, ours
+    /// first where they overlap): only the ones that change, by path. A record `theirs` didn't change from `ancestor`
+    /// is left out; one only `theirs` has is taken whole. `failure` says what failed.
+    static func unionRecords(root: String, paths: [String], ours: [String: Data], ancestor: String,
+                             theirs: String) -> Result<[String: Data], LeadRemote.Failure> {
+        func blob(_ commit: String, _ file: String) -> String? {
+            guard !commit.isEmpty else { return nil }
+            let found = Git.run(["rev-parse", "--verify", "--quiet", "\(commit):\(file)"], in: root)
+            return found.ok && !found.output.isEmpty ? found.output : nil
+        }
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("vibeswitcher-records-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        do { try FileManager.default.createDirectory(atPath: scratch, withIntermediateDirectories: true) } catch {
+            return .failure(LeadRemote.Failure("\(error)"))
+        }
+        // A blob's bytes, as git writes them (git's output here is text, trimmed): through an index of its own.
+        var count = 0
+        func bytes(_ oid: String, _ file: String) -> Data? {
+            count += 1
+            let own = ["GIT_INDEX_FILE": (scratch as NSString).appendingPathComponent("index-\(count)")]
+            let out = (scratch as NSString).appendingPathComponent("out-\(count)") + "/"
+            guard Git.run(["update-index", "--add", "--cacheinfo", "100644,\(oid),\(file)"], in: root, env: own).ok,
+                  Git.run(["checkout-index", "-f", "--prefix=\(out)", "--", file], in: root, env: own).ok else { return nil }
+            return FileManager.default.contents(atPath: out + file)
+        }
+        // git's empty blob: the merge base of a record only one side's history added.
+        let empty = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+        var changed: [String: Data] = [:]
+        for file in paths {
+            guard let their = blob(theirs, file) else { continue }
+            let old = blob(ancestor, file)
+            guard their != old else { continue }
+            guard let mine = ours[file] else {
+                guard let data = bytes(their, file) else { return .failure(LeadRemote.Failure("Couldn't read \(file) as \(theirs.prefix(8)) has it.")) }
+                changed[file] = data
+                continue
+            }
+            let copy = (scratch as NSString).appendingPathComponent("ours-\(changed.count)-\(count)")
+            guard FileManager.default.createFile(atPath: copy, contents: mine) else { return .failure(LeadRemote.Failure("Couldn't copy \(file) to merge it.")) }
+            let hashed = Git.run(["hash-object", "-w", "--path=\(file)", "--", copy], in: root)
+            guard hashed.ok, !hashed.output.isEmpty else { return .failure(LeadRemote.Failure("git hash-object \(file): \(said(hashed))")) }
+            let merged = Git.run(["merge-file", "--union", "--object-id", hashed.output, old ?? empty, their], in: root)
+            guard merged.ok, !merged.output.isEmpty else { return .failure(LeadRemote.Failure("git merge-file --union on \(file): \(said(merged))")) }
+            guard merged.output != hashed.output else { continue }
+            guard let data = bytes(merged.output, file) else { return .failure(LeadRemote.Failure("Couldn't read the union of \(file).")) }
+            changed[file] = data
+        }
+        return .success(changed)
     }
 
     /// Files Claude Code reads as settings or instructions (project settings and hooks under `.claude/`, `.mcp.json`,

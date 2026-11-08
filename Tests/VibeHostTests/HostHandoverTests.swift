@@ -25,7 +25,7 @@ final class ScratchHostProcess {
     let appKey = SymmetricKey(size: .bits256)
 
     /// `old`: the build it starts as (another commit's host, for an upgrade); this one's otherwise.
-    init(arguments extra: [String] = [], old: String = hostLauncher) throws {
+    init(arguments extra: [String] = [], old: String = hostLauncher) async throws {
         // Short: a socket's path has a 104-byte limit.
         dir = "\(shortScratchRoot)/vsho-\(UUID().uuidString.prefix(8))"
         home = dir + "/home"
@@ -62,7 +62,7 @@ final class ScratchHostProcess {
         try stdin.fileHandleForWriting.close()
         process.standardInput = stdin
         try TestHosts.run(process)
-        #expect(eventually { (try? UnixSocket.connect(path: socket)).map { Darwin.close($0); return true } ?? false })
+        #expect(await eventually { (try? UnixSocket.connect(path: socket)).map { Darwin.close($0); return true } ?? false })
     }
 
     var pid: pid_t { process.processIdentifier }
@@ -99,14 +99,14 @@ extension TestClient {
     }
 
     /// Connects and waits for the welcome, each for as long as a loaded Mac takes (the hang guard).
-    static func welcomed(_ socket: String, appKey: SymmetricKey? = nil) throws -> (TestClient, protocolVersion: Int, build: Int, sessions: [HostSession], capabilities: [String]?,
+    static func welcomed(_ socket: String, appKey: SymmetricKey? = nil) async throws -> (TestClient, protocolVersion: Int, build: Int, sessions: [HostSession], capabilities: [String]?,
                                                      pid: Int32?, startedAt: Date?) {
         var connected: TestClient?
-        guard eventually({ connected = try? TestClient(socket: socket, appKey: appKey); return connected != nil }), let client = connected else {
+        guard await eventually({ connected = try? TestClient(socket: socket, appKey: appKey); return connected != nil }), let client = connected else {
             throw NoWelcome(description: "no connection to \(socket) in \(Int(hangGuard)) s")
         }
         let seq = client.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
-        _ = eventually { client.reply(to: seq) != nil || client.closed }
+        _ = await eventually { client.reply(to: seq) != nil || client.closed }
         guard case .welcome(let version, let build, let sessions, let capabilities, let pid, let startedAt)? = client.reply(to: seq) else {
             let what = client.reply(to: seq).map { "it answered \($0)" }
                 ?? (client.closed ? "the connection closed first" : "no answer in \(Int(hangGuard)) s")
@@ -171,23 +171,23 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         var live: [HostSession] { [counter, shell, job, painted] }
     }
 
-    func scene(arguments: [String] = []) throws -> Scene {
-        let host = try ScratchHostProcess(arguments: arguments)
-        let (client, _, build, _, capabilities, pid, startedAt) = try TestClient.welcomed(host.socket, appKey: host.appKey)
+    func scene(arguments: [String] = []) async throws -> Scene {
+        let host = try await ScratchHostProcess(arguments: arguments)
+        let (client, _, build, _, capabilities, pid, startedAt) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
         #expect(build == host.oldBuild && pid == host.pid && startedAt != nil)
         #expect(capabilities?.contains(HostProtocol.Capability.handover) == true)
-        let counter = try client.spawn(Self.counter)
-        let shell = try client.spawn(nil)
-        let job = try client.spawn(Self.job)
-        let painted = try client.spawn(Self.painted)
-        let done = try client.spawn("echo finished-early; exit 3")
-        #expect(eventually { client.exitStatus(done.id) == 3 })
-        #expect(eventually { counted(client.screen(counter.id) ?? "").last ?? 0 >= 5 })
-        #expect(eventually { client.screen(shell.id)?.contains("$") == true })
-        #expect(eventually { client.screen(painted.id)?.contains("status line") == true })
+        let counter = try await client.spawn(Self.counter)
+        let shell = try await client.spawn(nil)
+        let job = try await client.spawn(Self.job)
+        let painted = try await client.spawn(Self.painted)
+        let done = try await client.spawn("echo finished-early; exit 3")
+        #expect(await eventually { client.exitStatus(done.id) == 3 })
+        #expect(await eventually { counted(client.screen(counter.id) ?? "").last ?? 0 >= 5 })
+        #expect(await eventually { client.screen(shell.id)?.contains("$") == true })
+        #expect(await eventually { client.screen(painted.id)?.contains("status line") == true })
         // Read from the same screen that showed the whole line: a read as "bg=" appears, before its digits, has no pid.
         var background: pid_t = 0
-        #expect(eventually { Self.backgroundPID(client.screen(job.id)).map { background = $0 } != nil })
+        #expect(await eventually { Self.backgroundPID(client.screen(job.id)).map { background = $0 } != nil })
         #expect(background > 0 && getpgid(background) == background && background != job.childPID)
         return Scene(host: host, client: client, counter: counter, shell: shell, job: job, painted: painted, done: done, background: background,
                      startedAt: startedAt)
@@ -201,8 +201,8 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
 
     /// After a handover (or one that went back): the same process, every session as it was, the counter unbroken,
     /// input reaching each session, and a session ending with its real status.
-    func expectCarriedOn(_ scene: Scene, build: Int, screens: [UUID: String], counterBefore: Int) throws {
-        let (client, _, welcomeBuild, sessions, _, pid, startedAt) = try TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
+    func expectCarriedOn(_ scene: Scene, build: Int, screens: [UUID: String], counterBefore: Int) async throws {
+        let (client, _, welcomeBuild, sessions, _, pid, startedAt) = try await TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
         #expect(welcomeBuild == build)
         // The same host: its process, started when it was.
         #expect(pid == scene.host.pid && startedAt == scene.startedAt)
@@ -216,80 +216,80 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         // late (until then the host answers a blank screen; at load 136 a single read came too soon).
         for (id, before) in screens {
             var after: String?
-            #expect(eventually { after = client.screen(id); return after == before }, "\(String(describing: after)) != \(before)")
+            #expect(await eventually { after = client.screen(id); return after == before }, "\(String(describing: after)) != \(before)")
         }
         #expect(screens[scene.done.id]?.contains("finished-early") == true && screens[scene.painted.id]?.contains("BOX") == true)
 
-        client.attach(scene.counter.id)
-        #expect(eventually { counted(client.text(scene.counter.id)).last ?? 0 >= counterBefore + 15 })
+        await client.attach(scene.counter.id)
+        #expect(await eventually { counted(client.text(scene.counter.id)).last ?? 0 >= counterBefore + 15 })
         let numbers = counted(client.text(scene.counter.id))
         #expect(isUnbroken(numbers), "the counter's output after reattach: \(numbers)")
         #expect(numbers.count > counterBefore)
 
         // A view attaching sees the same last screen.
-        client.attach(scene.painted.id)
+        await client.attach(scene.painted.id)
         #expect(viewScreen(client.text(scene.painted.id)) == screens[scene.painted.id])
 
-        client.attach(scene.shell.id)
-        client.attach(scene.job.id)
+        await client.attach(scene.shell.id)
+        await client.attach(scene.job.id)
         client.send(.input(id: scene.shell.id, bytes: Data("echo idle-$((6*7))\r".utf8), reply: false))
         client.send(.input(id: scene.counter.id, bytes: Data("typed-into-counter".utf8), reply: false))
         client.send(.input(id: scene.painted.id, bytes: Data("typed-into-painted".utf8), reply: false))
         client.send(.input(id: scene.job.id, bytes: Data("hello\r".utf8), reply: false))
-        #expect(eventually { client.text(scene.shell.id).contains("idle-42") })
-        #expect(eventually { client.text(scene.counter.id).contains("typed-into-counter") })
-        #expect(eventually { client.text(scene.painted.id).contains("typed-into-painted") })
-        #expect(eventually { client.text(scene.job.id).contains("got:hello") })
+        #expect(await eventually { client.text(scene.shell.id).contains("idle-42") })
+        #expect(await eventually { client.text(scene.counter.id).contains("typed-into-counter") })
+        #expect(await eventually { client.text(scene.painted.id).contains("typed-into-painted") })
+        #expect(await eventually { client.text(scene.job.id).contains("got:hello") })
         // Reaped by the host (still its parent): the program's own status.
-        #expect(eventually { client.exitStatus(scene.job.id) == 7 })
+        #expect(await eventually { client.exitStatus(scene.job.id) == 7 })
         // The job in its own process group carried on too.
         #expect(kill(scene.background, 0) == 0 && getpgid(scene.background) == scene.background)
         // Nothing left on disk.
         // Removed once the restored host has started serving, not before: a client can get here first.
-        #expect(eventually { !FileManager.default.fileExists(atPath: scene.host.lock + ".handover") })
+        #expect(await eventually { !FileManager.default.fileExists(atPath: scene.host.lock + ".handover") })
     }
 
-    @Test func aHandoverKeepsEverySession() throws {
-        let scene = try scene()
+    @Test func aHandoverKeepsEverySession() async throws {
+        let scene = try await scene()
         defer { end(scene) }
         let pid = scene.host.pid
         let screens = Dictionary(uniqueKeysWithValues: [scene.shell, scene.job, scene.painted, scene.done].map { ($0.id, scene.client.screen($0.id) ?? "") })
-        scene.client.attach(scene.counter.id)
+        await scene.client.attach(scene.counter.id)
         let counterBefore = counted(scene.client.text(scene.counter.id)).last ?? 0
 
         let seq = scene.client.send(.handover(executable: scene.host.newBinary))
-        #expect(eventually { scene.client.reply(to: seq) != nil })
+        #expect(await eventually { scene.client.reply(to: seq) != nil })
         #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
-        #expect(eventually { scene.client.closed })
+        #expect(await eventually { scene.client.closed })
 
-        try expectCarriedOn(scene, build: scene.host.newBuild, screens: screens, counterBefore: counterBefore)
+        try await expectCarriedOn(scene, build: scene.host.newBuild, screens: screens, counterBefore: counterBefore)
         #expect(scene.host.pid == pid)
         #expect(scene.host.runningExecutable == URL(fileURLWithPath: scene.host.newBinary).resolvingSymlinksInPath().path)
-        #expect(eventually { scene.host.log.contains("took over 5 sessions") }, "\(scene.host.log)")
+        #expect(await eventually { scene.host.log.contains("took over 5 sessions") }, "\(scene.host.log)")
     }
 
     /// A session carried over by a handover still ends in the session log, and with its signal, as one started by
     /// the new build would; a kill names who asked.
-    @Test func aRestoredSessionsEndIsLoggedWithItsSignal() throws {
-        let scene = try scene()
+    @Test func aRestoredSessionsEndIsLoggedWithItsSignal() async throws {
+        let scene = try await scene()
         defer { end(scene) }
-        let signalled = try scene.client.spawn("exec sleep 600"), killed = try scene.client.spawn("sleep 600")
-        #expect(eventually { (ProcessTable.info(pid: signalled.childPID)?.comm ?? "") == "sleep" })
+        let signalled = try await scene.client.spawn("exec sleep 600"), killed = try await scene.client.spawn("sleep 600")
+        #expect(await eventually { (ProcessTable.info(pid: signalled.childPID)?.comm ?? "") == "sleep" })
         let seq = scene.client.send(.handover(executable: scene.host.newBinary))
-        #expect(eventually { scene.client.reply(to: seq) != nil })
+        #expect(await eventually { scene.client.reply(to: seq) != nil })
         #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
-        #expect(eventually { scene.host.log.contains("took over") })
+        #expect(await eventually { scene.host.log.contains("took over") })
 
-        let (client, _, build, _, _, _, _) = try TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
+        let (client, _, build, _, _, _, _) = try await TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
         #expect(build == scene.host.newBuild)
         kill(signalled.childPID, SIGTERM)
         client.send(.kill(id: killed.id))
-        #expect(eventually { client.latest(signalled.id)?.exit != nil && client.latest(killed.id)?.exit != nil })
+        #expect(await eventually { client.latest(signalled.id)?.exit != nil && client.latest(killed.id)?.exit != nil })
         let death = try #require(client.latest(signalled.id)?.exit), kill = try #require(client.latest(killed.id)?.exit)
         #expect(death.status == 143 && death.signal == SIGTERM && death.cause == "killed by SIGTERM")
         #expect(kill.signal == SIGHUP && kill.killedBy == getpid())
         let lines = { (try? String(contentsOfFile: scene.host.sessionLog, encoding: .utf8)) ?? "" }
-        #expect(eventually { lines().components(separatedBy: "\n").filter { $0.contains("exit ") }.count >= 3 })
+        #expect(await eventually { lines().components(separatedBy: "\n").filter { $0.contains("exit ") }.count >= 3 })
         let all = lines().components(separatedBy: "\n")
         // Started before the handover, ended after it: both in the one log.
         #expect(all.contains { $0.contains("spawn") && $0.contains("pid \(signalled.childPID)") })
@@ -301,34 +301,34 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
 
     /// A program that asked for focus events still has them after a handover, though the replay no longer holds its
     /// ask: Claude Code asks once, and redraws past it long before.
-    @Test func focusEventsAskedForBeforeAHandoverAreKept() throws {
-        let scene = try scene()
+    @Test func focusEventsAskedForBeforeAHandoverAreKept() async throws {
+        let scene = try await scene()
         defer { end(scene) }
-        let asked = try scene.client.spawn("printf '\\033[?1004h\\033[2J\\033[Hdrawn after\\n'; exec sleep 600")
+        let asked = try await scene.client.spawn("printf '\\033[?1004h\\033[2J\\033[Hdrawn after\\n'; exec sleep 600")
         let focus = { (client: TestClient) -> Bool? in
             let seq = client.send(.styledScreen(id: asked.id))
-            guard eventually({ client.reply(to: seq) != nil }),
+            guard eventuallyBlocking({ client.reply(to: seq) != nil }),
                   case .styledScreenText(_, let text, _, let focusEvents)? = client.reply(to: seq), text.contains("drawn after") else { return nil }
             return focusEvents
         }
-        #expect(eventually { focus(scene.client) == true })
+        #expect(await eventually { focus(scene.client) == true })
         let seq = scene.client.send(.handover(executable: scene.host.newBinary))
-        #expect(eventually { scene.client.reply(to: seq) != nil })
+        #expect(await eventually { scene.client.reply(to: seq) != nil })
         #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
-        #expect(eventually { scene.host.log.contains("took over") })
-        let (client, _, build, _, _, _, _) = try TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
+        #expect(await eventually { scene.host.log.contains("took over") })
+        let (client, _, build, _, _, _, _) = try await TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
         #expect(build == scene.host.newBuild)
-        #expect(focus(client) == true)
+        await #expect(focus(client) == true)
     }
 
-    @Test func aBuildThatCantStartLeavesTheHostAsItWas() throws {
-        let scene = try scene()
+    @Test func aBuildThatCantStartLeavesTheHostAsItWas() async throws {
+        let scene = try await scene()
         defer { end(scene) }
         let screens = Dictionary(uniqueKeysWithValues: [scene.shell, scene.job, scene.painted, scene.done].map { ($0.id, scene.client.screen($0.id) ?? "") })
         let broken = scene.host.script("broken-host", "echo 'dyld: missing symbol' >&2; exit 3")
         for target in [broken, scene.host.dir + "/no-such-host", "/etc/hosts"] {
             let seq = scene.client.send(.handover(executable: target))
-            #expect(eventually { scene.client.reply(to: seq) != nil })
+            #expect(await eventually { scene.client.reply(to: seq) != nil })
             guard case .error(let message)? = scene.client.reply(to: seq) else {
                 Issue.record("handover to \(target): \(String(describing: scene.client.reply(to: seq)))")
                 continue
@@ -336,17 +336,17 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
             #expect(message.contains("Couldn't hand over"))
         }
         #expect(!scene.client.closed)
-        scene.client.attach(scene.counter.id)
+        await scene.client.attach(scene.counter.id)
         let counterBefore = counted(scene.client.text(scene.counter.id)).last ?? 0
         scene.client.close()
-        try expectCarriedOn(scene, build: scene.host.oldBuild, screens: screens, counterBefore: counterBefore)
+        try await expectCarriedOn(scene, build: scene.host.oldBuild, screens: screens, counterBefore: counterBefore)
         #expect(scene.host.runningExecutable == URL(fileURLWithPath: scene.host.oldBinary).resolvingSymlinksInPath().path)
     }
 
     /// What the host keeps in memory reaches the new build through the inherited channel, never through the state file.
-    @Test func secretsReachTheNewBuildAndNeverTheStateFile() throws {
+    @Test func secretsReachTheNewBuildAndNeverTheStateFile() async throws {
         let secret = "secret-\(UUID().uuidString)"
-        let scene = try scene(arguments: ["--handover-test-secret", secret])
+        let scene = try await scene(arguments: ["--handover-test-secret", secret])
         defer { end(scene) }
         let copy = scene.host.dir + "/state-as-handed-over"
         // The new build, keeping a copy of the state it's handed.
@@ -356,9 +356,9 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
             exec '\(scene.host.newBinary)' "$@"
             """)
         let seq = scene.client.send(.handover(executable: copying))
-        #expect(eventually { scene.client.reply(to: seq) != nil })
+        #expect(await eventually { scene.client.reply(to: seq) != nil })
         #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
-        #expect(eventually { scene.host.log.contains("took over") })
+        #expect(await eventually { scene.host.log.contains("took over") })
         #expect(scene.host.log.contains("test secret carried: yes"))
         #expect(scene.host.log.contains("and \(secret.utf8.count) bytes of secrets"))
         let handedOver = FileManager.default.contents(atPath: copy) ?? Data()
@@ -372,28 +372,28 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
     /// ad-hoc signed binary on its first exec (amfid), one at a time for the whole Mac. On 2026-10-19, 30 probes at once
     /// beside scripts/test-under-load.sh took 5 s each, and amfid answered nothing for 108 s at load 200. Here the probe
     /// waits 20 s before it starts (longer than the 15 s it was once given): a build slow to start still takes over.
-    @Test func aBuildSlowToStartStillTakesOver() throws {
-        let scene = try scene()
+    @Test func aBuildSlowToStartStillTakesOver() async throws {
+        let scene = try await scene()
         defer { end(scene) }
         let slow = scene.host.script("slow-host", """
             case " $* " in *" --handover-probe "*) sleep 20;; esac
             exec '\(scene.host.newBinary)' "$@"
             """)
         let seq = scene.client.send(.handover(executable: slow))
-        #expect(eventually { scene.client.reply(to: seq) != nil })
+        #expect(await eventually { scene.client.reply(to: seq) != nil })
         guard scene.client.reply(to: seq) == .ok else {
             Issue.record("handover to a build slow to start: \(String(describing: scene.client.reply(to: seq))); \(scene.host.log)")
             return
         }
-        #expect(eventually { scene.host.log.contains("took over 5 sessions") }, "\(scene.host.log)")
-        let (_, _, build, sessions, _, pid, _) = try TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
+        #expect(await eventually { scene.host.log.contains("took over 5 sessions") }, "\(scene.host.log)")
+        let (_, _, build, sessions, _, pid, _) = try await TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
         #expect(build == scene.host.newBuild && pid == scene.host.pid)
         #expect(sessions.map(\.id) == scene.all.map(\.id))
     }
 
     /// The new build passes the probe, then can't restore: it executes the old build's own copy, which does.
-    @Test func aBuildThatCantRestoreGoesBackToTheOldOne() throws {
-        let scene = try scene()
+    @Test func aBuildThatCantRestoreGoesBackToTheOldOne() async throws {
+        let scene = try await scene()
         defer { end(scene) }
         let pid = scene.host.pid
         let screens = Dictionary(uniqueKeysWithValues: [scene.shell, scene.job, scene.painted, scene.done].map { ($0.id, scene.client.screen($0.id) ?? "") })
@@ -401,17 +401,17 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
             case " $* " in *" --handover-probe "*) exec '\(scene.host.newBinary)' "$@";; esac
             exec '\(scene.host.newBinary)' "$@" --handover-fail-restore
             """)
-        scene.client.attach(scene.counter.id)
+        await scene.client.attach(scene.counter.id)
         let counterBefore = counted(scene.client.text(scene.counter.id)).last ?? 0
         let seq = scene.client.send(.handover(executable: failing))
-        #expect(eventually { scene.client.reply(to: seq) != nil })
+        #expect(await eventually { scene.client.reply(to: seq) != nil })
         #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
-        #expect(eventually { scene.client.closed })
+        #expect(await eventually { scene.client.closed })
 
-        try expectCarriedOn(scene, build: scene.host.oldBuild, screens: screens, counterBefore: counterBefore)
+        try await expectCarriedOn(scene, build: scene.host.oldBuild, screens: screens, counterBefore: counterBefore)
         #expect(scene.host.pid == pid)
         #expect(scene.host.log.contains("couldn't take over"))
-        #expect(eventually { scene.host.log.contains("took over 5 sessions") }, "\(scene.host.log)")
+        #expect(await eventually { scene.host.log.contains("took over 5 sessions") }, "\(scene.host.log)")
         // The old build's own copy, the one it started its sessions with.
         #expect(scene.host.runningExecutable?.hasSuffix("/.vibeswitcher/host/launcher-\(scene.host.oldBuild)") == true)
     }

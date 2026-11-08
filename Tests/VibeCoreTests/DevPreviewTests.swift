@@ -403,8 +403,8 @@ final class Once: @unchecked Sendable {
 
 /// Whether `condition` holds within `timeout` seconds (a hang guard), checked every 50 ms.
 func until(timeout: TimeInterval = hangGuard, _ condition: () -> Bool) async -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
+    let deadline = MacTime.real.awake() + timeout
+    while MacTime.real.awake() < deadline {
         if condition() { return true }
         try? await Task.sleep(nanoseconds: 50_000_000)
     }
@@ -635,7 +635,7 @@ struct PreviewProxyTests {
         let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
         let (proxy, port) = try await startProxy(target: target)
         defer { proxy.stop(); upstream.stop() }
-        let other = text(await exchange(port: port, "GET / HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\nTailscale-User-Login: someone@else.com\r\n\(Self.ours)\r\n"))
+        let other = text(await exchange(port: port, "GET / HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\nTailscale-User-Login: someone@else.example\r\n\(Self.ours)\r\n"))
         #expect(other.hasPrefix("HTTP/1.1 403"))
         let stale = text(await exchange(port: port, "GET / HTTP/1.1\r\n\(Self.me)Cookie: vs_preview_8444=OLD\r\n\r\n"))
         #expect(stale.hasPrefix("HTTP/1.1 403"))

@@ -130,6 +130,66 @@ struct LeadRiskTests {
                             Self.change("Sources/New/B.swift", 2, 0), Self.change("y.txt", 0, 0)])
     }
 
+    // MARK: The test census (harness review 2026-11-07)
+
+    static let suite = "Tests/VibeCoreTests/ThingTests.swift"
+
+    /// A `git diff -U0` of `path` with these hunks, each its removed and added lines.
+    static func testPatch(_ hunks: [(removed: [String], added: [String])], in path: String = suite) -> String {
+        "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n" + hunks.enumerated().map { index, hunk in
+            "@@ -\(index * 20 + 1),\(hunk.removed.count) +\(index * 20 + 1),\(hunk.added.count) @@\n"
+                + (hunk.removed.map { "-" + $0 } + hunk.added.map { "+" + $0 }).map { $0 + "\n" }.joined()
+        }.joined()
+    }
+
+    @Test func aBranchDeletingATestIsRaisedNamingIt() {
+        // One @Test deleted from a test file: nothing else in the branch would raise it.
+        let deleted = Self.testPatch([(removed: ["    @Test func itKeepsTheSession() {", "        #expect(store.kept)", "    }", ""], added: [])])
+        let raised = Self.raise([Self.change(Self.suite, 0, 4)], patch: deleted)
+        #expect(raised == "it takes tests out that the base has: removed itKeepsTheSession from \(Self.suite)", "\(raised ?? "nil")")
+        // Its attribute on a line of its own, with arguments over several lines; and an XCTest one.
+        let spread = Self.testPatch([(removed: ["    @Test(arguments: [", "        1, 2,", "    ])", "    func itCounts(n: Int) {", "    }"], added: []),
+                                     (removed: ["    func testItLoads() throws {", "    }"], added: [])])
+        let both = Self.raise([Self.change(Self.suite, 0, 7)], patch: spread)
+        #expect(both == "it takes tests out that the base has: removed itCounts, testItLoads from \(Self.suite)", "\(both ?? "nil")")
+        // A whole test file deleted: git prints its lines under the old path.
+        let file = "diff --git a/\(Self.suite) b/\(Self.suite)\ndeleted file mode 100644\n--- a/\(Self.suite)\n+++ /dev/null\n@@ -1,3 +0,0 @@\n"
+            + "-struct ThingTests {\n-    @Test func a() {}\n-}\n"
+        #expect(Self.raise([Self.change(Self.suite, 0, 3)], patch: file)?.contains("removed a from \(Self.suite)") == true)
+    }
+
+    @Test func aBranchReplacingATestIsRaisedSayingReplaced() {
+        let replaced = Self.testPatch([(removed: ["    @Test func itRefusesAStaleLock() {", "        #expect(refused)"],
+                                        added: ["    @Test func itTakesTheLock() {", "        #expect(taken)"])])
+        let raised = Self.raise([Self.change(Self.suite, 2, 2)], patch: replaced)
+        #expect(raised == "it takes tests out that the base has: replaced itRefusesAStaleLock with itTakesTheLock in \(Self.suite)", "\(raised ?? "nil")")
+        // Disabled, or commented out, it's there and doesn't run.
+        let disabled = Self.testPatch([(removed: ["    @Test func itWaits() {"], added: ["    @Test(.disabled(\"flaky\")) func itWaits() {"])])
+        #expect(Self.raise([Self.change(Self.suite, 1, 1)], patch: disabled) == "it takes tests out that the base has: disabled itWaits in \(Self.suite)")
+        let commented = Self.testPatch([(removed: ["    @Test func itWaits() {"], added: ["    // @Test func itWaits() {"])])
+        #expect(Self.raise([Self.change(Self.suite, 1, 1)], patch: commented) == "it takes tests out that the base has: removed itWaits from \(Self.suite)")
+    }
+
+    @Test func aBranchOnlyAddingOrEditingTestsIsntRaised() {
+        let added = Self.testPatch([(removed: [], added: ["    @Test func itAlsoKeepsTheName() {", "        #expect(named)", "    }"]),
+                                    (removed: [], added: ["    @Test(arguments: [1, 2])", "    func itCountsMore(n: Int) {}", "    func testMore() {}"])])
+        #expect(Self.raise([Self.change(Self.suite, 6, 0)], patch: added) == nil)
+        // A declaration's line edited, or a body changed: the test is still there.
+        let edited = Self.testPatch([(removed: ["    @Test func itWaits() {"], added: ["    @Test func itWaits() async throws {"]),
+                                     (removed: ["        #expect(a)"], added: ["        #expect(b)"])])
+        #expect(Self.raise([Self.change(Self.suite, 2, 2)], patch: edited) == nil)
+        // A test moved to another suite is still there.
+        let other = "Tests/VibeCoreTests/OtherTests.swift"
+        let moved = Self.testPatch([(removed: ["    @Test func itWaits() {", "    }"], added: [])])
+            + Self.testPatch([(removed: [], added: ["    @Test func itWaits() {", "    }"])], in: other)
+        #expect(Self.raise([Self.change(Self.suite, 0, 2), Self.change(other, 2, 0)], patch: moved) == nil)
+        // A helper in a test file whose name starts with test but takes arguments isn't an XCTest test.
+        let helper = Self.testPatch([(removed: ["    static func testPatch(_ hunks: [String]) -> String {", "    }"], added: [])])
+        #expect(Self.raise([Self.change(Self.suite, 0, 2)], patch: helper) == nil)
+        // A product file's `func test…` isn't a test.
+        #expect(Self.raise([Self.change("Sources/VibeCore/Thing.swift")], patch: Self.patch("Sources/VibeCore/Thing.swift", [], removed: ["func testConnection() {"])) == nil)
+    }
+
     // MARK: The model's answer
 
     @Test func theModelsAnswerIsRaiseOrKeepOrNothing() {

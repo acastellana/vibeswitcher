@@ -62,6 +62,18 @@ struct OpenAITranscription: Sendable {
         case empty
         case unreadable
 
+        /// How app.log names it: never the server's words.
+        var name: String {
+            switch self {
+            case .noKey: return "no key"
+            case .tooLong: return "too long"
+            case .status(let code): return "HTTP \(code)"
+            case .network: return "network"
+            case .empty: return "an empty transcript"
+            case .unreadable: return "an unreadable answer"
+            }
+        }
+
         var notice: String {
             switch self {
             case .noKey: return "Dictation needs an OpenAI API key: add one in Settings › General › Dictation."
@@ -126,6 +138,9 @@ struct OpenAITranscription: Sendable {
         do {
             (data, response) = try await client.send(request(audio: audio, model: model, prompt: prompt, key: key))
         } catch {
+            // Which failure (offline, timed out, the connection lost as the Mac slept), by its domain and code only.
+            let error = error as NSError
+            Breadcrumbs.shared.note("dictation: OpenAI's request failed (\(error.domain) \(error.code))")
             throw Failure.network
         }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { throw Failure.status(http.statusCode) }

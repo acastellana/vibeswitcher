@@ -12,22 +12,22 @@ import Testing
 
     func ended(_ client: TestClient, _ id: UUID) -> HostSession.Exit? { client.latest(id)?.exit }
 
-    @Test func aSignalDeathAndAnExitCodeAreToldApart() throws {
+    @Test func aSignalDeathAndAnExitCodeAreToldApart() async throws {
         let path = scratchLog()
         defer { unlink(path) }
         let host = try TestHost(log: path)
         let client = try TestClient(host)
         // SIGTERM from outside, as on 2026-10-17 (the session's interactive shell ignores its own).
-        let signalled = try client.spawn("exec sleep 30")
-        let exited = try client.spawn("exit 143")
-        #expect(eventually { (ProcessTable.info(pid: signalled.childPID)?.comm ?? "") == "sleep" })
+        let signalled = try await client.spawn("exec sleep 30")
+        let exited = try await client.spawn("exit 143")
+        #expect(await eventually { (ProcessTable.info(pid: signalled.childPID)?.comm ?? "") == "sleep" })
         kill(signalled.childPID, SIGTERM)
-        #expect(eventually { ended(client, signalled.id) != nil && ended(client, exited.id) != nil })
+        #expect(await eventually { ended(client, signalled.id) != nil && ended(client, exited.id) != nil })
         let killed = try #require(ended(client, signalled.id)), code = try #require(ended(client, exited.id))
         #expect(killed.status == 143 && killed.signal == 15 && killed.core == false && killed.killedBy == nil)
         #expect(killed.cause == "killed by SIGTERM")
         #expect(code.status == 143 && code.signal == nil && code.cause == "exited 143")
-        #expect(eventually { log(path).components(separatedBy: "\n").filter { $0.contains("exit ") }.count == 2 })
+        #expect(await eventually { log(path).components(separatedBy: "\n").filter { $0.contains("exit ") }.count == 2 })
         let lines = log(path).components(separatedBy: "\n")
         let spawn = try #require(lines.first { $0.contains("spawn") && $0.contains("pid \(signalled.childPID)") })
         #expect(spawn.contains("label 'Test'") && spawn.contains("cwd '/tmp'") && spawn.contains("peer pid \(getpid())"))
@@ -41,21 +41,21 @@ import Testing
     /// attach's size, or a client's), a drag's steps one line. The app's log says why (window resize, pane split…), same
     /// id, same clock. The one real-time wait here (the held line, a second after the attach's) is bounded at 10 s;
     /// the timing itself is `theResizeLogHoldsABurstOnItsClock`'s, on a clock the test moves.
-    @Test func eachResizeIsLoggedOnTheScratchHost() throws {
+    @Test func eachResizeIsLoggedOnTheScratchHost() async throws {
         let path = scratchLog()
         defer { unlink(path) }
         let host = try TestHost(log: path)
         let client = try TestClient(host)
-        let session = try client.spawn(keepRunning)
+        let session = try await client.spawn(keepRunning)
         defer { kill(-session.childPID, SIGKILL) }
         let short = session.id.uuidString.prefix(8)
         func resizes() -> [String] { log(path).components(separatedBy: "\n").filter { $0.contains("resize \(short) ") } }
         let attach = client.send(.attach(id: session.id, cols: 110, rows: 40))
-        #expect(eventually(timeout: 10) { client.reply(to: attach) == .attached(id: session.id) })
+        #expect(await eventually(timeout: 10) { client.reply(to: attach) == .attached(id: session.id) })
         // A drag: five steps right after; then the same size again (the PTY doesn't change: no line).
         for cols in 111...115 { client.send(.resize(id: session.id, cols: cols, rows: 40)) }
         client.send(.resize(id: session.id, cols: 115, rows: 40))
-        #expect(eventually(timeout: 10) { resizes().count == 2 })
+        #expect(await eventually(timeout: 10) { resizes().count == 2 })
         let lines = resizes()
         #expect(lines.first?.hasSuffix("resize \(short) to 110×40 (initial)") == true)
         #expect(lines.last?.contains("resize \(short) to 115×40 (client)") == true)
@@ -116,22 +116,22 @@ import Testing
         #expect(later.isEmpty)
     }
 
-    @Test func aKillAndAShutdownNameWhoAsked() throws {
+    @Test func aKillAndAShutdownNameWhoAsked() async throws {
         let path = scratchLog()
         defer { unlink(path) }
         let host = try TestHost(log: path)
         let client = try TestClient(host)
-        let session = try client.spawn("sleep 30")
+        let session = try await client.spawn("sleep 30")
         let refused = client.send(.shutdown)
-        #expect(eventually { client.reply(to: refused) != nil })
+        #expect(await eventually { client.reply(to: refused) != nil })
         client.send(.kill(id: session.id))
-        #expect(eventually { ended(client, session.id) != nil })
+        #expect(await eventually { ended(client, session.id) != nil })
         let exit = try #require(ended(client, session.id))
         let me = ProcessTable.info(pid: getpid())?.comm
         #expect(exit.signal == SIGHUP && exit.killedBy == getpid() && exit.killedByName == me)
         #expect(exit.cause.hasPrefix("killed by SIGHUP from pid \(getpid())"))
         let accepted = client.send(.shutdown)
-        #expect(eventually { client.reply(to: accepted) == .ok })
+        #expect(await eventually { client.reply(to: accepted) == .ok })
         let lines = log(path).components(separatedBy: "\n")
         #expect(lines.contains { $0.contains("kill \(session.id.uuidString.prefix(8))") && $0.contains("pid \(session.childPID)")
             && $0.contains("peer pid \(getpid())") })
@@ -140,7 +140,7 @@ import Testing
     }
 
     /// The built host on a private socket, lock, log and home: a SIGTERM is logged with its sender, and still ends it.
-    @Test func theHostLogsWhoSignalledIt() throws {
+    @Test func theHostLogsWhoSignalledIt() async throws {
         let path = scratchLog(), socket = scratchSocketPath()
         let home = scratchRoot.appendingPathComponent("vsh-home-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -154,9 +154,9 @@ import Testing
         host.standardError = FileHandle.nullDevice
         try TestHosts.run(host)
         defer { TestHosts.end(host) }
-        #expect(eventually { log(path).contains("host: started") })
+        #expect(await eventually { log(path).contains("host: started") })
         kill(host.processIdentifier, SIGTERM)
-        host.waitUntilExit()
+        #expect(await exited(host), "pid \(host.processIdentifier) still running")
         #expect(host.terminationReason == .uncaughtSignal && host.terminationStatus == SIGTERM)
         #expect(log(path).contains("host: got SIGTERM from pid \(getpid())"))
     }

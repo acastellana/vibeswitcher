@@ -110,9 +110,9 @@ struct RunnableCommandTests {
         #expect(RunnableCommand.runnable(code: "echo 'oops", language: "bash") == nil)
         // On one line those are the shell's to read, exactly as shown (and asked about).
         #expect(RunnableCommand.runnable(code: "git stash  # save", language: "bash")
-                == .init(prompt: "! git stash  # save", needsConfirmation: true))
+                == .init(command: "git stash  # save", needsConfirmation: true))
         #expect(RunnableCommand.runnable(code: "npm run dev &", language: "bash")
-                == .init(prompt: "! npm run dev &", needsConfirmation: true))
+                == .init(command: "npm run dev &", needsConfirmation: true))
         // # inside quotes or a word isn't a comment.
         #expect(RunnableCommand.runnable(code: "echo '# hi'\necho a#b", language: "bash")?.prompt == "! echo '# hi' && echo a#b")
     }
@@ -196,7 +196,7 @@ struct RunnableCommandTests {
         process.standardInput = FileHandle.nullDevice
         try process.run()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        waitForEnd(process)
         return String(decoding: data, as: UTF8.self)
     }
 
@@ -222,9 +222,9 @@ struct RunnableCommandTests {
                                          scripts: folder)?.script != nil)
         // One-liners and lines that join cleanly are still typed as they are.
         #expect(RunnableCommand.runnable(code: "swift test", language: "bash", scripts: folder)
-                == .init(prompt: "! swift test", needsConfirmation: false))
+                == .init(command: "swift test", needsConfirmation: false))
         #expect(RunnableCommand.runnable(code: "cd app\nmake", language: "bash", scripts: folder)
-                == .init(prompt: "! cd app && make", needsConfirmation: true))
+                == .init(command: "cd app && make", needsConfirmation: true))
     }
 
     @Test func onlyOnePlainLineRunsWithoutAsking() {
@@ -238,5 +238,25 @@ struct RunnableCommandTests {
                      "npm publish --force", "tail -f log", "/bin/rm x", "python3 x.py", "echo héllo"] {
             #expect(RunnableCommand.runnable(code: code, language: "bash")?.needsConfirmation == true, "\(code)")
         }
+    }
+
+    /// A fence's info string counts by its first word: ```bash title="setup" is a bash block (it had no Run).
+    @Test func aLanguageWithMoreAfterItStillRuns() {
+        #expect(RunnableCommand.prompt(code: "swift test", language: "bash title=\"setup\"") == "! swift test")
+        #expect(RunnableCommand.prompt(code: "swift test", language: "Shell {.copy}") == "! swift test")
+        #expect(RunnableCommand.prompt(code: "swift test", language: "shellscript") == "! swift test")
+        #expect(RunnableCommand.prompt(code: "let x = 1", language: "swift title=x") == nil)
+    }
+
+    /// One command, typed the way the session takes it: `! ` for Claude Code and Codex, as it is at a shell's prompt.
+    @Test func aRunIsTypedTheWayTheSessionTakesIt() throws {
+        let line = try #require(RunnableCommand.runnable(code: "cd app\nmake", language: "bash"))
+        #expect(line.typed(.bang) == "! cd app && make")
+        #expect(line.typed(.shell) == "cd app && make")
+        let folder = temp.url("scripts")
+        let script = try #require(RunnableCommand.runnable(code: "if true; then\n  echo hi\nfi", language: "sh", scripts: folder))
+        let file = try #require(script.script?.file.path)
+        #expect(script.typed(.bang) == "! sh '\(file)'; rm -f '\(file)'")
+        #expect(script.typed(.shell) == "sh '\(file)'; rm -f '\(file)'")
     }
 }

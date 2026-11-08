@@ -28,6 +28,11 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
     public var review: LeadTask.Review?
     /// Why the risk check raised it from review none to audit (see `LeadRisk`); nil when it didn't.
     public var riskRaised: String?
+    /// auto_advance's audit sample drew it from review none (see `LeadAuditSample`): true, sent to audit; false, drawn
+    /// and not sampled; nil: never drawn.
+    public var sampled: Bool?
+    /// A sampled task's audits so far: Important finding, clean or failed; nil while it has none, or isn't sampled.
+    public var sampleVerdict: LeadAuditSample.Verdict?
     /// The base's commit that reverted its merge (all or part of it), once one did.
     public var revertedBy: String?
     /// When these were counted.
@@ -35,7 +40,8 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
 
     public init(roundsToPass: Int? = nil, rounds: Int = 0, importantFindings: Int = 0, questions: Int = 0, answers: Int = 0,
                 waitingOnUser: Double = 0, mergedWithoutTests: Bool? = nil, mergedUnaudited: Bool? = nil, review: LeadTask.Review? = nil,
-                riskRaised: String? = nil, revertedBy: String? = nil, asOf: Double = Date().timeIntervalSince1970) {
+                riskRaised: String? = nil, sampled: Bool? = nil, sampleVerdict: LeadAuditSample.Verdict? = nil, revertedBy: String? = nil,
+                asOf: Double = Date().timeIntervalSince1970) {
         self.roundsToPass = roundsToPass
         self.rounds = rounds
         self.importantFindings = importantFindings
@@ -46,6 +52,8 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
         self.mergedUnaudited = mergedUnaudited
         self.review = review
         self.riskRaised = riskRaised
+        self.sampled = sampled
+        self.sampleVerdict = sampleVerdict
         self.revertedBy = revertedBy
         self.asOf = asOf
     }
@@ -60,7 +68,10 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
             // Its worker owns it through merge: no audit to count.
             parts.append("Review none: no audit")
         } else {
-            if review == .audit { parts.append("Review audit" + (riskRaised.map { " (audited: \(LeadToolset.clip($0, 90)), as the risk check found)" } ?? "")) }
+            if review == .audit {
+                parts.append("Review audit" + (riskRaised.map { " (audited: \(LeadToolset.clip($0, 90)), as the risk check found)" }
+                    ?? (sampled == true ? " (sampled from review none\(sampleVerdict.map { ": \($0.rawValue)" } ?? ""))" : "")))
+            }
             parts.append(roundsToPass.map { "Passed on audit \($0)" } ?? (rounds == 0 ? "Not audited yet" : "\(rounds) audit\(rounds == 1 ? "" : "s"), not passed yet"))
             parts.append("\(importantFindings) Important finding\(importantFindings == 1 ? "" : "s")")
         }
@@ -89,7 +100,9 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
                   questions: asked.count, answers: asked.filter { $0.answer != nil }.count,
                   waitingOnUser: asked.reduce(0) { $0 + $1.waitingOnUser(now: now) },
                   mergedWithoutTests: folded ? nil : task.merged.map { !$0.tested }, mergedUnaudited: folded ? nil : task.merged.map(\.unaudited),
-                  review: task.reviewLevel, riskRaised: task.riskRaised?.reason, revertedBy: folded ? nil : task.merged?.revertedBy, asOf: now)
+                  review: task.reviewLevel, riskRaised: task.riskRaised?.reason, sampled: task.auditSample?.sampled,
+                  sampleVerdict: task.auditSample?.sampled == true ? LeadAuditSample.verdict(audits) : nil,
+                  revertedBy: folded ? nil : task.merged?.revertedBy, asOf: now)
     }
 }
 

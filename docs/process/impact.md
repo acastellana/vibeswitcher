@@ -127,6 +127,31 @@ cost, the receipts of the 2026-10-31 batch give 8 tasks, 2.9 h and ~$86.
 
 ## Entries
 
+### IM-18: The session header and Team rows stop redrawing for nothing (freezes-remove-the-top, planned)
+
+- **Change:** the session header reads the window's model and the session host into the values it shows and draws its
+  bar (segmented picker, menu, 30 s clock) only when those change, not on every event of every session; it sets the
+  branch it reads only when it changed. Team rows say their time without a `DateComponentsFormatter` (10-50 µs a call,
+  in every row's body). Statistics shows Freezes per hour with each day's rate as a trend. Backlog B3; planned
+  2026-11-08.
+- **Hypothesis:** if the header stops redrawing on other sessions' events, then freezes/h at low load (the 0-12 and 12-24
+  buckets, where the app's own work shows rather than the Mac's starvation) drop by at least a third, because those
+  freezes were SwiftUI updates driven by the host's events (the AttributeGraph and NSHostingView transactions with no
+  app frame, and `SessionHeaderView.body` on top). Freezes at 36 and over are mostly starvation (571 of the week's 577
+  reports had a load over 1 per core, 466 over 2) and needn't move.
+- **Metric:** freezes/h by load bucket, and Statistics › Freezes per hour with its daily trend. Guard: the header still
+  shows the selected session's changes (its state, branch, activity; `FreezeCausesTests`).
+- **Baseline:** the 2026-11-07 digest: 75 freezes that day, 94 a day over the week. `scripts/impact-metrics.sh
+  2026-11-01..2026-11-07`: 3.43 freezes/h (577 hang reports in 168.0 h, about 82 a day); by bucket 0-12 0.34/h
+  (27 / 79.2 h), 12-24 5.03/h (72 / 14.3 h), 24-36 8.79/h (47 / 5.3 h), 36-48 17.31/h, 48-72 26.42/h, 72-100 37.64/h,
+  100-150 12.00/h, 150+ 42.86/h; 218 unsampled.
+- **Check:** 2026-11-15, window the week after the build is installed, by load bucket (read it within days: reports go
+  after a week).
+- **Status:** measuring
+- **Result:** (pending)
+- **Verdict:** (pending)
+- **Why:** (pending)
+
 ### IM-17: An agent opens a New Shell with the user's one click (an-agent-can-open, planned)
 
 - **Change:** `vs-shell run [--cwd DIR] [--label TEXT] -- COMMAND…`, on every session's PATH, files a request the session

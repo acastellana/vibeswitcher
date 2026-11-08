@@ -70,11 +70,11 @@ struct ChatTextPrepareLeakTests {
         return (count, output)
     }
 
-    @Test func leaksIsEndedWhenItGivesNoAnswer() throws {
+    @Test func leaksIsEndedWhenItGivesNoAnswer() async throws {
         let start = Date()
         // /bin/sleep given 600 for a pid: a leaks that never answers.
-        #expect {
-            try Self.leakCount(600, tool: "/bin/sleep", limit: 1)
+        await #expect {
+            try await offPool { try Self.leakCount(600, tool: "/bin/sleep", limit: 1) }
         } throws: { error in
             guard case .timedOut(let seconds, let pid)? = error as? LeaksFailure else { return false }
             return seconds == 1 && kill(pid, 0) == -1 && errno == ESRCH
@@ -83,7 +83,7 @@ struct ChatTextPrepareLeakTests {
         #expect(Date().timeIntervalSince(start) < 30)
     }
 
-    @Test func buildingTextsOnEightThreadsLeaksNothing() throws {
+    @Test func buildingTextsOnEightThreadsLeaksNothing() async throws {
         let app = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("VibeSwitcher")
         let home = scratch.url("prepare-leaks")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -114,12 +114,13 @@ struct ChatTextPrepareLeakTests {
             ended.wait()
         }
         let lines = LineReader(output.fileHandleForReading)
-        let ready = try #require(lines.next())
+        // The bench's lines and leaks (tens of seconds) awaited on threads of their own, not the cooperative pool.
+        let ready = try #require(await offPool { lines.next() })
         #expect(ready == "ready 160 texts", "\(ready)")
-        let before = try Self.leakCount(process.processIdentifier)
+        let before = try await offPool { try Self.leakCount(pid) }
         input.fileHandleForWriting.write(Data("go\n".utf8))
-        #expect(lines.next() == "built")
-        let after = try Self.leakCount(process.processIdentifier)
+        #expect(await offPool { lines.next() } == "built")
+        let after = try await offPool { try Self.leakCount(pid) }
         print("leaks: \(before.count) before building, \(after.count) after")
         #expect(after.count <= before.count, "leaks: \(before.count) before building, \(after.count) after\n\(after.text.prefix(4000))")
     }

@@ -44,6 +44,15 @@ struct AccountUsageTests: LeadTeamFixture {
         return try #require(TranscriptTail.read(url: file)?.usageLimit, "no usage limit read")
     }
 
+    /// A live refusal for startup tests; the historical transcript above keeps its original parsing expectations.
+    /// Live at the test clock (`now`, the time every test here reads the usage at): it resets a day after it.
+    func activeFableRefusal(now: Date = AccountUsageTests.now) throws -> UsageLimit {
+        var limit = try tail(Self.fableRefusal)
+        limit.at = now.timeIntervalSince1970
+        limit.resetsAt = now.timeIntervalSince1970 + 86_400
+        return limit
+    }
+
     func repo() throws -> String {
         let url = temp.url("usage")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -315,7 +324,8 @@ struct AccountUsageTests: LeadTeamFixture {
         #expect(!call(lead, "audit", ["task": "one"]).isError)
         let verifier = try #require(BoardStore(root: root).load().task("one")?.verifier)
         // Its transcript's last line, as the host reads it: the Fable limit.
-        runtime.usageLimits[verifier] = try tail(Self.fableRefusal)
+        let refusal = try activeFableRefusal()
+        runtime.usageLimits[verifier] = refusal
         let status = call(lead, "status").text
         #expect(status.contains("the fable limit (seven_day_overage_included): reached (Claude refused a request at it)"), "\(status)")
         let refused = call(lead, "audit", ["task": "two"])
@@ -326,7 +336,7 @@ struct AccountUsageTests: LeadTeamFixture {
         try runtime.kill(verifier)
         #expect(call(lead, "audit", ["task": "two"]).isError)
         // Up to its reset, by the lead's clock, and no longer.
-        let reset = Date(timeIntervalSince1970: 1_793_876_400)
+        let reset = Date(timeIntervalSince1970: try #require(refusal.resetsAt))
         lead.usageClock = { reset.addingTimeInterval(-1) }
         #expect(call(lead, "audit", ["task": "two"]).isError)
         lead.usageClock = { reset }
@@ -350,7 +360,7 @@ struct AccountUsageTests: LeadTeamFixture {
         #expect(!call(lead, "start_worker", ["task": "two"]).isError)
         #expect(!call(lead, "audit", ["task": "one"]).isError)
         let verifier = try #require(BoardStore(root: root).load().task("one")?.verifier)
-        runtime.usageLimits[verifier] = try tail(Self.fableRefusal)
+        runtime.usageLimits[verifier] = try activeFableRefusal()
         #expect(call(lead, "audit", ["task": "two"]).isError)
         #expect(!call(lead, "configure", ["verifier_model": "opus"]).isError)
         let moved = call(lead, "audit", ["task": "two"])
@@ -369,7 +379,7 @@ struct AccountUsageTests: LeadTeamFixture {
         for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
         #expect(!call(lead, "start_worker", ["task": "one"]).isError)
         let worker = try #require(BoardStore(root: root).load().task("one")?.worker)
-        runtime.usageLimits[worker] = try tail(Self.fableRefusal)
+        runtime.usageLimits[worker] = try activeFableRefusal()
         let started = call(lead, "start_worker", ["task": "two"])
         #expect(!started.isError, "\(started.text)")
         #expect(usageStore.load().limits.isEmpty, "\(usageStore.load().limits)")
@@ -406,7 +416,7 @@ struct AccountUsageTests: LeadTeamFixture {
 extension LeadAdvanceTests {
     /// auto_advance starts nothing near a limit, and tells the lead once, with the reset time; at the reset (its look
     /// again, armed once; the reading by then under 80 %) the tasks start, with nothing else nudging it.
-    @Test func nearALimitAutoAdvanceStartsNothingAndTellsTheLeadOnce() throws {
+    @Test func nearALimitAutoAdvanceStartsNothingAndTellsTheLeadOnce() async throws {
         let (root, runtime, lead) = try team()
         // Read at a fixed time (`LeadToolset.usageClock`), never the wall clock's.
         let now = AccountUsageTests.now, resets = AccountUsageTests.tomorrow
@@ -422,10 +432,10 @@ extension LeadAdvanceTests {
         _ = lead.call("add_task", ["title": "First", "goal": "g", "acceptance": ["a"]])
         _ = lead.call("add_task", ["title": "Second", "goal": "g", "acceptance": ["a"]])
         let told = { reports(runtime).filter { $0.contains("The account's usage is near a limit: the weekly limit (every model): 91% used, resets ") } }
-        #expect(advancing.until { !told().isEmpty }, "\(reports(runtime))")
-        advancing.settle()
+        #expect(await advancing.until { !told().isEmpty }, "\(reports(runtime))")
+        await advancing.settle()
         LeadAdvance.nudge(root: root)
-        advancing.settle()
+        await advancing.settle()
         #expect(told().count == 1, "\(reports(runtime))")
         #expect(told().first?.contains("Tell the user") == true)
         #expect(task("first", root)?.status == .planned && task("second", root)?.status == .planned && runtime.spawned.isEmpty)
@@ -435,7 +445,7 @@ extension LeadAdvanceTests {
         // The reset: the next reading is under the threshold, and the armed look starts them.
         UsageStatusLine.run(input: Data(status(30).utf8), store: usageStore, home: temp.url("no-home").path, now: now) { _ in }
         wakes.first?.1()
-        #expect(advancing.until { task("first", root)?.status == .running && task("second", root)?.status == .running })
+        #expect(await advancing.until { task("first", root)?.status == .running && task("second", root)?.status == .running })
     }
 
     /// The looks again a test's lead armed (`LeadToolset.usageWake`), not run.

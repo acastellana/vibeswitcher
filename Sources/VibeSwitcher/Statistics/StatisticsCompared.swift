@@ -104,7 +104,7 @@ struct ComparedPage: Equatable {
         guard let cost = f.processCost else {
             let why: String
             if f.codexLeftOut > 0 || f.codexTokens != nil {
-                why = "Codex tokens have no price" + (f.codexTokens.map { ": \(LeadReceipt.count($0)), not in the cost" } ?? "")
+                why = "Codex-worked merges are left out of the solo baseline" + (f.codexTokens.map { ": \(LeadReceipt.count($0)) Codex tokens" } ?? "")
             } else if f.rerolledLeftOut > 0 {
                 why = "the merges with a known cost were re-rolled: their attempts aren't split"
             } else {
@@ -127,7 +127,7 @@ struct ComparedPage: Equatable {
         if cost.reran > 0 { unknown.append("\(cost.reran) merge rerun\(cost.reran == 1 ? "" : "s")") }
         if cost.rerolledLeftOut > 0 { unknown.append("\(cost.rerolledLeftOut) re-rolled merge\(cost.rerolledLeftOut == 1 ? "" : "s")") }
         if !unknown.isEmpty { parts.append("not recorded: " + unknown.joined(separator: ", ")) }
-        if let tokens = f.codexTokens, tokens > 0 { parts.append("Codex tokens \(LeadReceipt.count(tokens)), not in the cost") }
+        if let tokens = f.codexTokens, tokens > 0 { parts.append("Codex tokens \(LeadReceipt.count(tokens)), not in the baseline") }
         return Cell(value: (cost.atLeast ? "≥ " : "") + QualityPage.percent(share), detail: parts.joined(separator: " · "))
     }
 

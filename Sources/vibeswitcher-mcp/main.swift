@@ -7,6 +7,13 @@ import Darwin
 import Foundation
 import VibeCore
 
+// A verifier session's shell prefix (`BranchCode.prefix`): each command its Claude Code runs, under the branch-code
+// wrapper, or its own tool server as itself. Before anything else: it runs none of the server's code.
+if BranchCode.isPrefix(CommandLine.arguments, environment: ProcessInfo.processInfo.environment) {
+    exit(BranchCode.runPrefix(CommandLine.arguments, environment: ProcessInfo.processInfo.environment,
+                              executable: Bundle.main.executablePath ?? CommandLine.arguments[0]))
+}
+
 // `vibeswitcher-mcp --keeper <arguments>`, as Claude Code starts it (see `LeadLaunch`): the tool server with the other
 // arguments, run as a child that's started again when it stops (see `MCPKeeper`). First of all, so the keeper runs
 // none of the server's code: its own log, and the relay.
@@ -139,6 +146,9 @@ MCPLog.start(role: startedAs)
 MCPLog.note("started: pid \(getpid()), parent \(getppid()), as \(startedAs), \(MCPServer.describe(BinaryWatch.identity(of: Bundle.main.executablePath ?? CommandLine.arguments[0])))"
             + (handover.map { ", switched in place from the \(MCPServer.describe($0.binary)) before it" } ?? ", fresh") + "; \(MCPLog.descriptors())")
 atexit { MCPLog.note("exiting: \(MCPLog.descriptors())") }
+// This process's build, read now (`ServerBuild.running` is read once): an install replacing the bundle later must not
+// pass for the code this process runs, which the merges' receipts name and status compares with the base.
+MCPLog.note("source: build \(ServerBuild.running?.label ?? "none (not in an app bundle)")")
 // A write to a pipe or socket whose reader has gone fails (EPIPE) instead of ending the process unseen: noted, and
 // served on. Caught, not ignored: what a call starts gets SIGPIPE at its default.
 signal(SIGPIPE) { _ in }
@@ -268,6 +278,8 @@ final class HostRuntime: LeadRuntime {
     }
 
     func loadAverages() -> MacLoad.Averages? { MacLoad.averages() }
+
+    func memoryReading() -> MacMemory? { MacMemory.read() }
 
     func census() throws -> [HostCensus]? { try HostCall.census(socket: socket) }
 

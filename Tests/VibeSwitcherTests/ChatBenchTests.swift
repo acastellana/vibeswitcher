@@ -27,7 +27,7 @@ struct ChatBenchTests {
     let scratch = Scratch()
 
     /// Runs the bench on a copy of the fixture in a scratch home with `settings`.
-    func bench(_ settings: [String: String]) throws -> (status: Int32, output: String) {
+    func bench(_ settings: [String: String]) async throws -> (status: Int32, output: String) {
         let app = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("VibeSwitcher")
         #expect(FileManager.default.isExecutableFile(atPath: app.path))
         let home = scratch.url("chat-bench")
@@ -52,7 +52,7 @@ struct ChatBenchTests {
         let ended = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in ended.signal() }
         try process.run()
-        if ended.wait(timeout: .now() + hangGuard) == .timedOut {
+        if await offPool({ ended.wait(timeout: .now() + hangGuard) }) == .timedOut {
             process.terminate()
             Issue.record("the bench hung")
             return (-1, (try? String(contentsOf: output, encoding: .utf8)) ?? "")
@@ -65,11 +65,11 @@ struct ChatBenchTests {
                          "VIBESWITCHER_BENCH_TICKS": "1", "VIBESWITCHER_BENCH_UPDATES": "1"]
 
     @Test(.tags(.perf), .enabled(if: perfRun, perfOnly), arguments: [0, 2], ["inspector", "no inspector"])
-    func theChatSettlesWithoutAStall(earlier: Int, pane: String) throws {
+    func theChatSettlesWithoutAStall(earlier: Int, pane: String) async throws {
         var settings = Self.settle
         settings["VIBESWITCHER_BENCH_SIZE"] = Self.panes[pane]
         if earlier > 0 { settings["VIBESWITCHER_BENCH_EARLIER"] = "\(earlier)" }
-        var run = try bench(settings)
+        var run = try await bench(settings)
         print("chat bench, \(earlier) pages back, \(pane): status \(run.status)\n\(run.output)")
         #expect(run.output.contains("stall rule: "), "\(run.output)")
         // Over load_threshold at the start or the end: recorded only.
@@ -77,7 +77,7 @@ struct ChatBenchTests {
         // Under it the Mac can still keep the bench off a core for a while (2026-10-19 at load 17 on 12 cores: a 0.94 s
         // tick, 0.25 s of it on the CPU): one more run, and if the Mac starves that one too it's recorded only.
         if Self.starved(run) {
-            run = try bench(settings)
+            run = try await bench(settings)
             print("chat bench again, the first run starved: status \(run.status)\n\(run.output)")
             guard !run.output.contains("is over load_threshold"), !Self.starved(run) else { return }
         }
@@ -122,12 +122,12 @@ struct ChatBenchTests {
     /// one's top to the end. Read at the top, the reopen shows 5 rows more above it (`ChatWindow.shown`'s context); in
     /// the middle the same rows, so the same height.
     @Test(.tags(.perf), .enabled(if: perfRun, perfOnly), arguments: ["top", "middle"])
-    func aReopenSettlesAtTheFirstOpensHeight(position: String) throws {
+    func aReopenSettlesAtTheFirstOpensHeight(position: String) async throws {
         var settings = Self.settle
         settings["VIBESWITCHER_BENCH_OPEN"] = position
         settings["VIBESWITCHER_BENCH_AT"] = position
         settings["VIBESWITCHER_BENCH_SIZE"] = Self.panes["no inspector"]
-        let run = try bench(settings)
+        let run = try await bench(settings)
         print("chat bench, read at the \(position): status \(run.status)\n\(run.output)")
         let lines = run.output.split(separator: "\n").map(String.init)
         // Read once shown, not before.
@@ -219,11 +219,11 @@ struct ChatBenchTests {
         #expect(!ChatBench.waitsAfterReopen(second: 7, seconds: 8, reopenedAt: 3, readyAt: nil))
     }
 
-    @Test func aLoadedMacJudgesTicksAgainstTheFirstOpen() throws {
+    @Test func aLoadedMacJudgesTicksAgainstTheFirstOpen() async throws {
         var settings = Self.settle
         settings["VIBESWITCHER_BENCH_LOAD"] = "100000"
         settings["VIBESWITCHER_BENCH_EARLIER"] = "1"
-        let run = try bench(settings)
+        let run = try await bench(settings)
         print("chat bench at a made-up load of 100000: status \(run.status)\n\(run.output)")
         #expect(run.output.contains("stall rule: the Mac's 1-minute load 100000 is over load_threshold "), "\(run.output)")
         #expect(run.output.contains("the first open's ticks are only recorded, later ones fail over 4 × its longest"), "\(run.output)")
@@ -376,7 +376,7 @@ struct ChatBenchSettleScriptTests {
         process.standardError = pipe
         try process.run()
         let output = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        waitForEnd(process)
         return (process.terminationStatus, String(decoding: output, as: UTF8.self))
     }
 

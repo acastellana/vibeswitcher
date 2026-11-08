@@ -3,7 +3,7 @@ import Testing
 @testable import VibeCore
 
 /// The merge gate's one rerun of failing tests, its flake ledger, and the catch-up message a merge sends to running
-/// branches it overlaps (see `MergeRerun`, `LeadBoard.recordFlakes`, `LeadToolset.tellToCatchUp`).
+/// branches it overlaps (see `MergeRerun`, `FlakeLedger.recordFlakes`, `LeadToolset.tellToCatchUp`).
 struct MergeGateTests: LeadTeamFixture {
     let temp = Scratch()
     let vault: LeadVault
@@ -106,13 +106,13 @@ struct MergeGateTests: LeadTeamFixture {
 
     // MARK: The ledger
 
-    @Test func eachFailingTestsLinesAreKeptMaskedAndCapped() {
+    @Test func eachFailingTestsLinesAreKeptMaskedAndCapped() async {
         let output = """
             ◇ Test flaky() started.
             ✘ Test flaky() recorded an issue at FlakyTests.swift:3:5: Expectation failed: (header → "X-Auth: Bearer abc123def456") == nil
             ↳ waited for the reply
             ✔ Test steady() passed after 0.001 seconds.
-            ✘ Test param(n:) recorded an issue with 1 argument n → 2 at ParamTests.swift:9:7: Expectation failed: eventually {
+            ✘ Test param(n:) recorded an issue with 1 argument n → 2 at ParamTests.swift:9:7: Expectation failed: await eventually {
                 n == 3
             }
             \u{1B}[1;31m✘\u{1B}[0m Test flaky() failed after 0.010 seconds with 1 issue.
@@ -123,7 +123,7 @@ struct MergeGateTests: LeadTeamFixture {
         let evidence = MergeRerun.evidence(in: output, tests: ["flaky()", "param(n:)", "OldTests.testIt", "crashed()"])
         #expect(evidence["flaky()"] == [#"✘ Test flaky() recorded an issue at FlakyTests.swift:3:5: Expectation failed: (header → "X-Auth: Bearer •••") == nil"#,
                                         "↳ waited for the reply", "✘ Test flaky() failed after 0.010 seconds with 1 issue."], "\(evidence)")
-        #expect(evidence["param(n:)"] == ["✘ Test param(n:) recorded an issue with 1 argument n → 2 at ParamTests.swift:9:7: Expectation failed: eventually {",
+        #expect(evidence["param(n:)"] == ["✘ Test param(n:) recorded an issue with 1 argument n → 2 at ParamTests.swift:9:7: Expectation failed: await eventually {",
                                           "    n == 3", "}"], "\(evidence)")
         #expect(evidence["OldTests.testIt"]?.count == 2, "\(evidence)")
         // A test with no line of its own (one that crashed) is left out, and so is one that isn't asked for.
@@ -137,25 +137,25 @@ struct MergeGateTests: LeadTeamFixture {
     }
 
     @Test func aTestThatFlakesThreeTimesInAWeekIsDueOnce() {
-        var board = LeadBoard()
+        var board = FlakeLedger()
         let day = 86_400.0, start = 1_000_000.0
         // One flake eight days ago is out of the window.
-        #expect(board.recordFlakes(["flaky()"], task: "old", commit: "c0", now: start).isEmpty)
-        #expect(board.recordFlakes(["flaky()", "other()"], task: "one", commit: "c1", now: start + 8 * day).isEmpty)
-        #expect(board.recordFlakes(["flaky()"], task: "two", commit: "c2", now: start + 9 * day).isEmpty)
-        let due = board.recordFlakes(["flaky()"], task: "three", commit: "c3", now: start + 10 * day)
+        #expect(board.recordFlakes(["flaky()"], task: "old", commit: "c0", now: start).due.isEmpty)
+        #expect(board.recordFlakes(["flaky()", "other()"], task: "one", commit: "c1", now: start + 8 * day).due.isEmpty)
+        #expect(board.recordFlakes(["flaky()"], task: "two", commit: "c2", now: start + 9 * day).due.isEmpty)
+        let due = board.recordFlakes(["flaky()"], task: "three", commit: "c3", now: start + 10 * day).due
         #expect(due.map(\.test) == ["flaky()"] && due.first?.merges == ["one", "two", "three"])
         board.notePlanned("fix-the-flaky-test-flaky", for: "flaky()")
         // The next flake doesn't plan another; three more after the planned one do.
-        #expect(board.recordFlakes(["flaky()"], task: "four", commit: "c4", now: start + 10 * day + 1).isEmpty)
-        #expect(board.recordFlakes(["flaky()"], task: "five", commit: "c5", now: start + 10 * day + 2).isEmpty)
-        #expect(board.recordFlakes(["flaky()"], task: "six", commit: "c6", now: start + 10 * day + 3).map(\.test) == ["flaky()"])
+        #expect(board.recordFlakes(["flaky()"], task: "four", commit: "c4", now: start + 10 * day + 1).due.isEmpty)
+        #expect(board.recordFlakes(["flaky()"], task: "five", commit: "c5", now: start + 10 * day + 2).due.isEmpty)
+        #expect(board.recordFlakes(["flaky()"], task: "six", commit: "c6", now: start + 10 * day + 3).due.map(\.test) == ["flaky()"])
         // Unnamed failures are recorded and plan nothing.
-        for n in 0..<3 { #expect(board.recordFlakes([MergeRerun.unnamed], task: "u\(n)", commit: "u", now: start + 10 * day + 4).isEmpty) }
+        for n in 0..<3 { #expect(board.recordFlakes([MergeRerun.unnamed], task: "u\(n)", commit: "u", now: start + 10 * day + 4).due.isEmpty) }
         let line = try? #require(board.flakeLine(now: start + 10 * day + 5))
         #expect(line?.contains("flaky() ×6 (one, two, three, four, five, six) → task fix-the-flaky-test-flaky") == true, "\(line ?? "")")
         #expect(line?.contains("other() ×1 (one)") == true)
-        #expect(LeadBoard().flakeLine(now: start) == nil)
+        #expect(FlakeLedger().flakeLine(now: start) == nil)
     }
 
     // MARK: Merges
@@ -180,6 +180,9 @@ struct MergeGateTests: LeadTeamFixture {
         }
         #expect(Git.run(["commit", "-q", "-m", message], in: dir).ok)
     }
+
+    /// The flake ledger's file in `root`, as read now.
+    func ledger(_ root: String) -> FlakeLedger { FlakeLedgerStore(root: root).load() }
 
     func ran() -> [String] {
         ((try? String(contentsOfFile: runs, encoding: .utf8)) ?? "").split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
@@ -241,9 +244,17 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(try String(contentsOfFile: regression, encoding: .utf8) == "ran\n")
         let board = BoardStore(root: root).load()
         #expect(board.task("add-b")?.status == .done)
-        let flake = try #require(board.flakes?.first)
-        #expect(board.flakes?.count == 1 && flake.test == "flaky()" && flake.task == "add-b" && flake.commit == board.task("add-b")?.merged?.commit)
+        let flake = try #require(ledger(root).flakes.first)
+        #expect(ledger(root).flakes.count == 1 && flake.test == "flaky()" && flake.task == "add-b" && flake.commit == board.task("add-b")?.merged?.commit)
+        #expect(flake.filtered == false && board.flakes == nil, "\(flake)")
+        // A whole rerun isn't run again on the base: recorded, unpaired.
+        let rerun = try #require(ledger(root).reruns.first)
+        #expect(ledger(root).reruns.count == 1 && rerun.task == "add-b" && rerun.passed && !rerun.filtered && rerun.tests == ["flaky()"], "\(rerun)")
+        #expect(rerun.base == .skipped && rerun.baseNote == "a whole rerun isn't run on the base", "\(rerun)")
         let status = lead.call("status", [:]).text
+        #expect(status.contains("Merge reruns in the last 7 days (record only, nothing here decides a merge): 1 merge went to a rerun, 1 passed it. "
+                                + "Filtered reruns (the failing tests only): none ran; whole reruns: 1 of 1 passed (100%). "
+                                + "The failing tests run once on the base: branch red/base green (the branch's) 0, red on the base too (flaky) 0, not paired 1"), "\(status)")
         #expect(status.contains("Flaky tests in the last 7 days (1 flake: each failed a merge's test run, passed its rerun"), "\(status)")
         #expect(status.contains("flaky() ×1 (add-b)"), "\(status)")
         let log = vault.scratch(root: root, "add-b/merge-test.log")
@@ -280,8 +291,7 @@ struct MergeGateTests: LeadTeamFixture {
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
         #expect(ran() == ["run ", "run "])
-        let board = BoardStore(root: root).load()
-        #expect(board.flakes?.map(\.test) == ["flaky()", MergeRerun.unnamed])
+        #expect(ledger(root).flakes.map(\.test) == ["flaky()", MergeRerun.unnamed])
         #expect(!merged.text.contains("bystander()") && !merged.text.contains("aFailingTestsHostIsEnded()"), "\(merged.text)")
     }
 
@@ -296,7 +306,11 @@ struct MergeGateTests: LeadTeamFixture {
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
         #expect(merged.text.contains("the rerun of those tests passed"), "\(merged.text)")
-        #expect(ran() == ["run ", #"run --filter /flaky\(\)(/|$)"#])
+        // The rerun, then the same filtered run once on the base (main), where it passes: the branch's, record only.
+        #expect(ran() == ["run ", #"run --filter /flaky\(\)(/|$)"#, #"run --filter /flaky\(\)(/|$)"#])
+        let rerun = try #require(ledger(root).reruns.first)
+        #expect(rerun.filtered && rerun.passed && rerun.base == .green && rerun.baseCommit == BoardStore(root: root).load().task("add-b")?.merged?.onto, "\(rerun)")
+        #expect(ledger(root).flakes.first?.filtered == true)
     }
 
     @Test func aFilteredRerunThatRanNoTestDoesntMerge() throws {
@@ -317,10 +331,12 @@ struct MergeGateTests: LeadTeamFixture {
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(merged.isError)
         #expect(merged.text.contains("didn't show flaky() passing"), "\(merged.text)")
-        #expect(ran().count == 2)
+        #expect(ran().count == 3)
+        // On the base the filter runs nothing either: no pairing.
+        #expect(ledger(root).reruns.map(\.passed) == [false] && ledger(root).reruns.first?.base == .absent, "\(ledger(root).reruns)")
         #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
         #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
-        #expect(BoardStore(root: root).load().flakes == nil)
+        #expect(ledger(root).flakes.isEmpty)
     }
 
     @Test func aRunThatFailsTwiceIsRefusedWithTheRerunsOutputAndRerunsOnce() throws {
@@ -336,11 +352,14 @@ struct MergeGateTests: LeadTeamFixture {
         let lines = merged.text.components(separatedBy: "\n")
         #expect(lines.first == "The test command fails on add-b rebased onto main, and again on its rerun (run once, after the first run failed).", "\(merged.text)")
         #expect(lines.dropFirst().first == "Failing tests (1): flaky()")
-        #expect(ran() == ["run ", #"run --filter /flaky\(\)(/|$)"#])
+        // Then once on the base, where it fails too (red on the base: flaky, or broken before the branch). Record only.
+        #expect(ran() == ["run ", #"run --filter /flaky\(\)(/|$)"#, #"run --filter /flaky\(\)(/|$)"#])
         let saved = try String(contentsOf: vault.scratch(root: root, "add-b/merge-test.log"), encoding: .utf8)
         #expect(saved.hasPrefix(Worktrees.rerunHeader), "\(saved.prefix(300))")
+        #expect(!saved.contains("record only"), "the base run's output isn't the merge's")
         let board = BoardStore(root: root).load()
-        #expect(board.task("add-b")?.status == .failed && board.flakes == nil)
+        #expect(board.task("add-b")?.status == .failed && ledger(root).flakes.isEmpty)
+        #expect(ledger(root).reruns.map(\.passed) == [false] && ledger(root).reruns.first?.base == .red, "\(ledger(root).reruns)")
         #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
     }
 
@@ -412,6 +431,146 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(line.firstRun == "failed" && line.result == "failed" && line.reran == ["flaky()"] && line.rerunWhole == false, "\(line)")
     }
 
+    /// The paired base run is skipped, and said so, while the Mac is over load_threshold; the merge goes ahead as
+    /// before.
+    @Test func thePairedBaseRunIsSkippedOverLoadThreshold() throws {
+        let root = try repo()
+        try fakeSuite(root, passes: "[[ \"$*\" == *--filter* ]]")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.macLimits = { MacLimits(maxSessions: 6, loadThreshold: 24) }
+        configure(lead, ["test_command": "bash scripts/test.sh"])
+        try audited(lead, runtime, root: root)
+        // Room for the merge's run when it starts; over the threshold once its rerun is done.
+        runtime.loadReadings = [0.5]
+        runtime.load = 50
+
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(ran() == ["run ", #"run --filter /flaky\(\)(/|$)"#])
+        let rerun = try #require(ledger(root).reruns.first)
+        #expect(rerun.passed && rerun.base == .skipped && rerun.baseNote == "the Mac's load (50) was over load_threshold (24)", "\(rerun)")
+    }
+
+    /// A fix-the-flaky-test task's merge records the test it fixed (fixedBy); the next flake of that test tells the
+    /// lead once, naming the fix; a flake after that doesn't tell it again.
+    @Test func aFixedTestThatFlakesAgainTellsTheLeadOnceNamingTheFix() throws {
+        let root = try repo()
+        // Flaky once flaky.flag is on main (add-c brings it); its filtered rerun always passes.
+        try fakeSuite(root, passes: "[[ \"$*\" == *--filter* ]] || [[ ! -e flaky.flag ]]")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        configure(lead, ["test_command": "bash scripts/test.sh"])
+        // add-b stands for the fix task the ledger planned for flaky().
+        try FlakeLedgerStore(root: root).update { ledger in
+            ledger.flakes.append(LeadFlake(test: "flaky()", task: "earlier", commit: "c1", at: Date().timeIntervalSince1970 - 86_400, planned: "add-b"))
+        }
+        try audited(lead, runtime, root: root)
+        let fixed = lead.call("merge", ["task": "add-b"])
+        #expect(!fixed.isError, "\(fixed.text)")
+        let fixCommit = try #require(BoardStore(root: root).load().task("add-b")?.merged?.commit)
+        let fix = try #require(ledger(root).fixes.first)
+        #expect(ledger(root).fixes.count == 1 && fix.test == "flaky()" && fix.fixedBy == "add-b" && fix.commit == fixCommit, "\(ledger(root).fixes)")
+        let told = { BoardStore(root: root).load().reports?.filter { $0.about == "flake ledger" } ?? [] }
+        #expect(told().isEmpty)
+
+        try audited(lead, runtime, root: root, slug: "add-c", files: ["flaky.flag": "x\n"])
+        let again = lead.call("merge", ["task": "add-c"])
+        #expect(!again.isError, "\(again.text)")
+        #expect(again.text.contains("flaky() flaked again in add-c's merge, though add-b merged to fix it (\(fixCommit.prefix(8))"), "\(again.text)")
+        #expect(told().count == 1 && told().first?.text.contains("add-b merged to fix it") == true, "\(told())")
+        #expect(ledger(root).flakes.last?.recurred == "add-b")
+        // The lead's session was told too, once.
+        #expect(runtime.steered.filter { $0.text.contains("flaked again") }.count == 1, "\(runtime.steered.map(\.text))")
+        let status = lead.call("status", [:]).text
+        #expect(status.contains("flaky() ×2 (earlier, add-c) → task add-b (fixed by add-b, flaked again since)"), "\(status)")
+
+        try audited(lead, runtime, root: root, slug: "add-d", files: ["d.txt": "dee\n"])
+        let third = lead.call("merge", ["task": "add-d"])
+        #expect(!third.isError, "\(third.text)")
+        #expect(!third.text.contains("flaked again"), "\(third.text)")
+        #expect(told().count == 1 && ledger(root).flakes.count == 3 && ledger(root).flakes.last?.recurred == nil)
+        // add-b's own record stays one fix; add-c and add-d, planned for nothing, fixed nothing.
+        #expect(ledger(root).fixes.map(\.fixedBy) == ["add-b"])
+    }
+
+    /// The board's flakes from before the ledger had a file move there once (with a fix for each planned task already
+    /// merged, from the board or its archive), and the board keeps none.
+    @Test func theBoardsFlakesMoveToTheLedgerOnce() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let now = Date().timeIntervalSince1970
+        let store = BoardStore(root: root)
+        try store.update { board in
+            board.flakes = [LeadFlake(test: "flaky()", task: "one", commit: "c1", at: now - 2 * 86_400, planned: "fix-flaky"),
+                            LeadFlake(test: "other()", task: "two", commit: "c2", at: now - 86_400, planned: "fix-other"),
+                            LeadFlake(test: "flaky()", task: "three", commit: "c3", at: now - 3_600)]
+            var fix = LeadTask(slug: "fix-flaky", title: "Fix the flaky test flaky()", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""))
+            fix.status = .done
+            fix.merged = LeadMergeRecord(commit: "f1", tested: true, onto: "c0")
+            fix.merged?.at = now - 86_400 * 1.5
+            board.tasks.append(fix)
+            // fix-other is planned and not merged: no fix for other().
+            board.tasks.append(LeadTask(slug: "fix-other", title: "Fix the flaky test other()", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: "")))
+        }
+        // A move cut short (the file written, the board not) leaves no copies.
+        try FlakeLedgerStore(root: root).update { $0.flakes.append(LeadFlake(test: "flaky()", task: "one", commit: "c1", at: now - 2 * 86_400, planned: "fix-flaky")) }
+
+        let status = lead.call("status", [:]).text
+        #expect(status.contains("flaky() ×2 (one, three) → task fix-flaky"), "\(status)")
+        #expect(store.load().flakes == nil)
+        let moved = ledger(root)
+        #expect(moved.flakes.map(\.task) == ["one", "two", "three"], "\(moved.flakes)")
+        #expect(moved.fixes == [LeadFlakeFix(test: "flaky()", fixedBy: "fix-flaky", commit: "f1", at: now - 86_400 * 1.5)], "\(moved.fixes)")
+        // The flake after the fix merged is a recurrence the lead hasn't been told of: the next one is.
+        _ = lead.call("status", [:])
+        #expect(ledger(root) == moved)
+        var next = moved
+        #expect(next.recordFlakes(["flaky()"], task: "four", commit: "c4", now: now).recurred.map(\.fix.fixedBy) == ["fix-flaky"])
+    }
+
+    @Test func theLedgersFileSkipsALineCutShortAndAppendsAfterIt() throws {
+        let root = try repo()
+        let store = FlakeLedgerStore(root: root)
+        try store.update { $0.flakes.append(LeadFlake(test: "a()", task: "t1", commit: "c1", at: 1)) }
+        // A crash mid-line, and a kind from a newer version.
+        let handle = try #require(FileHandle(forWritingAtPath: store.file))
+        handle.seekToEndOfFile()
+        handle.write(Data((#"{"kind":"someday","x":1}"# + "\n" + #"{"kind":"flake","test":"b()","ta"#).utf8))
+        try handle.close()
+        try store.append(LeadRerunRecord(task: "t2", commit: "c2", at: 2, tests: ["b()"], filtered: true, passed: true, base: .green))
+        try store.update { _ = $0.noteFixed("fix-a", commit: "f", now: 3) }
+        let read = store.load()
+        #expect(read.flakes.map(\.test) == ["a()"] && read.reruns.map(\.task) == ["t2"] && read.fixes.isEmpty, "\(read)")
+        #expect(try String(contentsOfFile: store.file, encoding: .utf8).hasSuffix("\n"))
+    }
+
+    @Test func aRecurrenceIsToldOncePerFixAndTheRerunLineComparesFilteredWithWhole() {
+        var ledger = FlakeLedger()
+        _ = ledger.recordFlakes(["flaky()"], task: "one", commit: "c1", now: 100)
+        ledger.notePlanned("fix-1", for: "flaky()")
+        #expect(ledger.noteFixed("fix-1", commit: "f1", now: 200).map(\.test) == ["flaky()"])
+        #expect(ledger.noteFixed("fix-1", commit: "f1", now: 201).isEmpty)
+        #expect(ledger.recordFlakes(["flaky()", MergeRerun.unnamed], task: "two", commit: "c2", now: 300).recurred.map(\.fix.fixedBy) == ["fix-1"])
+        #expect(ledger.recordFlakes(["flaky()"], task: "three", commit: "c3", now: 400).recurred.isEmpty)
+        // A second fix that doesn't hold either is told once more.
+        ledger.notePlanned("fix-2", for: "flaky()")
+        ledger.noteFixed("fix-2", commit: "f2", now: 500)
+        #expect(ledger.recordFlakes(["flaky()"], task: "four", commit: "c4", now: 600).recurred.map(\.fix.fixedBy) == ["fix-2"])
+
+        let now = 10 * 86_400.0
+        ledger.reruns = [LeadRerunRecord(task: "a", commit: "1", at: now - 1, tests: ["x()"], filtered: true, passed: true, base: .green),
+                         LeadRerunRecord(task: "b", commit: "2", at: now - 2, tests: ["x()"], filtered: true, passed: true, base: .red),
+                         LeadRerunRecord(task: "c", commit: "3", at: now - 3, tests: ["x()"], filtered: true, passed: false, base: .green),
+                         LeadRerunRecord(task: "d", commit: "4", at: now - 4, tests: ["y()"], filtered: false, passed: false, base: .skipped),
+                         LeadRerunRecord(task: "old", commit: "5", at: now - 8 * 86_400, tests: ["y()"], filtered: false, passed: true)]
+        #expect(ledger.rerunLine(now: now) == "Merge reruns in the last 7 days (record only, nothing here decides a merge): 4 merges went to a rerun, 2 passed it. "
+                + "Filtered reruns (the failing tests only): 2 of 3 passed (67%); whole reruns: 0 of 1 passed (0%). "
+                + "The failing tests run once on the base: branch red/base green (the branch's) 2, red on the base too (flaky) 1, not paired 1 (skipped, hung, or tests the base lacks).")
+        #expect(FlakeLedger().rerunLine(now: now) == nil)
+    }
+
     @Test func aBuildErrorIsntRerun() throws {
         let root = try repo()
         try commit(["scripts/test.sh": "#!/bin/bash\necho \"run $*\" >> \(RecentProjects.shellQuote(runs))\necho '/r/Sources/A.swift:3:1: error: cannot find x in scope'\nexit 1\n"],
@@ -452,7 +611,7 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(merged.text.contains("flaky() flaked 3 times within 7 days: planned \(fix.slug) to fix it."), "\(merged.text)")
         #expect(fix.status == .planned && fix.title == "Fix the flaky test flaky()")
         #expect(fix.contract.context.contains("earlier, later, add-b"), "\(fix.contract.context)")
-        #expect(board.flakes?.last?.planned == fix.slug)
+        #expect(ledger(root).flakes.last?.planned == fix.slug && board.flakes == nil)
         let progress = try String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)
         #expect(progress.contains("Planned \(fix.slug): flaky() flaked 3 times within 7 days"), "\(progress)")
     }
@@ -494,7 +653,7 @@ struct MergeGateTests: LeadTeamFixture {
         let lines = [#"✘ Test flaky() recorded an issue at FlakyTests.swift:3:5: Expectation failed: (header → "X-Auth: Bearer •••") == nil"#,
                      "↳ waited for the reply", "✘ Test flaky() failed after 0.010 seconds with 1 issue."]
         let board = BoardStore(root: root).load()
-        let flake = try #require(board.flakes?.last)
+        let flake = try #require(ledger(root).flakes.last)
         #expect(flake.task == "add-b", "\(flake)")
         // In the repository's ignored folder, private, named by the day, the task and the merge's commit.
         // The ledger keeps it relative to the root.
@@ -543,7 +702,7 @@ struct MergeGateTests: LeadTeamFixture {
         let second = lead.call("merge", ["task": "add-b"])
         #expect(!second.isError, "\(second.text)")
 
-        let flakes = (BoardStore(root: root).load().flakes ?? []).filter { $0.task == "add-b" }
+        let flakes = ledger(root).flakes.filter { $0.task == "add-b" }
         #expect(flakes.count == 2, "\(flakes)")
         let logs = flakes.compactMap(\.log).map { MergeRerun.evidenceFile(root: root, log: $0) }
         #expect(logs.count == 2 && Set(logs).count == 2, "\(logs)")
@@ -556,29 +715,40 @@ struct MergeGateTests: LeadTeamFixture {
         }
     }
 
-    @Test func twoHundredFlakesWithEvidenceKeepTheBoardSmallAndTheFixQuotesTheirFiles() throws {
+    /// The ledger is a file of its own: more than the 200 flakes board.json kept, none of them on the board, and a
+    /// board rewrite leaves them all.
+    @Test func moreThanTwoHundredFlakesWithEvidenceStayInTheLedgerThroughABoardRewriteAndTheFixQuotesTheirFiles() throws {
         let root = try repo()
         let store = BoardStore(root: root)
-        var board = LeadBoard()
+        let ledgerStore = FlakeLedgerStore(root: root)
         let now = Date().timeIntervalSince1970
+        let count = 250
         // The most a test's evidence keeps: `evidenceLimit` lines of `evidenceWidth` characters.
         let lines = MergeRerun.capped((1...30).map { "✘ Test SomeLongerSuiteName.aTestWithARatherLongDescriptiveName() recorded an issue at File.swift:\($0):1: " + String(repeating: "x", count: 500) })
-        var due: [(test: String, merges: [String], flakes: [LeadFlake])] = []
-        for n in 0..<LeadBoard.keptFlakes {
+        var due: [FlakeLedger.Due] = []
+        for n in 0..<count {
             let test = "SomeLongerSuiteName.aTestWithARatherLongDescriptiveName\(n % 60)()"
             let task = "a-task-with-a-long-enough-slug-\(n)"
             let commit = String(repeating: String(format: "%08x", n), count: 5)
             let file = MergeRerun.evidenceFile(root: root, task: task, commit: commit, at: Date(timeIntervalSince1970: now))
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try MergeRerun.evidenceLog(task: task, commit: commit, evidence: [test: lines], tests: [test]).write(to: file, atomically: true, encoding: .utf8)
-            due += board.recordFlakes([test], task: task, commit: commit, now: now + Double(n), logged: [test],
-                                      log: MergeRerun.evidencePath(task: task, commit: commit, at: Date(timeIntervalSince1970: now)))
+            due += try ledgerStore.update { ledger in
+                ledger.recordFlakes([test], task: task, commit: commit, now: now + Double(n), logged: [test],
+                                    log: MergeRerun.evidencePath(task: task, commit: commit, at: Date(timeIntervalSince1970: now))).due
+            }
         }
-        try store.update { $0.flakes = board.flakes }
-        let flakes = try #require(store.load().flakes)
-        #expect(flakes.count == LeadBoard.keptFlakes && flakes.allSatisfy { $0.log != nil })
+        // A board written over and over (as every tool call does) holds none of it and leaves the ledger whole.
+        try store.update { $0.tasks.append(LeadTask(slug: "other", title: "other", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""))) }
+        try store.update { _ in }
+        #expect(store.load().flakes == nil)
+        let flakes = ledgerStore.load().flakes
+        #expect(flakes.count == count && flakes.allSatisfy { $0.log != nil }, "\(flakes.count)")
+        #expect(flakes.first?.task == "a-task-with-a-long-enough-slug-0" && flakes.last?.task == "a-task-with-a-long-enough-slug-\(count - 1)")
         let size = try #require(try FileManager.default.attributesOfItem(atPath: store.file)[.size] as? Int)
         #expect(size < 100_000, "board.json is \(size) bytes")
+        let mode = { (path: String) in (try? FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int) ?? -1 }
+        #expect(mode(ledgerStore.file) == 0o600, "\(String(mode(ledgerStore.file), radix: 8))")
 
         // A fix task's context still quotes each merge's lines, read from its file.
         let last = try #require(due.last)
@@ -595,7 +765,7 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(gone.contains("- \(last.flakes[0].task)'s merge (\(first)): (its file can't be read now)"), "\(gone)")
     }
 
-    @Test func anEvidenceFileThatIsntAPlainFileQuotesNothingAndDoesntBlock() throws {
+    @Test func anEvidenceFileThatIsntAPlainFileQuotesNothingAndDoesntBlock() async throws {
         let root = try repo()
         let folder = root + "/.vibeswitcher/flakes"
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
@@ -609,11 +779,11 @@ struct MergeGateTests: LeadTeamFixture {
             read.signal()
         }
         // Waits on the read itself; the bound is only for failing: a writer then frees the blocked read.
-        let returned = read.wait(timeout: .now() + 60) == .success
+        let returned = await offPool { read.wait(timeout: .now() + 60) } == .success
         if !returned {
             let writer = open(fifo, O_WRONLY | O_NONBLOCK)
             if writer >= 0 { close(writer) }
-            read.wait()
+            #expect(await offPool { read.wait(timeout: .now() + hangGuard) } == .success, "a writer never freed the blocked read")
         }
         #expect(returned, "reading a FIFO blocked")
         #expect(found.get() == nil)
@@ -673,7 +843,7 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(open.contract.context.contains("earlier, later, add-b"), "\(open.contract.context)")
         #expect(open.contract.context.contains("- add-b's merge (") && open.contract.context.contains("\n    ✘ Test \(test) recorded an issue at FlakyTests.swift:3:5"),
                 "\(open.contract.context)")
-        #expect(board.flakes?.last?.planned == open.slug)
+        #expect(ledger(root).flakes.last?.planned == open.slug)
         #expect(merged.text.contains("\(test) flaked 3 times within 7 days: the open task terminal-clipboard-security names it"), "\(merged.text)")
         let progress = try String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)
         #expect(progress.contains("Noted in terminal-clipboard-security's context"), "\(progress)")
@@ -761,7 +931,7 @@ struct MergeGateTests: LeadTeamFixture {
 
     /// The tests a hung merge left started and never finished, and its output's tail, in a file every session can read
     /// (the merge's log is in the vault); the reply and the progress log name them.
-    @Test func aHungMergeNamesTheTestsThatNeverFinishedInAReadableFile() throws {
+    @Test func aHungMergeNamesTheTestsThatNeverFinishedInAReadableFile() async throws {
         let root = try repo()
         let marks = temp.url("marks").path
         try FileManager.default.createDirectory(atPath: marks, withIntermediateDirectories: true)
@@ -807,7 +977,73 @@ struct MergeGateTests: LeadTeamFixture {
         let task = try #require(BoardStore(root: root).load().task("add-b"))
         #expect(task.status == .review && task.setback == nil)
         let child = try #require(Int32((try String(contentsOfFile: marks + "/child", encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines)))
-        #expect(eventually { kill(child, 0) != 0 })
+        #expect(await eventually { kill(child, 0) != 0 })
+    }
+
+    /// What a stopped run was doing: building (its last build line) when no test started after it, testing when one
+    /// started and never finished or tests ran after the build, else unknown.
+    @Test func aHungRunsPhaseIsBuildingUntilATestStarts() {
+        let building = """
+            Building for debugging...
+            [221/295] Compiling VibeSwitcherTests TeamSnapshots.swift
+            /x/LeadRecordsTests.swift:212:24: warning: instance method 'wait' is unavailable from asynchronous contexts
+            \u{1B}[1m[223/295] Compiling VibeSwitcherTests TerminalAnswerTests.swift\u{1B}[0m
+            /x/LeadRemoteTests.swift:743:130: note: expanded code originates here
+            """
+        #expect(MergeRerun.phase(in: building) == .building(last: "[223/295] Compiling VibeSwitcherTests TerminalAnswerTests.swift"))
+        #expect(MergeRerun.phaseText(building) == "It was building and no test had started; its last build line: [223/295] Compiling VibeSwitcherTests TerminalAnswerTests.swift")
+        #expect(MergeRerun.phase(in: building + "\nBuild complete! (107.52s)") == .building(last: "Build complete! (107.52s)"))
+        let tested = building + "\nBuild complete! (1s)\n◇ Test run started.\n◇ Test a() started.\n✔ Test a() passed after 0.1 seconds."
+        #expect(MergeRerun.phase(in: tested) == .testing(unfinished: []))
+        #expect(MergeRerun.phaseText(tested) == "No test in its output started and never finished.")
+        #expect(MergeRerun.phase(in: tested + "\n◇ Test b() started.") == .testing(unfinished: ["b()"]))
+        #expect(MergeRerun.phaseText(tested + "\n◇ Test b() started.") == "Started and never finished: b().")
+        // A build after the tests (another step's): building again.
+        #expect(MergeRerun.phase(in: tested + "\n[1/2] Compiling Other x.swift") == .building(last: "[1/2] Compiling Other x.swift"))
+        #expect(MergeRerun.phase(in: "npm warn\nwaiting") == .unknown && MergeRerun.phase(in: "") == .unknown)
+        #expect(MergeRerun.phaseText("waiting") == "No test in its output started and never finished.")
+
+        let text = MergeRerun.hungLog(task: "add-b", commit: "0123", command: "test command", after: 2700,
+                                      output: building + "\n\n" + MergeRerun.quietNote(1500))
+        #expect(text.contains("\nIt was building and no test had started. Its last build line (the module or file it was compiling):\n    [223/295] Compiling VibeSwitcherTests TerminalAnswerTests.swift\nIts last output line came 25 min before it was stopped.\n"), "\(text)")
+        #expect(!text.contains("No test in its output"), "\(text)")
+    }
+
+    /// A merge whose test command builds and hangs before any test starts (2026-11-08: 45 min in its test target's
+    /// compile, only warnings in its tail): the hung file and the reply say it was building, and its last build line;
+    /// the file, how long since its last output line.
+    @Test func aMergeThatHangsInItsBuildSaysItWasBuildingAndItsLastBuildLine() async throws {
+        let root = try repo()
+        let marks = temp.url("marks").path
+        try FileManager.default.createDirectory(atPath: marks, withIntermediateDirectories: true)
+        try commit(["scripts/test.sh": """
+            #!/bin/bash
+            echo "Building for debugging..."
+            echo "[1/3] Compiling VibeCore A.swift"
+            echo "[2/3] Compiling VibeCoreTests HangsTests.swift"
+            echo "/x/HangsTests.swift:1:1: warning: something deprecated"
+            sleep \(ShellTests.childRuns) & echo $! > \(RecentProjects.shellQuote(marks))/child; wait
+            """], in: root, "a build that hangs")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        // 0.1 min: 6 s.
+        configure(lead, ["test_command": "bash scripts/test.sh", "test_timeout_min": "0.1"])
+        try audited(lead, runtime, root: root)
+
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(merged.isError)
+        #expect(merged.text.contains("the tests hung after 6 s") && merged.text.contains("It was building and no test had started; its last build line: [2/3] Compiling VibeCoreTests HangsTests.swift"), "\(merged.text)")
+        #expect(!merged.text.contains("No test in its output started"), "\(merged.text)")
+        let flakes = root + "/.vibeswitcher/flakes"
+        let files = try FileManager.default.contentsOfDirectory(atPath: flakes)
+        let file = flakes + "/" + (files.first { $0.hasSuffix("-hung.log") } ?? "")
+        let text = try String(contentsOfFile: file, encoding: .utf8)
+        #expect(text.contains("\nIt was building and no test had started. Its last build line (the module or file it was compiling):\n    [2/3] Compiling VibeCoreTests HangsTests.swift\n"), "\(text)")
+        #expect(text.range(of: #"\nIts last output line came \d+ s before it was stopped\.\n"#, options: .regularExpression) != nil, "\(text)")
+        let progress = try String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)
+        #expect(progress.contains("Hung in add-b's merge: the tests stopped after 6 s; it was building and no test had started; its last build line: [2/3] Compiling VibeCoreTests HangsTests.swift (\(file))"), "\(progress)")
+        let child = try #require(Int32((try String(contentsOfFile: marks + "/child", encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines)))
+        #expect(await eventually { kill(child, 0) != 0 })
     }
 
     @Test func aFailingOrPassingMergeWritesNoHungFile() throws {

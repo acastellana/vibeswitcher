@@ -22,11 +22,11 @@ import Testing
         let finished: Int
 
         /// `limit`: the server's soft limit on open files (`ulimit -n`), none set when nil.
-        init(limit: Int? = nil, finished: Int = 8) throws {
+        init(limit: Int? = nil, finished: Int = 8) async throws {
             let mcp = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
             try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")
             self.finished = finished
-            host = try ScratchHostProcess()
+            host = try await ScratchHostProcess()
             // The session's tools find the host where they always do: under its home.
             try FileManager.default.createDirectory(atPath: host.home + "/.vibeswitcher", withIntermediateDirectories: true)
             try FileManager.default.createSymbolicLink(atPath: host.home + "/.vibeswitcher/host.sock", withDestinationPath: host.socket)
@@ -46,8 +46,8 @@ import Testing
                 let slug = "done-\(index)"
                 #expect(Git.run(["worktree", "add", "-q", "-b", Worktrees.branch(slug), Worktrees.path(root: root, slug: slug)], in: root).ok)
             }
-            let (app, _, _, _, _, _, _) = try TestClient.welcomed(host.socket, appKey: host.appKey)
-            let worker = try app.spawn(keepRunning, cwd: worktree)
+            let (app, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+            let worker = try await app.spawn(keepRunning, cwd: worktree)
             sessions.append(worker)
             try BoardStore(root: root).update { board in
                 var task = LeadTask(slug: "live", title: "Live", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""), status: .running)
@@ -69,7 +69,7 @@ import Testing
             // Its home is the scratch one, for Foundation too (which reads CFFIXED_USER_HOME, not HOME): never the user's
             // host. No job control: the server stays in the session's process group, which the end kills.
             let ulimit = limit.map { "ulimit -n \($0); " } ?? ""
-            let lead = try app.spawn("set +m; (\(courier.command)) & export HOME='\(host.home)' CFFIXED_USER_HOME='\(host.home)'; "
+            let lead = try await app.spawn("set +m; (\(courier.command)) & export HOME='\(host.home)' CFFIXED_USER_HOME='\(host.home)'; "
                 + "cd '\(root)'; while [ ! -f '\(folder)/go' ]; do sleep 0.05; done; \(ulimit)"
                 + "tail -n +1 -f '\(folder)/a.in' | '\(mcp)' --root '\(root)' --role lead > '\(folder)/a.out' 2> '\(folder)/a.err' & "
                 + "echo $! > '\(folder)/pid'; wait", cwd: root)
@@ -77,22 +77,22 @@ import Testing
             guard case .grant(let grant)? = app.vault(.issue(role: .lead, root: root, task: nil, auditing: nil)) else {
                 throw TestClient.NoWelcome(description: "the app got no lead grant: \(host.log)")
             }
-            #expect(app.vault(.bind(grant: grant, root: root, session: lead.id.uuidString)) == .ok)
+            await #expect(app.vault(.bind(grant: grant, root: root, session: lead.id.uuidString)) == .ok)
             // The worker is a member of the lead's team, as start_worker checks.
-            let issued = try courier.send([.vault(.issue(role: .worker, root: root, task: "live", auditing: nil))])
+            let issued = try await courier.send([.vault(.issue(role: .worker, root: root, task: "live", auditing: nil))])
             guard case .vault(.grant(let workerGrant))? = issued[2] else {
                 throw TestClient.NoWelcome(description: "the scratch lead could not issue its worker grant")
             }
-            #expect(try courier.send([.vault(.bind(grant: workerGrant, root: root, session: worker.id.uuidString))])[2] == .vault(.ok))
+            await #expect(try courier.send([.vault(.bind(grant: workerGrant, root: root, session: worker.id.uuidString))])[2] == .vault(.ok))
             FileManager.default.createFile(atPath: folder + "/go", contents: nil)
 
             server = LeadToolServerHandoverTests.Server(folder: folder, name: "a")
             var started: Int32?
-            #expect(eventually { started = (try? String(contentsOfFile: folder + "/pid", encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }; return started != nil })
+            #expect(await eventually { started = (try? String(contentsOfFile: folder + "/pid", encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }; return started != nil })
             pid = try #require(started)
-            #expect(try server.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(server.errors)")
+            await #expect(try server.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(server.errors)")
             server.notify("notifications/initialized")
-            #expect(try server.tools(2).contains("cleanup"), "stderr: \(server.errors)")
+            await #expect(try server.tools(2).contains("cleanup"), "stderr: \(server.errors)")
         }
 
         deinit {
@@ -110,7 +110,7 @@ import Testing
 
         /// Sends every call at once (the server runs each on a thread of its own) and waits for all their answers:
         /// each call's text and whether it's an error, nil for one that got no answer.
-        func burst(_ calls: [(tool: String, arguments: [String: Any])]) throws -> [(text: String, isError: Bool)?] {
+        func burst(_ calls: [(tool: String, arguments: [String: Any])]) async throws -> [(text: String, isError: Bool)?] {
             let ids = calls.map { _ in next += 1; return next }
             var lines = Data()
             for (id, call) in zip(ids, calls) {
@@ -121,7 +121,7 @@ import Testing
             handle.seekToEndOfFile()
             handle.write(lines)
             try handle.close()
-            _ = eventually { Set(server.replies().keys).isSuperset(of: ids) || !alive }
+            _ = await eventually { Set(server.replies().keys).isSuperset(of: ids) || !alive }
             let replies = server.replies()
             return ids.map { id in
                 replies[id].map { result in
@@ -159,17 +159,17 @@ import Testing
 
     /// Many interleaved start_worker, cleanup, status and refused audit calls at once, while other clients call the
     /// host: every call is answered, none with EBADF, the server answers after, and its descriptors are as before.
-    @Test func manyCallsAtOnceLeaveTheServerAnsweringWithItsDescriptorsAsBefore() throws {
-        let rig = try Rig()
+    @Test func manyCallsAtOnceLeaveTheServerAnsweringWithItsDescriptorsAsBefore() async throws {
+        let rig = try await Rig()
         // A first round opens what stays open (the folder watch, the dispatch queues' kqueue): counted from after it.
         let round = rig.round(2)
-        let first = try rig.burst(round)
+        let first = try await rig.burst(round)
         try #require(first.allSatisfy { $0 != nil }, "unanswered in the first round; stderr: \(rig.server.errors)")
         // Each audit was refused before it started a verifier (none waited on one's tools).
         let audits = zip(round, first).filter { $0.0.tool == "audit" }.map { $0.1?.text ?? "" }
         #expect(audits.count == 2 && audits.allSatisfy(Self.refusesAudits), "audit: \(audits)")
         var base: Int?
-        #expect(eventually { base = rig.descriptors; return base != nil })
+        #expect(await eventually { base = rig.descriptors; return base != nil })
         let before = try #require(base)
 
         // Other clients of the host meanwhile, as the app and other tool servers are.
@@ -184,33 +184,33 @@ import Testing
         }
         var answers: [(text: String, isError: Bool)?] = []
         // A burst with a call unanswered waited out its hang guard: the next would too, so the test ends its bursts there.
-        for _ in 0..<5 where answers.allSatisfy({ $0 != nil }) { answers += try rig.burst(rig.round(4)) }
+        for _ in 0..<5 where answers.allSatisfy({ $0 != nil }) { await answers += try rig.burst(rig.round(4)) }
         stop.set()
-        _ = callers.wait(timeout: .now() + hangGuard)
+        _ = await offPool { callers.wait(timeout: .now() + hangGuard) }
 
         #expect(answers.allSatisfy { $0 != nil }, "\(answers.filter { $0 == nil }.count) of \(answers.count) calls got no answer; stderr: \(rig.server.errors)")
         let broken = answers.compactMap { $0 }.filter { Self.saysBadDescriptor($0.text) }
         #expect(broken.isEmpty, "EBADF: \(broken.prefix(3))")
         #expect(!Self.saysBadDescriptor(rig.server.errors) && !Self.saysBadDescriptor(rig.log), "stderr: \(rig.server.errors)\nlog: \(rig.log)")
         // Still answering.
-        #expect(try rig.server.ask(1_000, "ping") != nil)
-        let status = try rig.burst([("status", [:])])
+        await #expect(try rig.server.ask(1_000, "ping") != nil)
+        let status = try await rig.burst([("status", [:])])
         #expect(status.first??.isError == false, "status: \(String(describing: status.first))")
         // Flat: what the calls opened is closed once they're done (their readers and connections end as they do).
         var after: Int?
-        let flat = eventually(timeout: 60) { after = rig.descriptors; return (after ?? .max) <= before + 4 }
+        let flat = await eventually(timeout: 60) { after = rig.descriptors; return (after ?? .max) <= before + 4 }
         #expect(flat, "descriptors went from \(before) to \(after.map(String.init) ?? "?") after \(answers.count) calls")
         #expect(rig.log.contains("started: pid \(rig.pid)"), "log: \(rig.log)")
     }
 
     /// Out of descriptors (a low limit, many calls at once): the calls that can't start their commands say so (EMFILE),
     /// none fails with EBADF, the server's input isn't touched, and it answers once they're done.
-    @Test func outOfDescriptorsTheServerSaysSoAndServesOn() throws {
-        let rig = try Rig(limit: Self.lowLimit)
+    @Test func outOfDescriptorsTheServerSaysSoAndServesOn() async throws {
+        let rig = try await Rig(limit: Self.lowLimit)
         var exhausted = false
         var answers: [(text: String, isError: Bool)?] = []
         for _ in 0..<6 where !exhausted && rig.alive && answers.allSatisfy({ $0 != nil }) {
-            answers += try rig.burst(rig.round(16))
+            await answers += try rig.burst(rig.round(16))
             exhausted = rig.log.contains("EMFILE")
         }
         // The point of the test: the calls did run out (else it says nothing of the incident).
@@ -223,8 +223,8 @@ import Testing
         // The board kept every task (a read that failed for want of a descriptor isn't an empty board).
         #expect(BoardStore(root: rig.root).load().tasks.count == 1 + rig.finished)
         // Once the burst is over it serves as before.
-        #expect(try rig.server.ask(2_000, "ping") != nil, "log: \(rig.log)")
-        let status = try rig.burst([("status", [:])])
+        await #expect(try rig.server.ask(2_000, "ping") != nil, "log: \(rig.log)")
+        let status = try await rig.burst([("status", [:])])
         #expect(status.first??.isError == false, "status: \(String(describing: status.first))")
     }
 

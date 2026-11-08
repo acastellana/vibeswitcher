@@ -485,7 +485,7 @@ struct KeepAwakeTests {
         process.standardOutput = pipe
         try process.run()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        waitForEnd(process)
         return String(decoding: data, as: UTF8.self)
     }
 

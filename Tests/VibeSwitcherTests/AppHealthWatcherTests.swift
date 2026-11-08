@@ -4,8 +4,7 @@ import VibeCore
 @testable import VibeSwitcher
 
 /// The app's watch of its own logs (see `AppHealthWatcher`), on fake debug and DiagnosticReports folders and an app.log
-/// in scratch, never the app's own: file events bring each new report in, one digest goes out per burst, a repeat isn't
-/// sent again, a relaunch neither repeats nor misses one, and only a project with watch_app_logs gets them.
+/// in scratch, never the app's own: file events bring each new report in, one digest goes out per burst, a repeat is queued as FYI, a relaunch neither repeats nor misses one, and only a project with watch_app_logs gets them.
 @MainActor
 struct AppHealthWatcherTests {
     let temp = Scratch()
@@ -136,13 +135,13 @@ struct AppHealthWatcherTests {
         #expect(await until { world.sent.value.count == 1 })
         #expect(world.sent.value[0].contains("hang-20261025-140210 and 1 more like it (hang-20261025-140212)"), "\(world.sent.value[0])")
         #expect(world.sent.value[0].contains("hang-20261025-140211:"))
-        // The same freeze an hour on: counted, not sent.
+        // The same freeze an hour on: queued as FYI and counted for the daily digest.
         world.clock.value = world.clock.value.addingTimeInterval(3600)
         try writeHang("hang-20261025-151000", in: world)
         #expect(await until { watcher.state.hangs == ["hang-20261025-151000"] })
         closeWindow(watcher, world)
-        #expect(await until { watcher.state.opened == nil })
-        #expect(world.sent.value.count == 1)
+        #expect(await until { world.sent.value.count == 2 && watcher.state.opened == nil })
+        #expect(world.sent.value[1].contains("Seen again, already reported"))
         #expect(watcher.state.told.values.contains { $0.first == "hang-20261025-140210" && $0.repeats == 1 })
     }
 

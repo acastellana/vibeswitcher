@@ -383,7 +383,7 @@ struct PhoneWebTests {
     }()
 
     @Test(.enabled(if: node != nil, "node isn't installed on this Mac: the phone's web test can't run"))
-    func thePhoneDrawsTheMenuAsButtonsAndPostsATap() throws {
+    func thePhoneDrawsTheMenuAsButtonsAndPostsATap() async throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: try #require(Self.node))
         process.arguments = [Self.repo.appendingPathComponent("Tests/Web/phone-menu.test.mjs").path]
@@ -392,7 +392,7 @@ struct PhoneWebTests {
         process.standardError = output
         try process.run()
         let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+        #expect(await exited(process), "pid \(process.processIdentifier) still running")
         #expect(process.terminationStatus == 0, "\(text)")
         #expect(text.contains("phone-menu: ok"))
     }
@@ -400,7 +400,7 @@ struct PhoneWebTests {
     /// Brief me (Tests/Web/phone-briefing.test.mjs): the press posts /api/briefing with the token, shows a spinner,
     /// asks until it's written, then plays the Mac's bytes from a blob through the page's <audio> and shows the text.
     @Test(.enabled(if: node != nil, "node isn't installed on this Mac: the phone's web test can't run"))
-    func thePhonesBriefMePlaysTheBriefingAndShowsItsText() throws {
+    func thePhonesBriefMePlaysTheBriefingAndShowsItsText() async throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: try #require(Self.node))
         process.arguments = [Self.repo.appendingPathComponent("Tests/Web/phone-briefing.test.mjs").path]
@@ -409,7 +409,7 @@ struct PhoneWebTests {
         process.standardError = output
         try process.run()
         let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+        #expect(await exited(process), "pid \(process.processIdentifier) still running")
         #expect(process.terminationStatus == 0, "\(text)")
         #expect(text.contains("phone-briefing: ok"))
     }
@@ -418,7 +418,7 @@ struct PhoneWebTests {
     /// or 504 says to check the screen, a resend keeps its request id, and an unpaired phone gets the pairing screen
     /// with the reason.
     @Test(.enabled(if: node != nil, "node isn't installed on this Mac: the phone's web test can't run"))
-    func thePhoneSendsAReplyOnceAndSaysSentOnlyOnceItWentIn() throws {
+    func thePhoneSendsAReplyOnceAndSaysSentOnlyOnceItWentIn() async throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: try #require(Self.node))
         process.arguments = [Self.repo.appendingPathComponent("Tests/Web/phone-replies.test.mjs").path]
@@ -427,7 +427,7 @@ struct PhoneWebTests {
         process.standardError = output
         try process.run()
         let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+        #expect(await exited(process), "pid \(process.processIdentifier) still running")
         #expect(process.terminationStatus == 0, "\(text)")
         #expect(text.contains("phone-replies: ok"))
     }

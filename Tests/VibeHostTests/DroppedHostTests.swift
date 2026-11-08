@@ -106,10 +106,10 @@ final class DroppingHost {
     /// The real `vibeswitcher-mcp` in a lead's session on a scratch host, its runtime's host calls going to a host that
     /// drops each connection (VIBESWITCHER_MCP_TEST_RUNTIME_SOCKET; the vault stays on the scratch host): start_worker
     /// and cleanup refuse, the worker in the worktree is left alone. Then, with the host answering, the same calls see it.
-    @Test func startWorkerAndCleanupRefuseWhileTheHostDropsTheConnection() throws {
+    @Test func startWorkerAndCleanupRefuseWhileTheHostDropsTheConnection() async throws {
         let mcp = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")
-        let host = try ScratchHostProcess()
+        let host = try await ScratchHostProcess()
         let dropping = try DroppingHost(.beforeWelcome)
         var sessions: [HostSession] = []
         defer {
@@ -132,8 +132,8 @@ final class DroppingHost {
         // Task one runs: its worker is a live session in its worktree.
         let worktree = Worktrees.path(root: root, slug: "one")
         #expect(Git.run(["worktree", "add", "-q", "-b", Worktrees.branch("one"), worktree], in: root).ok)
-        let (app, _, _, _, _, _, _) = try TestClient.welcomed(host.socket, appKey: host.appKey)
-        let worker = try app.spawn(keepRunning, cwd: worktree)
+        let (app, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        let worker = try await app.spawn(keepRunning, cwd: worktree)
         sessions.append(worker)
         try BoardStore(root: root).update { board in
             var task = LeadTask(slug: "one", title: "One", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""), status: .running)
@@ -147,47 +147,47 @@ final class DroppingHost {
         FileManager.default.createFile(atPath: folder + "/a.in", contents: nil)
         let courier = try Courier(host.dir + "/lead-courier", socket: host.socket)
         // Its home is the scratch one, for Foundation too (which reads CFFIXED_USER_HOME, not HOME): never the user's host.
-        let lead = try app.spawn("set +m; (\(courier.command)) & export HOME='\(host.home)' CFFIXED_USER_HOME='\(host.home)' VIBESWITCHER_MCP_TEST_RUNTIME_SOCKET='\(runtimeSocket)'; "
+        let lead = try await app.spawn("set +m; (\(courier.command)) & export HOME='\(host.home)' CFFIXED_USER_HOME='\(host.home)' VIBESWITCHER_MCP_TEST_RUNTIME_SOCKET='\(runtimeSocket)'; "
             + "cd '\(root)'; while [ ! -f '\(folder)/go' ]; do sleep 0.05; done; "
             + "tail -n +1 -f '\(folder)/a.in' | '\(mcp)' --root '\(root)' --role lead > '\(folder)/a.out' 2> '\(folder)/a.err'", cwd: root)
         sessions.append(lead)
         guard case .grant(let grant)? = app.vault(.issue(role: .lead, root: root, task: nil, auditing: nil)) else {
             Issue.record("the app got no lead grant: \(host.log)"); return
         }
-        #expect(app.vault(.bind(grant: grant, root: root, session: lead.id.uuidString)) == .ok)
+        await #expect(app.vault(.bind(grant: grant, root: root, session: lead.id.uuidString)) == .ok)
         // The worker must be an actual member of the lead's team, not just a board entry. Other
         // projects' sessions are intentionally absent from the lead's host session list now.
-        let issued = try courier.send([.vault(.issue(role: .worker, root: root, task: "one", auditing: nil))])
+        let issued = try await courier.send([.vault(.issue(role: .worker, root: root, task: "one", auditing: nil))])
         guard case .vault(.grant(let workerGrant))? = issued[2] else {
             Issue.record("The scratch lead could not issue its worker grant"); return
         }
-        #expect(try courier.send([.vault(.bind(grant: workerGrant, root: root, session: worker.id.uuidString))])[2] == .vault(.ok))
+        await #expect(try courier.send([.vault(.bind(grant: workerGrant, root: root, session: worker.id.uuidString))])[2] == .vault(.ok))
         FileManager.default.createFile(atPath: folder + "/go", contents: nil)
 
         let server = LeadToolServerHandoverTests.Server(folder: folder, name: "a")
-        #expect(try server.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(server.errors)")
-        #expect(try server.tools(2).contains("cleanup"))
-        func call(_ id: Int, _ tool: String, _ arguments: [String: Any]) throws -> (text: String, isError: Bool)? {
-            guard let result = try server.ask(id, "tools/call", ["name": tool, "arguments": arguments]) else { return nil }
+        await #expect(try server.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(server.errors)")
+        await #expect(try server.tools(2).contains("cleanup"))
+        func call(_ id: Int, _ tool: String, _ arguments: [String: Any]) async throws -> (text: String, isError: Bool)? {
+            guard let result = try await server.ask(id, "tools/call", ["name": tool, "arguments": arguments]) else { return nil }
             let text = ((result["content"] as? [[String: Any]]) ?? []).compactMap { $0["text"] as? String }.joined(separator: "\n")
             return (text, result["isError"] as? Bool ?? true)
         }
 
-        let start = try call(3, "start_worker", ["task": "one"])
+        let start = try await call(3, "start_worker", ["task": "one"])
         #expect(start?.isError == true && start?.text.contains("can't be read") == true, "start_worker: \(start?.text ?? "no answer")")
-        let cleanup = try call(4, "cleanup", ["task": "one", "force": true])
+        let cleanup = try await call(4, "cleanup", ["task": "one", "force": true])
         #expect(cleanup?.isError == true && cleanup?.text.contains("can't be read") == true, "cleanup: \(cleanup?.text ?? "no answer")")
         #expect(dropping.dropped >= 2)
         // Nothing was started, ended or removed: the worker still runs in its worktree.
         #expect(FileManager.default.fileExists(atPath: worktree))
         #expect(kill(worker.childPID, 0) == 0)
-        #expect(app.screen(worker.id) != nil)
+        await #expect(app.screen(worker.id) != nil)
         #expect(BoardStore(root: root).load().task("one")?.worker == worker.id.uuidString)
 
         // The host answers again: the worker reads as running, so still no second one.
         try FileManager.default.removeItem(atPath: runtimeSocket)
         try FileManager.default.createSymbolicLink(atPath: runtimeSocket, withDestinationPath: host.socket)
-        let again = try call(5, "start_worker", ["task": "one"])
+        let again = try await call(5, "start_worker", ["task": "one"])
         #expect(again?.isError == true && again?.text.contains("still running") == true, "start_worker: \(again?.text ?? "no answer")")
     }
 }

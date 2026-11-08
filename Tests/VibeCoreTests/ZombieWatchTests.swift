@@ -5,14 +5,14 @@ import Testing
 /// The run's zombie watch (`ZombieWatch`): what it counts, and when it fails the run.
 struct ZombieWatchTests {
     /// A child that ended and that nobody waited for is counted, and is no longer once it's reaped.
-    @Test func aChildNobodyReapedIsCountedUntilItIs() throws {
+    @Test func aChildNobodyReapedIsCountedUntilItIs() async throws {
         var pid: pid_t = 0
         let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/usr/bin/true"), nil]
         defer { argv.forEach { free($0) } }
         try #require(posix_spawn(&pid, "/usr/bin/true", nil, nil, argv, environ) == 0)
         var status: Int32 = 0
         defer { _ = waitpid(pid, &status, WNOHANG) }
-        #expect(eventually { ZombieWatch.zombies().contains(pid) })
+        #expect(await eventually { ZombieWatch.zombies().contains(pid) })
         #expect(ZombieWatch.names([pid]) == "true ×1")
         #expect(waitpid(pid, &status, 0) == pid)
         #expect(!ZombieWatch.zombies().contains(pid))
@@ -26,7 +26,7 @@ struct ZombieWatchTests {
         let input = Pipe()
         child.standardInput = input
         try child.run()
-        defer { try? input.fileHandleForWriting.close(); child.waitUntilExit() }
+        defer { try? input.fileHandleForWriting.close(); waitForEnd(child) }
         #expect(!ZombieWatch.zombies().contains(child.processIdentifier))
     }
 

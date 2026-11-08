@@ -33,13 +33,14 @@ struct ComposerView: View {
     /// The session's project and folder: dictation's vocabulary (its name, its branches).
     var project: String? = nil
     var folder: String? = nil
+    var onTyping: () -> Void = {}
     @Environment(\.dictation) private var dictation
     @State private var height: CGFloat = 22
     @State private var suggestions = Suggestions()
     @State private var notice: String?
 
     private var text: Binding<String> {
-        Binding(get: { composer.drafts[rowID] ?? "" }, set: { composer.drafts[rowID] = $0 })
+        Binding(get: { composer.drafts[rowID] ?? "" }, set: { composer.drafts[rowID] = $0; onTyping() })
     }
 
     private var images: [String] { (composer.attachments[rowID] ?? []).filter { FileManager.default.fileExists(atPath: $0) } }

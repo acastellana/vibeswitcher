@@ -34,6 +34,97 @@ struct LeadWakeTests {
 
     func waiting(_ root: URL) -> [SteerMessage] { LeadWake.reports(SteerInbox.pending(tty: lead.tty, root: root), agentPid: lead.pid) }
 
+    @Test func fyiReportsWaitAndJoinTheNextActionableBatch() throws {
+        let root = scratch()
+        let t = 10_000.0
+        let fyi = try report("VibeSwitcher moved finished work on by itself (auto_advance):\n- Started a worker on x", about: LeadAdvance.sender, at: t, root: root)
+        #expect(fyi.wakes == false)
+        var wake = LeadWake()
+        var typed: [String] = []
+        #expect(wake.tick(reports: waiting(root), activity: idle, screen: { self.screen("") },
+                          typeInto: { typed.append($0); return true }, now: t + 100) == .none)
+        let typedFyi = wake.type(reports: waiting(root), box: .empty, typeInto: { typed.append($0); return true })
+        #expect(!typedFyi)
+        #expect(typed.isEmpty)
+        #expect(waiting(root).map(\.text) == [fyi.text])
+        #expect(LeadWake.waiting(waiting(root), now: t + 500) == 0)
+        _ = try report("The worker on y is blocked: choose a database", about: "worker y", at: t + 100, root: root)
+        #expect(wake.tick(reports: waiting(root), activity: idle, screen: { self.screen("") },
+                          typeInto: { typed.append($0); return true }, now: t + 200) == .ready)
+        #expect(typed.count == 1 && typed[0].contains("2 new reports"))
+        #expect(waiting(root).count == 2)
+    }
+
+    @Test func fyiDeliveryAndFlushWaitUntilUserInputArrives() throws {
+        let root = scratch()
+        let text = "VibeSwitcher moved finished work on by itself (auto_advance):\n- Started a worker on x"
+        var typed: [String] = []
+        let type: (String) -> Bool = { typed.append($0); return true }
+        #expect(try LeadDelivery.deliver(text, from: .system(LeadAdvance.sender), to: lead, activity: idle,
+                                         screen: { self.empty }, typeInto: type, root: root) == .queued)
+        #expect(!LeadDelivery.flush(lead, betweenTurns: true, inputIsEmpty: { true }, typeInto: type, root: root))
+        #expect(typed.isEmpty && waiting(root).count == 1)
+        try SteerInbox.post(SteerMessage(text: "Please continue", from: .user, agentPid: lead.pid), tty: lead.tty, root: root)
+        #expect(LeadDelivery.flush(lead, betweenTurns: true, inputIsEmpty: { true }, typeInto: type, root: root))
+        #expect(typed.count == 1)
+        #expect(hook("UserPromptSubmit", root: root, now: Date().timeIntervalSince1970) == ["Please continue"])
+    }
+
+    @Test(arguments: [false, true])
+    func codexFlushBatchesFyiWithTheWakingMessage(_ long: Bool) throws {
+        let root = scratch()
+        let codex = LeadAgent(pid: lead.pid, tty: lead.tty, session: "fake-codex", agent: .codex)
+        let fyi = "VibeSwitcher moved finished work on by itself (auto_advance):\n- Started a worker on x"
+            + (long ? String(repeating: "\nA recorded FYI with no decision to make.", count: 400) : "")
+        _ = try report(fyi, about: LeadAdvance.sender, at: 1, root: root)
+        _ = try report("VibeSwitcher moved finished work on by itself (auto_advance):\n- Released a worker", about: LeadAdvance.sender, at: 2, root: root)
+        let blocked = try report("Worker is blocked: choose a database", about: "worker", at: 3, root: root)
+        #expect(!LeadDelivery.flush(codex, betweenTurns: true, inputIsEmpty: { true }, typeInto: { _ in false }, root: root))
+        #expect(waiting(root).count == 3)
+        var typed: [String] = []
+        #expect(LeadDelivery.flush(codex, betweenTurns: true, inputIsEmpty: { true }, typeInto: { typed.append($0); return true }, root: root))
+        let prompt = try #require(typed.first)
+        #expect(typed.count == 1)
+        #expect(prompt.contains(fyi) && prompt.contains("Released a worker") && prompt.contains(blocked.text))
+        #expect(waiting(root).isEmpty)
+        #expect(!LeadDelivery.flush(codex, betweenTurns: true, inputIsEmpty: { true }, typeInto: { typed.append($0); return true }, root: root))
+        #expect(typed.count == 1)
+    }
+
+    @Test(arguments: ["PostToolUse", "Stop"])
+    func fyiOnlyHooksWaitForAPromptOrAnActionableReport(_ event: String) throws {
+        let root = scratch()
+        let t = 10_000.0
+        let text = "VibeSwitcher moved finished work on by itself (auto_advance):\n- Started a worker on x"
+        _ = try report(text, about: LeadAdvance.sender, at: t, root: root)
+        #expect(hook(event, root: root, now: t + 1).isEmpty)
+        #expect(waiting(root).map(\.text) == [text])
+        #expect(hook("UserPromptSubmit", root: root, now: t + 2) == [text])
+        #expect(waiting(root).isEmpty)
+        _ = try report(text, about: LeadAdvance.sender, at: t + 3, root: root)
+        let blocked = "The worker on y is blocked: choose a database"
+        _ = try report(blocked, about: "worker y", at: t + 4, root: root)
+        #expect(hook("Stop", root: root, now: t + 5) == [text, blocked])
+        #expect(waiting(root).isEmpty)
+    }
+
+    @Test(arguments: [
+        ("Started a worker on x", false), ("Started the audit of x", false),
+        ("Released x's worker, idle since its done report, while its audit runs", false), ("Cleaned up x.", false),
+        ("Merged x into main", true), ("Didn't merge x: failed tests", true),
+        ("Didn't start x: refused", true), ("Sent x's worker the open Important findings F1", true),
+        ("Started a worker on x. Decide whether to keep it.", true),
+        ("Started a worker on x\nDecide whether to keep it.", true),
+        ("Started a worker on x\n- Merged y into main", true),
+    ])
+    func automaticOutcomesWakeOnlyForJudgement(_ outcome: String, _ wakes: Bool) throws {
+        let message = SteerMessage(text: "VibeSwitcher moved finished work on by itself (auto_advance):\n- " + outcome,
+                                   from: .system(LeadAdvance.sender), agentPid: lead.pid)
+        #expect(message.wakes == wakes)
+        let decoded = try JSONDecoder().decode(SteerMessage.self, from: JSONEncoder().encode(message))
+        #expect(decoded.wakes == wakes)
+    }
+
     @Test func anIdleLeadWithAnEmptyBoxGetsOneShortWakeUp() throws {
         let root = scratch()
         // The worker's report reaches the idle lead's inbox; its tools don't type it in as it is.
@@ -267,6 +358,53 @@ struct LeadWakeTests {
             #expect(part.count == 1 && part[0].hasPrefix("[Part \(step) of 3"), "\(part.map { $0.prefix(60) })")
         }
         #expect(hook("PostToolUse", root: root, now: t + 15) == ["The worker on y is blocked: stuck"])
+    }
+
+    @Test func aLongFyiDoesNotBlockAnActionableReportBehindIt() throws {
+        let root = scratch()
+        let t = Date().timeIntervalSince1970
+        let long = "VibeSwitcher moved finished work on by itself (auto_advance):\n- Started a worker on x:\n"
+            + (1...400).map { "line \($0): checked, and it holds as the contract says." }.joined(separator: "\n")
+        let fyi = try report(long, about: LeadAdvance.sender, at: t, root: root)
+        #expect(fyi.wakes == false)
+        let blocked = "The worker on y is blocked: choose a database"
+        _ = try report(blocked, about: "worker y", at: t + 1, root: root)
+        var typed: [String] = []
+        #expect(typeWake(root, now: t + 6, into: &typed) != nil)
+        let first = hook("UserPromptSubmit", root: root, now: t + 9)
+        #expect(first.count == 1 && first[0].hasPrefix("[Part 1 of 3"))
+        for step in [2, 3] {
+            let part = hook("PostToolUse", root: root, now: t + 10 + Double(step))
+            #expect(part.count == 1 && part[0].hasPrefix("[Part \(step) of 3"))
+        }
+        #expect(hook("PostToolUse", root: root, now: t + 15) == [blocked])
+        #expect(waiting(root).isEmpty)
+    }
+
+    @Test(arguments: [("actionable-first", "PostToolUse"), ("actionable-first", "Stop"),
+                      ("user-prompt", "PostToolUse"), ("user-prompt", "Stop")])
+    func anAdmittedFyiFinishesAfterTheActionableReportIsGone(_ scenario: String, _ event: String) throws {
+        let root = temp.url("admission-" + scenario + "-" + event)
+        let t = Date().timeIntervalSince1970
+        let long = "VibeSwitcher moved finished work on by itself (auto_advance):\n- Started a worker on x:\n"
+            + (1...400).map { "line \($0): checked, and it holds as the contract says." }.joined(separator: "\n")
+        let blocked = "The worker on y is blocked: choose a database"
+        if scenario == "actionable-first" { _ = try report(blocked, about: "worker y", at: t, root: root) }
+        _ = try report(long, about: LeadAdvance.sender, at: t + 1, root: root)
+        let first = hook("UserPromptSubmit", root: root, now: t + 9)
+        let next: Int
+        if scenario == "actionable-first" {
+            #expect(first == [blocked])
+            next = 1
+        } else {
+            #expect(first.count == 1 && first[0].hasPrefix("[Part 1 of 3"))
+            next = 2
+        }
+        for step in next...3 {
+            let part = hook(event, root: root, now: t + 10 + Double(step))
+            #expect(part.count == 1 && part[0].hasPrefix("[Part \(step) of 3"))
+        }
+        #expect(waiting(root).isEmpty)
     }
 
     /// The wake-up's prompt went in, but its hook couldn't hand anything over (here the disk check fails; the seals

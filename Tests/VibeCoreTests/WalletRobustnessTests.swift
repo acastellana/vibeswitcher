@@ -52,7 +52,7 @@ struct WalletRobustnessTests {
 
     /// Listen lines (and another poll asked) while `passage inbox` runs start no second process: they ask the running
     /// poll to run once more when it's done, once however many asked.
-    @Test func listenLinesDuringAPollAskForOneMoreRunNotAnotherProcess() throws {
+    @Test func listenLinesDuringAPollAskForOneMoreRunNotAnotherProcess() async throws {
         let fake = try Fake(scratch)
         let held = HeldInbox(fake.link)
         let courier = WalletCourier(link: held, store: WalletRequestStore(folder: scratch.url("requests")), log: { _ in },
@@ -60,20 +60,20 @@ struct WalletRobustnessTests {
         defer { courier.close() }
         let first = DispatchSemaphore(value: 0)
         DispatchQueue.global().async { _ = courier.poll(); first.signal() }
-        #expect(held.started.wait(timeout: .now() + hangGuard) == .success)
+        #expect(await offPool { held.started.wait(timeout: .now() + hangGuard) } == .success)
         for _ in 0..<5 { courier.heardListenLine() }
         let second = DispatchSemaphore(value: 0)
         DispatchQueue.global().async { _ = courier.poll(); second.signal() }
-        #expect(eventually { courier.pollsPending == 7 })
+        #expect(await eventually { courier.pollsPending == 7 })
         #expect(held.looks == 1)
         held.go.signal()
-        #expect(first.wait(timeout: .now() + hangGuard) == .success)
-        #expect(second.wait(timeout: .now() + hangGuard) == .success)
+        #expect(await offPool { first.wait(timeout: .now() + hangGuard) } == .success)
+        #expect(await offPool { second.wait(timeout: .now() + hangGuard) } == .success)
         #expect(held.looks == 2 && inboxRuns(fake) == 2)
         #expect(courier.pollsPending == 0)
         // Nothing running: a listen line starts one poll of its own.
         courier.heardListenLine()
-        #expect(eventually { courier.pollsPending == 0 && inboxRuns(fake) == 3 })
+        #expect(await eventually { courier.pollsPending == 0 && inboxRuns(fake) == 3 })
         #expect(held.looks == 3)
     }
 
@@ -245,15 +245,15 @@ struct WalletRobustnessTests {
     /// A stand-in `passage listen` (the fake's, a child of this test, never Passage) recorded as a crashed run would
     /// have left it: ended at the next launch, by its pid. A record whose start time or command line don't match
     /// the process at that pid ends nothing.
-    @Test func aListenerACrashLeftIsEndedAtTheNextLaunch() throws {
+    @Test func aListenerACrashLeftIsEndedAtTheNextLaunch() async throws {
         let fake = try Fake(scratch)
         let folder = scratch.url("requests")
         let listen = Process()
         listen.executableURL = URL(fileURLWithPath: fake.executable)
         listen.arguments = ["listen"]
         try listen.run()
-        defer { if listen.isRunning { kill(listen.processIdentifier, SIGKILL); listen.waitUntilExit() } }
-        #expect(eventually { fake.text("listen.pid") != nil })
+        defer { if listen.isRunning { kill(listen.processIdentifier, SIGKILL); waitForEnd(listen) } }
+        #expect(await eventually { fake.text("listen.pid") != nil })
         let pid = listen.processIdentifier
         typealias Record = WalletCourier.ListenRecord
         Record.save(pid: pid, executable: fake.executable, in: folder, log: { _ in })
@@ -277,7 +277,7 @@ struct WalletRobustnessTests {
         try write(saved, in: folder)
         let log = PassageLinkTests.Log()
         #expect(Record.endOrphan(in: folder, log: log.note))
-        listen.waitUntilExit()
+        #expect(await exited(listen), "passage listen outlived its SIGTERM")
         #expect(fake.text("listen.stopped")?.hasPrefix("TERM") == true)
         #expect(log.lines == ["ended passage listen (pid \(pid)) an earlier run left running"])
         #expect(!FileManager.default.fileExists(atPath: Record.file(in: folder).path))

@@ -169,7 +169,7 @@ struct LeadArchiveToolTests: LeadTeamFixture {
         #expect(store.archived().count == 280 && store.load().tasks.count == 20)
     }
 
-    @Test func aPlannedTaskAfterAnArchivedOneStillWaitsOnIt() throws {
+    @Test func aPlannedTaskAfterAnArchivedOneStillWaitsOnIt() async throws {
         let (root, runtime, lead) = try team()
         try merged("base", file: "b.txt", lead, runtime, root: root)
         try age(["base"], root: root)
@@ -182,7 +182,7 @@ struct LeadArchiveToolTests: LeadTeamFixture {
         #expect(!lead.call("configure", ["auto_advance": true]).isError)
         let advancing = LeadAdvanceTests.Advancing(lead)
         defer { advancing.stop() }
-        #expect(advancing.until { BoardStore(root: root).load().task("next")?.status == .running })
+        #expect(await advancing.until { BoardStore(root: root).load().task("next")?.status == .running })
     }
 
     @Test func updateTaskReopensAnArchivedTaskAndFoldsIntoOne() throws {

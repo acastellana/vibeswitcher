@@ -29,6 +29,53 @@ final class HostTerminalView: TerminalView {
         onReply?(Data(data))
     }
 
+    // MARK: Selection, as in Terminal.app
+
+    /// The session's output, drawn without dropping the selection. SwiftTerm 1.19 drops it as each piece of output
+    /// arrives, and on each line of it, while `allowMouseReporting` is on (its `feedPrepare` and `linefeed`; on by
+    /// default, and the pane never turned it off), so in a shell printing a build's or a server's lines a drag's
+    /// selection was gone before it could be copied (2026-11-07: "can't paste, or even select", in shell panes; an idle
+    /// Claude prints nothing, so there it held). Off while output is drawn, which is how SwiftTerm keeps a selection
+    /// through output (lines that leave the top of a full scrollback take it with them, and it goes when its text does:
+    /// SwiftTerm's own); on otherwise, so a program that asked for the mouse still gets its clicks and the wheel.
+    func feedOutput(_ bytes: ArraySlice<UInt8>) {
+        withoutMouseReporting { feed(byteArray: bytes) }
+    }
+
+    func feedOutput(text: String) {
+        withoutMouseReporting { feed(text: text) }
+    }
+
+    /// A program that asked for the mouse (Claude Code's fullscreen, vim, htop, tmux) gets a plain drag, as in
+    /// Terminal.app; an Option-drag (or SwiftTerm's own Shift-drag) selects instead. Decided when the button goes down,
+    /// for the whole drag: letting go of Option halfway doesn't hand the rest of it to the program.
+    private var selectingPastProgram = false
+
+    override func mouseDown(with event: NSEvent) {
+        selectingPastProgram = event.modifierFlags.contains(.option) && getTerminal().mouseMode != .off
+        pastProgram { super.mouseDown(with: event) }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        pastProgram { super.mouseDragged(with: event) }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer { selectingPastProgram = false }
+        pastProgram { super.mouseUp(with: event) }
+    }
+
+    private func pastProgram(_ body: () -> Void) {
+        selectingPastProgram ? withoutMouseReporting(body) : body()
+    }
+
+    private func withoutMouseReporting(_ body: () -> Void) {
+        let allowed = allowMouseReporting
+        allowMouseReporting = false
+        defer { allowMouseReporting = allowed }
+        body()
+    }
+
     /// SwiftTerm asks for 8-bit RGBA on the view's layer, but a terminal that redraws often is drawn into a content
     /// sublayer AppKit adds (drawn asynchronously, on the GPU) in a format AppKit picks: half-float, 8 bytes a pixel,
     /// 16 MB for a 758x683-point pane. CoreAnimation's accelerated renderer keeps the last surface it drew into after the
@@ -269,7 +316,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     }
 
     func clearScrollback() {
-        currentView?.feed(text: "\u{1b}[3J")
+        currentView?.feedOutput(text: "\u{1b}[3J")
     }
 
     private func makeView(for id: UUID) -> HostTerminalView {
@@ -293,12 +340,12 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         gates[id, default: ReplayGate()].attaching()
         let size = terminal.getTerminal()
         host.attach(id, cols: size.cols, rows: size.rows, sink: .init(
-            output: { [weak terminal] data in terminal?.feed(byteArray: [UInt8](data)[...]) },
+            output: { [weak terminal] data in terminal?.feedOutput([UInt8](data)[...]) },
             attached: { [weak self] in self?.gates[id]?.attached() },
             // The host dropped our stream (we fell behind): start clean; a fresh replay follows.
             resync: { [weak self, weak terminal] in
                 self?.gates[id]?.attaching()
-                terminal?.feed(text: "\u{1b}c")
+                terminal?.feedOutput(text: "\u{1b}c")
             }))
         return terminal
     }
@@ -477,8 +524,11 @@ private extension String {
 extension HostTerminalView {
     func apply(_ appearance: TerminalAppearance, darkMode: Bool) {
         let size = CGFloat(appearance.fontSize)
-        font = (appearance.fontName.isEmpty ? nil : NSFont(name: appearance.fontName, size: size))
+        let wanted = (appearance.fontName.isEmpty ? nil : NSFont(name: appearance.fontName, size: size))
             ?? .monospacedSystemFont(ofSize: size, weight: .regular)
+        // Only a new font: SwiftTerm's setter drops the selection (and lays the screen out again), and this runs on
+        // every light/dark switch, the colours alone changing.
+        if font != wanted { font = wanted }
         let palette = appearance.palette(darkMode: darkMode)
         func color(_ hex: String) -> NSColor {
             let rgb = RGB(hex: hex) ?? RGB(red: 0.5, green: 0.5, blue: 0.5)

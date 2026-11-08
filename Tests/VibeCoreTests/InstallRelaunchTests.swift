@@ -1,3 +1,4 @@
+import VibeCore
 import Foundation
 import Testing
 
@@ -37,7 +38,7 @@ struct InstallRelaunchTests {
 
         /// The installed bundle holds a process of `mode` (started here, its traps set before this returns); the built
         /// bundle, a "new" one that quits when asked.
-        init(_ scratch: Scratch, mode: String) throws {
+        init(_ scratch: Scratch, mode: String) async throws {
             root = scratch.url("install")
             name = "VSStandin" + String((0..<6).map { _ in "abcdefghijklmnopqrstuvwxyz0123456789".randomElement()! })
             installed = root.appendingPathComponent("Installed/\(name).app")
@@ -79,7 +80,7 @@ struct InstallRelaunchTests {
             old.standardOutput = FileHandle.nullDevice
             old.standardError = FileHandle.nullDevice
             try old.run()
-            #expect(waitReady(oldPid), "the old stand-in (pid \(oldPid)) never set its traps")
+            #expect(await waitReady(oldPid), "the old stand-in (pid \(oldPid)) never set its traps")
         }
 
         static func makeBundle(_ bundle: URL, name: String, mode: String, version: String) throws {
@@ -127,8 +128,8 @@ struct InstallRelaunchTests {
         var aside: URL { URL(fileURLWithPath: installed.path + ".replaced") }
 
         /// The process of `pid` has set its traps.
-        func waitReady(_ pid: pid_t) -> Bool {
-            eventually { FileManager.default.fileExists(atPath: ready.appendingPathComponent("\(pid)").path) }
+        func waitReady(_ pid: pid_t) async -> Bool {
+            await eventually { FileManager.default.fileExists(atPath: ready.appendingPathComponent("\(pid)").path) }
         }
 
         /// The script's pgrep sees no process at all, as from the sandboxed shell of 2026-10-31 (pgrep -x VibeSwitcher
@@ -182,7 +183,7 @@ struct InstallRelaunchTests {
             pgrep.standardOutput = out
             try pgrep.run()
             let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            pgrep.waitUntilExit()
+            waitForEnd(pgrep)
             return text.split(separator: "\n").compactMap { pid_t($0) }.sorted()
         }
 
@@ -213,7 +214,7 @@ struct InstallRelaunchTests {
             process.standardError = out
             try process.run()
             let output = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            process.waitUntilExit()
+            waitForEnd(process)
             return (process.terminationStatus, output)
         }
 
@@ -223,20 +224,27 @@ struct InstallRelaunchTests {
         }
 
         /// Ends every process of the stand-in's name (SIGKILL: one may ignore the rest) and waits for them to go.
+        /// Blocking, for a `defer`: short, as a SIGKILL's processes end at once, and bounded by the hang guard.
         func cleanUp() {
             for pid in (try? running()) ?? [] { kill(pid, SIGKILL) }
             if old.isRunning { kill(oldPid, SIGKILL) }
-            old.waitUntilExit()
-            #expect(eventually { ((try? running()) ?? []).isEmpty }, "stand-ins of \(name) left running")
+            waitForEnd(old)
+            let deadline = MacTime.real.awake() + hangGuard
+            var left = (try? running()) ?? []
+            while !left.isEmpty, MacTime.real.awake() < deadline {
+                Thread.sleep(forTimeInterval: 0.02)
+                left = (try? running()) ?? []
+            }
+            #expect(left.isEmpty, "stand-ins of \(name) left running")
         }
     }
 
     /// The app ignores the quit request and SIGTERM (the stuck main queue of 2026-10-30): the script says so, exits 1,
     /// and leaves the installed bundle and the process as they were. Nothing says "Installed and launched".
-    @Test func anAppThatWontQuitIsLeftAsItWasAndTheInstallFailsClosed() throws {
-        let stand = try StandIn(temp, mode: "ignores-all")
+    @Test func anAppThatWontQuitIsLeftAsItWasAndTheInstallFailsClosed() async throws {
+        let stand = try await StandIn(temp, mode: "ignores-all")
         defer { stand.cleanUp() }
-        let run = try stand.install(wait: 2)
+        let run = try await offPool { try stand.install(wait: 2) }
         #expect(run.status == 1, Comment(rawValue: run.output))
         #expect(run.output.contains("Asking \(stand.name) (pid \(stand.oldPid), started "), Comment(rawValue: run.output))
         #expect(run.output.contains("didn't quit within 2s of being asked; sending SIGTERM"), Comment(rawValue: run.output))
@@ -249,10 +257,10 @@ struct InstallRelaunchTests {
 
     /// The app quits when asked (what ⌘Q and the quit Apple Event do): the bundle is replaced, the new one launched, and
     /// the message names the new process, started after the copy, and the one before.
-    @Test func anAppThatQuitsWhenAskedIsReplacedAndRelaunched() throws {
-        let stand = try StandIn(temp, mode: "quits-when-asked")
+    @Test func anAppThatQuitsWhenAskedIsReplacedAndRelaunched() async throws {
+        let stand = try await StandIn(temp, mode: "quits-when-asked")
         defer { stand.cleanUp() }
-        let run = try stand.install(wait: 10)
+        let run = try await offPool { try stand.install(wait: 10) }
         #expect(run.status == 0, Comment(rawValue: run.output))
         #expect(run.output.contains("Asking \(stand.name) (pid \(stand.oldPid), started ") && run.output.contains("\n\(stand.name) quit.\n"), Comment(rawValue: run.output))
         #expect(!run.output.contains("SIGTERM"), Comment(rawValue: run.output))
@@ -262,7 +270,7 @@ struct InstallRelaunchTests {
         #expect(launched != stand.oldPid)
         #expect(stand.installedVersion == "new")
         #expect(try stand.running() == [launched], "the one running is the one launched")
-        #expect(stand.waitReady(launched), "the launched process is the new bundle's")
+        #expect(await stand.waitReady(launched), "the launched process is the new bundle's")
         #expect(!stand.old.isRunning)
         #expect(try stand.passesVerify(stand.installed))
         #expect(!FileManager.default.fileExists(atPath: stand.staged.path) && !FileManager.default.fileExists(atPath: stand.aside.path))
@@ -272,8 +280,8 @@ struct InstallRelaunchTests {
     /// bundle) after the old bundle was removed, which left an installed app failing `codesign -v` and nothing running.
     /// Here a file of the built bundle can't be read, so cp copies the rest and fails: the installed bundle is the old one
     /// and still passes its check, the partial copy is gone, the old app is relaunched, and the exit status is 1.
-    @Test func aCopyThatFailsPartwayLeavesTheOldAppInstalledAndRelaunchesIt() throws {
-        let stand = try StandIn(temp, mode: "quits-when-asked")
+    @Test func aCopyThatFailsPartwayLeavesTheOldAppInstalledAndRelaunchesIt() async throws {
+        let stand = try await StandIn(temp, mode: "quits-when-asked")
         defer { stand.cleanUp() }
         let fixture = stand.built.appendingPathComponent("Contents/Resources/Fixtures/suggestion.raw")
         try FileManager.default.createDirectory(at: fixture.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -292,15 +300,15 @@ struct InstallRelaunchTests {
         #expect(try stand.passesVerify(stand.installed), "the installed bundle no longer passes its check")
         #expect(!FileManager.default.fileExists(atPath: stand.staged.path), "the partial copy was left")
         #expect(!stand.old.isRunning)
-        #expect(eventually { ((try? stand.running()) ?? []).count == 1 }, "the old app wasn't relaunched")
+        #expect(await eventually { ((try? stand.running()) ?? []).count == 1 }, "the old app wasn't relaunched")
         let relaunched = try #require(try stand.running().first)
         #expect(relaunched != stand.oldPid)
-        #expect(stand.waitReady(relaunched), "the relaunched process never started")
+        #expect(await stand.waitReady(relaunched), "the relaunched process never started")
     }
 
     /// The copy completes but doesn't pass the signature check: the same, nothing swapped in, the old app relaunched.
-    @Test func aCopyThatFailsItsSignatureCheckIsNotSwappedIn() throws {
-        let stand = try StandIn(temp, mode: "quits-when-asked")
+    @Test func aCopyThatFailsItsSignatureCheckIsNotSwappedIn() async throws {
+        let stand = try await StandIn(temp, mode: "quits-when-asked")
         defer { stand.cleanUp() }
         try "tampered".write(to: stand.built.appendingPathComponent("Contents/Resources/extra"), atomically: true, encoding: .utf8)
         let run = try stand.install(wait: 10)
@@ -310,20 +318,20 @@ struct InstallRelaunchTests {
         #expect(stand.installedVersion == "old")
         #expect(try stand.passesVerify(stand.installed))
         #expect(!FileManager.default.fileExists(atPath: stand.staged.path))
-        #expect(eventually { ((try? stand.running()) ?? []).count == 1 }, "the old app wasn't relaunched")
+        #expect(await eventually { ((try? stand.running()) ?? []).count == 1 }, "the old app wasn't relaunched")
         let relaunched = try #require(try stand.running().first)
-        #expect(stand.waitReady(relaunched))
+        #expect(await stand.waitReady(relaunched))
     }
 
     /// 2026-11-03: the default quit command had lost its quotes to the ${VS_INSTALL_QUIT:-…} it was written in, so
     /// osascript got `-e quit app VibeSwitcher`, a script of just `quit` (-1708), and every install waited out the 10 s
     /// and fell back to SIGTERM. Run with that default, the quit now reaches the app at once: osascript is given the
     /// whole script and the installed bundle's path, and SIGTERM is never sent.
-    @Test func theDefaultQuitCommandAsksTheInstalledAppToQuit() throws {
-        let stand = try StandIn(temp, mode: "quits-when-asked")
+    @Test func theDefaultQuitCommandAsksTheInstalledAppToQuit() async throws {
+        let stand = try await StandIn(temp, mode: "quits-when-asked")
         defer { stand.cleanUp() }
         try stand.quittingOsascript()
-        let run = try stand.install(wait: 10, defaultQuit: true)
+        let run = try await offPool { try stand.install(wait: 10, defaultQuit: true) }
         let args = (try? String(contentsOf: stand.osascriptArgs, encoding: .utf8)) ?? "(osascript wasn't run)"
         #expect(args == "-e\non run argv\n-e\ntell application (item 1 of argv) to quit\n-e\nend run\n\(stand.installed.path)\n", Comment(rawValue: args))
         #expect(run.status == 0, Comment(rawValue: run.output))
@@ -337,10 +345,10 @@ struct InstallRelaunchTests {
 
     /// The app doesn't answer the quit request (no Apple Events reach it) but quits on SIGTERM, the fallback: replaced
     /// and relaunched too, and the message says which it took.
-    @Test func anAppThatQuitsOnlyOnSIGTERMIsReplacedAfterTheFallback() throws {
-        let stand = try StandIn(temp, mode: "quits-on-sigterm")
+    @Test func anAppThatQuitsOnlyOnSIGTERMIsReplacedAfterTheFallback() async throws {
+        let stand = try await StandIn(temp, mode: "quits-on-sigterm")
         defer { stand.cleanUp() }
-        let run = try stand.install(wait: 3)
+        let run = try await offPool { try stand.install(wait: 3) }
         #expect(run.status == 0, Comment(rawValue: run.output))
         #expect(run.output.contains("didn't quit within 3s of being asked; sending SIGTERM.\n\(stand.name) quit on SIGTERM.\n"), Comment(rawValue: run.output))
         let launched = try #require(StandIn.launchedPid(in: run.output), Comment(rawValue: run.output))
@@ -352,12 +360,12 @@ struct InstallRelaunchTests {
 
     /// No process of the name after the launch (`open` dropped on an app still quitting, or a launch that fails): the
     /// script says the bundle is installed but nothing new is up, and exits 1 rather than "Installed and launched".
-    @Test func aLaunchThatStartsNothingIsReportedAndFails() throws {
-        let stand = try StandIn(temp, mode: "quits-when-asked")
+    @Test func aLaunchThatStartsNothingIsReportedAndFails() async throws {
+        let stand = try await StandIn(temp, mode: "quits-when-asked")
         defer { stand.cleanUp() }
         try "#!/bin/bash\nexit 0\n".write(to: stand.launcher, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stand.launcher.path)
-        let run = try stand.install(wait: 2)
+        let run = try await offPool { try stand.install(wait: 2) }
         #expect(run.status == 1, Comment(rawValue: run.output))
         #expect(run.output.contains("Installed \(stand.installed.path), but no new \(stand.name) process is up 2s after the launch"), Comment(rawValue: run.output))
         #expect(run.output.contains("Open it yourself: open \(stand.installed.path)"), Comment(rawValue: run.output))
@@ -370,11 +378,11 @@ struct InstallRelaunchTests {
     /// removed and replaced the bundle under the live app, and `open` only brought the old process forward. Now the
     /// script finds the app with ps, by its executable inside the installed bundle: it's asked to quit like any other
     /// run, and the one running afterwards is the one just installed.
-    @Test func anAppPgrepCantSeeIsStillAskedToQuitBeforeItsBundleIsReplaced() throws {
-        let stand = try StandIn(temp, mode: "quits-when-asked")
+    @Test func anAppPgrepCantSeeIsStillAskedToQuitBeforeItsBundleIsReplaced() async throws {
+        let stand = try await StandIn(temp, mode: "quits-when-asked")
         defer { stand.cleanUp() }
         try stand.blindPgrep()
-        let run = try stand.install(wait: 10)
+        let run = try await offPool { try stand.install(wait: 10) }
         #expect(!run.output.contains("isn't running"), Comment(rawValue: run.output))
         #expect(run.output.contains("Asking \(stand.name) (pid \(stand.oldPid), started ") && run.output.contains("\n\(stand.name) quit.\n"), Comment(rawValue: run.output))
         #expect(run.status == 0, Comment(rawValue: run.output))
@@ -386,11 +394,11 @@ struct InstallRelaunchTests {
     }
 
     /// The same blind pgrep, and an app that won't quit: nothing is copied over it.
-    @Test func anAppPgrepCantSeeThatWontQuitKeepsItsBundle() throws {
-        let stand = try StandIn(temp, mode: "ignores-all")
+    @Test func anAppPgrepCantSeeThatWontQuitKeepsItsBundle() async throws {
+        let stand = try await StandIn(temp, mode: "ignores-all")
         defer { stand.cleanUp() }
         try stand.blindPgrep()
-        let run = try stand.install(wait: 2)
+        let run = try await offPool { try stand.install(wait: 2) }
         #expect(run.status == 1, Comment(rawValue: run.output))
         #expect(run.output.contains("Nothing was installed: \(stand.installed.path) is the one that was there."), Comment(rawValue: run.output))
         #expect(!run.output.contains("Installed and launched"), Comment(rawValue: run.output))
@@ -400,12 +408,12 @@ struct InstallRelaunchTests {
 
     /// The process list can't be read at all: the script can't tell whether the app is up, so it copies nothing and
     /// says why, rather than taking "none found" for "not running".
-    @Test func anUnreadableProcessListInstallsNothing() throws {
-        let stand = try StandIn(temp, mode: "quits-when-asked")
+    @Test func anUnreadableProcessListInstallsNothing() async throws {
+        let stand = try await StandIn(temp, mode: "quits-when-asked")
         defer { stand.cleanUp() }
         try stand.blindPgrep()
         try stand.failingPs()
-        let run = try stand.install(wait: 2)
+        let run = try await offPool { try stand.install(wait: 2) }
         #expect(run.status == 1, Comment(rawValue: run.output))
         #expect(run.output.contains("Couldn't read the process list"), Comment(rawValue: run.output))
         #expect(run.output.contains("Nothing was installed: \(stand.installed.path) is the one that was there."), Comment(rawValue: run.output))
@@ -416,12 +424,12 @@ struct InstallRelaunchTests {
 
     /// The sandboxed shell may refuse the script's signals to the app as well (kill -0 fails with EPERM on a live pid):
     /// that must read as "still up", never as "quit", so an app that won't quit keeps its bundle.
-    @Test func anAppTheScriptCantSignalIsStillUpUntilPsSaysItsGone() throws {
-        let stand = try StandIn(temp, mode: "ignores-all")
+    @Test func anAppTheScriptCantSignalIsStillUpUntilPsSaysItsGone() async throws {
+        let stand = try await StandIn(temp, mode: "ignores-all")
         defer { stand.cleanUp() }
         try stand.blindPgrep()
         try stand.refusedSignals()
-        let run = try stand.install(wait: 2)
+        let run = try await offPool { try stand.install(wait: 2) }
         #expect(run.status == 1, Comment(rawValue: run.output))
         #expect(!run.output.contains("\n\(stand.name) quit"), Comment(rawValue: run.output))
         #expect(run.output.contains("Nothing was installed: \(stand.installed.path) is the one that was there."), Comment(rawValue: run.output))
@@ -430,12 +438,12 @@ struct InstallRelaunchTests {
     }
 
     /// The same refused signals and an app that quits when asked: ps sees it go, and the install carries on.
-    @Test func anAppTheScriptCantSignalIsReplacedOnceItQuits() throws {
-        let stand = try StandIn(temp, mode: "quits-when-asked")
+    @Test func anAppTheScriptCantSignalIsReplacedOnceItQuits() async throws {
+        let stand = try await StandIn(temp, mode: "quits-when-asked")
         defer { stand.cleanUp() }
         try stand.blindPgrep()
         try stand.refusedSignals()
-        let run = try stand.install(wait: 10)
+        let run = try await offPool { try stand.install(wait: 10) }
         #expect(run.status == 0, Comment(rawValue: run.output))
         #expect(run.output.contains("\n\(stand.name) quit.\n"), Comment(rawValue: run.output))
         let launched = try #require(StandIn.launchedPid(in: run.output), Comment(rawValue: run.output))

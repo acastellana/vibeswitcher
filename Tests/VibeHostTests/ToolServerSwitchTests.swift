@@ -33,23 +33,23 @@ import Testing
         }
 
         /// Asks and waits for the answer.
-        func ask(_ id: Int, _ method: String, _ params: [String: Any] = [:]) throws -> [String: Any]? {
+        func ask(_ id: Int, _ method: String, _ params: [String: Any] = [:]) async throws -> [String: Any]? {
             try write(["jsonrpc": "2.0", "id": id, "method": method, "params": params])
             let reply = { messages.first { ($0["id"] as? Int) == id }?["result"] as? [String: Any] }
-            _ = eventually { reply() != nil }
+            _ = await eventually { reply() != nil }
             return reply()
         }
 
-        func initialize() throws -> Bool {
-            let ok = try ask(1, "initialize", ["protocolVersion": "2025-06-18", "capabilities": [String: Any](),
+        func initialize() async throws -> Bool {
+            let ok = try await ask(1, "initialize", ["protocolVersion": "2025-06-18", "capabilities": [String: Any](),
                                                "clientInfo": ["name": "claude-code", "version": "test"]]) != nil
             try write(["jsonrpc": "2.0", "method": "notifications/initialized"])
             return ok
         }
 
         /// A tool call's text and whether it's an error.
-        func call(_ id: Int, _ tool: String, _ arguments: [String: Any] = [:]) throws -> (text: String, isError: Bool)? {
-            guard let result = try ask(id, "tools/call", ["name": tool, "arguments": arguments]) else { return nil }
+        func call(_ id: Int, _ tool: String, _ arguments: [String: Any] = [:]) async throws -> (text: String, isError: Bool)? {
+            guard let result = try await ask(id, "tools/call", ["name": tool, "arguments": arguments]) else { return nil }
             let text = ((result["content"] as? [[String: Any]]) ?? []).compactMap { $0["text"] as? String }.joined(separator: "\n")
             return (text, result["isError"] as? Bool ?? true)
         }
@@ -57,11 +57,11 @@ import Testing
         /// A tool call once the toolset is settled: a call while the server still asks the host for its role (a loaded
         /// host may not answer its first whoami in time, see `MCPHostedToolset`) is answered `waiting`, and asked again
         /// as the next id. `id`: the next free one.
-        func settledCall(_ id: inout Int, _ tool: String, _ arguments: [String: Any] = [:]) throws -> (text: String, isError: Bool)? {
+        func settledCall(_ id: inout Int, _ tool: String, _ arguments: [String: Any] = [:]) async throws -> (text: String, isError: Bool)? {
             var answer: (text: String, isError: Bool)?
-            _ = eventually {
+            _ = await eventuallyAsync {
                 defer { id += 1 }
-                answer = try? call(id, tool, arguments)
+                answer = try? await call(id, tool, arguments)
                 return answer.map { $0.text != MCPHostedToolset.waiting } ?? false
             }
             return answer
@@ -78,9 +78,9 @@ import Testing
     }
 
     /// The keeper's one child, the tool server, once it runs: not `previous`.
-    func child(of keeper: pid_t, not previous: pid_t? = nil) -> pid_t? {
+    func child(of keeper: pid_t, not previous: pid_t? = nil) async -> pid_t? {
         var found: pid_t?
-        _ = eventually {
+        _ = await eventually {
             found = SessionStrays.children(of: keeper).first { $0 != previous }
             return found != nil
         }
@@ -88,7 +88,7 @@ import Testing
     }
 
     @Test(arguments: [false, true])
-    func theLeadsAndAWorkersServersKeepTheirRolesAndSealsThroughASwitch(keeper: Bool) throws {
+    func theLeadsAndAWorkersServersKeepTheirRolesAndSealsThroughASwitch(keeper: Bool) async throws {
         let built = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         try #require(FileManager.default.isExecutableFile(atPath: built), "vibeswitcher-mcp isn't built beside the host: run swift build first")
         let files = FileManager.default
@@ -126,7 +126,7 @@ import Testing
         let client = try TestClient(host)
         // Each session: a stand-in for Claude Code (argv[0] `claude`, so the tools find it as the session's agent),
         // starting its tool server once the test says, as Claude Code starts it for the session's role.
-        func session(_ name: String, _ arguments: String) throws -> HostSession {
+        func session(_ name: String, _ arguments: String) async throws -> HostSession {
             files.createFile(atPath: "\(folder)/\(name).in", contents: nil)
             let script = "\(folder)/\(name).sh"
             try """
@@ -136,11 +136,11 @@ import Testing
             wait
             """.write(toFile: script, atomically: true, encoding: .utf8)
             // Its home is the scratch one, for Foundation too (CFFIXED_USER_HOME) and VibeSwitcher's folder: never the user's.
-            return try client.spawn("export HOME='\(home)' CFFIXED_USER_HOME='\(home)' VIBESWITCHER_HOME='\(vibe)'; cd '\(root)'; "
+            return try await client.spawn("export HOME='\(home)' CFFIXED_USER_HOME='\(home)' VIBESWITCHER_HOME='\(vibe)'; cd '\(root)'; "
                                     + "exec /bin/bash -c 'exec -a claude /bin/bash \(script)'", cwd: root)
         }
-        let leadSession = try session("lead", "--role lead")
-        let workerSession = try session("worker", "--role worker --task t")
+        let leadSession = try await session("lead", "--role lead")
+        let workerSession = try await session("worker", "--role worker --task t")
         // The app starts the lead; the lead, its worker.
         guard case .grant(let leadGrant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else {
             Issue.record("no lead grant"); return
@@ -154,23 +154,23 @@ import Testing
         for name in ["lead", "worker"] { files.createFile(atPath: "\(folder)/go-\(name)", contents: nil) }
 
         let lead = Server(folder: folder, name: "lead"), worker = Server(folder: folder, name: "worker")
-        #expect(try lead.initialize(), "lead's stderr: \(lead.errors)")
-        #expect(try worker.initialize(), "worker's stderr: \(worker.errors)")
+        await #expect(try lead.initialize(), "lead's stderr: \(lead.errors)")
+        await #expect(try worker.initialize(), "worker's stderr: \(worker.errors)")
         var leadID = 2, workerID = 2
-        let before = try lead.settledCall(&leadID, "status")
+        let before = try await lead.settledCall(&leadID, "status")
         #expect(before?.isError == false, "status: \(before?.text ?? "no answer"); stderr: \(lead.errors)")
         let leadPid = try #require(lead.pid), workerPid = try #require(worker.pid)
         // The servers end before the scratch folder goes: one still ending would write into it again.
         defer {
             for pid in [leadPid, workerPid] { kill(pid, SIGTERM) }
-            #expect(eventually { kill(leadPid, 0) != 0 && kill(workerPid, 0) != 0 })
+            #expect(await eventually { kill(leadPid, 0) != 0 && kill(workerPid, 0) != 0 })
         }
         // The lead records where it runs as it starts, else at its next call: each asks the process table again (on a
         // loaded Mac a shell's arguments, which make it the stand-in, may not be read in time).
-        #expect(eventually {
+        #expect(await eventuallyAsync {
             if store.load().leadTTY != nil { return true }
             defer { leadID += 1 }
-            _ = try? lead.call(leadID, "status")
+            _ = try? await lead.call(leadID, "status")
             return store.load().leadTTY != nil
         })
         let leadTTY = try #require(store.load().leadTTY, "the lead didn't record itself on the board")
@@ -178,17 +178,17 @@ import Testing
         // The loop runs in the lead's server: it holds its lock, and its first pass's report reaches the lead sealed.
         let advancing = LeadAdvance.runningLock(store)
         let fromLoop = { inbox(vibe, tty: leadTTY).filter { $0.from == .system(LeadAdvance.sender) } }
-        #expect(eventually { !fromLoop().isEmpty }, "the lead's inbox: \(inbox(vibe, tty: leadTTY)); stderr: \(lead.errors)")
+        #expect(await eventually { !fromLoop().isEmpty }, "the lead's inbox: \(inbox(vibe, tty: leadTTY)); stderr: \(lead.errors)")
         #expect(FileLock.attempt(advancing) == nil, "the loop doesn't hold \(advancing)")
         let reportsBefore = fromLoop().count
         // Under the keeper, its child is the server that switches (on its own pid, the keeper's staying as it is).
-        let kept = keeper ? (try #require(child(of: leadPid)), try #require(child(of: workerPid))) : nil
+        let kept = keeper ? (try #require(await child(of: leadPid)), try #require(await child(of: workerPid))) : nil
 
         // The install: another build (another file) in its place, written beside it and renamed over it.
         try files.copyItem(atPath: built, toPath: dir + "/app/next")
         #expect(rename(dir + "/app/next", installed) == 0)
         // Each server switches between requests, an idle one within a second.
-        #expect(eventually { lead.errors.contains("switched in place to the new build") && worker.errors.contains("switched in place to the new build") },
+        #expect(await eventually { lead.errors.contains("switched in place to the new build") && worker.errors.contains("switched in place to the new build") },
                 "lead: \(lead.errors)\nworker: \(worker.errors)")
         #expect(!lead.errors.contains("couldn't switch") && !worker.errors.contains("couldn't switch"))
         // The same processes, on the same pipes, now the new build.
@@ -197,14 +197,14 @@ import Testing
         if let kept { #expect(SessionStrays.children(of: leadPid) == [kept.0] && SessionStrays.children(of: workerPid) == [kept.1]) }
 
         // The lead's server is still the lead's: status answers, its role is the same grant in the same session.
-        let after = try lead.settledCall(&leadID, "status")
+        let after = try await lead.settledCall(&leadID, "status")
         #expect(after?.isError == false, "status: \(after?.text ?? "no answer"); stderr: \(lead.errors)")
         guard case .member(let current?) = book.answer(.current(role: .lead, root: root, task: nil), from: .app) else {
             Issue.record("the lead's role is gone after the switch"); return
         }
         #expect(current.id == leadGrant && current.session == leadSession.id.uuidString)
         // The new build's loop: its first pass reports again, sealed as auto_advance's, and it holds the lock again.
-        #expect(eventually { fromLoop().count > reportsBefore }, "the lead's inbox: \(inbox(vibe, tty: leadTTY)); stderr: \(lead.errors)")
+        #expect(await eventually { fromLoop().count > reportsBefore }, "the lead's inbox: \(inbox(vibe, tty: leadTTY)); stderr: \(lead.errors)")
         #expect(FileLock.attempt(advancing) == nil, "the new build's loop doesn't hold \(advancing)")
 
         if let kept {
@@ -212,29 +212,29 @@ import Testing
             let reportsBeforeKill = fromLoop().count
             #expect(kill(kept.0, SIGKILL) == 0 && kill(kept.1, SIGKILL) == 0)
             // Asked once the new ones run: a call the keeper reads before it hears of the end fails as one in hand.
-            let next = (try #require(child(of: leadPid, not: kept.0)), try #require(child(of: workerPid, not: kept.1)))
-            let restarted = try lead.settledCall(&leadID, "status")
+            let next = (try #require(await child(of: leadPid, not: kept.0)), try #require(await child(of: workerPid, not: kept.1)))
+            let restarted = try await lead.settledCall(&leadID, "status")
             #expect(restarted?.isError == false, "status: \(restarted?.text ?? "no answer"); stderr: \(lead.errors)")
             guard case .member(let again?) = book.answer(.current(role: .lead, root: root, task: nil), from: .app) else {
                 Issue.record("the lead's role is gone after the restart"); return
             }
             #expect(again.id == leadGrant && again.session == leadSession.id.uuidString)
             // The new server's loop reports again, sealed, and holds the lock.
-            #expect(eventually { fromLoop().count > reportsBeforeKill }, "the lead's inbox: \(inbox(vibe, tty: leadTTY)); stderr: \(lead.errors)")
+            #expect(await eventually { fromLoop().count > reportsBeforeKill }, "the lead's inbox: \(inbox(vibe, tty: leadTTY)); stderr: \(lead.errors)")
             #expect(FileLock.attempt(advancing) == nil, "the restarted server's loop doesn't hold \(advancing)")
             let log = (try? String(contentsOfFile: "\(vibe)/debug/mcp-lead-\(leadPid).log", encoding: .utf8)) ?? ""
             #expect(log.contains("keeper: the tool server was killed by signal 9") && log.contains("started the tool server again, pid \(next.0)"), "\(log)")
         }
 
         // The worker's server reports as its session's worker.
-        let report = try worker.settledCall(&workerID, "report", ["status": "blocked", "summary": "Blocked on purpose (a test)."])
+        let report = try await worker.settledCall(&workerID, "report", ["status": "blocked", "summary": "Blocked on purpose (a test)."])
         #expect(report?.isError == false, "report: \(report?.text ?? "no answer"); stderr: \(worker.errors)")
         // Its lead was told, though the host shows a worker none of its lead's session (only itself and what it
         // started): the report waits in the lead's inbox, where its hooks or the app's wake-up (`LeadWake`, on the
         // app's connection, which reaches every session) hand it over. The worker never types into its lead.
         #expect(report?.text.contains("There's no lead running") == false, "report: \(report?.text ?? "no answer")")
         let fromWorker = { inbox(vibe, tty: leadTTY).filter { $0.from == .system("worker t") } }
-        #expect(eventually { fromWorker().count == 1 }, "the lead's inbox: \(inbox(vibe, tty: leadTTY))")
+        #expect(await eventually { fromWorker().count == 1 }, "the lead's inbox: \(inbox(vibe, tty: leadTTY))")
 
         // Every one of them carries the host's seal for its sender.
         let sealed = fromLoop() + fromWorker()

@@ -52,6 +52,11 @@ public struct TestLock: Sendable {
     /// How long `vs-heavy` lets its command run before it ends its group, when set ("90", "90m", "30s", "2h"); else 60
     /// min. The lead gives its sessions the project's test_timeout_min, when the workflow sets one of its own.
     public static let timeoutVariable = "VIBESWITCHER_HEAVY_TIMEOUT"
+    /// How long `vs-heavy` lets its command go without progress (no new output, almost no CPU in its group, the Mac
+    /// under load_threshold) before it ends its group as past --timeout, when set ("10", "10m", "90s"; "0" or "off":
+    /// never); else 10 min (`StallWatch`). The lead gives its sessions the project's stall_min, when the workflow sets
+    /// one of its own.
+    public static let stallVariable = "VIBESWITCHER_HEAVY_STALL"
     /// A slot held this long is "long" in status, the witness and a waiter's words: only said, never acted on.
     public static let longAfter: TimeInterval = 30 * 60
     /// A holder whose work has used almost no CPU this long is "idle" there: only said, never acted on.
@@ -61,6 +66,10 @@ public struct TestLock: Sendable {
     public let slots: Int
     /// How often a holder here looks at its work's CPU time (`Held`).
     public var sampleEvery: TimeInterval = 60
+    /// What stops a run under this lock early when it makes no progress (merge's and an audit's commands, see
+    /// `Worktrees.runChecks`): the lead sets the project's stall_min and the Mac's load_threshold (`heavyLock`); nil:
+    /// only their timeout ends them.
+    public var watch: StallWatch?
     /// Slot 1's file (an older `vs-heavy` knows only this one).
     public var path: String { slotPath(1) }
 
@@ -73,6 +82,7 @@ public struct TestLock: Sendable {
     public func with(slots count: Int) -> TestLock {
         var lock = TestLock(directory: directory, slots: count)
         lock.sampleEvery = sampleEvery
+        lock.watch = watch
         return lock
     }
 

@@ -88,7 +88,7 @@ struct PhoneBriefingTests {
         // The other routes' Host and account rules: another name (DNS rebinding) or another account gets nothing.
         #expect(send("POST", "/api/briefing", token: token, host: "evil.example:\(PhoneAccess.httpsPort)").status == 421)
         #expect(send("POST", "/api/briefing", token: token, host: "127.0.0.1:\(PhoneAccess.port)").status == 421)
-        #expect(send("POST", "/api/briefing", token: token, login: "someone@else.com").status == 403)
+        #expect(send("POST", "/api/briefing", token: token, login: "someone@else.example").status == 403)
         #expect(fake.presses == 0)
         // An unpaired phone (removed on the Mac) is refused too, its token no longer good.
         #expect(send("POST", "/api/unpair", token: token).status == 200)
@@ -253,7 +253,8 @@ struct PhoneBriefingTests {
         let temp = Scratch()
         let folder = temp.url("mac-voice")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let data = try #require(await Task.detached { MacVoiceFile.render("Two tasks landed.", language: "en", folder: folder) }.value)
+        // The render waits up to a minute for the synthesizer: on a thread of its own, not the cooperative pool.
+        let data = try #require(await offPool { MacVoiceFile.render("Two tasks landed.", language: "en", folder: folder) })
         #expect(data.count > 1000)
         #expect(String(decoding: data.dropFirst(4).prefix(4), as: UTF8.self) == "ftyp")
         #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)

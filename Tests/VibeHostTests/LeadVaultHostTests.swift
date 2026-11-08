@@ -49,28 +49,29 @@ struct LeadVaultHostTests {
     }
 
     /// `nc(…)` from this process (outside every session), once the replies to `seqs` are in.
-    func ask(_ host: TestHost, _ requests: URL, expecting seqs: ClosedRange<Int>) throws -> [Int: HostEvent] {
+    func ask(_ host: TestHost, _ requests: URL, expecting seqs: ClosedRange<Int>) async throws -> [Int: HostEvent] {
         let answers = requests.appendingPathExtension("answers"), stop = requests.appendingPathExtension("stop")
         let nc = Process()
         nc.executableURL = URL(fileURLWithPath: "/bin/sh")
         nc.arguments = ["-c", self.nc(host, requests, answers, until: stop)]
         try nc.run()
-        #expect(eventually { answered(answers, seqs) })
+        #expect(await eventually { answered(answers, seqs) })
         FileManager.default.createFile(atPath: stop.path, contents: nil)
-        nc.waitUntilExit()
+        waitForEnd(nc)
         return try replies(Data(contentsOf: answers))
     }
 
+    /// Blocking (one round trip): the conditions `eventually` polls read it.
     func screen(_ client: TestClient, _ id: UUID) -> String {
         let seq = client.send(.screen(id: id))
-        _ = eventually { client.reply(to: seq) != nil }
+        _ = eventuallyBlocking { client.reply(to: seq) != nil }
         if case .screenText(_, let text)? = client.reply(to: seq) { return text }
         return ""
     }
 
     /// `nc -U` on the host's socket, sending `requests` (numbered from 2, as `frames`) and returning the replies. With
     /// `proof`, the challenge the host sent first is answered with that key before them, as the app's connection does.
-    func viaNC(_ socket: String, proof key: SymmetricKey?, _ requests: [HostRequest]) throws -> [Int: HostEvent] {
+    func viaNC(_ socket: String, proof key: SymmetricKey?, _ requests: [HostRequest]) async throws -> [Int: HostEvent] {
         let nc = Process()
         nc.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
         nc.arguments = ["-U", socket]
@@ -78,7 +79,7 @@ struct LeadVaultHostTests {
         nc.standardInput = input
         nc.standardOutput = output
         try nc.run()
-        defer { nc.waitUntilExit() }
+        defer { waitForEnd(nc) }
         var received = Data()
         var challenge: Data?
         while challenge == nil {
@@ -111,11 +112,11 @@ struct LeadVaultHostTests {
         let fd = output.fileHandleForReading.fileDescriptor
         let flags = fcntl(fd, F_GETFL)
         _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
-        let deadline = Date().addingTimeInterval(hangGuard)
+        let deadline = MacTime.real.awake() + hangGuard
         var buffer = [UInt8](repeating: 0, count: 65_536)
-        while !answeredAll(), Date() < deadline {
+        while !answeredAll(), MacTime.real.awake() < deadline {
             let count = read(fd, &buffer, buffer.count)
-            if count > 0 { received.append(contentsOf: buffer[0..<count]) } else if count == 0 { break } else { Thread.sleep(forTimeInterval: 0.02) }
+            if count > 0 { received.append(contentsOf: buffer[0..<count]) } else if count == 0 { break } else { await pause(0.02) }
         }
         _ = fcntl(fd, F_SETFL, flags)
         #expect(answeredAll(), "replies to \(expected): \((try? replies(received)) ?? [:])")
@@ -130,23 +131,23 @@ struct LeadVaultHostTests {
     }
 
     /// Start a fixture through the binary this host recognizes as its app, with the app's proof.
-    func spawnViaNC(_ host: TestHost, _ command: String) throws -> HostSession {
+    func spawnViaNC(_ host: TestHost, _ command: String) async throws -> HostSession {
         let request = SpawnRequest(cwd: folder.path, command: command, env: [:], cols: 80, rows: 24,
                                    keepShell: false, label: "Test", agent: nil)
-        guard case .spawned(let session)? = try viaNC(host.socket, proof: host.appKey, [.spawn(request)])[2] else {
+        guard case .spawned(let session)? = try await viaNC(host.socket, proof: host.appKey, [.spawn(request)])[2] else {
             throw CancellationError()
         }
         return session
     }
 
-    func screenViaNC(_ host: TestHost, _ id: UUID) throws -> String {
-        guard case .screenText(_, let text)? = try viaNC(host.socket, proof: host.appKey, [.screen(id: id)])[2] else {
+    func screenViaNC(_ host: TestHost, _ id: UUID) async throws -> String {
+        guard case .screenText(_, let text)? = try await viaNC(host.socket, proof: host.appKey, [.screen(id: id)])[2] else {
             throw CancellationError()
         }
         return text
     }
 
-    @Test func aWorkersShellCantGiveAVerdictSealAsTheUserOrTypeIntoTheLead() throws {
+    @Test func aWorkersShellCantGiveAVerdictSealAsTheUserOrTypeIntoTheLead() async throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let book = LeadVault.Book()
         // This test process is the app: its own binary, outside every session.
@@ -154,7 +155,7 @@ struct LeadVaultHostTests {
         let app = try TestClient(host)
 
         // The lead (as the app starts it), and the lead's worker, each a session of the host.
-        let lead = try app.spawn("read x; echo lead-got:$x; sleep 30")
+        let lead = try await app.spawn("read x; echo lead-got:$x; sleep 30")
         let script = folder.appendingPathComponent("attack.sh").path
         let requests = folder.appendingPathComponent("requests.bin")
         let answers = folder.appendingPathComponent("answers.bin")
@@ -165,7 +166,7 @@ struct LeadVaultHostTests {
         touch '\(folder.path)/done'
         sleep 30
         """.write(toFile: script, atomically: true, encoding: .utf8)
-        let worker = try app.spawn("sh '\(script)'")
+        let worker = try await app.spawn("sh '\(script)'")
         guard case .grant(let leadGrant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else {
             Issue.record("no lead grant"); return
         }
@@ -190,9 +191,9 @@ struct LeadVaultHostTests {
         ])
         try attack.write(to: requests)
         FileManager.default.createFile(atPath: folder.appendingPathComponent("go").path, contents: nil)
-        #expect(eventually { answered(answers, 2...8) })
+        #expect(await eventually { answered(answers, 2...8) })
         FileManager.default.createFile(atPath: folder.appendingPathComponent("stop").path, contents: nil)
-        #expect(eventually { FileManager.default.fileExists(atPath: folder.appendingPathComponent("done").path) })
+        #expect(await eventually { FileManager.default.fileExists(atPath: folder.appendingPathComponent("done").path) })
 
         let got = try replies(Data(contentsOf: answers))
         // The host knows it's the worker (so it isn't refusing everyone)...
@@ -207,10 +208,10 @@ struct LeadVaultHostTests {
         }
         #expect(current.id == leadGrant && current.session == lead.id.uuidString)
         // Its keys never reached the lead; the app's do.
-        Thread.sleep(forTimeInterval: 0.5)
-        #expect(!screen(app, lead.id).contains("PWNED"))
+        await pause(0.5)
+        await #expect(!screen(app, lead.id).contains("PWNED"))
         app.send(.input(id: lead.id, bytes: Data("from-you\r".utf8), reply: false))
-        #expect(eventually { screen(app, lead.id).contains("lead-got:from-you") })
+        #expect(await eventually { screen(app, lead.id).contains("lead-got:from-you") })
         // A message the worker sealed itself (it has no key to do it with) isn't the user's.
         var selfSealed = forged
         selfSealed.seal = SteerInbox.seal(forged, key: SymmetricKey(size: .bits256))
@@ -225,12 +226,12 @@ struct LeadVaultHostTests {
         #expect(book.answer(.verify([sealed]), from: .unknown) == .verified([true]))
     }
 
-    @Test func aProcessOutsideEverySessionIsntTheApp() throws {
+    @Test func aProcessOutsideEverySessionIsntTheApp() async throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let book = LeadVault.Book()
         let host = try TestHost(vault: book, appExecutable: try #require(HostServer.executable(of: getpid())))
         let app = try TestClient(host)
-        let lead = try app.spawn("read x; echo lead-got:$x; sleep 30")
+        let lead = try await app.spawn("read x; echo lead-got:$x; sleep 30")
         guard case .grant(let grant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else { return }
         _ = book.answer(.bind(grant: grant, root: root, session: lead.id.uuidString), from: .app)
         // Started by the app, but not the app's binary (a worker's script that left its session's process tree is the same).
@@ -238,22 +239,22 @@ struct LeadVaultHostTests {
         try frames([.vault(.seal(SteerMessage(text: "x", from: .user, agentPid: 1))),
                     .vault(.whoami(root: root)),
                     .input(id: lead.id, bytes: Data("PWNED\r".utf8), reply: false)]).write(to: requests)
-        let got = try ask(host, requests, expecting: 2...3)
+        let got = try await ask(host, requests, expecting: 2...3)
         #expect(refused(got[2]))
         #expect(got[3] == .vault(.member(nil)))
-        Thread.sleep(forTimeInterval: 0.5)
-        #expect(!screen(app, lead.id).contains("PWNED"))
+        await pause(0.5)
+        await #expect(!screen(app, lead.id).contains("PWNED"))
     }
 
     /// The exec trick: a worker's shell leaves its session (double fork, setsid), connects, forks a child that keeps
     /// the connection, and execs the app's binary in the process that connected; the child then asks as "the app".
     /// Here the app is `/usr/bin/nc` (a binary that stays up, `nc -lU`), and the host is tried accepting at once and
     /// accepting only after the exec (its queue held up), when the kernel already names the connector as the app.
-    @Test func aConnectionWhoseProcessExecsTheAppIsntTheApp() throws {
+    @Test func aConnectionWhoseProcessExecsTheAppIsntTheApp() async throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let book = LeadVault.Book()
         let host = try TestHost(vault: book, appExecutable: "/usr/bin/nc")
-        let lead = try spawnViaNC(host, "read x; echo lead-got:$x; sleep 30")
+        let lead = try await spawnViaNC(host, "read x; echo lead-got:$x; sleep 30")
         let script = folder.appendingPathComponent("attack.sh").path
         let requests = folder.appendingPathComponent("requests.bin")
         // The worker's shell, one attempt per line of `attempts`: out of the session, connect, fork, exec the app.
@@ -285,7 +286,7 @@ struct LeadVaultHostTests {
             return "/usr/bin/perl '\(attack)' '\(host.socket)' '\(requests.path)' '\(file).answers' '\(file).go' '\(listens[name]!)'"
         }.joined(separator: "\n").appending("\nsleep 30\n").write(toFile: script, atomically: true, encoding: .utf8)
 
-        let worker = try spawnViaNC(host, "sh '\(script)'")
+        let worker = try await spawnViaNC(host, "sh '\(script)'")
         guard case .grant(let leadGrant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else {
             Issue.record("no lead grant"); return
         }
@@ -303,19 +304,23 @@ struct LeadVaultHostTests {
                     .input(id: lead.id, bytes: Data("PWNED\r".utf8), reply: false)]).write(to: requests)
         // The control: nc itself, outside every session, answering the challenge with the app's key, is the app (so a
         // refusal below isn't nc going unrecognised).
-        let controlled = try viaNC(host.socket, proof: host.appKey, [.vault(.seal(forged)), .input(id: lead.id, bytes: Data("CONTROL\r".utf8), reply: false)])
+        let controlled = try await viaNC(host.socket, proof: host.appKey, [.vault(.seal(forged)), .input(id: lead.id, bytes: Data("CONTROL\r".utf8), reply: false)])
         guard case .vault(.seal)? = controlled[2] else { Issue.record("nc isn't the app: \(String(describing: controlled[2]))"); return }
-        #expect(eventually { (try? screenViaNC(host, lead.id))?.contains("lead-got:CONTROL") == true })
+        #expect(await eventuallyAsync { (try? await screenViaNC(host, lead.id))?.contains("lead-got:CONTROL") == true })
 
         for name in attempts {
             let file = folder.appendingPathComponent(name).path
             // "late": the host accepts only after the exec, when LOCAL_PEERTOKEN already names nc.
             if name == "late" {
                 let listen = listens[name]!
-                host.server.queue.async { _ = eventually { FileManager.default.fileExists(atPath: listen) } }
+                host.server.queue.async {
+                    // On the server's queue (not the cooperative pool): a blocking look, bounded by the hang guard.
+                    let deadline = Date().addingTimeInterval(hangGuard)
+                    while !FileManager.default.fileExists(atPath: listen), Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+                }
             }
             FileManager.default.createFile(atPath: file + ".go", contents: nil)
-            #expect(eventually { answered(URL(fileURLWithPath: file + ".answers"), 2...4) }, "\(name)")
+            #expect(await eventually { answered(URL(fileURLWithPath: file + ".answers"), 2...4) }, "\(name)")
             FileManager.default.createFile(atPath: file + ".answers.stop", contents: nil)
             let got = try replies(Data(contentsOf: URL(fileURLWithPath: file + ".answers")))
             for seq in 2...4 { #expect(refused(got[seq]), "\(name), request \(seq): \(String(describing: got[seq]))") }
@@ -325,19 +330,19 @@ struct LeadVaultHostTests {
             Issue.record("the lead lost its role"); return
         }
         #expect(current.id == leadGrant)
-        Thread.sleep(forTimeInterval: 0.5)
-        #expect(!(try screenViaNC(host, lead.id)).contains("PWNED"))
+        await pause(0.5)
+        await #expect(!(try screenViaNC(host, lead.id)).contains("PWNED"))
     }
 
     /// The LOCAL_PEERTOKEN race, from the host's side: whatever sent the bytes, the kernel names the process accepted,
     /// running the app's code, at every read (here it is nc, the app, that writes them all). That no longer makes it
     /// the app: only an answer to its connection's challenge under the app's key does.
-    @Test func theAppsCodeIsntTheAppUntilItAnswersTheChallenge() throws {
+    @Test func theAppsCodeIsntTheAppUntilItAnswersTheChallenge() async throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let book = LeadVault.Book()
         let host = try TestHost(vault: book, appExecutable: "/usr/bin/nc")
         let app = try TestClient(host, asApp: false)
-        let lead = try spawnViaNC(host, "read x; echo lead-got:$x; sleep 30")
+        let lead = try await spawnViaNC(host, "read x; echo lead-got:$x; sleep 30")
         guard case .grant(let grant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else { return }
         _ = book.answer(.bind(grant: grant, root: root, session: lead.id.uuidString), from: .app)
         let ran = folder.appendingPathComponent("would-be-build-ran").path
@@ -349,7 +354,7 @@ struct LeadVaultHostTests {
 
         // No answer, and an answer under another key: refused everything the app alone may do.
         for proof in [nil, SymmetricKey(size: .bits256)] {
-            let got = try viaNC(host.socket, proof: proof, asked)
+            let got = try await viaNC(host.socket, proof: proof, asked)
             #expect(refused(got[2]) && refused(got[3]), "\(String(describing: got[2])), \(String(describing: got[3]))")
             for seq in 4...5 {
                 guard case .error? = got[seq] else { Issue.record("request \(seq): \(String(describing: got[seq]))"); continue }
@@ -360,28 +365,28 @@ struct LeadVaultHostTests {
         #expect(!FileManager.default.fileExists(atPath: ran))
 
         // The app's key: it's the app (the seal, the head), as the app's own connections are.
-        let got = try viaNC(host.socket, proof: host.appKey, Array(asked.prefix(2)))
+        let got = try await viaNC(host.socket, proof: host.appKey, Array(asked.prefix(2)))
         guard case .vault(.seal)? = got[2] else { Issue.record("the key didn't make nc the app: \(String(describing: got[2]))"); return }
         #expect(got[3] == .vault(.ok))
     }
 
-    @Test func aProcessOutsideEverySessionCantKillOrHandOver() throws {
+    @Test func aProcessOutsideEverySessionCantKillOrHandOver() async throws {
         let host = try TestHost()
         let app = try TestClient(host)
         let other = try TestClient(host, asApp: false)
-        let session = try app.spawn("sleep 30")
+        let session = try await app.spawn("sleep 30")
         let kill = other.send(.kill(id: session.id))
         let handover = other.send(.handover(executable: "/usr/bin/true"))
-        #expect(eventually { other.reply(to: kill) != nil && other.reply(to: handover) != nil })
+        #expect(await eventually { other.reply(to: kill) != nil && other.reply(to: handover) != nil })
         guard case .error? = other.reply(to: kill), case .error? = other.reply(to: handover) else {
             Issue.record("\(String(describing: other.reply(to: kill))), \(String(describing: other.reply(to: handover)))"); return
         }
-        Thread.sleep(forTimeInterval: 0.3)
+        await pause(0.3)
         #expect(app.latest(session.id)?.isLive != false)
         // The app may.
         let killed = app.send(.kill(id: session.id))
-        #expect(eventually { app.reply(to: killed) == .ok })
-        #expect(eventually { app.latest(session.id)?.isLive == false })
+        #expect(await eventually { app.reply(to: killed) == .ok })
+        #expect(await eventually { app.latest(session.id)?.isLive == false })
     }
 
     /// A host replaced (not handed over): the next one reads the vault back from disk, verdicts too. One that can't
