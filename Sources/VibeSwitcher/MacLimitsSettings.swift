@@ -74,44 +74,56 @@ final class MacLimitsEditor: ObservableObject {
     }
 }
 
-/// Settings › Project lead's Mac-wide limits: what every project's leads start teams under.
+/// Settings › Performance's Mac-wide limits and usage limits: what every project's leads start teams under.
 struct MacLimitsSection: View {
     @StateObject private var editor = MacLimitsEditor()
 
     var body: some View {
         Section {
-            LabeledContent("Team sessions on this Mac, at most") {
-                HStack(spacing: 4) {
-                    TextField("Team sessions", value: $editor.maxSessions, format: .number)
-                        .labelsHidden().accessibilityLabel("Team sessions on this Mac, at most")
-                        .multilineTextAlignment(.trailing).frame(width: 44)
-                    Stepper("Team sessions", value: $editor.maxSessions, in: 1...99).labelsHidden()
-                }
+            SettingRow("max-sessions") { label in
+                LabeledContent {
+                    HStack(spacing: 4) {
+                        TextField("Team sessions", value: $editor.maxSessions, format: .number)
+                            .labelsHidden().accessibilityLabel("Team sessions on this Mac, at most")
+                            .multilineTextAlignment(.trailing).frame(width: 44)
+                        Stepper("Team sessions", value: $editor.maxSessions, in: 1...99).labelsHidden()
+                    }
+                } label: { label }
             }
-            LabeledContent("Start nothing above a load of") {
-                TextField("Load limit", value: $editor.loadThreshold, format: .number,
-                          prompt: Text(MacLoad.number(Double(2 * MacLoad.processors))))
-                    .labelsHidden().accessibilityLabel("Start nothing above a load of; empty is twice the cores")
-                    .multilineTextAlignment(.trailing).frame(width: 60)
+            SettingRow("load-threshold") { label in
+                LabeledContent {
+                    TextField("Load limit", value: $editor.loadThreshold, format: .number,
+                              prompt: Text(MacLoad.number(Double(2 * MacLoad.processors))))
+                        .labelsHidden().accessibilityLabel("Start nothing above a load of; empty is twice the cores")
+                        .multilineTextAlignment(.trailing).frame(width: 60)
+                } label: { label }
             }
-            BoostStepper(label: "Test and build slots at once", value: $editor.heavySlots, range: 1...MacLimits.heavySlotsCeiling)
-            Toggle("Ignore usage limits", isOn: $editor.ignoreUsageLimits)
-                .accessibilityLabel("Ignore usage limits: start workers and audits whatever share of a Claude limit is used")
-            Text("Leads start workers and audits at any share of a Claude limit (normally they stop at \(Int(AccountUsage.threshold)) %), Boost isn't held off for usage, and agent: auto stays on Claude until Claude refuses at a limit. A session that reaches a limit still stops, and the lead is told. Usage still shows, marked \(AccountUsage.ignoredMark).")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingRow("heavy-slots") { label in
+                BoostStepper(label: label, name: "Test and build slots at once", value: $editor.heavySlots, range: 1...MacLimits.heavySlotsCeiling)
+            }
             if let problem = editor.problem {
                 Text(problem).foregroundStyle(.red).font(.caption)
             }
         } header: {
-            Text("Project lead: Mac-wide limits")
+            Text("Mac-wide limits")
         } footer: {
-            SettingsFooter("Every project's leads share this Mac. They start no workers or audits while the workers and verifiers of all projects together are at the first limit, or the Mac's load is above the second (the greater of its 1- and 5-minute averages, so a dip after a spike isn't room; empty: twice the \(MacLoad.processors) cores); merges wait for the load. A lead refused for either is told once there's room again. Builds and full test runs (vs-heavy's, merges', audits') take one of the test and build slots; one more waits. Each gets VS_HEAVY_CORES, the \(MacLoad.processors) cores ÷ the slots (\(BoostSection.coresPerSlot(editor.heavySlots)) each), and caps its own parallelism to it; a project's heavy_slots in workflow.md sets its own. Kept in ~/.vibeswitcher/mac-limits.json; workflow.md's load_threshold and mac_max_sessions are ignored.")
+            SettingsFooter("Every project's leads share this Mac: they start nothing at the first limit, or while the load (the greater of the 1- and 5-minute averages) is above the second, and merges wait for the load. A lead refused for either is told once there's room. Builds and full test runs take one slot each; each gets VS_HEAVY_CORES, the \(MacLoad.processors) cores ÷ the slots (\(BoostSection.coresPerSlot(editor.heavySlots)) each); a project's heavy_slots in workflow.md sets its own. Kept in ~/.vibeswitcher/mac-limits.json; workflow.md's load_threshold and mac_max_sessions are ignored.")
         }
         .onAppear { editor.reload() }
+        Section {
+            SettingRow("ignore-usage-limits") { label in
+                Toggle(isOn: $editor.ignoreUsageLimits) { label }
+                    .accessibilityLabel("Ignore usage limits: start workers and audits whatever share of a Claude limit is used")
+            }
+        } header: {
+            Text("Usage limits")
+        } footer: {
+            SettingsFooter("Leads start workers and audits at any share of a Claude limit (normally they stop at \(Int(AccountUsage.threshold)) %), Boost isn't held off for usage, and agent: auto stays on Claude until Claude refuses at a limit. A session that reaches a limit still stops, and the lead is told. Usage still shows, marked \(AccountUsage.ignoredMark).")
+        }
     }
 }
 
-/// Settings › Project lead's Boost mode (see `Boost`): Off, On, or Automatic (only while you're away and the Mac is on
+/// Settings › Performance's Boost mode (see `Boost`): Off, On, or Automatic (only while you're away and the Mac is on
 /// AC power), "Also on battery" (down to `Boost.batteryFloor` % of charge), and the limits it raises to. Saved through
 /// `Preferences`; `BoostWatch` decides and tells the leads.
 struct BoostSection: View {
@@ -121,30 +133,38 @@ struct BoostSection: View {
 
     var body: some View {
         Section {
-            Picker("Boost", selection: $preferences.boostMode) {
-                ForEach(BoostMode.allCases, id: \.self) { Text($0.label).tag($0) }
+            SettingRow("boost-mode") { label in
+                Picker(selection: $preferences.boostMode) {
+                    ForEach(BoostMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                } label: { label }
+                .pickerStyle(.segmented)
+                .accessibilityLabel("Boost mode: off, on, or automatic while you're away and on AC power")
             }
-            .pickerStyle(.segmented)
-            .accessibilityLabel("Boost mode: off, on, or automatic while you're away and on AC power")
-            Toggle("Also on battery", isOn: $preferences.boostOnBattery)
-            Text("On and Automatic also boost on battery, until the charge drops below \(Boost.batteryFloor) %.")
-                .font(.caption).foregroundStyle(.secondary)
-            LabeledContent("Start nothing above a load of, while boosted") {
-                TextField("Boost load limit", value: $preferences.boostLimits.loadThreshold, format: .number)
-                    .labelsHidden().accessibilityLabel("Start nothing above a load of, while boosted")
-                    .multilineTextAlignment(.trailing).frame(width: 60)
+            SettingRow("boost-on-battery") { label in Toggle(isOn: $preferences.boostOnBattery) { label } }
+            SettingRow("boost-load") { label in
+                LabeledContent {
+                    TextField("Boost load limit", value: $preferences.boostLimits.loadThreshold, format: .number)
+                        .labelsHidden().accessibilityLabel("Start nothing above a load of, while boosted")
+                        .multilineTextAlignment(.trailing).frame(width: 60)
+                } label: { label }
             }
-            BoostStepper(label: "Team sessions on this Mac while boosted, at most", value: $preferences.boostLimits.maxSessions,
-                         range: 1...BoostLimits.countCeiling)
-            BoostStepper(label: "Workers per project while boosted, at most", value: $preferences.boostLimits.maxWorkers,
-                         range: 1...BoostLimits.countCeiling)
-            BoostStepper(label: "Test and build slots while boosted", value: $preferences.boostLimits.heavySlots,
-                         range: 1...BoostLimits.slotCeiling)
+            SettingRow("boost-sessions") { label in
+                BoostStepper(label: label, name: "Team sessions on this Mac while boosted, at most", value: $preferences.boostLimits.maxSessions,
+                             range: 1...BoostLimits.countCeiling)
+            }
+            SettingRow("boost-workers") { label in
+                BoostStepper(label: label, name: "Workers per project while boosted, at most", value: $preferences.boostLimits.maxWorkers,
+                             range: 1...BoostLimits.countCeiling)
+            }
+            SettingRow("boost-slots") { label in
+                BoostStepper(label: label, name: "Test and build slots while boosted", value: $preferences.boostLimits.heavySlots,
+                             range: 1...BoostLimits.slotCeiling)
+            }
             if let watch { BoostNow(watch: watch) }
         } header: {
-            Text("Project lead: Boost")
+            Text("Boost")
         } footer: {
-            SettingsFooter("Boost raises the Mac-wide limits to these for more throughput: leads start more workers and audits, and projects whose merge_batching is boost test merges in batches. Automatic boosts only while the Mac is on AC power and you're away (screen locked, or no input for 5 minutes), and drops back within \(BoostWatch.every) seconds of either changing: new starts stop above the normal limits, running work finishes. On battery it's off whatever the mode, unless Also on battery is on: then it runs on battery as on AC until the charge drops below \(Boost.batteryFloor) % (the battery hold above still pauses lead work below its limit). The usage watch keeps it off at \(MacLoad.number(Boost.vetoPercent)) % of an account limit, unless Ignore usage limits is on. While boosted, room freed on the Mac goes first to the project you last worked in, and no project runs more than its workers' limit. The test and build slots go up to these for vs-heavy and the leads' merges and audits alike (never below the normal count), and VS_HEAVY_CORES follows: the \(MacLoad.processors) cores ÷ the slots (\(Self.coresPerSlot(preferences.boostLimits.heavySlots)) each).")
+            SettingsFooter("Automatic boosts only while the Mac is on AC power and you're away (screen locked, or no input for 5 minutes), and drops back within \(BoostWatch.every) seconds of either changing: new starts stop above the normal limits, running work finishes. On battery it's off whatever the mode, unless Also on battery is on (the battery limit below still pauses lead work). Projects whose merge_batching is boost test merges in batches while boosted. The usage watch keeps it off at \(MacLoad.number(Boost.vetoPercent)) % of an account limit, unless Ignore usage limits is on. While boosted, room freed on the Mac goes first to the project you last worked in. VS_HEAVY_CORES follows the slots: the \(MacLoad.processors) cores ÷ the slots (\(Self.coresPerSlot(preferences.boostLimits.heavySlots)) each).")
         }
     }
 }
@@ -158,19 +178,21 @@ extension BoostSection {
 
 /// One whole-number limit: a field and a stepper, within `range`.
 private struct BoostStepper: View {
-    let label: String
+    let label: SettingLabel
+    /// Its name for VoiceOver: the field and stepper hide their labels.
+    let name: String
     @Binding var value: Int
     var range: ClosedRange<Int> = 1...99
 
     var body: some View {
-        LabeledContent(label) {
+        LabeledContent {
             HStack(spacing: 4) {
-                TextField(label, value: $value, format: .number)
-                    .labelsHidden().accessibilityLabel(label)
+                TextField(name, value: $value, format: .number)
+                    .labelsHidden().accessibilityLabel(name)
                     .multilineTextAlignment(.trailing).frame(width: 44)
-                Stepper(label, value: $value, in: range).labelsHidden()
+                Stepper(name, value: $value, in: range).labelsHidden()
             }
-        }
+        } label: { label }
     }
 }
 

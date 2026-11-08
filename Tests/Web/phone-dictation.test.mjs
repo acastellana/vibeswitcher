@@ -260,9 +260,9 @@ await flush();
 clock += 2000;
 fire(mic, 'pointerup');
 await flush();
-answer('/api/dictation', 502, { error: 'OpenAI refused the API key (HTTP 401). Check it in Settings › General › Dictation.' });
+answer('/api/dictation', 502, { error: 'OpenAI refused the API key (HTTP 401). Check it in Settings › Dictation & Briefing.' });
 await flush();
-assert.equal($('dictationStatus').textContent, 'OpenAI refused the API key (HTTP 401). Check it in Settings › General › Dictation.');
+assert.equal($('dictationStatus').textContent, 'OpenAI refused the API key (HTTP 401). Check it in Settings › Dictation & Briefing.');
 assert.ok($('dictationStatus').classList.contains('error'));
 assert.equal(reply.value, before);
 
@@ -284,7 +284,7 @@ const recorded = recorders.length;
 fire(mic, 'pointerdown');
 await flush();
 assert.equal(recorders.length, recorded);
-assert.ok($('dictationStatus').textContent.includes('Settings… › General › Dictation'));
+assert.ok($('dictationStatus').textContent.includes('Settings… › Dictation & Briefing'));
 fire(mic, 'pointerup');
 
 // 8. A Mac without dictation (an older one, or none offered): no button.

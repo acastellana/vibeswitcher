@@ -583,7 +583,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     # How many finders an audit runs: 1 is one verifier. 2 or 3 run that many with different focuses (contract and
     # acceptance; bugs and regressions; security when sensitive_paths are touched, else tests), on one build and test
     # run the audit makes first; a vote keeps the findings most of them found. Each counts against mac_max_sessions
-    # (Mac-wide, set in VibeSwitcher's Settings › Project lead).
+    # (Mac-wide, set in VibeSwitcher's Settings › Performance).
     audit_finders: 1
     # How many new Nit findings one audit's vote keeps.
     audit_nit_cap: 5

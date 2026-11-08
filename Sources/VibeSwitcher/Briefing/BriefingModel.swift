@@ -237,7 +237,7 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
 
     // MARK: Settings
 
-    /// Settings › General › Briefing › Test voice: one sentence in the chosen language, through the voice a
+    /// Settings › Dictation & Briefing › Spoken briefing › Test voice: one sentence in the chosen language, through the voice a
     /// briefing would use.
     func testVoice() {
         if phase != .idle { stop() }

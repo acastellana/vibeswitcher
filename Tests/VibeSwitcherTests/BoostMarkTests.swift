@@ -115,7 +115,7 @@ import VibeCore
         #expect(brief.fittingSize == NSSize(width: 36, height: 36))
     }
 
-    /// A click opens Settings › General at Boost: the window hands it to `onBoostMark`.
+    /// A click opens Settings › Performance at Boost: the window hands it to `onBoostMark`.
     @Test func aClickOpensBoostSettings() async throws {
         let signals = Signals()
         let (watch, _) = watch(signals)

@@ -1238,7 +1238,7 @@ async function send(payload, button, doneLabel) {
 const DICTATION_MAX_MS = 120000;
 const DICTATION_MAX_BYTES = 4 * 1024 * 1024;
 const DICTATION_TYPES = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus'];
-const DICTATION_NO_KEY = 'Dictation needs an OpenAI API key on the Mac: VibeSwitcher › Settings… › General › Dictation.';
+const DICTATION_NO_KEY = 'Dictation needs an OpenAI API key on the Mac: VibeSwitcher › Settings… › Dictation & Briefing.';
 let dictation = null;        // the recording under way: { recorder, stream, chunks, started, sid, timer, limit }
 let dictationHeld = false;   // the mic is held down now
 let transcribing = false;

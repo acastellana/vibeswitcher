@@ -40,7 +40,7 @@ struct DictationAudio: Equatable, Sendable {
 struct OpenAITranscription: Sendable {
     static let endpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
     /// OpenAI's recommended transcription model (developers.openai.com/api/docs/guides/speech-to-text, 2026-10: the
-    /// gpt-4o ones are deprecated, shut down 2027-02-26); Settings › General › Dictation changes it.
+    /// gpt-4o ones are deprecated, shut down 2027-02-26); Settings › Dictation & Briefing changes it.
     static let defaultModel = "gpt-transcribe"
     /// The models Settings offers, best first.
     static let models = ["gpt-transcribe", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
@@ -76,9 +76,9 @@ struct OpenAITranscription: Sendable {
 
         var notice: String {
             switch self {
-            case .noKey: return "Dictation needs an OpenAI API key: add one in Settings › General › Dictation."
+            case .noKey: return "Dictation needs an OpenAI API key: add one in Settings › Dictation & Briefing."
             case .tooLong: return "That recording is too long to transcribe: keep it under 2 minutes."
-            case .status(401): return "OpenAI refused the API key (HTTP 401). Check it in Settings › General › Dictation."
+            case .status(401): return "OpenAI refused the API key (HTTP 401). Check it in Settings › Dictation & Briefing."
             case .status(403): return "OpenAI refused this request (HTTP 403): the key's project may not allow audio."
             case .status(413): return "OpenAI found the recording too big (HTTP 413): keep it under 2 minutes."
             case .status(429): return "OpenAI says slow down or the account is out of credit (HTTP 429)."

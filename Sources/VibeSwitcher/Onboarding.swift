@@ -536,7 +536,7 @@ struct OnboardingView: View {
                    + "there. Without them you still hear a sound when a session needs you.")
             SetupStatusLabel(status: setup.notificationStatus)
             action(setup.notificationButton, done: setup.notifications == .allowed, busy: false) { setup.allowNotifications() }
-            Text("Choose which ones you get, and reminders about waiting or stuck sessions, in Settings › General.")
+            Text("Choose which ones you get, and reminders about waiting or stuck sessions, in Settings › Notifications.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }

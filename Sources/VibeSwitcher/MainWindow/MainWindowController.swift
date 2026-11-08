@@ -10,7 +10,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     let pane: TerminalPaneController
     /// ⌘+ (1), ⌘− (−1), ⌘0 (0 = default size).
     var onFontSize: (Int) -> Void = { _ in }
-    /// The toolbar's Boost mark clicked: Settings › General at Boost.
+    /// The toolbar's Boost mark clicked: Settings › Performance at Boost.
     var onBoostMark: () -> Void = {}
     /// The toolbar's Statistics button: the Statistics window.
     var onStatistics: () -> Void = {}

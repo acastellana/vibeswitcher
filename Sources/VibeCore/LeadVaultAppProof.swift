@@ -76,9 +76,9 @@ public enum AppProof {
         }
     }
 
-    /// Where the ElevenLabs API key for the spoken briefing is kept (Settings › General › Briefing).
+    /// Where the ElevenLabs API key for the spoken briefing is kept (Settings › Dictation & Briefing › Spoken briefing).
     public static let elevenLabsAccount = "elevenlabs-api-key"
-    /// Where the OpenAI API key for dictation is kept (Settings › General › Dictation).
+    /// Where the OpenAI API key for dictation is kept (Settings › Dictation & Briefing › Dictation).
     public static let openAIAccount = "openai-api-key"
 
     /// A secret you typed in Settings (the ElevenLabs API key, the OpenAI one), in the login Keychain beside the app's key, with the

@@ -3,7 +3,7 @@ import VibeCore
 
 /// The main window's Boost mark: the menu bar's small orange bolt (`StatusIcon`'s), in the toolbar while Boost mode is
 /// on. Its texts come from the decision `BoostWatch` published (no file is read for them: the main thread only reads
-/// what the watch holds). A click opens Settings › General at the Boost section.
+/// what the watch holds). A click opens Settings › Performance at the Boost section.
 struct BoostMark: View {
     let state: BoostState
     let open: () -> Void
@@ -22,7 +22,7 @@ struct BoostMark: View {
         return "Boost on (\(state.why))\n"
             + "Raised limits: a load of \(MacLoad.number(limits.loadThreshold)), \(limits.maxSessions) team sessions on this Mac, "
             + "\(limits.maxWorkers) workers per project, \(limits.heavySlots) test and build slots\n"
-            + "Click for Settings › General › Boost"
+            + "Click for Settings › Performance › Boost"
     }
 
     var body: some View {

@@ -3887,7 +3887,7 @@ public final class LeadToolset: MCPToolset {
     /// verifiers and a merge's test run died in the Mac's sleeps on 2026-10-19 at 2 %. `not`: what didn't happen.
     func checkBattery(not: String) throws {
         guard let power = power(), power.onBattery, let limit = power.heldUnder else { return }
-        throw Problem(text: "\(not): the Mac is on battery at \(power.percent) %, under the user's \(limit) % limit (Settings › Project lead), "
+        throw Problem(text: "\(not): the Mac is on battery at \(power.percent) %, under the user's \(limit) % limit (Settings › Performance), "
             + "so nothing starts, audits or merges until AC power returns or the limit is lowered; work in flight finishes. "
             + "The witness tells you when to resume. " + LeadPrompts.retryWhenWoken)
     }
@@ -4203,7 +4203,7 @@ public final class LeadToolset: MCPToolset {
         let mac = LeadWorkflow.macKeys.filter { arguments[$0] != nil }
         guard mac.isEmpty else {
             throw Problem(text: "Nothing was changed: \(mac.joined(separator: " and ")) \(mac.count == 1 ? "is" : "are") set once for the whole Mac, "
-                          + "by the user in VibeSwitcher's Settings › Project lead (every project's leads share it), not in workflow.md. "
+                          + "by the user in VibeSwitcher's Settings › Performance (every project's leads share it), not in workflow.md. "
                           + "Now: \(Self.macLimitsText(macLimits())).")
         }
         let unknown = Set(arguments.keys).subtracting(LeadWorkflow.configurable)
@@ -5555,7 +5555,7 @@ public final class LeadToolset: MCPToolset {
     static func ignoredText(_ workflow: LeadWorkflow) -> String {
         let keys = workflow.ignoredKeys.joined(separator: " and ")
         return "workflow.md's \(keys) \(workflow.ignoredKeys.count == 1 ? "is" : "are") ignored: the Mac-wide limits are set once for every "
-            + "project in VibeSwitcher's Settings › Project lead."
+            + "project in VibeSwitcher's Settings › Performance."
     }
 
     /// `ignoredText`, the first time status meets ignored keys in this tool server; nil after, or with none.
@@ -5643,7 +5643,7 @@ public final class LeadToolset: MCPToolset {
         }
         lines += [""] + floorLines(workflow)
         let limits = macLimits()
-        lines += ["", "Mac-wide, set by the user in VibeSwitcher's Settings › Project lead (not here; configure doesn't set them):",
+        lines += ["", "Mac-wide, set by the user in VibeSwitcher's Settings › Performance (not here; configure doesn't set them):",
                   "- load_threshold: \(limits.loadLimitText) (above this load, the greater of the 1- and 5-minute averages, start_worker and audit refuse and merge waits)",
                   "- memory: start_worker and audit refuse too while the Mac is short of memory \(MacMemory.limitsText(limits)) (Mac-wide defaults kept in mac-limits.json as memoryPressure and swapOutRate, not in Settings)",
                   "- mac_max_sessions: \(limits.maxSessionsText) (workers and verifiers of all projects on this Mac; start_worker and audit refuse at it)"]

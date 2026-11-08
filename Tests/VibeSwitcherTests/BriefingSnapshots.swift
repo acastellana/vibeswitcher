@@ -4,8 +4,8 @@ import Testing
 import VibeCore
 @testable import VibeSwitcher
 
-/// Pictures of Brief me: its panel after a made-up briefing (and the template's notice), and Settings › General ›
-/// Briefing, drawn offscreen. Only with `BRIEFING_SNAPSHOT_DIR=/some/folder swift test --filter BriefingSnapshots`.
+/// Pictures of Brief me: its panel after a made-up briefing (and the template's notice), and Settings › Dictation & Briefing,
+/// drawn offscreen. Only with `BRIEFING_SNAPSHOT_DIR=/some/folder swift test --filter BriefingSnapshots`.
 @MainActor
 struct BriefingSnapshots {
     static let folder = ProcessInfo.processInfo.environment["BRIEFING_SNAPSHOT_DIR"]
@@ -51,7 +51,7 @@ struct BriefingSnapshots {
         }
     }
 
-    /// Settings › General › Briefing in each state of the key: saved in the Keychain, from your shell, none.
+    /// Settings › Dictation & Briefing › Spoken briefing in each state of the key: saved in the Keychain, from your shell, none.
     @Test(.enabled(if: folder != nil)) func drawKeySources() async throws {
         let temp = Scratch()
         let defaults = temp.defaults("briefing-key-snapshots")

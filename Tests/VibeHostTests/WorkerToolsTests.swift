@@ -31,8 +31,9 @@ import Testing
         let app = try TestClient(host)
         // Every session's tools find the host where they always do: under its home (the scratch one, never the user's).
         try FileManager.default.createSymbolicLink(atPath: vibe + "/host.sock", withDestinationPath: host.socket)
-        // No Mac-wide load refusal: the test runs on a loaded Mac too.
-        try JSONEncoder().encode(MacLimits(maxSessions: 10, loadThreshold: 100_000)).write(to: URL(fileURLWithPath: vibe + "/mac-limits.json"))
+        // No Mac-wide load or memory refusal: the test runs on a loaded Mac, or one short of memory, too.
+        try JSONEncoder().encode(MacLimits(maxSessions: 10, loadThreshold: 100_000, memoryPressure: "off", swapOutRate: 0))
+            .write(to: URL(fileURLWithPath: vibe + "/mac-limits.json"))
 
         let env = "HOME='\(home)' CFFIXED_USER_HOME='\(home)' VIBESWITCHER_HOME='\(vibe)'"
         // The fake claude: the project's Claude command, so the lead starts its worker with it.

@@ -55,22 +55,27 @@ struct WorkingPolicySection: View {
 
     var body: some View {
         Section {
-            TextEditor(text: $editor.draft)
-                .font(.system(.callout))
-                .frame(minHeight: 120)
-                .accessibilityLabel("Working policy")
-            HStack {
-                if let problem = editor.problem {
-                    Text(problem).foregroundStyle(.red).font(.caption)
+            SettingRow("working-policy") { label in
+                VStack(alignment: .leading, spacing: 6) {
+                    label.stacked
+                    TextEditor(text: $editor.draft)
+                        .font(.system(.callout))
+                        .frame(minHeight: 120)
+                        .accessibilityLabel("Working policy")
+                    HStack {
+                        if let problem = editor.problem {
+                            Text(problem).foregroundStyle(.red).font(.caption)
+                        }
+                        Spacer()
+                        Button("Reset to Default") { editor.resetToDefault() }
+                            .disabled(editor.isDefault)
+                        Button("Save") { editor.save() }
+                            .disabled(!editor.changed)
+                    }
                 }
-                Spacer()
-                Button("Reset to Default") { editor.resetToDefault() }
-                    .disabled(editor.isDefault)
-                Button("Save") { editor.save() }
-                    .disabled(!editor.changed)
             }
         } header: {
-            Text("Project lead: working policy")
+            Text("Working policy")
         } footer: {
             SettingsFooter("Every project's lead, workers and verifiers get this in their prompts. When you save a change, each lead running now is told it once and applies it from then on. Kept in ~/.vibeswitcher/policy.md.")
         }

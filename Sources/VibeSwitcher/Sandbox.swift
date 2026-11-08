@@ -308,7 +308,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     lazy var dictation: DictationController = {
         let controller = DictationController(keyStore: dictationKey, recorder: SandboxRecorder(), microphone: SandboxMicrophone(),
                                              transcription: OpenAITranscription(client: SandboxTranscriber()), findKey: { nil })
-        controller.openSettings = { [weak self] in self?.showSettings(.general) }
+        controller.openSettings = { [weak self] in self?.showSettings(.dictation, reveal: .dictationKey) }
         // A fake Claude's /voice (`tell '{"op": "voice", "mode": "hold"}'`): never the user's Claude settings.
         controller.claudeSettings = { _ in ClaudeVoiceSettings() }
         controller.checkKey()
@@ -1128,7 +1128,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         windowActions = actions
         let controller = MainWindowController(store: store, host: host, model: model, actions: actions, leads: leads, briefing: briefing,
                                               dictation: dictation, wallet: walletDesk, boost: boostWatch, shells: shellDesk)
-        controller.onBoostMark = { [weak self] in self?.showSettings(.general, reveal: .boost) }
+        controller.onBoostMark = { [weak self] in self?.showSettings(.performance, reveal: .boost) }
         controller.pane.configure = { [weak self, weak controller] view in
             guard let self else { return }
             let dark = (view.window ?? controller?.window)?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -1148,7 +1148,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.waitForRow(tries: tries - 1, done) }
     }
 
-    func showSettings(_ tab: SettingsTab, reveal: SettingsSection? = nil) {
+    func showSettings(_ tab: SettingsTab, reveal: SettingsSection? = nil) { showSettings(tab, option: reveal?.option) }
+
+    func showSettings(_ tab: SettingsTab, option: String?) {
         if settings == nil {
             settings = SettingsWindowController(
                 preferences: preferences, setup: SetupModel(preferences: preferences, system: .fixed(hooks: [.claude: true, .codex: false], terminal: .notAsked, notifications: .off)),
@@ -1165,7 +1167,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
         guard let window = settings?.window else { return }
         Sandbox.hide(window)
-        settings?.open(tab: tab, reveal: reveal)
+        settings?.open(tab: tab, option: option)
         window.orderFrontRegardless()
         Sandbox.hide(window)
     }
@@ -1226,9 +1228,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("wallet [STATE]", "shows a made-up wallet request card as the sheet, in STATE: " + Driver.walletCards.map(\.state).joined(separator: ", ") + " (all: every state, one under another); settings wallet shows its Settings tab"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
-        ("boost off|on|away|present|battery|battery-on|battery-low|veto|mark", "boost mark clicks the main window's Boost mark (Settings › General at Boost). Otherwise Boost mode in a made-up state (the power source, the charge, your presence and the usage made up): off; On on AC; Automatic away on AC (boosted), at the Mac, away on battery; On on battery with Also on battery at 86 % (boosted) or 24 %; or away on AC with the usage watch's veto. Settings and the menu-bar sheet show it"),
-        ("settings [TAB] [SECTION]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")
-            + "; scrolled to a section: boost, review-floor (General; it makes the made-up project sandbox-floor first)"),
+        ("boost off|on|away|present|battery|battery-on|battery-low|veto|mark", "boost mark clicks the main window's Boost mark (Settings › Performance at Boost). Otherwise Boost mode in a made-up state (the power source, the charge, your presence and the usage made up): off; On on AC; Automatic away on AC (boosted), at the Mac, away on battery; On on battery with Also on battery at 86 % (boosted) or 24 %; or away on AC with the usage watch's veto. Settings and the menu-bar sheet show it"),
+        ("settings [TAB] [OPTION]", "opens Settings on a category: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")
+            + "; scrolled to and highlighting an option: an id in the settings catalog, or boost, review-floor (it makes the made-up project sandbox-floor first)"),
+        ("settings-search [TEXT]", "types TEXT in Settings' search field, opening Settings if it's closed (no TEXT clears it), and says what it found"),
+        ("settings-pick N|ID", "picks the Nth search result (from 1), or the option with that catalog id, as a click on it does"),
         ("toolchain [dismiss]", "shows or dismisses a fake developer tools notice"),
         ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", ")),
         ("close settings|sheet", "closes Settings or the sheet"),
@@ -2066,9 +2070,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
             let total = Date().timeIntervalSince(started)
             reply(true, String(format: "%d publishes: %.1f ms each, longest %.1f ms", count, total * 1000 / Double(count), longest * 1000))
         case "scroll" where rest.hasPrefix("settings"):
-            // The Settings tab's form: the window's first scroll view.
-            func first(_ view: NSView) -> NSScrollView? { (view as? NSScrollView) ?? view.subviews.lazy.compactMap(first).first }
-            guard let root = settings?.window?.contentView, let scroll = first(root), let document = scroll.documentView else {
+            // The shown category's form: the window's widest scroll view (the sidebar's list is narrower).
+            func scrolls(_ view: NSView) -> [NSScrollView] { ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap(scrolls) }
+            guard let root = settings?.window?.contentView, let scroll = scrolls(root).max(by: { $0.frame.width < $1.frame.width }),
+                  let document = scroll.documentView else {
                 return reply(false, "no settings shown")
             }
             let to = rest.dropFirst("settings".count).trimmingCharacters(in: .whitespaces)
@@ -2233,13 +2238,31 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "settings":
             let words = rest.split(separator: " ").map(String.init)
             guard let tab = words.isEmpty ? .general : SettingsTab(rawValue: words[0]) else {
-                return reply(false, "no tab \(rest): " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", "))
+                return reply(false, "no category \(rest): " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", "))
             }
+            // A section's old name, or any option's id in the catalog.
             let section = words.count > 1 ? SettingsSection(rawValue: words[1]) : nil
-            if words.count > 1, section == nil { return reply(false, "no section \(words[1]): boost, review-floor") }
+            let option = words.count > 1 ? section?.option ?? words[1] : nil
+            if let option, SettingsCatalog.option(option) == nil { return reply(false, "no option \(option): boost, review-floor, or an id in the settings catalog") }
             if section == .reviewFloor { _ = Driver.floorProject(home: home) }
-            showSettings(tab, reveal: section)
-            settle { reply(true, "settings shown on \(tab.rawValue)" + (section.map { " at \($0.rawValue)" } ?? "")) }
+            showSettings(tab, option: option)
+            settle { reply(true, "settings shown on \(self.settings?.searchSelection.tab.rawValue ?? tab.rawValue)" + (option.map { " at \($0)" } ?? "")) }
+        case "settings-search":
+            if settings == nil { showSettings(.general) }
+            guard let selection = settings?.searchSelection else { return reply(false, "no settings shown") }
+            selection.query = rest
+            settle {
+                let found = selection.results
+                reply(true, rest.isEmpty ? "search cleared" : "\(found.count) found: " + found.prefix(8).map { "\($0.id) (\($0.category.title))" }.joined(separator: ", "))
+            }
+        case "settings-pick":
+            guard let selection = settings?.searchSelection else { return reply(false, "no settings shown") }
+            let results = selection.results
+            guard let option = Int(rest).flatMap({ results.indices.contains($0 - 1) ? results[$0 - 1] : nil }) ?? SettingsCatalog.option(rest) else {
+                return reply(false, "settings-pick N (1 to \(results.count)) or a catalog id")
+            }
+            selection.pick(option)
+            settle { reply(true, "picked \(option.id): \(selection.tab.title) › \(option.section)") }
         case "sheet": showSheet(rest, reply)
         case "boost":
             let now = Date().timeIntervalSince1970
@@ -2262,7 +2285,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 // The main window's Boost mark clicked, as the toolbar's button does.
                 guard window?.boostMarkItem != nil else { return reply(false, "no Boost mark: boost is off") }
                 window?.onBoostMark()
-                return settle { reply(true, "the Boost mark clicked: Settings › General at Boost") }
+                return settle { reply(true, "the Boost mark clicked: Settings › Performance at Boost") }
             default: return reply(false, "boost off|on|away|present|battery|battery-on|battery-low|veto|mark")
             }
             boostWatch.look { [weak self] in self?.settle { reply(true, self?.boostWatch.state?.text ?? "not decided") } }

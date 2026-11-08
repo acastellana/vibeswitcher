@@ -161,7 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private lazy var dictation: DictationController = {
         let controller = DictationController(keyStore: dictationKey, recorder: EngineRecorder(), microphone: SystemMicrophone(),
                                              silencer: outputSilencer)
-        controller.openSettings = { [weak self] in self?.showSettings(tab: .general) }
+        controller.openSettings = { [weak self] in self?.showSettings(tab: .dictation, reveal: .dictationKey) }
         return controller
     }()
     private var statusItem: NSStatusItem!
@@ -611,7 +611,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
 
     func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
               userData data: UnsafeMutableRawPointer?) -> String {
-        if Int(bitPattern: data) == Self.boostToolTip { return boostWatch.menuText.map { "\($0)\nSettings › General › Project lead: Boost" } ?? "" }
+        if Int(bitPattern: data) == Self.boostToolTip { return boostWatch.menuText.map { "\($0)\nSettings › Performance › Boost" } ?? "" }
         let index = Int(bitPattern: data) - 1
         let own = store.split.own
         guard own.indices.contains(index) else { return "" }
@@ -790,7 +790,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                                   leads: leadController, briefing: briefing, dictation: dictation, wallet: walletDesk,
                                                   boost: boostWatch, shells: shellDesk)
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
-            controller.onBoostMark = { [weak self] in self?.showSettings(tab: .general, reveal: .boost) }
+            controller.onBoostMark = { [weak self] in self?.showSettings(tab: .performance, reveal: .boost) }
             controller.onStatistics = { [weak self] in self?.showStatistics() }
             controller.pane.configure = { [weak self] view in
                 guard let self else { return }

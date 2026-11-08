@@ -136,12 +136,14 @@ struct WalletSettingsTab: View {
     var body: some View {
         Form {
             Section {
-                Picker("Wallet Manager", selection: $preferences.walletPeerID) {
-                    Text("None").tag("")
-                    Text(Self.onThisMacTitle).tag(Self.onThisMac)
-                    ForEach(Self.choices(peers, saved: preferences.walletPeerID)) { peer in
-                        Text(peer.name).tag(peer.peerID)
-                    }
+                SettingRow("wallet-manager") { label in
+                    Picker(selection: $preferences.walletPeerID) {
+                        Text("None").tag("")
+                        Text(Self.onThisMacTitle).tag(Self.onThisMac)
+                        ForEach(Self.choices(peers, saved: preferences.walletPeerID)) { peer in
+                            Text(peer.name).tag(peer.peerID)
+                        }
+                    } label: { label }
                 }
                 Text(Self.status(peers, saved: preferences.walletPeerID))
                     .font(.callout)
@@ -161,10 +163,12 @@ struct WalletSettingsTab: View {
                     + "VibeSwitcher never signs. The Wallet Manager's answers go back to the agent as messages.")
             }
             Section {
-                LabeledContent("Command path") {
-                    TextField("Passage path", text: $preferences.walletPassagePath, prompt: Text("passage"))
-                        .labelsHidden().accessibilityLabel("Path to the passage command")
-                        .font(.system(.body, design: .monospaced))
+                SettingRow("wallet-passage") { label in
+                    LabeledContent {
+                        TextField("Passage path", text: $preferences.walletPassagePath, prompt: Text("passage"))
+                            .labelsHidden().accessibilityLabel("Path to the passage command")
+                            .font(.system(.body, design: .monospaced))
+                    } label: { label }
                 }
                 if let using = Self.using(peerList.passage, read: peerList.read, path: peerList.settledPath) {
                     Text(using)

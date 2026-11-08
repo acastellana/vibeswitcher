@@ -126,8 +126,8 @@ struct BriefingKeyTests {
         #expect(key.refresh())
     }
 
-    /// Settings › General › Briefing looks again on each opening of the window, never on a tab switch within one
-    /// (the window is kept for the launch; the General tab appears again each time it's chosen).
+    /// Settings › Dictation & Briefing › Spoken briefing looks again on each opening of the window, never on a tab switch within one
+    /// (the window is kept for the launch; a category's pane appears again each time it's chosen).
     @Test func eachOpeningOfSettingsRefreshesTheKeyOnce() async throws {
         let defaults = temp.defaults("briefing-key-tests")
         let presets = temp.url("briefing-key-presets")
@@ -140,7 +140,7 @@ struct BriefingKeyTests {
         for opening in 1...3 {
             controller.open(tab: .general)
             #expect(await until { shell.reads == opening && model.keySource == .shell(variable: "ELEVENLABS_API_KEY") })
-            for tab in [SettingsTab.agents, .general, .phone, .general, .terminal, .general] { controller.open(tab: tab) }
+            for tab in [SettingsTab.agents, .general, .phone, .general, .appearance, .general] { controller.open(tab: tab) }
             try await Task.sleep(nanoseconds: 200_000_000)
             #expect(shell.reads == opening)
             controller.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: controller.window))

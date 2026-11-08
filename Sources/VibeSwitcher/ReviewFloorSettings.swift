@@ -151,30 +151,40 @@ struct ReviewFloorSection: View {
 
     var body: some View {
         Section {
+            // Always there, so a link to the floor has its row to scroll to (a row that's one branch or another isn't found).
+            SettingRow("floor-project") { label in
+                Picker(selection: $editor.root) {
+                    ForEach(editor.projects, id: \.self) { Text(($0 as NSString).lastPathComponent).tag(Optional($0)) }
+                } label: { label }
+                .disabled(editor.projects.isEmpty)
+            }
             if editor.projects.isEmpty {
                 Text("No project has a lead yet.").foregroundStyle(.secondary)
             } else {
-                Picker("Project", selection: $editor.root) {
-                    ForEach(editor.projects, id: \.self) { Text(($0 as NSString).lastPathComponent).tag(Optional($0)) }
-                }
                 ReviewFloorRows(editor: editor).disabled(editor.busy)
-                HStack {
-                    if editor.busy {
-                        ProgressView().controlSize(.small)
-                        Text("Asking the session host…").foregroundStyle(.secondary).font(.caption)
-                    } else if let problem = editor.problem {
-                        Text(problem).foregroundStyle(.red).font(.caption)
-                    } else if editor.recorded == nil {
-                        Text("Not recorded yet: these are the project's values, recorded when its lead next starts.")
-                            .foregroundStyle(.secondary).font(.caption)
+                SettingRow("floor-save") { label in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            if editor.busy {
+                                ProgressView().controlSize(.small)
+                                Text("Asking the session host…").foregroundStyle(.secondary).font(.caption)
+                            } else if let problem = editor.problem {
+                                Text(problem).foregroundStyle(.red).font(.caption)
+                            } else if editor.recorded == nil {
+                                Text("Not recorded yet: these are the project's values, recorded when its lead next starts.")
+                                    .foregroundStyle(.secondary).font(.caption)
+                            } else {
+                                label.stacked
+                            }
+                        }
+                        Spacer()
+                        Button("Revert") { editor.revert() }.disabled(!editor.changed || editor.recorded == nil)
+                        Button("Save") { editor.save() }.disabled(!editor.changed)
                     }
-                    Spacer()
-                    Button("Revert") { editor.revert() }.disabled(!editor.changed || editor.recorded == nil)
-                    Button("Save") { editor.save() }.disabled(!editor.changed)
                 }
             }
         } header: {
-            Text("Project lead: review rules floor")
+            Text("Review rules floor")
         } footer: {
             SettingsFooter("The least strict each project's review rules may be. Its lead can raise a rule above the floor with configure, never lower one below it; what's in force is the floor joined with the project's workflow.md (paths: both lists; the rest: the stricter). Kept in the session host's vault, written only by VibeSwitcher.")
         }
@@ -188,51 +198,67 @@ struct ReviewFloorRows: View {
 
     var body: some View {
         let workflow = editor.workflow
-        row("Sensitive paths", project: workflow.sensitivePaths.map { $0.joined(separator: ", ") } ?? "the defaults") {
-            TextField("Sensitive paths", text: $editor.sensitive, axis: .vertical).lineLimit(1...4)
-                .labelsHidden().accessibilityLabel("Sensitive paths floor, comma-separated")
-                .font(.system(.callout, design: .monospaced))
-        }
-        row("Strict paths", project: workflow.strictPaths?.joined(separator: ", ") ?? "none") {
-            TextField("Strict paths", text: $editor.strict, prompt: Text("none"), axis: .vertical).lineLimit(1...4)
-                .labelsHidden().accessibilityLabel("Strict paths floor, comma-separated")
-                .font(.system(.callout, design: .monospaced))
-        }
-        row("Audit finders, at least", project: String(workflow.auditFinders)) {
-            Stepper("\(editor.finders)", value: $editor.finders, in: 1...LeadWorkflow.maxFinders)
-                .accessibilityLabel("Audit finders floor").accessibilityValue("\(editor.finders)")
-        }
-        row("Merge policy, at least", project: workflow.mergePolicy?.rawValue ?? "not chosen") {
-            Picker("Merge policy", selection: $editor.policy) {
-                ForEach(LeadWorkflow.MergePolicy.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .labelsHidden().accessibilityLabel("Merge policy floor").fixedSize()
-        }
-        row("Risk lines, at most", project: workflow.riskLines == 0 ? "0 (no size trigger)" : String(workflow.riskLines)) {
-            HStack(spacing: 4) {
-                TextField("Risk lines", value: $editor.riskLines, format: .number)
-                    .labelsHidden().accessibilityLabel("Risk lines floor, 0 for none")
-                    .multilineTextAlignment(.trailing).frame(width: 60)
-                if editor.riskLines == 0 { Text("(none)").foregroundStyle(.secondary) }
+        SettingRow("floor-sensitive") { label in
+            row(label, project: workflow.sensitivePaths.map { $0.joined(separator: ", ") } ?? "the defaults") {
+                TextField("Sensitive paths", text: $editor.sensitive, axis: .vertical).lineLimit(1...4)
+                    .labelsHidden().accessibilityLabel("Sensitive paths floor, comma-separated")
+                    .font(.system(.callout, design: .monospaced))
             }
         }
-        row("Risk check's model pass", project: workflow.riskModel ? "on" : "off") {
-            Toggle("Always on", isOn: $editor.riskModel).accessibilityLabel("Keep the risk check's model pass on")
+        SettingRow("floor-strict") { label in
+            row(label, project: workflow.strictPaths?.joined(separator: ", ") ?? "none") {
+                TextField("Strict paths", text: $editor.strict, prompt: Text("none"), axis: .vertical).lineLimit(1...4)
+                    .labelsHidden().accessibilityLabel("Strict paths floor, comma-separated")
+                    .font(.system(.callout, design: .monospaced))
+            }
         }
-        row("Audit sample, at least", project: "\(workflow.auditSamplePercent) %") {
-            Stepper("\(editor.samplePercent) %", value: $editor.samplePercent, in: 0...100, step: 5)
-                .accessibilityLabel("Audit sample percent floor").accessibilityValue("\(editor.samplePercent) percent")
+        SettingRow("floor-finders") { label in
+            row(label, project: String(workflow.auditFinders)) {
+                Stepper("\(editor.finders)", value: $editor.finders, in: 1...LeadWorkflow.maxFinders)
+                    .accessibilityLabel("Audit finders floor").accessibilityValue("\(editor.finders)")
+            }
         }
-        row("Verifier", project: workflow.verifierModel.map { $0.isEmpty ? "another model" : $0 } ?? "another model") {
-            Toggle("Never the workers' model", isOn: $editor.verifierDifferent).accessibilityLabel("Verifier never on the workers' model")
+        SettingRow("floor-merge") { label in
+            row(label, project: workflow.mergePolicy?.rawValue ?? "not chosen") {
+                Picker("Merge policy", selection: $editor.policy) {
+                    ForEach(LeadWorkflow.MergePolicy.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .labelsHidden().accessibilityLabel("Merge policy floor").fixedSize()
+            }
+        }
+        SettingRow("floor-risk-lines") { label in
+            row(label, project: workflow.riskLines == 0 ? "0 (no size trigger)" : String(workflow.riskLines)) {
+                HStack(spacing: 4) {
+                    TextField("Risk lines", value: $editor.riskLines, format: .number)
+                        .labelsHidden().accessibilityLabel("Risk lines floor, 0 for none")
+                        .multilineTextAlignment(.trailing).frame(width: 60)
+                    if editor.riskLines == 0 { Text("(none)").foregroundStyle(.secondary) }
+                }
+            }
+        }
+        SettingRow("floor-risk-model") { label in
+            row(label, project: workflow.riskModel ? "on" : "off") {
+                Toggle("Always on", isOn: $editor.riskModel).accessibilityLabel("Keep the risk check's model pass on")
+            }
+        }
+        SettingRow("floor-sample") { label in
+            row(label, project: "\(workflow.auditSamplePercent) %") {
+                Stepper("\(editor.samplePercent) %", value: $editor.samplePercent, in: 0...100, step: 5)
+                    .accessibilityLabel("Audit sample percent floor").accessibilityValue("\(editor.samplePercent) percent")
+            }
+        }
+        SettingRow("floor-verifier") { label in
+            row(label, project: workflow.verifierModel.map { $0.isEmpty ? "another model" : $0 } ?? "another model") {
+                Toggle("Never the workers' model", isOn: $editor.verifierDifferent).accessibilityLabel("Verifier never on the workers' model")
+            }
         }
     }
 
-    private func row<Control: View>(_ title: String, project: String, @ViewBuilder control: () -> Control) -> some View {
+    private func row<Control: View>(_ label: SettingLabel, project: String, @ViewBuilder control: () -> Control) -> some View {
         LabeledContent {
             control()
         } label: {
-            Text(title)
+            label
             Text("Project: \(project)").lineLimit(2).truncationMode(.middle)
         }
     }

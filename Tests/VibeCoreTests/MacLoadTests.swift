@@ -113,13 +113,13 @@ extension LeadToolsetTests {
             let refused = call(lead, "configure", arguments)
             #expect(refused.isError, "\(refused.text)")
             #expect(refused.text.hasPrefix("Nothing was changed"), "\(refused.text)")
-            #expect(refused.text.contains("Settings › Project lead"), "\(refused.text)")
+            #expect(refused.text.contains("Settings › Performance"), "\(refused.text)")
             #expect(refused.text.contains("load_threshold 30 in Settings, mac_max_sessions 10"), "\(refused.text)")
         }
         #expect(FileManager.default.contents(atPath: root + "/.vibeswitcher/workflow.md") == before)
         // configure shows them, as the Mac's.
         let shown = call(lead, "configure").text
-        #expect(shown.contains("Mac-wide, set by the user in VibeSwitcher's Settings › Project lead"), "\(shown)")
+        #expect(shown.contains("Mac-wide, set by the user in VibeSwitcher's Settings › Performance"), "\(shown)")
         #expect(shown.contains("- load_threshold: 30 in Settings") && shown.contains("- mac_max_sessions: 10"), "\(shown)")
     }
 
@@ -133,7 +133,7 @@ extension LeadToolsetTests {
         runtime.others = Self.neighbours
         let refused = call(lead, "start_worker", ["task": "one"])
         #expect(refused.isError && refused.text.contains("(mac_max_sessions 6)"), "\(refused.text)")
-        let said = "workflow.md's mac_max_sessions and load_threshold are ignored: the Mac-wide limits are set once for every project in VibeSwitcher's Settings › Project lead."
+        let said = "workflow.md's mac_max_sessions and load_threshold are ignored: the Mac-wide limits are set once for every project in VibeSwitcher's Settings › Performance."
         #expect(call(lead, "status").text.contains(said))
         #expect(!call(lead, "status").text.contains("are ignored"))
         // configure still says it, as the file's settings.
