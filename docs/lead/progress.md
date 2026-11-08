@@ -4363,3 +4363,9 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-08 19:21 Started a worker on turn-this-incident-into-16
 - 2026-11-08 19:21 Automatically (auto_advance): Started a worker on turn-this-incident-into-16 (Turn this incident into a check: Merge test runs stalled for tens of minutes on an idle Mac, …).
 - 2026-11-08 19:21 Review of turn-this-incident-into-16: audit
+- 2026-11-08 20:03 Released the-vault-s-no's worker (idle since its done report on 22d9f9d2) while its audit runs
+- 2026-11-08 20:03 Automatically (auto_advance): Started the audit of the-vault-s-no at 22d9f9d2 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 20:03 Released product-fixes-from-the's worker (idle since its done report on 485c4761) while its audit runs
+- 2026-11-08 20:03 Automatically (auto_advance): Started the audit of product-fixes-from-the at 485c4761 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 20:03 Released every-text-that-crosses's worker (idle since its done report on fd6745a4) while its audit runs
+- 2026-11-08 20:03 Automatically (auto_advance): Started the audit of every-text-that-crosses at fd6745a4 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
