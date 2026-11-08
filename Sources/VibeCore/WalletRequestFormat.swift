@@ -366,11 +366,11 @@ public enum WalletRequestFormat {
 
     /// The most lines a request's `reason` may have (7 line feeds).
     public static let maxReasonLines = 8
-    /// The most combining marks (Unicode Mn, Mc, Me) a reason may stack on one base character.
+    /// The most combining marks (Unicode Mn, Mc, Me) a reason or a requester field may stack on one base character.
     public static let maxCombiningMarks = 2
 
     /// Characters that draw as nothing, or as a line break, though Unicode doesn't class them as control, format or
-    /// space characters: a reason holding one could pass for blank space, an empty line or the end of the reason.
+    /// space characters: a reason or requester field holding one could pass for blank space, an empty line or its end.
     public static let blankLookalikes: Set<UInt32> = [
         0x115F, 0x1160,   // Hangul choseong and jungseong fillers
         0x17B4, 0x17B5,   // Khmer inherent vowels
@@ -388,6 +388,19 @@ public enum WalletRequestFormat {
         try checkText(text, field: field, limit: 1000, multiline: true)
         let lines = text.unicodeScalars.reduce(1) { $0 + ($1 == "\n" ? 1 : 0) }
         guard lines <= maxReasonLines else { throw Failure.invalid(field, "over \(maxReasonLines) lines") }
+        try checkDrawn(text, field: field)
+    }
+
+    /// A requester field (`requestedBy.project`, `.session`, `.label`): line(200) as `checkText` has it, and the limits
+    /// a `reason` has on what it can draw (`checkDrawn`), since a card and the signer's page show these beside it.
+    static func checkRequester(_ text: String, field: String, minimum: Int) throws {
+        try checkText(text, field: field, minimum: minimum, limit: 200)
+        try checkDrawn(text, field: field)
+    }
+
+    /// No more than `maxCombiningMarks` combining marks on one base character (marks stacked into other rows), and none
+    /// of `blankLookalikes`.
+    private static func checkDrawn(_ text: String, field: String) throws {
         var marks = 0
         for scalar in text.unicodeScalars {
             if blankLookalikes.contains(scalar.value) {

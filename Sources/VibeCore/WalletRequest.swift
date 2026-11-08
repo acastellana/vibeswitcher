@@ -111,9 +111,9 @@ public struct WalletRequest: Equatable, Sendable {
         }
         let by = try WalletRequestFormat.Fields(fields.value("requestedBy"), path: fields.name("requestedBy"), allowed: ["project", "session", "label"])
         let requester = Requester(project: try by.string("project"), session: try by.string("session"), label: try by.string("label"))
-        try WalletRequestFormat.checkText(requester.project, field: by.name("project"), limit: 200)
-        try WalletRequestFormat.checkText(requester.session, field: by.name("session"), limit: 200)
-        try WalletRequestFormat.checkText(requester.label, field: by.name("label"), minimum: 0, limit: 200)
+        try WalletRequestFormat.checkRequester(requester.project, field: by.name("project"), minimum: 1)
+        try WalletRequestFormat.checkRequester(requester.session, field: by.name("session"), minimum: 1)
+        try WalletRequestFormat.checkRequester(requester.label, field: by.name("label"), minimum: 0)
         let workspace = try fields.string("workspace")
         guard WalletRequestFormat.isName(workspace) else {
             throw WalletRequestFormat.Failure.invalid(fields.name("workspace"), "must be 1-64 of A-Z a-z 0-9 . _ - starting with a letter or digit")

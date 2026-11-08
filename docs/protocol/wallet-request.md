@@ -173,9 +173,9 @@ Sent by VibeSwitcher to the Wallet Manager. All fields are required unless marke
 | `createdAt` | string | A time: when VibeSwitcher made the request. |
 | `expiresAt` | string | A time after `createdAt`, by at most 7 days (604 800 s). VibeSwitcher's default is `createdAt` + 24 hours. |
 | `requestedBy` | object | Who asked: exactly the three fields below. |
-| `requestedBy.project` | string | line(200), 1–200: the project the request was made from. |
-| `requestedBy.session` | string | line(200), 1–200: the session (agent) that made it. |
-| `requestedBy.label` | string | line(200), 0–200: a label for people (may be empty). |
+| `requestedBy.project` | string | line(200), 1–200: the project the request was made from. No more than 2 combining marks on one base character and none of the blank lookalikes, as for `reason`. |
+| `requestedBy.session` | string | line(200), 1–200: the session (agent) that made it. The same limits as `requestedBy.project`. |
+| `requestedBy.label` | string | line(200), 0–200: a label for people (may be empty). The same limits as `requestedBy.project`. |
 | `workspace` | string | A name: which of the Wallet Manager's workspaces to use. Opaque to VibeSwitcher; the Wallet Manager has several. |
 | `from` | string | The wallet to send from, in that workspace: its wallet id there (a name that doesn't start with `0x`), or its address. A value that starts with `0x` or `0X` MUST be an address. |
 | `chainId` | number | 1 to 2⁵³−1 (9 007 199 254 740 991). Any chain id is taken by the format; the Wallet Manager refuses chains it doesn't know. Known now: Ethereum mainnet (`1`), Sepolia (`11155111`), Base (`8453`), Base Sepolia (`84532`), GenLayer mainnet (`42424242`), GenLayer testnet (`4221`). |
@@ -457,6 +457,11 @@ are updated together.
 
 ### History
 
+- 2026-11-08: still version 1. `requestedBy.project`, `requestedBy.session` and `requestedBy.label` take the limits
+  `reason` has on what it can draw: no more than 2 combining marks on one base character, and none of the blank
+  lookalikes. A requester's words sit beside the rows the signer reads, so they can't stack into or blank out those
+  rows either. VibeSwitcher refuses such a request when it's filed and when it's sent. A v1 reader that doesn't apply
+  these limits takes every request this one does, so nothing the Wallet Manager reads changes, and no vector changes.
 - 2026-11-05: still version 1. A second transport, for a Wallet Manager on the same Mac as VibeSwitcher
   ([Transport on one Mac](#transport-on-one-mac)): requests as `wallet-request-<id>.json` in an owner-only folder
   `to-wm`, results as `wallet-result-<id>-<seq>.json` in `from-wm`, a liveness file `to-wm/.listening`, and the
