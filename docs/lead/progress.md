@@ -4281,3 +4281,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 14:28 Started a worker on the-git-guard-treats
 - 2026-11-08 14:28 Automatically (auto_advance): Started a worker on the-git-guard-treats (The git guard treats trailer commands as executable config).
 - 2026-11-08 14:28 Audit of turn-this-incident-into-15: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
+- 2026-11-08 14:44 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
+Seen again, already reported, so only counted (the daily trend has the counts): a freeze like hang-20261107-014500 (no app frames: _ZN2AG5Graph15propagate_dirtyENS_11AttributeIDE (AttributeGraph) < SwiftUI.GraphHost.flushTransactions() -> () (SwiftUICore) < closure #1 (SwiftUI.GraphHost) -> () in closure #1 () -> () in closure #1 () -> () in SwiftUI.NSHostingView.beginTransac (SwiftUI) [likely starvation])
+- 2026-11-08 14:52 Merged turn-this-incident-into-15: An install's own hook-binary write raises no Accept card (build 9bb93056766a)
