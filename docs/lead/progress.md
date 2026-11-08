@@ -4295,3 +4295,16 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-08 14:56 Automatically (auto_advance): Started the audit of a-branch-that-moves at e7c0c884 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-08 15:01 Released host-reply-timers-belong's worker (idle since its done report on 9690d4be) while its audit runs
 - 2026-11-08 15:01 Automatically (auto_advance): Started the audit of host-reply-timers-belong at 9690d4be (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 15:04 Audit of the-git-guard-treats: complete, clean, round 1: 1 Nit open
+- 2026-11-08 15:05 Audit of readme-and-guides: incomplete, clean, round 1: 1 Important open, 6 Nit open, 2 Pre-existing open
+- 2026-11-08 15:05 Started a worker on readme-and-guides
+- 2026-11-08 15:05 Automatically (auto_advance): Sent readme-and-guides's worker the open Important findings readme-and-guides:F1 from its audit at c9b5f391 (in a new worker: its last one was released during the audit).
+- 2026-11-08 15:05 Sent readme-and-guides's audit contract v5 (it had v4)
+- 2026-11-08 15:05 Released an-app-wide-appearance's worker (idle since its done report on 75884109) while its audit runs
+- 2026-11-08 15:05 Automatically (auto_advance): Started the audit of an-app-wide-appearance at 75884109 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 15:11 The worker on readme-and-guides answered findings: readme-and-guides:F1 fixed at 4ec99413: Commit 4ec99413. README.md:116 now says leads can message each other "unless you turn that off in Settings › Project lead"; docs/guide/project-lead.md:446 says it's on by default and that turning off Let project leads message each other stops it. Matches LeadMail.isOn (unset means on) and Preferences.swift:151, which initialises the toggle from it. Also checked the docs' other on/off claims against the code: letAgentsOpenShells, boostOnBattery and ignoreUs…
+- 2026-11-08 15:14 Audit of host-reply-timers-belong: complete, clean, round 1: 1 Nit open
+- 2026-11-08 15:18 Audit of an-app-wide-appearance: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-11-08 15:20 Audit of a-branch-that-moves: complete, suspect, round 1: 4 Nit open
+- 2026-11-08 15:20 Dismissed a-branch-that-moves:F1: Accepted by the lead: the optional branchHead field is needed because a stamped merge has a different hash on the base. The reviewer found it correct, and the contract's boundaries should have listed it. See the note in the task's context.
+- 2026-11-08 15:21 Merged the-git-guard-treats: The git guard treats trailer commands as executable config (build 9bb93056766a)
