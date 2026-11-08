@@ -17,7 +17,7 @@ switcher it started as: every Claude Code and Codex session on the Mac, with a l
 - **Leads a project.** A project lead is one Claude session per repository. It keeps a board of tasks with contracts,
   runs up to 3 workers at once (Claude or Codex), and records its decisions and progress in the repository.
 - **Checks work before it lands.** A read-only verifier audits risky changes, a risk check reads each branch's diff,
-  and nothing reaches your branch unless the project's tests pass on it.
+  and once a project has a test command, nothing reaches your branch unless its tests pass on it.
 - **Stops when something looks wrong.** If the agents' own config changes while a team runs, or your branch moves under
   a lead, work waits for your click.
 - **Shows every session at a glance.** One dot per session in the menu bar: red needs you, orange is working, blue
@@ -125,7 +125,7 @@ get raised to it anyway:
   deletes or rewrites files, changes permissions, spawns processes or adds locks or threads, a change to the test or
   build setup, or tests taken out: all go to audit. A small Claude model can raise it too. Nothing here can lower it.
 - **Sensitive paths** (`.claude/`, `.github/`, `.env`, entitlements and the like) are always audited.
-- **A random sample** (10 % by default) of the rest is audited anyway.
+- **A random sample** (10 % by default) of the rest is audited anyway, for tasks `auto_advance` moves on (the default).
 
 An audit is a read-only verifier, on a different model from the workers unless you say otherwise, working from the
 contract with real commands. It can run as 1 to 3 finders with different focuses. An Important finding blocks the merge
@@ -134,11 +134,14 @@ sending it back again.
 
 A merge takes exactly the commit that was checked, rebases it onto the lead's branch in a worktree no agent works in,
 runs the project's tests there and fast-forwards. There's never a force, and any merge can be undone with a revert
-commit. `merge_policy` decides what waits for you: `auto`, `ask_sensitive` (how merges go until you choose) or `ask_all`.
+commit. A project with no `test_command` runs no tests: audited work still merges and is logged as merged without
+tests, and a task that wasn't audited is refused. `merge_policy` decides what waits for you: `auto`, `ask_sensitive`
+(how merges go until you choose) or `ask_all`.
 
-The lead can make its project's review rules stricter, not looser: Settings › Project lead › **Review rules floor** sets
-the least each project may have. It doesn't push on its own either: it asks, and only your click on the card's
-**Push** sends that exact commit, as a fast-forward.
+The lead can change its project's review rules, but not below a floor: Settings › Project lead › **Review rules floor**
+sets the least each project may have. The floor starts at the project's rules when its lead first starts, with `auto`
+for a merge policy nobody has chosen, so raise it to keep a lead from loosening them. The lead doesn't push on its own
+either: it asks, and only your click on the card's **Push** sends that exact commit, as a fast-forward.
 
 ### The config seal and Accept cards
 

@@ -187,7 +187,7 @@ Some tasks are audited whatever their level says:
   `risk_model` is off, a small Claude model sees the diff's stat and the contract and may raise it too. Either can only
   raise, and an error leaves the result as it was;
 - a random **sample** of the review-none tasks left, `audit_sample_percent` of them (10 by default), drawn once per
-  task.
+  task by `auto_advance` when the task reports done; a task it doesn't move on isn't sampled.
 
 The Team tab shows such a task as **Needs audit**, with why. `REVIEW.md` at the repository's root is your few lines on
 what matters in this code; the verifier and the risk check read it from the base branch, so a worker can't change its
@@ -225,8 +225,9 @@ worker's answer. The merge refusal, the audit's report, `status` and `board(task
 **The review rules floor.** Settings › Project lead › Review rules floor sets, per project, the least strict its rules
 may be: sensitive and strict paths, audit finders, merge policy, risk lines, the risk check's model pass, the audit
 sample, and whether the verifier must run on a different model. It's kept in the session host's vault, written only by
-the app. A lead can make a rule stricter with `configure`, never looser: for paths both lists count, for the rest the
-stricter value does.
+the app. The floor is recorded once, at the project's values, when its lead first starts (`auto` for a merge policy
+not chosen yet). A lead can change a rule with `configure` but never below the floor, so it can loosen a rule down to
+that level; raise the floor to stop that. For paths both lists count, for the rest the stricter value does.
 
 A verifier ends itself 20 seconds after it submits its verdict. The app ends every worker and verifier session of a
 task that merged, was folded, abandoned or cleaned up.
@@ -240,7 +241,9 @@ then:
    the base in);
 2. runs `init_command`, then `test_command`, then `regression_command` if set, each within `test_timeout_min` (45
    minutes), and stops one as hung sooner when it makes no progress for `stall_min` (10 minutes: no new output, under
-   1 % of a core, while the Mac's load is under `load_threshold`), naming the last test it started;
+   1 % of a core, while the Mac's load is under `load_threshold`), naming the last test it started. With no
+   `test_command` no tests run: the merge is logged as merged without tests, and a task with no passing audit is
+   refused;
 3. fast-forwards the lead's branch to exactly what was tested. Never a merge commit, never a force.
 
 It refuses while an Important finding is open, while the task is **kept** (held back with a reason, such as "don't
@@ -508,7 +511,7 @@ not edit that folder.
 `workflow.md` (in `.vibeswitcher/`, git-ignored) holds the limits and commands below. The lead changes it with its
 `configure` tool, which keeps your comments. The guard rails (the test and setup commands, `merge_policy`,
 `sensitive_paths`, `strict_paths`, `records_dir`, `max_workers`, `heavy_slots`, `audit_finders`, `audit_nit_cap`, `auto_advance`,
-`risk_lines`, `risk_model`, `audit_sample_percent`; `Sources/VibeCore/LeadVaultGuarded.swift`)
+`risk_lines`, `risk_model`, `audit_sample_percent`, `merge_batching`, `remote`; `Sources/VibeCore/LeadVaultGuarded.swift`)
 count only as the lead last set them: when the file says anything else, `merge` and `start_worker` refuse until the
 lead sets them again.
 
