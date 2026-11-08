@@ -252,7 +252,10 @@ struct HookBoundsTests {
             if left == 0 { readAt = Date() } else if running { unreadAt = polled } else { break }
             if readAt == nil, ended.wait(timeout: .now() + .microseconds(500)) == .success { ended.signal(); running = false }
         }
-        if ended.wait(timeout: .now() + hangGuard) == .timedOut { process.terminate() }
+        if ended.wait(timeout: .now() + hangGuard) == .timedOut {
+            process.terminate()
+            _ = ended.wait(timeout: .now() + hangGuard)
+        }
         let exited = Date()
         let seconds = exited.timeIntervalSince(exec), own = readAt == nil ? seconds : exited.timeIntervalSince(unreadAt)
         if let readAt {
