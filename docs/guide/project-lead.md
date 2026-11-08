@@ -306,8 +306,8 @@ shell wrote is on disk, but no worker or verifier VibeSwitcher starts loads it u
 
 ## Provenance
 
-Each commit a merge lands on the base ends with git trailers (`LeadProvenance.swift`), so the history says where it came
-from and it goes wherever the commit goes:
+The top commit of each merge on the base ends with git trailers (`LeadProvenance.swift`), so the history says where it
+came from and it goes wherever the commit goes. A branch of several commits lands as several; only the top one has them.
 
 | Trailer | What it says |
 | --- | --- |

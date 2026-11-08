@@ -187,22 +187,6 @@ enum Sandbox {
         return (try? png.write(to: file)) != nil
     }
 
-    /// As `draw`, through the window's layer tree: `cacheDisplay` leaves SwiftUI lists and fills out on macOS 27 (a
-    /// blank sidebar, a Team tab with no colors), and `layershot` is for pictures that need them.
-    static func drawLayers(_ window: NSWindow, to file: URL) -> Bool {
-        guard let view = window.contentView?.superview ?? window.contentView, let layer = view.layer ?? window.contentView?.layer,
-              let space = CGColorSpace(name: CGColorSpace.sRGB) else { return false }
-        let scale = window.backingScaleFactor
-        guard let context = CGContext(data: nil, width: Int(layer.bounds.width * scale), height: Int(layer.bounds.height * scale),
-                                      bitsPerComponent: 8, bytesPerRow: 0, space: space,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
-        context.scaleBy(x: scale, y: scale)
-        layer.render(in: context)
-        guard let image = context.makeImage(),
-              let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return false }
-        return (try? png.write(to: file)) != nil
-    }
-
     /// A file name's part from `text`: letters, digits, `.`, `_` and `-` only.
     static func fileName(_ text: String) -> String {
         let kept = text.map { $0.isLetter || $0.isNumber || "._-".contains($0) ? $0 : "-" }
@@ -1259,7 +1243,6 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("close settings|sheet", "closes Settings or the sheet"),
         ("shot NAME", "draws each window, light and dark, into the shots folder"),
         ("panes on|off", "shows or collapses the sidebar and inspector, for a shot of the middle alone"),
-        ("layershot NAME", "as shot, through the window's layer tree, for what cacheDisplay leaves out (lists, fills)"),
         ("pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT", "the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views (where, their tooltip); hover moves the pointer onto the message holding TEXT; drag presses on the message holding FROM and lets go on the one holding TO; copy is ⌘C (to a pasteboard of the sandbox's own, never the general one), printing what it copied; menu right-clicks the message holding TEXT and prints its menu"),
         ("unproved", "connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions"),
         ("quit", "quits (the host and fake sessions end with it)"),
@@ -2372,7 +2355,6 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             reply(true, "closed \(rest)")
         case "shot": shot(rest.isEmpty ? "shot" : rest, reply)
-        case "layershot": shot(rest.isEmpty ? "shot" : rest, draw: Sandbox.drawLayers, reply)
         case "panes":
             // A shot draws a glass sidebar and inspector blank or without their colors on macOS 27: `panes off` leaves them out.
             guard rest == "on" || rest == "off", let split = window?.window?.contentViewController as? NSSplitViewController else {
@@ -2944,7 +2926,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     /// Each window the sandbox shows (the main window, Settings when open, the sheet when shown), drawn in light and in
     /// dark: `NAME-main-light.png`, `NAME-main-dark.png`, `NAME-settings-light.png`…
-    private func shot(_ name: String, draw: @escaping (NSWindow, URL) -> Bool = Sandbox.draw, _ reply: @escaping (Bool, String) -> Void) {
+    private func shot(_ name: String, _ reply: @escaping (Bool, String) -> Void) {
         let base = Sandbox.fileName(name)
         var windows: [(label: String, window: NSWindow)] = []
         if let main = window?.window, main.isVisible { windows.append(("main", main)) }
@@ -2968,7 +2950,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 for (label, window) in windows {
                     let file = self.shots.appendingPathComponent("\(base)-\(label)-\(mode).png")
-                    if draw(window, file) { written.append(file.path) } else { failed.append(file.lastPathComponent) }
+                    if Sandbox.draw(window, to: file) { written.append(file.path) } else { failed.append(file.lastPathComponent) }
                 }
                 take(appearances.dropFirst())
             }

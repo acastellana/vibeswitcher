@@ -185,7 +185,7 @@ with working solo is labelled as an estimate.
 
 ### Git provenance
 
-Each commit a lead merges ends with trailers saying where it came from: `VS-Task`, `VS-Review`, `VS-Worker-Model`,
+The top commit of each merge ends with trailers saying where it came from: `VS-Task`, `VS-Review`, `VS-Worker-Model`,
 `VS-Verifier-Model`, `VS-Build` and `VS-Contract` (a hash of the task's contract). They go wherever the commit goes.
 
 ```sh
@@ -208,7 +208,7 @@ VibeSwitcher never signs or holds a key. Choose where requests go in Settings �
 [wallet-request.md](docs/protocol/wallet-request.md).
 
 An agent can also ask to open a shell with `vs-shell run`: its card shows the folder and the exact command, and it runs
-only when you press **Run**.
+when you press **Run**, unless you've let agents open shells without asking in Settings › Agents.
 
 ### The phone
 
@@ -220,7 +220,7 @@ switch. See [Phone access](docs/guide/phone-access.md).
 ### Dictation and the spoken briefing
 
 Hold the mic button in the composer, or ⌥Space, and let go: the text lands at the cursor and is never sent by itself.
-You can also hold Space in an empty composer, if you turn that on. A Claude Code session in the window dictates through
+Holding Space in the composer does the same, unless you turn that off. A Claude Code session in the window dictates through
 Claude's own `/voice`, with your claude.ai sign-in; anything else records on the Mac and uses OpenAI with your API key.
 
 **Brief me** (⇧⌘B, or ⌥⇧⌘B for one project) tells you in about 30 seconds what happened across your leads: what

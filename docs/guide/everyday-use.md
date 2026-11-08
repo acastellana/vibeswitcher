@@ -100,8 +100,8 @@ Agents can ask you for two things as cards in the chat:
 - **A transaction.** `vs-wallet request …` shows a card saying what the transaction does, from where and to whom, with
   the agent's reason. Nothing leaves the Mac until you press **Send to Wallet Manager**, which hands it to the Wallet
   Manager, a separate app, over Passage to another Mac or in a folder on this one. It checks the request and you sign
-  there. Without one set up in Settings › Wallet, or if you prefer, the card offers **Sign in browser wallet**, unless
-  the request is marked for a local fork only. VibeSwitcher never signs or holds a key. For a session with no chat, the
+  there. The card can also offer **Sign in browser wallet**, for a plain address on a request not marked for a local
+  fork only; that skips the Wallet Manager's checks. VibeSwitcher never signs or holds a key. For a session with no chat, the
   card sits along the terminal. The format is [wallet-request.md](../protocol/wallet-request.md).
 
 Claude Code may show `Ran 1 stop hook` / `Stop hook feedback: [VibeSwitcher · messages, v2] …` when a message arrives
@@ -126,8 +126,8 @@ Choose which you get in Settings › Notifications.
 ## Dictation
 
 Hold the mic button in the composer, or ⌥Space, and speak; let go, and the text lands at the cursor for you to read. It
-is never sent by itself. Esc or the ✕ cancels. **Hold Space to dictate** (Settings › Dictation & Briefing) also starts
-it when you hold the Space bar alone in the box.
+is never sent by itself. Esc or the ✕ cancels. Holding the Space bar in the box starts it too, unless you turn off
+**Hold Space to dictate** in Settings › Dictation & Briefing; what's in the box is kept.
 
 - A Claude Code session in the window dictates through Claude's own `/voice`, with your claude.ai sign-in and no key.
   If its voice mode is off or in tap mode, the composer offers a one-click `/voice hold`; without a claude.ai sign-in
