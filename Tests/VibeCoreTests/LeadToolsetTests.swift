@@ -205,6 +205,8 @@ extension LeadTeamFixture {
     static func newVault(in temp: Scratch) -> LeadVault {
         let folder = temp.url("vault")
         let book = LeadVault.Book()
+        // The agents' config it seals (`ConfigSeal`): a scratch home of its own, never the Mac's or another test's.
+        book.configHome = temp.url("config-home").path
         booksLock.lock()
         books[folder.path] = book
         booksLock.unlock()

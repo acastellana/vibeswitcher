@@ -44,8 +44,14 @@ extension LeadVault {
         Dictionary(uniqueKeysWithValues: guardedKeys.map { ($0, hash(guardedValue($0, in: workflow))) })
     }
 
-    /// What the lead last set the guard rails to, as hashes by key; nil when nothing is recorded yet.
+    /// What the lead last set the guard rails to, as hashes by key; nil when nothing is recorded yet. Not the agents'
+    /// config the vault seals beside them (`guardedRecord`).
     public func guardedSettings(root: String) throws -> [String: String]? {
+        try guardedRecord(root: root).map { $0.filter { !ConfigSeal.isVaultKey($0.key) } }
+    }
+
+    /// Everything the vault keeps with the guard rails: theirs, and the agents' config's (`ConfigSeal`).
+    public func guardedRecord(root: String) throws -> [String: String]? {
         guard case .guarded(let hashes) = try call(.guarded(root: root)) else { throw Self.unexpected }
         return hashes
     }

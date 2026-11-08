@@ -519,6 +519,10 @@ extension LeadToolset {
             throw Problem(text: "Not merged (nothing was tested): \(Worktrees.refusal(lock))")
         }
         let waited = try waitForLoad(workflow, slug: label, doing: "merge_remote", done: "merged")
+        // The remote's code runs from here, outside any session: the team isn't quiet (`ConfigSeal`). Unmarked, it
+        // doesn't run.
+        let mark = try markBranchRun(not: "Not merged (nothing was tested)")
+        defer { endBranchRun(mark) }
         let landing = LeadRemote.mergeAndTest(root: root, head: current, tip: tip, label: label, records: workflow.recordsDir,
                                               setup: workflow.initCommand, test: workflow.mergeChecks,
                                               scratch: vault.scratch(root: root, "merge-remote"), home: vault.scratch(root: root, "merge-remote-home"),
@@ -528,7 +532,10 @@ extension LeadToolset {
         switch landing {
         case .upToDate:
             return MCPToolResult(text: "Nothing to merge: \(base) has everything \(label) has (\(tip.prefix(8))).")
-        case .passed(let commit, let isMerge): (made, merged) = (commit, isMerge)
+        case .passed(let commit, let isMerge):
+            // What its tests wrote outside the checkout (the agents' config) holds the merge, whatever they said.
+            try checkConfig(not: "Not merged: the tests of \(label) passed, and after them")
+            (made, merged) = (commit, isMerge)
         case .conflict(let files):
             try? store.appendProgress("merge_remote stopped: \(label) conflicts with \(base) in \(Self.clip(files.joined(separator: ", "), 300))")
             throw Problem(text: "Not merged: \(label) (\(tip.prefix(8))) conflicts with \(base) in \(files.prefix(12).joined(separator: ", "))\(files.count > 12 ? ", …" : ""). "

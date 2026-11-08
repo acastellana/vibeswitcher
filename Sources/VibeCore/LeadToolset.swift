@@ -2079,6 +2079,8 @@ public final class LeadToolset: MCPToolset {
         if let missing = runtime.preflight(command: command) {
             throw Problem(text: "Not started: \(missing.description) Tell the user: VibeSwitcher only checks for it and never installs anything.")
         }
+        // What the session would load from outside its worktree, as sealed: a worker's shell may have written it.
+        try checkConfig(not: "\(role == .worker ? "\(slug)'s worker" : "\(slug)'s \(finder == nil ? "verifier" : "finder")") not started")
         let grant: String
         do { grant = try vault.issue(role: role, root: root, task: slug, auditing: auditing, finder: finder) } catch { throw Problem(text: "\(error)") }
         do {
@@ -2462,11 +2464,16 @@ public final class LeadToolset: MCPToolset {
         }
         defer { lock.release() }
         let logs = URL(fileURLWithPath: store.folder).appendingPathComponent("audit/\(slug)/\(commit.prefix(12))")
-        let run = Self.sharedRun(at: logs) ?? {
-            Worktrees.auditRun(root: root, commit: commit, setup: workflow.initCommand, test: workflow.testCommand,
-                               scratch: vault.scratch(root: root, "audit-\(slug)"), home: vault.scratch(root: root, "audit-\(slug)-home"),
-                               logs: logs, timeout: workflow.testTimeout, lock: heavyLock(workflow))
-        }()
+        let run: Worktrees.AuditRun
+        if let shared = Self.sharedRun(at: logs) { run = shared } else {
+            // The branch's code runs from here, outside any session: the team isn't quiet (`ConfigSeal`). Unmarked, it
+            // doesn't run.
+            let mark = try markBranchRun(not: "The audit of \(slug) didn't make its build and test run; \(not)")
+            defer { endBranchRun(mark) }
+            run = Worktrees.auditRun(root: root, commit: commit, setup: workflow.initCommand, test: workflow.testCommand,
+                                     scratch: vault.scratch(root: root, "audit-\(slug)"), home: vault.scratch(root: root, "audit-\(slug)-home"),
+                                     logs: logs, timeout: workflow.testTimeout, lock: heavyLock(workflow))
+        }
         if case .cancelled = run.outcome {
             throw Problem(text: "The audit of \(slug) was cancelled during its build and test run; \(not).")
         }
@@ -2815,6 +2822,10 @@ public final class LeadToolset: MCPToolset {
         // When its commands started (the slot taken) and the load then, for the merge stats line.
         let called = Date()
         var begun: (at: Date, load: [Double])?
+        // The branch's code runs from here, outside any session: the team isn't quiet (`ConfigSeal`). Unmarked, it
+        // doesn't run.
+        let mark = try markBranchRun(not: "Not merged (nothing was tested)")
+        defer { endBranchRun(mark) }
         // The failing tests' one run on the base after a rerun: record only (`MergeRerun.baseline`).
         let pairing = MergeRerun.Pairing()
         let checked = Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
@@ -2849,6 +2860,11 @@ public final class LeadToolset: MCPToolset {
                 recordRerun(plan, task: slug, commit: commit, base: current, passed: false, load: begun?.load.first, pairing: pairing)
             default: break
             }
+        }
+        // What its tests wrote outside the worktree (the agents' config) holds the merge, whatever they said.
+        switch checked {
+        case .passed, .passedOnRerun: try checkConfig(not: "Not merged: \(slug)'s tests passed, and after them")
+        default: break
         }
         switch checked {
         case .passed(let commit): tested = commit
@@ -3166,11 +3182,18 @@ public final class LeadToolset: MCPToolset {
         let message = "Revert \(slug): \(Self.clip(task.title, 60))\n\n\(reason)\n\n"
             + commits.map { "This reverts commit \($0)." }.joined(separator: "\n")
         let made: String
+        // The base's code runs from here, outside any session: the team isn't quiet (`ConfigSeal`). Unmarked, it
+        // doesn't run.
+        let mark = try markBranchRun(not: "Not reverted (nothing was tested)")
+        defer { endBranchRun(mark) }
         switch Worktrees.revertAndTest(root: root, onto: onto, commit: merged.commit, base: current, message: message,
                                        setup: workflow.initCommand, test: workflow.mergeChecks,
                                        scratch: vault.scratch(root: root, "revert-\(slug)"), home: vault.scratch(root: root, "revert-\(slug)-home"),
                                        timeout: workflow.testTimeout, lock: heavyLock(workflow)) {
-        case .passed(let commit): made = commit
+        case .passed(let commit):
+            // What its tests wrote outside the checkout (the agents' config) holds the revert, whatever they said.
+            try checkConfig(not: "Not reverted: the tests passed with \(slug) reverted, and after them")
+            made = commit
         case .conflict(let files):
             let shown = laterTouches(files.prefix(12).map { $0 }, slug: slug, after: merged.commit, current: current)
             throw Problem(text: "Not reverted: reverting \(slug) conflicts with what \(base) did since it merged, in \(files.count) file\(files.count == 1 ? "" : "s"): "
@@ -4193,6 +4216,41 @@ public final class LeadToolset: MCPToolset {
         guard !changed.isEmpty else { return }
         let now = changed.map { $0.value.isEmpty ? "\($0.key) is now empty" : "\($0.key) is now `\($0.value)`" }.joined(separator: "; ")
         throw Problem(text: "\(not): workflow.md's \(now), not what you last set with configure. Its commands run as you, its policy and limits hold the team, and any session of the team can write the file: a worker may have changed it. If you or the user did, set it again with configure (as it should read) and try again; if not, set it back with configure and tell the user.")
+    }
+
+    /// The agents' config (`ConfigSeal`), looked at by the vault: a change made while the team's sessions ran holds new
+    /// workers, verifiers and merges (`not` says what didn't happen) until the user accepts it in the app; one made
+    /// while the team was quiet is the user's, sealed as it is and noted in the progress log.
+    func checkConfig(not: String) throws {
+        let found: LeadVault.ConfigCheck
+        do { found = try vault.checkConfig(root: root) } catch {
+            throw Problem(text: "\(not): the session host couldn't say whether the agents' config is as sealed (\(error)).")
+        }
+        if !found.resealed.isEmpty {
+            try? store.appendProgress("Agents' instructions changed while no worker or verifier ran (the user's), sealed as they are: \(ConfigSeal.list(found.resealed))")
+        }
+        guard found.held.isEmpty else { throw Problem(text: ConfigSeal.refusal(found.held, outside: found.outside, not: not)) }
+    }
+
+    /// Tells the vault a branch's code is about to run outside any session (`ConfigSeal`): a change it makes isn't
+    /// taken as the user's. When the vault can't be told, the code doesn't run (`not` says what didn't happen): a run
+    /// it never heard of would leave the team quiet, and what the run wrote would be sealed as the user's.
+    /// It counts as running until `endBranchRun` with the id this gives.
+    func markBranchRun(not: String) throws -> String {
+        do { return try vault.markBranchRun(root: root) } catch {
+            throw Problem(text: "\(not): the session host couldn't record that the branch's code runs (\(error)), so it didn't run.")
+        }
+    }
+
+    /// The branch run `id` (`markBranchRun`'s) ended. Not told, the vault counts it as running for a day: never quiet.
+    func endBranchRun(_ id: String) {
+        try? vault.endBranchRun(id, root: root)
+    }
+
+    /// `checkConfig`'s refusal after a batch's tests passed, as the batch's stop text; nil when nothing is held.
+    func heldConfig() -> String? {
+        do { try checkConfig(not: "the stack's tests passed, and after them") } catch let problem as Problem { return problem.text } catch { return "\(error)" }
+        return nil
     }
 
     /// A merge's test run takes minutes, in which update_task answers as ever: the lead may hold the task (kept,

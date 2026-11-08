@@ -58,6 +58,7 @@ struct ChatContainer: View {
                 }
                 BaseMovePrompt(moves: leads.baseMoves, root: lead.root)
                 PushRequestPrompt(pushes: leads.pushes, root: lead.root)
+                ConfigHeldPrompt(holds: leads.configHolds, root: lead.root)
             } else if let todos = chat.log.todos, todos.contains(where: { $0.status != .done }) {
                 TodoPanel(todos: todos)
             }

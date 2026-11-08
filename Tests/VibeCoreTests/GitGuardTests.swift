@@ -360,6 +360,10 @@ struct GitGuardTests: LeadTeamFixture {
         let status = lead.call("status", [:]).text
         #expect(status.contains("post-checkout (new), post-merge (changed), reference-transaction (new)"), "\(status)")
         #expect(status.contains("Git config: this repository's own config sets filter.evil.smudge."), "\(status)")
+        // Changed while the worker ran: held, named, until the user accepts it in the app (`ConfigSeal`).
+        let held = lead.call("merge", ["task": "add-b"])
+        #expect(held.isError && held.text.contains(".git/config (main checkout) and .git/hooks (main checkout)"), "\(held.text)")
+        #expect(try vault.checkConfig(root: root).resealed == [".git/config (main checkout)", ".git/hooks (main checkout)"])
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
         #expect(merged.text.contains("post-merge (changed)"), "\(merged.text)")
@@ -391,6 +395,9 @@ struct GitGuardTests: LeadTeamFixture {
         let worktree = Worktrees.path(root: root, slug: "add-b")
         try commit([".gitattributes": Self.attributes, "b.txt": "bee\n"], in: worktree)
         try plant(root: root, marks: marks)
+        // Planted while the worker ran: held until the user accepts it in the app (`ConfigSeal`), which they do here.
+        #expect(try !vault(for: runtime).checkConfig(root: root).held.isEmpty)
+        #expect(try !vault.checkConfig(root: root).resealed.isEmpty)
         let advancing = LeadAdvanceTests.Advancing(lead)
         defer { advancing.stop() }
         let report = try seat("worker-add-b", runtime).call("report", doneReport("added"))

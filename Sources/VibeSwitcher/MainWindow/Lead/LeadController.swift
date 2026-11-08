@@ -390,6 +390,8 @@ final class LeadController: ObservableObject {
     let baseMoves: BaseMoves
     /// The pushes the leads ask you for (push_remote), each a card you click Push or Decline on (see `PushRequests`).
     let pushes: PushRequests
+    /// The agents' config held for each team (changed while its sessions ran), a card you click Accept on (see `ConfigHolds`).
+    let configHolds: ConfigHolds
     /// The roots with a push request open: it counts with the lead's questions (the sidebar's badge, `leadsAsking`).
     @Published private(set) var pushesOpen: Set<String> = []
     /// The Mac kept awake while a team works.
@@ -603,6 +605,7 @@ final class LeadController: ObservableObject {
         self.reads = reads
         baseMoves = BaseMoves(vault: vault, reads: reads)
         pushes = PushRequests(vault: vault)
+        configHolds = ConfigHolds(vault: vault)
         allDone = AllDoneWatch(reads: reads)
         self.claudeCommand = claudeCommand
         installer = ToolInstaller(host: host)
@@ -655,6 +658,17 @@ final class LeadController: ObservableObject {
             self.alert(.broken(title: "\(project)'s lead asks to push \(request.branch)",
                                body: "\(LeadToolset.commits(request.ahead)) to \(request.target). Push or Decline in its chat.",
                                leadTTY: self.boards[root]?.leadTTY, key: "push-\(request.id)"))
+        }
+        configHolds.onHeld = { [weak self] root, names in
+            guard let self else { return }
+            let project = (root as NSString).lastPathComponent
+            self.alert(.broken(title: "\(project): the agents' config changed while its team ran",
+                               body: "\(names.joined(separator: ", ")). No worker, verifier or merge until you accept it in the lead's chat.",
+                               leadTTY: self.boards[root]?.leadTTY, key: "config-held-\(root)-\(names.joined(separator: ","))"))
+        }
+        configHolds.onAccepted = { [weak self] root, names in
+            self?.deliver("The user accepted the change to \(names.joined(separator: ", ")) in VibeSwitcher: it's sealed as it is, and workers, verifiers and merges go ahead again.",
+                          from: .system("the user, in the window"), root: root)
         }
         // The outcome of your click, to the lead, as VibeSwitcher's (the progress log has it: `LeadPush.settle`).
         pushes.onSettled = { [weak self] root, request, outcome in
@@ -1513,6 +1527,7 @@ final class LeadController: ObservableObject {
         if read != decisions { decisions = read }
         baseMoves.look(roots)
         pushes.look(roots)
+        configHolds.look(roots)
         for (root, board) in loaded {
             for event in AlertRules.look(previous: previous[root], board: board, project: (root as NSString).lastPathComponent,
                                          seen: &seenQuestions, launchedAt: launchedAt) {

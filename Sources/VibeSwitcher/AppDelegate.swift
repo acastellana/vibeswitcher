@@ -1140,6 +1140,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
 
 /// Installs the hook binary and both agents' hook configs, and trusts the Codex hooks.
 /// Returns human-readable problems (empty on success). Blocking: call off the main thread.
+/// Each write of the agents' config here is the app's own, sealed as written (`LeadVault.appWrite`): an install or an
+/// update never waits for your Accept in a lead's chat, and what anyone else changed is still held.
 enum HookSetup {
     static func installAll() -> [String] {
         var problems: [String] = []
@@ -1147,14 +1149,27 @@ enum HookSetup {
             problems.append("The hook binary could not be installed to \(VibePaths.hookBinary.path).")
         }
         for agent in Agent.allCases {
-            do { try HookInstaller.install(agent: agent) } catch {
+            do { try LeadVault.standard.appWrite([HookInstaller.configURL(for: agent).path]) { try HookInstaller.install(agent: agent) } } catch {
                 problems.append("\(agent.displayName): \(error.localizedDescription)")
             }
         }
-        do { try CodexTrust.trustOurHooks() } catch {
+        do { try trustCodex() } catch {
             problems.append("Codex hooks are installed but not trusted (\(error.localizedDescription)). Run /hooks in Codex and trust the vibeswitcher-hook entries.")
         }
+        // Sealed before returning (`--install-hooks` exits right after).
+        LeadVault.standard.sealAppWrites()
         return problems
+    }
+
+    /// Takes VibeSwitcher's hooks out of `agent`'s config, sealed as written (see above).
+    static func uninstall(agent: Agent) throws {
+        try LeadVault.standard.appWrite([HookInstaller.configURL(for: agent).path]) { try HookInstaller.uninstall(agent: agent) }
+    }
+
+    /// Trusts VibeSwitcher's Codex hooks (`CodexTrust`): what it records in ~/.codex/config.toml is sealed as written.
+    @discardableResult
+    static func trustCodex() throws -> Int {
+        try LeadVault.standard.appWrite([(VibePaths.home as NSString).appendingPathComponent(".codex/config.toml")]) { try CodexTrust.trustOurHooks() }
     }
 }
 
@@ -1166,8 +1181,14 @@ enum HookBinary {
         return url.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
     }
 
+    /// The app's own write, sealed as written (`LeadVault.appWrite`): an update's new binary never waits for your
+    /// Accept.
     @discardableResult
     static func sync() -> Bool {
+        LeadVault.standard.appWrite([VibePaths.hookBinary.path]) { write() }
+    }
+
+    private static func write() -> Bool {
         guard let source = bundled, let data = try? Data(contentsOf: source) else { return false }
         let target = VibePaths.hookBinary
         if let existing = try? Data(contentsOf: target), existing == data { return true }

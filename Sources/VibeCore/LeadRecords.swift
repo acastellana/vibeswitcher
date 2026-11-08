@@ -242,7 +242,12 @@ public final class LeadRecords: @unchecked Sendable {
     /// doesn't, or `head` has no script, or it failed (`ProductInventory`: the records go without it).
     private func inventory(at head: String) -> Data? {
         guard let key = ProductInventory.key(root: root, commit: head) else { return nil }
-        if inventoryMade?.key != key { inventoryMade = (key, ProductInventory.generate(root: root, commit: head)) }
+        if inventoryMade?.key != key {
+            // The merged code's script runs: the team isn't quiet while it does (`ConfigSeal`). Unmarked, it doesn't run.
+            guard let mark = try? vault.markBranchRun(root: root) else { return nil }
+            defer { try? vault.endBranchRun(mark, root: root) }
+            inventoryMade = (key, ProductInventory.generate(root: root, commit: head))
+        }
         guard let made = inventoryMade?.data else { return nil }
         let committed = Git.run(["cat-file", "blob", "\(head):\(ProductInventory.output)"], in: root)
         let text = String(decoding: made, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)

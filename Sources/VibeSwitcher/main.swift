@@ -48,7 +48,7 @@ if arguments.contains("--uninstall-hooks") {
     var failed = false
     for agent in Agent.allCases {
         do {
-            try HookInstaller.uninstall(agent: agent)
+            try HookSetup.uninstall(agent: agent)
             print("removed \(agent.displayName) hooks from \(HookInstaller.configURL(for: agent).path)")
         } catch {
             failed = true

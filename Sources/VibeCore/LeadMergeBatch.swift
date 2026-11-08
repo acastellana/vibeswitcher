@@ -151,6 +151,15 @@ extension LeadToolset {
             runs += 1
             var plan: MergeRerun.Plan?
             var tests: Int?
+            // The branches' code runs from here, outside any session: the team isn't quiet (`ConfigSeal`). Unmarked, it
+            // doesn't run.
+            let mark: String
+            do { mark = try markBranchRun(not: "the stack wasn't tested") } catch let problem as Problem {
+                return BatchRun(outcome: .stopped(kind: "error", text: problem.text), tests: nil, plan: nil)
+            } catch {
+                return BatchRun(outcome: .stopped(kind: "error", text: "\(error)"), tests: nil, plan: nil)
+            }
+            defer { endBranchRun(mark) }
             var load: Double?
             // The failing tests' one run on the stack's base after a rerun: record only (`MergeRerun.baseline`).
             let pairing = MergeRerun.Pairing()
@@ -175,6 +184,10 @@ extension LeadToolset {
                 }
             }
             let outcome: BatchRun.Outcome
+            // What the tests wrote outside the worktree (the agents' config) holds the merge, whatever they said.
+            var held: String?
+            if case .passed = check { held = heldConfig() } else if case .passedOnRerun = check { held = heldConfig() }
+            if let held { return BatchRun(outcome: .stopped(kind: "error", text: held), tests: tests, plan: plan) }
             switch check {
             case .passed: outcome = .passed
             case .passedOnRerun(_, let failed, let again):

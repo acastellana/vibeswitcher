@@ -1128,6 +1128,80 @@ struct BaseMoveCard: View {
     }
 }
 
+/// The agents' config held for this team (see `ConfigHolds`): the files that changed while its workers or verifiers
+/// ran, and Accept. Only this click seals them; until then no worker or verifier starts and nothing merges.
+struct ConfigHeldPrompt: View {
+    @ObservedObject var holds: ConfigHolds
+    let root: String
+
+    var body: some View {
+        if let names = holds.held[root] {
+            ConfigHeldCard(names: names, outside: holds.outside[root] ?? [], changes: holds.changes[root] ?? [:],
+                           changedAt: holds.changedAt[root] ?? [:], accepting: holds.accepting.contains(root),
+                           accept: { holds.accept(root) })
+                .padding(.horizontal, 12).padding(.vertical, 8)
+        }
+    }
+}
+
+struct ConfigHeldCard: View {
+    let names: [String]
+    /// Those changed outside a team session (code that runs).
+    var outside: Set<String> = []
+    /// What changed in each (its keys, never a value).
+    var changes: [String: String] = [:]
+    /// When each was last changed (read off the main thread, `ConfigHolds`).
+    var changedAt: [String: Date] = [:]
+
+    /// Every one changed outside a team session: said plainly, as such.
+    var allOutside: Bool { !names.isEmpty && names.allSatisfy(outside.contains) }
+    var accepting = false
+    let accept: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.shield.fill").foregroundStyle(.red).accessibilityHidden(true)
+                Text(allOutside ? "Changed outside a team session: if you made this change, accept it"
+                                : "The agents' config changed while the team ran").font(.system(size: 12, weight: .semibold))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(names, id: \.self) { name in
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(name).font(.system(size: 11.5).monospaced()).lineLimit(1).truncationMode(.middle)
+                            if outside.contains(name), !allOutside {
+                                Text("outside a team session").font(.system(size: 10.5)).foregroundStyle(.secondary)
+                            }
+                            if let at = changedAt[name] {
+                                Text("changed \(at.formatted(date: .omitted, time: .shortened))").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                            }
+                        }
+                        if let keys = changes[name] {
+                            Text(keys).font(.system(size: 10.5).monospaced()).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            .textSelection(.enabled)
+            Text(allOutside
+                 ? "These carry code that runs in every new session (hooks, MCP servers, shell startup, git's commands), so only your Accept seals them, whoever changed them. No worker or verifier starts and nothing merges until you accept. If you didn't make this change, look at them and set them back first."
+                 : "A worker's shell, a verifier's command or a branch's tests can write these, and every new session would load them (hooks, MCP servers, shell startup). No worker or verifier starts and nothing merges until you accept. If you changed them, accept. If not, look at them and set them back first.")
+                .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button("I Changed Them: Accept", action: accept).buttonStyle(.borderedProminent).controlSize(.small).disabled(accepting)
+                if accepting { ProgressView().controlSize(.small).accessibilityLabel("Accepting") }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.red.opacity(0.07)))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.red.opacity(0.35)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel((allOutside ? "Changed outside a team session: " : "Agents' config held: ") + names.joined(separator: ", "))
+    }
+}
+
 /// A push the lead asks for (push_remote, see `PushRequests`): the commits, where they go, and Push or Decline. Only
 /// this click pushes, and only the commit shown.
 struct PushRequestPrompt: View {
