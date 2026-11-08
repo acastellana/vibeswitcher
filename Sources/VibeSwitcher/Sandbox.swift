@@ -3038,14 +3038,14 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let lifts = windows.map { LiftedGlass(window: $0.window) }
         lifts.forEach { $0.followWindow() }
         settle { [weak self] in
-            guard let self else { lifts.forEach { $0.restore() }; return }
+            guard let self else { lifts.forEach { $0.putBack() }; return }
             var lines = [self.lookReport()]
             var ok = true
             for ((label, _), lift) in zip(windows, lifts) {
                 let file = self.shots.appendingPathComponent("\(base)-\(label)-real.png")
                 if let problem = self.drawChecked(lift, label: label, to: file) { ok = false; lines.append(problem) } else { lines.append(file.path) }
             }
-            lifts.forEach { $0.restore() }
+            lifts.forEach { $0.putBack() }
             reply(ok, lines.joined(separator: "\n"))
         }
     }
@@ -3075,7 +3075,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let lifts = windows.map { LiftedGlass(window: $0.window) }
         func take(_ appearances: ArraySlice<(String, NSAppearance.Name)>) {
             guard let (mode, appearance) = appearances.first else {
-                lifts.forEach { $0.restore() }
+                lifts.forEach { $0.putBack() }
                 windows.forEach { $0.window.appearance = nil }
                 window?.pane.reconfigureAll()
                 return reply(failed.isEmpty, (written + failed).joined(separator: "\n"))
@@ -3084,7 +3084,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             lifts.forEach { $0.followWindow() }
             window?.pane.reconfigureAll()
             settle { [weak self] in
-                guard let self else { lifts.forEach { $0.restore() }; return }
+                guard let self else { lifts.forEach { $0.putBack() }; return }
                 for ((label, _), lift) in zip(windows, lifts) {
                     let file = self.shots.appendingPathComponent("\(base)-\(label)-\(mode).png")
                     if let problem = self.drawChecked(lift, label: label, to: file) { failed.append(problem) } else { written.append(file.path) }
@@ -3102,7 +3102,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
 final class LiftedGlass {
     struct Pane {
         let wrapper: NSView
-        let restore: () -> Void
+        let putBack: () -> Void
     }
 
     let window: NSWindow
@@ -3111,7 +3111,7 @@ final class LiftedGlass {
     /// `problems` still looks at them.
     private let sidePanes: [NSView]
 
-    /// Lifts `window`'s glass panes (none before macOS 26, or when they're collapsed). Each `restore()` must follow.
+    /// Lifts `window`'s glass panes (none before macOS 26, or when they're collapsed). Each `putBack()` must follow.
     init(window: NSWindow) {
         self.window = window
         let root = window.contentView?.superview ?? window.contentView
@@ -3155,7 +3155,7 @@ final class LiftedGlass {
                                      content.topAnchor.constraint(equalTo: wrapper.topAnchor),
                                      content.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor)])
         let selections = Self.flattenSelections(in: content)
-        return Pane(wrapper: wrapper, restore: {
+        return Pane(wrapper: wrapper, putBack: {
             selections()
             content.translatesAutoresizingMaskIntoConstraints = translated
             glass.contentView = content
@@ -3193,8 +3193,8 @@ final class LiftedGlass {
         panes.forEach { $0.wrapper.appearance = NSAppearance(named: dark ? .darkAqua : .aqua) }
     }
 
-    func restore() {
-        panes.forEach { $0.restore() }
+    func putBack() {
+        panes.forEach { $0.putBack() }
         panes = []
     }
 
