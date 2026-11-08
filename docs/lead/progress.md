@@ -4409,3 +4409,9 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-08 21:24 Released anything-needing-a-real's worker (idle since its done report on 8aa6e23e) while its audit runs
 - 2026-11-08 21:24 Automatically (auto_advance): Started the audit of anything-needing-a-real at 8aa6e23e (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-08 21:40 Merged turn-this-incident-into-16: A merge's test time counts only while the Mac is awake (build 767537e5ec09)
+- 2026-11-08 21:40 Automatically (auto_advance): Merged turn-this-incident-into-16 (A merge's test time counts only while the Mac is awake) into main at 7183d7ca, on its passing audit and the full test run.
+- 2026-11-08 21:40 Automatically (auto_advance): Cleaned up turn-this-incident-into-16 (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-08 21:40 Started a worker on the-other-time-limits
+- 2026-11-08 21:40 Automatically (auto_advance): Started a worker on the-other-time-limits (The other time limits count awake time, and "still running" names only tests that were running), its after tasks done (turn-this-incident-into-16).
+- 2026-11-08 21:40 Released auto-advance-keeps's worker (idle since its done report on 9feae0f8) while its audit runs
+- 2026-11-08 21:40 Automatically (auto_advance): Started the audit of auto-advance-keeps at 9feae0f8 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
