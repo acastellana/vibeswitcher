@@ -4130,3 +4130,10 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 07:14 Merged scorecard-small-version: Scorecard, small version: user-found bugs, questions, cost per delivery and time to install (backlog A1) (build ebed973e8025)
 - 2026-11-08 07:14 Automatically (auto_advance): Merged scorecard-small-version (Scorecard, small version: user-found bugs, questions, cost per delivery and time to install (backlog A1)) into main at 49e4d8d9, on its passing audit and the full test run.
 - 2026-11-08 07:14 Automatically (auto_advance): Cleaned up scorecard-small-version (freed 2.9 GB of build output and temporary folders). It stays done.
+- 2026-11-08 07:28 Audit of config-seal-covers at d4d2e472 tested its merged result e8817347 onto main: test command failed
+- 2026-11-08 07:28 Released config-seal-covers's worker (idle since its done report on d4d2e472) while its audit runs
+- 2026-11-08 07:28 Automatically (auto_advance): Started the audit of config-seal-covers at d4d2e472 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 07:28 Planned starts-and-audits-wait: Starts and audits wait when the Mac is short of memory, not only when its load is high (review audit)
+- 2026-11-08 07:28 Started a worker on starts-and-audits-wait
+- 2026-11-08 07:28 Automatically (auto_advance): Started a worker on starts-and-audits-wait (Starts and audits wait when the Mac is short of memory, not only when its load is high).
+- 2026-11-08 07:29 Update: Retrospective: the first backlog batch (A1, A2, A3, A5, A6, B3) — **Landed (all six you chose, 2026-11-08):**

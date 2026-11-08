@@ -314,3 +314,11 @@ The lead proposed it with a 15 min timer and the user didn't answer in time, so 
 
 Question CEDA0180, 2026-11-08: the user didn't answer in 15 min, so the lead's proposal applied. A plugin's hooks run as code in every Claude session, and a forged update (a new version folder in the cache with the install record repointed) can't be told apart on disk from Claude Code's own update. That matches the standing rule that code that runs always needs Accept.
 
+## 2026-11-08 07:28:52 From the 2026-11-08 batch retrospective, two planning rules. (1) Tasks whose boundaries name the same source file never run side by side: the later one gets `after` on the earlier. (2) A task whose contract needs its worker to run a full suite (it changes scripts/test.sh or the test harness) gets budget_min 120, not 60. Full suites took 600–1,100 s that night, and two tasks ran over their budgets just waiting on them.
+
+(1) config-seal-covers and config-seal-a-merge both changed LeadVault.swift's seal code and started together, because the lead gave both `after: branch-code-can-t` instead of chaining them. The lead had to send a warning message mid-task, and a merge conflict was likely. (2) swift-testing-s-parallel ran over 60 then 100 min, and branch-code-can-t over 180 then 225 min. Each extension cost a round trip and a stopped turn.
+
+## 2026-11-08 07:28:55 Starts and audits also wait when the Mac is short of memory (task starts-and-audits-wait, audited). Until it lands, the lead watches status for a load above 100 and starts nothing by hand while it lasts.
+
+On 2026-11-08 from 03:40 to 06:00, load was 100–225 with idle CPU, 504 MB of RAM free and swap at 85%. The overload came from parallel full suites, 12 tests wide each, the old-host rebuild in every merge and audit, and up to 7 boosted sessions. The width cap and the old-host cache address the suites; nothing yet holds new sessions while the Mac pages.
+
