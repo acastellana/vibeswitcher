@@ -298,3 +298,7 @@ The user's goal: exactly what they want, without issues, safely, cheaply, fast, 
 
 Round 2 confirmed F1, F2, F3, F5 and F7 fixed. A re-roll from base would throw that verified work away, and the open finding sits in one contained rule whose fix the lead could specify. If round 3 leaves an Important open, re-roll then.
 
+## 2026-11-08 04:14:20 branch-code-can-t merges with its round-3 audit passed. The one Important finding round 3 raised, F10, moved to its own audited task, config-seal-a-merge: after a merge, the merge's own branch run makes the next look unquiet, so the user's quiet edit is held anyway. config-seal-covers now runs after branch-code-can-t. The install that carries the seal waits until config-seal-a-merge has merged, so the user never runs a build that holds their own edits after every merge.
+
+This replaces the 01:28 plan to re-roll the task if round 3 left an Important finding open. F10 is new, small and narrow: the order of one end call against one check. It only errs toward safety: it raises a hold too many, never lets a change through unheld. Round 3 confirmed the F9 redesign and the 7 fixes before it. A re-roll would discard about 3.5 h of audited security work to fix an ordering bug. It's the same pattern as resume-work-cut-off's F6 on 2026-11-07 12:56. Gate code only takes effect after an install, so holding the install closes the gap.
+
