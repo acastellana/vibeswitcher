@@ -36,4 +36,19 @@ struct ConfigHoldsTests {
         #expect(times["~/.claude/skills"] == nil)
         #expect(times["~/.zshrc"] != nil)
     }
+
+    /// Blind check: a plugin's or a settings file's scripts carry no time on the card: their path's time (the version
+    /// folder's, settings.json's) isn't when the code that changed was changed.
+    @Test func changedAtGivesAPluginOrASettingsScriptsNoTime() throws {
+        let home = scratch.url("home").path
+        let install = home + "/.claude/plugins/cache/m/p/1"
+        try FileManager.default.createDirectory(atPath: install, withIntermediateDirectories: true)
+        try #"{"enabledPlugins":{"p@m":true}}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
+        try #"{"version":2,"plugins":{"p@m":[{"scope":"user","installPath":"\#(install)"}]}}"#
+            .write(toFile: home + "/.claude/plugins/installed_plugins.json", atomically: true, encoding: .utf8)
+        let times = ConfigHolds.changedAt(["~/.claude/settings.json's scripts", "~/.claude/plugins: p@m", "~/.claude/settings.json"], root: "/r", home: home)
+        #expect(times["~/.claude/settings.json's scripts"] == nil)
+        #expect(times["~/.claude/plugins: p@m"] == nil)
+        #expect(times["~/.claude/settings.json"] != nil)
+    }
 }

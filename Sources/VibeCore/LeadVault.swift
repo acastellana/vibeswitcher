@@ -1214,9 +1214,13 @@ extension LeadVault {
         /// Two seals: your home's files are the Mac's, one seal for every team (`State.config`); the main checkout's
         /// are the team's (`Team.guarded`). A thing not recorded yet is recorded as it is; one as recorded is found
         /// unchanged. One that differs is sealed anew by the app (your click), or by the lead only while its seal is
-        /// quiet and it doesn't execute (`ConfigSeal.executes`): quiet, no worker, verifier or branch run of any team
-        /// still in use (`retired`) ran since that seal was last sealed or found as sealed. Otherwise it's refused and
-        /// held, named under `heldKey`, until you accept it in the app. nil when it's taken.
+        /// quiet and it's one a quiet look seals (`ConfigSeal.sealsWhenQuiet`: instructions, plugins, the scripts
+        /// settings name): quiet, no worker, verifier or branch run of any team still in use (`retired`) ran since that
+        /// seal was last sealed or found as sealed. A plugin whose version folder moved (`ConfigSeal.isUpdate`), and one
+        /// that comes back changed after a look that didn't see it (`ConfigSeal.goneKey`), wait for your click whoever
+        /// made them, as does a plugin first seen after the seal's first look that watched plugins
+        /// (`ConfigSeal.comesAndGoesSince`). Otherwise it's refused and held, named under `heldKey`, until you accept it in the app. nil when
+        /// it's taken.
         private func sealConfig(root: String, asked: [String: String], now hashes: [String: String]?, caller: Caller, live: Set<String>?,
                                 changed: inout Bool) -> String? {
             let marks = asked.keys.filter(ConfigSeal.isVaultKey)
@@ -1266,10 +1270,10 @@ extension LeadVault {
             var team = state.teams[own] ?? Team(root: LeadVault.canonical(root))
             var guarded = team.guarded ?? [:]
             let home = Self.judge(watchedNow.filter { ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &mac.hashes, held: &mac.held,
-                                  quiet: quiet(since: mac.sealedAt), caller: caller)
+                                  quiet: quiet(since: mac.sealedAt), caller: caller, home: true)
             var projectHeld = guarded[ConfigSeal.heldKey]
             let project = Self.judge(watchedNow.filter { !ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &guarded, held: &projectHeld,
-                                     quiet: quiet(since: team.configSealedAt), caller: caller)
+                                     quiet: quiet(since: team.configSealedAt), caller: caller, home: false)
             guarded[ConfigSeal.heldKey] = projectHeld
             // Sealed, or found as sealed, now: what ran before is seen. A session still running is as new (not quiet).
             if home { mac.sealedAt = now }
@@ -1289,10 +1293,10 @@ extension LeadVault {
         }
 
         /// One seal's look (`sealConfig`): `now` its watched things' hashes as they are, `hashes` with their per-key
-        /// hashes, `recorded` and `held` (`heldKey`'s value) as sealed, updated here. True when nothing is held: all of
-        /// it sealed or found as sealed.
+        /// hashes, `recorded` and `held` (`heldKey`'s value) as sealed, updated here; `home`: the Mac-wide seal's. True
+        /// when nothing is held: all of it sealed or found as sealed.
         private static func judge(_ now: [String: String], hashes: [String: String], recorded: inout [String: String], held: inout String?,
-                                  quiet: Bool, caller: Caller) -> Bool {
+                                  quiet: Bool, caller: Caller, home: Bool) -> Bool {
             // A seal made while the sync bookkeeping still counted, of a folder as it is now: the same folder, carried
             // over to the hash that leaves it out, so that alone holds nothing. Whatever else moved doesn't match, and
             // is judged as ever.
@@ -1307,17 +1311,49 @@ extension LeadVault {
                 }
             }
             if carried { held = Self.heldValue(before) }
-            let differ = now.filter { recorded[$0.key] != nil && recorded[$0.key] != $0.value }
+            // Not told at this look (a plugin no settings enable now, the scripts of a settings file that doesn't read):
+            // marked, so that if it comes back changed, no quiet look seals it: when it changed isn't known.
+            for key in Array(recorded.keys) where ConfigSeal.isWatchedKey(key) && ConfigSeal.isHome(key: key) == home && now[key] == nil
+                && ConfigSeal.sealsWhenQuiet(key: key) {
+                recorded[ConfigSeal.goneKey(of: key)] = "1"
+            }
+            // A plugin or scripts first seen: at this seal's first look that watches them, recorded as they are; after
+            // it, a change whose time isn't known (enabled now, its cache written while nothing watched it).
+            if recorded[ConfigSeal.comesAndGoesSince] == nil {
+                seal(now.keys.filter { recorded[$0] == nil && ConfigSeal.comesAndGoes(key: $0) }, from: hashes, into: &recorded)
+                recorded[ConfigSeal.comesAndGoesSince] = "1"
+            }
+            // One with nothing in it (scripts of a settings file that names none) holds nothing: recorded as it is.
+            let firstSeen = Set(now.keys.filter { key in
+                recorded[key] == nil && ConfigSeal.comesAndGoes(key: key) && !(hashes[ConfigSeal.keysKey(of: key)].map(ConfigSeal.decode)?.isEmpty ?? false)
+            })
+            let differ = now.filter { firstSeen.contains($0.key) || (recorded[$0.key] != nil && recorded[$0.key] != $0.value) }
             // Your click seals only what its card showed you: each held thing as it was when held. One that moved
             // since (or changed and was never shown) is held anew, for the card to show. For the lead: a change while
             // the seal was quiet is yours and sealed, unless it executes: that waits for your click whoever made it.
+            // Back changed after a look that didn't see it: changed when, isn't known.
+            let returned = Set(differ.keys.filter { recorded[ConfigSeal.goneKey(of: $0)] != nil }).union(firstSeen)
+            // A plugin whose version folder moved (`ConfigSeal.isUpdate`: Claude Code's update, or a shell's forged one,
+            // alike on disk) is new code: it waits for your click like other code, whoever made it, quiet or not.
+            let updates = Set(differ.keys.filter { ConfigSeal.isUpdate(key: $0, recorded: recorded, now: hashes) })
             // Something already held is never the lead's look's to seal, quiet or not: only your click clears it.
             let unseen = caller == .app ? differ.filter { before[$0.key]?.hash != $0.value }
-                : differ.filter { !quiet || ConfigSeal.executes(key: $0.key) || before[$0.key] != nil }
-            // Held, and not told now (`~/.claude.json` read mid-write): still held, as it was, until it reads whole.
-            let unread = before.filter { now[$0.key] == nil && recorded[$0.key] != nil }
+                : differ.filter { key, _ in
+                    !quiet || !ConfigSeal.sealsWhenQuiet(key: key) || before[key] != nil || returned.contains(key) || updates.contains(key)
+                }
+            // Held, and not told now (`~/.claude.json` read mid-write, a plugin no settings enable now): still held, as
+            // it was, until it's told again. A plugin may never be: your click seals it as its card showed it, so it
+            // comes back unchanged only as you accepted it.
+            var unread = before.filter { now[$0.key] == nil && recorded[$0.key] != nil }
+            if caller == .app {
+                for (key, line) in unread where ConfigSeal.isPlugin(name: ConfigSeal.name(ofKey: key)) {
+                    recorded[key] = line.hash
+                    unread[key] = nil
+                }
+            }
             guard !unseen.isEmpty else {
                 seal(now.keys, from: hashes, into: &recorded)
+                for key in now.keys { recorded[ConfigSeal.goneKey(of: key)] = nil }
                 held = heldValue(unread)
                 return unread.isEmpty
             }
@@ -1325,9 +1361,10 @@ extension LeadVault {
             // seal (quiet, instructions only) is sealed meanwhile.
             let sealed = caller == .app ? [:] : differ.filter { unseen[$0.key] == nil }
             let holding = differ.filter { sealed[$0.key] == nil }
-            // Changed outside a team session: seen so now, or seen so before and not moved since.
+            // Changed outside a team session: seen so now, or seen so before and not moved since. Not one that came
+            // back changed: when it changed isn't known.
             let outside = Set(holding.keys.filter { key in
-                (quiet && caller != .app) || (before[key]?.outside == true && before[key]?.hash == holding[key])
+                (quiet && caller != .app && !returned.contains(key)) || (before[key]?.outside == true && before[key]?.hash == holding[key])
             })
             // Which keys or paths changed, from the per-key hashes as sealed: names, for the card, never values or
             // contents. A folder's also says when its newest changed file was.
@@ -1335,7 +1372,9 @@ extension LeadVault {
             var times: [String: Double] = [:]
             for key in holding.keys {
                 let keys = ConfigSeal.keysKey(of: key)
-                if hashes[ConfigSeal.countingKey(of: key)] != nil {
+                if firstSeen.contains(key) {
+                    changes[key] = "first watched"
+                } else if hashes[ConfigSeal.countingKey(of: key)] != nil {
                     let files = ConfigSeal.changedFiles(from: recorded[keys], to: hashes[keys])
                     changes[key] = files.said
                     times[key] = files.at
@@ -1344,6 +1383,7 @@ extension LeadVault {
                 }
             }
             seal(sealed.keys, from: hashes, into: &recorded)
+            for key in now.keys where recorded[key] == now[key] { recorded[ConfigSeal.goneKey(of: key)] = nil }
             held = ConfigSeal.heldValue(holding.merging(unread.mapValues(\.hash)) { $1 }, outside: outside.union(unread.filter(\.value.outside).keys),
                                         changes: changes.merging(unread.mapValues(\.changes)) { $1 },
                                         times: times.merging(unread.compactMapValues(\.at)) { $1 })
@@ -1402,9 +1442,9 @@ extension LeadVault {
         /// held says which keys changed).
         private func guardedAnswer(_ root: String) -> [String: String]? {
             let guarded = team(root)?.guarded
-            guard let mac = state.config else { return guarded.map { $0.filter { !$0.key.hasPrefix(ConfigSeal.keysPrefix) } } }
-            var answer = (guarded ?? [:]).filter { !ConfigSeal.isHome(key: $0.key) && !$0.key.hasPrefix(ConfigSeal.keysPrefix) }
-            for (key, hash) in mac.hashes where !key.hasPrefix(ConfigSeal.keysPrefix) { answer[key] = hash }
+            guard let mac = state.config else { return guarded.map { $0.filter { !ConfigSeal.isVaultNote($0.key) } } }
+            var answer = (guarded ?? [:]).filter { !ConfigSeal.isHome(key: $0.key) && !ConfigSeal.isVaultNote($0.key) }
+            for (key, hash) in mac.hashes where !ConfigSeal.isVaultNote(key) { answer[key] = hash }
             var held = ConfigSeal.heldLines(in: guarded).filter { !ConfigSeal.isHome(key: $0.key) }
             held.merge(ConfigSeal.heldLines(in: [ConfigSeal.heldKey: mac.held ?? ""])) { $1 }
             answer[ConfigSeal.heldKey] = Self.heldValue(held)

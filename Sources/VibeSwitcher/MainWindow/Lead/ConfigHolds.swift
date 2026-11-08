@@ -89,11 +89,12 @@ final class ConfigHolds: ObservableObject {
 
     /// When each of `names` was last changed, for the card ("14:02"): nothing for a missing file, or a folder (its own
     /// time moves with whatever is written in it: what's held says when its newest changed file was,
-    /// `ConfigSeal.heldTimes`). Reads the disk: off the main thread.
+    /// `ConfigSeal.heldTimes`), or a plugin or a settings file's scripts (its path's time isn't the time of the code
+    /// that changed). Reads the disk: off the main thread.
     static func changedAt(_ names: [String], root: String, home: String = VibePaths.home) -> [String: Date] {
         guard !names.isEmpty else { return [:] }
         var times: [String: Date] = [:]
-        for watched in ConfigSeal.watched(home: home, root: root) where names.contains(watched.name) && watched.kind != .folder {
+        for watched in ConfigSeal.watched(home: home, root: root) where names.contains(watched.name) && (watched.kind == .file || watched.kind == .mcpServers) {
             times[watched.name] = (try? FileManager.default.attributesOfItem(atPath: watched.path))?[.modificationDate] as? Date
         }
         return times

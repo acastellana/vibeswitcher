@@ -4410,7 +4410,7 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "\(not): the session host couldn't say whether the agents' config is as sealed (\(error)).")
         }
         if !found.resealed.isEmpty {
-            try? store.appendProgress("Agents' instructions changed while no worker or verifier ran (the user's), sealed as they are: \(ConfigSeal.list(found.resealed))")
+            try? store.appendProgress("Agents' config changed while no worker or verifier ran (the user's), sealed as they are: \(ConfigSeal.list(found.resealed))")
         }
         guard found.held.isEmpty else { throw Problem(text: ConfigSeal.refusal(found.held, outside: found.outside, not: not)) }
     }

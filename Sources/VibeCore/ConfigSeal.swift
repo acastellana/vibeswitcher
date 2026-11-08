@@ -20,9 +20,15 @@ import Foundation
 /// verifier VibeSwitcher starts loads it unseen. Running sessions keep the hooks they started with (Claude Code
 /// snapshots them).
 ///
-/// Not watched yet (a known gap, a follow-up task): `~/.claude/plugins` (enabled plugins' hooks, hook scripts and MCP
-/// servers run in every session) and the scripts settings' hooks or status line name by a path outside what's watched
-/// here. A branch's code that edits one of those isn't held.
+/// Plugins and scripts: each enabled plugin (settings' `enabledPlugins`, at its version folder as
+/// `~/.claude/plugins/installed_plugins.json` records it) is watched for what of it runs: its manifest, hooks, MCP and
+/// LSP servers and the files their commands name, never the rest of a big cache. Each watched settings file's scripts
+/// (what its hooks', status line's and helpers' commands name by path) are watched by contents. Both are sealed by a
+/// quiet look (`sealsWhenQuiet`): only a change made while the team ran holds. A plugin whose version folder moved
+/// (`isUpdate`: Claude Code's update, or a shell's forged one, alike on disk) always waits for your Accept, as does one
+/// that comes back changed after a look didn't see it (`gonePrefix`), or is first seen after the seal's first look
+/// that watched plugins (`comesAndGoesSince`: one enabled now, its cache written while nothing watched it). Not watched: what a command computes (`$(…)`, a
+/// glob) or loads itself (a script's own `source`, an interpreter's modules), and plugins' skills and commands.
 public enum ConfigSeal {
     /// One thing watched: its name as the lead and you are told it, where it is, and how it's read.
     public struct Watched: Equatable, Sendable {
@@ -34,6 +40,14 @@ public enum ConfigSeal {
             case folder
             /// `~/.claude.json`: only its MCP servers, yours and each project's (the rest changes with every session).
             case mcpServers
+            /// An enabled plugin's installs, each at its version folder (none when Claude Code's record has none, nil
+            /// when the record can't be read): only what runs (`pluginParts`), never its skills, commands, agents or
+            /// docs. `home` stands for `~` and `$HOME`. `path` is its first install's folder ("" with none).
+            case plugin(home: String, installs: [PluginInstall]?)
+            /// The scripts the settings file at `path` names by path (its hooks', status line's and helpers'
+            /// commands), each by contents (`settingsScripts`); `project` stands for `$CLAUDE_PROJECT_DIR`, and what's
+            /// at or under `skip` is watched already.
+            case scripts(home: String, project: String?, skip: [String])
         }
 
         public var name: String
@@ -43,6 +57,13 @@ public enum ConfigSeal {
         /// scripts, commands' `!` lines): a change is never sealed silently, even made outside a team session. Not:
         /// instructions (CLAUDE.md, agents, output styles), which a quiet look seals as yours.
         public var executes = true
+    }
+
+    /// One install of a plugin as Claude Code records it: its version folder, and how its parts are labelled ("" for
+    /// the only one; its scope and project when the plugin has several).
+    public struct PluginInstall: Equatable, Sendable {
+        public var path: String
+        public var label: String
     }
 
     /// The watched things that only instruct (no code of theirs runs): sealed silently when changed while the team
@@ -56,6 +77,52 @@ public enum ConfigSeal {
 
     /// Whether the thing `key` names executes (see `Watched.executes`).
     public static func executes(key: String) -> Bool { !instructions.contains(name(ofKey: key)) }
+
+    /// Whether a change to the thing `key` names, made while its seal was quiet, is sealed as yours by the lead's
+    /// look: instructions, and the code you change by hand without a card (an edit inside a plugin's version folder, a
+    /// script settings name; never a plugin's update, `isUpdate`). Everything else that executes waits for your Accept
+    /// whoever changed it. The gap is the same as `instructions`': a process branch code left behind that writes one
+    /// after the team went quiet is sealed.
+    public static func sealsWhenQuiet(key: String) -> Bool {
+        let name = name(ofKey: key)
+        return instructions.contains(name) || isPlugin(name: name) || isScripts(name: name)
+    }
+
+    /// The name of an enabled plugin as watched: "~/.claude/plugins: <plugin>@<marketplace>", your home's (the
+    /// Mac-wide seal) when your settings enable it; "plugin <plugin>@<marketplace> (main checkout)", the team's, when
+    /// only the main checkout's do (only that team's looks see it).
+    static var pluginPrefix: String { "~/.claude/plugins: " }
+
+    static let checkoutPluginPrefix = "plugin "
+
+    static func isPlugin(name: String) -> Bool {
+        name.hasPrefix(pluginPrefix) || (name.hasPrefix(checkoutPluginPrefix) && name.hasSuffix(" (main checkout)"))
+    }
+
+    /// The name of the scripts a settings file names: "<the settings' name>'s scripts".
+    static let scriptsSuffix = "'s scripts"
+
+    static func isScripts(name: String) -> Bool { name.hasSuffix(scriptsSuffix) }
+
+    /// The per-key hash of a plugin's version folder (`keyHashes`): where it's installed, not what's in it.
+    static let versionKey = "version folder"
+
+    /// The same for a plugin whose record points outside Claude Code's cache: no update of Claude Code's, new code all the same.
+    static let installKey = "install folder"
+
+    /// Whether `key` (a watched one) is a plugin that came to new code: it's in a folder now (`versionKey`, `installKey`)
+    /// and wasn't in that one between `recorded`'s per-key hashes and `now`'s: moved from another (Claude Code's update
+    /// writes a new folder and moves its record there; a shell can do the same), or from no folder at all (a look that
+    /// found it not installed, Claude Code's record unreadable, or the folder its record names gone, sealed nothing of
+    /// what's there now). An edit inside the same folder isn't, nor an uninstall (no folder now). It always waits for
+    /// your Accept, whoever made it.
+    static func isUpdate(key: String, recorded: [String: String], now: [String: String]) -> Bool {
+        guard isPlugin(name: name(ofKey: key)), let new = now[keysKey(of: key)] else { return false }
+        let after = decode(new), before = recorded[keysKey(of: key)].map(decode) ?? [:]
+        guard let to = after[versionKey] ?? after[installKey] else { return false }
+        if to != before[versionKey] ?? before[installKey] { return true }
+        return before.keys.contains { ($0 == "absent" || $0.hasSuffix(": absent")) && after[$0] == nil }
+    }
 
     /// The prefix of a watched thing's key among the vault's guarded hashes.
     public static let keyPrefix = "config:"
@@ -140,12 +207,36 @@ public enum ConfigSeal {
     /// Whether `key` (a watched thing's, or its per-key hashes') is in your home: the Mac's, sealed once for every team
     /// (`LeadVault.Book`); the rest is the main checkout's, sealed per team.
     public static func isHome(key: String) -> Bool {
-        let rest = key.hasPrefix(keysPrefix) ? key.dropFirst(keysPrefix.count) : key.hasPrefix(keyPrefix) ? key.dropFirst(keyPrefix.count) : ""
+        let rest = key.hasPrefix(keysPrefix) ? key.dropFirst(keysPrefix.count) : key.hasPrefix(gonePrefix) ? key.dropFirst(gonePrefix.count)
+            : key.hasPrefix(keyPrefix) ? key.dropFirst(keyPrefix.count) : ""
         return rest.hasPrefix("~/")
     }
 
     /// The key of the per-key hashes of the thing `key` (a watched key) hashes.
     static func keysKey(of key: String) -> String { keysPrefix + name(ofKey: key) }
+
+    /// Where the vault marks a thing a quiet look seals (`sealsWhenQuiet`) that a look didn't see (a plugin no
+    /// settings enable now, the scripts of a settings file that doesn't read), until it's seen as sealed again: if it
+    /// comes back changed, when it changed isn't known, so it waits for your Accept. Only the vault reads it.
+    static let gonePrefix = keyPrefix + "#gone "
+
+    static func goneKey(of key: String) -> String { gonePrefix + name(ofKey: key) }
+
+    /// Whether the thing `key` names comes and goes with what settings say (a plugin they enable, the scripts of a
+    /// settings file that reads), unlike a file, which hashes as absent when it's not there.
+    static func comesAndGoes(key: String) -> Bool {
+        let name = name(ofKey: key)
+        return isPlugin(name: name) || isScripts(name: name)
+    }
+
+    /// Where a seal notes that it has watched plugins and scripts since (its first look that did): after it, one seen
+    /// for the first time (a plugin enabled, or moved between your settings and the checkout's) waits for your Accept,
+    /// since whatever wrote it while it was unwatched isn't known. At that first look, what's there is recorded as it is.
+    static let comesAndGoesSince = keyPrefix + "#watched since"
+
+    /// Whether `key` is one of the vault's own notes beside a watched thing's hash (`keysPrefix`, `gonePrefix`,
+    /// `comesAndGoesSince`): never in its `guarded` answer.
+    static func isVaultNote(_ key: String) -> Bool { key.hasPrefix(keysPrefix) || key.hasPrefix(gonePrefix) || key == comesAndGoesSince }
 
     /// Where a look's hashes say what a folder hashes to with the sync bookkeeping counted (`isSyncBookkeeping`), as
     /// versions before it was left out did: only to carry a seal they made over, never recorded.
@@ -194,27 +285,97 @@ public enum ConfigSeal {
         (".claude/settings.json", .file), (".claude/settings.local.json", .file), ("CLAUDE.local.md", .file), (".mcp.json", .file),
     ]
 
-    /// What's watched in your home at `home` (every team's alike).
+    /// The settings files whose scripts (`Kind.scripts`) and enabled plugins (`enabledPlugins`) are watched: your
+    /// home's, and the main checkout's (`checkoutFiles`).
+    static let settingsFiles = [".claude/settings.json", ".claude/settings.local.json"]
+
+    /// What's watched in your home at `home` (every team's alike): the files, the scripts your settings name, and the
+    /// plugins they enable.
     public static func homeWatched(home: String) -> [Watched] {
-        homeFiles.map { file in
+        let files = homeFiles.map { file in
             let name = "~/" + file.0
             return Watched(name: name, path: (home as NSString).appendingPathComponent(file.0), kind: file.1, executes: !instructions.contains(name))
         }
+        let skip = files.filter { $0.kind == .file || $0.kind == .folder }.map(\.path)
+        let scripts = settingsFiles.map { file in
+            Watched(name: "~/" + file + scriptsSuffix, path: (home as NSString).appendingPathComponent(file), kind: .scripts(home: home, project: nil, skip: skip))
+        }
+        return files + scripts + plugins(home: home, enabledIn: settingsFiles.map { (home as NSString).appendingPathComponent($0) })
     }
 
-    /// Everything watched for the team of the repository at `root`, with your home at `home`.
+    /// Everything watched for the team of the repository at `root`, with your home at `home`: your home's, the main
+    /// checkout's files, the scripts its settings name, and the plugins they enable that yours don't.
     public static func watched(home: String, root: String) -> [Watched] {
-        var all = homeWatched(home: home)
+        let mine = homeWatched(home: home)
+        var all = mine
         let checkout = URL(fileURLWithPath: (root as NSString).standardizingPath).resolvingSymlinksInPath().path
         all += checkoutFiles.map { Watched(name: $0.0 + " (main checkout)", path: (checkout as NSString).appendingPathComponent($0.0), kind: $0.1) }
         let git = gitFolder(checkout)
         all.append(Watched(name: ".git/config (main checkout)", path: (git as NSString).appendingPathComponent("config"), kind: .file))
         all.append(Watched(name: ".git/hooks (main checkout)", path: (git as NSString).appendingPathComponent("hooks"), kind: .folder))
+        let skip = all.filter { $0.kind == .file || $0.kind == .folder }.map(\.path)
+        let settings = settingsFiles.map { (checkout as NSString).appendingPathComponent($0) }
+        all += zip(settingsFiles, settings).map { file, path in
+            Watched(name: file + " (main checkout)" + scriptsSuffix, path: path, kind: .scripts(home: home, project: checkout, skip: skip))
+        }
+        // A plugin only the checkout enables is the team's: only its looks see it, so the Mac-wide seal never holds it.
+        let yours = Set(mine.map(\.name).filter { $0.hasPrefix(pluginPrefix) }.map { String($0.dropFirst(pluginPrefix.count)) })
+        all += plugins(home: home, enabledIn: settings, checkout: true, except: yours)
         return all.map { item in
             var item = item
             item.executes = !instructions.contains(item.name)
             return item
         }
+    }
+
+    /// The plugins the settings files at `settings` enable (`enabledPlugins`, Claude Code's own record: any that sets
+    /// one true), one watched thing each under a name that stays (`pluginPrefix`; `checkout`: the team's), with each
+    /// of its installs as Claude Code records them (`~/.claude/plugins/installed_plugins.json`). An enabled plugin with
+    /// no install is watched as such (an install appearing is a change); while that record can't be read (three reads
+    /// in a row) each is watched as "record unreadable", so it's a change, never left out.
+    static func plugins(home: String, enabledIn settings: [String], checkout: Bool = false, except: Set<String> = []) -> [Watched] {
+        var enabled = Set<String>()
+        for path in settings {
+            guard let data = regularContents(path, limit: jsonLimit),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            for (id, on) in object["enabledPlugins"] as? [String: Any] ?? [:] where (on as? Bool) == true { enabled.insert(id) }
+        }
+        enabled.subtract(except)
+        guard !enabled.isEmpty else { return [] }
+        let record = (home as NSString).appendingPathComponent(".claude/plugins/installed_plugins.json")
+        var installs = installedPlugins(record)
+        for _ in 1..<3 where installs == nil {
+            usleep(20_000)
+            installs = installedPlugins(record)
+        }
+        return enabled.sorted().map { id in
+            let name = checkout ? checkoutPluginPrefix + id + " (main checkout)" : pluginPrefix + id
+            guard let installs else { return Watched(name: name, path: "", kind: .plugin(home: home, installs: nil)) }
+            let each = (installs[id] ?? []).sorted { $0.path < $1.path }
+            let labelled = each.map { install in
+                PluginInstall(path: install.path, label: each.count == 1 ? "" : "\(install.scope ?? "user") \(install.project ?? "")".trimmingCharacters(in: .whitespaces) + ": ")
+            }
+            return Watched(name: name, path: each.first?.path ?? "", kind: .plugin(home: home, installs: labelled))
+        }
+    }
+
+    /// Claude Code's record of the installed plugins, by "<plugin>@<marketplace>": each install's version folder,
+    /// scope and project. Empty when there's none; nil when it doesn't read as JSON.
+    static func installedPlugins(_ path: String) -> [String: [(path: String, scope: String?, project: String?)]]? {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return [:] }
+        guard let data = regularContents(path, limit: jsonLimit),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        var installs: [String: [(path: String, scope: String?, project: String?)]] = [:]
+        // Version 2 keeps a list of installs per plugin; version 1, one.
+        for (id, value) in object["plugins"] as? [String: Any] ?? [:] {
+            let list = value as? [[String: Any]] ?? (value as? [String: Any]).map { [$0] } ?? []
+            installs[id] = list.compactMap { install in
+                guard let path = install["installPath"] as? String, !path.isEmpty else { return nil }
+                return (path, install["scope"] as? String, install["projectPath"] as? String)
+            }
+        }
+        return installs
     }
 
     /// The checkout's git folder: `.git`, or where a `.git` file (`gitdir: …`) points.
@@ -240,6 +401,12 @@ public enum ConfigSeal {
     static func hashes(of items: [Watched]) -> [String: String] {
         var all: [String: String] = [:]
         for item in items {
+            // A plugin's or a settings' scripts: read once, for its hash and its per-key hashes.
+            if let parts = parts(item) {
+                all[keyPrefix + item.name] = partsHash(parts)
+                all[keysPrefix + item.name] = encode(Dictionary(parts, uniquingKeysWith: { first, _ in first }))
+                continue
+            }
             if item.kind == .folder {
                 let folder = readFolder(item)
                 all[keyPrefix + item.name] = folder.hash
@@ -258,6 +425,7 @@ public enum ConfigSeal {
     /// keys, and under `hooks` and `mcpServers` each event and server. Absent: none. nil for what isn't JSON, or
     /// doesn't read as JSON now.
     static func keyHashes(_ watched: Watched) -> [String: String]? {
+        if let parts = parts(watched) { return Dictionary(parts, uniquingKeysWith: { first, _ in first }) }
         guard watched.kind == .mcpServers || (watched.kind == .file && watched.path.hasSuffix(".json")) else { return nil }
         var info = stat()
         guard stat(watched.path, &info) == 0 else { return [:] }
@@ -312,7 +480,8 @@ public enum ConfigSeal {
         guard let old, let new else { return nil }
         let before = decode(old), after = decode(new)
         var said: [String] = []
-        for key in Set(before.keys).union(after.keys).sorted() {
+        // A plugin's version folder first: an update says so before what moved with it.
+        for key in Set(before.keys).union(after.keys).sorted(by: { $0 == versionKey || ($1 != versionKey && $0 < $1) }) {
             switch (before[key], after[key]) {
             case (nil, _?): said.append("\(key) added")
             case (_?, nil): said.append("\(key) removed")
@@ -374,6 +543,10 @@ public enum ConfigSeal {
     /// What `watched` holds now, hashed (SHA-256, hex). Something absent hashes as such, never as an empty file. nil
     /// when it can't be told now (`~/.claude.json` that doesn't parse, three reads in a row).
     public static func fingerprint(_ watched: Watched) -> String? {
+        switch watched.kind {
+        case .plugin, .scripts: return parts(watched).map(partsHash)
+        default: break
+        }
         var hasher = SHA256()
         let add = { (text: String) in hasher.update(data: Data(text.utf8)) }
         var info = stat()
@@ -401,8 +574,164 @@ public enum ConfigSeal {
             }
             guard let servers else { return nil }
             add(servers)
+        case .plugin, .scripts:
+            break
         }
         return hex(hasher.finalize())
+    }
+
+    /// The hash of a plugin's or a settings' scripts' parts, in order.
+    static func partsHash(_ parts: [(String, String)]) -> String {
+        var hasher = SHA256()
+        for (label, digest) in parts { hasher.update(data: Data((label + "\0" + digest + "\n").utf8)) }
+        return hex(hasher.finalize())
+    }
+
+    /// What a plugin or a settings' scripts holds now, part by part ("<label>", "<digest>"), in order; nil for the
+    /// other kinds, or when it can't be told now (a settings file that doesn't read as JSON: the file itself is
+    /// watched, and what's held stays held).
+    static func parts(_ watched: Watched) -> [(String, String)]? {
+        switch watched.kind {
+        case .plugin(let home, let installs):
+            guard let installs else { return [("record unreadable", "")] }
+            guard !installs.isEmpty else { return [("not installed", "")] }
+            // The version folders, all of them as one: Claude Code's update moves one (`isUpdate`). Only folders in
+            // its own cache count as one: a record pointing elsewhere is no update of its.
+            let cache = (home as NSString).appendingPathComponent(".claude/plugins/cache") + "/"
+            let folders = installs.map { $0.label + $0.path }.joined(separator: "\n")
+            let key = installs.allSatisfy { $0.path.hasPrefix(cache) } ? versionKey : installKey
+            return [(key, hex(SHA256.hash(data: Data(folders.utf8))))] + installs.flatMap { install in
+                pluginParts(install.path, home: home).map { (install.label + $0.0, $0.1) }
+            }
+        case .scripts(let home, let project, let skip): return settingsScripts(watched.path, home: home, project: project, skip: skip)
+        default: return nil
+        }
+    }
+
+    /// At most this many paths a plugin's or a settings file's commands name are hashed: past them, the rest is named
+    /// as cut.
+    static let maxNamed = 200
+
+    /// A named script bigger than this (an interpreter's binary a command names, not a script) is told by its size,
+    /// times (ctime too: a shell can set mtime back, not ctime) and inode, not read.
+    static let scriptLimit = 8 << 20
+
+    /// An enabled plugin's install at `root`, its version folder ("" or missing: "absent"), as parts: its manifest (`.claude-plugin/plugin.json`), its hooks
+    /// (`hooks/hooks.json`, and the files the manifest names), its MCP and LSP servers (`.mcp.json`, `.lsp.json`, and
+    /// the files the manifest names), and every file their commands and arguments name by path
+    /// (`${CLAUDE_PLUGIN_ROOT}/…`, `~/…`, `/…`). Nothing else is read, so a big cache costs only what runs.
+    static func pluginParts(_ root: String, home: String) -> [(String, String)] {
+        var info = stat()
+        guard !root.isEmpty, lstat(root, &info) == 0 else { return [("absent", "")] }
+        var parts: [(String, String)] = []
+        var listed = Set<String>()
+        var configs: [Any] = []
+        let label = { (path: String) -> String in
+            path.hasPrefix(root + "/") ? String(path.dropFirst(root.count + 1)) : shown(path, home: home)
+        }
+        func json(_ path: String) {
+            let path = URL(fileURLWithPath: path).standardized.path
+            guard listed.insert(path).inserted else { return }
+            let read = jsonPart(path)
+            parts.append((label(path), read.digest))
+            if let object = read.object { configs.append(object) }
+        }
+        let manifest = (root as NSString).appendingPathComponent(".claude-plugin/plugin.json")
+        json(manifest)
+        for file in ["hooks/hooks.json", ".mcp.json", ".lsp.json"] { json((root as NSString).appendingPathComponent(file)) }
+        // The manifest may name more hooks, MCP or LSP files (a path, or a list of them), or carry them inline.
+        if let object = configs.first as? [String: Any] {
+            for key in ["hooks", "mcpServers", "lspServers"] {
+                let named = (object[key] as? String).map { [$0] } ?? object[key] as? [String] ?? []
+                for path in named { json(path.hasPrefix("/") ? path : (root as NSString).appendingPathComponent(path)) }
+            }
+        }
+        let vars = ["CLAUDE_PLUGIN_ROOT": root, "HOME": home]
+        var named: [String] = []
+        for config in configs { for command in commands(in: config) { named += namedPaths(command, vars: vars, home: home, base: root) } }
+        parts += scriptParts(named, skip: [], listed: &listed, label: label)
+        return parts
+    }
+
+    /// The scripts the settings file at `path` names by path, as parts: each file its hooks', status line's and
+    /// helpers' (`apiKeyHelper`…) commands name, by contents (`scriptDigest`), labelled by where it is. What's at or
+    /// under `skip` is watched already, and what you can't write isn't watched (no branch code can write it either).
+    /// None when there's no settings file; nil when it doesn't read as JSON.
+    static func settingsScripts(_ path: String, home: String, project: String?, skip: [String]) -> [(String, String)]? {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return [] }
+        guard let data = regularContents(path, limit: jsonLimit),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        var vars = ["HOME": home]
+        if let project { vars["CLAUDE_PROJECT_DIR"] = project }
+        var found = commands(in: object)
+        for key in ["apiKeyHelper", "awsAuthRefresh", "awsCredentialExport", "otelHeadersHelper"] {
+            if let command = object[key] as? String { found.append(.shell(command)) }
+        }
+        var listed = Set<String>()
+        return scriptParts(found.flatMap { namedPaths($0, vars: vars, home: home, base: project) }, skip: skip, listed: &listed) { shown($0, home: home) }
+    }
+
+    /// Each of `paths` not yet `listed` nor at or under `skip`, hashed (`scriptDigest`), at most `maxNamed`.
+    private static func scriptParts(_ paths: [String], skip: [String], listed: inout Set<String>, label: (String) -> String) -> [(String, String)] {
+        var parts: [(String, String)] = []
+        for path in paths where !skip.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) {
+            guard listed.insert(path).inserted else { continue }
+            guard listed.count <= maxNamed else {
+                parts.append(("cut", ""))
+                break
+            }
+            // What isn't there is no part, so command text a word carried, not a file, is never a label. Created
+            // later it's a part then, and that's a change.
+            guard let digest = scriptDigest(path), digest != "absent" else { continue }
+            parts.append((label(path), digest))
+        }
+        return parts
+    }
+
+    /// A JSON file's digest (as `file` hashes it: "absent", a link's target, its contents) and what it holds, when it
+    /// reads as JSON.
+    private static func jsonPart(_ path: String) -> (digest: String, object: Any?) {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return ("absent", nil) }
+        let link = (info.st_mode & S_IFMT) == S_IFLNK ? "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? "") + " " : ""
+        guard let data = regularContents(path, limit: jsonLimit) else {
+            return (link + (contentsDigest(path, followLink: true) == .other ? "other" : "unreadable"), nil)
+        }
+        return (link + hex(SHA256.hash(data: data)), try? JSONSerialization.jsonObject(with: data))
+    }
+
+    /// A file a command names, as watched: "absent", or its link's target and its contents' hash (past
+    /// `scriptLimit`, its size, times and inode). nil when it isn't watched: a folder, or something you can't change:
+    /// neither it nor its folder is writable by you or yours (made read-only, you can make it writable again).
+    static func scriptDigest(_ path: String) -> String? {
+        let parent = (path as NSString).deletingLastPathComponent
+        var info = stat(), folder = stat()
+        let yours = (lstat(path, &info) == 0 && info.st_uid == geteuid()) || (stat(parent, &folder) == 0 && folder.st_uid == geteuid())
+        guard yours || access(path, W_OK) == 0 || access(parent, W_OK) == 0 else { return nil }
+        info = stat()
+        guard lstat(path, &info) == 0 else { return "absent" }
+        var said = ""
+        if (info.st_mode & S_IFMT) == S_IFLNK {
+            said = "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? "") + " "
+            guard stat(path, &info) == 0 else { return said + "dangling" }
+        }
+        switch info.st_mode & S_IFMT {
+        case S_IFDIR: return nil
+        case S_IFREG where info.st_size > Int64(scriptLimit):
+            return said + "big \(info.st_size) \(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec) \(info.st_ctimespec.tv_sec).\(info.st_ctimespec.tv_nsec) \(info.st_ino)"
+        default:
+            switch contentsDigest(path, followLink: true) {
+            case .digest(let digest): return said + digest
+            case .other: return said + "other"
+            case .unreadable: return said + "unreadable"
+            }
+        }
+    }
+
+    /// `path` as you're told it: under your home as `~/…`.
+    static func shown(_ path: String, home: String) -> String {
+        path.hasPrefix(home + "/") ? "~/" + path.dropFirst(home.count + 1) : path
     }
 
     /// A watched folder as it is now.
@@ -640,8 +969,9 @@ extension LeadVault {
     /// it's asked again at the next look (`sealAppWrites`). The app's alone (the vault refuses anyone else).
     @discardableResult
     public func appWrite<T>(_ paths: [String], home: String = VibePaths.home, _ write: () throws -> T) rethrows -> T {
+        // A plugin with no install has no path: no write is in it.
         let items = ConfigSeal.homeWatched(home: home).filter { item in
-            paths.contains { $0 == item.path || $0.hasPrefix(item.path + "/") }
+            !item.path.isEmpty && paths.contains { $0 == item.path || $0.hasPrefix(item.path + "/") }
         }
         let before = items.map(ConfigSeal.fingerprint)
         defer {
@@ -690,8 +1020,10 @@ extension LeadVault {
             check.outside = ConfigSeal.heldOutside(in: record)
         }
         let after = try guardedRecord(root: root) ?? [:]
+        // Sealed anew: recorded before and changed, or held and first recorded now (a plugin first seen).
+        let wasHeld = ConfigSeal.heldLines(in: before)
         check.resealed = after.keys.filter { key in
-            ConfigSeal.isWatchedKey(key) && before[key] != nil && before[key] != after[key]
+            ConfigSeal.isWatchedKey(key) && before[key] != after[key] && (before[key] != nil || wasHeld[key] != nil)
         }.sorted().map(ConfigSeal.name(ofKey:))
         return check
     }

