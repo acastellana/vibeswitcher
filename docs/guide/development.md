@@ -86,7 +86,7 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|DocLinksLint|HomePathLint|KeychainLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
 ```
 
 | Lint | What it catches |
@@ -95,6 +95,7 @@ bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|D
 | `AgentExportLint` | A script or test that writes a git tree into the worktree with its agent files (AGENTS.md, `CLAUDE*.md`, `.claude/`, `.mcp.json`). |
 | `DebugAidsLint` | A notification handler that writes a session's screen where the (unknown) sender says. |
 | `DocLinksLint` | A relative link or `#anchor` in README.md or `docs/**/*.md` that doesn't resolve, an image in `docs/images` no doc shows, or a lint suite missing from the command above. |
+| `ElapsedTimeLint` | A correctness test judging an elapsed time against a bare number (`took < 0.05`, `Date().timeIntervalSince(x) < 5`): it judges the order of events, a baseline from the same test, or it's a `.perf` bench; the short allow list is in `ElapsedTimeLintTests.swift`. |
 | `HomePathLint` | A path under the home folder worked out once per process. |
 | `KeychainLint` | A test that can reach the real keychain. |
 | `PreferencesLint` | A test that makes a defaults suite in the real `~/Library/Preferences`. |
