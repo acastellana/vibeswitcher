@@ -15,6 +15,10 @@ import VibeCore
 /// so on its card, and goes with the request's results window. What marks a message as told (an expiry's, a browser
 /// page's no answer) is written only once it went.
 ///
+/// A request's record and browser mark are files any process of the user's can write. A card is drawn from one only
+/// when it carries the session host's seal or equals the host-stamped filed request (`vouched`); otherwise the
+/// request gets no card and no Retry, and the log says so without repeating what the copy says.
+///
 /// The fallback, while a request has never reached the Wallet Manager: Sign in browser wallet (`act(.browser)`) serves
 /// the request on a local page (`WalletSignServer`) and opens it in the browser, whose wallet extension shows and signs
 /// it; what it did comes back to the card and the asking session. A mark beside the filed request (`WalletBrowser.Mark`)
