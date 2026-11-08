@@ -148,14 +148,14 @@ Settings (⌘,), category by category: each option, under its section, with the 
 
 ### Appearance
 - Settings › Appearance — `Sources/VibeSwitcher/SettingsCatalog.swift`
-- Text: Font — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Text: Size — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Colors: Theme — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Colors: Text color — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Colors: Background color — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Colors: Cursor color — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Colors: Selection color — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Colors: ANSI colors — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Text: Font — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Text: Size — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Behavior: Cursor — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Behavior: Blinking cursor — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Behavior: Scrollback — `Sources/VibeSwitcher/SettingsWindow.swift`
@@ -376,6 +376,10 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `settings-pick N|ID` — picks the Nth search result (from 1), or the option with that catalog id, as a click on it does — `Sources/VibeSwitcher/Sandbox.swift`
 - `toolchain [dismiss]` — shows or dismisses a fake developer tools notice — `Sources/VibeSwitcher/Sandbox.swift`
 - `sheet NAME` — shows a sheet on the window — `Sources/VibeSwitcher/Sandbox.swift`
+- `theme [` — sets Settings › Appearance › Theme, as its picker does (none: what it is), and says the app's look: the… — `Sources/VibeSwitcher/Sandbox.swift`
+- `looks` — the main window's views by what each draws in (effectiveAppearance) and how many: what a stale or forced part… — `Sources/VibeSwitcher/Sandbox.swift`
+- `panes [NAME]` — what SwiftUI resolves inside the main window's sidebar and inspector, and those two views drawn again in a… — `Sources/VibeSwitcher/Sandbox.swift`
+- `shot-real NAME` — draws each window in the app's own look, nothing overridden: NAME-main-real.png, NAME-settings-real.png…… — `Sources/VibeSwitcher/Sandbox.swift`
 - `close settings|sheet` — closes Settings or the sheet — `Sources/VibeSwitcher/Sandbox.swift`
 - `shot NAME` — draws each window, light and dark, into the shots folder — `Sources/VibeSwitcher/Sandbox.swift`
 - `panes on|off` — shows or collapses the sidebar and inspector, for a shot of the middle alone — `Sources/VibeSwitcher/Sandbox.swift`

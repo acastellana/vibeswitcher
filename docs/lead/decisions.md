@@ -298,3 +298,7 @@ Ten icons and eight taglines didn't win over the current look. Per the 2026-11-0
 
 The user asked for a pass to find issues; their working policy is to fix material bugs and not to turn cosmetic observations into tasks. A filter stop isn't something for the lead to route around.
 
+## 2026-11-08 17:52:40 Narrows the 2026-11-08 07:28 rule (1): tasks that name the same source file may run side by side when they change different functions of it and the Mac has room. Two tasks that change the same function, or the same whole file (LeadRecords.swift), still chain with `after`. Applied now: every-text-that-crosses runs after a-branch-that-moves, alongside the-vault-s-no, and the-board-and-records runs after the-vault-s-no (they share LeadRecords.swift).
+
+The user asked "why not start more?" on 2026-11-08 while the Mac sat at load 7 with one session of this project. The three review tasks were chained only because their boundaries all name LeadToolset.swift, in unrelated places (checkBaseMoves and the merge's recording, saveMergeLog, the scratch sweep), and git merges separate hunks cleanly. The rule came from two seal tasks that edited the same seal code. A strict chain of three audited tasks costs hours.
+
