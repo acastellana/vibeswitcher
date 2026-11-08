@@ -213,7 +213,9 @@ import Testing
         let decoded = Counter()
         let allDecoded = DispatchSemaphore(value: 0)
         let burst = screens(1_000, of: UUID())
-        let connection = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Darwin.write($0, $1, $2) }) { tap in
+        // A bound none of it reaches, however many reads it comes in: here the reader mustn't stop.
+        let connection = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Darwin.write($0, $1, $2) },
+                                            backlog: .init(bytes: 64 << 20, batches: 1 << 20)) { tap in
             guard case .decoded = tap else { return }
             if DispatchQueue.getSpecific(key: Self.callers) == true { _ = decodedOnCallers.add() }
             if decoded.add() == burst.count { allDecoded.signal() }
@@ -406,9 +408,10 @@ import Testing
         }
         #expect(await offPool { paused.wait(timeout: .now() + hangGuard) } == .success, "the reader didn't stop for the backlog")
         connection = nil
-        #expect(freed == nil, "still held")
+        // The reader may hold it until its turn ends; the host's write fails only once it's freed (its fd closed).
         #expect(await offPool { written.wait(timeout: .now() + hangGuard) } == .success, "the socket wasn't let go")
         #expect(wrote.value == 0)
+        #expect(freed == nil, "still held")
         release.signal()
         queue.sync {}
         #expect(log.items.isEmpty)
