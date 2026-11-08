@@ -73,6 +73,11 @@ import Testing
         cache.appendingPathComponent("\(commit)-\(try toolchainKey(xcrun: xcrun))")
     }
 
+    /// A cache folder this run can't write to.
+    struct CacheUnwritable: Error, CustomStringConvertible {
+        let description: String
+    }
+
     /// The old build's host: built once per Mac and toolchain (minutes), into `cache`, then reused by every checkout.
     /// Its dependencies come from `checkout`'s .build. `waitingForLock` runs when another run is building it (tests).
     /// Blocking: a test awaits it through `offPool`.
@@ -82,11 +87,19 @@ import Testing
         let built = folder.appendingPathComponent("vibeswitcher-host").path
         // Only a finished build is ever at this name (it's renamed in whole, below).
         if FileManager.default.isExecutableFile(atPath: built) { return built }
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         // One build per entry, whichever run gets here first; the others wait on the lock, then take what it made. The
         // kernel lets an flock go with its file, so a run stopped mid-build leaves no lock behind.
-        let lock = open(folder.path + ".lock", O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
-        guard lock >= 0 else { throw BuildFailed(description: "can't open \(folder.path).lock: \(String(cString: strerror(errno)))") }
+        let lock: Int32
+        do {
+            lock = try lockFile(for: folder)
+        } catch let unwritable as CacheUnwritable {
+            // A Codex worker's sandbox writes only to its worktree, its git folders, its TMPDIR and the module cache
+            // (LeadLaunch.codexWritableRoots): it reads the shared build, but when there's none yet it builds its own
+            // in this checkout's .build, as every checkout did before.
+            let own = checkout.appendingPathComponent(".build/old-hosts")
+            guard cache.standardizedFileURL.path != own.standardizedFileURL.path else { throw unwritable }
+            return try oldHost(cache: own, checkout: checkout, xcrun: xcrun, waitingForLock: waitingForLock)
+        }
         defer { close(lock) }
         if flock(lock, LOCK_EX | LOCK_NB) != 0 {
             waitingForLock()
@@ -95,8 +108,12 @@ import Testing
             }
         }
         if FileManager.default.isExecutableFile(atPath: built) { return built }
-        // Built in a folder of its own and moved into place: what a stopped run left (a work folder, a staged copy) is
-        // never taken for the build.
+        // What a run stopped mid-build left here (its work folder, a full build of up to 700 MB, and a staged copy) goes:
+        // no one else builds in this entry while this run holds its lock.
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] where name.hasPrefix("work-") || name.hasPrefix("host-") {
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+        }
+        // Built in a folder of its own and moved into place: a run never takes a half-made host for the build.
         let work = folder.appendingPathComponent("work-\(UUID().uuidString.prefix(8))")
         let source = work.appendingPathComponent("src"), scratch = work.appendingPathComponent("build")
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
@@ -122,6 +139,18 @@ import Testing
         try FileManager.default.copyItem(atPath: binary, toPath: staged)
         if rename(staged, built) != 0 { unlink(staged) }
         return built
+    }
+
+    /// The entry `folder` made and its lock file (`folder`.lock) opened, unlocked; `CacheUnwritable` when either can't be.
+    static func lockFile(for folder: URL) throws -> Int32 {
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        } catch {
+            throw CacheUnwritable(description: "can't make \(folder.path): \(error.localizedDescription)")
+        }
+        let lock = open(folder.path + ".lock", O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
+        guard lock >= 0 else { throw CacheUnwritable(description: "can't open \(folder.path).lock: \(String(cString: strerror(errno)))") }
+        return lock
     }
 
     /// Writes `commit`'s tree into `source` (by way of the archive `tree`), its agent files left out: AGENTS.md,
@@ -335,6 +364,22 @@ import Testing
         #expect(a == host && b == host)
         #expect(fake.builds == 1)
         #expect(try String(contentsOfFile: host, encoding: .utf8).contains("the whole old host"))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: entry.path) == ["vibeswitcher-host"], "a stopped run's leftovers stayed")
+    }
+
+    /// A run that can't write to the shared cache (a Codex worker's sandbox allows only its worktree, its TMPDIR and a
+    /// few more) builds the old host in its own checkout's .build, as before, rather than failing.
+    @Test(.enabled(if: hasOldCommit, "needs commit 6311e18 in this clone"))
+    func aRunThatCantWriteTheSharedCacheBuildsInItsOwnCheckout() async throws {
+        let fake = try FakeToolchain(in: temp.url("old-host-toolchain"))
+        let checkout = try Self.fakeCheckout(temp.url("old-host-checkout"))
+        try FileManager.default.createDirectory(at: fake.cache, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: fake.cache.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.cache.path) }
+        let built = try await offPool { try Self.oldHost(cache: fake.cache, checkout: checkout, xcrun: fake.xcrun) }
+        #expect(built.hasPrefix(checkout.appendingPathComponent(".build/old-hosts").path + "/\(Self.commit)-"))
+        #expect(FileManager.default.isExecutableFile(atPath: built) && fake.builds == 1)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: fake.cache.path).isEmpty)
     }
 
     @Test(.enabled(if: canBuildOldHost, "needs commit 6311e18 in this clone and its resolved dependencies in .build (or the old host built already in the main checkout's .vibeswitcher/old-hosts); a fresh clone or another Mac has neither, and nothing is downloaded"))
