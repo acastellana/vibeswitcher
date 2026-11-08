@@ -4284,3 +4284,12 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 14:44 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
 Seen again, already reported, so only counted (the daily trend has the counts): a freeze like hang-20261107-014500 (no app frames: _ZN2AG5Graph15propagate_dirtyENS_11AttributeIDE (AttributeGraph) < SwiftUI.GraphHost.flushTransactions() -> () (SwiftUICore) < closure #1 (SwiftUI.GraphHost) -> () in closure #1 () -> () in closure #1 () -> () in SwiftUI.NSHostingView.beginTransac (SwiftUI) [likely starvation])
 - 2026-11-08 14:52 Merged turn-this-incident-into-15: An install's own hook-binary write raises no Accept card (build 9bb93056766a)
+- 2026-11-08 14:52 Automatically (auto_advance): Merged turn-this-incident-into-15 (An install's own hook-binary write raises no Accept card) into main at c0f31aee, on its passing audit and the full test run.
+- 2026-11-08 14:52 Automatically (auto_advance): Cleaned up turn-this-incident-into-15 (freed 3.2 GB of build output and temporary folders). It stays done.
+- 2026-11-08 14:53 Released readme-and-guides's worker (idle since its done report on c9b5f391) while its audit runs
+- 2026-11-08 14:53 Automatically (auto_advance): Started the audit of readme-and-guides at c9b5f391 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 14:53 Planned sandbox-shots-draw-the: Sandbox shots draw the sidebar and inspector correctly on macOS 27
+- 2026-11-08 14:55 Released the-git-guard-treats's worker (idle since its done report on 196187e4) while its audit runs
+- 2026-11-08 14:55 Automatically (auto_advance): Started the audit of the-git-guard-treats at 196187e4 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 14:56 Released a-branch-that-moves's worker (idle since its done report on e7c0c884) while its audit runs
+- 2026-11-08 14:56 Automatically (auto_advance): Started the audit of a-branch-that-moves at e7c0c884 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
