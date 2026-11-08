@@ -116,3 +116,10 @@ Evidence: The audited head ed0f9e66 had merge commit b32522b7 (parents a4fbbd9b 
 Task: redo-the-github-merge
 Check: task turn-this-incident-into-12 turns it into a check that runs before merge.
 
+## 2026-11-08 03:34:22 A merge's test run hung for 45 min inside the build, before any test started, while the Mac's load reached 100+ on 12 cores. The hang report said only "no test started and never finished", which doesn't name the build phase.
+
+Evidence: .vibeswitcher/flakes/2026-11-08-freezes-remove-the-top-fc504a93-hung.log: its last 60 lines are compiler warnings (LeadRemoteTests.swift:743, LeadRecordsTests.swift:212), with no test output. The merge test log is at ~/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/freezes-remove-the-top/merge-test.log. The load average at 03:27 was { 101.71 55.28 47.51 }, with swiftpm-testing-helper at 250% CPU and only 2 team sessions running. Six app hangs at 03:16-03:26 came at a 1-minute load of 52-117. The retry of the same batch merged fine (7ed9b62a, bba06c82).
+
+Task: freezes-remove-the-top
+Check: task turn-this-incident-into-13 turns it into a check that runs before merge.
+

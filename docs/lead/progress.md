@@ -3791,3 +3791,17 @@ Freezes of its main thread (reports in ~/.vibeswitcher/debug, .txt the sampled s
 Turn what's a real bug into a task (one already on the board needs nothing; one marked likely starvation needs none); read the reports for the full stacks.
 - 2026-11-08 03:33 Merged freezes-remove-the-top: Freezes: remove the top recurring main-thread hangs and track freezes per hour (backlog B3) (in a batch: freezes-remove-the-top, chat-s-not-run landed on one test run) (build ebed973e8025)
 - 2026-11-08 03:33 Merged chat-s-not-run: Chat's "Not run" refusals go to app.log so the log watcher counts them (in a batch: freezes-remove-the-top, chat-s-not-run landed on one test run) (build ebed973e8025)
+- 2026-11-08 03:33 Automatically (auto_advance): Merged freezes-remove-the-top at 7ed9b62a (its passing audit), chat-s-not-run at bba06c82 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-08 03:33 Automatically (auto_advance): Cleaned up freezes-remove-the-top (freed 3.3 GB of build output and temporary folders). It stays done.
+- 2026-11-08 03:33 Automatically (auto_advance): Cleaned up chat-s-not-run (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-08 03:34 Incident: A merge's test run hung for 45 min inside the build, before any test started, while the Mac's load reached 100+ on 12 cores. The hang report said only "no test … (in freezes-remove-the-top); planned turn-this-incident-into-13 to turn it into a check
+- 2026-11-08 03:34 Review of turn-this-incident-into-13: audit
+- 2026-11-08 03:34 Update: Fewer freezes from the session header; Statistics shows freezes per hour — **What changed (main 7ed9b62a, batch with bba06c82):**
+- 2026-11-08 03:35 Started a worker on host-events-decode-off
+- 2026-11-08 03:35 Automatically (auto_advance): Started a worker on host-events-decode-off (Host events decode off the main thread), its after tasks done (freezes-remove-the-top).
+- 2026-11-08 03:35 Started a worker on turn-this-incident-into-13
+- 2026-11-08 03:35 Automatically (auto_advance): Started a worker on turn-this-incident-into-13 (A merge's test run that hangs in the build says so, and its build is sized to its slot).
+- 2026-11-08 03:37 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
+Freezes of its main thread (reports in ~/.vibeswitcher/debug, .txt the sampled stacks, .log the state):
+- hang-20261108-032700: stuck 18.6 s; lead session selected, chat shown, window not key; footprint 162 MB (peak 299 MB); no app frames on the main thread's busiest path (caught while stuck); its top frames: SwiftUI.(UnaryLayoutEngine in _1C3B77B617AD058A6802F719E38F5D79).sizeThatFits(SwiftUI._ProposedSize) -> __C.CGSize (SwiftUICore) < (extension in SwiftUI):SwiftUI.LayoutEngine.lengthThatFits(_: SwiftUI._ProposedSize, in: SwiftUI.Axis) -> CoreGraphics.C (SwiftUICore) < SwiftUI.(LayoutEngineBox in _91FCB5522C30220AE13689E45789FEF2).lengthThatFits(_: SwiftUI._ProposedSize, in: SwiftUI.Axis (SwiftUICore) (0% of its sample inside the stall) — 1-minute load 92.3 on 12 cores
+Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
