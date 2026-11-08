@@ -4427,3 +4427,8 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-08 22:19 Merged sandbox-shots-draw-the: Sandbox shots draw the sidebar and inspector correctly on macOS 27 (in a batch: sandbox-shots-draw-the, anything-needing-a-real, auto-advance-keeps landed on one test run) (build 767537e5ec09)
 - 2026-11-08 22:19 Merged anything-needing-a-real: Anything needing a real terminal is offered as a one-click shell (in a batch: sandbox-shots-draw-the, anything-needing-a-real, auto-advance-keeps landed on one test run) (build 767537e5ec09)
 - 2026-11-08 22:19 Merged auto-advance-keeps: auto_advance keeps moving other tasks while a merge's tests run (in a batch: sandbox-shots-draw-the, anything-needing-a-real, auto-advance-keeps landed on one test run) (build 767537e5ec09)
+- 2026-11-08 22:19 Automatically (auto_advance): Merged sandbox-shots-draw-the at 2370c879 (its passing audit), anything-needing-a-real at 29f92bdb (its passing audit), auto-advance-keeps at d8178d84 (its passing audit) into main as one batch, on 1 test run for 3 tasks.
+- 2026-11-08 22:19 Automatically (auto_advance): Cleaned up sandbox-shots-draw-the (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-08 22:19 Automatically (auto_advance): Cleaned up anything-needing-a-real (freed 2.1 GB of build output and temporary folders). It stays done.
+- 2026-11-08 22:19 Automatically (auto_advance): Cleaned up auto-advance-keeps (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-08 22:37 Merged the-board-and-records: The board and records stop growing without bound, and scratch folders are swept (build 767537e5ec09)
