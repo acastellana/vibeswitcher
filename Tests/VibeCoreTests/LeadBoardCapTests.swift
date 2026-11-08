@@ -363,6 +363,42 @@ struct LeadBoardCapTests: LeadTeamFixture {
         #expect(FileManager.default.fileExists(atPath: baseLock.path))
     }
 
+    /// A task whose slug starts with `merge-` or `audit-` keeps its log folder under that very name.
+    @Test func theSweepLeavesALogFolderNamedAfterATaskOnTheBoard() throws {
+        let root = try makeRepo()
+        let lead = try lead(root, FakeRuntime())
+        try lead.store.update { board in
+            board.tasks = [LeadBudgetTests.task(budget: 0, .failed), LeadBoardArchiveTests.task("audit-finished-one", .done, finished: Date().timeIntervalSince1970)]
+            board.tasks[0].slug = "merge-gate-a"
+        }
+        let live = try #require(lead.saveMergeLog("why it failed", slug: "merge-gate-a"))
+        let done = try #require(lead.saveMergeLog("its audit's output", slug: "audit-finished-one"))
+        #expect(lead.sweepScratch().isEmpty)
+        #expect(FileManager.default.fileExists(atPath: live) && FileManager.default.fileExists(atPath: done))
+    }
+
+    /// An archived task's log folder can bear the name of a live task's audit folder: it stays while that audit runs.
+    @Test func anArchivedSlugNeverTakesALiveTasksScratchFolder() throws {
+        let root = try makeRepo()
+        try BoardStore(root: root).prepare()
+        let lead = try lead(root, FakeRuntime())
+        let auditing = try leftover(lead, "audit-takes-a-branch")
+        let revert = try leftover(lead, "revert-old-work")
+        let baseLock = vault.scratch(root: root, "merge-into-abcd.lock")
+        let merging = try #require(FileLock.attempt(baseLock.path))
+        defer { merging.release() }
+        let old = Date().timeIntervalSince1970 - 3 * 86_400
+        try lead.store.update { board in
+            board.tasks = [LeadBoardArchiveTests.task("audit-takes-a-branch", .done, finished: old), LeadBoardArchiveTests.task("revert-old-work", .done, finished: old),
+                           LeadBudgetTests.task(budget: 0, .review)]
+            board.tasks[2].slug = "takes-a-branch"
+        }
+        lead.archiveFinished(force: true)
+        #expect(lead.store.archived().count == 2)
+        #expect(FileManager.default.fileExists(atPath: auditing)) // takes-a-branch is in review.
+        #expect(FileManager.default.fileExists(atPath: revert)) // A revert into the base may be using it.
+    }
+
     @Test func aTasksMergeLogGoesWhenItsArchived() throws {
         let root = try makeRepo()
         try BoardStore(root: root).prepare()

@@ -407,48 +407,76 @@ public final class LeadToolset: MCPToolset {
     private static let keptScratch: Set<String> = ["remote-git", "remote-poll"]
 
     /// The merge logs (`saveMergeLog`, `<slug>/`) of tasks that are in the archive now and not on the board: they go
-    /// when the task does.
+    /// when the task does, unless the folder is in use under that name (`freeScratch`: a slug that starts `merge-`
+    /// names a log folder and another task's scratch alike).
     private func removeArchivedLogs() {
         let top = scratchTop
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: top.path), !names.isEmpty else { return }
-        let onBoard = Set(store.load().tasks.map(\.slug))
+        let board = store.load()
+        let onBoard = Set(board.tasks.map(\.slug)), live = liveSlugs(board)
         let archived = Set(store.archived().map(\.slug))
-        for name in names where archived.contains(name) && !onBoard.contains(name) && !Self.keptScratch.contains(name) {
+        let leaving = names.filter { archived.contains($0) && !onBoard.contains($0) && !Self.keptScratch.contains($0) }
+        guard !leaving.isEmpty else { return }
+        let locks = mergeLocks(names, in: top)
+        defer { locks.forEach { $0?.release() } }
+        for name in leaving {
+            guard let held = freeScratch(name, live: live, mergesFree: !locks.contains { $0 == nil }) else { continue }
+            defer { held.forEach { $0.release() } }
             _ = removeFolder(top.appendingPathComponent(name).path)
         }
     }
 
+    /// The tasks that aren't finished: their scratch folders stay, whatever locks say.
+    private func liveSlugs(_ board: LeadBoard) -> Set<String> {
+        let finished: [LeadTask.Status] = [.done, .folded, .abandoned, .reverted]
+        return Set(board.tasks.filter { !finished.contains($0.status) }.map(\.slug))
+    }
+
+    /// Every base's merge lock, taken if free (nil for one a merge or revert holds).
+    private func mergeLocks(_ names: [String], in top: URL) -> [FileLock?] {
+        names.filter { $0.hasPrefix("merge-into-") && $0.hasSuffix(".lock") }.map { FileLock.attempt(top.appendingPathComponent($0).path) }
+    }
+
+    /// The prefixes of the folders merges, reverts and audits make under a project's scratch.
+    private static let scratchPrefixes = ["merge-", "revert-", "audit-"]
+
+    /// The locks to hold while folder `name` goes, none needed for a name no merge or audit makes; nil when it's in
+    /// use: a task that isn't finished owns it, or a live lock holds it (an audit's `run/audit-<slug>.lock`, or a
+    /// merge's, when `mergesFree` is false).
+    private func freeScratch(_ name: String, live: Set<String>, mergesFree: Bool) -> [FileLock]? {
+        guard let prefix = Self.scratchPrefixes.first(where: name.hasPrefix) else { return [] }
+        let rest = String(name.dropFirst(prefix.count))
+        // The folder's task, or a slug that itself ends in -home: both looked at.
+        let slugs = rest.hasSuffix("-home") ? [String(rest.dropLast("-home".count)), rest] : [rest]
+        guard Set(slugs).isDisjoint(with: live) else { return nil }
+        guard prefix == "audit-" else { return mergesFree ? [] : nil }
+        let taken = slugs.map { FileLock.attempt((store.folder as NSString).appendingPathComponent("run/audit-\($0).lock")) }
+        guard !taken.contains(where: { $0 == nil }) else {
+            taken.forEach { $0?.release() }
+            return nil
+        }
+        return taken.compactMap { $0 }
+    }
+
     /// Removes what merges and audits cut short left under this project's scratch folder (`merge-*`, `revert-*`,
-    /// `audit-*`, each with its `-home`): at the lead's tool server's start, off the first call. Never a task's
-    /// that isn't finished (a running or reviewed task's folder), nor one a live lock holds: an audit's
-    /// `run/audit-<slug>.lock`, a merge or revert's `merge-into-*.lock` (held while it's removed). Each was a scratch
-    /// worktree: git forgets it. Returns the names removed.
+    /// `audit-*`, each with its `-home`): at the lead's tool server's start, off the first call. Never a folder in use
+    /// (`freeScratch`), nor one named as a task on the board is: a slug that starts `merge-` keeps its merge log there
+    /// until the task is archived. Each was a scratch worktree: git forgets it. Returns the names removed.
     @discardableResult
     func sweepScratch() -> [String] {
         let top = scratchTop
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: top.path), !names.isEmpty else { return [] }
-        let finished: [LeadTask.Status] = [.done, .folded, .abandoned, .reverted]
-        let live = Set(store.load().tasks.filter { !finished.contains($0.status) }.map(\.slug))
+        let board = store.load()
+        let onBoard = Set(board.tasks.map(\.slug)), live = liveSlugs(board)
         // Every base's lock held while merges' folders go, or none of them if one is busy.
-        let locks = names.filter { $0.hasPrefix("merge-into-") && $0.hasSuffix(".lock") }.map { FileLock.attempt(top.appendingPathComponent($0).path) }
+        let locks = mergeLocks(names, in: top)
         let mergesFree = !locks.contains { $0 == nil }
         defer { locks.forEach { $0?.release() } }
         var removed: [String] = []
-        for name in names where !name.hasPrefix("merge-into-") && !Self.keptScratch.contains(name) {
-            guard let prefix = ["merge-", "revert-", "audit-"].first(where: name.hasPrefix) else { continue }
-            let rest = String(name.dropFirst(prefix.count))
-            // The folder's task, or a slug that itself ends in -home: both looked at.
-            let slugs = rest.hasSuffix("-home") ? [String(rest.dropLast("-home".count)), rest] : [rest]
-            guard Set(slugs).isDisjoint(with: live) else { continue }
-            var holds: [FileLock] = []
-            defer { holds.forEach { $0.release() } }
-            if prefix == "audit-" {
-                let taken = slugs.map { FileLock.attempt((store.folder as NSString).appendingPathComponent("run/audit-\($0).lock")) }
-                guard !taken.contains(where: { $0 == nil }) else { continue }
-                holds = taken.compactMap { $0 }
-            } else if !mergesFree {
-                continue
-            }
+        for name in names where !name.hasPrefix("merge-into-") && !Self.keptScratch.contains(name) && !onBoard.contains(name)
+            && Self.scratchPrefixes.contains(where: name.hasPrefix) {
+            guard let held = freeScratch(name, live: live, mergesFree: mergesFree) else { continue }
+            defer { held.forEach { $0.release() } }
             let path = top.appendingPathComponent(name).path
             Git.run(["worktree", "remove", "--force", path], in: root)
             _ = removeFolder(path)
