@@ -229,6 +229,27 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(toWorker(slug, root, runtime).isEmpty, "A brief written from v2 needs no amendment")
     }
 
+    /// A flake note a merge adds to its context (an open task naming the test, `planFlakeFixes`) is a new version of
+    /// the contract, but the lead gave it nothing: it still waits.
+    @Test func aFlakeNoteOnAnIncidentsTaskDoesntEndItsWait() async throws {
+        let (root, _, lead) = try team()
+        #expect(!lead.call("record_incident", ["what": "testFooHangs hung the merge", "evidence": "the log"]).isError)
+        let slug = try #require(BoardStore(root: root).load().tasks.last?.slug)
+        try BoardStore(root: root).update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            LeadToolset.appendContext("testFooHangs was flaky in a merge's run.", to: &board.tasks[index])
+        }
+        #expect(task(slug, root)?.contractRevision == 2)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Other work", "goal": "g", "acceptance": ["a"]])
+        #expect(await advancing.until { task("other-work", root)?.status == .running })
+        #expect(task(slug, root)?.status == .planned && task(slug, root)?.worker == nil)
+
+        #expect(!lead.call("update_task", ["task": slug, "goal": "The lead's goal"]).isError)
+        #expect(await advancing.until { task(slug, root)?.status == .running })
+    }
+
     @Test(arguments: [true, false])
     func theLeadCanSetAnIncidentsTaskGoingOnItsGenericBrief(byAutoAdvance: Bool) async throws {
         let (root, _, lead) = try team()

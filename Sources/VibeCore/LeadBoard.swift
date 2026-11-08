@@ -872,9 +872,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
 
     /// Its contract's version, 1 until update_task first changes it.
     public var contractRevision: Int { contractVersion ?? 1 }
-    /// Still on the generic brief record_incident wrote and not set going: auto_advance leaves it planned. Any change
-    /// to its contract, by whichever route, is a new version and ends the wait.
-    public var waitsForContract: Bool { genericBrief == true && contractRevision == 1 }
+    /// Still on the generic brief record_incident wrote and not set going: auto_advance leaves it planned. Only the
+    /// lead ends the wait (`genericBrief`): a flake note merge adds to its context is a new version, not its contract.
+    public var waitsForContract: Bool { genericBrief == true }
 
     /// "judged contract vN, current vM" when its verdict (or the one a newer report outdated) judged an older version
     /// of its contract than it has now: the lead amended it after its verifiers last heard; nil otherwise.

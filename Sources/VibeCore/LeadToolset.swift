@@ -1458,6 +1458,8 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].contractVersion = board.tasks[index].contractRevision + 1
                 contractVersion = board.tasks[index].contractVersion
                 changed.append("contract now v\(board.tasks[index].contractRevision)")
+                // The lead gave it a contract: record_incident's generic brief no longer holds it back.
+                board.tasks[index].genericBrief = nil
             }
             // auto_advance: true says go, even on record_incident's generic brief (a changed contract ended the wait already).
             if auto == true, board.tasks[index].genericBrief == true {
