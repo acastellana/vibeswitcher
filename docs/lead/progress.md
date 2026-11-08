@@ -4157,3 +4157,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 08:49 Started a worker on config-seal-covers
 - 2026-11-08 08:49 Automatically (auto_advance): Started a worker on config-seal-covers (Config seal covers plugins and the hook scripts settings name), its after tasks done (branch-code-can-t).
 - 2026-11-08 08:49 Automatically (auto_advance): Sent config-seal-covers's worker the open Important findings config-seal-covers:F6 from its audit at d4d2e472.
+- 2026-11-08 08:56 Audit of starts-and-audits-wait: complete, clean, round 1: 5 Nit open
+- 2026-11-08 08:56 The worker on config-seal-covers answered findings: config-seal-covers:F6 fixed at 9adbe02d: Commit 9adbe02d: LeadToolset.checkConfig's progress line now reads "Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ...", main's closing wording, which ConfigSealTests/aMergesOwnRunDoesntMakeTheNextLookUnquiet pins. The test is unchanged and no seal logic changed. With the fix reverted the test fails at ConfigSealTests.swift:695 (the log shows "sealed as it is:"); with it, ConfigSeal passes and the test passes 3 of…
