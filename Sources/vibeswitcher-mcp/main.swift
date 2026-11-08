@@ -279,6 +279,8 @@ final class HostRuntime: LeadRuntime {
 
     func loadAverages() -> MacLoad.Averages? { MacLoad.averages() }
 
+    func memoryReading() -> MacMemory? { MacMemory.read() }
+
     func census() throws -> [HostCensus]? { try HostCall.census(socket: socket) }
 
     func forget(_ session: String) {

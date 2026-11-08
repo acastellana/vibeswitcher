@@ -32,6 +32,8 @@ final class FakeRuntime: LeadRuntime {
     /// Set: the 1- and 5-minute averages apart, in place of `load`.
     var averages: MacLoad.Averages?
     var loadReads = 0
+    /// The Mac's memory as start_worker, audit and auto_advance read it (`LeadRuntime.memoryReading`); nil: not read.
+    var memory: MacMemory?
     /// Sessions of other projects' teams the host also lists.
     var others: [LeadSessionInfo] = []
     /// Sessions of other projects' teams the host doesn't list this lead (since PR #1) but counts in its census.
@@ -143,6 +145,11 @@ final class FakeRuntime: LeadRuntime {
         if let averages { return averages }
         return (loadReadings.isEmpty ? load : loadReadings.removeFirst()).map { MacLoad.Averages(one: $0, five: $0) }
     }
+    func memoryReading() -> MacMemory? {
+        calls.lock()
+        defer { calls.unlock() }
+        return memory
+    }
     func transcript(of session: String) throws -> String? {
         calls.lock()
         defer { calls.unlock() }
@@ -185,6 +192,7 @@ final class FakeSeat: LeadRuntime {
     func currentAgent() -> LeadAgent? { agent }
     func isRunning(_ agent: LeadAgent) -> Bool { shared.isRunning(agent) }
     func loadAverages() -> MacLoad.Averages? { shared.loadAverages() }
+    func memoryReading() -> MacMemory? { shared.memoryReading() }
     func agentEnding(_ session: LeadSessionInfo) -> String? { shared.agentEnding(session) }
 }
 

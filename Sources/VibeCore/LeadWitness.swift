@@ -850,7 +850,7 @@ extension LeadWitness {
 
         /// What to tell each refused lead now that the Mac has room, one message per project: the waits `mac` has
         /// room for under `limits` (the load, `MacLoad.Averages.steady`, not over load_threshold, and with a wait's sessions the team
-        /// sessions within mac_max_sessions). Those told are removed; the rest stay until there's room for them too.
+        /// sessions within mac_max_sessions and the Mac not short of memory, `MacMemory.shortage`). Those told are removed; the rest stay until there's room for them too.
         /// A project whose automatic steps were refused is nudged (`LeadAdvance.nudge`) instead: its lead's tool server
         /// tries them again, and only the lead's own refusals are told.
         /// While boosted, the room is shared out in turn instead (`Self.inTurn`): the project the user last worked in
@@ -901,7 +901,8 @@ extension LeadWitness {
 
         static func hasRoom(for wait: Wait, mac: MacLoad, limits: MacLimits) -> Bool {
             guard !mac.isBusy(threshold: limits.loadLimit) else { return false }
-            return wait.need == 0 || mac.sessions + wait.need <= limits.maxSessions
+            // A merge's wait (no session) waits on the load alone, as merge does; starts and audits on memory too.
+            return wait.need == 0 || (mac.memoryShortage(limits) == nil && mac.sessions + wait.need <= limits.maxSessions)
         }
 
         private typealias Holder = MacLoad.Holder
@@ -940,7 +941,8 @@ extension LeadWitness {
     /// still wanted." Naming no project but the lead's `root`'s: the lead may copy it into its repo's records.
     public static func roomText(_ whats: [String], mac: MacLoad, limits: MacLimits, root: String) -> String {
         "The Mac has room again for what was refused: \(whats.joined(separator: ", ")). Now: load \(mac.loadText) "
-            + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessionsText)). "
+            + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessionsText))"
+            + (mac.memory.map { ", \($0.text) \(MacMemory.limitsText(limits))" } ?? "") + ". "
             + "Retry what's still wanted; other projects' leads may take the room too."
     }
 }

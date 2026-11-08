@@ -16,6 +16,8 @@ public struct MacLoad: Equatable, Sendable {
     public var load: Double?
     /// The projects holding live team sessions, most first.
     public var holders: [Holder]
+    /// The Mac's memory (`MacMemory`), where it was read: start_worker, audit and auto_advance's starts weigh it too.
+    public var memory: MacMemory? = nil
 
     public var sessions: Int { holders.reduce(0) { $0 + $1.sessions } }
 
@@ -96,6 +98,9 @@ public struct MacLoad: Equatable, Sendable {
     /// Above the threshold: builds and tests slow down for every project's team.
     public func isBusy(threshold: Double) -> Bool { load.map { $0 > threshold } ?? false }
 
+    /// Why the Mac is short of memory under `limits` (`MacMemory.shortage`); nil when it isn't or wasn't read.
+    public func memoryShortage(_ limits: MacLimits) -> String? { memory?.shortage(limits) }
+
     /// At the cap: one more session would go past it.
     public func isFull(max: Int) -> Bool { sessions >= max }
 
@@ -170,6 +175,14 @@ public struct MacLimits: Codable, Equatable, Sendable {
     /// reached limit. A limit Claude refused at still holds (`AccountUsage.hold(ignoring:)`): a session started into it
     /// would stop at once.
     public var ignoreUsageLimits: Bool
+    /// The memory pressure level (`MacMemory.Pressure`'s name: "warning" or "critical"; "off": none) at which
+    /// start_worker, audit and auto_advance's starts refuse, as for the load; nil: "warning" (`pressureLimit`).
+    /// Mac-wide defaults kept in mac-limits.json, no Settings control: on 2026-11-08 new sessions kept starting into a
+    /// Mac that was paging (see `MacMemory`).
+    public var memoryPressure: String?
+    /// The pages swapped out per second, over about the last minute, above which they refuse too; nil: 50
+    /// (`swapOutRateLimit`), 0: no hold on it.
+    public var swapOutRate: Double?
     /// The boost these were raised by (`boosted(by:)`), and the limits as set before it; nil: not boosted. Not saved.
     public internal(set) var boost: BoostState?
     var normal: Normal?
@@ -180,7 +193,10 @@ public struct MacLimits: Codable, Equatable, Sendable {
         var loadLimitText: String
     }
 
-    enum CodingKeys: String, CodingKey { case maxSessions, loadThreshold, heavySlots, ignoreUsageLimits }
+    enum CodingKeys: String, CodingKey { case maxSessions, loadThreshold, heavySlots, ignoreUsageLimits, memoryPressure, swapOutRate }
+
+    public static let defaultPressure = MacMemory.Pressure.warning
+    public static let defaultSwapOutRate = 50.0
 
     /// The cores ÷ 6, rounded down, at least 1: 2 on a 12-core Mac.
     public static var defaultHeavySlots: Int { max(1, MacLoad.processors / 6) }
@@ -188,8 +204,10 @@ public struct MacLimits: Codable, Equatable, Sendable {
     public static var heavySlotsCeiling: Int { max(1, MacLoad.processors) }
 
     public init(maxSessions: Int = MacLimits.defaultMaxSessions, loadThreshold: Double? = nil, heavySlots: Int = MacLimits.defaultHeavySlots,
-                ignoreUsageLimits: Bool = false) {
+                ignoreUsageLimits: Bool = false, memoryPressure: String? = nil, swapOutRate: Double? = nil) {
         self.maxSessions = max(1, maxSessions)
+        self.memoryPressure = memoryPressure
+        self.swapOutRate = swapOutRate.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         self.ignoreUsageLimits = ignoreUsageLimits
         self.loadThreshold = loadThreshold.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         self.heavySlots = min(max(1, heavySlots), Self.heavySlotsCeiling)
@@ -200,7 +218,22 @@ public struct MacLimits: Codable, Equatable, Sendable {
         self.init(maxSessions: (try? container.decodeIfPresent(Int.self, forKey: .maxSessions)) ?? Self.defaultMaxSessions,
                   loadThreshold: try? container.decodeIfPresent(Double.self, forKey: .loadThreshold),
                   heavySlots: (try? container.decodeIfPresent(Int.self, forKey: .heavySlots)) ?? Self.defaultHeavySlots,
-                  ignoreUsageLimits: (try? container.decodeIfPresent(Bool.self, forKey: .ignoreUsageLimits)) ?? false)
+                  ignoreUsageLimits: (try? container.decodeIfPresent(Bool.self, forKey: .ignoreUsageLimits)) ?? false,
+                  memoryPressure: try? container.decodeIfPresent(String.self, forKey: .memoryPressure),
+                  swapOutRate: try? container.decodeIfPresent(Double.self, forKey: .swapOutRate))
+    }
+
+    /// The pressure level start_worker and audit refuse at: the one set, "warning" when unset or unknown; nil: "off".
+    public var pressureLimit: MacMemory.Pressure? {
+        guard let memoryPressure else { return Self.defaultPressure }
+        if memoryPressure.lowercased() == "off" { return nil }
+        return MacMemory.Pressure(name: memoryPressure).flatMap { $0 > .normal ? $0 : nil } ?? Self.defaultPressure
+    }
+
+    /// The swap-out rate (pages/s) above which they refuse: the one set, 50 when unset; nil: 0, no hold.
+    public var swapOutRateLimit: Double? {
+        guard let swapOutRate else { return Self.defaultSwapOutRate }
+        return swapOutRate > 0 ? swapOutRate : nil
     }
 
     /// The load threshold in force: the one set, else twice the Mac's cores.

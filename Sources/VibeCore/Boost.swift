@@ -212,7 +212,7 @@ extension MacLimits {
         guard let boost, boost.on else { return self }
         var raised = MacLimits(maxSessions: max(maxSessions, boost.limits.maxSessions),
                                loadThreshold: max(loadLimit, boost.limits.loadThreshold), heavySlots: heavySlots,
-                               ignoreUsageLimits: ignoreUsageLimits)
+                               ignoreUsageLimits: ignoreUsageLimits, memoryPressure: memoryPressure, swapOutRate: swapOutRate)
         raised.boost = boost
         raised.normal = Normal(maxSessions: maxSessions, loadLimitText: loadLimitText)
         return raised

@@ -1698,7 +1698,11 @@ final class LeadController: ObservableObject {
         guard let roomWaits else { return }
         let mac = MacLoad.count(host.sessions.map { ($0.label, $0.cwd, $0.isLive) }, load: macLoad())
         // Wait files and the sleep ledger (including its lock) belong on the boards' queue.
-        reads.async({ _ in roomWaits.look(mac: mac, limits: limits) }, then: { [weak self] due in
+        reads.async({ _ in
+            var mac = mac
+            mac.memory = MacMemory.read()
+            return roomWaits.look(mac: mac, limits: limits)
+        }, then: { [weak self] due in
             for (root, text) in due { self?.deliver(text, from: .system("witness"), root: root) }
         })
     }

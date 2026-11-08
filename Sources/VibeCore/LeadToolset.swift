@@ -103,6 +103,8 @@ public protocol LeadRuntime: AnyObject {
     func isRunning(_ agent: LeadAgent) -> Bool
     /// The Mac's 1- and 5-minute load averages (see `MacLoad.averages`); nil when they can't be read.
     func loadAverages() -> MacLoad.Averages?
+    /// The Mac's memory pressure and swapping (see `MacMemory.read`); nil when not read (the tests' runtimes).
+    func memoryReading() -> MacMemory?
     /// The model the project's workers run on, as `claude --model` names it (nil: Claude's default, not known).
     func workerModel(root: String) -> String?
     /// How a session's agent ended, in the witness's words (see `LeadWitness.verifierEnding`): its session's ending
@@ -121,6 +123,9 @@ public extension LeadRuntime {
 
     /// None: the Mac-wide limits count the sessions `sessions` lists.
     func census() throws -> [HostCensus]? { nil }
+
+    /// Not read: only the real tool server reads the Mac's memory, and a test injects its own.
+    func memoryReading() -> MacMemory? { nil }
 
     /// Codex as the login shell finds it.
     func codexCommand(root: String) -> String { "codex" }
@@ -3767,6 +3772,7 @@ public final class LeadToolset: MCPToolset {
     /// project `root` (see `MacLoad.sessionsText(for:)`: refusals and merge replies go into the repo's records).
     private static func macText(_ mac: MacLoad, _ limits: MacLimits, root: String) -> String {
         "load \(mac.loadText) (load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessionsText))"
+            + (mac.memory.map { ", \($0.text) \(MacMemory.limitsText(limits))" } ?? "")
     }
 
     /// Why no worker or verifier may start now on the Mac as `mac` has it (`not`: what didn't happen); nil when one may.
@@ -3776,6 +3782,7 @@ public final class LeadToolset: MCPToolset {
         let limits = macLimits()
         var over: [String] = []
         if mac.isBusy(threshold: limits.loadLimit) { over.append("its load (the greater of its 1- and 5-minute averages) is above load_threshold") }
+        if let short = mac.memoryShortage(limits) { over.append("it's short of memory: \(short)") }
         if mac.isFull(max: limits.maxSessions) { over.append("the team sessions of all its projects are at mac_max_sessions") }
         if over.isEmpty, roomWaits.heldFor(root: root, need: need, mac: mac, limits: limits) != nil {
             over.append("while boosted, the room left is kept for the project the user last worked in, whose start waits for it")
@@ -3999,8 +4006,10 @@ public final class LeadToolset: MCPToolset {
     /// past mac_max_sessions.
     func macLoad(_ sessions: [LeadSessionInfo], load: Double?, except folder: String? = nil) throws -> MacLoad {
         let listed = sessions.map { ($0.label, $0.cwd, $0.live) }
-        guard let census = try runtime.census() else { return MacLoad.count(listed, load: load, except: folder) }
-        return MacLoad.count(census: census, sessions: listed, load: load, except: folder)
+        var mac = try runtime.census().map { MacLoad.count(census: $0, sessions: listed, load: load, except: folder) }
+            ?? MacLoad.count(listed, load: load, except: folder)
+        mac.memory = runtime.memoryReading()
+        return mac
     }
 
     /// As `macLoad`, a census that can't be read a refusal saying what didn't happen (`refused`).
@@ -5522,6 +5531,7 @@ public final class LeadToolset: MCPToolset {
         let limits = macLimits()
         lines += ["", "Mac-wide, set by the user in VibeSwitcher's Settings › Project lead (not here; configure doesn't set them):",
                   "- load_threshold: \(limits.loadLimitText) (above this load, the greater of the 1- and 5-minute averages, start_worker and audit refuse and merge waits)",
+                  "- memory: start_worker and audit refuse too while the Mac is short of memory \(MacMemory.limitsText(limits)) (Mac-wide defaults kept in mac-limits.json as memoryPressure and swapOutRate, not in Settings)",
                   "- mac_max_sessions: \(limits.maxSessionsText) (workers and verifiers of all projects on this Mac; start_worker and audit refuse at it)"]
         if !workflow.ignoredKeys.isEmpty { lines.append(Self.ignoredText(workflow)) }
         let warnings = workflowWarnings(workflow)
