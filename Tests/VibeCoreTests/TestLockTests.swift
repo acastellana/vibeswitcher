@@ -79,8 +79,9 @@ struct TestLockTests {
     // MARK: TestLock (merge and audits)
 
     @Test func theSecondWaitsSayingWhoHoldsItAndTakesItOnceItsLetGo() throws {
-        guard case .held(let first, let waited, let after) = lock.acquire(as: "merge of a", timeout: 5) else { Issue.record("not taken"); return }
-        #expect(waited < 1 && after.isEmpty)
+        guard case .held(let first, _, let after) = lock.acquire(as: "merge of a", timeout: 5) else { Issue.record("not taken"); return }
+        // Taken at its first look: it found no holder to wait behind.
+        #expect(after.isEmpty)
         #expect(lock.holder(1).note?.contains("pid \(getpid()), merge of a, since") == true)
         guard case .busy(let holders) = lock.acquire(as: "merge of b", timeout: 1) else { Issue.record("taken twice"); return }
         #expect(holders.count == 1 && holders.first?.note?.contains("merge of a") == true)
@@ -106,8 +107,9 @@ struct TestLockTests {
         try "pid \(holder.processIdentifier), a run that died, since 01:00:00\n".write(toFile: lock.slotPath(1) + ".holder", atomically: true, encoding: .utf8)
         kill(holder.processIdentifier, SIGKILL)
         #expect(await exited(holder), "pid \(holder.processIdentifier) still running")
-        guard case .held(let held, let waited, _) = lock.acquire(as: "b", timeout: 5) else { Issue.record("not taken"); return }
-        #expect(waited < 1)
+        guard case .held(let held, _, let after) = lock.acquire(as: "b", timeout: 5) else { Issue.record("not taken"); return }
+        // At once: its first look found the lock free, the dead holder's note or not.
+        #expect(after.isEmpty, "\(after)")
         #expect(lock.holder(1).note?.contains(", b, since") == true)
         held.release()
     }
@@ -128,8 +130,8 @@ struct TestLockTests {
         #expect(try String(contentsOfFile: seen, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) == lock.path)
         #expect(outputs.first?.output.contains("Waited ") == true && outputs.first?.output.contains("for a slot of the Mac-wide test and build lock, its one slot held") == true, "\(outputs)")
         // Let go after: the next one takes it at once.
-        guard case .held(let held, let waited, _) = lock.acquire(as: "next", timeout: 2) else { Issue.record("still held"); return }
-        #expect(waited < 1)
+        guard case .held(let held, _, let after) = lock.acquire(as: "next", timeout: hangGuard) else { Issue.record("still held"); return }
+        #expect(after.isEmpty, "\(after)")
         held.release()
         // Held by someone else past the timeout: nothing runs, and it says who held it.
         let stuck = try outsideHolder(lock)

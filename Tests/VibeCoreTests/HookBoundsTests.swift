@@ -114,15 +114,33 @@ struct HookBoundsTests {
 
     // MARK: Locks
 
+    private final class LetGo: @unchecked Sendable { var letGo = false }
+
+    /// What `body` (a wait for the lock `holder` keeps) came back with, and whether the lock was still kept then: a wait
+    /// that doesn't give up is let go by the hang guard, so its test fails instead of hanging. A wait that gives up is
+    /// judged by that order, and by the least it waited, which a loaded Mac only adds to; how soon it ends is the benches'.
+    private func whileKept<Value>(by holder: Int32, _ body: () -> Value) -> (value: Value, kept: Bool) {
+        let back = DispatchSemaphore(value: 0), flag = LetGo()
+        Thread {
+            guard back.wait(timeout: .now() + hangGuard) == .timedOut else { return }
+            flag.letGo = true
+            flock(holder, LOCK_UN)
+        }.start()
+        let value = body()
+        back.signal()
+        return (value, !flag.letGo)
+    }
+
     @Test func aLockHeldElsewhereIsGivenUpAfterASecond() throws {
         let path = temp.url("lock").path
         let holder = open(path, O_CREAT | O_RDWR, 0o600), other = open(path, O_RDWR)
         defer { close(holder); close(other) }
         #expect(flock(holder, LOCK_EX) == 0)
         let start = Date()
-        #expect(!HookLock.exclusive(other, within: 1))
+        let (got, kept) = whileKept(by: holder) { HookLock.exclusive(other, within: 1) }
         let waited = Date().timeIntervalSince(start)
-        #expect(waited >= 0.95 && waited < 2.5, "waited \(waited) s")
+        #expect(!got && kept, "got it: \(got), the lock kept all along: \(kept)")
+        #expect(waited >= 0.95, "waited \(waited) s")
         flock(holder, LOCK_UN)
         #expect(HookLock.exclusive(other, within: 1))
         flock(other, LOCK_UN)
@@ -137,9 +155,10 @@ struct HookBoundsTests {
         defer { close(holder) }
         #expect(flock(holder, LOCK_EX) == 0)
         let start = Date()
-        #expect(SteerInbox.take(tty: "ttys001", agentPid: 42, root: root).isEmpty)
+        let (taken, kept) = whileKept(by: holder) { SteerInbox.take(tty: "ttys001", agentPid: 42, root: root) }
         let waited = Date().timeIntervalSince(start)
-        #expect(waited >= 0.95 && waited < 2.5, "waited \(waited) s")
+        #expect(taken.isEmpty && kept, "taken: \(taken.map(\.id)), the lock kept all along: \(kept)")
+        #expect(waited >= 0.95, "waited \(waited) s")
         flock(holder, LOCK_UN)
         #expect(SteerInbox.take(tty: "ttys001", agentPid: 42, root: root).map(\.id) == ["a"])
     }
@@ -323,9 +342,11 @@ struct HookBoundsTests {
         pipe.fileHandleForWriting.write(Data("{\"hook_event_name\": \"UserPromptSubmit\", ".utf8))
         let run = try runHook(home: home, input: pipe.fileHandleForReading)
         try? pipe.fileHandleForWriting.close()
+        // Left by itself with its input still open, the alarm's doing: a hook that waited on would be ended by
+        // runHook's hang guard (a signal, not an exit). The least it took is a loaded Mac's to add to, the most a bench's.
         #expect(run.reason == .exit && run.status == 0)
         #expect(run.stdout.isEmpty)
-        #expect(run.seconds >= 2.9 && run.own < 8, "took \(run.seconds) s from its exec, \(run.own) s its own")
+        #expect(run.seconds >= 2.9, "took \(run.seconds) s from its exec, \(run.own) s its own")
     }
 
     @Test(.enabled(if: HookBoundsTests.terminal != nil, "the hook records for no terminal from here"))
@@ -344,9 +365,64 @@ struct HookBoundsTests {
         #expect(lock >= 0 && flock(lock, LOCK_EX) == 0)
         let held = try runHook(home: home, input: payload(["hook_event_name": "UserPromptSubmit", "session_id": "s", "prompt": "next"]))
         #expect(held.reason == .exit && held.status == 0 && held.stdout.isEmpty)
-        // A second for the lock, then on: well before the alarm.
-        #expect(held.seconds >= 0.95 && held.own < 2.9, "took \(held.seconds) s from its exec, \(held.own) s its own")
+        // A second for the lock at least; how soon after it leaves is a bench's.
+        #expect(held.seconds >= 0.95, "took \(held.seconds) s from its exec, \(held.own) s its own")
         #expect(HookState.load(from: state)?.lastPrompt == Self.clipBefore(prompt))
+        // Then on, not stopped by the alarm: only a hook that got past the lock hands a session its note.
+        let start: [String: Any] = ["hook_event_name": "SessionStart", "source": "startup", "session_id": "s"]
+        let on = try runHook(home: home, input: payload(start),
+                             environment: ["VIBESWITCHER_SESSION": "11111111-2222-4333-8444-555555555555", SessionNote.roleVariable: nil])
+        #expect(on.reason == .exit && on.status == 0)
+        #expect(String(decoding: on.stdout, as: UTF8.self).contains("additionalContext"), "no note: the alarm got there first (\(on.seconds) s)")
+        flock(lock, LOCK_UN)
+    }
+
+    // MARK: How soon: benches
+
+    /// A wait for a kept lock ends about when it said, and the built hook leaves well before its alarm: upper bounds, so
+    /// they depend on how busy the Mac is. In the default run the same tests judge what's so at any load: it gave up with
+    /// the lock still kept, and got past it.
+    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly))
+    func aKeptLockIsGivenUpInTime() throws {
+        let path = temp.url("bench-lock").path
+        let holder = open(path, O_CREAT | O_RDWR, 0o600), other = open(path, O_RDWR)
+        defer { close(holder); close(other) }
+        #expect(flock(holder, LOCK_EX) == 0)
+        let start = Date()
+        #expect(!HookLock.exclusive(other, within: 1))
+        let waited = Date().timeIntervalSince(start)
+        #expect(waited < 2.5, "waited \(waited) s")
+
+        let root = temp.url("bench-steer")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try SteerInbox.post(SteerMessage(id: "a", text: "check the tests", from: .lead("lead"), agentPid: 42, at: 1), tty: "ttys001", root: root)
+        let inbox = open(try SteerInbox.file("ttys001", "jsonl", root: root).path, O_RDWR)
+        defer { close(inbox) }
+        #expect(flock(inbox, LOCK_EX) == 0)
+        let began = Date()
+        #expect(SteerInbox.take(tty: "ttys001", agentPid: 42, root: root).isEmpty)
+        let took = Date().timeIntervalSince(began)
+        #expect(took < 2.5, "waited \(took) s")
+    }
+
+    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly))
+    func theBuiltHookLeavesInTime() throws {
+        let home = try home()
+        let pipe = Pipe()
+        pipe.fileHandleForWriting.write(Data("{\"hook_event_name\": \"UserPromptSubmit\", ".utf8))
+        let run = try runHook(home: home, input: pipe.fileHandleForReading)
+        try? pipe.fileHandleForWriting.close()
+        #expect(run.reason == .exit && run.own < 8, "took \(run.seconds) s from its exec, \(run.own) s its own")
+
+        guard let tty = Self.terminal else { return }
+        let state = home.appendingPathComponent(".vibeswitcher/state/\(tty).json")
+        let first = try runHook(home: home, input: payload(["hook_event_name": "UserPromptSubmit", "session_id": "s", "prompt": "first"]))
+        #expect(first.reason == .exit)
+        let lock = open(state.path + ".lock", O_RDWR)
+        defer { close(lock) }
+        #expect(lock >= 0 && flock(lock, LOCK_EX) == 0)
+        let held = try runHook(home: home, input: payload(["hook_event_name": "UserPromptSubmit", "session_id": "s", "prompt": "next"]))
+        #expect(held.reason == .exit && held.own < 2.9, "took \(held.seconds) s from its exec, \(held.own) s its own")
         flock(lock, LOCK_UN)
     }
 

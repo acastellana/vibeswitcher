@@ -135,6 +135,10 @@ perf_tests=(
     SandboxSoakBenchTests/theFootprintIsFlatOverFiveSimulatedHours
     FreezeCausesTests/aRowsSpokenLabelCostsAFractionOfTheFormatter
     ConfigSealPluginBenchTests/aRealSizedPluginCacheIsFingerprintedFast
+    HookBoundsTests/aKeptLockIsGivenUpInTime
+    HookBoundsTests/theBuiltHookLeavesInTime
+    AppleScriptRunnerTests/aHungScriptEndsInTime
+    ProcessTableTests/aSnapshotIsQuickOnABusyMac
 )
 
 source scripts/lib/processes.sh

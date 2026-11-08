@@ -97,9 +97,10 @@ struct StallWatchTests {
         let sleep = try #require((try? String(contentsOfFile: marks + "/sleep", encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
         #expect(await eventually { kill(sleep, 0) != 0 })
         #expect(lock.holders().isEmpty)
-        guard case .held(let held, let waited, _) = lock.acquire(as: "next", timeout: 5) else { Issue.record("the slot stayed held"); return }
+        guard case .held(let held, _, let after) = lock.acquire(as: "next", timeout: hangGuard) else { Issue.record("the slot stayed held"); return }
         held.release()
-        #expect(waited < 5)
+        // Free at once: the first look found no holder.
+        #expect(after.isEmpty, "\(after)")
     }
 
     /// A failing run is a failure and a hung one is hung: merge tells them apart (a hang leaves the task as it was).
