@@ -180,6 +180,72 @@ struct GitGuardTests: LeadTeamFixture {
         #expect(marked(marks).isEmpty, "\(marked(marks))")
     }
 
+    /// 2026-11-08: a merge's provenance stamp is a `git commit --trailer`, which runs trailer.<token>.cmd and .command.
+    /// Both are executable keys however the file spells them (git lowers the section and key); the rest of trailer.*,
+    /// tokens that happen to be called cmd or command included, names no program.
+    @Test func trailerCommandsAreExecutableKeysAndOtherTrailerSettingsArent() throws {
+        let common = temp.url("trailer-config").resolvingSymlinksInPath().path
+        try FileManager.default.createDirectory(atPath: common, withIntermediateDirectories: true)
+        let file = common + "/config"
+        try """
+        [trailer]
+        \twhere = end
+        \tifexists = replace
+        \tifmissing = add
+        \tseparators = :
+        [trailer "sign"]
+        \tcmd = one
+        \tkey = Signed-off-by
+        \twhere = start
+        \tifexists = addIfDifferent
+        \tifmissing = doNothing
+        [Trailer "Fix"]
+        \tCMD = two
+        [TRAILER "ref"]
+        \tCoMmAnD = three
+        [trailer "cmd"]
+        \twhere = start
+        [trailer "command"]
+        \tkey = Command
+
+        """.write(toFile: file, atomically: true, encoding: .utf8)
+        let entries = GitGuard.fileEntries(file, env: [:]).map { "\($0.key)=\($0.value)" }
+        #expect(entries == ["trailer.sign.cmd=one", "trailer.Fix.cmd=two", "trailer.ref.command=three"], "\(entries)")
+
+        // A file whose only executable key is one of these is asked of git at all: `executableWords` holds their names.
+        for (spelled, key) in [("cmd", "cmd"), ("CMD", "cmd"), ("Cmd", "cmd"), ("command", "command"), ("COMMAND", "command")] {
+            try "[trailer \"sign\"]\n\t\(spelled) = one\n".write(toFile: file, atomically: true, encoding: .utf8)
+            let found = GitGuard.repositoryConfig(common: common)
+            #expect(found.keys == ["trailer.sign.\(key)"], "\(spelled): \(found.keys)")
+        }
+    }
+
+    /// A trailer command in the repository's config doesn't run in a merge's provenance stamp, which still lands.
+    @Test func aTrailerCommandInTheRepositorysConfigDoesntRunInTheProvenanceStamp() throws {
+        let root = try repo()
+        let marks = try marks()
+        try commit(["b.txt": "bee\n"], in: root, "the branch's")
+        for (key, value) in [("trailer.evil.cmd", touching(marks, "trailer-cmd", then: "echo planted")),
+                             ("trailer.worse.command", touching(marks, "trailer-command", then: "echo planted"))] {
+            #expect(Git.run(["config", key, value], in: root).ok)
+        }
+        let trailers = [Worktrees.Trailer("VS-Task", "x"), Worktrees.Trailer("VS-Build", "1")]
+        let stopped = Worktrees.stamp(trailers, onto: "HEAD~1", in: root)
+        #expect(stopped == nil, "\(String(describing: stopped))")
+        #expect(marked(marks).isEmpty, "the stamp ran \(marked(marks))")
+        let message = Git.run(["log", "-1", "--format=%B"], in: root).output
+        #expect(message.contains("VS-Task: x") && message.contains("VS-Build: 1"), "\(message)")
+        #expect(!message.contains("planted"), "\(message)")
+
+        // One planted under a key the stamp itself writes doesn't run or say what lands either.
+        #expect(Git.run(["config", "trailer.vs-task.cmd", touching(marks, "trailer-own-key", then: "echo planted")], in: root).ok)
+        let again = Worktrees.stamp(trailers, onto: "HEAD~1", in: root)
+        #expect(again == nil, "\(String(describing: again))")
+        #expect(marked(marks).isEmpty, "the stamp ran \(marked(marks))")
+        let stamped = Git.run(["log", "-1", "--format=%B"], in: root).output
+        #expect(!stamped.contains("planted") && stamped.contains("VS-Build: 1"), "\(stamped)")
+    }
+
     /// A repository whose own config includes another file runs none of the lead's git, and the lead is told which file
     /// and key: here one included as `~<user>/…`, which git expands and a walk of includes didn't (the filter it sets
     /// ran in start_worker's checkout), and one in a worktree's config.worktree, only on the task's branch.
