@@ -4182,3 +4182,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 10:17 Released auto-advance-doesn-t's worker (idle since its done report on 9335fba1) while its audit runs
 - 2026-11-08 10:17 Automatically (auto_advance): Released auto-advance-doesn-t's worker, idle since its done report on 9335fba1, while its audit runs (ended pid 80396 (Worker: auto_advance doesn't merge a clean verdict that judged an older contract version)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-08 10:25 Audit of auto-advance-doesn-t: complete, clean, round 2: 6 Nit (4 open)
+- 2026-11-08 10:29 Update: Toolbar: bolt and Brief Me spacing, before and after (in review) — **Cause:** the bolt and the Brief Me icon were smaller than a toolbar button, so macOS drew the glass around the small icons and left the spare room between them.
+- 2026-11-08 10:30 Fetched origin/main at f38147da: main is 12 commits ahead of origin/main and 0 commits behind it
+- 2026-11-08 10:30 Asked the user to push main at 3b271e17 (12 commits) to origin/main
+- 2026-11-08 10:32 Pushed main at 3b271e17 (12 commits) to origin/main, on the user's click
+- 2026-11-08 10:43 Merged auto-advance-doesn-t: auto_advance doesn't merge a clean verdict that judged an older contract version (build f38147da532c)
