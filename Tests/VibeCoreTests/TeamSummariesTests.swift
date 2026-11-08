@@ -110,12 +110,14 @@ struct TeamSummariesTests {
     /// A cut can leave too little of a token for any rule to know it: it's masked first.
     @Test func aPromptMasksBeforeItCuts() {
         let token = "gh" + "p_" + String(repeating: "AbCdEfGhIj", count: 4)
-        let padding = String(repeating: "x", count: 190) + " "
-        let prompt = SummaryPrompts.task(title: "t", role: "agent", checkpoints: [LeadCheckpoint(text: padding + token, at: 0)],
-                                         steps: [TranscriptEntry(kind: .reply, id: "1", text: String(repeating: "y", count: 230) + " " + token)])
+        // No space before it: `clip` cuts at a word when it can, which would take the token out whole.
+        let prompt = SummaryPrompts.task(title: "t", role: "agent", checkpoints: [LeadCheckpoint(text: String(repeating: "x", count: 190) + token, at: 0)],
+                                         steps: [TranscriptEntry(kind: .reply, id: "1", text: String(repeating: "y", count: 230) + token)])
         #expect(!prompt.contains("gh" + "p_"), "\(prompt)")
-        let decision = SummaryPrompts.decision(String(repeating: "z", count: 990) + " " + token, why: "w")
+        let decision = SummaryPrompts.decision(String(repeating: "z", count: 990) + token, why: "w")
         #expect(!decision.contains("gh" + "p_"), "\(decision)")
+        let message = SummaryPrompts.message(TeamMessage(sender: .vibeSwitcher("reports"), body: String(repeating: "m", count: 3_990) + token))
+        #expect(!message.contains("gh" + "p_"), "\(message)")
     }
 
     @Test func thePromptsCarryTheTaskCheckpointsAndSteps() {
