@@ -65,6 +65,7 @@ The main window's menus (`MainMenu.build`); standard items go to the first respo
 ### Window
 - Window › Minimize ⌘M — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
 - Window › Zoom — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
+- Window › Statistics… ⌥⌘S — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
 - Window › Bring All to Front — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
 
 ### Help
@@ -84,6 +85,7 @@ Sessions in attention order, then these commands, then New <preset> in <recent p
 - Toggle Sidebar ⌃⌘S — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
 - Focus Terminal ⇧⌘↩ — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
 - Open in Terminal ⌘O — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
+- Statistics… ⌥⌘S — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
 - Settings… ⌘, — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
 - Start Project Lead in … — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
 - New … in … — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
@@ -384,6 +386,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `shot NAME` — draws each window, light and dark, into the shots folder — `Sources/VibeSwitcher/Sandbox.swift`
 - `panes on|off` — shows or collapses the sidebar and inspector, for a shot of the middle alone — `Sources/VibeSwitcher/Sandbox.swift`
 - `pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT` — the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views… — `Sources/VibeSwitcher/Sandbox.swift`
+- `offline on|off` — the app loses its connection to the sandbox's own host and doesn't get it back (the host and fake sessions… — `Sources/VibeSwitcher/Sandbox.swift`
 - `unproved` — connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions — `Sources/VibeSwitcher/Sandbox.swift`
 - `quit` — quits (the host and fake sessions end with it) — `Sources/VibeSwitcher/Sandbox.swift`
 

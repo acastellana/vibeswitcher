@@ -508,3 +508,25 @@ F1–F5 are fixed and verified. F6 is a small cost on a rare path and has a prec
 
 Round 2 confirmed F1, F2, F3, F5 and F7 fixed. A re-roll from base would throw that verified work away, and the open finding sits in one contained rule whose fix the lead could specify. If round 3 leaves an Important open, re-roll then.
 
+# Archived 2026-11-08 20:25:55: Per-task calls for tasks that are now merged or dropped, one duplicate of the entry after it, and the brand plan superseded the same day
+
+## 2026-11-08 04:14:20 branch-code-can-t merges with its round-3 audit passed. The one Important finding round 3 raised, F10, moved to its own audited task, config-seal-a-merge: after a merge, the merge's own branch run makes the next look unquiet, so the user's quiet edit is held anyway. config-seal-covers now runs after branch-code-can-t. The install that carries the seal waits until config-seal-a-merge has merged, so the user never runs a build that holds their own edits after every merge.
+
+This replaces the 01:28 plan to re-roll the task if round 3 left an Important finding open. F10 is new, small and narrow: the order of one end call against one check. It only errs toward safety: it raises a hold too many, never lets a change through unheld. Round 3 confirmed the F9 redesign and the 7 fixes before it. A re-roll would discard about 3.5 h of audited security work to fix an ordering bug. It's the same pattern as resume-work-cut-off's F6 on 2026-11-07 12:56. Gate code only takes effect after an install, so holding the install closes the gap.
+
+## 2026-11-08 06:32:41 Plugin updates and the config seal. A plugin's hooks run as code in every Claude session. The new plugin seal currently accepts a plugin update silently, but a shell in a worker could fake an update the same way, and nothing on disk tells the two apart. Your rule so far has been "anything that runs as code always needs your Accept". How should plugin updates be handled? → Always ask: a card for every plugin update, like other code (the safest; one click per update)
+
+The lead proposed it with a 15 min timer and the user didn't answer in time, so it went ahead (question CEDA0180).
+
+## 2026-11-08 08:49:29 config-seal-covers isn't re-rolled after "reconsider the approach". Its one open Important finding, F6, is a progress-line wording collision with config-seal-a-merge's test on main, so a fresh worker continues on the same branch to merge main and restore the wording. Round 2 confirmed the plugin seal logic, F1 and the always-Accept rule for plugin updates.
+
+A re-roll would throw away a seal the audit has confirmed in order to fix one line of text. The collision came from the two seal tasks running side by side, the planning slip already covered by the 2026-11-08 rule to chain tasks that share a file.
+
+## 2026-11-08 09:19:10 config-seal-covers gets a third, targeted round on its branch instead of merging on the F6-only re-audit. It fixes: (1) only what runs counts as code, not redirect targets or data-file arguments; (2) relative paths and `sh -c` scripts are watched, and command text never reaches a held line or card; (3) a plugin going from no version folder to a version folder is held even when quiet.
+
+The F6 worker's blind check found all three by reading the code, and a re-audit of F6 alone wouldn't cover them. (1) would hold starts and merges again after every Accept for any hook that logs to a file. (2c) could put a token on the card, which breaks the seal's "never values". (3) breaks the user's always-Accept rule for code (CEDA0180). Fixing them on the branch keeps known-bad gate code out of main; the re-plan restarts its audit rounds, and the next audit judges the whole branch.
+
+## 2026-11-08 10:58:56 Brand update, the user's choice on 2026-11-08 (1A1D1711): the name VibeSwitcher stays. Task brand-new-app-icon makes 4 icon concepts around the lead-and-team idea and 3 taglines with About text. The user picks; only then is the chosen one applied. The GitHub repository's description isn't changed by any task: that's outward-facing, so it waits for the user's say.
+
+The app began as a session switcher and now runs a project lead with a team of agents, so its words and icon no longer describe it. The README rewrite (readme-and-guides) follows the pick so it carries the chosen tagline.
+
