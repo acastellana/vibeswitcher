@@ -56,8 +56,10 @@ struct MergeRunMacSleepTests {
         var lock = TestLock(directory: temp.url("locks-\(UUID().uuidString.prefix(8))").path)
         lock.watch = watch
         let chosen = lock, time = mac.time
+        // The scratch home is the caller's to remove, as merge's is: `temp` does.
+        let home = temp.url("home").path
         return Task.detached {
-            let stopped = await offPool { Worktrees.runChecks(setup: nil, test: test, in: folder.path, home: folder.path + "-home", timeout: timeout, lock: chosen, time: time).stopped }
+            let stopped = await offPool { Worktrees.runChecks(setup: nil, test: test, in: folder.path, home: home, timeout: timeout, lock: chosen, time: time).stopped }
             mac.runEnded()
             return stopped
         }
