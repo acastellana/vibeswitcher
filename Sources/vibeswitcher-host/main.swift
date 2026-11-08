@@ -126,7 +126,7 @@ config.appExecutable = (restoring != nil ? value(after: "--app-executable") : ni
 // (on its own lock) keeps one in memory only, never touching the user's.
 // After a handover, the vault is the one the build before held in memory (its secrets), not what's on disk.
 let vaultFile = VibePaths.root.appendingPathComponent("lead/vault.sealed")
-config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: VaultStorage.keychainKey()).book(handedOver: restoredSecrets)
+config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: VaultStorage.keychainKey(), logPath: config.logPath).book(handedOver: restoredSecrets)
     : LeadVault.Book(restoring: restoredSecrets)
 // The app that started this host gives it its key on stdin (see `AppProof`), and says so: taken while the vault
 // holds none.
