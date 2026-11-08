@@ -4231,3 +4231,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 12:44 Released settings-redesign-clear's worker (idle since its done report on 308001e7) while its audit runs
 - 2026-11-08 12:44 Automatically (auto_advance): Started the audit of settings-redesign-clear at 308001e7 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-08 12:49 Audit of settings-redesign-clear: complete, clean, round 3: 1 Important closed, 3 Nit (1 open)
+- 2026-11-08 13:01 Audit of config-seal-covers: complete, clean, round 3: 2 Important closed, 4 Nit (1 open)
+- 2026-11-08 13:16 Merged settings-redesign-clear: Settings redesign: clear categories, search, and a plain description on every option (build f38147da532c)
