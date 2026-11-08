@@ -378,6 +378,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `sheet NAME` — shows a sheet on the window — `Sources/VibeSwitcher/Sandbox.swift`
 - `close settings|sheet` — closes Settings or the sheet — `Sources/VibeSwitcher/Sandbox.swift`
 - `shot NAME` — draws each window, light and dark, into the shots folder — `Sources/VibeSwitcher/Sandbox.swift`
+- `panes on|off` — shows or collapses the sidebar and inspector, for a shot of the middle alone — `Sources/VibeSwitcher/Sandbox.swift`
 - `pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT` — the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views… — `Sources/VibeSwitcher/Sandbox.swift`
 - `unproved` — connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions — `Sources/VibeSwitcher/Sandbox.swift`
 - `quit` — quits (the host and fake sessions end with it) — `Sources/VibeSwitcher/Sandbox.swift`

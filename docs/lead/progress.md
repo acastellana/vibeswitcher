@@ -4308,3 +4308,19 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-08 15:20 Audit of a-branch-that-moves: complete, suspect, round 1: 4 Nit open
 - 2026-11-08 15:20 Dismissed a-branch-that-moves:F1: Accepted by the lead: the optional branchHead field is needed because a stamped merge has a different hash on the base. The reviewer found it correct, and the contract's boundaries should have listed it. See the note in the task's context.
 - 2026-11-08 15:21 Merged the-git-guard-treats: The git guard treats trailer commands as executable config (build 9bb93056766a)
+- 2026-11-08 15:21 Automatically (auto_advance): Merged the-git-guard-treats (The git guard treats trailer commands as executable config) into main at f0a8ebef, on its passing audit and the full test run.
+- 2026-11-08 15:21 Automatically (auto_advance): Cleaned up the-git-guard-treats (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-08 15:21 Released readme-and-guides's worker (idle since its done report on 3ee6ced6) while its audit runs
+- 2026-11-08 15:21 Automatically (auto_advance): Started the audit of readme-and-guides at 3ee6ced6 (An audit was started on it: its verdict decides). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 15:22 Released wallet-cards-trust-only's worker (idle since its done report on a49fd480) while its audit runs
+- 2026-11-08 15:22 Automatically (auto_advance): Started the audit of wallet-cards-trust-only at a49fd480 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 15:22 Audit of a-branch-that-moves: complete, clean, round 2: 4 Nit (3 open)
+- 2026-11-08 15:25 Audit of readme-and-guides: complete, clean, round 2: 1 Important closed, 6 Nit (3 open), 2 Pre-existing open
+- 2026-11-08 15:30 Audit of wallet-cards-trust-only: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
+- 2026-11-08 17:01 Released correctness-tests-stop's worker (idle since its done report on c4d2588f) while its audit runs
+- 2026-11-08 17:17 Merged readme-and-guides: README and guides describe what VibeSwitcher is today (in a batch, on a test run of its own) (build 9bb93056766a)
+- 2026-11-08 17:17 Didn't merge a-branch-that-moves in the batch: tests fail with it on main (whatTheWorkerDoesDuringTheMergeIsntMerged()); back to its worker
+- 2026-11-08 17:24 Audit of correctness-tests-stop: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-11-08 17:24 Started a worker on an-app-wide-appearance
+- 2026-11-08 17:25 Started a worker on a-branch-that-moves
+- 2026-11-08 17:29 Merged host-reply-timers-belong: Host: reply timers belong to their connection, and a failed vault save is logged (in a batch, on a test run of its own) (build 9bb93056766a)
