@@ -282,3 +282,7 @@ On 2026-11-08 from 03:40 to 06:00, load was 100–225 with idle CPU, 504 MB of R
 
 A re-roll would throw away a seal the audit has confirmed in order to fix one line of text. The collision came from the two seal tasks running side by side, the planning slip already covered by the 2026-11-08 rule to chain tasks that share a file.
 
+## 2026-11-08 09:19:10 config-seal-covers gets a third, targeted round on its branch instead of merging on the F6-only re-audit. It fixes: (1) only what runs counts as code, not redirect targets or data-file arguments; (2) relative paths and `sh -c` scripts are watched, and command text never reaches a held line or card; (3) a plugin going from no version folder to a version folder is held even when quiet.
+
+The F6 worker's blind check found all three by reading the code, and a re-audit of F6 alone wouldn't cover them. (1) would hold starts and merges again after every Accept for any hook that logs to a file. (2c) could put a token on the card, which breaks the seal's "never values". (3) breaks the user's always-Accept rule for code (CEDA0180). Fixing them on the branch keeps known-bad gate code out of main; the re-plan restarts its audit rounds, and the next audit judges the whole branch.
+

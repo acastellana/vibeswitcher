@@ -123,3 +123,10 @@ Evidence: .vibeswitcher/flakes/2026-11-08-freezes-remove-the-top-fc504a93-hung.l
 Task: freezes-remove-the-top
 Check: task turn-this-incident-into-13 turns it into a check that runs before merge.
 
+## 2026-11-08 09:58:41 The config seal held every worker start and a passing merge because Claude's own skill sync rewrote two bookkeeping files in ~/.claude/skills/synced/. The card named only the folder, with a wrong time.
+
+Evidence: progress.md 09:16: "Didn't merge starts-and-audits-wait … ~/.claude/skills changed while the team's sessions ran", and the same refusal for toolbar-the-boost-bolt and settings-redesign-clear. Only the synced account folder, its .last-complete-round and its manifest.json had mtimes after the 08:05 install, all at 09:15. The user's screenshot at 09:49 shows "changed 23:34". The user accepted the card and work resumed. Check: config-seal-claude-s's tests.
+
+Task: config-seal-claude-s
+Check: task turn-this-incident-into-14 turns it into a check that runs before merge.
+
