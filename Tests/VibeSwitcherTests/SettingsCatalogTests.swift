@@ -380,6 +380,10 @@ struct SettingsNoteTests {
         }
         #expect(source.contains("SettingsFooter(.sessionHost("))
         #expect(!source.contains("SettingsFooter(\""))
+        // A footer written some other way (FooterText, a plain Text) would slip past the checks above.
+        let panes = try files.map(SettingsCatalogTests.read).joined(separator: "\n")
+        let footers = panes.matches(of: #/footer:\s*\{\s*(\w+)/#).map { String($0.output.1) }
+        #expect(!footers.isEmpty && footers.allSatisfy { $0 == "SettingsFooter" }, "\(footers)")
     }
 
     /// Every state of the session host has a footer, and the restart that ends sessions says so.
