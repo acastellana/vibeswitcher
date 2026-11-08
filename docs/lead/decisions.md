@@ -290,3 +290,7 @@ The F6 worker's blind check found all three by reading the code, and a re-audit 
 
 The app began as a session switcher and now runs a project lead with a team of agents, so its words and icon no longer describe it. The README rewrite (readme-and-guides) follows the pick so it carries the chosen tagline.
 
+## 2026-11-08 11:20:21 The app icon stays as it is (the user, 2026-11-08, after two rounds of options: "meh lets leave the current logo"). brand-new-app-icon is abandoned, and no tagline or About text changes in the app. The README rewrite goes ahead with a plain opening description. This supersedes the 2026-11-08 brand decision (1A1D1711).
+
+Ten icons and eight taglines didn't win over the current look. Per the 2026-11-07 rule, a lukewarm answer means dropping the idea rather than holding it open.
+
