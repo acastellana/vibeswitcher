@@ -2890,11 +2890,12 @@ public final class LeadToolset: MCPToolset {
             let saved = saveMergeLog(output, slug: slug)
             // The tests that never finished and the output's tail, where the worker who fixes the hang can read them
             // (the merge's log is in the vault).
-            let hung = Self.clip(Redaction.secrets(in: MergeRerun.hung(in: output).joined(separator: ", ")))
+            // What it was doing: the tests it left unfinished, or the build's last line when no test had started.
+            let phase = Self.clip(MergeRerun.phaseText(output))
             let readable = saveEvidence(MergeRerun.hungLog(task: slug, commit: commit, command: command, after: after, output: output, stall: stall),
                                         log: MergeRerun.hungPath(task: slug, commit: commit, at: Date()))
                 .map { MergeRerun.evidenceFile(root: root, log: $0) }
-            let named = hung.isEmpty ? "No test in its output started and never finished. " : "Started and never finished: \(hung). "
+            let named = phase + " "
             // Stopped for making no progress: the test it was stuck in goes in the flake ledger, so a test that hangs
             // merges again and again gets a task of its own (`planFlakeFixes`).
             var ledger = ""
@@ -2911,7 +2912,7 @@ public final class LeadToolset: MCPToolset {
             }
             try? store.appendProgress("Hung in \(slug)'s merge: the \(what) "
                                       + (stall.map { "made \(Redaction.secrets(in: $0.summary)), stopped \(Worktrees.duration(after)) in" } ?? "stopped after \(Worktrees.duration(after))")
-                                      + (hung.isEmpty ? "; no test in its output started and never finished" : "; started and never finished: \(hung)")
+                                      + "; " + phase.prefix(1).lowercased() + (phase.hasSuffix(".") ? phase.dropFirst().dropLast() : phase.dropFirst())
                                       + (readable.map { " (\($0))" } ?? ""))
             let advice = stall == nil
                 ? "If they only need longer, raise test_timeout_min (\(Self.gb(workflow.testTimeoutMinutes)) in workflow.md) with configure; else have the worker find what hangs."

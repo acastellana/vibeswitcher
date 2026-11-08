@@ -980,6 +980,72 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(await eventually { kill(child, 0) != 0 })
     }
 
+    /// What a stopped run was doing: building (its last build line) when no test started after it, testing when one
+    /// started and never finished or tests ran after the build, else unknown.
+    @Test func aHungRunsPhaseIsBuildingUntilATestStarts() {
+        let building = """
+            Building for debugging...
+            [221/295] Compiling VibeSwitcherTests TeamSnapshots.swift
+            /x/LeadRecordsTests.swift:212:24: warning: instance method 'wait' is unavailable from asynchronous contexts
+            \u{1B}[1m[223/295] Compiling VibeSwitcherTests TerminalAnswerTests.swift\u{1B}[0m
+            /x/LeadRemoteTests.swift:743:130: note: expanded code originates here
+            """
+        #expect(MergeRerun.phase(in: building) == .building(last: "[223/295] Compiling VibeSwitcherTests TerminalAnswerTests.swift"))
+        #expect(MergeRerun.phaseText(building) == "It was building and no test had started; its last build line: [223/295] Compiling VibeSwitcherTests TerminalAnswerTests.swift")
+        #expect(MergeRerun.phase(in: building + "\nBuild complete! (107.52s)") == .building(last: "Build complete! (107.52s)"))
+        let tested = building + "\nBuild complete! (1s)\n◇ Test run started.\n◇ Test a() started.\n✔ Test a() passed after 0.1 seconds."
+        #expect(MergeRerun.phase(in: tested) == .testing(unfinished: []))
+        #expect(MergeRerun.phaseText(tested) == "No test in its output started and never finished.")
+        #expect(MergeRerun.phase(in: tested + "\n◇ Test b() started.") == .testing(unfinished: ["b()"]))
+        #expect(MergeRerun.phaseText(tested + "\n◇ Test b() started.") == "Started and never finished: b().")
+        // A build after the tests (another step's): building again.
+        #expect(MergeRerun.phase(in: tested + "\n[1/2] Compiling Other x.swift") == .building(last: "[1/2] Compiling Other x.swift"))
+        #expect(MergeRerun.phase(in: "npm warn\nwaiting") == .unknown && MergeRerun.phase(in: "") == .unknown)
+        #expect(MergeRerun.phaseText("waiting") == "No test in its output started and never finished.")
+
+        let text = MergeRerun.hungLog(task: "add-b", commit: "0123", command: "test command", after: 2700,
+                                      output: building + "\n\n" + MergeRerun.quietNote(1500))
+        #expect(text.contains("\nIt was building and no test had started. Its last build line (the module or file it was compiling):\n    [223/295] Compiling VibeSwitcherTests TerminalAnswerTests.swift\nIts last output line came 25 min before it was stopped.\n"), "\(text)")
+        #expect(!text.contains("No test in its output"), "\(text)")
+    }
+
+    /// A merge whose test command builds and hangs before any test starts (2026-11-08: 45 min in its test target's
+    /// compile, only warnings in its tail): the hung file and the reply say it was building, and its last build line;
+    /// the file, how long since its last output line.
+    @Test func aMergeThatHangsInItsBuildSaysItWasBuildingAndItsLastBuildLine() async throws {
+        let root = try repo()
+        let marks = temp.url("marks").path
+        try FileManager.default.createDirectory(atPath: marks, withIntermediateDirectories: true)
+        try commit(["scripts/test.sh": """
+            #!/bin/bash
+            echo "Building for debugging..."
+            echo "[1/3] Compiling VibeCore A.swift"
+            echo "[2/3] Compiling VibeCoreTests HangsTests.swift"
+            echo "/x/HangsTests.swift:1:1: warning: something deprecated"
+            sleep \(ShellTests.childRuns) & echo $! > \(RecentProjects.shellQuote(marks))/child; wait
+            """], in: root, "a build that hangs")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        // 0.1 min: 6 s.
+        configure(lead, ["test_command": "bash scripts/test.sh", "test_timeout_min": "0.1"])
+        try audited(lead, runtime, root: root)
+
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(merged.isError)
+        #expect(merged.text.contains("the tests hung after 6 s") && merged.text.contains("It was building and no test had started; its last build line: [2/3] Compiling VibeCoreTests HangsTests.swift"), "\(merged.text)")
+        #expect(!merged.text.contains("No test in its output started"), "\(merged.text)")
+        let flakes = root + "/.vibeswitcher/flakes"
+        let files = try FileManager.default.contentsOfDirectory(atPath: flakes)
+        let file = flakes + "/" + (files.first { $0.hasSuffix("-hung.log") } ?? "")
+        let text = try String(contentsOfFile: file, encoding: .utf8)
+        #expect(text.contains("\nIt was building and no test had started. Its last build line (the module or file it was compiling):\n    [2/3] Compiling VibeCoreTests HangsTests.swift\n"), "\(text)")
+        #expect(text.range(of: #"\nIts last output line came \d+ s before it was stopped\.\n"#, options: .regularExpression) != nil, "\(text)")
+        let progress = try String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)
+        #expect(progress.contains("Hung in add-b's merge: the tests stopped after 6 s; it was building and no test had started; its last build line: [2/3] Compiling VibeCoreTests HangsTests.swift (\(file))"), "\(progress)")
+        let child = try #require(Int32((try String(contentsOfFile: marks + "/child", encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines)))
+        #expect(await eventually { kill(child, 0) != 0 })
+    }
+
     @Test func aFailingOrPassingMergeWritesNoHungFile() throws {
         let root = try repo()
         let pass = temp.url("pass").path

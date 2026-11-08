@@ -16,6 +16,8 @@ public enum Git {
         public var signaled = false
         /// It made no progress for its watch's stall_min and was stopped (`timedOut` too): what it was stuck on.
         public var stall: StallWatch.Stall?
+        /// Out of time (`timedOut`, `Shell.run`): how long it had written nothing when it was stopped.
+        public var quiet: TimeInterval?
         public var ok: Bool { status == 0 && !timedOut && !cancelled }
     }
 

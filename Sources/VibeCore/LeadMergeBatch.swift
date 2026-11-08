@@ -200,7 +200,8 @@ extension LeadToolset {
             case .failed(let output): outcome = .failed(output)
             case .hung(let command, let after, let output, let stall):
                 let saved = saveMergeLog(output, slug: "merge-batch", name: "hung.log")
-                outcome = .stopped(kind: "hung", text: "the \(command) \(Worktrees.hung(after: after, stall: stall)) on the stack's first \(count) task\(count == 1 ? "" : "s") and was stopped"
+                outcome = .stopped(kind: "hung", text: "the \(command) \(Worktrees.hung(after: after, stall: stall)) on the stack's first \(count) task\(count == 1 ? "" : "s") and was stopped. "
+                                   + MergeRerun.phaseText(output)
                                    + (saved.map { " (the output so far: \($0))" } ?? ""))
             case .cancelled: outcome = .stopped(kind: "cancelled", text: "it was cancelled")
             case .error(let text): outcome = .stopped(kind: "error", text: text)

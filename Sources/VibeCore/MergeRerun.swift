@@ -301,13 +301,75 @@ public enum MergeRerun {
         return started.filter { !ended.contains($0) }
     }
 
+    /// What a stopped run was doing, from its output (`phase(in:)`).
+    public enum Phase: Equatable, Sendable {
+        /// Running tests: those that started and never finished (`hung(in:)`), maybe none.
+        case testing(unfinished: [String])
+        /// Building, no test started since its last build line: that line (a module or file it was compiling).
+        case building(last: String)
+        /// Neither shows in its output.
+        case unknown
+    }
+
+    /// A build's progress line: SwiftPM's "[223/295] Compiling VibeSwitcherTests TerminalAnswerTests.swift" (and its
+    /// "Emitting module", "Linking", "Write" ones), "Building for debugging...", "Build complete! (118.02s)".
+    private static let buildLine = try! NSRegularExpression(pattern: #"^(\[\d+/\d+\] \S|Building for |Build complete!)"#)
+    /// Any line of a test run: Swift Testing's ("◇ Test run started.", a test's start or end) or XCTest's.
+    private static let testLine = try! NSRegularExpression(pattern: #"^(\S{1,2} Test .+ (started\.$|passed after |failed after |skipped)|Test (Case|Suite) ')"#)
+
+    /// The phase a stopped run's `output` was in: testing when a test started and never finished, else whichever came
+    /// last of a build line and a test line. On 2026-11-08 a merge hung 45 min in its test target's compile, with only
+    /// compiler warnings in its tail, and the hung file said only "No test in its output started and never finished".
+    public static func phase(in output: String) -> Phase {
+        let unfinished = hung(in: output)
+        if !unfinished.isEmpty { return .testing(unfinished: unfinished) }
+        var lastBuild: String?, testedAfter = false
+        for raw in output.components(separatedBy: "\n") {
+            let line = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+            let range = NSRange(line.startIndex..., in: line)
+            if buildLine.firstMatch(in: line, range: range) != nil {
+                lastBuild = line
+                testedAfter = false
+            } else if testLine.firstMatch(in: line, range: range) != nil {
+                testedAfter = true
+            }
+        }
+        if testedAfter { return .testing(unfinished: []) }
+        return lastBuild.map { .building(last: $0) } ?? .unknown
+    }
+
+    /// The line a run stopped at test_timeout_min ends its output with (`Worktrees.runChecks`): how long it had been
+    /// silent. A build that crawls keeps writing warnings; one that's stuck goes quiet.
+    public static func quietNote(_ quiet: TimeInterval) -> String {
+        quietPrefix + "\(Worktrees.duration(quiet)) before it was stopped."
+    }
+    static let quietPrefix = "Its last output line came "
+
+    /// What the hung file and the lead's message say of `output`'s phase: "Started and never finished: x(), y()." /
+    /// "No test in its output started and never finished." while testing (or unknown), "It was building and no test
+    /// had started; its last build line: [223/295] Compiling …" while building. Secrets masked, the line cut at
+    /// `evidenceWidth`.
+    public static func phaseText(_ output: String) -> String {
+        switch phase(in: output) {
+        case .testing(let unfinished) where !unfinished.isEmpty:
+            return "Started and never finished: " + Redaction.secrets(in: unfinished.joined(separator: ", ")) + "."
+        case .building(let last):
+            let line = Redaction.secrets(in: last)
+            return "It was building and no test had started; its last build line: "
+                + (line.count > evidenceWidth ? String(line.prefix(evidenceWidth - 1)) + "…" : line)
+        case .testing, .unknown:
+            return "No test in its output started and never finished."
+        }
+    }
+
     /// Where a hung merge's evidence is kept, beside its flake evidence: `.vibeswitcher/flakes/<yyyy-mm-dd>-<task>-<commit>-hung.log`.
     public static func hungPath(task: String, commit: String, at date: Date) -> String {
         String(evidencePath(task: task, commit: commit, at: date).dropLast(".log".count)) + "-hung.log"
     }
 
     /// The hung file's text: which of `task`'s merge commands (`command`, testing `commit`) ran past test_timeout_min
-    /// (`after`) and was stopped, the tests its `output` left started and unfinished (`hung(in:)`), and the output's
+    /// (`after`) and was stopped, the phase it was in (`phase(in:)`: the tests its `output` left started and unfinished,
+    /// or the build's last line when no test had started), how long it had been silent (`quietNote`), and the output's
     /// last `hungTail` lines. Masked whole before it's cut (`Redaction`): a secret the tail starts partway into (a
     /// key's lines under its header) is masked as it would be in full. Each line cut at `evidenceWidth`.
     /// With `stall`, it was stopped for making no progress (stall_min) rather than at test_timeout_min: the file says
@@ -319,14 +381,24 @@ public enum MergeRerun {
                 .replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression) }
         let tail = masked.reversed().drop { $0.isEmpty }.prefix(hungTail).reversed()
             .map { $0.count > evidenceWidth ? String($0.prefix(evidenceWidth - 1)) + "…" : $0 }
-        let tests = hung(in: masked.joined(separator: "\n"))
         let what = command == "rerun" ? "the rerun of its failing tests" : "its \(command)"
         var text = stall.map { stall in
             "Hung in \(task)'s merge (tested \(commit.prefix(12))): \(what) made \(Redaction.secrets(in: stall.summary)) and was stopped \(Worktrees.duration(after)) in (stall_min), with everything started under it.\n"
                 + (stall.processes.isEmpty ? "" : "\nIts processes when stopped (pid, parent, state, CPU seconds, name):\n" + stall.processes.map { "    " + $0 }.joined(separator: "\n") + "\n")
         } ?? "Hung in \(task)'s merge (tested \(commit.prefix(12))): \(what) ran past test_timeout_min (\(Worktrees.duration(after))) and was stopped, with everything started under it.\n"
-        text += tests.isEmpty ? "\nNo test in its output started and never finished.\n"
-            : "\nStarted and never finished (secrets masked):\n" + tests.map { "    " + $0 }.joined(separator: "\n") + "\n"
+        switch phase(in: masked.joined(separator: "\n")) {
+        case .testing(let tests) where !tests.isEmpty:
+            text += "\nIt was testing.\nStarted and never finished (secrets masked):\n" + tests.map { "    " + $0 }.joined(separator: "\n") + "\n"
+        case .building(let last):
+            let line = last.count > evidenceWidth ? String(last.prefix(evidenceWidth - 1)) + "…" : last
+            text += "\nIt was building and no test had started. Its last build line (the module or file it was compiling):\n    \(line)\n"
+        case .testing:
+            text += "\nIt was testing.\nNo test in its output started and never finished.\n"
+        case .unknown:
+            text += "\nNo test in its output started and never finished. It shows no build line either.\n"
+        }
+        // How long it had been silent (stopped at test_timeout_min; a stall's summary above says its own).
+        if let quiet = masked.last(where: { $0.hasPrefix(quietPrefix) }) { text += quiet + "\n" }
         text += "\nIts output's last \(tail.count) lines (secrets masked, each cut at \(evidenceWidth) characters):\n"
             + tail.map { "    " + $0 }.joined(separator: "\n") + "\n"
         return text

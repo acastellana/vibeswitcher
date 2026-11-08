@@ -38,13 +38,22 @@ public final class ShellCancel: @unchecked Sendable {
 private final class PipeText: @unchecked Sendable {
     private let lock = NSLock()
     private var data = Data()
+    private var lastRead: Date?
 
     func drain(_ handle: FileHandle) {
         while case let chunk = handle.availableData, !chunk.isEmpty {
             lock.lock()
             data.append(chunk)
+            lastRead = Date()
             lock.unlock()
         }
+    }
+
+    /// When output last came, nil before any.
+    var last: Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        return lastRead
     }
 
     var text: String {
@@ -276,7 +285,8 @@ public enum Shell {
             readers.enter()
             Thread.detachNewThread { errors.drain(err.reading); readers.leave() }
         }
-        let deadline = Date().addingTimeInterval(timeout)
+        let began = Date()
+        let deadline = began.addingTimeInterval(timeout)
         let cancel = ShellCancel.current
         var judge = watch.map { StallWatch.Judge(after: $0.after, loadLimit: $0.loadLimit, start: Date()) }
         var nextLook = Date(), stall: StallWatch.Stall?
@@ -298,10 +308,13 @@ public enum Shell {
             }
             usleep(20_000)
         }
-        var timedOut = false, cancelled = false
+        var timedOut = false, cancelled = false, quiet: TimeInterval?
         if process.isRunning {
             cancelled = cancel?.isCancelled == true
             timedOut = !cancelled
+            // How long it had written nothing (since it started, when it never wrote), read before it's stopped.
+            let heard = [output.last, errors.last].compactMap { $0 }.max() ?? began
+            quiet = timedOut ? max(0, Date().timeIntervalSince(heard)) : nil
             if cancelled { stall = nil }
             // Out of time: its children (a test runner's workers) go too, or they'd keep running in the worktree.
             // Asked first; whatever is still there after `grace` (it ignores TERM) is killed.
@@ -321,7 +334,7 @@ public enum Shell {
             _ = readers.wait(timeout: .now() + grace)
         }
         return Git.Result(status: process.terminationStatus, output: output.text, error: errors.text, timedOut: timedOut, cancelled: cancelled,
-                          signaled: process.signaled, stall: timedOut ? stall : nil)
+                          signaled: process.signaled, stall: timedOut ? stall : nil, quiet: quiet)
     }
 
     /// Stops a program and everything it started: its family and its process group, asked with TERM, then, once it's
@@ -1249,6 +1262,12 @@ public enum Worktrees {
         }
     }
 
+    /// The run's header line on the cores its commands get (`TestLock.coresVariable`) holding one of `slots` slots: a
+    /// hung merge's log showed no -j anywhere (2026-11-08), so whether its build was capped couldn't be read from it.
+    static func coresLine(slots: Int, cores: Int = ProcessInfo.processInfo.processorCount) -> String {
+        "\(TestLock.coresVariable): \(TestLock.coreBudget(slots: slots, cores: cores)), the slot's share of \(cores) cores (\(slots) slot\(slots == 1 ? "" : "s")): builds and test runners take it as their parallelism\n"
+    }
+
     /// The first line of a rerun's output (`runChecks`' `rerun`).
     public static let rerunHeader = "Rerun once, after the first run failed (its failing tests when they can be picked out, else all of it):\n"
 
@@ -1294,6 +1313,7 @@ public enum Worktrees {
             switch outcome {
             case .held(let taken, let waited, let after):
                 held = taken
+                header += coresLine(slots: lock.slots)
                 if !after.isEmpty {
                     header += "Waited \(duration(waited)) for a slot of the Mac-wide test and build lock, \(slots) held: \(recorded(after)).\n"
                 }
@@ -1351,7 +1371,9 @@ public enum Worktrees {
                                 branchCode: true, watch: lock?.watch)
             stop?()
             // A run stopped for making no progress says so first, then what it was stuck on, after its output.
-            let said = (name == "rerun" ? rerunHeader : "") + header + run.output + (run.stall.map { "\n\n" + $0.report } ?? "")
+            // Stopped at test_timeout_min, it says how long it had been silent: a crawl keeps writing, a stuck one doesn't.
+            let silent = run.stall == nil ? run.quiet.map { "\n\n" + MergeRerun.quietNote($0) } : nil
+            let said = (name == "rerun" ? rerunHeader : "") + header + run.output + (run.stall.map { "\n\n" + $0.report } ?? silent ?? "")
             outputs.append((name, said))
             if run.cancelled || cancel?.isCancelled == true { return (.cancelled, outputs) }
             if let stall = run.stall {

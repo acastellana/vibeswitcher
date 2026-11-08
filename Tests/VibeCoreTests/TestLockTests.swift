@@ -160,6 +160,41 @@ struct TestLockTests {
         #expect(given == String(TestLock.coreBudget(slots: 3)), "\(given)")
     }
 
+    /// The whole way a merge's build gets its cap: the merge holds a slot and gives its test command VS_HEAVY_CORES,
+    /// scripts/test.sh's vs-heavy (under that slot, so it doesn't wait) keeps it, and heavy_swift (scripts/lib/
+    /// swift-jobs.sh) passes it to SwiftPM: two modules at once, VS_HEAVY_CORES ÷ 2 (rounded up) frontends each. A fake
+    /// swift says what it was asked. The run's header names the cores, so a hung merge's log shows its cap (2026-11-08:
+    /// its log had no -j anywhere).
+    @Test func theMergesBuildRunsOnItsSlotsShareOfTheCoresThroughVsHeavy() throws {
+        let locks = url("locks").path
+        let lock = TestLock(directory: locks, slots: 3)
+        let worktree = url("worktree"), bin = url("bin")
+        try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let asked = worktree.appendingPathComponent("asked").path
+        let swift = bin.appendingPathComponent("swift")
+        try """
+            #!/bin/bash
+            echo "$* | $\(TestLock.coresVariable)" > \(RecentProjects.shellQuote(asked))
+
+            """.write(to: swift, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: swift.path)
+        let q = RecentProjects.shellQuote
+        // PATH after the login shell's startup files (path_helper puts the system's first); the lock's folder as the
+        // merge's, so vs-heavy knows the held slot as one of its own.
+        let test = "export PATH=\(q(bin.path)):$PATH \(TestLock.directoryVariable)=\(q(locks)); unset CODEX_SANDBOX\n"
+            + "\(q(Self.vsHeavyScript.path)) bash -c 'source \(Self.repo.path)/scripts/lib/swift-jobs.sh; heavy_swift build'"
+        let (stopped, outputs) = Worktrees.runChecks(setup: nil, test: test, in: worktree.path, home: url("home").path,
+                                                     timeout: hangGuard, lock: lock, as: "merge of x")
+        #expect(stopped == nil, "\(outputs)")
+        let cores = TestLock.coreBudget(slots: 3)
+        let said = try String(contentsOfFile: asked, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(said == "build --build-system native -j 2 -Xswiftc -j\((cores + 1) / 2) | \(cores)", "\(said)")
+        let header = "\(TestLock.coresVariable): \(cores), the slot's share of \(ProcessInfo.processInfo.processorCount) cores (3 slots)"
+        #expect(outputs.first?.output.contains("\n" + header) == true, "\(outputs)")
+        #expect(Worktrees.coresLine(slots: 1, cores: 12).hasPrefix("\(TestLock.coresVariable): 12, the slot's share of 12 cores (1 slot): "))
+    }
+
     @Test func underItsHolderTheLockIsntTakenAgain() {
         let path = TestLock(directory: "/l").path
         #expect(TestLock.standard([TestLock.directoryVariable: "/l"])?.path == path)
