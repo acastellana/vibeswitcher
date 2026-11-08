@@ -682,18 +682,33 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let index = toolbar.items.firstIndex { $0.itemIdentifier == Self.boostItem }
         boostState = state
         guard let state else {
-            if let index { toolbar.removeItem(at: index) }
+            if let index {
+                toolbar.removeItem(at: index)
+                sizeBriefMe()
+            }
             return
         }
         if index == nil {
             // Made by the delegate below, from `boostState`.
             let before = toolbar.items.firstIndex { $0.itemIdentifier == Self.briefItem || $0.itemIdentifier == .toggleInspector }
             toolbar.insertItem(withItemIdentifier: Self.boostItem, at: before ?? toolbar.items.count)
+            sizeBriefMe()
         }
         guard let item = boostMarkItem else { return }
         item.toolTip = BoostMark.help(state)
         (item.view as? NSHostingView<BoostMark>)?.rootView = BoostMark(state: state, open: { [weak self] in self?.onBoostMark() })
     }
+
+    /// Brief Me's size for what's beside it: the Boost mark's slot while that's in the toolbar, its own without.
+    private var briefMeSlot: CGFloat? { boostState == nil ? nil : BoostMark.toolbarSlot }
+
+    private func sizeBriefMe() {
+        guard let briefing, let item = briefMeItem else { return }
+        (item.view as? NSHostingView<BriefMeToolbarItem>)?.rootView = BriefMeToolbarItem(model: briefing, slot: briefMeSlot)
+    }
+
+    /// The toolbar's Brief Me, when the window has one.
+    private var briefMeItem: NSToolbarItem? { window?.toolbar?.items.first { $0.itemIdentifier == Self.briefItem } }
 
     /// What the Boost mark shows; nil while it isn't in the toolbar.
     private var boostState: BoostState?
@@ -724,7 +739,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             let item = NSToolbarItem(itemIdentifier: identifier)
             item.label = "Brief Me"
             item.toolTip = "Brief me: 30 seconds, spoken, on what happened lately across your projects"
-            item.view = NSHostingView(rootView: BriefMeToolbarItem(model: briefing))
+            item.view = NSHostingView(rootView: BriefMeToolbarItem(model: briefing, slot: briefMeSlot))
             return item
         }
         if identifier == Self.boostItem, let boostState {

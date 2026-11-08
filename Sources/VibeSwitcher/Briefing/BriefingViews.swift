@@ -7,6 +7,8 @@ struct BriefMeButton: View {
     @ObservedObject var model: BriefingModel
     /// Pressed (whatever it did): the window's toolbar opens its panel.
     var pressed: () -> Void = {}
+    /// The icon centred in a square of this side, all of it the button's; nil, the icon's own size.
+    var slot: CGFloat?
 
     var body: some View {
         Button {
@@ -14,6 +16,8 @@ struct BriefMeButton: View {
             pressed()
         } label: {
             BriefingPhaseIcon(phase: model.phase)
+                .frame(width: slot, height: slot)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
         .accessibilityLabel("Brief me")
@@ -156,10 +160,12 @@ struct BriefingPanel: View {
 /// The main window's toolbar item: the button, its panel in a popover.
 struct BriefMeToolbarItem: View {
     @ObservedObject var model: BriefingModel
+    /// `BoostMark.toolbarSlot` beside the Boost mark, so the two share their glass evenly; nil on its own.
+    var slot: CGFloat?
     @State private var shown = false
 
     var body: some View {
-        BriefMeButton(model: model) { shown = model.phase != .idle || model.briefing != nil }
+        BriefMeButton(model: model, pressed: { shown = model.phase != .idle || model.briefing != nil }, slot: slot)
             .popover(isPresented: $shown, arrowEdge: .bottom) {
                 BriefingPanel(model: model).frame(width: 380)
             }

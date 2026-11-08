@@ -16,7 +16,7 @@ import VibeCore
         var away = true
     }
 
-    func window(_ watch: BoostWatch) throws -> MainWindowController {
+    func window(_ watch: BoostWatch, briefing: BriefingModel? = nil) throws -> MainWindowController {
         _ = NSApplication.shared
         let scratch = temp.url("boost-mark")
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
@@ -25,7 +25,7 @@ import VibeCore
         let leads = LeadController(host: host, store: store, vault: LeadVault(folder: scratch.appendingPathComponent("vault"), ask: { _ in throw LeadVault.Refused("none") }),
                                    inbox: scratch, home: scratch.path) { _ in "true" }
         return MainWindowController(store: store, host: host, model: WindowModel(), actions: EndedSnapshots.actions, leads: leads,
-                                    boost: watch)
+                                    briefing: briefing, boost: watch)
     }
 
     func watch(_ signals: Signals) -> (BoostWatch, Preferences) {
@@ -85,6 +85,34 @@ import VibeCore
         let again = try #require(mark(controller))
         #expect(BoostMark.label(again.state) == "Boost on: on in Settings, on AC")
         #expect(controller.window?.toolbar?.items.filter { $0.itemIdentifier == MainWindowController.boostItem }.count == 1)
+    }
+
+    /// The toolbar gives each item a slot of about a system button's width and draws the shared glass around the views,
+    /// so a smaller view leaves the slot's room as a gap between the two icons. Side by side both fill a system button's
+    /// 36×36 (the inspector's); Brief Me alone keeps its own size. The window is never shown, so this is what the views
+    /// ask for, the size the toolbar lays out.
+    @Test func theBoltAndBriefMeFillAToolbarButtonWhileTogether() async throws {
+        let signals = Signals()
+        let (watch, _) = watch(signals)
+        let briefing = BriefingModel(snapshot: { .init(boards: [:], sessions: []) }, language: { .english }, keyStore: AppProof.MemorySecret(),
+                                     generate: { _ in nil }, voice: BriefingButtonTests.FakeVoice(), defaults: temp.defaults("boost-mark-briefing"))
+        let controller = try window(watch, briefing: briefing)
+        let brief = try #require(controller.window?.toolbar?.items.first { $0.itemIdentifier.rawValue == "briefMe" }?.view)
+        let alone = brief.fittingSize
+        #expect(alone.width < 36 && alone.height < 36)
+
+        await look(watch)
+        let bolt = try #require(controller.boostMarkItem?.view)
+        #expect(bolt.fittingSize == NSSize(width: 36, height: 36))
+        #expect(brief.fittingSize == NSSize(width: 36, height: 36))
+
+        // Boost off: Brief Me is back to its own size, and on again beside the mark.
+        signals.onAC = false
+        await look(watch)
+        #expect(brief.fittingSize == alone)
+        signals.onAC = true
+        await look(watch)
+        #expect(brief.fittingSize == NSSize(width: 36, height: 36))
     }
 
     /// A click opens Settings › General at Boost: the window hands it to `onBoostMark`.
