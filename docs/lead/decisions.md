@@ -278,3 +278,7 @@ Question CEDA0180, 2026-11-08: the user didn't answer in 15 min, so the lead's p
 
 On 2026-11-08 from 03:40 to 06:00, load was 100–225 with idle CPU, 504 MB of RAM free and swap at 85%. The overload came from parallel full suites, 12 tests wide each, the old-host rebuild in every merge and audit, and up to 7 boosted sessions. The width cap and the old-host cache address the suites; nothing yet holds new sessions while the Mac pages.
 
+## 2026-11-08 08:49:29 config-seal-covers isn't re-rolled after "reconsider the approach". Its one open Important finding, F6, is a progress-line wording collision with config-seal-a-merge's test on main, so a fresh worker continues on the same branch to merge main and restore the wording. Round 2 confirmed the plugin seal logic, F1 and the always-Accept rule for plugin updates.
+
+A re-roll would throw away a seal the audit has confirmed in order to fix one line of text. The collision came from the two seal tasks running side by side, the planning slip already covered by the 2026-11-08 rule to chain tasks that share a file.
+

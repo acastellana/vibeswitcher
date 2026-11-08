@@ -4147,3 +4147,13 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 08:31 Pushed main at f38147da (74 commits) to origin/main, on the user's click
 - 2026-11-08 08:43 Merged the-old-host-build: The old-host build the upgrade tests need is cached once per Mac, not rebuilt in every merge and audit (no audit: review none) (in a batch, on a test run of its own) (build ebed973e8025)
 - 2026-11-08 08:43 Didn't merge auto-advance-doesn-t in the batch: tests fail with it on main (ctrlCLetsGoOfTheLock()); back to its worker
+- 2026-11-08 08:43 Started a worker on auto-advance-doesn-t
+- 2026-11-08 08:43 Automatically (auto_advance): Merge of auto-advance-doesn-t failed: Tests fail rebased onto main (in a batch): ctrlCLetsGoOfTheLock() Sent its worker the output; it's back at work.
+- 2026-11-08 08:43 Automatically (auto_advance): Merged the-old-host-build at 2f1dc217 (review none: its worker's done report on cad00ddf) into main as one batch, on 2 test runs for 2 tasks.
+- 2026-11-08 08:43 Automatically (auto_advance): Cleaned up the-old-host-build (freed 2.2 GB of build output and temporary folders). It stays done.
+- 2026-11-08 08:46 Released starts-and-audits-wait's worker (idle since its done report on ab8d28c6) while its audit runs
+- 2026-11-08 08:46 Automatically (auto_advance): Started the audit of starts-and-audits-wait at ab8d28c6 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 08:49 Audit of config-seal-covers: complete, clean, round 2: 2 Important (1 open), 4 Nit (3 open)
+- 2026-11-08 08:49 Started a worker on config-seal-covers
+- 2026-11-08 08:49 Automatically (auto_advance): Started a worker on config-seal-covers (Config seal covers plugins and the hook scripts settings name), its after tasks done (branch-code-can-t).
+- 2026-11-08 08:49 Automatically (auto_advance): Sent config-seal-covers's worker the open Important findings config-seal-covers:F6 from its audit at d4d2e472.
