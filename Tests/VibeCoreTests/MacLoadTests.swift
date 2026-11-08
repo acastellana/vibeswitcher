@@ -423,6 +423,51 @@ extension LeadToolsetTests {
         #expect(runtime.loadReads - reads == 4)
     }
 
+    /// The Mac's limits for a wait for the load, on `mac`'s clocks: at the wait's second poll, `then` happens to the Mac.
+    func loadWait(_ lead: LeadToolset, mac: MergeRunMacSleepTests.Mac, then: @escaping () -> Void) {
+        var polls = 0
+        lead.macTime = mac.time
+        lead.loadPoll = 0.01
+        lead.macLimits = {
+            polls += 1
+            if polls == 2 { then() }
+            return MacLimits(maxSessions: 6, loadThreshold: 24)
+        }
+    }
+
+    /// The Mac sleeps 2 hours through merge's 45-minute wait for the load: the wait goes on awake, and ends when the load
+    /// drops. Its polls are the test's events, on one thread: no time is waited for.
+    @Test func aWaitForTheLoadTheMacSleepsThroughIsNotOver() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let mac = MergeRunMacSleepTests.Mac()
+        loadWait(lead, mac: mac) { mac.sleep(2 * 60 * 60) }
+        runtime.loadReadings = [150, 150, 150, 150, 3]
+        var workflow = LeadWorkflow()
+        workflow.testTimeoutMinutes = 45
+        let waited = try lead.waitForLoad(workflow, slug: "add-b")
+        #expect(waited?.from == 150)
+    }
+
+    /// The limit still holds: a wait that really had its 45 awake minutes refuses, the load still high.
+    @Test func aWaitForTheLoadPastItsLimitInAwakeTimeRefuses() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let mac = MergeRunMacSleepTests.Mac()
+        loadWait(lead, mac: mac) { mac.stayAwake(46 * 60) }
+        runtime.load = 150
+        var workflow = LeadWorkflow()
+        workflow.testTimeoutMinutes = 45
+        do {
+            _ = try lead.waitForLoad(workflow, slug: "add-b")
+            Issue.record("it never refused")
+        } catch {
+            #expect(String(describing: error).contains("stayed above load_threshold"), "\(error)")
+        }
+    }
+
     @Test func mergeRefusesWhenTheLoadStaysAboveTheThreshold() throws {
         let root = try repo()
         let runtime = FakeRuntime()

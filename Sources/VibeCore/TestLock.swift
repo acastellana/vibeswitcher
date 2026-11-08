@@ -49,11 +49,11 @@ public struct TestLock: Sendable {
         let slots = max(1, slots)
         return max(2, (max(1, cores) + slots - 1) / slots)
     }
-    /// How long `vs-heavy` lets its command run before it ends its group, when set ("90", "90m", "30s", "2h"); else 60
-    /// min. The lead gives its sessions the project's test_timeout_min, when the workflow sets one of its own.
+    /// How long `vs-heavy` lets its command run, in time the Mac was awake, before it ends its group, when set ("90",
+    /// "90m", "30s", "2h"); else 60 min. The lead gives its sessions the project's test_timeout_min, when the workflow sets one of its own.
     public static let timeoutVariable = "VIBESWITCHER_HEAVY_TIMEOUT"
     /// How long `vs-heavy` lets its command go without progress (no new output, almost no CPU in its group, the Mac
-    /// under load_threshold) before it ends its group as past --timeout, when set ("10", "10m", "90s"; "0" or "off":
+    /// under load_threshold), in time the Mac was awake, before it ends its group as past --timeout, when set ("10", "10m", "90s"; "0" or "off":
     /// never); else 10 min (`StallWatch`). The lead gives its sessions the project's stall_min, when the workflow sets
     /// one of its own.
     public static let stallVariable = "VIBESWITCHER_HEAVY_STALL"
@@ -572,9 +572,13 @@ public struct TestLock: Sendable {
 
     /// Waits in line for a slot up to `timeout` (checking `cancel`), takes the first it may, and writes `what` (run in
     /// `directory`) as its holder. While it waits, `waiting` hears who holds them and who's in line before it (first
-    /// first), at once and then every `every`.
+    /// first), at once and then every `every`. `timeout`, `every` and the seconds it says it waited count the time the
+    /// Mac was awake (`time`).
     public func acquire(as what: String, in directory: String? = nil, timeout: TimeInterval, cancel: ShellCancel? = ShellCancel.current,
-                        every: TimeInterval = 30, waiting: (([Holder], [Waiter], TimeInterval) -> Void)? = nil) -> Outcome {
+                        every: TimeInterval = 30, time: MacTime = .real, waiting: (([Holder], [Waiter], TimeInterval) -> Void)? = nil) -> Outcome {
+        // Its limit counts the time the Mac was awake, as a merge's run does (`Shell.run`): a Mac that slept through the
+        // wait hasn't waited, and the first look after waking would find test_timeout_min passed.
+        let clock = time.awake
         let folder = self.directory
         do { try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true)) } catch {
             return .failed("Couldn't make \(folder) for the test and build lock (\(error.localizedDescription)).")
@@ -603,9 +607,9 @@ public struct TestLock: Sendable {
             unlink(ticketPath(ticket.number))
             close(ticket.fd)
         }
-        let start = Date()
+        let start = clock()
         var waitedFor: [Holder] = []
-        var told: Date?
+        var told: TimeInterval?
         while true {
             let ahead = waiters(before: ticket.number)
             // The slots no one before it may take.
@@ -616,15 +620,15 @@ public struct TestLock: Sendable {
                 let index = free + 1
                 try? VibePaths.writePrivate(Data((note() + "\n" + Self.record(in: directory)).utf8), to: URL(fileURLWithPath: slotPath(index) + ".holder"))
                 try? VibePaths.writePrivate(Data("pid \(getpid())\n".utf8), to: URL(fileURLWithPath: slotPath(index) + ".active"))
-                return .held(Held(fd: fd, path: slotPath(index), every: sampleEvery), waited: Date().timeIntervalSince(start), after: waitedFor)
+                return .held(Held(fd: fd, path: slotPath(index), every: sampleEvery), waited: clock() - start, after: waitedFor)
             }
             if waitedFor.isEmpty { waitedFor = (1...slots).map(holder) }
             if cancel?.isCancelled == true { return .cancelled }
-            let now = Date()
-            if now.timeIntervalSince(start) >= timeout { return .busy(holders: (1...slots).map(holder)) }
-            if let waiting, told.map({ now.timeIntervalSince($0) >= every }) ?? true {
+            let now = clock()
+            if now - start >= timeout { return .busy(holders: (1...slots).map(holder)) }
+            if let waiting, told.map({ now - $0 >= every }) ?? true {
                 told = now
-                waiting((1...slots).map(holder), ahead, now.timeIntervalSince(start))
+                waiting((1...slots).map(holder), ahead, now - start)
             }
             usleep(useconds_t(min(500_000, max(10_000, every * 1_000_000 / 2))))
         }

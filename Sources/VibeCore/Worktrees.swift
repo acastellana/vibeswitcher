@@ -308,9 +308,9 @@ public enum Shell {
                 let at = Date(timeIntervalSinceReferenceDate: looked)
                 if judge?.observe(look, at: at) == true, process.isRunning {
                     // What it was stuck on, read before it's stopped: no debugger, no sample; the kernel's records.
-                    let (test, tail) = StallWatch.stuck(in: output.text + (interleaved ? "" : "\n" + errors.text))
+                    let (test, unknown, tail) = StallWatch.stuck(in: output.text + (interleaved ? "" : "\n" + errors.text))
                     stall = StallWatch.Stall(idle: judge?.idle(at: at) ?? watch.after, load: look.load, loadLimit: watch.loadLimit,
-                                             lastTest: test, processes: StallWatch.lines(members ?? []), tail: tail)
+                                             lastTest: test, unknownTests: unknown, processes: StallWatch.lines(members ?? []), tail: tail)
                     break
                 }
                 nextLook = looked + watch.every
@@ -1316,7 +1316,7 @@ public enum Worktrees {
         let runs = [setup, test].contains { !($0 ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
         if let lock, runs {
             let slots = lock.slots == 1 ? "its one slot" : "all \(lock.slots) slots"
-            let outcome = lock.acquire(as: holder, in: place, timeout: timeout, cancel: cancel, every: progress?.every ?? 30,
+            let outcome = lock.acquire(as: holder, in: place, timeout: timeout, cancel: cancel, every: progress?.every ?? 30, time: time,
                                        waiting: progress.map { progress in { holders, ahead, waited in
                 progress.send("Waiting \(duration(waited)) for a slot of the Mac-wide test and build lock (\(slots) held), \(TestLock.place(behind: ahead)): \(TestLock.text(holders)).")
             } })
@@ -2177,14 +2177,15 @@ public struct TestFailures: Equatable, Sendable {
     public var lines: [String] = []
     /// Swift Testing's closing line ("✘ Test run with 547 tests failed after … with 1 issue.").
     public var run: String?
-    /// Tests that started and never ended (the test process crashed or was stopped).
+    /// Tests that printed their start and never ended (the test process crashed or was stopped): some may only have
+    /// been queued for a slot, so this says a run stopped partway, not what was running (`running`).
     public var unfinished: [String] = []
     /// Error lines that name no test: the compiler's, a crash's.
     public var errors: [String] = []
 
     public init(output: String) {
         // Lines since the last issue line, while they may still be part of it.
-        var started: [String] = [], ended: Set<String> = [], inIssue: Int?
+        var started: [String] = [], ended: [String] = [], inIssue: Int?
         for raw in output.components(separatedBy: "\n") {
             let plain = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
             let line = plain.trimmingCharacters(in: .whitespaces)
@@ -2206,12 +2207,12 @@ public struct TestFailures: Equatable, Sendable {
                 // A failure with no issue line of its own (a time limit) still shows.
                 if !tests.contains(name) { lines.append(line) }
                 add(name)
-                ended.insert(name)
+                ended.append(name)
             } else if let name = Self.swiftTesting(line, " started.", marks: ["◇"]) {
                 started.append(name)
             } else if let name = Self.swiftTesting(line, " passed after", marks: ["✔", "􁁛", "➜", "􀟈"]) ?? Self.swiftTesting(line, " skipped")
                         ?? Self.passedWithKnownIssues(line) {
-                ended.insert(name)
+                ended.append(name)
             } else if line.range(of: #"^[✘􀢄] Test run with "#, options: .regularExpression) != nil {
                 run = line
             } else if let match = line.range(of: #": error: -?\[?[^ :\]]+[ .][^ :\]]+\]? : "#, options: .regularExpression) {
@@ -2225,7 +2226,21 @@ public struct TestFailures: Equatable, Sendable {
                 errors.append(line)
             }
         }
-        unfinished = started.filter { !ended.contains($0) }
+        unfinished = Self.stillOpen(started, ended: ended)
+    }
+
+    /// The unfinished tests that were executing: the only one, when there's just one (`MergeRerun.running` says why
+    /// two or more can't be told from queued ones). Swift Testing's lines only, as `unfinished` is.
+    public var running: [String] { unfinished.count == 1 ? unfinished : [] }
+
+    /// `started` without one start for each of `ended`, in order: a test that started twice and ended once is still open.
+    static func stillOpen(_ started: [String], ended: [String]) -> [String] {
+        var left = Dictionary(ended.map { ($0, 1) }, uniquingKeysWith: +)
+        return started.filter { name in
+            guard let count = left[name], count > 0 else { return true }
+            left[name] = count - 1
+            return false
+        }
     }
 
     /// The files the compiler's errors are in ("/path/File.swift:51:10: error: …"), in the order they first appear.
@@ -2277,7 +2292,12 @@ public struct TestFailures: Equatable, Sendable {
             head = ["Failing tests (\(tests.count)): \(tests.prefix(20).joined(separator: ", "))\(more)"]
             body = lines + [run].compactMap { $0 }
         } else if !unfinished.isEmpty || !errors.isEmpty {
-            if !unfinished.isEmpty { head.append("Started and never finished: \(unfinished.joined(separator: ", "))") }
+            if !running.isEmpty {
+                head.append("Started and never finished: \(running.joined(separator: ", "))")
+            } else if !unfinished.isEmpty {
+                let said = MergeRerun.cantTell(unfinished.count)
+                head.append(said.prefix(1).uppercased() + said.dropFirst())
+            }
             body = errors + [run].compactMap { $0 }
             if !errors.isEmpty { head.append(unfinished.isEmpty ? "No test failed by name; the errors:" : "The errors:") }
         } else {

@@ -44,9 +44,9 @@ public enum MergeRerun {
               !output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker) else { return nil }
         let failures = TestFailures(output: output)
         var tests = failures.tests
-        for name in failures.unfinished where !tests.contains(name) { tests.append(name) }
-        // A build that failed fails again.
-        if tests.isEmpty, !failures.errors.isEmpty { return nil }
+        for name in failures.running where !tests.contains(name) { tests.append(name) }
+        // A build that failed fails again. (A crash that left tests unfinished isn't one, named or not.)
+        if tests.isEmpty, failures.unfinished.isEmpty, !failures.errors.isEmpty { return nil }
         var again = workflow
         let patterns = tests.map(pattern)
         // A run that crashed or was stopped (tests started and never ended) never ran the rest of the suite: it all
@@ -274,11 +274,56 @@ public enum MergeRerun {
     /// '-[Module.Suite testName]' started." with no "passed", "failed" or "skipped" one. On 2026-10-28 a merge hung
     /// 45 min and its log was in the vault's scratch, which no session can read: its fixer had to guess which test hung.
     public static func hung(in output: String) -> [String] {
-        var started: [String] = [], ended: Set<String> = []
-        for raw in output.components(separatedBy: "\n") {
+        var seen: Set<String> = []
+        return openTests(in: output).map(\.name).filter { seen.insert($0).inserted }
+    }
+
+    /// What a stopped run's `output` can say of which tests were executing when it stopped (`running(in:)`).
+    public struct Running: Equatable, Sendable {
+        /// The tests that were executing, in the order they started.
+        public var named: [String] = []
+        /// How many tests printed their start and never finished when the output can't say which of them were
+        /// executing; 0 when it can.
+        public var unknown = 0
+
+        public init(named: [String] = [], unknown: Int = 0) {
+            self.named = named
+            self.unknown = unknown
+        }
+    }
+
+    /// Which tests a stopped run's `output` shows executing. Swift Testing prints a test's "started" before the test
+    /// gets a slot of the run's width (SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH), and hands slots out in no order
+    /// its output shows, so a "started" with no end doesn't mean running: on 2026-11-08 about 2,800 tests only queued
+    /// for a slot were listed as running, and whichever printed last would have been blamed. One such test alone is
+    /// certain, though: a test waits for a slot only while others that haven't finished hold every one, and those would
+    /// have printed their start too. Two or more could be any mix of running and queued, whatever the width, so none
+    /// is named. XCTest prints its "started" as the test begins, one at a time: each is executing.
+    public static func running(in output: String) -> Running {
+        let open = openTests(in: output)
+        let plain = open.filter(\.swiftTesting)
+        var seen: Set<String> = []
+        let named = open.filter { (!$0.swiftTesting || plain.count == 1) && seen.insert($0.name).inserted }.map(\.name)
+        return Running(named: named, unknown: plain.count > 1 ? plain.count : 0)
+    }
+
+    /// What's said of a stopped run with `count` tests the output can't tell apart (`Running.unknown`).
+    public static func cantTell(_ count: Int) -> String {
+        "\(count) tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running"
+    }
+
+    /// Each test that started more times than it ended, in the order they started (one that started twice and ended
+    /// once is still open: two suites may have a test of one name), and whether it's Swift Testing's.
+    private static func openTests(in output: String) -> [(name: String, swiftTesting: Bool)] {
+        var started: [(name: String, swiftTesting: Bool)] = [], ended: [String] = []
+        var lines = output.components(separatedBy: "\n")
+        // A stall's report comes last and repeats the run's last lines: they aren't the run's a second time, and each
+        // open test counted twice would make one hung test look like two that can't be told apart.
+        if let report = lines.lastIndex(where: { $0.hasPrefix(StallWatch.Stall.reportStart) }) { lines.removeSubrange(report...) }
+        for raw in lines {
             let line = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
             let range = NSRange(line.startIndex..., in: line)
-            var name: String, event: String
+            var name: String, event: String, swiftTesting = true
             if let match = swiftTestingEvent.firstMatch(in: line, range: range),
                let found = Range(match.range(at: 1), in: line), let what = Range(match.range(at: 2), in: line) {
                 name = String(line[found])
@@ -289,22 +334,31 @@ public enum MergeRerun {
                       let found = Range(match.range(at: 1), in: line), let what = Range(match.range(at: 2), in: line) {
                 name = TestFailures.xcTestName(line[found])
                 event = String(line[what])
+                swiftTesting = false
             } else {
                 continue
             }
             if event.hasPrefix("started") {
-                if !started.contains(name) { started.append(name) }
+                started.append((name, swiftTesting))
             } else {
-                ended.insert(name)
+                ended.append(name)
             }
         }
-        return started.filter { !ended.contains($0) }
+        let open = TestFailures.stillOpen(started.map(\.name), ended: ended)
+        var left = Dictionary(open.map { ($0, 1) }, uniquingKeysWith: +)
+        return started.filter { test in
+            guard let count = left[test.name], count > 0 else { return false }
+            left[test.name] = count - 1
+            return true
+        }
     }
 
     /// What a stopped run was doing, from its output (`phase(in:)`).
     public enum Phase: Equatable, Sendable {
-        /// Running tests: those that started and never finished (`hung(in:)`), maybe none.
+        /// Running tests: those that were executing when it stopped (`running(in:)`), maybe none.
         case testing(unfinished: [String])
+        /// Running tests, `open` of them started and unfinished, and the output can't say which were executing.
+        case testingUnknown(open: Int)
         /// Building, no test started since its last build line: that line (a module or file it was compiling).
         case building(last: String)
         /// Neither shows in its output.
@@ -317,12 +371,14 @@ public enum MergeRerun {
     /// Any line of a test run: Swift Testing's ("◇ Test run started.", a test's start or end) or XCTest's.
     private static let testLine = try! NSRegularExpression(pattern: #"^(\S{1,2} Test .+ (started\.$|passed after |failed after |skipped)|Test (Case|Suite) ')"#)
 
-    /// The phase a stopped run's `output` was in: testing when a test started and never finished, else whichever came
+    /// The phase a stopped run's `output` was in: testing when a test was executing or the output can't say which was,
+    /// else whichever came
     /// last of a build line and a test line. On 2026-11-08 a merge hung 45 min in its test target's compile, with only
     /// compiler warnings in its tail, and the hung file said only "No test in its output started and never finished".
     public static func phase(in output: String) -> Phase {
-        let unfinished = hung(in: output)
-        if !unfinished.isEmpty { return .testing(unfinished: unfinished) }
+        let shown = running(in: output)
+        if !shown.named.isEmpty { return .testing(unfinished: shown.named) }
+        if shown.unknown > 0 { return .testingUnknown(open: shown.unknown) }
         var lastBuild: String?, testedAfter = false
         for raw in output.components(separatedBy: "\n") {
             let line = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
@@ -345,7 +401,8 @@ public enum MergeRerun {
     }
     static let quietPrefix = "Its last output line came "
 
-    /// What the hung file and the lead's message say of `output`'s phase: "Started and never finished: x(), y()." /
+    /// What the hung file and the lead's message say of `output`'s phase: "Started and never finished: x()." (or, when
+    /// several Swift Testing tests are open, `cantTell`) /
     /// "No test in its output started and never finished." while testing (or unknown), "It was building and no test
     /// had started; its last build line: [223/295] Compiling …" while building. Secrets masked, the line cut at
     /// `evidenceWidth`.
@@ -353,6 +410,8 @@ public enum MergeRerun {
         switch phase(in: output) {
         case .testing(let unfinished) where !unfinished.isEmpty:
             return "Started and never finished: " + Redaction.secrets(in: unfinished.joined(separator: ", ")) + "."
+        case .testingUnknown(let open):
+            return cantTell(open).prefix(1).uppercased() + cantTell(open).dropFirst() + "."
         case .building(let last):
             let line = Redaction.secrets(in: last)
             return "It was building and no test had started; its last build line: "
@@ -389,6 +448,8 @@ public enum MergeRerun {
         switch phase(in: masked.joined(separator: "\n")) {
         case .testing(let tests) where !tests.isEmpty:
             text += "\nIt was testing.\nStarted and never finished (secrets masked):\n" + tests.map { "    " + $0 }.joined(separator: "\n") + "\n"
+        case .testingUnknown(let open):
+            text += "\nIt was testing.\n" + cantTell(open) + ".\n"
         case .building(let last):
             let line = last.count > evidenceWidth ? String(last.prefix(evidenceWidth - 1)) + "…" : last
             text += "\nIt was building and no test had started. Its last build line (the module or file it was compiling):\n    \(line)\n"

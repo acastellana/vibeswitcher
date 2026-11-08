@@ -94,8 +94,13 @@ public struct StallWatch: Sendable {
         /// The Mac's 1-minute load when it was stopped (nil: unread), and the limit it was under.
         public var load: Double?
         public var loadLimit: Double
-        /// The last test its output shows started and never finished (`MergeRerun.hung`); nil when none is.
+        /// The last test its output shows executing when it was stopped (`MergeRerun.running`); nil when none is or
+        /// the output can't say. Never a test whose "started" is all that's known of it: Swift Testing prints that before
+        /// a test gets a slot, so among several unfinished the last to print is likelier queued than stuck, and this
+        /// name goes in the flake ledger, where three of them plan a task to fix an innocent test.
         public var lastTest: String?
+        /// How many tests its output shows started and unfinished when it can't say which were executing; 0 when it can.
+        public var unknownTests = 0
         /// Its processes when it was stopped: "pid ppid state cpu name" lines.
         public var processes: [String]
         /// Its output's last lines.
@@ -107,8 +112,13 @@ public struct StallWatch: Sendable {
             let load = self.load.map { "at load \(MacLoad.number($0)) under load_threshold \(MacLoad.number(loadLimit))" }
                 ?? "load unread, load_threshold \(MacLoad.number(loadLimit))"
             return "no progress for \(Worktrees.duration(idle)) (no new output and under 1 % of a core, \(load)); "
-                + (lastTest.map { "last test started: \($0)" } ?? "no test in its output started and never finished")
+                + (lastTest.map { "last test started: \($0)" }
+                    ?? (unknownTests > 0 ? MergeRerun.cantTell(unknownTests) : "no test in its output started and never finished"))
         }
+
+        /// How the report's first line starts, which is how what reads a stopped run's output finds where the run's own
+        /// ended (`MergeRerun.openTests`): the report repeats its last lines.
+        public static let reportStart = "Stopped: no progress for "
 
         /// The whole report: the summary, its processes and its output's last lines.
         public var report: String {
@@ -123,13 +133,15 @@ public struct StallWatch: Sendable {
         }
     }
 
-    /// The last test `output` shows started and never finished, and its last `count` non-empty lines.
-    static func stuck(in output: String, count: Int = MergeRerun.hungTail) -> (test: String?, tail: [String]) {
+    /// The last test `output` shows executing (`Stall.lastTest`), how many it can't tell apart (`Stall.unknownTests`),
+    /// and its last `count` non-empty lines.
+    static func stuck(in output: String, count: Int = MergeRerun.hungTail) -> (test: String?, unknown: Int, tail: [String]) {
         let lines = output.components(separatedBy: "\n")
             .map { $0.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
                 .replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression) }
         let tail = Array(lines.reversed().drop { $0.isEmpty }.prefix(count).reversed())
-        return (MergeRerun.hung(in: lines.joined(separator: "\n")).last, tail)
+        let running = MergeRerun.running(in: lines.joined(separator: "\n"))
+        return (running.named.last, running.unknown, tail)
     }
 
     // MARK: A run's process tree

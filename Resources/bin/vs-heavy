@@ -57,8 +57,9 @@
 # while the Mac's 1-minute load is under load_threshold (mac-limits.json's loadThreshold, else twice the cores; raised
 # while boosted; VIBESWITCHER_HEAVY_LOAD stands in for the load, tests): no new output, its group under 1 % of a core,
 # no new process in it. A loaded Mac starving it isn't a hang: while the load is at or above the threshold, its
-# silence isn't counted, nor is time the Mac slept (a look that comes half a --stall late starts the count again). It's
-# looked at at least 4 times a --stall. Its output is watched where it can be seen without coming between COMMAND and it: a file
+# silence isn't counted (nor is a look that comes half a --stall late: it starts the count again). Both --timeout and
+# --stall count the time the Mac was awake (CLOCK_UPTIME_RAW, as a merge's run does): sleep isn't a run's time, and on
+# 2026-11-08 a merge's run was called hung with 4.9 minutes awake out of 51.8. It's looked at at least 4 times a --stall. Its output is watched where it can be seen without coming between COMMAND and it: a file
 # (its size) or a terminal (when it was last written); when either of its outputs goes elsewhere (a pipe, /dev/null),
 # --stall is off and only --timeout ends it. Stopping it, it says so first ("no progress for 10 min …; last test
 # started: X"), then its processes (pid, parent, state, CPU seconds, name: the kernel's records, no debugger) and,
@@ -347,6 +348,21 @@ done
 # more since the look before (CPU of processes that ended in between isn't seen; new ones count whole). Its stdin is this script's
 # (`<&0`: a script's background job's would be /dev/null).
 /usr/bin/perl -MPOSIX=:sys_wait_h -MTime::HiRes=time -e '
+    # The clocks: (the wall clock, the time the Mac was awake). VIBESWITCHER_HEAVY_CLOCK is a file standing in for both
+    # ("WALL AWAKE", seconds; tests), each reading noted with a byte in its .reads beside it.
+    sub clocks {
+        my $given = $ENV{VIBESWITCHER_HEAVY_CLOCK} // "";
+        if (length $given && open(my $in, "<", $given)) {
+            my ($wall, $awake) = split " ", (scalar <$in>) // "";
+            if (open(my $reads, ">>", "$given.reads")) { print $reads "."; close $reads; }
+            return ($wall + 0, $awake + 0) if defined $awake;
+        }
+        my $awake = eval { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_UPTIME_RAW()) };
+        return (time, defined $awake && $awake > 0 ? $awake : time);
+    }
+    # What --timeout and --stall count on: the time the Mac was awake, as a merge'\''s run does (Shell.run). A Mac that
+    # slept through a run gave it no time to finish, and the first look after waking would find the limit passed.
+    sub now { (clocks())[1] }
     my ($script, $what, $limit, $active, $every, $stall, $loadLimit, $loadGiven, @command) = @ARGV;
     my $stop;
     $SIG{$_} = sub { $stop //= $_[0] } for qw(TERM INT HUP);
@@ -381,7 +397,7 @@ done
     }
     # Either side may run first: the group is made before anything is sent to it.
     POSIX::setpgid($child, $child);
-    my ($start, $status, $timedOut) = (time, undef, 0);
+    my ($start, $status, $timedOut) = (now(), undef, 0);
     # The user'\''s own processes, from ps: pid => [parent, group, CPU seconds, start (lstart)]; undef when it did not
     # answer in 5 s.
     sub table {
@@ -427,11 +443,11 @@ done
         my $table = family(\%tree) or return undef;
         return { map { $_ => $table->{$_}[2] } keys %tree };
     }
-    # Says it made no progress for $idle seconds (at load $load), the last test its output shows started and never
-    # finished, its processes, and its output'\''s last 60 lines (from a file: F_GETPATH names it).
+    # Says it made no progress for $idle seconds (at load $load), the last test its output shows executing (or that it
+    # cannot tell which were), its processes, and its output'\''s last 60 lines (from a file: F_GETPATH names it).
     sub report {
         my ($idle, $load) = @_;
-        my ($test, @tail);
+        my ($test, $unknown, @tail);
         for my $output (grep { $_->[1] eq "file" } @outputs) {
             my $path = "\0" x 1024;
             fcntl($output->[0], 50, $path) or next;
@@ -446,17 +462,23 @@ done
             my (@started, %ended);
             my @lines = map { s/\e\[[0-9;]*m//gr =~ s/\s+$//r } split /\n/, $data;
             for (@lines) {
-                my ($name, $event);
+                my ($name, $event, $plain);
                 if (/^\s*\S{1,2} Test (.+?) (started\.$|passed after |failed after |skipped(?:\.$|:| with))/) {
-                    ($name, $event) = ($1, $2);
+                    ($name, $event, $plain) = ($1, $2, 1);
                     next if $name eq "run" || $name =~ /^run with /;
                 } elsif (/^\s*Test Case \x27([^\x27]+)\x27 (started|passed|failed|skipped)/) {
                     ($name, $event) = ($1, $2);
                 } else { next; }
-                if ($event =~ /^started/) { push @started, $name unless grep { $_ eq $name } @started; } else { $ended{$name} = 1; }
+                if ($event =~ /^started/) { push @started, [$name, $plain]; } else { $ended{$name}++; }
             }
-            my @open = grep { !$ended{$_} } @started;
-            $test = $open[-1] if @open;
+            # One start for each end, in order: two suites may have a test of one name.
+            my @open = grep { !($ended{$_->[0]} && $ended{$_->[0]}--) } @started;
+            # Swift Testing prints a test'\''s start before it gets a slot, so of several unfinished none can be named
+            # (`MergeRerun.running`: one alone is certain); XCTest prints it as the test begins.
+            my @plain = grep { $_->[1] } @open;
+            my @named = grep { !$_->[1] || @plain == 1 } @open;
+            $test = $named[-1][0] if @named;
+            $unknown = @plain if @plain > 1;
             my @kept = grep { length } @lines;
             @tail = @kept > 60 ? @kept[-60 .. -1] : @kept;
             last;
@@ -471,28 +493,30 @@ done
         my $at = defined $load ? sprintf("at load %.1f under load_threshold %s", $load, $loadLimit + 0) : "load unread";
         binmode(STDERR, ":utf8");
         print STDERR "vs-heavy: $what: no progress for $min (no new output and under 1 % of a core, $at): stopping it, with everything it started (exit 124); "
-            . (defined $test ? "last test started: $test" : "no test in its output started and never finished") . ".\n";
+            . (defined $test ? "last test started: $test"
+               : $unknown ? "$unknown tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can'\''t say which of them were running"
+               : "no test in its output started and never finished") . ".\n";
         print STDERR "vs-heavy: its processes (pid, parent, state, CPU time, name):\n" . join("", map { "    $_\n" } @processes) if @processes;
         print STDERR "vs-heavy: its output'\''s last " . scalar(@tail) . " lines:\n" . join("", map { "    $_\n" } @tail) if @tail;
     }
     # Looked at often enough that a few looks fit in --stall: its first only sets where CPU starts from.
     $every = $stall / 4 if $stall > 0 && $every > $stall / 4;
-    my ($seen, $next, $looked) = (undef, time + $every, time);
+    my ($seen, $next, $looked) = (undef, now() + $every, now());
     # When it last made progress: new output, 1 % of a core or a new process in its tree, or a Mac too loaded to judge.
-    my ($progressed, $marked, $loaded) = (time, mark(), undef);
+    my ($progressed, $marked, $loaded) = (now(), mark(), undef);
     while (1) {
         if (waitpid($child, WNOHANG) == $child) { $status = $?; last; }
         if (!defined $stop && (getppid() == 1 || !kill(0, $script))) {
             print STDERR "vs-heavy: $what: vs-heavy (pid $script) went: stopping it.\n";
             $stop = "TERM";
         }
-        if (!defined $stop && time - $start >= $limit) {
+        if (!defined $stop && now() - $start >= $limit) {
             my $past = $limit % 60 ? "$limit s" : $limit / 60 . " min";
             print STDERR "vs-heavy: $what: ran past $past (--timeout): stopping it, with everything it started (exit 124).\n";
             ($stop, $timedOut) = ("TERM", 1);
         }
         last if defined $stop;
-        if (time >= $next) {
+        if (now() >= $next) {
             my $wrote = mark();
             my $busy = $wrote ne $marked;
             if (my $now = cpu()) {
@@ -507,15 +531,14 @@ done
             }
             utime(undef, undef, $active) if $busy;
             $loaded = load();
-            # A look this late (the Mac slept, or this supervisor was starved) saw nothing of the time between: a
-            # fresh start, not silence.
-            my $late = time - $looked >= $every + $stall / 2;
-            $progressed = time if $busy || $late || (defined $loaded && $loaded >= $loadLimit);
-            ($marked, $looked) = ($wrote, time);
-            $next = time + $every;
+            # A look this late (this supervisor was starved) saw nothing of the time between: a fresh start, not silence.
+            my $late = now() - $looked >= $every + $stall / 2;
+            $progressed = now() if $busy || $late || (defined $loaded && $loaded >= $loadLimit);
+            ($marked, $looked) = ($wrote, now());
+            $next = now() + $every;
             # Judged only at a look, on what that look saw.
-            if ($stall > 0 && time - $progressed >= $stall) {
-                report(time - $progressed, $loaded);
+            if ($stall > 0 && now() - $progressed >= $stall) {
+                report(now() - $progressed, $loaded);
                 ($stop, $timedOut) = ("TERM", 1);
                 last;
             }

@@ -205,6 +205,8 @@ public final class LeadToolset: MCPToolset {
     public var codexUsage: CodexUsageReader
     /// How often merge reads the load again while it waits for it to drop below load_threshold.
     var loadPoll: TimeInterval = 15
+    /// The clocks merge's wait for the load counts on (`waitForLoad`). Faked in tests.
+    var macTime: MacTime = .real
     /// The Mac-wide limits in force (see `MacLimits`): Settings', raised while the app says Boost mode is on
     /// (`MacLimits.current`), read at each call. Faked in tests.
     var macLimits: () -> MacLimits = { MacLimits.current() }
@@ -4040,38 +4042,41 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// Waits while the Mac's load (`steadyLoad`) is above load_threshold, reading it every `loadPoll`, for at most
-    /// test_timeout_min; nil when it didn't wait, else how long and from what load. Throws, with the numbers, when the
+    /// test_timeout_min of the time the Mac was awake; nil when it didn't wait, else how long and from what load. Throws, with the numbers, when the
     /// load didn't drop in time (nothing was tested). The limits are read again at each poll: Boost mode ending during
     /// the wait puts load_threshold back to the normal one at once.
     /// `doing` and `done`: what waits ("merge", "merged"; a revert's say so).
     func waitForLoad(_ workflow: LeadWorkflow, slug: String, doing: String = "merge", done: String = "merged") throws -> (after: TimeInterval, from: Double)? {
-        let start = Date()
-        let deadline = start.addingTimeInterval(workflow.testTimeout)
+        // Its limit counts the time the Mac was awake, as a merge's run does (`Shell.run`): a Mac that slept through the
+        // wait hasn't waited, and the load it reads on waking says nothing of the time between.
+        let clock = macTime.awake
+        let start = clock()
+        let deadline = start + workflow.testTimeout
         var limits = macLimits()
         guard let first = runtime.steadyLoad(), first > limits.loadLimit else { return nil }
         var load: Double? = first
         let progress = ToolProgress.current
-        var told: Date?
+        var told: TimeInterval?
         while let current = load, current > limits.loadLimit {
-            if let progress, told.map({ Date().timeIntervalSince($0) >= progress.every }) ?? true {
-                told = Date()
-                progress.send("Waiting \(Worktrees.duration(Date().timeIntervalSince(start))) for the Mac's load (\(MacLoad.number(current)), the greater of its 1- and 5-minute averages) to drop below load_threshold (\(MacLoad.number(limits.loadLimit))) before testing \(slug).")
+            if let progress, told.map({ clock() - $0 >= progress.every }) ?? true {
+                told = clock()
+                progress.send("Waiting \(Worktrees.duration(clock() - start)) for the Mac's load (\(MacLoad.number(current)), the greater of its 1- and 5-minute averages) to drop below load_threshold (\(MacLoad.number(limits.loadLimit))) before testing \(slug).")
             }
             if ShellCancel.current?.isCancelled == true {
                 throw Problem(text: "The \(doing) of \(slug) was cancelled while it waited for the Mac's load to drop; nothing was \(done), and \(slug) stays as it was.")
             }
-            guard Date() < deadline else {
+            guard clock() < deadline else {
                 let listing = (try? listed()) ?? []
                 let mac = (try? macLoad(listing, load: current)) ?? MacLoad.count(listing.map { ($0.label, $0.cwd, $0.live) }, load: current)
                 roomWaits.record(root: root, what: "\(doing)(\(slug))", need: 0, auto: LeadAdvance.isAutomatic)
                 throw Problem(text: "Not \(done) (nothing was tested): the Mac's load (the greater of its 1- and 5-minute averages) stayed above load_threshold for the \(Worktrees.duration(workflow.testTimeout)) \(doing) waits (test_timeout_min). Now: \(Self.macText(mac, limits, root: root)). "
                               + "Timing-sensitive tests fail on a Mac this busy, so \(slug) wasn't tested and stays as it was. \(LeadPrompts.retryWhenWoken) Meanwhile start no workers or audits (they'd add to the load), and tell the user if it stays this busy.")
             }
-            Thread.sleep(forTimeInterval: min(loadPoll, progress?.every ?? loadPoll, max(0, deadline.timeIntervalSinceNow)))
+            Thread.sleep(forTimeInterval: min(loadPoll, progress?.every ?? loadPoll, max(0, deadline - clock())))
             load = runtime.steadyLoad()
             limits = macLimits()
         }
-        return (Date().timeIntervalSince(start), first)
+        return (clock() - start, first)
     }
 
     /// What became of a session asked to end: `failure` nil when its process is gone.

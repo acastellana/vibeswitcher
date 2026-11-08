@@ -136,7 +136,96 @@ struct StallWatchTests {
         #expect(LeadWorkflow.configurable.contains("stall_min"))
     }
 
+    // MARK: Which tests it names
+
+    /// A Swift Testing run of 200 tests, `open` of them started and unfinished. Swift Testing prints "started" before a
+    /// test gets a slot (seen at width 2 on 2026-11-08: 15 tests' lines at once, slots handed out in another order), so
+    /// on that day about 2,800 tests only queued for a slot were listed as running.
+    static func run(open: Int) -> String {
+        let started = (1...200).map { "◇ Test test\($0)() started." }
+        let passed = open == 200 ? [] : (1...(200 - open)).map { "✔ Test test\($0)() passed after 1.2 seconds." }
+        return (["◇ Test run started."] + started + passed).joined(separator: "\n") + "\n"
+    }
+
+    static let cantTell150 = "150 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running"
+
+    /// A run stopped with tests queued names none of them: not as "the last test started" (the one the flake ledger
+    /// would blame), not in the hung file or the failure's summary, and it says plainly that it can't tell.
+    @Test func aRunStoppedWithTestsQueuedNamesNoneAndSaysItCantTell() throws {
+        let output = Self.run(open: 150)
+        let (test, unknown, _) = StallWatch.stuck(in: output)
+        #expect(test == nil && unknown == 150, "\(String(describing: test)) \(unknown)")
+        let stall = StallWatch.Stall(idle: 600, load: 4.2, loadLimit: 24, lastTest: test, unknownTests: unknown, processes: [], tail: [])
+        #expect(stall.summary.hasSuffix("; " + Self.cantTell150), "\(stall.summary)")
+        #expect(!stall.summary.contains("last test started") && !stall.summary.contains("test200()"), "\(stall.summary)")
+        #expect(MergeRerun.phase(in: output) == .testingUnknown(open: 150))
+        let capital = "1" + Self.cantTell150.dropFirst()
+        #expect(MergeRerun.phaseText(output) == capital + ".", "\(MergeRerun.phaseText(output))")
+        let file = MergeRerun.hungLog(task: "add-b", commit: "0123", command: "test command", after: 600, output: output)
+        #expect(file.contains("\nIt was testing.\n" + Self.cantTell150 + ".\n") && !file.contains("Started and never finished"), "\(file)")
+        let failures = TestFailures(output: output)
+        #expect(failures.unfinished.count == 150 && failures.running.isEmpty)
+        let summary = try #require(failures.summary())
+        #expect(summary.hasPrefix(capital) && !summary.contains("test200()"), "\(summary)")
+    }
+
+    /// A crash with tests queued names none of them as failing, yet it stopped partway: the whole command runs again.
+    @Test func aCrashWithTestsQueuedRerunsWholeNamingNone() throws {
+        var workflow = LeadWorkflow()
+        workflow.testCommand = "bash scripts/test.sh"
+        let plan = try #require(MergeRerun.plan(after: Self.run(open: 150) + "Fatal error: boom\n", workflow: workflow))
+        #expect(!plan.filtered && plan.tests.isEmpty && !plan.command.contains("--filter"), "\(plan)")
+        #expect(MergeRerun.flakes(in: Self.run(open: 150) + "Fatal error: boom\n") == [MergeRerun.unnamed])
+    }
+
+    /// One unfinished test alone is named: a test waits for a slot only while others that haven't finished hold every
+    /// one. XCTest's are named beside any number of Swift Testing's: it prints "started" as the test begins. Two suites may
+    /// have a test of one name: one of two that started and ended once is still open, and alone.
+    @Test func oneUnfinishedTestAloneIsNamedAndXCTestsAlways() {
+        #expect(StallWatch.stuck(in: Self.run(open: 1)).test == "test200()")
+        #expect(StallWatch.stuck(in: Self.run(open: 1)).unknown == 0)
+        #expect(MergeRerun.phaseText(Self.run(open: 1)) == "Started and never finished: test200().")
+        let mixed = "◇ Test a() started.\n◇ Test b() started.\nTest Case '-[VibeCoreTests.OldTests testHangs]' started.\n"
+        #expect(MergeRerun.running(in: mixed) == MergeRerun.Running(named: ["OldTests.testHangs"], unknown: 2))
+        let twins = "◇ Test same() started.\n◇ Test same() started.\n✔ Test same() passed after 0.1 seconds.\n"
+        #expect(MergeRerun.running(in: twins) == MergeRerun.Running(named: ["same()"]))
+        #expect(MergeRerun.hung(in: twins) == ["same()"])
+        #expect(TestFailures(output: twins).running == ["same()"])
+    }
+
+    /// A stall's report repeats the output's last lines, and what's read afterwards is the output with the report after
+    /// it: its lines aren't the run's a second time. A line like the report's earlier on is only output.
+    @Test func aStallsReportIsntReadAsMoreOfTheRun() {
+        let output = "◇ Test only() started.\nwaiting"
+        let (test, unknown, tail) = StallWatch.stuck(in: output)
+        let report = StallWatch.Stall(idle: 600, load: 4.2, loadLimit: 24, lastTest: test, unknownTests: unknown, processes: ["1 0 sleeping 0.0 sleep"], tail: tail).report
+        let said = output + "\n\n" + report
+        #expect(said.contains("    ◇ Test only() started."), "\(said)")
+        #expect(MergeRerun.running(in: said) == MergeRerun.Running(named: ["only()"]), "\(MergeRerun.running(in: said))")
+        #expect(MergeRerun.phaseText(said) == "Started and never finished: only().")
+        #expect(MergeRerun.running(in: StallWatch.Stall.reportStart + "a line of its own\n" + said) == MergeRerun.Running(named: ["only()"]))
+    }
+
+    /// Stopped for real, by a merge run's watch: several tests open, the stall names none and says so.
+    @Test func aMergeRunStoppedWithSeveralOpenBlamesNone() async throws {
+        let test = "echo '◇ Test one() started.'; echo '◇ Test two() started.'; echo '◇ Test three() started.'; exec sleep \(Int(hangGuard))"
+        let (stopped, _, _) = try await check(test, stall: 2, load: 4.2)
+        guard case .hung(_, _, let output, let stall?) = stopped else { Issue.record("\(String(describing: stopped))"); return }
+        #expect(stall.lastTest == nil && stall.unknownTests == 3, "\(stall)")
+        #expect(stall.summary.contains("3 tests printed their start and never finished") && !stall.summary.contains("last test started"), "\(stall.summary)")
+        #expect(output.contains("3 tests printed their start and never finished"), "\(output)")
+    }
+
     // MARK: vs-heavy
+
+    /// vs-heavy's report has the same rule: several Swift Testing tests open names none, and says it can't tell.
+    @Test func vsHeavyNamesNoTestWhenSeveralMayBeQueued() async throws {
+        let stuck = "$| = 1; print \"\\x{25C7} Test one() started.\\n\\x{25C7} Test two() started.\\n\\x{25C7} Test three() started.\\n\"; sleep \(Int(hangGuard))"
+        let (status, output, _) = try await vsHeavy(["--as", "stuck", "--stall", "2s", "/usr/bin/perl", "-CS", "-e", stuck], load: "4.2", name: "queued")
+        #expect(status == 124, "\(output)")
+        #expect(output.contains("(exit 124); 3 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running."), "\(output)")
+        #expect(!output.contains("last test started"), "\(output)")
+    }
 
     func vsHeavy(_ arguments: [String], load: String, name: String) async throws -> (status: Int32, output: String, locks: String) {
         let locks = temp.url("heavy-locks").path, out = temp.url(name + ".out").path
