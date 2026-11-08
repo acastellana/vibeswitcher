@@ -46,7 +46,7 @@ struct MergeRunMacSleepTests {
     /// A command that says it has started (`started` appears), stays quiet in one process until `go` appears, then exits 0.
     func gated(_ name: String) -> (command: String, started: String, go: String) {
         let started = temp.url(name + "-started").path, go = temp.url(name + "-go").path
-        let wait = "select(undef, undef, undef, 0.02) until -e shift"
+        let wait = "my $go = shift; select(undef, undef, undef, 0.02) until -e $go"
         return ("touch \(RecentProjects.shellQuote(started)); exec /usr/bin/perl -e '\(wait)' \(RecentProjects.shellQuote(go))", started, go)
     }
 

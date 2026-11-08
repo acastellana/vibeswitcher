@@ -252,11 +252,14 @@ public enum Shell {
     /// the lead's terminal) isn't stopped by SIGTTOU as it takes the terminal from a background group.
     /// With `watch`, a run that makes no progress (no new output, almost no CPU in its tree, the Mac not loaded) for
     /// its `after` is stopped as one past `timeout` is: `timedOut`, with `stall` saying what it was stuck on.
+    /// `timeout`, the watch's `after` and what's said of its silence count the time the Mac was awake (`time`).
     public static func run(executable: String, args: [String], in directory: String, env: [String: String] = [:],
                            timeout: TimeInterval = 120, grace: TimeInterval = 5, interleaved: Bool = false,
                            branchCode: Bool = false, ownSession: Bool = false, watch: StallWatch? = nil,
                            time: MacTime = .real) -> Git.Result {
-        let now: () -> TimeInterval = { time.wall().timeIntervalSinceReferenceDate }
+        // Its limits count the time the Mac was awake. On 2026-11-08 a merge's run had 4.9 minutes awake out of 51.8:
+        // the first look after a dark wake found test_timeout_min passed and called it hung, and the merges behind it waited.
+        let now = time.awake
         let environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
         let out: ShellPipe, err: ShellPipe
         do {
