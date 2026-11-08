@@ -113,8 +113,8 @@ like any session. It:
 
 When the board runs out of work it posts an all-done card with what landed and what it cost. The inspector's Team tab
 shows each task's state at a glance, and the Team strip above the chat shows it without opening the tab. Leads of
-different projects can message each other if you turn that on in Settings › Project lead; every message shows in the
-Team tab. See [The project lead](docs/guide/project-lead.md).
+different projects can message each other unless you turn that off in Settings › Project lead; every message shows in
+the Team tab. See [The project lead](docs/guide/project-lead.md).
 
 ### Merge gates and reviews
 

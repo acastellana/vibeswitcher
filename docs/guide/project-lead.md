@@ -443,9 +443,9 @@ work, a merge of a sensitive path, or anything outward-facing (publishing, pushi
 
 You can message the lead any time; your message reaches it at its next step.
 
-Leads of different projects can message each other with `tell_lead`, once you turn on **Let project leads message each
-other** in Settings › Project lead. Every message, sent or refused, shows under **Between leads** in the Team tab. A
-message can't approve or grant anything.
+Leads of different projects can message each other with `tell_lead`. It's on by default; turn off **Let project leads
+message each other** in Settings › Project lead to stop it. Every message, sent or refused, shows under **Between
+leads** in the Team tab. A message can't approve or grant anything.
 
 ## The Team tab, the all-done card, receipts and revert
 
