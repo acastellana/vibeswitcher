@@ -4434,3 +4434,5 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-08 22:37 Merged the-board-and-records: The board and records stop growing without bound, and scratch folders are swept (build 767537e5ec09)
 - 2026-11-08 22:37 Automatically (auto_advance): Merged the-board-and-records (The board and records stop growing without bound, and scratch folders are swept) into main at 657f161e, on its passing audit and the full test run.
 - 2026-11-08 22:37 Automatically (auto_advance): Cleaned up the-board-and-records (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-08 22:47 Audit of the-other-time-limits at d182f5b6 tested its merged result 961cb4db onto main: the test command passed
+- 2026-11-08 22:48 Automatically (auto_advance): Started the audit of the-other-time-limits at d182f5b6 (Its review is audit).
