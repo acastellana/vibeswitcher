@@ -555,7 +555,8 @@ public final class LeadToolset: MCPToolset {
                                              "summary": P(type: "string", description: "The evidence: what you ran and what you saw"),
                                              "tests": P(type: "string", description: "How the tests went when you ran them: passed, failed, or not_run (you didn't run them)",
                                                         options: LeadVault.TestRun.allCases.map(\.rawValue)),
-                                             "findings": P(type: "array", description: Self.findingsShape, items: "object")],
+                                             "findings": P(type: "array", description: Self.findingsShape, items: "object"),
+                                             "contract_version": P(type: "integer", description: "The version of the task's contract you judged: your brief's, or the newest the lead sent you while you audited")],
                                 required: ["completion", "integrity", "summary"])]
         case .lead?:
             return [
@@ -886,6 +887,16 @@ public final class LeadToolset: MCPToolset {
         let number = (given as? NSNumber)?.doubleValue ?? (given as? String).flatMap { Double($0.trimmingCharacters(in: .whitespaces)) }
         guard let number, number >= 0, number == number.rounded() else {
             throw Problem(text: "budget_min is a whole number of minutes, 0 (no budget) or more, not \(given). Nothing was changed.")
+        }
+        return Int(number)
+    }
+
+    /// submit_audit's `contract_version`: a whole number, 1 or more; nil when none was given.
+    static func contractVersionArgument(_ given: Any?) throws -> Int? {
+        guard let given, !(given is NSNull), !((given as? String)?.isEmpty ?? false) else { return nil }
+        let number = (given as? NSNumber)?.doubleValue ?? (given as? String).flatMap { Double($0.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "vV"))) }
+        guard let number, number >= 1, number == number.rounded(), number < 1_000_000 else {
+            throw Problem(text: "contract_version is the version of the contract you judged, a whole number (your brief's, or the newest the lead sent), not \(given). Nothing was recorded; call submit_audit again.")
         }
         return Int(number)
     }
@@ -1242,6 +1253,7 @@ public final class LeadToolset: MCPToolset {
         let ending: LeadReceipt.Ending? = status == .folded ? .folded : status == .abandoned ? .abandoned : nil
         let usage = ending == nil ? nil : store.load().task(slug).map(receiptUsage)
         var changed: [String] = []
+        var contractVersion: Int?
         try boardChange { board in
             // A task in the board's archive comes back to be changed (reopened, renamed).
             guard let index = store.restore(slug, into: &board) else { return }
@@ -1271,6 +1283,7 @@ public final class LeadToolset: MCPToolset {
                 }
                 target = found
             }
+            let contractBefore = board.tasks[index].contract
             if let title = arguments["title"] as? String { board.tasks[index].title = title; changed.append("title") }
             if let goal = arguments["goal"] as? String { board.tasks[index].contract.goal = goal; changed.append("goal") }
             if arguments["acceptance"] != nil { board.tasks[index].contract.acceptance = strings(arguments["acceptance"]); changed.append("acceptance") }
@@ -1319,6 +1332,12 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].contract.context = context.isEmpty ? appended : context + "\n\n" + appended
                 if let note { board.tasks[index].keep(note) }
                 changed.append("context (added to)")
+            }
+            // A new contract is a new version (the same text given again isn't): a verifier at work hears of it below.
+            if board.tasks[index].contract != contractBefore {
+                board.tasks[index].contractVersion = board.tasks[index].contractRevision + 1
+                contractVersion = board.tasks[index].contractVersion
+                changed.append("contract now v\(board.tasks[index].contractRevision)")
             }
             if let status {
                 // Re-planned: its next worker's time counts from zero.
@@ -1369,7 +1388,9 @@ public final class LeadToolset: MCPToolset {
             return MCPToolResult(text: (changed.isEmpty ? "" : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded) ") + (try rerollTask(slug)))
         }
         let goOn = budgetCleared && status == nil ? " If its worker stopped for the budget, message(\(slug), …) to tell it to go on." : ""
-        return MCPToolResult(text: changed.isEmpty ? "Nothing to change on \(slug)." : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded)\(goOn)")
+        // An audit under way judges the new version: its verifiers are sent what changed, at their next step.
+        let heard = contractVersion == nil ? "" : sendContractChange(slug).map { " " + $0 } ?? ""
+        return MCPToolResult(text: changed.isEmpty ? "Nothing to change on \(slug)." : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded)\(goOn)\(heard)")
     }
 
     /// A task may be re-rolled while it's still to land: not merged, kept, folded or abandoned, and no merge of it under way.
@@ -2250,14 +2271,18 @@ public final class LeadToolset: MCPToolset {
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].verifier = session
             board.tasks[index].panel = panel
+            // The contract their brief was written from: an update_task from here on is sent to them (sendContractChange).
+            board.tasks[index].auditBrief = LeadAuditBrief(version: task.contractRevision, contract: task.contract)
             board.tasks[index].launched(panel?.sessions ?? [session], on: auditModel(workflow, task: task))
             board.tasks[index].noteWaits { $0.auditStarted(at: auditStart, sessions: panel?.sessions.count ?? 1) }
             // A kept task stays kept through a new audit: what holds it back hasn't changed.
             if ![.kept, .folded, .abandoned, .reverted].contains(board.tasks[index].status) { board.tasks[index].status = .review }
             board.tasks[index].evidence = nil
         }
+        // An update_task while it started went to no verifier yet (the board named none, or the one before): sent now.
+        let amended = sendContractChange(slug).map { " " + $0 } ?? ""
         // The verifier is up: its worker, idle since its done report, needn't hold a Mac slot through the audit.
-        let released = releaseWorker(slug).map { " " + $0.text } ?? ""
+        let released = amended + (releaseWorker(slug).map { " " + $0.text } ?? "")
         let flagged: String
         if !committed.isEmpty {
             flagged = " The branch changes Claude's settings or instructions (\(config.prefix(5).joined(separator: ", "))\(config.count > 5 ? ", …" : "")): the verifier runs with project settings off, and VibeSwitcher didn't answer its trust question; tell the user it waits for them to decide, and have the verifier look hard at those files."
@@ -2629,6 +2654,46 @@ public final class LeadToolset: MCPToolset {
         guard let report = task.report, let kept = try? vault.unaudited(root: root, task: task.slug), kept.reported == head else { return nil }
         guard let evidence = kept.evidence else { return report }
         return report + "\n\nIts evidence, check by check (what it says it ran and saw):\n" + evidence.lines.joined(separator: "\n")
+    }
+
+    /// Sends the verifiers its audit still waits on (live, not yet submitted) what changed in the task's contract since
+    /// the version they have (`LeadTask.auditBrief`), through the channel the lead's messages take (at their next
+    /// step), and makes the new version theirs once each was sent it: a lead's note that arrived after the audit began
+    /// reached no verifier, and two audits came back suspect on 2026-11-07 for an edit it had accepted. What the lead's
+    /// result says of it; nil when no audit is under way, or its verifiers have the current version. Under the task's
+    /// contract lock: update_task and the audit's launch may both send it, and each change goes once.
+    func sendContractChange(_ slug: String) -> String? {
+        var version = 0
+        do {
+            return try exclusively("contract-\(slug)") { () -> String? in
+                guard let task = store.load().task(slug), task.evidence == nil, let brief = task.auditBrief,
+                      brief.version < task.contractRevision else { return nil }
+                version = task.contractRevision
+                let live = Set(try listed().filter(\.live).map(\.id))
+                let verifiers = task.awaitedVerifiers.filter(live.contains)
+                guard !verifiers.isEmpty else { return nil }
+                let text = LeadPrompts.contractAmended(slug: slug, from: brief.version, to: version, changes: task.contract.changes(from: brief.contract))
+                var failed: [String] = []
+                for verifier in verifiers {
+                    do { _ = try runtime.steer(.session(verifier), from: .lead("lead of \(project)"), text: text, clearDraft: false) } catch {
+                        failed.append("\(verifier): \(error)")
+                    }
+                }
+                let who = verifiers.count == 1 ? "Its audit's verifier (session \(verifiers[0]))" : "Its audit's \(verifiers.count) finders still at work"
+                guard failed.isEmpty else {
+                    return "\(who) couldn't all be sent the change (\(failed.joined(separator: "; "))): its verdict will say it judged contract v\(brief.version), not v\(version)."
+                }
+                try store.update { board in
+                    guard let index = board.taskIndex(slug), board.tasks[index].auditBrief == brief, board.tasks[index].verifier == task.verifier else { return }
+                    board.tasks[index].auditBrief?.version = version
+                    board.tasks[index].auditBrief?.contract = task.contract
+                }
+                try? store.appendProgress("Sent \(slug)'s audit contract v\(version) (it had v\(brief.version))")
+                return "\(who) \(verifiers.count == 1 ? "was" : "were") sent what changed (contract v\(brief.version) to v\(version)), at \(verifiers.count == 1 ? "its" : "their") next step; its verdict records the version it judged."
+            }
+        } catch {
+            return "Its audit's verifiers couldn't be sent the change (\(error)): its verdict will say if it judged an older contract than v\(version)."
+        }
     }
 
     /// Sends `text` to the task's worker when it runs; what the lead's result says about it.
@@ -4547,6 +4612,7 @@ public final class LeadToolset: MCPToolset {
             }
             return tests
         }
+        let stated = try Self.contractVersionArgument(arguments["contract_version"])
         let (reports, demoted) = try Self.parsedFindings(arguments["findings"])
         let demotedText = demoted.isEmpty ? "" : " Recorded as Nit\(demoted.count == 1 ? "" : "s"), having no failure_scenario: \(demoted.joined(separator: ", ")) (Important needs one)."
         // Checked here first against what a re-audit covers (the vault has no git; see reauditScope), then by the vault.
@@ -4562,6 +4628,14 @@ public final class LeadToolset: MCPToolset {
         do { submission = try vault.submit(root: root, completion: completion, integrity: integrity, summary: summary, findings: reports, tests: tests) } catch {
             throw Problem(text: "\(error)")
         }
+        // The version it judged: what it says, never past the newest it was sent (one sent as it submitted may
+        // not have reached it); with several finders, the oldest any of them judged.
+        try? store.update { board in
+            guard let index = board.taskIndex(slug), var brief = board.tasks[index].auditBrief, board.tasks[index].evidence == nil else { return }
+            let said = min(stated ?? brief.version, brief.version)
+            brief.judged = min(brief.judged ?? said, said)
+            board.tasks[index].auditBrief = brief
+        }
         let finder = member.finder?.index
         guard let verdict = submission.verdict else {
             // One of several finders: its ballot is in, and the vote waits for the others'.
@@ -4575,7 +4649,8 @@ public final class LeadToolset: MCPToolset {
         // The verdict: one verifier's, or the finders' vote.
         let ledger = vault.audits(root: root, task: slug)
         let audited = verdict.commit
-        let evidence = LeadEvidence(completion: verdict.completion, integrity: verdict.integrity, summary: verdict.summary, commit: audited)
+        let evidence = LeadEvidence(completion: verdict.completion, integrity: verdict.integrity, summary: verdict.summary, commit: audited,
+                                    contract: store.load().task(slug)?.auditBrief.map { $0.judged ?? $0.version })
         // On a branch touching strict_paths, the unconfirmed Important ones hold it too.
         let hold = self.hold(slug, ledger, head: audited)
         let blocking = hold.findings
@@ -4604,6 +4679,11 @@ public final class LeadToolset: MCPToolset {
         var text = evidence.passes
             ? "The audit of \(slug) passed (complete, clean): \(evidence.summary)\n" + (blocking.isEmpty ? "merge(\(slug)) when you're ready.\(moved)" : "")
             : "The audit of \(slug) did not pass (\(evidence.completion.rawValue), \(evidence.integrity.rawValue)): \(evidence.summary)\n"
+        // Amended after its verifiers last heard: the lead weighs the verdict against what changed.
+        if let task = store.load().task(slug), let stale = task.staleContract {
+            text += (text.hasSuffix("\n") ? "" : "\n") + "This verdict \(stale): the contract changed after its verifier\(task.panel == nil ? "" : "s") last heard "
+                + "(board(\(slug)) shows it). Weigh the verdict against what changed, or audit(\(slug)) again for a verdict on v\(task.contractRevision).\n"
+        }
         if let vote = ledger?.vote {
             let unconfirmed = hold.held.isEmpty
                 ? " (unconfirmed ones don't hold the merge back; dismiss_finding them, or add_task(from_finding: …) one that's a real Important problem)"
@@ -5187,6 +5267,7 @@ public final class LeadToolset: MCPToolset {
     /// verdict no longer covers what would be merged.
     private func auditText(_ evidence: LeadEvidence, of task: LeadTask) -> String {
         var text = "audit " + (evidence.passes ? "clean" : "\(evidence.completion.rawValue)/\(evidence.integrity.rawValue)")
+            + (task.staleContract.map { " (\($0))" } ?? "")
         guard let commit = evidence.commit else { return text }
         text += " at \(commit.prefix(8))"
         // A merged task's branch has done its part (cleanup may have removed it).
@@ -5440,7 +5521,9 @@ public final class LeadToolset: MCPToolset {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             var lines = [String(decoding: try encoder.encode(task), as: UTF8.self)]
-            lines.append("\nWorker: \(Self.agentText(task))" + (task.codexAudit.map { " (\($0))" } ?? ""))
+            lines.append("\nContract: v\(task.contractRevision)" + (task.staleContract.map { " (its verdict \($0))" } ?? "")
+                + (task.auditBrief.map { brief in task.evidence == nil && brief.version < task.contractRevision ? " (its audit's verifiers have v\(brief.version))" : "" } ?? ""))
+            lines.append("Worker: \(Self.agentText(task))" + (task.codexAudit.map { " (\($0))" } ?? ""))
             lines.append("Review: \(task.reviewLevel.rawValue)" + (task.merged.map { $0.unaudited ? " (merged with no audit)" : "" } ?? "")
                 + (task.riskRaised.map { " (audited: \($0.reason), raised by the risk check at \($0.commit.prefix(8)))" } ?? ""))
             if let receipt = task.receipt { lines.append("\n" + receipt.line) }

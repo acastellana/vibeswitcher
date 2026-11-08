@@ -17,6 +17,50 @@ public struct LeadContract: Codable, Equatable, Sendable {
         self.boundaries = boundaries
         self.context = context
     }
+
+    /// What changed from `old` to this, section by section, for a verifier briefed on `old` (see
+    /// `LeadToolset.sendContractChange`): a goal given whole, the checks and boundaries added and dropped, the context
+    /// added to it (or given whole when it was replaced). Empty when nothing did.
+    public func changes(from old: LeadContract) -> String {
+        var parts: [String] = []
+        if goal != old.goal { parts.append("## Goal (replaced)\n\(goal)") }
+        func listed(_ heading: String, _ now: [String], _ was: [String]) {
+            let added = now.filter { !was.contains($0) }, dropped = was.filter { !now.contains($0) }
+            guard !added.isEmpty || !dropped.isEmpty else {
+                if now != was { parts.append("## \(heading) (reordered)\n" + now.map { "- \($0)" }.joined(separator: "\n")) }
+                return
+            }
+            parts.append("## \(heading)\n" + (added.map { "Added: \($0)" } + dropped.map { "Dropped: \($0)" }).joined(separator: "\n"))
+        }
+        listed("Acceptance checks", acceptance, old.acceptance)
+        listed("Boundaries", boundaries, old.boundaries)
+        if context != old.context {
+            let was = old.context.trimmingCharacters(in: .whitespacesAndNewlines)
+            let now = context.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !was.isEmpty, now.hasPrefix(was) {
+                parts.append("## Context (added to)\n" + now.dropFirst(was.count).trimmingCharacters(in: .whitespacesAndNewlines))
+            } else {
+                parts.append("## Context (replaced)\n" + (now.isEmpty ? "(now empty)" : now))
+            }
+        }
+        return parts.joined(separator: "\n\n")
+    }
+}
+
+/// The contract its audit's verifiers have: the version their brief was written from, or the last amendment sent to
+/// them while they audit (see `LeadToolset.sendContractChange`), with that version's text to tell the next change
+/// from. `judged`: the lowest version a verifier that submitted said it judged (a finder that submitted before an
+/// amendment judged the older one).
+public struct LeadAuditBrief: Codable, Equatable, Sendable {
+    public var version: Int
+    public var contract: LeadContract
+    public var judged: Int?
+
+    public init(version: Int, contract: LeadContract, judged: Int? = nil) {
+        self.version = version
+        self.contract = contract
+        self.judged = judged
+    }
 }
 
 /// The verifier's report: what it found in the worker's branch, not what the worker said.
@@ -29,12 +73,17 @@ public struct LeadEvidence: Codable, Equatable, Sendable {
     public var at: Double
     /// The branch's commit the verifier looked at: only that commit may be merged on this verdict.
     public var commit: String?
+    /// The version of the task's contract its verifiers judged (see `LeadTask.contractVersion`); nil on verdicts from
+    /// before contracts had versions.
+    public var contract: Int?
 
-    public init(completion: Completion, integrity: Integrity, summary: String, commit: String? = nil, at: Double = Date().timeIntervalSince1970) {
+    public init(completion: Completion, integrity: Integrity, summary: String, commit: String? = nil, contract: Int? = nil,
+                at: Double = Date().timeIntervalSince1970) {
         self.completion = completion
         self.integrity = integrity
         self.summary = summary
         self.commit = commit
+        self.contract = contract
         self.at = at
     }
 
@@ -670,6 +719,11 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var rerolls: [LeadReroll]?
     /// The lead's notes on it since its contract (appended context, messages to its worker), oldest first.
     public var notes: [LeadNote]?
+    /// Its contract's version: each update_task that changes the goal, acceptance, boundaries or context adds one.
+    /// nil: version 1, the contract add_task gave it (see `contractRevision`).
+    public var contractVersion: Int?
+    /// The contract its running (or last) audit's verifiers have, and the version they judged (see `LeadAuditBrief`).
+    public var auditBrief: LeadAuditBrief?
     /// How it went, in the scorecard's numbers, as of the board's last change (see `LeadTaskScore`).
     public var score: LeadTaskScore?
     /// Its review level as the lead set it (for showing, and never lowering: merge goes by the stricter of this and
@@ -771,6 +825,16 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
 
     /// Its review level: none unless the lead set audit.
     public var reviewLevel: Review { review ?? .none }
+
+    /// Its contract's version, 1 until update_task first changes it.
+    public var contractRevision: Int { contractVersion ?? 1 }
+
+    /// "judged contract vN, current vM" when its verdict (or the one a newer report outdated) judged an older version
+    /// of its contract than it has now: the lead amended it after its verifiers last heard; nil otherwise.
+    public var staleContract: String? {
+        guard let judged = (evidence ?? outdatedEvidence)?.contract, judged < contractRevision else { return nil }
+        return "judged contract v\(judged), current v\(contractRevision)"
+    }
 
     /// Its worker's answers given since the last audit `ledger` records, by finding id: the ones the next audit judges.
     public func currentAnswers(_ ledger: LeadAuditLedger?) -> [String: LeadFindingAnswer] {

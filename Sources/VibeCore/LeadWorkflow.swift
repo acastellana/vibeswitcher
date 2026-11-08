@@ -1519,10 +1519,26 @@ public enum LeadPrompts {
 
         \(WorkerBrief.render(task))
 
+        \(contractVersionRule(task.contractRevision))
+
         \(guideSection(guide, base: workflow.base))\(securitySection(security))\(reportSection(report))
 
         \(notesSection(notes))
         """
+    }
+
+    /// The verifier's word on its contract's version: the lead may amend it during the audit (see `contractAmended`).
+    static func contractVersionRule(_ version: Int) -> String {
+        "This is contract v\(version). If the lead amends it while you audit, the change comes as a message from the lead naming the new "
+            + "version: judge the branch against the newest, and give the version you judged as contract_version in submit_audit."
+    }
+
+    /// What a verifier at work is sent when update_task changes its task's contract (`LeadToolset.sendContractChange`):
+    /// the new version, and what changed since the version it has.
+    public static func contractAmended(slug: String, from old: Int, to new: Int, changes: String) -> String {
+        "The lead amended agent/\(slug)'s contract while you audit: it's now contract v\(new) (you had v\(old)). What changed:\n\n"
+            + (changes.isEmpty ? "(nothing in the text: the version only)" : changes)
+            + "\n\nJudge the branch against v\(new): what it accepts is in scope, what it adds is checked. Give contract_version: \(new) in submit_audit."
     }
 
     static let guideHeading = "## The project's REVIEW.md"
