@@ -4247,3 +4247,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 13:49 Automatically (auto_advance): Cleaned up config-seal-covers (freed 3.0 GB of build output and temporary folders). It stays done.
 - 2026-11-08 13:49 Started a worker on turn-this-incident-into-15
 - 2026-11-08 13:49 Automatically (auto_advance): Started a worker on turn-this-incident-into-15 (An install's own hook-binary write raises no Accept card), its after tasks done (config-seal-covers).
+- 2026-11-08 14:03 Audit of settings-plain-language at a3af8c33 tested its merged result 441ed20b onto main: the test command passed
+- 2026-11-08 14:03 Released settings-plain-language's worker (idle since its done report on a3af8c33) while its audit runs
+- 2026-11-08 14:03 Automatically (auto_advance): Started the audit of settings-plain-language at a3af8c33 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
