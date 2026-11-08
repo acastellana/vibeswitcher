@@ -383,8 +383,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `panes [NAME]` — what SwiftUI resolves inside the main window's sidebar and inspector, and those two views drawn again in a… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shot-real NAME` — draws each window in the app's own look, nothing overridden: NAME-main-real.png, NAME-settings-real.png…… — `Sources/VibeSwitcher/Sandbox.swift`
 - `close settings|sheet` — closes Settings or the sheet — `Sources/VibeSwitcher/Sandbox.swift`
-- `shot NAME` — draws each window, light and dark, into the shots folder — `Sources/VibeSwitcher/Sandbox.swift`
-- `panes on|off` — shows or collapses the sidebar and inspector, for a shot of the middle alone — `Sources/VibeSwitcher/Sandbox.swift`
+- `shot NAME` — draws each window, light and dark, into the shots folder, its side panes out of their glass (a drawing can't… — `Sources/VibeSwitcher/Sandbox.swift`
 - `pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT` — the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views… — `Sources/VibeSwitcher/Sandbox.swift`
 - `offline on|off` — the app loses its connection to the sandbox's own host and doesn't get it back (the host and fake sessions… — `Sources/VibeSwitcher/Sandbox.swift`
 - `unproved` — connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions — `Sources/VibeSwitcher/Sandbox.swift`

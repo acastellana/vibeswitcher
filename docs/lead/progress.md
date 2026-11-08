@@ -4420,3 +4420,10 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-08 22:01 Audit of sandbox-shots-draw-the at 061d718f tested its merged result 200c15a4 onto main: the test command passed
 - 2026-11-08 22:01 Released sandbox-shots-draw-the's worker (idle since its done report on 061d718f) while its audit runs
 - 2026-11-08 22:01 Automatically (auto_advance): Started the audit of sandbox-shots-draw-the at 061d718f (An audit was started on it: its verdict decides). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 22:04 Audit of sandbox-shots-draw-the: complete, clean, round 3: 1 Important closed, 2 Nit open
+- 2026-11-08 22:04 Released the-board-and-records's worker (idle since its done report on 62ae6558) while its audit runs
+- 2026-11-08 22:04 Automatically (auto_advance): Started the audit of the-board-and-records at 62ae6558 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 22:16 Audit of the-board-and-records: complete, clean, round 1: 5 Nit open
+- 2026-11-08 22:19 Merged sandbox-shots-draw-the: Sandbox shots draw the sidebar and inspector correctly on macOS 27 (in a batch: sandbox-shots-draw-the, anything-needing-a-real, auto-advance-keeps landed on one test run) (build 767537e5ec09)
+- 2026-11-08 22:19 Merged anything-needing-a-real: Anything needing a real terminal is offered as a one-click shell (in a batch: sandbox-shots-draw-the, anything-needing-a-real, auto-advance-keeps landed on one test run) (build 767537e5ec09)
+- 2026-11-08 22:19 Merged auto-advance-keeps: auto_advance keeps moving other tasks while a merge's tests run (in a batch: sandbox-shots-draw-the, anything-needing-a-real, auto-advance-keeps landed on one test run) (build 767537e5ec09)
