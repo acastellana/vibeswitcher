@@ -3869,3 +3869,11 @@ Turn what's a real bug into a task (one already on the board needs nothing; one 
 - 2026-11-08 04:14 branch-code-can-t back in review: no Important finding open, and its audit passed
 - 2026-11-08 04:17 Planned swift-testing-s-parallel: Swift Testing's parallel width follows the slot's cores, not the whole Mac's
 - 2026-11-08 04:24 Merged provenance-in-git-every: Provenance in git: every merge commit carries its task, models, verdict and the VS build (backlog A2) (build ebed973e8025)
+- 2026-11-08 04:24 Automatically (auto_advance): Merged provenance-in-git-every (Provenance in git: every merge commit carries its task, models, verdict and the VS build (backlog A2)) into main at be822045, on its passing audit and the full test run.
+- 2026-11-08 04:24 Automatically (auto_advance): Cleaned up provenance-in-git-every (freed 2.8 GB of build output and temporary folders). It stays done.
+- 2026-11-08 04:24 Started a worker on versioned-contracts-a (auto → Claude: Claude weekly 20%, 18 points behind pace, not tight; Codex 59%)
+- 2026-11-08 04:24 Automatically (auto_advance): Started a worker on versioned-contracts-a (Versioned contracts: a verifier already running hears when its task's contract changes (backlog A6)), its after tasks done (provenance-in-git-every); its agent is auto, so it went to Claude: Claude weekly 20%, 18 points behind pace, not tight; Codex 59%.
+- 2026-11-08 04:24 Started a worker on swift-testing-s-parallel
+- 2026-11-08 04:24 Automatically (auto_advance): Started a worker on swift-testing-s-parallel (Swift Testing's parallel width follows the slot's cores, not the whole Mac's).
+- 2026-11-08 04:24 Released host-events-decode-off's worker (idle since its done report on 795922ac) while its audit runs
+- 2026-11-08 04:24 Automatically (auto_advance): Started the audit of host-events-decode-off at 795922ac (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
