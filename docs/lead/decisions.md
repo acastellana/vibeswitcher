@@ -302,3 +302,7 @@ The user asked for a pass to find issues; their working policy is to fix materia
 
 The user asked "why not start more?" on 2026-11-08 while the Mac sat at load 7 with one session of this project. The three review tasks were chained only because their boundaries all name LeadToolset.swift, in unrelated places (checkBaseMoves and the merge's recording, saveMergeLog, the scratch sweep), and git merges separate hunks cleanly. The rule came from two seal tasks that edited the same seal code. A strict chain of three audited tasks costs hours.
 
+## 2026-11-08 20:08:48 When the user needs to run something that wants a real terminal (a password prompt, an install, anything interactive), the lead and workers file `vs-shell run` so the user gets a one-click Run card. They don't tell the user to open Terminal.app, paste a command or type `! <command>`, and never take a password in chat. This replaces Claude Code's generic "suggest `!`" advice inside VibeSwitcher sessions. Task anything-needing-a-real puts it in the prompts and makes build-app.sh's locked-keychain failure say what to do.
+
+On 2026-11-08 an install failed on a locked signing keychain. The lead said to use Terminal.app, the user ran it through `!` twice, which has no terminal for the password, and only `vs-shell run` worked. The user: "you should have asked to do a shell like you did now".
+

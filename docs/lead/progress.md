@@ -4369,3 +4369,15 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-08 20:03 Automatically (auto_advance): Started the audit of product-fixes-from-the at 485c4761 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-08 20:03 Released every-text-that-crosses's worker (idle since its done report on fd6745a4) while its audit runs
 - 2026-11-08 20:03 Automatically (auto_advance): Started the audit of every-text-that-crosses at fd6745a4 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 20:06 Released sandbox-shots-draw-the's worker (idle since its done report on 8db6403f) while its audit runs
+- 2026-11-08 20:06 Automatically (auto_advance): Started the audit of sandbox-shots-draw-the at 8db6403f (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 20:08 Planned anything-needing-a-real: Anything needing a real terminal is offered as a one-click shell (review audit)
+- 2026-11-08 20:12 Audit of product-fixes-from-the: complete, clean, round 1: 3 Nit open
+- 2026-11-08 20:20 Audit of sandbox-shots-draw-the: complete, clean, round 1: 1 Important open, 2 Nit open
+- 2026-11-08 20:20 Audit of every-text-that-crosses: complete, clean, round 1: 1 Nit open
+- 2026-11-08 20:23 Audit of the-vault-s-no: complete, clean, round 1: 2 Nit open, 2 Pre-existing open
+- 2026-11-08 20:23 Planned auto-advance-keeps: auto_advance keeps moving other tasks while a merge's tests run (review audit)
+- 2026-11-08 20:23 Started a worker on sandbox-shots-draw-the
+- 2026-11-08 20:23 Started a worker on anything-needing-a-real
+- 2026-11-08 20:23 Started a worker on auto-advance-keeps
+- 2026-11-08 20:25 Merged fix-the-flaky-test-21: Fix the flaky test aPlainShellTakesARunOnlyAtItsPrompt() (no audit: review none) (build 9bb93056766a)
