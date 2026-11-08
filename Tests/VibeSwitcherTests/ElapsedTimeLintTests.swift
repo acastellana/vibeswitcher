@@ -19,6 +19,7 @@ struct ElapsedTimeLintTests {
         Allowed(file: "VibeCoreTests/TestLockTests.swift", text: "#expect(waited < 30)", reason: "hang guard for a wait that must not sit out a long hold"),
         Allowed(file: "VibeHostTests/ParserCostTests.swift", text: "timeIntervalSince(start) < 30", reason: "hang guard: the child sleeps 600 s and is ended at 1 s"),
         Allowed(file: "VibeSwitcherTests/ChatTextPrepareLeakTests.swift", text: "timeIntervalSince(start) < 30", reason: "hang guard: the tool is ended at 1 s"),
+        Allowed(file: "VibeCoreTests/ElapsedTicksTests.swift", text: "tick.timeIntervalSince(now) <= 60.01", reason: "not elapsed time: arithmetic on an injected clock"),
         // Older than this lint, outside the 2026-11-08 change: each still to judge order or move to `.perf`.
         Allowed(file: "VibeHostTests/ParserIsolationTests.swift", text: "timeIntervalSince(sent) < 5", reason: "to move: a host's end after SIGTERM"),
         Allowed(file: "VibeHostTests/ParserIsolationTests.swift", text: "timeIntervalSince(killed) < 5", reason: "to move: reaped after the kill"),
@@ -29,12 +30,12 @@ struct ElapsedTimeLintTests {
         Allowed(file: "VibeCoreTests/MacLoadTests.swift", text: "timeIntervalSince(started) < 5", reason: "to move: a refused merge comes back at once"),
     ]
 
-    /// `took`/`waited`/… against a bare number, `Date().timeIntervalSince(x)` or `seconds(since: x)` against one, and a
+    /// `took`/`waited`/… against a bare number, `.timeIntervalSince(x)` or `seconds(since: x)` against one, and a
     /// list of times checked against one. Comments and messages aside, a bound against a name passes.
     private static let number = #"<=?\s*(?:\.?[0-9]|\.milliseconds\(|\.seconds\()"#
     static let patterns: [Regex<AnyRegexOutput>] = [
         #"\b(?:took|waited|elapsed|duration|seconds|own)\)?\s*"# + number,
-        #"(?:Date\(\)\.timeIntervalSince\([^)]*\)|seconds\(since:[^)]*\))\s*"# + number,
+        #"(?:\.timeIntervalSince\([^)]*\)|seconds\(since:[^)]*\))\s*"# + number,
         #"\b(?:took|waited|times|elapsed|durations)\b[^{]*\.allSatisfy\s*\{\s*\$0\s*"# + number,
     ].map { try! Regex($0).wordBoundaryKind(.simple) }
 
@@ -73,18 +74,18 @@ struct ElapsedTimeLintTests {
         #expect(flagged.isEmpty, "judge the order of events, a baseline from the same test, or make it a bench (.perf): \(flagged)")
         let stale = Set(Self.allowed).subtracting(used).map { "\($0.file): \($0.text)" }.sorted()
         #expect(stale.isEmpty, "allowed, and no such line any more: \(stale)")
-        #expect(Self.allowed.count <= 13, "the list is for hang guards and shrinks: \(Self.allowed.count)")
+        #expect(Self.allowed.count <= 14, "the list is for hang guards and shrinks: \(Self.allowed.count)")
     }
 
     @Test func theLintCatchesAnElapsedBoundAndOnlyThat() {
         func flagged(_ text: String, allowed: [Allowed] = []) -> [String] { Self.flagged(file: "a.swift", text: text, allowed: allowed).flagged }
         for line in ["#expect(took < 0.05, \"x\")", "#expect(waited < 1 && ok)", "#expect(run.own < 8)", "#expect(run.seconds < .5)",
-                     "#expect(Date().timeIntervalSince(start) < 5)", "#expect(seconds(since: start) < 2)",
+                     "#expect(Date().timeIntervalSince(start) < 5)", "#expect(end.timeIntervalSince(start) < 2)", "#expect(seconds(since: start) < 2)",
                      "#expect(took < .milliseconds(250))", "#expect(took.allSatisfy { $0 < 5 })"] {
             #expect(flagged("@Test func a() {\n    \(line)\n}") == ["a.swift:2"], "\(line)")
         }
         for line in ["#expect(took < hangGuard)", "#expect(times.allSatisfy { $0 < ProcessTable.snapshotLimit + 1 })",
-                     "#expect(count < 5)", "#expect(waited >= 0.95)", "#expect(tick.timeIntervalSince(now) <= 60.01)",
+                     "#expect(count < 5)", "#expect(waited >= 0.95)", "#expect(abs(a.timeIntervalSince(b) - 5) < 0.001)",
                      "// #expect(took < 0.05)", "let took = 0 < 5"] {
             #expect(flagged("@Test func a() {\n    \(line)\n}").isEmpty, "\(line)")
         }

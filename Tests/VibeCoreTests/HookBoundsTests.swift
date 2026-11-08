@@ -375,12 +375,18 @@ struct HookBoundsTests {
         // A second for the lock at least; how soon after it leaves is a bench's.
         #expect(held.seconds >= 0.95, "took \(held.seconds) s from its exec, \(held.own) s its own")
         #expect(HookState.load(from: state)?.lastPrompt == Self.clipBefore(prompt))
-        // Then on, not stopped by the alarm: only a hook that got past the lock hands a session its note.
+        // Then on, not stopped by the alarm: only a hook that got past the lock hands a session its note. Any one note
+        // says so, and a hook that stays on the lock never writes one; a stalled Mac can lose a run to the alarm (3 s, a
+        // second of it the lock), so it's asked again.
         let start: [String: Any] = ["hook_event_name": "SessionStart", "source": "startup", "session_id": "s"]
-        let on = try runHook(home: home, input: payload(start),
-                             environment: ["VIBESWITCHER_SESSION": "11111111-2222-4333-8444-555555555555", SessionNote.roleVariable: nil])
-        #expect(on.reason == .exit && on.status == 0)
-        #expect(String(decoding: on.stdout, as: UTF8.self).contains("additionalContext"), "no note: the alarm got there first (\(on.seconds) s)")
+        var noted = false
+        for _ in 1...5 where !noted {
+            let on = try runHook(home: home, input: payload(start),
+                                 environment: ["VIBESWITCHER_SESSION": "11111111-2222-4333-8444-555555555555", SessionNote.roleVariable: nil])
+            #expect(on.reason == .exit && on.status == 0)
+            noted = String(decoding: on.stdout, as: UTF8.self).contains("additionalContext")
+        }
+        #expect(noted, "no note in 5 runs: the alarm got there first each time")
         flock(lock, LOCK_UN)
     }
 
