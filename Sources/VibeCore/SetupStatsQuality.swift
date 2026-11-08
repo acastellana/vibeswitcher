@@ -357,7 +357,9 @@ enum SetupQualityMath {
     static func quality(_ sources: [QualitySource], window: SetupStatsCollector.Window, weeks: [DateInterval],
                         mergeLines: [String: [String: [RecorderLine]]]?, calendar: Calendar = .current) -> SetupQuality {
         var merges: [Merge] = [], ended: [Ended] = [], sampled: [Sampled] = []
-        var questions: [LeadQuestion] = [], untasked: [LeadQuestion] = []
+        // `untasked`: questions about no task asked in the range; `anyUntasked`: all of them, for the scorecard's two
+        // weeks, which don't follow the range picked.
+        var questions: [LeadQuestion] = [], untasked: [LeadQuestion] = [], anyUntasked: [LeadQuestion] = []
         // Every task's worker (made unique as merges' are), for the flake ledger's entries; and those entries in the range.
         var who: [String: (codex: Bool, model: String?)] = [:], flakes: [String]?
         for (index, source) in sources.enumerated() {
@@ -366,8 +368,9 @@ enum SetupQualityMath {
                 if let task = question.task {
                     question.task = prefix + task
                     questions.append(question)
-                } else if window.within(question.askedAt) {
-                    untasked.append(question)
+                } else {
+                    anyUntasked.append(question)
+                    if window.within(question.askedAt) { untasked.append(question) }
                 }
             }
             let askedAbout = Set(source.questions.compactMap(\.task))
@@ -438,7 +441,7 @@ enum SetupQualityMath {
         days.timeZone = calendar.timeZone
         days.locale = Locale(identifier: "en_US_POSIX")
         days.dateFormat = "yyyy-MM-dd"
-        let card = scorecard(sources, merges: merges, untasked: untasked, questions: questions, weeks: weeks, now: window.now,
+        let card = scorecard(sources, merges: merges, untasked: anyUntasked, questions: questions, weeks: weeks, now: window.now,
                              dayKey: { days.string(from: Date(timeIntervalSince1970: $0)) },
                              dayStart: { days.date(from: $0)?.timeIntervalSince1970 })
         return SetupQuality(all: all, byAgent: byAgent, byModel: byModel, weeks: trend, scorecard: card)

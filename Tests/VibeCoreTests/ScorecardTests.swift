@@ -122,7 +122,12 @@ struct ScorecardTests: LeadTeamFixture {
         var question = LeadQuestion(text: "Which?", options: ["a", "b"], at: Self.date(11, 3, 12))
         question.task = "u1"
         question.answeredAt = Self.date(11, 3, 12) + 1800
-        board.questions = [question]
+        // Questions about no task: one in each week (answered after 12 and 6 minutes).
+        var general = LeadQuestion(text: "Plan?", options: ["a"], at: Self.date(11, 7, 9))
+        general.answeredAt = Self.date(11, 7, 9) + 720
+        var earlier = LeadQuestion(text: "Order?", options: ["a"], at: Self.date(10, 30, 9))
+        earlier.answeredAt = Self.date(10, 30, 9) + 360
+        board.questions = [question, general, earlier]
         try JSONEncoder().encode(board).write(to: folder.appendingPathComponent("board.json"))
         // The lead's days: Nov 4 (two merges: spread), Nov 5 (none: not spread), Nov 6 (n1's), Nov 7 (a model with no price).
         func day(_ cost: Double, unpriced: Bool = false) -> [String: Any] {
@@ -156,9 +161,9 @@ struct ScorecardTests: LeadTeamFixture {
         #expect(week.origins.userReported == 1 && week.origins.systemFound == 2 && week.origins.total == 4)
         #expect(before.origins == LeadOrigins(counts: [.userReport: 1]))
 
-        #expect(week.merged == 3 && week.questions == 1 && abs((week.questionsPerTask ?? 0) - 1.0 / 3) < 1e-9)
-        #expect(abs((week.userMinutesPerTask ?? 0) - 10) < 1e-9, "\(String(describing: week.userMinutesPerTask))")
-        #expect(before.merged == 1 && before.questions == 0)
+        #expect(week.merged == 3 && week.questions == 2 && abs((week.questionsPerTask ?? 0) - 2.0 / 3) < 1e-9)
+        #expect(abs((week.userMinutesPerTask ?? 0) - 14) < 1e-9, "\(String(describing: week.userMinutesPerTask))")
+        #expect(before.merged == 1 && before.questions == 1 && abs((before.userMinutesPerTask ?? 0) - 6) < 1e-9)
 
         // Receipts: $6 over 2 costed merges; the lead's $3 + $0.60 on merge days over 3 merges; $1 on Nov 5 not spread.
         #expect(week.costed == 2 && week.cost == 6 && week.receiptCostPerTask == 3)
@@ -178,6 +183,10 @@ struct ScorecardTests: LeadTeamFixture {
         // Each build and merge asked once at most per collect; a build named "unknown …" never.
         let once = asked.all
         #expect(once.count == Set(once).count && !once.isEmpty, "\(once)")
+        // The two weeks don't follow the range picked: with today's range, the week before still has its question about no task.
+        let today = DateInterval(start: Date(timeIntervalSince1970: Self.date(11, 8)), end: Date(timeIntervalSince1970: Self.date(11, 9)))
+        let narrow = try #require(await collector.collect(projects: [project.path], range: today).quality?.scorecard)
+        #expect(narrow.week.questions == 2 && narrow.previous.questions == 1)
         // Without the app's record, a1 and n1 aren't installed yet.
         collector.installedApp = { nil }
         let bare = try #require(await collector.collect(projects: [project.path], range: range).quality?.scorecard)
