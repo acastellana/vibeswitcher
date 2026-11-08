@@ -6,9 +6,11 @@ import VibeCore
 /// The card's data (`ConfigHolds`): a held folder's paths and time come from what the vault holds, never from the
 /// folder's own modification time (which moves with whatever is written in it).
 struct ConfigHoldsTests {
+    private let scratch = Scratch()
+
     /// A vault that answers with `record`, and holds that look inline.
     func holds(answering record: [String: String]) -> ConfigHolds {
-        let vault = LeadVault(folder: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)) { request in
+        let vault = LeadVault(folder: scratch.url("vault")) { request in
             guard case .guarded = request else { throw LeadVault.Refused("none") }
             return .guarded(record)
         }
@@ -27,7 +29,7 @@ struct ConfigHoldsTests {
 
     /// A folder's own time is never shown: only a file's.
     @Test func changedAtReadsFilesNeverAFoldersOwnTime() throws {
-        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        let home = scratch.url("home").path
         try FileManager.default.createDirectory(atPath: home + "/.claude/skills", withIntermediateDirectories: true)
         try "x\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
         let times = ConfigHolds.changedAt(["~/.claude/skills", "~/.zshrc"], root: "/r", home: home)
