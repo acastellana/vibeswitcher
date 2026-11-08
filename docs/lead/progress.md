@@ -4137,3 +4137,13 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 07:28 Started a worker on starts-and-audits-wait
 - 2026-11-08 07:28 Automatically (auto_advance): Started a worker on starts-and-audits-wait (Starts and audits wait when the Mac is short of memory, not only when its load is high).
 - 2026-11-08 07:29 Update: Retrospective: the first backlog batch (A1, A2, A3, A5, A6, B3) — **Landed (all six you chose, 2026-11-08):**
+- 2026-11-08 07:58 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
+Freezes of its main thread (reports in ~/.vibeswitcher/debug, .txt the sampled stacks, .log the state):
+- hang-20261108-074230: stuck 2.2 s; lead session selected, chat shown, window not key; top app frames (caught while stuck): VibeCore.LeadDecision.id.getter : Swift.String < DecisionFeedView.body.getter : some — 1-minute load 17.6 on 12 cores
+Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
+- 2026-11-08 08:31 Audit of config-seal-covers at d4d2e472 tested its merged result 3c153e27 onto main: test command failed
+- 2026-11-08 08:31 Fetched origin/main at 31921aaa: main is 74 commits ahead of origin/main and 0 commits behind it
+- 2026-11-08 08:31 Asked the user to push main at f38147da (74 commits) to origin/main
+- 2026-11-08 08:31 Pushed main at f38147da (74 commits) to origin/main, on the user's click
+- 2026-11-08 08:43 Merged the-old-host-build: The old-host build the upgrade tests need is cached once per Mac, not rebuilt in every merge and audit (no audit: review none) (in a batch, on a test run of its own) (build ebed973e8025)
+- 2026-11-08 08:43 Didn't merge auto-advance-doesn-t in the batch: tests fail with it on main (ctrlCLetsGoOfTheLock()); back to its worker

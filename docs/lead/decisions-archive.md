@@ -462,3 +462,49 @@ The first real Codex task (wallet-results-tests, 2026-11-02) couldn't run any Sw
 
 They were marked codex by hand only because Claude's weekly usage was ahead of pace (decision 1). That reason has gone, and a Claude worker can run the full suite and socket tests, which a Codex worker still can't.
 
+# Archived 2026-11-08 08:00:11: Lapsed timers and one-off calls. The verifier-on-Opus windows were superseded by 2026-11-07 20:06 (back to Fable). The others were one-task overrides and round plans (permission-prompt, resume-work-cut-off, turn-this-incident-into-4), a past correction, and a done GitHub merge. The branch-code-can-t re-plan was superseded by 2026-11-08 04:14.
+
+## 2026-11-01 07:55:22 Audits run on Opus (configure verifier_model: opus) from 2026-11-01 06:4x until the Fable limit resets on 2026-11-05 at 12:00. The lead then switches back with configure(verifier_model: "") (the default: Fable while workers run Opus).
+
+User's answer to 19AF8BCD. The account hit its Fable usage limit, and the wallet production-readiness pass's audited tasks would otherwise wait three days. The verifier-eval baseline was measured with Fable, so Opus verdicts in this window get the same scrutiny, and nothing about the audit rules changes.
+
+## 2026-11-01 18:08:55 Correction to "heavy slots go from 3 to 2": there was no Settings value for heavy slots. The count came from VIBESWITCHER_HEAVY_SLOTS or cores ÷ 4 (3 here). boost-release-6-7 adds it to Settings › Project lead and mac-limits.json, default cores ÷ 6 (2 here), with the lead's lock and vs-heavy reading one count.
+
+The lead asked the user to change a setting that didn't exist, so the load stayed at three heavy jobs. The worker found this while fixing F6. Lesson: verify a setting exists before asking the user to change it.
+
+## 2026-11-02 13:52:20 GitHub's main merged into this Mac's main on 2026-11-02 at 7ece3ba, run by the user. It brings the other Mac's portability test fixes and the Boost load-ceiling clamp. "This Mac" in the 2026-11-02 10:26 Metal Toolchain entry means the other Mac (the 8-core MacBook on Xcode 27.2), not this one. progress.md kept this Mac's version: GitHub's copy had committed conflict markers. The next merge's full test run (statistics-1-2-a) is the full-suite check on the merged main, so no separate task.
+
+Both Macs' leads write the same lead record. Task lead-records-merge adds merge=union so future merges don't stop on it.
+
+## 2026-11-06 11:43:13 Fable's weekly limit is reached until Nov 11, 18:00, and audits run on Fable, so the one-click shell feature (an-agent-can-open, built and reported done) can't be audited. Switch audits to Opus until the reset, as you chose on Nov 1 in the same situation? Workers also run Opus 5.5 now, so the verifier would be the same model as the worker, which is weaker than our usual rule of a different model. → Audits on Opus until Nov 11, 18:00
+
+The lead proposed it with a 15 min timer and the user didn't answer in time, so it went ahead (question 6B9DC8CB). Why it was asked: The shell feature is ready for audit and nothing else on the board can move it.
+
+## 2026-11-06 11:43:23 Audits run on Opus (configure verifier_model: opus) from 2026-11-06 11:43 until the Fable limit resets on 2026-11-11 at 18:00; then the lead switches back with configure(verifier_model: ""). Workers also run Opus 5.5 in this window, so verifier and worker are the same model: the lead reads audit verdicts on security-relevant tasks with extra care.
+
+Question 6B9DC8CB went ahead on its timer with the lead's proposal, as on 2026-11-01 in the same situation. The account reached Fable's weekly limit, and an audited task (an-agent-can-open) was waiting.
+
+## 2026-11-07 10:27:13 The 2026-11-05 incident "the user's Allow on a verifier's Read prompt didn't reach the session" gets no regression check. turn-this-incident-into-4 is abandoned after its probe (00c6531, ChatSyncTests.probeReadPermissionAllow) passed on main's code: Chat's Allow on today's Read prompt shape lands, the card shows nothing misleading, and the notification has no Allow action (a click only opens the session). The most likely cause is that the user answered from the notification, which sends nothing.
+
+The contract said to stop if the Allow path works, rather than invent a check. The probe was run by the lead on 2026-11-07 under vs-heavy, because Codex's sandbox can't compile SwiftTerm's Metal shaders. Not reproduced: a host write failure that only goes to the log, and a selection that moves between the screen read and the key writes.
+
+## 2026-11-07 12:47:21 permission-prompt runs now on Claude with override_usage, spending the rest of the weekly limit (80% used, resets Nov 11, 18:00). This is the user's answer to 3ABA1BF9 on 2026-11-07. Its audit also uses override_usage.
+
+The user said not to wait and chose to spend the limit. The task changes a guard rail, so it stays on Claude, and Codex's sandbox can't build the app.
+
+## 2026-11-06 22:04:23 verifier_model is opus until the Fable limit resets on 2026-11-11 at 18:00. Then run configure(verifier_model: "") to go back to Fable.
+
+The user chose to switch reviews to Opus rather than wait (AFB3AD43), after the account hit its Fable limit on 2026-11-06.
+
+## 2026-11-07 12:42:22 resume-work-cut-off gets a third, targeted round for F5 instead of a re-roll.
+
+Rounds 1–2 fixed and verified F1–F4. F5 is one narrow gap: a gate-refused resume has nothing to wake it again. It has a precise fix and a test. A re-roll would throw away verified work, and merging with F5 open would put back the silent stuck worker the task exists to prevent.
+
+## 2026-11-07 12:56:02 resume-work-cut-off merges with F5 fixed, and its round-3 finding F6 (a once-a-minute main-thread lock and read, only while a sleep retry is pending) moves to its own follow-up task, sleep-recovery-room-wait, instead of a fourth round or a re-roll.
+
+F1–F5 are fixed and verified. F6 is a small cost on a rare path and has a precise fix. Each patch round has surfaced one new narrow issue, and a separate task keeps that cycle from blocking the verified behaviour.
+
+## 2026-11-08 01:28:15 branch-code-can-t reached "reconsider the approach" after round 2 with one Important finding open (F9, the cross-team quiet rule). The lead didn't re-roll it. Instead it re-planned that one part with a simpler model, given in the contract: one Mac-wide seal for home files, per-team seals for project files, retired teams never counting. A fresh worker continues on the same branch.
+
+Round 2 confirmed F1, F2, F3, F5 and F7 fixed. A re-roll from base would throw that verified work away, and the open finding sits in one contained rule whose fix the lead could specify. If round 3 leaves an Important open, re-roll then.
+
