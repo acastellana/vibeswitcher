@@ -294,3 +294,7 @@ On 2026-11-07 the app showed items waiting on the user. They were two chat tasks
 
 The user's goal: exactly what they want, without issues, safely, cheaply, fast, with only necessary questions. The lead's review judged A1–A6 and A9 worth doing (A1 and A4 in cheaper forms) and A8 lukewarm. B3 was added because 75–94 freezes a day hit the user directly. The user answered "yes".
 
+## 2026-11-08 01:28:15 branch-code-can-t reached "reconsider the approach" after round 2 with one Important finding open (F9, the cross-team quiet rule). The lead didn't re-roll it. Instead it re-planned that one part with a simpler model, given in the contract: one Mac-wide seal for home files, per-team seals for project files, retired teams never counting. A fresh worker continues on the same branch.
+
+Round 2 confirmed F1, F2, F3, F5 and F7 fixed. A re-roll from base would throw that verified work away, and the open finding sits in one contained rule whose fix the lead could specify. If round 3 leaves an Important open, re-roll then.
+
