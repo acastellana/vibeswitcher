@@ -1181,21 +1181,34 @@ enum HookBinary {
         return url.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
     }
 
-    /// The app's own write, sealed as written (`LeadVault.appWrite`): an update's new binary never waits for your
-    /// Accept.
-    @discardableResult
-    static func sync() -> Bool {
-        LeadVault.standard.appWrite([VibePaths.hookBinary.path]) { write() }
+    /// What a launch does about the binary. `connect` makes the app's connection to the host, `replace` the binary's
+    /// write and its seal.
+    static func atLaunch(connect: () -> Void,
+                         background: (@escaping () -> Void) -> Void = { DispatchQueue.global(qos: .userInitiated).async(execute: $0) },
+                         replace: @escaping () -> Void = {
+                             sync()
+                             LeadVault.standard.sealAppWrites()
+                         }) {
+        _ = background
+        replace()
+        connect()
     }
 
-    private static func write() -> Bool {
-        guard let source = bundled, let data = try? Data(contentsOf: source) else { return false }
-        let target = VibePaths.hookBinary
+    /// The app's own write, sealed as written (`LeadVault.appWrite`): an update's new binary never waits for your
+    /// Accept. The parameters are for tests.
+    @discardableResult
+    static func sync(vault: LeadVault = .standard, home: String = VibePaths.home, source: URL? = bundled, target: URL = VibePaths.hookBinary) -> Bool {
+        vault.appWrite([target.path], home: home) { write(source: source, to: target) }
+    }
+
+    private static func write(source: URL?, to target: URL) -> Bool {
+        guard let source, let data = try? Data(contentsOf: source) else { return false }
+        let folder = target.deletingLastPathComponent()
         if let existing = try? Data(contentsOf: target), existing == data { return true }
         do {
-            try FileManager.default.createDirectory(at: VibePaths.binDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             // Write-then-rename so a hook that is running right now never sees a half-written binary.
-            let temp = VibePaths.binDir.appendingPathComponent(".vibeswitcher-hook.tmp")
+            let temp = folder.appendingPathComponent(".vibeswitcher-hook.tmp")
             try data.write(to: temp)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: temp.path)
             _ = try FileManager.default.replaceItemAt(target, withItemAt: temp)
