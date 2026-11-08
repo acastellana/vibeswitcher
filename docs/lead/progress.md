@@ -4250,3 +4250,17 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 14:03 Audit of settings-plain-language at a3af8c33 tested its merged result 441ed20b onto main: the test command passed
 - 2026-11-08 14:03 Released settings-plain-language's worker (idle since its done report on a3af8c33) while its audit runs
 - 2026-11-08 14:03 Automatically (auto_advance): Started the audit of settings-plain-language at a3af8c33 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 14:09 Audit of settings-plain-language: complete, clean, round 1: 2 Nit open
+- 2026-11-08 14:10 Released turn-this-incident-into-15's worker (idle since its done report on d27e82bd) while its audit runs
+- 2026-11-08 14:10 Automatically (auto_advance): Started the audit of turn-this-incident-into-15 at d27e82bd (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 14:14 Planned a-branch-that-moves: A branch that moves during its merge's test run is never lost (review audit)
+- 2026-11-08 14:14 Planned the-vault-s-no: The vault's "no answer" isn't read as "nothing recorded", and a merge that moved main is always recorded (review audit)
+- 2026-11-08 14:14 Planned product-fixes-from-the: Product fixes from the review: silent beeps, misleading labels, dead ends
+- 2026-11-08 14:14 Planned wallet-cards-trust-only: Wallet cards trust only the host-stamped request, and the requester's label can't pass for more than it is (review audit)
+- 2026-11-08 14:15 Planned correctness-tests-stop: Correctness tests stop judging wall-clock time (review audit)
+- 2026-11-08 14:15 Planned host-reply-timers-belong: Host: reply timers belong to their connection, and a failed vault save is logged (review audit)
+- 2026-11-08 14:15 Planned every-text-that-crosses: Every text that crosses a boundary goes through the same secret mask (review audit)
+- 2026-11-08 14:15 Planned the-board-and-records: The board and records stop growing without bound, and scratch folders are swept (review audit)
+- 2026-11-08 14:15 Update: Project review: what it found, and what's being fixed — Independent read-only reviews of core correctness, product and performance, on a different model from the one that wrote the code. I spot-checked the most serious findings in the code myself; the rest…
+- 2026-11-08 14:16 Planned the-git-guard-treats: The git guard treats trailer commands as executable config (review audit)
+- 2026-11-08 14:27 Merged settings-plain-language: Settings: plain-language pass over section footers (build 9bb93056766a)

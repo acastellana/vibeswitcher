@@ -294,3 +294,7 @@ The app began as a session switcher and now runs a project lead with a team of a
 
 Ten icons and eight taglines didn't win over the current look. Per the 2026-11-07 rule, a lukewarm answer means dropping the idea rather than holding it open.
 
+## 2026-11-08 14:15:49 The 2026-11-08 project review's material findings became 8 tasks (a-branch-that-moves, the-vault-s-no, host-reply-timers-belong, wallet-cards-trust-only, every-text-that-crosses, product-fixes-from-the, the-board-and-records, correctness-tests-stop). Tasks that share LeadToolset.swift are chained with `after`. The minor findings are left alone. The security review's phone, host-authentication and tool-boundary parts didn't run: Fable's safety filter stopped it, and whether to run them another way is the user's call.
+
+The user asked for a pass to find issues; their working policy is to fix material bugs and not to turn cosmetic observations into tasks. A filter stop isn't something for the lead to route around.
+

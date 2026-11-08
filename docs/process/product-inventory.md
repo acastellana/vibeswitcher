@@ -371,6 +371,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `home` — shows the start page — `Sources/VibeSwitcher/Sandbox.swift`
 - `boost off|on|away|present|battery|battery-on|battery-low|veto|mark` — boost mark clicks the main window's Boost mark (Settings › Performance at Boost). Otherwise Boost mode in a… — `Sources/VibeSwitcher/Sandbox.swift`
 - `settings [TAB] [OPTION]` — opens Settings on a category — `Sources/VibeSwitcher/Sandbox.swift`
+- `settings-help NOTE` — opens the "?" popover of a footer in the Settings category shown ("shot" draws it) — `Sources/VibeSwitcher/Sandbox.swift`
 - `settings-search [TEXT]` — types TEXT in Settings' search field, opening Settings if it's closed (no TEXT clears it), and says what it… — `Sources/VibeSwitcher/Sandbox.swift`
 - `settings-pick N|ID` — picks the Nth search result (from 1), or the option with that catalog id, as a click on it does — `Sources/VibeSwitcher/Sandbox.swift`
 - `toolchain [dismiss]` — shows or dismisses a fake developer tools notice — `Sources/VibeSwitcher/Sandbox.swift`
