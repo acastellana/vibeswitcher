@@ -633,6 +633,12 @@ public struct LeadWorkflow: Equatable, Sendable {
 public enum LeadPrompts {
     public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, dismiss_finding, record_decision, archive_decisions, record_incident, merge, revert, cleanup, fetch_remote, merge_remote, push_remote, configure"
 
+    /// Read before proposing or asking (backlog A5, the cheap A4): on 2026-11-07 the lead proposed four chat features
+    /// that already existed (⌘F search, tool groups, Latest, Copy as Markdown).
+    static let productCheck = "Before you propose a feature or ask the user anything, check the code, "
+        + "docs/process/product-inventory.md, decisions.md and the backlog (docs/process/backlog.md), where the project has them: "
+        + "propose only what's missing, and ask only what none of them answers."
+
     /// What workers and verifiers are told about putting load on the Mac: a verifier once ran four times its
     /// contract's load on a Mac other sessions and the user were using, and a turn that ended left its burners running.
     public static let loadTests = "Load tests (a test run beside busy loops, to see what fails only on a loaded Mac): "
@@ -944,7 +950,7 @@ public enum LeadPrompts {
         0. Set up the project's workflow yourself: when status says workflow.md has a problem or no test_command, \
         set it with configure (status suggests a command from the repository; run it once first if unsure) and tell \
         the user what you set. Don't ask the user to edit workflow.md.
-        1. Understand what the user wants. Ask only what you truly need (direction, product choices, anything risky or \
+        1. Understand what the user wants. \(productCheck) Ask only what you truly need (direction, product choices, anything risky or \
         irreversible) with ask_user. It doesn't block: keep working while the user answers; the answer arrives as a \
         message. For a reversible choice, prefer proposing your answer with a timer (ask_user with proposal, one of \
         the options, and decide_in minutes, 10 by default): the user can pick another option or hold it, and if no \

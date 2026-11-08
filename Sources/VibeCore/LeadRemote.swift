@@ -247,9 +247,11 @@ public enum LeadRemote {
         return .success(Incoming(head: head, tip: tip, ahead: ahead, behind: behind, subjects: subjects, outlook: outlook))
     }
 
-    /// One of the lead's records (`LeadRecords.paths`), which merge by union.
+    /// One of the lead's records (`LeadRecords.paths`), which merge by union; or the product inventory, which both
+    /// Macs' records commits make (`ProductInventory`): taken by union too, and made again from the merged code by the
+    /// records commit after merge_remote, so a conflict in it never stops one.
     static func isRecord(_ file: String, records: String?) -> Bool {
-        records.map { LeadRecords.paths($0).contains(file) } ?? false
+        records.map { LeadRecords.paths($0).contains(file) || file == ProductInventory.output } ?? false
     }
 
     /// How merge_remote's run went.

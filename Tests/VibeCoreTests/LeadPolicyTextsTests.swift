@@ -214,6 +214,21 @@ struct LeadPolicyTextsTests {
         }
     }
 
+    /// The lead reads what exists before it proposes or asks (backlog A5 and the cheap A4): the code, the product
+    /// inventory, decisions.md and the backlog, in a rule of at most 3 lines in step 1, with every project's lead.
+    @Test func theLeadChecksWhatExistsBeforeProposingOrAsking() {
+        let rule = LeadPrompts.productCheck
+        for name in ["the code", "docs/process/product-inventory.md", "decisions.md", "docs/process/backlog.md",
+                     "propose only what's missing", "ask only what none of them answers"] {
+            #expect(rule.contains(name), "\(name)")
+        }
+        #expect(!rule.contains("\n") && rule.count <= 3 * 120, "\(rule.count) characters")
+        for workflow in [LeadWorkflow(), LeadWorkflow.parse("---\nrecords_dir:\n---")] {
+            let prompt = LeadPrompts.lead(project: "acme", root: "/r", workflow: workflow)
+            #expect(prompt.contains("1. Understand what the user wants. " + rule + " Ask only what you truly need"))
+        }
+    }
+
     /// The brief sends a change to the verifier through its eval set where the project has one, and says nothing of it
     /// elsewhere.
     @Test func theLeadsBriefRunsTheVerifierEvalOnlyWhereTheProjectHasIt() {

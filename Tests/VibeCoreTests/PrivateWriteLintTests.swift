@@ -32,7 +32,8 @@ struct PrivateWriteLintTests {
         "Sources/VibeSwitcher/SessionStore.swift": (1, "the state folder, made 0700 by ensurePrivateDirectories first"),
         // Not VibeSwitcher's own files.
         "Sources/VibeCore/LeadBoard.swift": (2, ".git/info/exclude: git's file"),
-        "Sources/VibeCore/LeadRecords.swift": (4, "records_dir: the repository's own committed files, with its usual modes (the remote's lines taken in after a merge too)"),
+        "Sources/VibeCore/LeadRecords.swift": (6, "records_dir: the repository's own committed files, with its usual modes (the remote's lines taken in after a merge too; the product inventory's committed copy in the checkout)"),
+        "Sources/VibeCore/ProductInventory.swift": (2, "a scratch folder in the temporary directory, removed after: the commit's script and inputs, run there"),
         "Sources/VibeCore/HookInstaller.swift": (2, "the agents' settings (~/.claude, ~/.codex): theirs"),
         "Sources/VibeCore/ProjectCreation.swift": (3, "a new project the user makes, with its usual modes"),
         "Sources/VibeCore/FolderRepository.swift": (4, "a folder the user chose for a lead: its .gitignore, and git's .git/info/exclude, with their usual modes; an empty repository's index and exclude put back as they were"),

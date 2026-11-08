@@ -7,7 +7,8 @@ import Foundation
 ///
 /// The lead itself may not edit files or run git that writes; its tool server commits for it, batched (after each
 /// merge, and at most every `interval` otherwise), as small commits of their own that touch only those two files
-/// (`Worktrees.commitFiles`): the user's own staged and unstaged changes in the main checkout stay as they are. A
+/// (`Worktrees.commitFiles`), and the product inventory when the code before it makes another (`ProductInventory`):
+/// the user's own staged and unstaged changes in the main checkout stay as they are. A
 /// commit takes the same lock as a merge into the branch, so none lands between a merge's rebase-and-test and its
 /// fast-forward, and it records the branch's new head in the vault as the lead's own (only the lead's session may),
 /// so the next merge's check that nothing else moved the branch takes it.
@@ -51,9 +52,10 @@ public final class LeadRecords: @unchecked Sendable {
 
     /// No trailer (Co-Authored-By or any other): a project's workflow may refuse them (project-c's regression_command
     /// does), and these commits land on its base among its own.
-    static func message(_ dir: String) -> String {
-        "\(subject)\n\nThe project lead's \(dir)/decisions.md, \(dir)/progress.md, \(dir)/incidents.md and \(dir)/decisions-archive.md, committed by VibeSwitcher for the lead "
-            + "(its tool server); nothing else is in this commit."
+    static func message(_ dir: String, inventory: Bool = false) -> String {
+        "\(subject)\n\nThe project lead's \(dir)/decisions.md, \(dir)/progress.md, \(dir)/incidents.md and \(dir)/decisions-archive.md"
+            + (inventory ? ", and \(ProductInventory.output) as \(ProductInventory.script) makes it from the code before this commit," : "")
+            + " committed by VibeSwitcher for the lead (its tool server); nothing else is in this commit."
     }
 
     /// The records' paths in the repository with `records_dir` `dir`.
@@ -71,6 +73,9 @@ public final class LeadRecords: @unchecked Sendable {
     private var lastFlush: Date
     private var lastOutcome: Outcome?
     private var timer: DispatchSourceTimer?
+    /// The product inventory last made (`ProductInventory`), and what from (its key): made again only when that changes,
+    /// a failure too (nil), so a broken script isn't run on every flush.
+    private var inventoryMade: (key: String, data: Data?)?
 
     public init(store: BoardStore, vault: LeadVault, now: Date = Date()) {
         self.store = store
@@ -150,8 +155,11 @@ public final class LeadRecords: @unchecked Sendable {
     private func commit(base: String) -> Outcome {
         guard let dir = store.recordsDir, Git.run(["rev-parse", "--git-dir"], in: root).ok else { return .local }
         do { try store.withRecordsLock { try Self.migrate(store) } } catch { return .failed("moving the old logs from .vibeswitcher failed (\(error)).") }
-        let paths = Self.paths(dir)
-        guard changed(paths, on: base) else { return .unchanged }
+        var paths = Self.paths(dir)
+        // Made before the lock (it takes seconds), from the head as it is; checked again under the lock.
+        let early = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(base)"], in: root).output
+        let inventoryDue = !early.isEmpty && inventory(at: early) != nil
+        guard changed(paths, on: base) || inventoryDue else { return .unchanged }
         // As a merge into the branch does: one at a time, and never between its tests and its fast-forward.
         let baseLock = Self.baseLock(vault: vault, root: root, base: base)
         try? vault.ensurePrivate(baseLock.deletingLastPathComponent())
@@ -166,18 +174,33 @@ public final class LeadRecords: @unchecked Sendable {
         // Only the lead's session (or the app) records where the branch is: asked before anything is committed.
         do { try vault.setHead(head, root: root, branch: base) } catch { return .failed("\(error)") }
         // The logs as they are now, read under the records' lock (never half an entry); git runs after, without it.
-        let snapshot: [String: Data]
+        var snapshot: [String: Data]
         do {
             snapshot = try store.withRecordsLock {
                 paths.reduce(into: [:]) { taken, path in taken[path] = FileManager.default.contents(atPath: (root as NSString).appendingPathComponent(path)) }
             }
         } catch { return .failed("\(error)") }
-        let result = Worktrees.commitFiles(root: root, branch: base, paths: paths, contents: snapshot, message: Self.message(dir),
+        // The inventory goes in when the head's code makes another one, unless the user changed the checkout's copy.
+        let checkedOut = Worktrees.checkout(of: base, root: root).map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
+            == URL(fileURLWithPath: root).resolvingSymlinksInPath().path
+        let inventory = inventory(at: head).flatMap { made in !checkedOut || inventoryUntouched(head) ? made : nil }
+        if let inventory {
+            paths.append(ProductInventory.output)
+            snapshot[ProductInventory.output] = inventory
+        }
+        let result = Worktrees.commitFiles(root: root, branch: base, paths: paths, contents: snapshot,
+                                           message: Self.message(dir, inventory: inventory != nil),
                                            from: head, lockWait: lockWait, lockPause: lockPause)
         switch result {
         case .unchanged: return .unchanged
         case .failed(let why): return .failed(why)
         case .committed(let commit, _):
+            // The checkout's copy as committed (its index entry already is), as a merge's fast-forward leaves files.
+            if let inventory, checkedOut {
+                let file = URL(fileURLWithPath: (root as NSString).appendingPathComponent(ProductInventory.output))
+                try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? inventory.write(to: file)
+            }
             do { try vault.setHead(commit, root: root, branch: base) } catch {
                 return .failed("committed \(commit.prefix(8)) on \(base), but couldn't record it as the lead's (\(error)): the next merge asks the user about it.")
             }
@@ -215,6 +238,26 @@ public final class LeadRecords: @unchecked Sendable {
     }
 
     /// Whether any of `paths` in the working tree differs from `base`'s.
+    /// The product inventory as the code at `head` makes it, when that differs from the one `head` has; nil when it
+    /// doesn't, or `head` has no script, or it failed (`ProductInventory`: the records go without it).
+    private func inventory(at head: String) -> Data? {
+        guard let key = ProductInventory.key(root: root, commit: head) else { return nil }
+        if inventoryMade?.key != key { inventoryMade = (key, ProductInventory.generate(root: root, commit: head)) }
+        guard let made = inventoryMade?.data else { return nil }
+        let committed = Git.run(["cat-file", "blob", "\(head):\(ProductInventory.output)"], in: root)
+        let text = String(decoding: made, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return committed.ok && committed.output == text ? nil : made
+    }
+
+    /// Whether the checkout's copy of the inventory is `head`'s (or neither has one): never one the user is changing.
+    private func inventoryUntouched(_ head: String) -> Bool {
+        let path = ProductInventory.output
+        guard Git.run(["cat-file", "-e", "\(head):\(path)"], in: root).ok else {
+            return !FileManager.default.fileExists(atPath: (root as NSString).appendingPathComponent(path))
+        }
+        return Git.run(["diff", "--quiet", head, "--", path], in: root).ok
+    }
+
     private func changed(_ paths: [String], on base: String) -> Bool {
         paths.contains { path in
             guard FileManager.default.fileExists(atPath: (root as NSString).appendingPathComponent(path)) else { return false }

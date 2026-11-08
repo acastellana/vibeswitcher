@@ -426,6 +426,25 @@ struct LeadRemoteTests: LeadTeamFixture {
         #expect(Git.run(["status", "--porcelain"], in: scene.root).output.split(whereSeparator: \.isNewline).allSatisfy { $0.contains("docs/lead/") || $0.contains(".vibeswitcher") })
     }
 
+    /// Both Macs' records commits make the product inventory: a conflict in it is taken by union (and made again
+    /// from the merged code by the records commit after), never a stop.
+    @Test func aConflictInTheProductInventoryDoesntStopTheMerge() throws {
+        let scene = try makeScene()
+        _ = try pushed(scene, ProductInventory.output, "# Inventory\n- first\n", message: "Inventory")
+        Git.run(["pull", "-q", "--ff-only", "origin", "main"], in: scene.root)
+        let tip = try pushed(scene, ProductInventory.output, "- remote's\n", append: true, message: "Remote inventory")
+        try commit(ProductInventory.output, "- local\n", in: scene.root, append: true, message: "Local inventory")
+        let lead = try lead(scene.root, FakeRuntime())
+        #expect(!lead.call("fetch_remote", [:]).isError)
+
+        let merged = lead.call("merge_remote", [:])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(isAncestor(tip, of: "main", in: scene.root))
+        let inventory = Git.run(["show", "main:\(ProductInventory.output)"], in: scene.root).output
+        for line in ["- first", "- local", "- remote's"] { #expect(inventory.contains(line), "\(inventory)") }
+        #expect(!inventory.contains("<<<<<<<"))
+    }
+
     @Test func aCodeConflictStopsWithTheFileNamedAndMainUnmoved() throws {
         let scene = try makeScene()
         _ = try pushed(scene, "a.txt", "theirs\n", message: "Remote a")
