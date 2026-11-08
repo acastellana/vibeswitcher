@@ -306,3 +306,11 @@ This replaces the 01:28 plan to re-roll the task if round 3 left an Important fi
 
 On 2026-11-08 from 03:40 to 05:35, the load reached 100–225 on 12 cores whenever full suites overlapped, and the app froze dozens of times. Each suite ran 12 tests at once whatever its slot. The worker's two timings (1003–1093 s) came while the Mac was loaded at 57 to 225, so they can't separate the width's cost from the load.
 
+## 2026-11-08 06:32:41 Plugin updates and the config seal. A plugin's hooks run as code in every Claude session. The new plugin seal currently accepts a plugin update silently, but a shell in a worker could fake an update the same way, and nothing on disk tells the two apart. Your rule so far has been "anything that runs as code always needs your Accept". How should plugin updates be handled? → Always ask: a card for every plugin update, like other code (the safest; one click per update)
+
+The lead proposed it with a 15 min timer and the user didn't answer in time, so it went ahead (question CEDA0180).
+
+## 2026-11-08 06:33:00 Plugin updates always need the user's Accept, like any other code change, whoever made them and whether or not team sessions ran. config-seal-covers merges as built, and plugin-updates-always (after it, audited) removes its silent sealing of updates. The plugin seal ships in an install only once both have merged.
+
+Question CEDA0180, 2026-11-08: the user didn't answer in 15 min, so the lead's proposal applied. A plugin's hooks run as code in every Claude session, and a forged update (a new version folder in the cache with the install record repointed) can't be told apart on disk from Claude Code's own update. That matches the standing rule that code that runs always needs Accept.
+

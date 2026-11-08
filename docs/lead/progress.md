@@ -4102,3 +4102,15 @@ Freezes of its main thread (reports in ~/.vibeswitcher/debug, .txt the sampled s
 Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
 - 2026-11-08 06:26 Merged host-events-decode-off: Host events decode off the main thread (in a batch: host-events-decode-off, swift-testing-s-parallel landed on one test run) (build ebed973e8025)
 - 2026-11-08 06:26 Merged swift-testing-s-parallel: Swift Testing's parallel width follows the slot's cores, not the whole Mac's (in a batch: host-events-decode-off, swift-testing-s-parallel landed on one test run) (build ebed973e8025)
+- 2026-11-08 06:26 Automatically (auto_advance): Merged host-events-decode-off at d98f1345 (its passing audit), swift-testing-s-parallel at be76cec7 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-08 06:26 Automatically (auto_advance): Cleaned up host-events-decode-off (freed 2.2 GB of build output and temporary folders). It stays done.
+- 2026-11-08 06:26 Automatically (auto_advance): Cleaned up swift-testing-s-parallel (freed 2.2 GB of build output and temporary folders). It stays done.
+- 2026-11-08 06:26 Started a worker on the-old-host-build
+- 2026-11-08 06:26 Automatically (auto_advance): Started a worker on the-old-host-build (The old-host build the upgrade tests need is cached once per Mac, not rebuilt in every merge and audit), its after tasks done (swift-testing-s-parallel).
+- 2026-11-08 06:26 Released config-seal-covers's worker (idle since its done report on d546a066) while its audit runs
+- 2026-11-08 06:26 Automatically (auto_advance): Started the audit of config-seal-covers at d546a066 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 06:27 Audit of config-seal-a-merge: complete, clean, round 1: 1 Nit open
+- 2026-11-08 06:32 Planned plugin-updates-always: Plugin updates always need the user's Accept, like other code (review audit)
+- 2026-11-08 06:37 Audit of config-seal-covers: complete, clean, round 1: 1 Important open, 4 Nit open
+- 2026-11-08 06:38 Folded plugin-updates-always into config-seal-covers: that task carries its work
+- 2026-11-08 06:45 Merged config-seal-a-merge: Config seal: a merge's own branch run doesn't make the next look unquiet (build ebed973e8025)
