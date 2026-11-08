@@ -29,7 +29,8 @@ public enum ConfigSeal {
         public enum Kind: Equatable, Sendable {
             /// A file: its contents (a link followed, and where it points).
             case file
-            /// A folder: every name under it, each file's contents and each link's target; links never followed.
+            /// A folder: every name under it, each file's contents and each link's target; links never followed. In
+            /// `~/.claude/skills`, not Claude Code's sync bookkeeping (`isSyncBookkeeping`).
             case folder
             /// `~/.claude.json`: only its MCP servers, yours and each project's (the rest changes with every session).
             case mcpServers
@@ -83,21 +84,30 @@ public enum ConfigSeal {
     }
 
     /// What changed in each held thing, by name: its keys (a JSON file's top-level keys, each hook event, each MCP
-    /// server), as "hooks.SessionStart added, env changed"; never a value. Only for what has keys and was sealed with
-    /// them.
+    /// server), as "hooks.SessionStart added, env changed", or a folder's relative paths, as "foo/SKILL.md changed";
+    /// never a value or a file's contents. Only for what has keys or paths and was sealed with them.
     public static func heldChanges(in guarded: [String: String]?) -> [String: String] {
         var changes: [String: String] = [:]
         for (key, line) in heldLines(in: guarded) where !line.changes.isEmpty { changes[name(ofKey: key)] = line.changes }
         return changes
     }
 
-    /// What's held, by key, with the hash it had when it was held (`heldKey`'s lines: "<key>\t<hash>\t<r|q>\t<keys>",
-    /// q: changed outside a team session; keys: `heldChanges`').
-    static func heldLines(in guarded: [String: String]?) -> [String: (hash: String, outside: Bool, changes: String)] {
-        var held: [String: (hash: String, outside: Bool, changes: String)] = [:]
+    /// When a held folder's newest changed file was changed, by name (`changedFiles`). Not for a file: its own time
+    /// says that.
+    public static func heldTimes(in guarded: [String: String]?) -> [String: Date] {
+        var times: [String: Date] = [:]
+        for (key, line) in heldLines(in: guarded) { if let at = line.at { times[name(ofKey: key)] = Date(timeIntervalSince1970: at) } }
+        return times
+    }
+
+    /// What's held, by key, with the hash it had when it was held (`heldKey`'s lines:
+    /// "<key>\t<hash>\t<r|q>\t<keys>\t<at>", q: changed outside a team session; keys: `heldChanges`'; at: `heldTimes`', absent on
+    /// a line an older version wrote).
+    static func heldLines(in guarded: [String: String]?) -> [String: (hash: String, outside: Bool, changes: String, at: Double?)] {
+        var held: [String: (hash: String, outside: Bool, changes: String, at: Double?)] = [:]
         for line in (guarded?[heldKey] ?? "").split(separator: "\n") {
             let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-            if parts.count >= 2 { held[parts[0]] = (parts[1], parts.count > 2 && parts[2] == "q", parts.count > 3 ? parts[3] : "") }
+            if parts.count >= 2 { held[parts[0]] = (parts[1], parts.count > 2 && parts[2] == "q", parts.count > 3 ? parts[3] : "", parts.count > 4 ? Double(parts[4]) : nil) }
         }
         return held
     }
@@ -105,10 +115,10 @@ public enum ConfigSeal {
     static func heldHashes(in guarded: [String: String]?) -> [String: String] { heldLines(in: guarded).mapValues(\.hash) }
 
     /// `heldKey`'s value for these keys and hashes, `outside` the ones changed outside a team session, `changes` what
-    /// changed in each (`changedKeys`).
-    static func heldValue(_ held: [String: String], outside: Set<String>, changes: [String: String] = [:]) -> String {
+    /// changed in each (`changedKeys`, `changedFiles`), `times` when a folder's newest changed file was.
+    static func heldValue(_ held: [String: String], outside: Set<String>, changes: [String: String] = [:], times: [String: Double] = [:]) -> String {
         held.keys.sorted().map { key in
-            "\(key)\t\(held[key] ?? "")\t\(outside.contains(key) ? "q" : "r")\t\(clean(changes[key] ?? ""))"
+            "\(key)\t\(held[key] ?? "")\t\(outside.contains(key) ? "q" : "r")\t\(clean(changes[key] ?? ""))\t\(times[key].map { String($0) } ?? "")"
         }.joined(separator: "\n")
     }
 
@@ -136,6 +146,26 @@ public enum ConfigSeal {
 
     /// The key of the per-key hashes of the thing `key` (a watched key) hashes.
     static func keysKey(of key: String) -> String { keysPrefix + name(ofKey: key) }
+
+    /// Where a look's hashes say what a folder hashes to with the sync bookkeeping counted (`isSyncBookkeeping`), as
+    /// versions before it was left out did: only to carry a seal they made over, never recorded.
+    static let countingPrefix = keyPrefix + "#counting "
+
+    /// The key of the hash, bookkeeping counted, of the folder `key` (a watched key) hashes. Only folders have one.
+    static func countingKey(of key: String) -> String { countingPrefix + name(ofKey: key) }
+
+    /// The two files Claude Code's skill sync rewrites in `~/.claude/skills/synced/<account folder>/` on its own
+    /// schedule, with no skill's content in them: left out of that folder's hash, or every sync round would hold the team.
+    static let syncBookkeeping: Set<String> = [".last-complete-round", "manifest.json"]
+
+    /// Whether `relative`, a regular file under the watched thing `name`, is that bookkeeping: those two names at
+    /// exactly that depth, in that folder. A link or a folder with one of the names stays watched, as does anything
+    /// beside or under them, every skill in `synced/` and the same names anywhere else.
+    static func isSyncBookkeeping(_ relative: String, in name: String) -> Bool {
+        guard name == "~/.claude/skills" else { return false }
+        let parts = relative.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count == 3 && parts[0] == "synced" && syncBookkeeping.contains(String(parts[2]))
+    }
 
     /// The key VibeSwitcher sends after writing watched things itself (`appWrite`): lines "<name>\t<before>\t<after>",
     /// the hashes around its write. For each team where a thing was sealed as `before`, the vault seals `after` (a
@@ -200,7 +230,8 @@ public enum ConfigSeal {
     /// The hashes of everything watched, by key (`keyPrefix` + name).
     /// Something read mid-write (`~/.claude.json`, which Claude Code rewrites at every session's start and end) is
     /// left out: neither recorded nor compared, so it holds nothing until it reads whole.
-    /// With each JSON one's per-key hashes (`keysKey`, `keyHashes`), for the vault alone.
+    /// With each JSON one's per-key hashes (`keysKey`, `keyHashes`) and each folder's per-path ones (`FolderRead`), for
+    /// the vault alone; and each folder's hash with the bookkeeping counted (`countingKey`), never kept.
     public static func hashes(home: String, root: String) -> [String: String] {
         hashes(of: watched(home: home, root: root))
     }
@@ -209,6 +240,13 @@ public enum ConfigSeal {
     static func hashes(of items: [Watched]) -> [String: String] {
         var all: [String: String] = [:]
         for item in items {
+            if item.kind == .folder {
+                let folder = readFolder(item)
+                all[keyPrefix + item.name] = folder.hash
+                all[keysPrefix + item.name] = encode(folder.entries)
+                all[countingPrefix + item.name] = folder.countingHash
+                continue
+            }
             guard let hash = fingerprint(item) else { continue }
             all[keyPrefix + item.name] = hash
             if let keys = keyHashes(item) { all[keysPrefix + item.name] = encode(keys) }
@@ -286,6 +324,43 @@ public enum ConfigSeal {
         return said.prefix(shown).joined(separator: ", ") + (said.count > shown ? " and \(said.count - shown) more" : "")
     }
 
+    /// What changed in a held folder, between its per-path hashes as sealed and as they are (`FolderRead.entries`):
+    /// its relative paths, "foo/SKILL.md changed, bar.sh added and 3 more", the first `shown` in name order (a folder
+    /// only when nothing under it changed too), and the newest of the changed ones' times, the unshown included: a
+    /// folder's own time moves with whatever is written in it, a removed path has none. Paths only, never contents.
+    /// Sealed without them (by a version before them) or with no path changed: nothing to name, the folder's newest.
+    static func changedFiles(from old: String?, to new: String?, shown: Int = 5) -> (said: String?, at: Double?) {
+        guard let new else { return (nil, nil) }
+        let after = decode(new)
+        func hash(_ entry: String?) -> Substring? { entry?.split(separator: " ").first }
+        func time(_ entry: String?) -> Double? { entry?.split(separator: " ").last.flatMap { Double($0) } }
+        var changed: [(path: String, word: String)] = []
+        if let old {
+            let before = decode(old)
+            for path in Set(before.keys).union(after.keys).sorted() {
+                switch (hash(before[path]), hash(after[path])) {
+                case (nil, _?): changed.append((path, "added"))
+                case (_?, nil): changed.append((path, "removed"))
+                case let (was?, now?) where was != now: changed.append((path, "changed"))
+                default: break
+                }
+            }
+        }
+        var parents: Set<Substring> = []
+        for (path, _) in changed {
+            var rest = Substring(path)
+            while let slash = rest.lastIndex(of: "/") {
+                rest = rest[..<slash]
+                parents.insert(rest)
+            }
+        }
+        let listed = changed.filter { !parents.contains(Substring($0.path)) }
+        guard !listed.isEmpty else { return (nil, after.values.compactMap { time($0) }.max()) }
+        let said = listed.prefix(shown).map { "\($0.path) \($0.word)" }.joined(separator: ", ")
+            + (listed.count > shown ? " and \(listed.count - shown) more" : "")
+        return (said, listed.compactMap { time(after[$0.path]) }.max())
+    }
+
     /// The name a key stands for.
     public static func name(ofKey key: String) -> String { String(key.dropFirst(keyPrefix.count)) }
 
@@ -317,8 +392,7 @@ public enum ConfigSeal {
             case .unreadable: add("unreadable")
             }
         case .folder:
-            var count = 0
-            walk(watched.path, relative: "", count: &count) { add($0 + "\n") }
+            return readFolder(watched).hash
         case .mcpServers:
             var servers = mcpServers(watched.path)
             for _ in 1..<3 where servers == nil {
@@ -331,28 +405,70 @@ public enum ConfigSeal {
         return hex(hasher.finalize())
     }
 
-    /// Each entry under `folder` in name order, one line each: links read, never followed.
-    private static func walk(_ folder: String, relative: String, count: inout Int, line: (String) -> Void) {
+    /// A watched folder as it is now.
+    struct FolderRead {
+        /// Its hash: every entry but the sync bookkeeping (`isSyncBookkeeping`).
+        var hash: String
+        /// Its hash with the bookkeeping counted. Without any bookkeeping there, `hash`.
+        var countingHash: String
+        /// Each entry but the bookkeeping, by relative path: "<its line's hash> <mtime, seconds>". What a held folder's
+        /// card names comes from these (`changedFiles`): paths, hashes and times, never contents.
+        var entries: [String: String]
+    }
+
+    /// Reads the folder `watched` (`Kind.folder`). The lines are the hash's since before the bookkeeping was left out,
+    /// so a folder without any hashes as it did.
+    static func readFolder(_ watched: Watched) -> FolderRead {
+        var hasher = SHA256(), counting = SHA256()
+        var info = stat()
+        guard lstat(watched.path, &info) == 0 else {
+            hasher.update(data: Data("absent".utf8))
+            let absent = hex(hasher.finalize())
+            return FolderRead(hash: absent, countingHash: absent, entries: [:])
+        }
+        var entries: [String: String] = [:]
+        var count = 0
+        walk(watched.path, relative: "", name: watched.name, count: &count) { line in
+            let text = Data((line.text + "\n").utf8)
+            counting.update(data: text)
+            guard !line.bookkeeping else { return }
+            hasher.update(data: text)
+            if let path = line.path { entries[path] = hex(SHA256.hash(data: text).prefix(8)) + " \(line.mtime)" }
+        }
+        return FolderRead(hash: hex(hasher.finalize()), countingHash: hex(counting.finalize()), entries: entries)
+    }
+
+    /// One of `walk`'s lines: what's hashed, and for an entry its path and mtime (`FolderRead.entries`).
+    private struct FolderLine {
+        var text: String
+        var path: String?
+        var mtime = 0
+        var bookkeeping = false
+    }
+
+    /// Each entry under `folder` (of the watched thing `name`) in name order, one line each: links read, never followed.
+    private static func walk(_ folder: String, relative: String, name watchedName: String, count: inout Int, line: (FolderLine) -> Void) {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder) else {
-            line("unreadable \(relative)")
+            line(FolderLine(text: "unreadable \(relative)"))
             return
         }
         for name in names.sorted() where name != ".DS_Store" {
             count += 1
             guard count <= maxEntries else {
-                line("cut")
+                line(FolderLine(text: "cut"))
                 return
             }
             let path = (folder as NSString).appendingPathComponent(name)
             let shown = relative.isEmpty ? name : relative + "/" + name
             var info = stat()
             guard lstat(path, &info) == 0 else { continue }
+            let mtime = Int(info.st_mtimespec.tv_sec)
             switch info.st_mode & S_IFMT {
             case S_IFDIR:
-                line("d \(shown)")
-                walk(path, relative: shown, count: &count, line: line)
+                line(FolderLine(text: "d \(shown)", path: shown, mtime: mtime))
+                walk(path, relative: shown, name: watchedName, count: &count, line: line)
             case S_IFLNK:
-                line("l \(shown) -> " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? ""))
+                line(FolderLine(text: "l \(shown) -> " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? ""), path: shown, mtime: mtime))
             case S_IFREG:
                 let digest: String
                 switch contentsDigest(path, followLink: false) {
@@ -360,9 +476,10 @@ public enum ConfigSeal {
                 case .other: digest = "other"
                 case .unreadable: digest = "unreadable"
                 }
-                line("f \(shown) \(info.st_mode & 0o777) \(digest)")
+                line(FolderLine(text: "f \(shown) \(info.st_mode & 0o777) \(digest)", path: shown, mtime: mtime,
+                                bookkeeping: isSyncBookkeeping(shown, in: watchedName)))
             default:
-                line("o \(shown)")
+                line(FolderLine(text: "o \(shown)", path: shown, mtime: mtime))
             }
         }
     }

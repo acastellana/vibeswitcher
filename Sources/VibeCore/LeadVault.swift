@@ -1293,11 +1293,24 @@ extension LeadVault {
         /// it sealed or found as sealed.
         private static func judge(_ now: [String: String], hashes: [String: String], recorded: inout [String: String], held: inout String?,
                                   quiet: Bool, caller: Caller) -> Bool {
+            // A seal made while the sync bookkeeping still counted, of a folder as it is now: the same folder, carried
+            // over to the hash that leaves it out, so that alone holds nothing. Whatever else moved doesn't match, and
+            // is judged as ever.
+            var before = ConfigSeal.heldLines(in: [ConfigSeal.heldKey: held ?? ""])
+            var carried = false
+            for (key, hash) in now {
+                guard let counting = hashes[ConfigSeal.countingKey(of: key)], counting != hash else { continue }
+                if recorded[key] == counting { Self.seal([key], from: hashes, into: &recorded) }
+                if before[key]?.hash == counting {
+                    before[key]?.hash = hash
+                    carried = true
+                }
+            }
+            if carried { held = Self.heldValue(before) }
             let differ = now.filter { recorded[$0.key] != nil && recorded[$0.key] != $0.value }
             // Your click seals only what its card showed you: each held thing as it was when held. One that moved
             // since (or changed and was never shown) is held anew, for the card to show. For the lead: a change while
             // the seal was quiet is yours and sealed, unless it executes: that waits for your click whoever made it.
-            let before = ConfigSeal.heldLines(in: [ConfigSeal.heldKey: held ?? ""])
             // Something already held is never the lead's look's to seal, quiet or not: only your click clears it.
             let unseen = caller == .app ? differ.filter { before[$0.key]?.hash != $0.value }
                 : differ.filter { !quiet || ConfigSeal.executes(key: $0.key) || before[$0.key] != nil }
@@ -1316,15 +1329,24 @@ extension LeadVault {
             let outside = Set(holding.keys.filter { key in
                 (quiet && caller != .app) || (before[key]?.outside == true && before[key]?.hash == holding[key])
             })
-            // Which keys changed, from the per-key hashes as sealed: names, for the card, never values.
+            // Which keys or paths changed, from the per-key hashes as sealed: names, for the card, never values or
+            // contents. A folder's also says when its newest changed file was.
             var changes: [String: String] = [:]
+            var times: [String: Double] = [:]
             for key in holding.keys {
                 let keys = ConfigSeal.keysKey(of: key)
-                changes[key] = ConfigSeal.changedKeys(from: recorded[keys], to: hashes[keys])
+                if hashes[ConfigSeal.countingKey(of: key)] != nil {
+                    let files = ConfigSeal.changedFiles(from: recorded[keys], to: hashes[keys])
+                    changes[key] = files.said
+                    times[key] = files.at
+                } else {
+                    changes[key] = ConfigSeal.changedKeys(from: recorded[keys], to: hashes[keys])
+                }
             }
             seal(sealed.keys, from: hashes, into: &recorded)
             held = ConfigSeal.heldValue(holding.merging(unread.mapValues(\.hash)) { $1 }, outside: outside.union(unread.filter(\.value.outside).keys),
-                                        changes: changes.merging(unread.mapValues(\.changes)) { $1 })
+                                        changes: changes.merging(unread.mapValues(\.changes)) { $1 },
+                                        times: times.merging(unread.compactMapValues(\.at)) { $1 })
             return false
         }
 
@@ -1369,8 +1391,9 @@ extension LeadVault {
         }
 
         /// `heldKey`'s value for `held` (`ConfigSeal.heldLines`'), nil when nothing is.
-        private static func heldValue(_ held: [String: (hash: String, outside: Bool, changes: String)]) -> String? {
-            let value = ConfigSeal.heldValue(held.mapValues(\.hash), outside: Set(held.filter(\.value.outside).keys), changes: held.mapValues(\.changes))
+        private static func heldValue(_ held: [String: (hash: String, outside: Bool, changes: String, at: Double?)]) -> String? {
+            let value = ConfigSeal.heldValue(held.mapValues(\.hash), outside: Set(held.filter(\.value.outside).keys), changes: held.mapValues(\.changes),
+                                             times: held.compactMapValues(\.at))
             return value.isEmpty ? nil : value
         }
 

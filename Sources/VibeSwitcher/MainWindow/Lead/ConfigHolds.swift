@@ -14,8 +14,8 @@ final class ConfigHolds: ObservableObject {
     @Published private(set) var accepting: Set<String> = []
     /// What changed in each held thing (its keys, "hooks.SessionStart added"; never a value), by root and name.
     @Published private(set) var changes: [String: [String: String]] = [:]
-    /// When each held thing was last changed, by root and name: read in the background with what's held, so the card
-    /// never reads a file on the main thread.
+    /// When each held thing was last changed, by root and name (a folder: its newest changed file): read in the
+    /// background with what's held, so the card never reads a file on the main thread.
     @Published private(set) var changedAt: [String: [String: Date]] = [:]
 
     var vault: LeadVault
@@ -50,6 +50,7 @@ final class ConfigHolds: ObservableObject {
                 let outside = guarded.map { Set(ConfigSeal.heldOutside(in: $0)) }
                 let changes = guarded.map { ConfigSeal.heldChanges(in: $0) }
                 let times = Self.changedAt((try? names.get()) ?? [], root: root)
+                    .merging(guarded.map { ConfigSeal.heldTimes(in: $0) } ?? [:]) { $1 }
                 self.main {
                     // Not known (the host didn't answer): what was shown stays.
                     if let outside, self.outside[root] ?? [] != outside { self.outside[root] = outside.isEmpty ? nil : outside }
@@ -86,12 +87,13 @@ final class ConfigHolds: ObservableObject {
         }
     }
 
-    /// When each of `names` was last changed, for the card ("14:02"): nothing for a missing file. Reads the disk: off
-    /// the main thread.
+    /// When each of `names` was last changed, for the card ("14:02"): nothing for a missing file, or a folder (its own
+    /// time moves with whatever is written in it: what's held says when its newest changed file was,
+    /// `ConfigSeal.heldTimes`). Reads the disk: off the main thread.
     static func changedAt(_ names: [String], root: String, home: String = VibePaths.home) -> [String: Date] {
         guard !names.isEmpty else { return [:] }
         var times: [String: Date] = [:]
-        for watched in ConfigSeal.watched(home: home, root: root) where names.contains(watched.name) {
+        for watched in ConfigSeal.watched(home: home, root: root) where names.contains(watched.name) && watched.kind != .folder {
             times[watched.name] = (try? FileManager.default.attributesOfItem(atPath: watched.path))?[.modificationDate] as? Date
         }
         return times
