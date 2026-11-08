@@ -134,7 +134,7 @@ public enum SetupInstalls {
             if let known = histories[build] {
                 history = known
             } else {
-                let result = Git.run(["rev-list", "--since=\(Int(since))", build, "--"], in: root, timeout: 20)
+                let result = Git.run(["rev-list"] + (since > 0 ? ["--since=\(Int(since))"] : []) + [build, "--"], in: root, timeout: 20)
                 history = result.status == 0 ? Set(result.output.split(whereSeparator: \.isNewline).map { String($0).lowercased() }) : []
                 histories[build] = history
             }

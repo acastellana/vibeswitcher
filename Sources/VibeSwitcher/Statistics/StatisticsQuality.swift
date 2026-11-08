@@ -61,7 +61,7 @@ struct QualityPage: Equatable {
 
     init(_ quality: SetupQuality, calendar: Calendar = .current) {
         let all = quality.all
-        sections = [Self.quality(all), Self.autonomy(all), Self.time(all), Self.cost(all)]
+        sections = (quality.scorecard.map { [Self.scorecard($0)] } ?? []) + [Self.quality(all), Self.autonomy(all), Self.time(all), Self.cost(all)]
         compared = ComparedPage(all: all, byAgent: quality.byAgent)
         breakdown = quality.byAgent.flatMap { group -> [BreakdownRow] in
             let row = BreakdownRow(name: group.name, model: false, cells: Self.cells(group.figures))
@@ -216,9 +216,11 @@ struct QualityPage: Equatable {
                    help: "What the merges' test reruns cost: receipts count a rerun but don't price it."),
             lead(f.lead),
             Figure(label: "Codex tokens", value: f.codexTokens.map { LeadReceipt.count($0) } ?? (merged ? notRecorded : none),
-                   detail: f.codexTokens != nil ? "not in the cost: Codex has no price here" : merged ? "no merge's receipt read a Codex worker's tokens" : nil,
-                   help: "The tokens Codex workers spent on the merged tasks, from Codex's own records. Codex has no price in the price table, "
-                       + "so they aren't in any cost here."),
+                   detail: f.codexTokens != nil ? "in the cost at Codex's prices of \(LeadPrices.codexAsOf) (receipts from before then: not in it)"
+                       : merged ? "no merge's receipt read a Codex worker's tokens" : nil,
+                   help: "The tokens Codex workers spent on the merged tasks, from Codex's own records, priced from the Codex price table "
+                       + "(LeadPrices.codex); a model not in it leaves that receipt's cost unknown. Receipts made before Codex was priced "
+                       + "kept them out of their cost."),
         ])
     }
 

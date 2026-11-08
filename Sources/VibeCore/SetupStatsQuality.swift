@@ -231,7 +231,8 @@ public struct QualityFigures: Equatable, Sendable {
     public var verificationShare: Double? { cost > 0 ? verifierCost / cost : nil }
     /// The merges' test reruns' cost: nil, not recorded (receipts count a rerun, not what it cost).
     public var mergeRerunCost: Double?
-    /// The merges' workers' Codex tokens (`LeadTokens.codex`): not in the cost (`LeadPrices` has no Codex price); nil
+    /// The merges' workers' Codex tokens (`LeadTokens.codex`): in the cost at `LeadPrices.codex` (receipts from before
+    /// Codex was priced: not); nil
     /// when no merge's receipt read any.
     public var codexTokens: Int?
     /// The project lead's own spend on the range's days, every project's (`ProjectFigures.leadTokens`): only on

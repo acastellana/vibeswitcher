@@ -354,9 +354,9 @@ struct StatisticsModelTests {
         // All: the lead's $1.50 spread over 3 merges, the baseline's 2 carry $1.
         #expect(cost.cells.map(\.value) == ["≥ 40%", "≥ 33%", "Not recorded"])
         #expect(cost.cells[0].detail == "$4.00 of $10.00 over 2 merges · lead $1.00 (2 of 3 merges' share of $1.50), verifiers $3.00 "
-            + "· not recorded: 1 merge rerun · Codex tokens 1.5M, not in the cost")
+            + "· not recorded: 1 merge rerun · Codex tokens 1.5M, not in the baseline")
         #expect(cost.cells[1].detail == "$3.00 of $9.00 over 2 merges · verifiers $3.00 · not recorded: the lead's (in All only), 1 merge rerun")
-        #expect(cost.cells[2].detail == "Codex tokens have no price: 1.5M, not in the cost")
+        #expect(cost.cells[2].detail == "Codex-worked merges are left out of the solo baseline: 1.5M Codex tokens")
         // Caught beside escaped.
         #expect(try row("Important findings fixed").cells.map(\.value) == ["50", "50", "Not recorded"])
         #expect(try row("Important findings fixed").cells[0].detail == "1 finding over 2 merges whose audits are kept")
@@ -417,7 +417,7 @@ struct StatisticsModelTests {
         #expect(try figure("Worker working").value == "37%" && figure("The rest").value == "53%")
         #expect(try figure("Verifier hours").value == StatisticsPage.hours(1.25))
         #expect(try figure("Project lead").value == "$1.50" && figure("Project lead").detail == "2.4M tokens")
-        #expect(try figure("Codex tokens").value == "1.5M" && figure("Codex tokens").detail == "not in the cost: Codex has no price here")
+        #expect(try figure("Codex tokens").value == "1.5M" && figure("Codex tokens").detail == "in the cost at Codex's prices of \(LeadPrices.codexAsOf) (receipts from before then: not in it)")
         #expect(try figure("Merge reruns").value == "Not recorded", "receipts still don't price a rerun")
         // Not kept: said so.
         var bare = QualityFigures()
