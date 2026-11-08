@@ -92,4 +92,86 @@ struct RunButtonTests {
         RunButton.run(runnable, way: .bang, with: runner, confirm: { _ in Issue.record("asked"); return false })
         #expect(typed == ["! swift test"])
     }
+
+    // MARK: Refusals in app.log
+
+    /// Each way a Run is refused writes one app.log line naming its kind and the session's, never what it was asked to
+    /// run nor the reason's words (a script's path, an error's text). The log watcher counts each kind as one cause.
+    @Test func eachRefusalWritesOneLogLineWithItsKindAndNothingItRan() throws {
+        let blocked = scratch.url("blocked")
+        try Data("a file, not a folder".utf8).write(to: blocked)
+        let script = try #require(RunnableCommand.runnable(code: Self.block, language: "bash", scripts: scratch.url("scripts")))
+        let unwritable = try #require(RunnableCommand.runnable(code: Self.block, language: "bash",
+                                                               scripts: blocked.appendingPathComponent("scripts")))
+        let line = try #require(RunnableCommand.runnable(code: "git push origin secret-branch-name", language: "bash"))
+        var logged: [String] = []
+        var outcome: RunOutcome??
+        func refused(_ runner: ChatRunner, _ runnable: RunnableCommand.Runnable, way: RunnableCommand.Way = .bang,
+                     confirm: @escaping (RunnableCommand.Runnable) -> Bool = { _ in true }) -> String? {
+            logged = []
+            outcome = nil
+            runner.sessionKind = { "claude" }
+            runner.log = { logged.append($0) }
+            RunButton.run(runnable, way: way, with: runner, confirm: confirm) { outcome = .some($0) }
+            guard case .refused(let reason)?? = outcome else { Issue.record("not refused: \(String(describing: outcome))"); return nil }
+            #expect(logged.count == 1, "\(logged)")
+            for text in logged {
+                #expect(text.hasPrefix("chat: Run refused (claude session), kind: "))
+                for secret in ["secret-branch-name", "git push", "STOPPED", scratch.url("").path, "/", reason] {
+                    #expect(!text.contains(secret), "\(text) holds \(secret)")
+                }
+            }
+            return logged.first.map { String($0.dropFirst("chat: Run refused (claude session), kind: ".count)) }
+        }
+        // The button's own: no session there, another session shown meanwhile, the way it takes commands changed, the
+        // script's file couldn't be written.
+        let alone = ChatRunner()
+        alone.way = .bang
+        let id = UUID()
+        alone.session = { id }
+        #expect(refused(alone, line) == "noSession")
+        let switched = Self.runner()
+        #expect(refused(switched, script, confirm: { _ in switched.session = { UUID() }; return true }) == "otherSession")
+        let changed = Self.runner()
+        #expect(refused(changed, script, confirm: { _ in changed.way = .shell; return true }) == "wayChanged")
+        #expect(refused(Self.runner(), unwritable) == "notWritten")
+        // The session's own, from the window and `ChatSync.run`; and one nobody named yet.
+        let answers: [(String, String)] = [
+            (RunRefusal.noSession, "noSession"), (RunRefusal.otherSession, "otherSession"), (RunRefusal.wayChanged, "wayChanged"),
+            (RunRefusal.replacedLead, "replacedLead"), (ChatSync.notConnected, "notConnected"), (ChatSync.shellBusy, "shellBusy"),
+            (ChatSync.behindDraft(.claude), "behindDraft"), (ChatSync.behindDraft(.codex), "behindDraft"),
+            (ChatSync.notTaken(.codex), "notTaken"), (ChatSync.noAgent, "noAgent"), (ChatSync.dictating, "dictating"),
+            (ChatSync.pickerOpen, "pickerOpen"), (ChatSync.questionOpen, "questionOpen"),
+            (RunRefusal.notWritten(CocoaError(.fileWriteNoPermission, userInfo: [NSFilePathErrorKey: "/Users/someone/x.sh"])), "notWritten"),
+            ("Not run: some reason nobody named at /Users/someone/x.", "other"),
+        ]
+        for (reason, kind) in answers {
+            #expect(refused(Self.runner(answer: .refused(reason)), line) == kind, "\(reason)")
+            #expect(refused(Self.runner(answer: .refused(reason)), script) == kind, "\(reason)")
+        }
+        // Run: nothing logged.
+        logged = []
+        let ran = Self.runner()
+        ran.log = { logged.append($0) }
+        RunButton.run(line, way: .bang, with: ran, confirm: { _ in true })
+        #expect(logged.isEmpty)
+    }
+
+    /// The line goes to the app's own log (`Breadcrumbs`, app.log once the app turns its file on), and the log watcher
+    /// takes it as one cause per kind, whatever the session.
+    @Test func aRefusalsLineIsTheAppLogsAndTheWatcherGroupsItByKind() throws {
+        let line = try #require(RunnableCommand.runnable(code: "make deploy", language: "bash"))
+        let runner = Self.runner(answer: .refused(ChatSync.shellBusy))
+        let kind = "probe\(UUID().uuidString.prefix(8).filter(\.isLetter))"
+        runner.sessionKind = { kind }
+        RunButton.run(line, way: .bang, with: runner, confirm: { _ in true })
+        #expect(Breadcrumbs.shared.lines.contains { $0.hasSuffix("chat: Run refused (\(kind) session), kind: shellBusy") })
+        let at = "2026-11-08 10:00:00"
+        for session in ["claude", "codex", "shell", "none"] {
+            #expect(AppHealth.cause(ofLine: "10:00:00.000 " + RunRefusal.logLine(RunRefusal.wayChanged, session: session), at: at)?.key
+                        == "notice Code block's Run refused: wayChanged")
+        }
+        #expect(AppHealth.cause(ofLine: RunRefusal.logLine(ChatSync.shellBusy, session: "shell"), at: at)?.key
+                    == "notice Code block's Run refused: shellBusy")
+    }
 }

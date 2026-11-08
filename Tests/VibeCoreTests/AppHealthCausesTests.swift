@@ -107,6 +107,22 @@ struct AppHealthCausesTests {
         #expect(key("10:00:00.000 dictation: Claude's ended, text taken (42 characters), after 5.2 s") == nil)
     }
 
+    /// A code block's Run refused in the chat (VibeSwitcher's `RunRefusal.logLine`): one cause per refusal kind, the
+    /// session's kind aside.
+    @Test func twoRunRefusalsOfAKindAreOneCause() throws {
+        var watch = AppHealth.Watch()
+        watch.saw(lines: ["10:00:00.000 chat: Run refused (claude session), kind: wayChanged",
+                          "10:05:00.000 chat: Run refused (shell session), kind: wayChanged",
+                          "10:06:00.000 chat: Run refused (codex session), kind: notWritten"], now: start)
+        let notices = watch.causes.byKey.filter { $0.value.kind == .notice }
+        #expect(notices.count == 2, "\(notices.keys.sorted())")
+        let changed = try #require(notices["notice Code block's Run refused: wayChanged"])
+        #expect(changed.counts == [AppHealth.Watch.day(start): 2])
+        #expect(changed.first == AppHealth.Watch.day(start) + " 10:00:00")
+        #expect(changed.last == AppHealth.Watch.day(start) + " 10:05:00")
+        #expect(notices["notice Code block's Run refused: notWritten"]?.counts == [AppHealth.Watch.day(start): 1])
+    }
+
     @Test func aNoticeOnThreeDaysIsProposed() throws {
         let folders = try folders()
         var watch = AppHealth.Watch()

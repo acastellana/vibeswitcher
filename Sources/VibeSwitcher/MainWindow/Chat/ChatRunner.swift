@@ -26,6 +26,33 @@ enum RunRefusal {
         "Not run: its answer couldn't be written (\(error.localizedDescription)), so the shell wasn't started."
     }
     static func shellNotStarted(_ why: String) -> String { "Not run: the shell session didn't start (\(why))." }
+
+    /// A replaced lead's typing goes to the live lead as a message: a command isn't one.
+    static let replacedLead = "Not run: this lead was replaced. Run it from the live lead's chat."
+
+    /// A code block's refusal by kind, for app.log: its name, never its words (a `notWritten`'s error can name a file;
+    /// none holds the command). The session's own reasons come from `ChatSync`; any other is "other".
+    static func kind(of reason: String) -> String {
+        let known: [(String, String)] = [
+            (noSession, "noSession"), (otherSession, "otherSession"), (wayChanged, "wayChanged"), (replacedLead, "replacedLead"),
+            (ChatSync.notConnected, "notConnected"), (ChatSync.shellBusy, "shellBusy"), (ChatSync.noAgent, "noAgent"),
+            (ChatSync.dictating, "dictating"), (ChatSync.pickerOpen, "pickerOpen"), (ChatSync.questionOpen, "questionOpen"),
+        ]
+        if let (_, kind) = known.first(where: { $0.0 == reason }) { return kind }
+        if Agent.allCases.contains(where: { ChatSync.behindDraft($0) == reason }) { return "behindDraft" }
+        if Agent.allCases.contains(where: { ChatSync.notTaken($0) == reason }) { return "notTaken" }
+        if reason.hasPrefix(notWrittenStart) { return "notWritten" }
+        return "other"
+    }
+
+    /// What every `notWritten` starts with, whatever its error.
+    private static let notWrittenStart = String(notWritten(CocoaError(.fileWriteUnknown)).prefix { $0 != "(" })
+
+    /// The app.log line for a code block's refusal: its kind and the session's (`ChatRunner.sessionKind`), nothing it
+    /// was asked to run. The log watcher counts each kind as its own cause (`AppHealth.notices`).
+    static func logLine(_ reason: String, session: String) -> String {
+        "chat: Run refused (\(session) session), kind: \(kind(of: reason))"
+    }
 }
 
 /// What a Run button shows: Run; Sent for a moment once it went; Not run for a while after a refusal, with why in its
@@ -85,6 +112,10 @@ final class ChatRunner: ObservableObject {
     }
     /// Says why a Run didn't go (the composer's notice line).
     var refused: (String) -> Void = { _ in }
+    /// What the selected session is, for app.log: its agent ("claude", "codex"), "shell", or "none".
+    var sessionKind: () -> String = { "none" }
+    /// Writes a refusal's line (`RunRefusal.logLine`) to app.log.
+    var log: (String) -> Void = { Breadcrumbs.shared.note($0) }
 }
 
 /// Runs a code block's command in the session: typed in as `! command` for an agent (it runs in the agent's shell and
@@ -130,15 +161,16 @@ struct RunButton: View {
 
     /// Asks first when it must (`confirm`), checks the session is still the one asked about and takes commands the
     /// same way, writes a script's file and has the runner type it. `done`: nil when cancelled; refused with why not
-    /// (also told through `runner.refused`; the script's file goes then, unless an earlier Run left it there). A refusal
+    /// (also told through `runner.refused` and logged by kind through `runner.log`; the script's file goes then, unless an earlier Run left it there). A refusal
     /// says why in words and makes no sound, as a shell request card's Run (`ShellDesk.run`).
     static func run(_ runnable: RunnableCommand.Runnable, way: RunnableCommand.Way, with runner: ChatRunner,
                     confirm: (RunnableCommand.Runnable) -> Bool, done: @escaping (RunOutcome?) -> Void = { _ in }) {
-        let session = runner.session()
+        let session = runner.session(), sessionKind = runner.sessionKind()
         // The file this Run wrote: one there before is an earlier Run's of the same block, maybe still queued to run.
         var wrote: URL?
         func refuse(_ reason: String) {
             if let wrote { try? FileManager.default.removeItem(at: wrote) }
+            runner.log(RunRefusal.logLine(reason, session: sessionKind))
             runner.refused(reason)
             done(.refused(reason))
         }

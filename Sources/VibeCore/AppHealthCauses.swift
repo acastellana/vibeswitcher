@@ -81,7 +81,7 @@ extension AppHealth {
     }
 
     /// The notices, the first that matches wins. Their app.log lines are VibeSwitcher's own words (ClaudeVoice,
-    /// DictationController, ChatSync, ChatModel, ComposerOutbox, HostClient, ShellDesk).
+    /// DictationController, ChatSync, ChatModel, ChatRunner, ComposerOutbox, HostClient, ShellDesk).
     static let notices: [Notice] = [
         Notice(name: "Dictation cut short", title: "Find why dictations are cut short", all: ["dictation: claude's ended", "cut short"]),
         Notice(name: "Dictation: the keys didn't reach the session", title: "Find why dictation's keys don't reach the session",
@@ -100,6 +100,9 @@ extension AppHealth {
         Notice(name: "Unsent messages dropped", title: "Find why unsent messages are dropped", all: ["composer: dropped", "unsent"]),
         Notice(name: "Run not confirmed: the session host didn't confirm a code block", title: "Find why a code block's Run isn't confirmed",
                all: ["chat: the host didn't confirm a code block"]),
+        // A code block's Run refused in the chat (`RunRefusal.logLine`): one cause per refusal kind, whatever the session.
+        Notice(name: "Code block's Run refused", title: "Find why code blocks' Runs in the chat are refused",
+               all: ["chat: run refused ("], reasonAfter: ", kind: "),
         Notice(name: "Run refused: the shell session didn't start", title: "Find why a shell request's Run doesn't start its shell",
                all: ["shell: ", "didn't start"]),
         Notice(name: "Run refused: the shell request wasn't started", title: "Find why a shell request isn't started",

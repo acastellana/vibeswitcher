@@ -200,6 +200,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
         chat.runner.session = { [weak self] in self?.model.selectedRow?.hostID }
         chat.runner.refused = { [weak self] reason in self?.chat.sendNotice = reason }
+        chat.runner.sessionKind = { [weak self] in
+            guard let row = self?.model.selectedRow, row.hostID != nil else { return "none" }
+            return row.session?.agent.rawValue ?? "shell"
+        }
         chat.runner.run = { [weak self] runnable, way, done in
             guard let self else { return done(.refused(RunRefusal.noSession)) }
             self.runSelected(runnable, way: way, done)
@@ -511,10 +515,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     /// A code block's Run, typed into the selected window session as `way` takes it (`ChatSync.run`).
     private func runSelected(_ runnable: RunnableCommand.Runnable, way: RunnableCommand.Way, _ done: @escaping (RunOutcome) -> Void) {
         guard let row = model.selectedRow, let id = row.hostID, actions.isLive(row) else { return done(.refused(RunRefusal.noSession)) }
-        // A replaced lead's typing goes to the live lead as a message: a command isn't one.
-        guard model.replacedLeads[id] == nil else {
-            return done(.refused("Not run: this lead was replaced. Run it from the live lead's chat."))
-        }
+        guard model.replacedLeads[id] == nil else { return done(.refused(RunRefusal.replacedLead)) }
         guard runWay(row) == way else { return done(.refused(RunRefusal.wayChanged)) }
         let text = runnable.typed(way), working = row.session?.status == .working, agent = row.session?.agent
         sync.run(text) { [weak self] refusal in
