@@ -4170,3 +4170,12 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 09:58 Folded turn-this-incident-into-14 into config-seal-claude-s: that task carries its work
 - 2026-11-08 10:01 Automatically fetched origin/main at f38147da: 0 commits from the other Mac at origin/main (f38147da532c5803faefe6cc2ec9ea4fba0a4a40): merge_remote would do nothing: main has everything origin/main has.
 - 2026-11-08 10:10 Merged starts-and-audits-wait: Starts and audits wait when the Mac is short of memory, not only when its load is high (build f38147da532c)
+- 2026-11-08 10:10 Automatically (auto_advance): Merged starts-and-audits-wait (Starts and audits wait when the Mac is short of memory, not only when its load is high) into main at 2fac7d48, on its passing audit and the full test run.
+- 2026-11-08 10:10 Automatically (auto_advance): Cleaned up starts-and-audits-wait (freed 2.8 GB of build output and temporary folders). It stays done.
+- 2026-11-08 10:10 Started a worker on toolbar-the-boost-bolt
+- 2026-11-08 10:10 Automatically (auto_advance): Started a worker on toolbar-the-boost-bolt (Toolbar: the Boost bolt and Brief Me sit far apart in their capsule).
+- 2026-11-08 10:10 Started a worker on settings-redesign-clear
+- 2026-11-08 10:10 Automatically (auto_advance): Started a worker on settings-redesign-clear (Settings redesign: clear categories, search, and a plain description on every option).
+- 2026-11-08 10:10 Started a worker on config-seal-claude-s
+- 2026-11-08 10:10 Automatically (auto_advance): Started a worker on config-seal-claude-s (Config seal: Claude's skill-sync bookkeeping doesn't hold the team; folder cards name what changed and when).
+- 2026-11-08 10:10 Automatically (auto_advance): Started the audit of auto-advance-doesn-t at 9335fba1 (Its review is audit).
