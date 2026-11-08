@@ -277,8 +277,11 @@ struct LeadToolTripTests: LeadTeamFixture {
         let lead = try lead(root, runtime)
         // A roomy disk: the Mac's own, under 10 GB free, added the low-disk line and failed the bound (2026-10-22).
         lead.freeSpace = { _ in 500_000_000_000 }
+        // The Mac line with its memory said at its longest that holds nothing (as the load here holds nothing).
+        runtime.memory = MacMemory(pressure: .normal, swapUsed: 90_000_000_000, swapTotal: 100_000_000_000, swapOutRate: 49.9)
         try bigBoard(root, runtime)
         let status = lead.call("status", [:]).text
+        #expect(status.contains("memory pressure normal, swap 83.8/93.1 GB, swap-out 49.9 pages/s"), "\(status)")
         #expect(status.utf8.count < 10_000, "status is \(status.utf8.count) bytes")
         // Each report one line, cut; those about merged or abandoned tasks a count.
         #expect(status.contains("Reports since your last status (100)"))

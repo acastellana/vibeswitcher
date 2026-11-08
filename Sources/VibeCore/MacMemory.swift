@@ -58,13 +58,14 @@ public struct MacMemory: Equatable, Sendable {
         return why.isEmpty ? nil : why.joined(separator: " and ")
     }
 
-    /// "memory pressure normal, swap 7.6 of 9 GB used, swapping out 0 pages/s": what status and the refusals say.
+    /// "memory pressure normal, swap 7.6/9 GB, swap-out 0 pages/s": what status and the refusals say, short (status
+    /// stays under its bound on a big board; the limits are in configure's listing and the refusal's reason).
     public var text: String {
         var parts = ["memory pressure \(pressure?.name ?? "unknown")"]
         if let used = swapUsed, let total = swapTotal {
-            parts.append(total == 0 ? "no swap" : "swap \(Self.gb(used)) of \(Self.gb(total)) GB used")
+            parts.append(total == 0 ? "no swap" : "swap \(Self.gb(used))/\(Self.gb(total)) GB")
         }
-        parts.append("swapping out " + (swapOutRate.map { "\(Self.rateText($0)) pages/s" } ?? "not known yet"))
+        parts.append("swap-out " + (swapOutRate.map { "\(Self.rateText($0)) pages/s" } ?? "not known yet"))
         return parts.joined(separator: ", ")
     }
 
@@ -78,7 +79,8 @@ public struct MacMemory: Equatable, Sendable {
 
     static func gb(_ bytes: UInt64) -> String { MacLoad.number((Double(bytes) / 1_073_741_824 * 10).rounded() / 10) }
 
-    static func rateText(_ rate: Double) -> String { MacLoad.number(rate >= 10 ? rate.rounded() : (rate * 10).rounded() / 10) }
+    /// One decimal under 100 (49.9 isn't said as the 50 it doesn't reach), whole from there.
+    static func rateText(_ rate: Double) -> String { MacLoad.number(rate >= 100 ? rate.rounded() : (rate * 10).rounded() / 10) }
 
     // MARK: Reading the Mac
 

@@ -3772,7 +3772,7 @@ public final class LeadToolset: MCPToolset {
     /// project `root` (see `MacLoad.sessionsText(for:)`: refusals and merge replies go into the repo's records).
     private static func macText(_ mac: MacLoad, _ limits: MacLimits, root: String) -> String {
         "load \(mac.loadText) (load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessionsText))"
-            + (mac.memory.map { ", \($0.text) \(MacMemory.limitsText(limits))" } ?? "")
+            + (mac.memory.map { ", \($0.text)" } ?? "")
     }
 
     /// Why no worker or verifier may start now on the Mac as `mac` has it (`not`: what didn't happen); nil when one may.
@@ -5154,7 +5154,7 @@ public final class LeadToolset: MCPToolset {
             let current = reports.filter { !finished.contains($0) }
             lines.append("\nReports since your last status (\(reports.count)), each cut to its start (board(task) has a task's reports in full, read_session its conversation):")
             if current.count > Self.statusReports { lines.append("- \(current.count - Self.statusReports) earlier ones: board(task) has them.") }
-            lines += current.suffix(Self.statusReports).map { "- \(LeadBoard.clock($0.at)) \($0.about): " + Self.clip($0.text, 200) }
+            lines += current.suffix(Self.statusReports).map { "- \(LeadBoard.clock($0.at)) \($0.about): " + Self.clip($0.text, 190) }
             if !finished.isEmpty { lines.append("- \(finished.count) about tasks already merged or abandoned.") }
         }
         let answered = board.questions.filter { $0.state == .answered }.suffix(5)

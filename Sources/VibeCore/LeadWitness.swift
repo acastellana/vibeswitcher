@@ -942,7 +942,7 @@ extension LeadWitness {
     public static func roomText(_ whats: [String], mac: MacLoad, limits: MacLimits, root: String) -> String {
         "The Mac has room again for what was refused: \(whats.joined(separator: ", ")). Now: load \(mac.loadText) "
             + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessionsText))"
-            + (mac.memory.map { ", \($0.text) \(MacMemory.limitsText(limits))" } ?? "") + ". "
+            + (mac.memory.map { ", \($0.text)" } ?? "") + ". "
             + "Retry what's still wanted; other projects' leads may take the room too."
     }
 }

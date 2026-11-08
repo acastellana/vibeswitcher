@@ -24,7 +24,7 @@ extension LeadToolsetTests {
         #expect(refused.isError && refused.text.contains("Not started"), "\(refused.text)")
         #expect(refused.text.contains("it's short of memory: its memory pressure is warning (memory_pressure warning)"), "\(refused.text)")
         #expect(!refused.text.contains("above load_threshold"), "\(refused.text)")
-        #expect(refused.text.contains("memory pressure warning, swap 8 of 9 GB used, swapping out 3 pages/s (holds at memory_pressure warning or swap_out_rate 50 pages/s)"), "\(refused.text)")
+        #expect(refused.text.contains("memory pressure warning, swap 8/9 GB, swap-out 3 pages/s"), "\(refused.text)")
         #expect(refused.text.contains("VibeSwitcher sends you one message once there's room again"), "\(refused.text)")
         let audit = call(lead, "audit", ["task": "one"])
         #expect(audit.isError && audit.text.contains("No verifier started") && audit.text.contains("short of memory"), "\(audit.text)")
@@ -81,14 +81,16 @@ extension LeadToolsetTests {
         let calm = call(lead, "status").text
         let line = try #require(calm.components(separatedBy: "\n").first { $0.hasPrefix("Mac (every project's team):") })
         #expect(line.contains("load 0.5"), "\(line)")
-        #expect(line.contains("memory pressure normal, swap 7.6 of 9 GB used, swapping out not known yet (holds at memory_pressure warning or swap_out_rate 50 pages/s)."), "\(line)")
+        #expect(line.contains("(mac_max_sessions 6), memory pressure normal, swap 7.6/9 GB, swap-out not known yet."), "\(line)")
         #expect(!line.contains("refuse until it eases"), "\(line)")
         runtime.memory?.pressure = .warning
-        #expect(call(lead, "status").text.contains("memory pressure warning, swap 7.6 of 9 GB used") )
+        #expect(call(lead, "status").text.contains("memory pressure warning, swap 7.6/9 GB"))
         #expect(call(lead, "status").text.contains("start_worker and audit refuse until it eases"))
         // Not read (an older tool server, or none): no memory said, nothing held.
         runtime.memory = nil
         #expect(!call(lead, "status").text.contains("memory pressure"))
+        // configure lists the holds and where they're kept.
+        #expect(call(lead, "configure").text.contains("- memory: start_worker and audit refuse too while the Mac is short of memory (holds at memory_pressure warning or swap_out_rate 50 pages/s) (Mac-wide defaults kept in mac-limits.json as memoryPressure and swapOutRate, not in Settings)"))
     }
 }
 
@@ -134,8 +136,8 @@ struct MacMemoryTests {
         #expect(try decoded(#"{"memoryPressure":"normal","swapOutRate":-3}"#).pressureLimit == .warning)
         #expect(try decoded(#"{"memoryPressure":"banana","swapOutRate":"x"}"#).swapOutRateLimit == 50)
         // Kept through a save (unset ones stay unset) and through Boost, which raises only the load and sessions.
-        let file = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mac-limits-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: file) }
+        let temp = Scratch()
+        let file = temp.url("mac-limits").appendingPathComponent("mac-limits.json")
         try MacLimits(maxSessions: 4, memoryPressure: "critical", swapOutRate: 80).save(to: file)
         let saved = MacLimits.load(from: file)
         #expect(saved.memoryPressure == "critical" && saved.swapOutRate == 80)
@@ -159,8 +161,8 @@ struct MacMemoryTests {
         #expect(MacMemory.SwapSamples.rate([at(5, 1), at(400, 0)], outs: 5, now: now) == nil)
         #expect(MacMemory.SwapSamples.rate([at(60, 9_000)], outs: 5, now: now) == nil)
         // The file: each reading kept for the next reader, old ones dropped.
-        let file = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("swap-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: file) }
+        let temp = Scratch()
+        let file = temp.url("swap").appendingPathComponent("swap-samples.json")
         let samples = MacMemory.SwapSamples(file: file)
         #expect(samples.rate(adding: 100, now: now.addingTimeInterval(-1_000)) == nil)
         #expect(samples.rate(adding: 1_000, now: now.addingTimeInterval(-60)) == nil)
