@@ -36,9 +36,10 @@ struct WorktreesTests {
     @Test func anAuditRunsLogsArePrivate() throws {
         let root = try repo()
         let head = Git.run(["rev-parse", "HEAD"], in: root).output
-        let logs = temp.url("audit-logs/add-b/\(head.prefix(12))")
-        let run = Worktrees.auditRun(root: root, commit: head, setup: "echo set up", test: "echo tested", scratch: temp.url("audit-scratch/run"),
-                                     home: temp.url("audit-scratch/home"), logs: logs, lock: lock)
+        let logs = temp.url("audit-logs").appendingPathComponent("add-b/\(head.prefix(12))")
+        let scratches = temp.url("audit-scratch")
+        let run = Worktrees.auditRun(root: root, commit: head, setup: "echo set up", test: "echo tested", scratch: scratches.appendingPathComponent("run"),
+                                     home: scratches.appendingPathComponent("home"), logs: logs, lock: lock)
         #expect(run.outcome == .passed, "\(run)")
         let fm = FileManager.default
         #expect(try Set(fm.contentsOfDirectory(atPath: logs.path)) == ["init.log", "test.log", "run.txt"])
