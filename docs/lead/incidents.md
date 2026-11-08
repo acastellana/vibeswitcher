@@ -137,3 +137,10 @@ Evidence: The install finished at 13:34:25 (pid 62375). ~/.vibeswitcher/bin/vibe
 Task: branch-code-can-t
 Check: task turn-this-incident-into-15 turns it into a check that runs before merge.
 
+## 2026-11-08 19:21:36 Merge test runs stalled for tens of minutes on an idle Mac, delaying every merge behind them by hours on 2026-11-08
+
+Evidence: .vibeswitcher/flakes/2026-11-08-an-app-wide-appearance-2aa1e894-hung.log: the merge test of 2aa1e894 ran past test_timeout_min (45 min) and was stopped. Its last output line came 21 min before the stop, at load 5-8. Many tests are listed as started and never finished, including the merge-simulation tests (aTaskSetKeptDuringItsMergesTestRunStaysKept, aCleanVerdictOnAnOlderContractVersionIsAuditedAgainOnWhatChangedNotMerged) and a wallet test (aPlantedRecordGetsNoCardNoRetryAndALineWithNoContent). The same commit's change then passed in a batch on one test run at about 18:55, so the hang is intermittent and not caused by that branch. Batch 211190bb also held its slot for about 38 min. A verifier's full suite took 603 s on the same Mac in the same period. Merge flow: nothing reached main between 15:21 and 17:17, and Theme waited until about 18:55.
+
+Task: an-app-wide-appearance
+Check: task turn-this-incident-into-16 turns it into a check that runs before merge.
+

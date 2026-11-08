@@ -4345,3 +4345,21 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-08 19:20 Merged a-branch-that-moves: A branch that moves during its merge's test run is never lost (in a batch: an-app-wide-appearance, a-branch-that-moves landed on one test run) (build 9bb93056766a)
 - 2026-11-08 19:20 Flaky in the batch an-app-wide-appearance, a-branch-that-moves: aPlainShellTakesARunOnlyAtItsPrompt(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
 - 2026-11-08 19:20 Planned fix-the-flaky-test-21: aPlainShellTakesARunOnlyAtItsPrompt() flaked 3 times within 7 days
+- 2026-11-08 19:20 Automatically (auto_advance): Merged an-app-wide-appearance at 970c3e39 (its passing audit), a-branch-that-moves at 104d5819 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-08 19:20 Automatically (auto_advance): Cleaned up an-app-wide-appearance (freed 2.7 GB of build output and temporary folders). It stays done.
+- 2026-11-08 19:20 Automatically (auto_advance): Cleaned up a-branch-that-moves (freed 4.0 GB of build output and temporary folders). It stays done.
+- 2026-11-08 19:20 Started a worker on the-vault-s-no
+- 2026-11-08 19:20 Automatically (auto_advance): Started a worker on the-vault-s-no (The vault's "no answer" isn't read as "nothing recorded", and a merge that moved main is always recorded), its after tasks done (a-branch-that-moves).
+- 2026-11-08 19:20 Started a worker on product-fixes-from-the
+- 2026-11-08 19:20 Automatically (auto_advance): Started a worker on product-fixes-from-the (Product fixes from the review: silent beeps, misleading labels, dead ends), its after tasks done (an-app-wide-appearance).
+- 2026-11-08 19:20 Started a worker on every-text-that-crosses
+- 2026-11-08 19:20 Automatically (auto_advance): Started a worker on every-text-that-crosses (Every text that crosses a boundary goes through the same secret mask), its after tasks done (a-branch-that-moves).
+- 2026-11-08 19:20 Started a worker on sandbox-shots-draw-the
+- 2026-11-08 19:20 Automatically (auto_advance): Started a worker on sandbox-shots-draw-the (Sandbox shots draw the sidebar and inspector correctly on macOS 27), its after tasks done (an-app-wide-appearance, readme-and-guides).
+- 2026-11-08 19:20 Started a worker on fix-the-flaky-test-21
+- 2026-11-08 19:20 Automatically (auto_advance): Started a worker on fix-the-flaky-test-21 (Fix the flaky test aPlainShellTakesARunOnlyAtItsPrompt()).
+- 2026-11-08 19:21 Update: Theme now sets the whole app's look (on main) — **What changed:** Settings › Appearance › Theme now sets the whole app as well as the terminal, at once and with no relaunch. Match System follows macOS, Light and Solarized Light force light, Dark an…
+- 2026-11-08 19:21 Incident: Merge test runs stalled for tens of minutes on an idle Mac, delaying every merge behind them by hours on 2026-11-08 (in an-app-wide-appearance); planned turn-this-incident-into-16 to turn it into a check
+- 2026-11-08 19:21 Started a worker on turn-this-incident-into-16
+- 2026-11-08 19:21 Automatically (auto_advance): Started a worker on turn-this-incident-into-16 (Turn this incident into a check: Merge test runs stalled for tens of minutes on an idle Mac, …).
+- 2026-11-08 19:21 Review of turn-this-incident-into-16: audit
