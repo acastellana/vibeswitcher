@@ -711,7 +711,8 @@ extension LeadVault {
             // The agents' config, hashed here (never taken from the caller) and outside the lock: it reads files.
             var config: [String: String]?
             if case .setGuarded(let root, let hashes) = request {
-                if hashes[ConfigSeal.checkKey] != nil {
+                // A branch run's end is a look as well (`sealConfig`).
+                if hashes[ConfigSeal.checkKey] != nil || hashes[ConfigSeal.runEndKey] != nil {
                     config = ConfigSeal.hashes(home: configHome, root: root)
                 } else if hashes[ConfigSeal.wroteKey] != nil {
                     config = ConfigSeal.hashes(of: ConfigSeal.homeWatched(home: configHome))
@@ -1233,6 +1234,9 @@ extension LeadVault {
             // ended still knows it ran (another team's worker can write ~/.claude/CLAUDE.md too). Retired teams never count.
             let ids = live.map { Set($0.map { $0.lowercased() }) }
             // A branch run (a merge's, an audit's tests) is no session: it counts as running from its mark to its end.
+            // Its end is a look too (`hashes`): what changed since the last look is held (the run was open), and a
+            // seal made at it comes after the run, when nothing of the team runs on (`endedOnly`).
+            var endedOnly = false
             for (id, team) in state.teams where !Self.retired(team, live: ids, now: now) || id == own {
                 let sessions = team.members.filter { $0.role != .lead }.compactMap(\.session) + (team.former ?? [])
                 var running = ids.map { ids in sessions.contains { ids.contains($0.lowercased()) } } ?? !sessions.isEmpty
@@ -1240,6 +1244,7 @@ extension LeadVault {
                 if id == own, let begun = asked[ConfigSeal.runKey] { runs[begun] = now }
                 if id == own, let ended = asked[ConfigSeal.runEndKey] {
                     runs[ended] = nil
+                    endedOnly = !running && runs.isEmpty
                     running = true
                 }
                 running = running || !runs.isEmpty
@@ -1269,10 +1274,17 @@ extension LeadVault {
             // Sealed, or found as sealed, now: what ran before is seen. A session still running is as new (not quiet).
             if home { mac.sealedAt = now }
             if project { team.configSealedAt = now }
+            // A run that ended at this look, with nothing of the team running on, ran until just before it: a seal
+            // made now saw all it wrote, so the next look is quiet unless something runs since. One ulp, so it's
+            // still after every seal made before this look.
+            if endedOnly, team.branchCodeAt == now { team.branchCodeAt = now.nextDown }
             team.guarded = guarded
             state.config = mac
             state.teams[own] = team
             changed = true
+            // The end's own look holds what it holds (named under `heldKey`, for the app and every next look), but
+            // the end itself is recorded: told so, not refused.
+            guard asked[ConfigSeal.checkKey] != nil || asked[ConfigSeal.runEndKey] == nil else { return nil }
             return home && project ? nil : ConfigSeal.heldRefusal
         }
 
