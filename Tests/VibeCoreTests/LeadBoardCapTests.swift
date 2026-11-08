@@ -139,6 +139,17 @@ struct LeadBoardCapTests: LeadTeamFixture {
         #expect(lead.store.loadAll().updates.count == 300)
     }
 
+    /// The Setup stats read closed questions from the board's archive too: its numbers don't shrink with the cap.
+    @Test func setupStatsCountTheQuestionsTheArchiveTook() throws {
+        let store = try store()
+        try store.update { $0.questions = (0..<120).map { Self.closed($0) } }
+        try store.archive(now: Self.now)
+        #expect(store.load().questions.count == LeadBoard.keptClosedQuestions)
+        let view = try #require(BoardView(path: store.file))
+        #expect(view.questions.count == 120)
+        #expect(Set(view.questions.map(\.id)).count == 120)
+    }
+
     @Test func boardOfATaskListsItsArchivedQuestionsAndTheUpdatesNamingIt() throws {
         let root = try makeRepo()
         let store = BoardStore(root: root)
@@ -257,7 +268,7 @@ struct LeadBoardCapTests: LeadTeamFixture {
         let old = "- 2026-10-31 23:59 Last of October\n  with a second line\n- 2026-10-02 10:00 Also October\n"
         let kept = "- 2026-11-01 00:01 First of November\n"
         try ("# Progress\n\n" + old + kept).write(toFile: path, atomically: true, encoding: .utf8)
-        let now = Date(timeIntervalSince1970: 1_793_500_000) // 2026-11-0x, local
+        let now = Date(timeIntervalSince1970: 1_794_100_000) // 2026-11-0x, local
         #expect(try LeadRecords.rollProgress(store, now: now) == 2)
         #expect(try String(contentsOfFile: path, encoding: .utf8) == "# Progress\n\n" + kept)
         let archive = try String(contentsOfFile: store.recordPath("progress-archive.md"), encoding: .utf8)
@@ -274,7 +285,7 @@ struct LeadBoardCapTests: LeadTeamFixture {
         try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         let text = "# Progress\n\n- 2026-10-02 10:00 Also October\n"
         try text.write(toFile: path, atomically: true, encoding: .utf8)
-        let now = Date(timeIntervalSince1970: 1_793_500_000)
+        let now = Date(timeIntervalSince1970: 1_794_100_000)
         try LeadRecords.rollProgress(store, now: now)
         let archive = try String(contentsOfFile: archivePath, encoding: .utf8)
         // The crash left the archive written and progress.md as it was.
