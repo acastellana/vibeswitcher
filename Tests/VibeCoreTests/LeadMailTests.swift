@@ -147,6 +147,41 @@ struct LeadMailTests: LeadTeamFixture {
         #expect(pending().isEmpty)
     }
 
+    /// Not only the vendors' shapes: whatever `Redaction.secrets` catches stays out of the message and of the record,
+    /// whichever argument it came in.
+    @Test func whatRedactionCatchesIsRefusedAndNeverKept() throws {
+        let sender = try leads()
+        let secret = "correct-horse-battery-7f3a"
+        let texts = ["call it with Authorization: Bearer \(secret)", "X-Auth: bearer \(secret)", "the login is password=\(secret) for now",
+                     "export API_KEY=\(secret)", "clone https://deploy:\(secret)@git.example.com/a.git"]
+        for text in texts {
+            let refused = sender.call("tell_lead", ["project": "beta", "kind": "report", "text": text])
+            #expect(refused.isError && refused.text.contains("shaped like a credential"), "\(text): \(refused.text)")
+            #expect(!refused.text.contains(secret), "\(refused.text)")
+            #expect(LeadMail.load(root: alphaRoot).last?.outcome == .refused)
+        }
+        // A secret in the other arguments, which a refusal quotes.
+        _ = sender.call("tell_lead", ["project": "beta", "kind": "password=\(secret)", "text": "hi"])
+        _ = sender.call("tell_lead", ["project": "password=\(secret)", "kind": "report", "text": "hi"])
+        #expect(alpha.steered.isEmpty)
+        #expect(pending().isEmpty)
+        #expect(LeadMail.load(root: alphaRoot).count == texts.count + 2)
+        // The bytes on disk, every field.
+        let written = try String(contentsOf: LeadMail.file(root: alphaRoot), encoding: .utf8)
+        #expect(!written.contains(secret), "\(written)")
+        #expect(written.contains("•••"), "\(written)")
+    }
+
+    /// Prose about credentials isn't a credential, and goes.
+    @Test func talkingAboutCredentialsStillGoes() throws {
+        let sender = try leads()
+        let text = "The bearer token expired, so the password rule changed; see the URL https://example.com/docs"
+        #expect(LeadMail.textRefusal(text) == nil)
+        let sent = sender.call("tell_lead", ["project": "beta", "kind": "report", "text": text])
+        #expect(!sent.isError, "\(sent.text)")
+        #expect(LeadMail.load(root: alphaRoot).last?.text == text)
+    }
+
     @Test func theRateLimitHoldsEachPairToTenAnHour() throws {
         let sender = try leads()
         var now = 1_800_000_000.0

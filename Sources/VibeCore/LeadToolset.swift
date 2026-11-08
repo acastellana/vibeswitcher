@@ -3720,11 +3720,12 @@ public final class LeadToolset: MCPToolset {
         return log
     }
 
-    /// Saves a merge's test output where the lead can read it; its path, or nil when it couldn't be saved.
+    /// Saves a merge's test output where the lead can read it (0600, in a 0700 folder in the vault); its path, or nil
+    /// when it couldn't be saved.
     func saveMergeLog(_ output: String, slug: String, name: String = "merge-test.log") -> String? {
         let log = vault.scratch(root: root, "\(slug)/\(name)")
         return (try? vault.ensurePrivate(log.deletingLastPathComponent())).flatMap {
-            (try? Data(output.utf8).write(to: log, options: .atomic)).map { log.path }
+            (try? VibePaths.writePrivate(Data(output.utf8), to: log)).map { log.path }
         }
     }
 

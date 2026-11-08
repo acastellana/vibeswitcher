@@ -104,16 +104,17 @@ public enum LeadMail {
 
     // MARK: Guards
 
-    /// Why the text can't go (nil: it may): empty, over `maxCharacters`, or holding something shaped like a
-    /// credential (`SecretShapes`, the list SecretShapeLintTests checks the repository with).
+    /// Why the text can't go (nil: it may): empty, over `maxCharacters`, or holding anything `masked` would hide.
     public static func textRefusal(_ text: String) -> String? {
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "the text is empty" }
         if text.count > maxCharacters {
             return "the text is \(text.count) characters, over the \(maxCharacters) a message takes: say it shorter, or point to a file in the repository"
         }
         let found = SecretShapes.found(in: text)
-        if !found.isEmpty {
-            return "the text holds something shaped like a credential (\(found.joined(separator: ", "))): never send one to another lead; leave it out"
+        if !found.isEmpty || masked(text) != text {
+            // Masked again where it's kept, so these words mustn't read as a secret's name and value themselves.
+            let what = found.isEmpty ? "a password or token given a value, a bearer token, a URL with credentials" : found.joined(separator: ", ")
+            return "the text holds something shaped like a credential (\(what)): never send one to another lead; leave it out"
         }
         return nil
     }
@@ -160,9 +161,15 @@ public enum LeadMail {
         guard written == line.count else { throw CocoaError(.fileWriteUnknown) }
     }
 
-    /// The text as the record keeps it: credential shapes masked, cut at `maxCharacters`.
+    /// `text` with anything secret hidden: what `Redaction.secrets` catches (a private key whole, bearer tokens,
+    /// NAME=value pairs, URLs with credentials), then the vendor shapes it doesn't (`SecretShapes`, the list
+    /// SecretShapeLintTests checks the repository with).
+    static func masked(_ text: String) -> String { SecretShapes.masked(Redaction.secrets(in: text)) }
+
+    /// The text as the record keeps it: masked, then cut at `maxCharacters` (in that order: a cut can halve a
+    /// credential into something no rule knows).
     static func kept(_ text: String) -> String {
-        let masked = SecretShapes.masked(text)
+        let masked = masked(text)
         return masked.count > maxCharacters ? String(masked.prefix(maxCharacters)) + "…" : masked
     }
 
@@ -205,9 +212,12 @@ extension LeadToolset {
         let kind = LeadMail.Kind(rawValue: kindWord)
         let text = (arguments["text"] as? String) ?? ""
         let now = mailClock()
-        var to = asked
+        // Masked until it names a project that exists: it's the caller's words, and the record keeps it.
+        var to = LeadMail.masked(asked)
         // Each outcome is kept in this project's record, and a sent one in the receiver's too.
         func answer(_ outcome: LeadMail.Outcome, _ detail: String, receiver: String? = nil) -> MCPToolResult {
+            // A detail can quote the caller's arguments (a kind that isn't one, a project that isn't there).
+            let detail = LeadMail.masked(detail)
             let record = LeadMail.Record(at: now, from: me, to: to, kind: kind, text: LeadMail.kept(text), outcome: outcome, detail: detail)
             var said = detail
             do { try LeadMail.append(record, root: root) } catch {

@@ -327,6 +327,29 @@ struct LeadToolsetTests: LeadTeamFixture {
 
     func call(_ tools: LeadToolset, _ name: String, _ arguments: [String: Any] = [:]) -> MCPToolResult { tools.call(name, arguments) }
 
+    /// A merge's test output can hold anything: it's only the user's to read, a log from an older version included.
+    @Test(arguments: ["merge-test.log", "revert-test.log"])
+    func aMergesTestLogIsPrivate(name: String) throws {
+        let root = try repo()
+        let lead = try lead(root, FakeRuntime())
+        let fm = FileManager.default
+        let expected = vault.scratch(root: root, "add-b/\(name)")
+        func mode(_ path: String) throws -> Int? { (try fm.attributesOfItem(atPath: path)[.posixPermissions] as? NSNumber)?.intValue }
+
+        #expect(lead.saveMergeLog("the output", slug: "add-b", name: name) == expected.path)
+        #expect(try String(contentsOf: expected, encoding: .utf8) == "the output")
+        #expect(try mode(expected.path) == 0o600)
+        #expect(try mode(expected.deletingLastPathComponent().path) == 0o700)
+        #expect(try mode(vault.folder.path) == 0o700)
+
+        // One an older version wrote with the umask's mode is replaced, and nothing else is left beside it.
+        try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: expected.path)
+        #expect(lead.saveMergeLog("newer", slug: "add-b", name: name) == expected.path)
+        #expect(try String(contentsOf: expected, encoding: .utf8) == "newer")
+        #expect(try mode(expected.path) == 0o600)
+        #expect(try fm.contentsOfDirectory(atPath: expected.deletingLastPathComponent().path) == [name])
+    }
+
     @Test(arguments: [false, true])
     func incidentWorkerBriefUsesTheContractAtLaunch(updateDuringStart: Bool) throws {
         let root = try repo()

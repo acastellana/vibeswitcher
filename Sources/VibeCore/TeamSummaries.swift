@@ -129,8 +129,13 @@ public final class Summarizer: @unchecked Sendable {
     }
 }
 
-/// The prompts the Team view's one-liners are written from.
+/// The prompts the Team view's one-liners are written from. They go to `claude -p`, off this Mac, so every field is
+/// masked (`Redaction.secrets`) as it comes in, whole: before it's cut, as a cut can halve a credential into something
+/// no rule knows.
 public enum SummaryPrompts {
+    private static func masked(_ text: String) -> String { Redaction.secrets(in: text) }
+    private static func masked(_ text: String, clip count: Int) -> String { Summarizer.clip(masked(text), count) }
+
     /// The system prompt: one plain line, for someone glancing at a list.
     public static let system = """
         You write one short line, at most 90 characters, in plain language a non-programmer understands. No jargon, \
@@ -139,10 +144,10 @@ public enum SummaryPrompts {
 
     /// What a task's agent is doing now, from its title, its latest checkpoints and its last steps.
     public static func task(title: String, role: String, checkpoints: [LeadCheckpoint], steps: [TranscriptEntry]) -> String {
-        var text = "Say what this \(role) is doing right now, starting with a verb (e.g. \"Making the credential masker fast on huge inputs\").\n\n"
-        text += "Task: \(title)\n"
+        var text = "Say what this \(masked(role)) is doing right now, starting with a verb (e.g. \"Making the credential masker fast on huge inputs\").\n\n"
+        text += "Task: \(masked(title))\n"
         if !checkpoints.isEmpty {
-            text += "\nLatest milestones, oldest first:\n" + checkpoints.suffix(3).map { "- \(Summarizer.clip($0.text, 200))" }.joined(separator: "\n") + "\n"
+            text += "\nLatest milestones, oldest first:\n" + checkpoints.suffix(3).map { "- \(masked($0.text, clip: 200))" }.joined(separator: "\n") + "\n"
         }
         if !steps.isEmpty {
             text += "\nIts last steps, oldest first:\n" + steps.map(step).joined(separator: "\n") + "\n"
@@ -153,23 +158,23 @@ public enum SummaryPrompts {
     /// What a decision of the lead's means, from the decision and why.
     public static func decision(_ decision: String, why: String) -> String {
         "Restate this decision a project lead took, as what was decided (no \"Decided:\" prefix).\n\n"
-            + "Decision: \(Summarizer.clip(decision, 1_000))\n\nWhy: \(Summarizer.clip(why, 1_000))\n"
+            + "Decision: \(masked(decision, clip: 1_000))\n\nWhy: \(masked(why, clip: 1_000))\n"
     }
 
     /// What a message VibeSwitcher handed a lead says (a worker's report, an audit), from who sent it and its text.
     public static func message(_ message: TeamMessage) -> String {
         "Say in one sentence what this message to a project lead says: what happened and what it asks for "
             + "(e.g. \"The chat layout is fixed and its tests pass; it's ready for review\").\n\n"
-            + "From: \(message.title)\n\nMessage:\n\(Summarizer.clip(message.body, 4_000))\n"
+            + "From: \(masked(message.title))\n\nMessage:\n\(masked(message.body, clip: 4_000))\n"
     }
 
     static func step(_ entry: TranscriptEntry) -> String {
-        let text = Summarizer.clip(entry.text.replacingOccurrences(of: "\n", with: " "), 240)
+        let text = Summarizer.clip(masked(entry.text).replacingOccurrences(of: "\n", with: " "), 240)
         switch entry.kind {
         case .prompt: return "- Told: \(text)"
         case .reply: return "- Said: \(text)"
-        case .tool, .toolResult: return "- \(entry.tool.map { "\($0): " } ?? "")\(text)"
-        case .notice: return "- \(entry.from ?? "VibeSwitcher") (not the user): \(text)"
+        case .tool, .toolResult: return "- \(entry.tool.map { "\(masked($0)): " } ?? "")\(text)"
+        case .notice: return "- \(entry.from.map(masked) ?? "VibeSwitcher") (not the user): \(text)"
         }
     }
 

@@ -1399,7 +1399,8 @@ public enum Worktrees {
     /// An audit's shared run (audit_finders 2 or 3): `setup` and `test` on exactly `commit`, as the branch is (not
     /// rebased), in a detached worktree of its own at `scratch` under a scratch home, both removed afterwards. Each
     /// command's whole output goes to `<logs>/init.log` and `<logs>/test.log` for the finders to read, with
-    /// `<logs>/run.txt` saying how it went (written last: a folder without it holds no finished run).
+    /// `<logs>/run.txt` saying how it went (written last: a folder without it holds no finished run). A test run's
+    /// output can hold anything: `logs` is made 0700 and each file 0600.
     public static func auditRun(root: String, commit: String, setup: String?, test: String?, scratch: URL, home: URL,
                                 logs: URL, timeout: TimeInterval = testTimeout, lock: TestLock?) -> AuditRun {
         let path = scratch.path, homePath = home.path
@@ -1415,7 +1416,7 @@ public enum Worktrees {
         if FileManager.default.fileExists(atPath: path) || FileManager.default.fileExists(atPath: homePath) { remove() }
         try? FileManager.default.removeItem(at: logs)
         do {
-            try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+            try VibePaths.ensurePrivate(logs)
             try FileManager.default.createDirectory(at: scratch.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
         } catch { return AuditRun(outcome: .error("Couldn't make \(logs.path) for the run's logs: \(error.localizedDescription)"), logs: []) }
@@ -1429,7 +1430,7 @@ public enum Worktrees {
         var files: [String] = []
         for (name, output) in outputs {
             let file = logs.appendingPathComponent(name == "init_command" ? "init.log" : "test.log")
-            if (try? Data(output.utf8).write(to: file, options: .atomic)) != nil { files.append(file.path) }
+            if (try? VibePaths.writePrivate(Data(output.utf8), to: file)) != nil { files.append(file.path) }
         }
         let outcome: AuditRun.Outcome
         switch stopped {
@@ -1441,7 +1442,7 @@ public enum Worktrees {
         case .passed, .passedOnRerun, .conflict: outcome = .error("unexpected")
         }
         if case .cancelled = outcome { return AuditRun(outcome: outcome, logs: files) }
-        try? Data((outcome.text + "\n").utf8).write(to: logs.appendingPathComponent("run.txt"), options: .atomic)
+        try? VibePaths.writePrivate(Data((outcome.text + "\n").utf8), to: logs.appendingPathComponent("run.txt"))
         return AuditRun(outcome: outcome, logs: files)
     }
 

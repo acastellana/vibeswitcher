@@ -32,6 +32,24 @@ struct WorktreesTests {
         #expect(Worktrees.mainBranch(root: root) == "main")
     }
 
+    /// A test run's output can hold anything: its logs are only the user's to read.
+    @Test func anAuditRunsLogsArePrivate() throws {
+        let root = try repo()
+        let head = Git.run(["rev-parse", "HEAD"], in: root).output
+        let logs = temp.url("audit-logs/add-b/\(head.prefix(12))")
+        let run = Worktrees.auditRun(root: root, commit: head, setup: "echo set up", test: "echo tested", scratch: temp.url("audit-scratch/run"),
+                                     home: temp.url("audit-scratch/home"), logs: logs, lock: lock)
+        #expect(run.outcome == .passed, "\(run)")
+        let fm = FileManager.default
+        #expect(try Set(fm.contentsOfDirectory(atPath: logs.path)) == ["init.log", "test.log", "run.txt"])
+        #expect(run.logs == ["init.log", "test.log"].map { logs.appendingPathComponent($0).path })
+        for name in ["init.log", "test.log", "run.txt"] {
+            let attributes = try fm.attributesOfItem(atPath: logs.appendingPathComponent(name).path)
+            #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600, "\(name)")
+        }
+        #expect((try fm.attributesOfItem(atPath: logs.path)[.posixPermissions] as? NSNumber)?.intValue == 0o700)
+    }
+
     func scratch() -> URL { temp.url("wt-scratch").appendingPathComponent("merge") }
 
     /// The test and build lock a merge's tests take: a scratch one, never the Mac-wide one other runs hold.

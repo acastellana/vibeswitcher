@@ -13,12 +13,11 @@ struct PrivateWriteLintTests {
         "Sources/VibeSwitcher/HangWatchdog.swift": (2, "~/.vibeswitcher/debug hang reports: the user's own area, left for their word (R9); its folder is 0700"),
         // In VibeSwitcher's folders, already private or under a 0700 folder; outside this change's files.
         "Sources/VibeCore/DebugLog.swift": (2, "debug/app.log: its folder is made 0700 and the file 0600 by its own attributes"),
-        "Sources/VibeCore/LeadToolset.swift": (1, "the vault's check logs, in the vault's 0700 folder (vault.ensurePrivate)"),
         "Sources/VibeCore/Steer.swift": (1, "the steer folder, 0700 attributes"),
         "Sources/VibeCore/TeamSummaries.swift": (1, "its folder, 0700 attributes"),
         "Sources/VibeCore/TranscriptReader.swift": (2, "converted transcripts in a 0700 folder"),
         "Sources/VibeCore/LeadRemote.swift": (3, "merge_remote's scratch folder in the vault (0700 attributes) and the lead's records merged in its scratch worktree, a git checkout"),
-        "Sources/VibeCore/Worktrees.swift": (11, "merge and revert scratch and check logs in the vault's 0700 folders; worktrees and hash copies are git checkouts; the lead's records (the repository's own files) copied for their union in the user's temporary folder"),
+        "Sources/VibeCore/Worktrees.swift": (8, "merge and revert scratch in the vault's 0700 folders; worktrees and hash copies are git checkouts; the lead's records (the repository's own files) copied for their union in the user's temporary folder"),
         "Sources/VibeHost/VaultStorage.swift": (1, "the host's vault: its own 0600 rules"),
         "Sources/VibeHost/HostLog.swift": (1, "the host's log: its own 0600 rules"),
         "Sources/vibeswitcher-host/main.swift": (1, "the host's launchers folder, 0700 attributes"),
