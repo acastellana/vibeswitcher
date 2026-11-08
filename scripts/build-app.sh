@@ -161,6 +161,74 @@ if [[ -f "$SIGNING_DIR/vibeswitcher.keychain-db" ]]; then
 else
     IDENTITY=(--sign -)
 fi
+# What this build runs again once the keychain is unlocked (the message below): --install only if this run was asked for it.
+BUILD_LINE="scripts/build-app.sh"
+if [[ "${1:-}" == "--install" ]]; then BUILD_LINE="scripts/build-app.sh --install"; fi
+# --- The locked signing keychain's message (test-signing.sh runs this block) ---
+# Whether $KEYCHAIN is locked, asked without a dialog (`security show-keychain-info` on a locked keychain asks you):
+# locked, unlocked, or unknown when it can't tell.
+signing_keychain_state() {
+    local tool="${TMPDIR:-/tmp/}keychain-state"
+    cat > "$tool.swift" <<'SWIFT'
+import Security
+var keychain: SecKeychain?
+var status: SecKeychainStatus = 0
+guard SecKeychainOpen(CommandLine.arguments[1], &keychain) == errSecSuccess, let keychain,
+      SecKeychainGetStatus(keychain, &status) == errSecSuccess else { exit(1) }
+print(status & SecKeychainStatus(kSecUnlockStateStatus) != 0 ? "unlocked" : "locked")
+SWIFT
+    (swiftc "$tool.swift" -o "$tool" 2>/dev/null && "$tool" "$KEYCHAIN") || echo unknown
+}
+
+# $1 as one shell word: as it is when it's plain, else in single quotes.
+shell_word() {
+    if [[ "$1" =~ ^[A-Za-z0-9_./-]+$ ]]; then printf '%s' "$1"; else printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; fi
+}
+
+# After codesign failed with errSecInternalComponent, which is what it says when the key's keychain is locked and nothing
+# can ask for the password (a Claude Code `!` command, an agent's Bash: no terminal, no dialog). Says so, and the way out:
+# a real terminal, which in a VibeSwitcher session is one Run click on a vs-shell card. The password is only ever typed
+# at security's own prompt there. An unlocked keychain failed for another reason: codesign's own error stands.
+say_signing_keychain_locked() {
+    local state unlock
+    state="$(signing_keychain_state)"
+    [[ "$state" != unlocked ]] || return 0
+    unlock="security unlock-keychain $(shell_word "$KEYCHAIN") && $BUILD_LINE"
+    {
+        echo
+        if [[ "$state" == locked ]]; then
+            echo "The signing keychain is locked, and nothing here can ask for its password:"
+        else
+            echo "The signing keychain looks locked (its state couldn't be read), and nothing here can ask for its password:"
+        fi
+        echo "    $KEYCHAIN"
+        echo "A \`!\` command or an agent's own shell has no terminal to type it into, so running this again here fails the same way."
+        if [[ -n "${VIBESWITCHER_SESSION:-}" ]] && command -v vs-shell >/dev/null 2>&1; then
+            echo "In this VibeSwitcher session, unlock it in a real shell with one Run click on a card: run"
+            echo "    vs-shell run --cwd $(shell_word "$PWD") --label 'Unlock signing keychain' -- $(shell_word "$unlock")"
+            echo "and type the keychain's password (the one chosen in setup-signing.sh) only into that shell, never into chat."
+        else
+            echo "Open a real terminal (Terminal.app or another) and run"
+            echo "    cd $(shell_word "$PWD") && $unlock"
+            echo "typing the keychain's password (the one chosen in setup-signing.sh) at its prompt."
+        fi
+    } >&2
+}
+
+# codesign for sign() below, its errors kept to see whether the keychain being locked stopped it (the message above).
+# A function of that name, so sign() stays as it is and works alone (Tests/SecurityAudit/library-injection.test.mjs).
+codesign() {
+    local status=0 errors="${TMPDIR:-/tmp/}codesign-errors"
+    command codesign "$@" 2>"$errors" || status=$?
+    cat "$errors" >&2
+    if [[ "$status" -ne 0 && -n "${KEYCHAIN:-}" ]] && grep errSecInternalComponent "$errors" >/dev/null; then
+        # Before the message, which compiles a small tool: the signing keychain is in the list for the codesigns alone.
+        restore_search_list_on_exit
+        say_signing_keychain_locked
+    fi
+    return "$status"
+}
+# --- end of the locked signing keychain's message ---
 sign() {
     # Keep DYLD environment injection and foreign libraries disabled for the app and every helper.
     codesign --force --options runtime "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-hook"

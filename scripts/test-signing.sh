@@ -24,6 +24,9 @@
 # create-keychain has added to it, and a build adds the signing keychain just before its four codesigns and puts the
 # list back right after them, Ctrl-C during signing too; after each, the list is as it was, the login keychain in it.
 #
+# A locked signing keychain with nothing to ask for its password: build-app.sh's message, run with stand-ins; with --build,
+# a real build on the scratch HOME's really locked keychain, its codesign failing as the real one does there, no dialog.
+#
 # scripts/test-signing.sh [--build]
 # (pipefail: a check reads its pipe to the end, `grep >/dev/null` rather than `grep -q`, or the writer's SIGPIPE fails it.)
 set -uo pipefail
@@ -131,6 +134,45 @@ for script in scripts/setup-signing.sh scripts/build-app.sh; do
     check "and writes nothing when the list wasn't changed" \
         '[[ -z $(HOME="$unit_home" /bin/bash -c '\''eval "$1"; security() { echo written; }; restore_search_list_on_exit'\'' _ "$(search_block $script)") ]]'
 done
+
+# build-app.sh's message for a locked signing keychain, run with the state stood in. locked_says STATE SESSION KEYCHAIN LINE.
+locked_block() { sed -n '/^# --- The locked signing keychain/,/^# --- end of the locked signing keychain/p' scripts/build-app.sh; }
+mkdir "$work/shell-card"
+printf '#!/bin/bash\nprintf "[%%s]\\n" "$@"\n' > "$work/shell-card/vs-shell"
+chmod +x "$work/shell-card/vs-shell"
+locked_says() {
+    PATH="$work/shell-card:$PATH" VIBESWITCHER_SESSION=$2 KEYCHAIN=$3 BUILD_LINE=$4 STOOD_IN_STATE=$1 /bin/bash -c 'set -euo pipefail; eval "$1"
+        signing_keychain_state() { echo "$STOOD_IN_STATE"; }; say_signing_keychain_locked' _ "$(locked_block)" 2>&1
+}
+session_id=11111111-2222-4333-8444-555555555555
+kc=/Users/someone/.vibeswitcher/signing/vibeswitcher.keychain-db
+check "the locked-keychain block is in build-app.sh" '[[ -n $(locked_block) ]]'
+out=$(locked_says locked $session_id "$kc" "scripts/build-app.sh --install")
+check "in a VibeSwitcher session a locked keychain is named, with a vs-shell run of the unlock-and-install line" \
+    '[[ $out == *"signing keychain is locked"*"$kc"*"vs-shell run --cwd "*" -- '"'"'security unlock-keychain $kc && scripts/build-app.sh --install'"'"'"* ]]'
+check "it says the password goes only into that shell, and that ! can't take one" \
+    '[[ $out == *"only into that shell, never into chat"* && $out == *"!"*"no terminal to type it into"* ]]'
+check "it doesn't send anyone to Terminal" '[[ $out != *Terminal* ]]'
+out=$(locked_says locked "" "$kc" "scripts/build-app.sh")
+check "outside a session it names a real terminal and the same unlock, without --install when the build had none" \
+    '[[ $out == *"signing keychain is locked"*"real terminal"*"&& security unlock-keychain $kc && scripts/build-app.sh"* && $out != *--install* && $out != *vs-shell* ]]'
+out=$(locked_says unknown "" "$kc" "scripts/build-app.sh")
+check "a state that can't be read is said as looking locked" '[[ $out == *"looks locked"* ]]'
+out=$(locked_says unlocked $session_id "$kc" "scripts/build-app.sh")
+check "an unlocked keychain gets no message: codesign's error stands" '[[ -z $out ]]'
+# The printed line, run as printed: one command for the card, its folder and keychain quoted whatever they hold.
+awkward="$(cd "$work" && pwd)/it's a home"
+mkdir "$awkward"
+block=$(locked_block)
+out=$(cd "$awkward" && PATH="$work/shell-card:$PATH" VIBESWITCHER_SESSION=$session_id KEYCHAIN="$awkward/k.keychain-db" BUILD_LINE="scripts/build-app.sh" \
+    /bin/bash -c 'set -euo pipefail; eval "$1"; signing_keychain_state() { echo locked; }; say_signing_keychain_locked' _ "$block" 2>&1)
+words=$(PATH="$work/shell-card:$PATH" /bin/bash -c "$(grep -E '^ +vs-shell run' <<<"$out")")
+quoted_kc=$(printf '%s' "$awkward/k.keychain-db" | sed "s/'/'\\\\''/g")
+card_command="[--]"$'\n'"[security unlock-keychain '$quoted_kc' && scripts/build-app.sh]"
+check "the vs-shell line stays one correct command with spaces and an apostrophe in the paths" \
+    '[[ $words == *"[run]"*"[--cwd]"*"[$awkward]"* && $words == *"$card_command" ]]'
+found=$(password_arguments scripts/build-app.sh || true)
+check "the message puts no password on a command line" '[[ -z $found ]]'
 
 if [[ "${1:-}" == "--build" ]]; then
     home="$work/home"
@@ -296,10 +338,15 @@ EOF
     # dialog is ever put in front of you.
     # It logs each signing to $SIGNING_CALLS, and with SIGNING_INTERRUPT_AT=N stands in for a Ctrl-C at the Nth: SIGINT
     # to its process group, as Terminal would.
+    # With SIGNING_NO_PROMPT, nothing can ask (a `!` command, an agent's Bash): a locked keychain fails as the real one does.
     cat > "$work/bin/codesign" <<'EOF'
 #!/bin/bash
 echo codesign >> "$SIGNING_CALLS"
 [[ $(grep -c codesign "$SIGNING_CALLS") -eq ${SIGNING_INTERRUPT_AT:-0} ]] && kill -INT 0
+if [[ -n ${SIGNING_NO_PROMPT:-} && $("$SIGNING_LOCKSTATE" "$SIGNING_KEYCHAIN") == locked ]]; then
+    echo "${@: -1}: errSecInternalComponent" >&2
+    exit 1
+fi
 if [[ $("$SIGNING_LOCKSTATE" "$SIGNING_KEYCHAIN") == locked ]]; then
     echo prompt >> "$SIGNING_PROMPTS"
     printf 'test-password\n' | python3 -I -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
@@ -373,6 +420,31 @@ EOF
         '[[ $status -ne 0 && $(calls) == "add codesign codesign restore" ]] && ! grep "^Built" "$work/build4.log" >/dev/null'
     check "and the search list is put back, the login keychain in it" \
         '[[ $(run security list-keychains -d user) == "$search_list" ]] && has_login'
+
+    # The keychain locked and nothing to ask for its password: in a VibeSwitcher session, then outside one (the session
+    # variable is whatever this run has otherwise). Never with --install: a build that signed would then install.
+    printf '#!/bin/bash\necho ran >> "$SIGNING_CALLS"\n' > "$work/bin/vs-shell"
+    chmod +x "$work/bin/vs-shell"
+    locked_build() {
+        # A name of its own: `check` evals in its own function, where $1 is the check's name.
+        locked_log="$work/build$1.log"
+        run security lock-keychain "$keychain"
+        SIGNING_NO_PROMPT=1 VIBESWITCHER_SESSION=$2 build "$1" stops
+        check "$3: the build stops, signing nothing, running no vs-shell, and the keychain stays locked with nothing asked" \
+            '[[ $status -ne 0 && -s $locked_log && $(calls) == "add codesign restore" && $prompts -eq 0 && $(lockstate) == locked ]] && ! grep "^Built" "$locked_log" >/dev/null'
+        check "$3: the search list is put back" '[[ $(run security list-keychains -d user) == "$search_list" ]] && has_login'
+        check "$3: the message names the locked keychain, after codesign's error" \
+            'grep -F "errSecInternalComponent" "$locked_log" >/dev/null && grep -F "signing keychain is locked" "$locked_log" >/dev/null &&
+             grep -F "$keychain" "$locked_log" >/dev/null && [[ $(tail -1 "$locked_log") != *errSecInternalComponent* ]]'
+        check "$3: no password in its output" '[[ -s $locked_log ]] && ! grep -E "test-password|old-password" "$locked_log" >/dev/null'
+    }
+    locked_build 5 11111111-2222-4333-8444-555555555555 "locked, in a session"
+    check "locked, in a session: it gives the vs-shell run line" \
+        'grep -F "vs-shell run --cwd" "$work/build5.log" | grep -F "security unlock-keychain" | grep -F "&& scripts/build-app.sh" >/dev/null'
+    check "locked, in a session: it doesn't send anyone to Terminal" '! grep Terminal "$work/build5.log" >/dev/null'
+    locked_build 6 "" "locked, outside a session"
+    check "locked, outside a session: it names a real terminal and no vs-shell" \
+        'grep -F "real terminal" "$work/build6.log" >/dev/null && ! grep -F "vs-shell" "$work/build6.log" >/dev/null'
 fi
 
 if [[ $failures -gt 0 ]]; then echo "$failures check(s) failed"; exit 1; fi

@@ -96,7 +96,8 @@ Agents can ask you for two things as cards in the chat:
 
 - **A shell.** `vs-shell run [--cwd DIR] [--label TEXT] -- COMMAND…` shows the folder and the exact command, with
   **Run** and **Decline**. Nothing runs until you press Run, unless you've turned on **Let agents open shells without
-  asking** in Settings › Agents.
+  asking** in Settings › Agents. Anything that needs a real terminal comes this way (a password prompt, an install, an
+  interactive program), rather than a request to open Terminal or type a `!` command; a password goes only into that shell.
 - **A transaction.** `vs-wallet request …` shows a card saying what the transaction does, from where and to whom, with
   the agent's reason. Nothing leaves the Mac until you press **Send to Wallet Manager**, which hands it to the Wallet
   Manager, a separate app, over Passage to another Mac or in a folder on this one. It checks the request and you sign

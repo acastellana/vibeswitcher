@@ -9,6 +9,18 @@ public enum SessionNote {
     /// Set to the role's name in the sessions `LeadLaunch` starts (lead, worker, verifier).
     public static let roleVariable = "VIBESWITCHER_ROLE"
 
+    /// What every agent VibeSwitcher starts is told about anything needing a real terminal: this note's and the lead's and
+    /// worker's prompts' one wording (`LeadPrompts.lead`, `.worker`), since those sessions don't get this note. Claude Code's
+    /// own system prompt tells an agent to suggest `! <command>`, so it has to say it replaces that: on 2026-11-08 a lead sent
+    /// the user to Terminal.app and `!` failed three times on a locked signing keychain before `vs-shell run` worked.
+    public static let realTerminal = "When something needs a real terminal (a password or other prompt, an install, an "
+        + "interactive program, anything that asks questions on stdin or files wallet requests), ask for it with "
+        + "`vs-shell run [--cwd DIR] [--label TEXT] -- COMMAND…` (on your PATH; `vs-shell help`): it puts the exact command on a "
+        + "card in this session's chat, and one Run click from the user opens it in a new shell session with a real terminal. "
+        + "In VibeSwitcher this replaces Claude Code's advice to suggest `! <command>`: don't ask the user to open Terminal.app, "
+        + "to paste a command into a shell, or to type `! <command>` for it (a `!` command has no terminal to type a password "
+        + "into). A password is typed only into that shell, never into chat: don't ask for one here, and never put one in the command."
+
     public static let text = """
         [VibeSwitcher · session note] This session runs in VibeSwitcher. When a transaction is needed (a payment, a \
         transfer, a contract call), ask for it with `vs-wallet request …` (on your PATH; `vs-wallet help` lists the fields). \
@@ -16,9 +28,7 @@ public enum SessionNote {
         The Wallet Manager then checks it on its own Mac and the user signs it there with a hardware wallet; its answers come back to you as \
         messages. From an 0x address the card also offers Sign in browser wallet, which works without a Wallet Manager: when \
         none is set up, vs-wallet says so and the browser wallet is the way to sign. vs-wallet never holds or takes keys: never put a key, seed or recovery phrase in a request. \
-        When a long-running program needs a real terminal (it asks questions on stdin, or files wallet requests), don't ask the \
-        user to open a shell and paste it: ask with `vs-shell run [--cwd DIR] [--label TEXT] -- COMMAND…` (`vs-shell help`), which \
-        puts the exact command on a card here for the user's Run and opens it in a new shell session.
+        \(realTerminal)
         """
 
     /// The hook's reply to `payload`: the note at a Claude Code session's start (a new one, a resumed one, one cleared
