@@ -3755,3 +3755,5 @@
 - 2026-11-08 01:27 Audit of branch-code-can-t: incomplete, clean, round 2: 4 Important (1 open), 5 Nit (1 open)
 - 2026-11-08 01:28 Audit of product-inventory-read: complete, clean, round 1: 3 Nit open
 - 2026-11-08 01:28 Started a worker on branch-code-can-t
+- 2026-11-08 01:32 Audit of provenance-in-git-every: complete, clean, round 1: 2 Nit open
+- 2026-11-08 01:41 Merged product-inventory-read: Product inventory, read before proposing; backlog statuses updated (backlog A5 + the A4 rule) (build ebed973e8025)
