@@ -4226,3 +4226,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 12:01 Automatically fetched origin/main at 3b271e17: 0 commits from the other Mac at origin/main (3b271e17b17c98c4c9262766197f1a6aff797549): merge_remote would do nothing: main has everything origin/main has.
 - 2026-11-08 12:01 Audit of settings-redesign-clear: complete, clean, round 2: 1 Important closed, 3 Nit (1 open)
 - 2026-11-08 12:29 Automatically (auto_advance): Merge of settings-redesign-clear failed: Tests fail rebased onto main: aWorkerStartedByTheLeadGetsItsTools() Sent its worker the output; it's back at work.
+- 2026-11-08 12:41 Released config-seal-covers's worker (idle since its done report on 15e779a8) while its audit runs
+- 2026-11-08 12:41 Automatically (auto_advance): Started the audit of config-seal-covers at 15e779a8 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-08 12:44 Released settings-redesign-clear's worker (idle since its done report on 308001e7) while its audit runs
+- 2026-11-08 12:44 Automatically (auto_advance): Started the audit of settings-redesign-clear at 308001e7 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
