@@ -141,12 +141,16 @@ public enum WalletBrowser {
         /// The request as it was when the user clicked Sign in browser wallet: the page was made from it, so the card and
         /// the messages after it come from it, whatever the filed request says later. Nil in a mark from before it was kept.
         public var request: WalletRequest?
+        /// The session host's seal on `request` (`WalletRequest.sealedCopy`). Nil in a mark from before it was kept, or
+        /// when the host couldn't be asked: such a mark's copy speaks only while it equals the filed request.
+        public var seal: String?
 
-        public init(state: State, txHash: String? = nil, at: Date, request: WalletRequest? = nil) {
+        public init(state: State, txHash: String? = nil, at: Date, request: WalletRequest? = nil, seal: String? = nil) {
             self.state = state
             self.txHash = txHash
             self.at = Date(timeIntervalSince1970: floor(at.timeIntervalSince1970))
             self.request = request
+            self.seal = seal
         }
     }
 
@@ -167,17 +171,19 @@ public enum WalletBrowser {
         if let hash = mark.txHash { members.append(.init("txHash", .string(hash))) }
         members.append(.init("at", .string(WalletRequestFormat.string(mark.at))))
         if let request = mark.request { members.append(.init("request", request.value)) }
+        if let seal = mark.seal { members.append(.init("seal", .string(seal))) }
         try VibePaths.ensurePrivate(folder)
         try VibePaths.writePrivate(WalletRequestFormat.Value.object(members).encoded(), to: markFile(id, in: folder))
     }
 
     static func parseMark(_ data: Data) throws -> Mark {
-        let fields = try WalletRequestFormat.Fields(WalletRequestFormat.Value.parse(data), path: "", allowed: ["state", "txHash", "at", "request"])
+        let fields = try WalletRequestFormat.Fields(WalletRequestFormat.Value.parse(data), path: "", allowed: ["state", "txHash", "at", "request", "seal"])
         guard let state = Mark.State(rawValue: try fields.string("state")) else { throw WalletRequestFormat.Failure.invalid("state", "unknown") }
         let hash = try fields.optionalString("txHash")
         guard (state == .sent) == (hash != nil), hash.map(isHash) ?? true else { throw WalletRequestFormat.Failure.invalid("txHash", "only, and always, with sent") }
         let request = fields.has("request") ? try WalletRequest.read(fields.value("request"), path: "request") : nil
-        return Mark(state: state, txHash: hash, at: try WalletRequestFormat.date(fields.string("at"), field: "at"), request: request)
+        return Mark(state: state, txHash: hash, at: try WalletRequestFormat.date(fields.string("at"), field: "at"), request: request,
+                    seal: try fields.optionalString("seal"))
     }
 
     // MARK: Messages to the asking session
