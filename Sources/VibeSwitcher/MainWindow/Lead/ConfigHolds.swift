@@ -43,7 +43,7 @@ final class ConfigHolds: ObservableObject {
             let vault = self.vault
             background {
                 // The app's own writes of the agents' config the host couldn't seal when they were made.
-                vault.sealAppWrites()
+                vault.retrySealingAppWrites()
                 let record = Result { try vault.guardedRecord(root: root) }
                 let names = record.map { ConfigSeal.held(in: $0) }
                 let guarded = try? record.get()

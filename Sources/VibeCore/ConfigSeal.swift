@@ -929,6 +929,31 @@ public enum ConfigSeal {
             lines = Array((old + lines).suffix(limit))
             lock.unlock()
         }
+
+        /// How long a look leaves writes the vault refused (`mayRetry`): each ask has the host hash your home's config.
+        let refusalPause: TimeInterval = 30
+        private var refusedAt: Date?
+
+        /// The vault said no. True the first time since it last took some, for the log.
+        func noteRefused(now: Date) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            let first = refusedAt == nil
+            refusedAt = now
+            return first
+        }
+
+        func noteTaken() {
+            lock.lock()
+            refusedAt = nil
+            lock.unlock()
+        }
+
+        func mayRetry(now: Date) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return refusedAt.map { now.timeIntervalSince($0) >= refusalPause } ?? true
+        }
     }
 
     /// The app's writes not yet sealed, by vault (its folder: the app has one; each test its own).
@@ -966,7 +991,8 @@ extension LeadVault {
     /// `write`, and asks the vault to seal what it wrote (`ConfigSeal.wroteKey`), so the app's hook install or update
     /// never waits for your Accept. Only what was as sealed before the write is sealed so, and only as the write left
     /// it: a change someone else made before, or makes after, is still held. When the session host can't be asked now,
-    /// it's asked again at the next look (`sealAppWrites`). The app's alone (the vault refuses anyone else).
+    /// or won't take it yet, it's asked again at the next look (`sealAppWrites`). The app's alone (the vault refuses
+    /// anyone else).
     @discardableResult
     public func appWrite<T>(_ paths: [String], home: String = VibePaths.home, _ write: () throws -> T) rethrows -> T {
         // A plugin with no install has no path: no write is in it.
@@ -991,9 +1017,14 @@ extension LeadVault {
     }
 
     /// Asks the vault to seal the app's own writes not yet sealed (`appWrite`), in the order they were made; kept to
-    /// be asked again when the host doesn't answer. Blocking.
+    /// be asked again when the host doesn't answer or refuses. Blocking.
     public func sealAppWrites() {
         ConfigSeal.flushes.sync { flushAppWrites() }
+    }
+
+    /// `sealAppWrites` for a periodic look: writes the vault refused wait out `Pending.refusalPause`.
+    public func retrySealingAppWrites(now: Date = Date()) {
+        ConfigSeal.flushes.sync { if ConfigSeal.pending(for: folder).mayRetry(now: now) { flushAppWrites() } }
     }
 
     private func flushAppWrites() {
