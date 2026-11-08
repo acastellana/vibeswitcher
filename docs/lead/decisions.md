@@ -302,3 +302,7 @@ Round 2 confirmed F1, F2, F3, F5 and F7 fixed. A re-roll from base would throw t
 
 This replaces the 01:28 plan to re-roll the task if round 3 left an Important finding open. F10 is new, small and narrow: the order of one end call against one check. It only errs toward safety: it raises a hold too many, never lets a change through unheld. Round 3 confirmed the F9 redesign and the 7 fixes before it. A re-roll would discard about 3.5 h of audited security work to fix an ordering bug. It's the same pattern as resume-work-cut-off's F6 on 2026-11-07 12:56. Gate code only takes effect after an install, so holding the install closes the gap.
 
+## 2026-11-08 05:42:44 swift-testing-s-parallel merges as built: under a heavy slot, Swift Testing's parallel width is capped to VS_HEAVY_CORES. Its cost gets measured on the merges that follow, not tuned in the task: the next 5 merge test runs' swift-test times against the earlier 290–400 s, and the app's freezes per hour (IM-18) against 3.43/h. If merge runs stay above about 1.5x (around 600 s) on a calm Mac, the width goes to 2× the slot's share.
+
+On 2026-11-08 from 03:40 to 05:35, the load reached 100–225 on 12 cores whenever full suites overlapped, and the app froze dozens of times. Each suite ran 12 tests at once whatever its slot. The worker's two timings (1003–1093 s) came while the Mac was loaded at 57 to 225, so they can't separate the width's cost from the load.
+
