@@ -1476,7 +1476,7 @@ public enum LeadPrompts {
                 + "the checks yourself, and a claimed result your run doesn't reproduce is a finding):\n" + said)
     }
 
-    public static func verifier(task: LeadTask, root: String, workflow: LeadWorkflow, reaudit: Reaudit? = nil, finder: Finder? = nil,
+    public static func verifier(task: LeadTask, root: String, workflow: LeadWorkflow, reaudit: Reaudit? = nil, amended: ContractReaudit? = nil, finder: Finder? = nil,
                                 merged: Merged? = nil, notes: Notes = Notes(), report: String? = nil, policy: String = WorkingPolicy.load(),
                                 guide: String? = nil, security: String? = nil) -> String {
         // A finder, or a single verifier of a merged result, reads the audit's own run of the whole suite instead.
@@ -1489,11 +1489,12 @@ public enum LeadPrompts {
         \(WorkingPolicy.section(policy))
         \(finder.map { "\n" + finding($0) + "\n" } ?? "")
         \(merged.map { Self.merged($0) + "\n" } ?? "")
-        \(reaudit.map(recheck) ?? """
+        \(reaudit.map { recheck($0, amended: amended != nil) } ?? """
         Check: run every acceptance check\(sharedRun ? "" : ", " + Policy.verifierTests(Policy.lintTests(in: root), test: workflow.testCommand)); read the whole change \
         (`git diff \(workflow.base)...HEAD`, `git log \(workflow.base)..HEAD`); look for edits outside the boundaries, weakened or deleted \
         tests, hard-coded results, leftovers and anything that only looks done.\(sharedRun ? "" : " " + Policy.verifierSuite(test: workflow.testCommand))
         """)
+        \(amended.map { "\n" + contractReaudit($0) + "\n" } ?? "")
         \(notesRule)
         \(routineCallsRule)
         \(loadTests) Reproduce at the contract's load and stop there.\((finder?.index ?? 1) == 1 ? " " + newTestsChecked : "")
@@ -1526,6 +1527,37 @@ public enum LeadPrompts {
 
         \(notesSection(notes))
         """
+    }
+
+    /// A re-audit of a commit whose passing verdict judged an older version of its contract than the task has now
+    /// (the lead amended it after its verifiers last heard): it judges what changed since that version.
+    public struct ContractReaudit: Equatable, Sendable {
+        public var judged: Int
+        public var current: Int
+        public var commit: String
+        /// What changed since `judged` (`LeadContract.changes`); nil when that version's text isn't on record.
+        public var changes: String?
+
+        public init(judged: Int, current: Int, commit: String, changes: String?) {
+            self.judged = judged
+            self.current = current
+            self.commit = commit
+            self.changes = changes
+        }
+    }
+
+    /// What a `ContractReaudit`'s verifier is told it judges.
+    static func contractReaudit(_ amended: ContractReaudit) -> String {
+        let (old, new) = (amended.judged, amended.current)
+        let head = "## What this audit judges\nAn earlier audit judged this branch at \(amended.commit.prefix(8)) against contract v\(old) and passed it "
+            + "(complete, clean); the lead has since amended the contract to v\(new). "
+        guard let changes = amended.changes else {
+            return head + "v\(old)'s text isn't on record, so judge the branch against the whole of v\(new), as a first audit would."
+        }
+        return head + "Judge only what changed since v\(old), below: run each acceptance check it adds, check the branch against a goal or "
+            + "boundary it changed, and take the context it adds into account (an edit it now accepts is in scope). Don't re-review what "
+            + "v\(old)'s audit covered. Where the branch falls short of v\(new)'s change, that's a finding. What changed from v\(old) to v\(new):\n\n"
+            + (changes.isEmpty ? "(nothing in the text: the version only)" : changes)
     }
 
     /// The verifier's word on its contract's version: the lead may amend it during the audit (see `contractAmended`).
@@ -1588,7 +1620,9 @@ public enum LeadPrompts {
     }
 
     /// A re-audit's instructions: the open findings, the closed ones, and the diff its new findings come from.
-    static func recheck(_ reaudit: Reaudit) -> String {
+    /// `amended`: it's the re-audit of a contract the lead changed (`contractReaudit`), which says what it judges: no
+    /// worker's fix is what's being checked, so "only what the fix brought in" would rule out the very thing it's for.
+    static func recheck(_ reaudit: Reaudit, amended: Bool = false) -> String {
         let since = reaudit.since.prefix(8), base = reaudit.base
         var check: String
         let heading: String, empty: String, from: String
@@ -1631,6 +1665,11 @@ public enum LeadPrompts {
             and check each open finding below against the new code (fixed when the new branch doesn't have the problem).
             """
             newFindings = "New findings come from \(from), as in a first audit."
+        } else if amended {
+            check = "an earlier audit passed the branch at \(since), and the lead has amended its contract since. What you check "
+                + "is under \"What this audit judges\" below, not a worker's fixes; the branch's change is there to read for it "
+                + "(`\(reaudit.command)`)."
+            newFindings = "New findings come from what this audit judges, below: where the branch falls short of it."
         } else {
             newFindings = "New findings come from \(from), and only for a problem the fix itself brought in, never a new Nit "
                 + "but the one for a fix's test below."

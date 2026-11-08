@@ -620,7 +620,8 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "merge", description: "Merge a task: rebase onto the lead's branch (squashed when the worker merged it in), run the test command, fast-forward that branch. An audit task (or one whose branch touches sensitive_paths) needs its passing audit; a review none task needs only its worker's done report on the branch's head and the test command passing.",
                             properties: ["task": task,
                                          "tasks": P(type: "array", description: "Instead of task: two or more tasks to merge as one batch (at most \(Self.batchLimit)), each checked as merge checks it alone: their branches stacked on the base in this order, one test run on the stack, the base fast-forwarded to it when it passes (each task's merge recorded on its own). A failure is rerun as ever, then split to find the task that breaks it, which is set failed with its output; the rest merge. A task that doesn't apply on the stack is left out, failed, to merge the base",
-                                                    items: "string")]),
+                                                    items: "string"),
+                                         "accept_stale_verdict": P(type: "string", description: "With task: merge on a passing verdict that judged an older version of its contract than it has now (merge refuses one otherwise, and audit judges what changed since). Why that verdict covers the current version; it goes into the progress log")]),
                 MCPToolInfo(name: "revert", description: "Undo a merged task in one step: one commit on top of the lead's branch reverts the commits its merge put there, the test command runs on it, and the branch fast-forwards to it; the task reads reverted. It only adds a commit (nothing is reset or rewritten). Refused, with the branch untouched, when the tests fail or when later commits conflict with the revert (it names the files and the tasks that touched them: plan a fix-forward task instead).",
                             properties: ["task": task, "reason": P(type: "string", description: "What the merge broke, in one line: it goes into the revert commit's message and the task's record")],
                             required: ["task", "reason"]),
@@ -735,7 +736,7 @@ public final class LeadToolset: MCPToolset {
                     records.flush(base: base)
                     return withGitNotice(merged)
                 }
-                let merged = try merge(try taskSlug(arguments))
+                let merged = try merge(try taskSlug(arguments), acceptStale: Self.staleReason(arguments))
                 records.flush(base: base)
                 return withGitNotice(merged)
             case "revert":
@@ -1417,6 +1418,16 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: changed.isEmpty ? "Nothing to change on \(slug)." : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded)\(goOn)\(heard)")
     }
 
+    /// `text` added to `task`'s contract context as a paragraph of its own; a contract it changed is a new version, as
+    /// update_task's are (`LeadTask.contractVersion`). The caller sends an audit under way what changed
+    /// (`sendContractChange`) once the board is written.
+    static func appendContext(_ text: String, to task: inout LeadTask) {
+        let before = task.contract
+        let context = task.contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.contract.context = context.isEmpty ? text : context + "\n\n" + text
+        if task.contract != before { task.contractVersion = task.contractRevision + 1 }
+    }
+
     /// A task may be re-rolled while it's still to land: not merged, kept, folded or abandoned, and no merge of it under way.
     private func checkRerollable(_ slug: String) throws {
         guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
@@ -1484,8 +1495,7 @@ public final class LeadToolset: MCPToolset {
         let record = LeadReroll(archive: archive ?? "", commit: head, round: ledger?.rounds ?? 0)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
-            let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
-            board.tasks[index].contract.context = context.isEmpty ? summary : context + "\n\n" + summary
+            Self.appendContext(summary, to: &board.tasks[index])
             board.tasks[index].keep(note)
             board.tasks[index].rerolls = (board.tasks[index].rerolls ?? []) + [record]
             board.tasks[index].answers = nil
@@ -1506,6 +1516,8 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].overBudget = nil
             if let replanned { board.tasks[index].audits = replanned }
         }
+        // Its sessions ended above, so this tells no verifier; kept for one started in between.
+        _ = sendContractChange(slug)
         try? store.appendProgress("Re-rolled \(slug) after \(ledger?.rounds ?? 0) audit round\((ledger?.rounds ?? 0) == 1 ? "" : "s")" + (archive.map { ": its branch is kept as \($0)" } ?? ""))
         let ended = endings.isEmpty ? "" : " Ended " + endings.map(\.said).joined(separator: ", ") + "."
         let dropped = untracked.isEmpty ? "" : " Untracked files left in its worktree went with it: " + untracked.prefix(10).map(\.path).joined(separator: ", ") + (untracked.count > 10 ? ", …" : "") + "."
@@ -2209,7 +2221,15 @@ public final class LeadToolset: MCPToolset {
         // A passing verdict on this very commit with nothing Important open: another round would check the same code
         // again, for Nits at most (the working policy: no audit rounds without a concrete open concern; 2026-10-21, text
         // selection took four rounds and the picker card four tasks).
-        if let verdict = vault.verdict(root: root, task: slug), verdict.passes, verdict.commit == head,
+        // Unless the contract changed after its verifiers last heard: then this audit judges what changed since the
+        // version that verdict judged (`StaleVerdict`), on the same commit.
+        let verdict = vault.verdict(root: root, task: slug)
+        // Only a verdict that let it merge (passing, or failed only on findings the lead dismissed): one that failed
+        // otherwise judged nothing to narrow a re-audit to, and this audit checks the whole branch as ever.
+        let stale = verdict.flatMap { verdict in
+            verdict.commit == head && (verdict.passes || verdict.dismissed(in: vault.audits(root: root, task: slug)) != nil) ? Self.staleVerdict(task) : nil
+        }
+        if let verdict, verdict.passes, verdict.commit == head, stale == nil,
            hold(slug, vault.audits(root: root, task: slug), head: head).isEmpty {
             throw Problem(text: "Not audited: \(slug)'s audit at \(head.prefix(8)) passed (complete, clean) with no Important finding open, and its branch "
                           + "hasn't moved since, so another audit would check the same commit again. merge(\(slug)) when nothing holds it back; "
@@ -2258,6 +2278,8 @@ public final class LeadToolset: MCPToolset {
         // A re-audit checks the open findings and the diff since the commit the last audit covered, not everything again.
         let ledger = vault.audits(root: root, task: slug)
         let recheck = ledger.flatMap { ledger in ledger.isReaudit ? reaudit(ledger, slug: slug, head: head) : nil }
+        // A passing verdict on this commit that judged an older contract: this one judges what changed since.
+        let amendedScope = stale.map { LeadPrompts.ContractReaudit(judged: $0.judged, current: $0.current, commit: head, changes: $0.changes) }
         // Named before its grant goes to the new one.
         let noTools = noToolsBefore(task, .verifier, sessions: sessions)
         let room = makeRoom(task, head: head, need: finders, limits: limits)
@@ -2268,7 +2290,8 @@ public final class LeadToolset: MCPToolset {
         // The audit starts here (a merged result's test run is part of it): its wait ends, its time begins.
         let auditStart = Date().timeIntervalSince1970
         if finders > 1 {
-            let started = try startFinders(finders, task: task, head: head, merged: merged, workflow: workflow, recheck: recheck, trust: config.isEmpty, expectedHead: expectedHead)
+            let started = try startFinders(finders, task: task, head: head, merged: merged, workflow: workflow, recheck: recheck, amended: amendedScope,
+                                           trust: config.isEmpty, expectedHead: expectedHead)
             (panel, earlier) = (started.0, started.1)
             session = started.0.sessions[0]
         } else {
@@ -2285,7 +2308,7 @@ public final class LeadToolset: MCPToolset {
             earlier = try endEarlierVerifiers(task, not: "Not audited, no verifier started")
             session = try launch(.verifier, task: slug, name: "verify-\(slug)", in: Worktrees.path(root: root, slug: slug),
                                  label: "Verifier: \(task.title)", trust: config.isEmpty,
-                                 prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, merged: merged,
+                                 prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, amended: amendedScope, merged: merged,
                                                               notes: leadNotes(task), report: doneReport(task, head: head),
                                                               guide: LeadRisk.reviewGuide(root: root, base: workflow.base),
                                                               security: Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised)),
@@ -2324,7 +2347,8 @@ public final class LeadToolset: MCPToolset {
             }
             return " It's a re-audit (round \(recheck.round)): the verifier checks the \(recheck.open.count) open finding\(recheck.open.count == 1 ? "" : "s") and \(covers)."
         } ?? ""
-        let cap = ledger?.reconsider == true ? " " + Self.reconsiderText(ledger!, of: slug) : ""
+        let cap = (ledger?.reconsider == true ? " " + Self.reconsiderText(ledger!, of: slug) : "")
+            + (stale.map { " Its passing audit at \(head.prefix(8)) \($0.text): this one judges " + ($0.changes == nil ? "the whole of v\($0.current) (v\($0.judged)'s text isn't on record)." : "only what changed since v\($0.judged).") } ?? "")
         let tested = merged.map { " One build and test run of its merged result \($0.commit.prefix(8)) came first, and the verifier reads its logs (\($0.run ?? "")): \($0.logs.joined(separator: ", "))." } ?? ""
         if let panel {
             return MCPToolResult(text: noTools + putBack + behind + room + earlier + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8))): " + Self.focusesText(panel.focuses) + ". "
@@ -2428,7 +2452,8 @@ public final class LeadToolset: MCPToolset {
     /// ended first (see `endEarlierVerifiers`), and the panel comes with what audit's reply says of them.
     /// A branch behind the base where it matters is tested as it would land: `merged`'s commit, not `head`.
     private func startFinders(_ count: Int, task: LeadTask, head: String, merged: LeadPrompts.Merged?, workflow: LeadWorkflow,
-                              recheck: LeadPrompts.Reaudit?, trust: Bool, expectedHead: String? = nil) throws -> (LeadAuditPanel, String) {
+                              recheck: LeadPrompts.Reaudit?, amended: LeadPrompts.ContractReaudit? = nil, trust: Bool,
+                              expectedHead: String? = nil) throws -> (LeadAuditPanel, String) {
         let slug = task.slug
         let tested = merged?.commit ?? head
         let run = try auditRun(slug, commit: tested, workflow: workflow, not: "no finder started")
@@ -2451,7 +2476,7 @@ public final class LeadToolset: MCPToolset {
             do {
                 sessions.append(try launch(.verifier, task: slug, name: index == 1 ? "verify-\(slug)" : "finder\(index)-\(slug)",
                                            in: Worktrees.path(root: root, slug: slug), label: "Verifier: \(task.title) (finder \(index)/\(count): \(focus.rawValue))",
-                                           trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, finder: finder,
+                                           trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, amended: amended, finder: finder,
                                                                                       merged: merged, notes: notes, report: report, guide: guide,
                                                                                       security: security),
                                            start: "Look for findings in your focus now, then call submit_audit.", model: auditModel(workflow, task: task), auditing: head,
@@ -2800,19 +2825,58 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// What lets a task merge, as merge checks it before anything is tested: the task, the commit that merges, whether
-    /// a passing audit let it in, and the Important findings the lead dismissed on a verdict that failed only on them.
+    /// a passing audit let it in, the Important findings the lead dismissed on a verdict that failed only on them, and
+    /// the lead's reason for merging on a verdict that judged an older version of its contract (`StaleVerdict`).
     struct MergeGate {
         let task: LeadTask
         let commit: String
         let audited: Bool
         let dismissed: [LeadFinding]
+        var staleAccepted: (stale: StaleVerdict, reason: String)? = nil
+    }
+
+    /// A verdict that judged an older version of its task's contract than the task has now: the lead amended the
+    /// contract after its verifiers last heard, so the verdict doesn't cover what was added. `changes`: what changed
+    /// since the version judged (`LeadContract.changes`), nil when that version's text isn't on record (a finder
+    /// judged an older version than the one its audit was last sent).
+    struct StaleVerdict: Equatable {
+        let judged: Int
+        let current: Int
+        let changes: String?
+
+        /// "judged contract v1, and its contract is now v2".
+        var text: String { "judged contract v\(judged), and its contract is now v\(current)" }
+    }
+
+    /// `task`'s verdict as a `StaleVerdict` when it judged an older version of the contract than the task has (see
+    /// `LeadEvidence.contract`); nil when it judged the current one, or the version isn't known (a verdict from before
+    /// contracts had versions).
+    static func staleVerdict(_ task: LeadTask) -> StaleVerdict? {
+        // The board's copy of the verdict, or, before submit_audit writes it (the vault has the verdict first), the
+        // version its verifiers' brief says they judged (`judgedVersion`).
+        let judged = task.evidence.map(\.contract) ?? task.auditBrief.map(Self.judgedVersion)
+        guard let judged, judged < task.contractRevision else { return nil }
+        // The brief's text is the version judged when no amendment reached its verifiers after the one they judged.
+        let old = task.auditBrief.flatMap { $0.version == judged ? $0.contract : nil }
+        return StaleVerdict(judged: judged, current: task.contractRevision, changes: old.map { task.contract.changes(from: $0) })
+    }
+
+    /// The version an audit's verifiers judged, as their brief records it: what they said (the oldest, with several
+    /// finders), else the version their brief was written from (one sent later may not have reached them).
+    static func judgedVersion(_ brief: LeadAuditBrief) -> Int { brief.judged ?? brief.briefed ?? brief.version }
+
+    /// merge's `accept_stale_verdict`: the lead's reason, trimmed; nil when none was given.
+    static func staleReason(_ arguments: [String: Any]) -> String? {
+        guard let given = (arguments["accept_stale_verdict"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !given.isEmpty else { return nil }
+        return given
     }
 
     /// Every check merge makes of `slug` before its test run, a batch's (`mergeBatch`) for each of its tasks too: not
     /// merged or settled already, no battery hold, not kept, its passing audit on its branch's head (or, for review
     /// none, its worker's done report there), no Important finding open or held by strict_paths, and the merge policy
-    /// (the user's approval of that commit when it asks for one). Throws the refusal.
-    func mergeGate(_ slug: String) throws -> MergeGate {
+    /// (the user's approval of that commit when it asks for one), and a verdict that judged the contract's current
+    /// version (or the lead's reason for merging on one that judged an older one, `acceptStale`). Throws the refusal.
+    func mergeGate(_ slug: String, acceptStale: String? = nil) throws -> MergeGate {
         guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
         if task.status == .done {
             throw Problem(text: "\(slug) is already merged" + (task.merged.map { " at \($0.commit.prefix(8)) (\(LeadBoard.clock($0.at)))" } ?? "")
@@ -2828,6 +2892,7 @@ public final class LeadToolset: MCPToolset {
         let commit: String, audited: Bool
         // The Important findings the lead dismissed on a verdict that failed only on them (see `Verdict.dismissed`).
         var dismissed: [LeadFinding] = []
+        var staleAccepted: (stale: StaleVerdict, reason: String)?
         // The verdict as the verifier's own tool server recorded it in the vault (the board's copy is for showing):
         // from the verifier VibeSwitcher started last for this task, on the commit it was started on.
         if let verdict = vault.verdict(root: root, task: slug) {
@@ -2851,6 +2916,17 @@ public final class LeadToolset: MCPToolset {
                 throw Problem(text: "agent/\(slug) has commits the verifier didn't see (audited \(verdict.commit.prefix(8)), now \(head.prefix(8))). Run audit again.")
             }
             (commit, audited) = (verdict.commit, true)
+            // The contract changed after its verifiers last heard: the verdict doesn't cover what changed, so it
+            // doesn't merge on it unless the lead says why it holds for the current version.
+            if let stale = Self.staleVerdict(task) {
+                guard let acceptStale else {
+                    throw Problem(text: "Not merged: \(slug)'s passing audit \(stale.text) (the contract changed after its verifier last heard). "
+                        + "audit(\(slug)) again for a verdict on v\(stale.current): it judges only what changed since v\(stale.judged). "
+                        + "Or, if v\(stale.judged)'s verdict covers v\(stale.current) as it is, merge(\(slug), accept_stale_verdict: \"why\"): "
+                        + "the reason goes into the progress log.")
+                }
+                staleAccepted = (stale, acceptStale)
+            }
         } else {
             let head = branchHead(Worktrees.branch(slug))
             if let needed = reviewNeeded(slug, commit: head, model: true) {
@@ -2872,11 +2948,11 @@ public final class LeadToolset: MCPToolset {
         }
         try checkMergePolicy(task, commit: commit)
         try checkRemoteCarried(slug, commit: commit)
-        return MergeGate(task: task, commit: commit, audited: audited, dismissed: dismissed)
+        return MergeGate(task: task, commit: commit, audited: audited, dismissed: dismissed, staleAccepted: staleAccepted)
     }
 
-    private func merge(_ slug: String) throws -> MCPToolResult {
-        let gate = try mergeGate(slug)
+    private func merge(_ slug: String, acceptStale: String? = nil) throws -> MCPToolResult {
+        let gate = try mergeGate(slug, acceptStale: acceptStale)
         let (task, commit, audited, dismissed) = (gate.task, gate.commit, gate.audited, gate.dismissed)
         guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
             throw Problem(text: "A merge of \(slug) is already running; its result comes back to the call that started it.")
@@ -2993,6 +3069,7 @@ public final class LeadToolset: MCPToolset {
                     planFlakeFixes(&board, flakes: [stuck], slug: slug, commit: commit, at: Date(), logged: [], log: nil,
                                    load: begun?.load.first, workflow: workflow)
                 }) ?? FlakePlan()
+                sendFlakeNotes(plan)
                 let planned = plan.planned
                 ledger = "\(Self.clip(stuck, 200)), the last test it started, is recorded in the flake ledger"
                     + (planned.first.map { $0.noted ? " (the open task \($0.slug) names it: noted in its context)" : " (it hung or flaked \(LeadBoard.flakeLimit) times: planned \($0.slug) to fix it)" } ?? "")
@@ -3032,6 +3109,7 @@ public final class LeadToolset: MCPToolset {
         }
         // Held, re-planned, folded or abandoned by the lead while the tests ran: that word stands, and it doesn't land.
         if let changed = changedMeanwhile(slug, since: task, tests: "passed") { throw changed }
+        if let amended = amendedMeanwhile(slug, since: task, tests: "passed") { throw amended }
         switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tested, from: current) }) {
         case .merged:
             try vault.setHead(tested, root: root, branch: base)
@@ -3059,6 +3137,7 @@ public final class LeadToolset: MCPToolset {
                                       log: flakeLog, load: begun?.load.first, filtered: flaked?.plan.filtered, workflow: workflow)
             }
             let planned = flakePlan.planned
+            sendFlakeNotes(flakePlan)
             // A fix-the-flaky-test task (or an open one a due flake was noted in) merging fixes its test.
             noteFlakeFixes([(slug, tested)])
             // Nothing ran: say so, it isn't a pass.
@@ -3066,6 +3145,7 @@ public final class LeadToolset: MCPToolset {
                 ? " (merged without tests: no test_command\(workflow.problem.map { "; \($0)" } ?? ""). Set one with configure.)" : ""
             try? store.appendProgress("Merged \(slug): \(task.title)\(untested.isEmpty ? "" : " (without tests: no test_command)")\(audited ? "" : " (no audit: review none)")"
                 + (dismissed.isEmpty ? "" : " (its audit's Important findings dismissed by the lead: \(dismissed.map(\.id).joined(separator: ", ")))")
+                + (gate.staleAccepted.map { " (on a verdict that \($0.stale.text), accepted by the lead: \(Redaction.secrets(in: Self.clip($0.reason, 400))))" } ?? "")
                 + buildNote)
             let ran = workflow.regressionCommand == nil ? "" : " (regression_command passed too.)"
             let patience = waited.map { " (The tests waited \(Worktrees.duration($0.after)) for the Mac's load to drop from \(MacLoad.number($0.from)) below load_threshold.)" } ?? ""
@@ -3097,7 +3177,8 @@ public final class LeadToolset: MCPToolset {
             }
             let caughtUp = tellToCatchUp(merged: slug, from: current, to: tested, base: base)
             archiveFinished(force: false)
-            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(overruled)\(unaudited)\(ran)\(patience)\(evidence)\(flakeNote)\(caughtUp)")
+            let staleNote = gate.staleAccepted.map { " (Its passing audit \($0.stale.text): merged on it with your reason, in the progress log.)" } ?? ""
+            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(overruled)\(staleNote)\(unaudited)\(ran)\(patience)\(evidence)\(flakeNote)\(caughtUp)")
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason)")
         }
@@ -3129,9 +3210,9 @@ public final class LeadToolset: MCPToolset {
                 var plan = FlakePlan(recurred: recurred)
                 plan.planned = due.map { test, _, counted in
                     if let open = board.openTask(naming: test), let index = board.taskIndex(open.id) {
-                        let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let line = MergeRerun.flakeNote(test: test, flakes: counted, root: root)
-                        board.tasks[index].contract.context = context.isEmpty ? line : context + "\n\n" + line
+                        // A new version of its contract: an audit under way hears of it once the board is written
+                        // (`sendFlakeNotes`; this runs under the board's lock).
+                        Self.appendContext(MergeRerun.flakeNote(test: test, flakes: counted, root: root), to: &board.tasks[index])
                         ledger.notePlanned(open.slug, for: test)
                         return (test, open.slug, true)
                     }
@@ -3149,6 +3230,12 @@ public final class LeadToolset: MCPToolset {
             try? store.appendProgress("The flake ledger couldn't record \(Self.clip(flakes.joined(separator: ", "), 300)) from \(slug)'s merge: \(error)")
             return FlakePlan()
         }
+    }
+
+    /// The open tasks `plan` noted a flaky test in (a new version of each one's contract, see `planFlakeFixes`): an
+    /// audit under way on one is sent what changed (`sendContractChange`). Called once the board is written.
+    func sendFlakeNotes(_ plan: FlakePlan) {
+        for slug in Set(plan.planned.filter(\.noted).map(\.slug)) { _ = sendContractChange(slug) }
     }
 
     /// Moves the board's flakes from before the ledger's file there, once (`FlakeLedgerStore.migrate`).
@@ -4368,6 +4455,17 @@ public final class LeadToolset: MCPToolset {
                        + (now.status == .kept ? " If it's wanted after all, update_task(\(slug), status: planned) first, and say why with record_decision." : ""))
     }
 
+    /// The contract's version can move in those minutes too, and the gate only saw it before them: this is the refusal
+    /// when `slug`'s verdict is out of date in a way it wasn't when the merge began (or a different way than the lead
+    /// accepted with accept_stale_verdict). Only once the tests have passed: a failure goes to the worker as ever.
+    func amendedMeanwhile(_ slug: String, since started: LeadTask, tests: String) -> Problem? {
+        guard let now = store.load().task(slug), let stale = Self.staleVerdict(now), stale != Self.staleVerdict(started) else { return nil }
+        try? store.appendProgress("Didn't merge \(slug): its contract was amended while its tests ran (they \(tests)); its passing audit \(stale.text)")
+        return Problem(text: "Not merged: \(slug)'s contract was amended while its tests ran (they \(tests)): its passing audit \(stale.text). "
+                       + "It stays in review, and nothing was changed. audit(\(slug)) again to judge what changed, "
+                       + "or merge(\(slug), accept_stale_verdict: \"why\") if this verdict covers v\(stale.current).")
+    }
+
     func setStatus(_ slug: String, _ status: LeadTask.Status, setback: LeadSetback? = nil) throws {
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
@@ -4440,8 +4538,11 @@ public final class LeadToolset: MCPToolset {
             }
             if let standing {
                 if board.tasks[index].evidence?.commit != standing.commit {
+                    // The version its verifiers judged, as submit_audit recorded it with their brief (the vault
+                    // keeps none): the merge gate goes by it.
                     board.tasks[index].evidence = LeadEvidence(completion: standing.completion, integrity: standing.integrity,
-                                                               summary: standing.summary, commit: standing.commit, at: standing.at)
+                                                               summary: standing.summary, commit: standing.commit,
+                                                               contract: board.tasks[index].auditBrief.map(Self.judgedVersion), at: standing.at)
                 }
             } else {
                 // Kept to show what was audited, for an older commit; merge goes by the vault, which has none now.
@@ -4471,7 +4572,8 @@ public final class LeadToolset: MCPToolset {
             "No new commit since its audit at \(verdict.commit.prefix(8)), which "
                 + (verdict.passes ? "passed: that verdict stands" : "didn't pass (\(verdict.completion.rawValue), \(verdict.integrity.rawValue)): that verdict stands")
                 + (!done ? "." : !verdict.passes ? "; audit(\(slug)) to have it checked again."
-                    : blocking.isEmpty ? ". merge(\(slug)) when you're ready."
+                    : blocking.isEmpty ? (store.load().task(slug).flatMap(Self.staleVerdict).map { ", but it \($0.text): audit(\(slug)) again for a verdict on v\($0.current), or merge(\(slug), accept_stale_verdict: \"why\")." }
+                        ?? ". merge(\(slug)) when you're ready.")
                     : ", with Important findings open (\(blocking.map { "\(slug):\($0.id)" }.joined(separator: ", "))\(hold.why.isEmpty ? "" : "; \(hold.why)")) that merge refuses: dismiss_finding them, or have the worker fix them and commit, then audit(\(slug)).")
         }
         // No audit asked for: the merge's own test run is the check.
@@ -4488,7 +4590,9 @@ public final class LeadToolset: MCPToolset {
         var auto = ""
         if done, advances(slug) {
             if let standing {
-                if standing.passes && blocking.isEmpty { auto = " " + LeadAdvance.mergesItself }
+                if standing.passes && blocking.isEmpty {
+                    auto = " " + (store.load().task(slug).flatMap(Self.staleVerdict) == nil ? LeadAdvance.mergesItself : LeadAdvance.reauditsItself)
+                }
             } else if needed == nil, case .success = recorded {
                 auto = " " + LeadAdvance.mergesItself
             } else {
@@ -4654,17 +4758,22 @@ public final class LeadToolset: MCPToolset {
                                  changed: earlier.commit.flatMap { reauditFiles(since: $0, head: audited) })
             } catch { throw Problem(text: "Not recorded: \(error) Nothing was recorded; call submit_audit again.") }
         }
-        let submission: LeadVault.Submission
-        do { submission = try vault.submit(root: root, completion: completion, integrity: integrity, summary: summary, findings: reports, tests: tests) } catch {
-            throw Problem(text: "\(error)")
-        }
+        // Before the vault has its verdict: the merge gate and auto_advance read the version judged from here until
+        // the board's copy of the verdict is written below (a submit the vault then refuses leaves it as old or
+        // older, which only holds a merge back).
         // The version it judged: what it says, never past the newest it was sent (one sent as it submitted may
         // not have reached it); its brief's when it doesn't say; with several finders, the oldest any of them judged.
         try? store.update { board in
-            guard let index = board.taskIndex(slug), var brief = board.tasks[index].auditBrief, board.tasks[index].evidence == nil else { return }
+            guard let index = board.taskIndex(slug), var brief = board.tasks[index].auditBrief, board.tasks[index].evidence == nil,
+                  // One of this audit's verifiers: an earlier audit's, still running, is refused by the vault below.
+                  let session = member.session, board.tasks[index].verifier == session || board.tasks[index].panel?.sessions.contains(session) == true else { return }
             let said = min(stated ?? brief.briefed ?? brief.version, brief.version)
             brief.judged = min(brief.judged ?? said, said)
             board.tasks[index].auditBrief = brief
+        }
+        let submission: LeadVault.Submission
+        do { submission = try vault.submit(root: root, completion: completion, integrity: integrity, summary: summary, findings: reports, tests: tests) } catch {
+            throw Problem(text: "\(error)")
         }
         let finder = member.finder?.index
         guard let verdict = submission.verdict else {
@@ -4680,7 +4789,7 @@ public final class LeadToolset: MCPToolset {
         let ledger = vault.audits(root: root, task: slug)
         let audited = verdict.commit
         let evidence = LeadEvidence(completion: verdict.completion, integrity: verdict.integrity, summary: verdict.summary, commit: audited,
-                                    contract: store.load().task(slug)?.auditBrief.map { $0.judged ?? $0.version })
+                                    contract: store.load().task(slug)?.auditBrief.map(Self.judgedVersion))
         // On a branch touching strict_paths, the unconfirmed Important ones hold it too.
         let hold = self.hold(slug, ledger, head: audited)
         let blocking = hold.findings
@@ -4706,13 +4815,18 @@ public final class LeadToolset: MCPToolset {
             + (ledger?.vote.map { " (\($0.text))" } ?? ""))
         let head = branchHead(Worktrees.branch(slug))
         let moved = head == audited ? "" : "\nagent/\(slug) moved during the audit (now \(head?.prefix(8) ?? "gone")): this verdict covers \(audited.prefix(8)) only, and merge refuses newer commits until they're audited."
+        // Judged an older version of the contract than it has now: merge refuses it as it is (see `mergeGate`).
+        let stale = store.load().task(slug).flatMap(Self.staleVerdict)
         var text = evidence.passes
-            ? "The audit of \(slug) passed (complete, clean): \(evidence.summary)\n" + (blocking.isEmpty ? "merge(\(slug)) when you're ready.\(moved)" : "")
+            ? "The audit of \(slug) passed (complete, clean): \(evidence.summary)\n" + (blocking.isEmpty && stale == nil ? "merge(\(slug)) when you're ready.\(moved)" : "")
             : "The audit of \(slug) did not pass (\(evidence.completion.rawValue), \(evidence.integrity.rawValue)): \(evidence.summary)\n"
         // Amended after its verifiers last heard: the lead weighs the verdict against what changed.
         if let task = store.load().task(slug), let stale = task.staleContract {
             text += (text.hasSuffix("\n") ? "" : "\n") + "This verdict \(stale): the contract changed after its verifier\(task.panel == nil ? "" : "s") last heard "
-                + "(board(\(slug)) shows it). Weigh the verdict against what changed, or audit(\(slug)) again for a verdict on v\(task.contractRevision).\n"
+                + "(board(\(slug)) shows it)" + (evidence.passes
+                    ? ", so merge refuses it as it is. audit(\(slug)) again for a verdict on v\(task.contractRevision) (it judges what changed since), "
+                        + "or merge(\(slug), accept_stale_verdict: \"why\") if this verdict covers v\(task.contractRevision).\n"
+                    : ". Weigh the verdict against what changed, or audit(\(slug)) again for a verdict on v\(task.contractRevision).\n")
         }
         if let vote = ledger?.vote {
             let unconfirmed = hold.held.isEmpty
@@ -4730,13 +4844,13 @@ public final class LeadToolset: MCPToolset {
                 + "merge refuses while an Important finding is open: send the worker the open ones (message, with their ids; it answers each with answer_findings, fixed or disagree with a reason, and the re-audit judges the answers), or dismiss_finding one with a reason, or add_task(from_finding: …) to move it to a task of its own."
         } else if !evidence.passes {
             text += "Send the worker the findings with message, or re-plan the task."
-        } else if ledger?.open.isEmpty == false {
+        } else if ledger?.open.isEmpty == false, stale == nil {
             text += "merge(\(slug)) when you're ready: Nits and Pre-existing findings don't hold it back, and a Nit never becomes a task by itself (add_task(from_finding: …) makes a Pre-existing one that matters a task).\(moved)"
         }
         // VibeSwitcher's own next step, when it takes it (see `LeadAdvance`).
         if advances(slug), ledger?.reconsider != true {
             if evidence.passes && blocking.isEmpty && head == audited {
-                text += (text.hasSuffix("\n") ? "" : "\n") + LeadAdvance.mergesItself
+                text += (text.hasSuffix("\n") ? "" : "\n") + (stale == nil ? LeadAdvance.mergesItself : LeadAdvance.reauditsItself)
             } else if !blocking.isEmpty && evidence.integrity == .clean && head == audited {
                 text += (text.hasSuffix("\n") ? "" : "\n") + LeadAdvance.sendsBackItself
             }

@@ -233,6 +233,12 @@ extension LeadToolset {
                     stopped = "\(gate.task.slug) was set \(Self.shownState(store.load().task(gate.task.slug) ?? gate.task)) while the tests ran, so the stack tested with it on doesn't land"
                     return false
                 }
+                if let amended = amendedMeanwhile(gate.task.slug, since: gate.task, tests: "passed in a batch") {
+                    ends[gate.task.slug] = .refused(amended.text)
+                    results[gate.task.slug] = ("passed", Date(), passing.plan)
+                    stopped = "\(gate.task.slug)'s contract was amended while the tests ran, so the stack tested with it on doesn't land"
+                    return false
+                }
             }
             switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tip, from: onto) }) {
             case .refused(let reason):
@@ -290,6 +296,7 @@ extension LeadToolset {
                                       log: flakeLog, load: begun?.load.first, filtered: flaked?.plan.filtered, workflow: workflow)
             } } catch { return unrecorded("the board couldn't be written", error) }
             let planned = flakePlan.planned
+            sendFlakeNotes(flakePlan)
             // A fix-the-flaky-test task (or an open one a due flake was noted in) merging fixes its test.
             noteFlakeFixes(prefix.enumerated().map { ($0.element.task.slug, stack.tips[$0.offset]) })
             let decided = Date()

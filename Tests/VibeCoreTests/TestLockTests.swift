@@ -895,19 +895,20 @@ struct TestLockTests {
         #expect(try String(contentsOfFile: state, encoding: .utf8) == "{\"own\": 1}")
     }
 
+    /// A's swift sleeps for twice the hang guard, so B can only end inside its wait if the Ctrl-C let go of the lock: no
+    /// clock is read. It was `elapsed < 30` s, and two merges' full runs read 192 s here while the same test alone took 3.
     @Test func ctrlCLetsGoOfTheLock() async throws {
         let (bin, log) = try fakes()
-        let a = try start("A", sleep: 60, bin: bin)
+        let a = try start("A", sleep: Int(hangGuard) * 2, bin: bin)
         #expect(await eventually { lines(log).contains("A build start") })
         let b = try start("B", bin: bin)
         #expect(await eventually { lines(b.output).joined().contains("waiting for") })
-        let interrupted = Date()
         kill(-a.process.processIdentifier, SIGINT)
         #expect(await exited(a.process), "pid \(a.process.processIdentifier) still running")
-        #expect(await exited(b.process), "pid \(b.process.processIdentifier) still running")
+        #expect(await exited(b.process), "pid \(b.process.processIdentifier) still running: it waited for A's sleep")
         #expect(a.process.terminationStatus != 0)
         #expect(b.process.terminationStatus == 0, "\(lines(b.output))")
-        #expect(Date().timeIntervalSince(interrupted) < 30, "B waited for A's sleep instead")
+        #expect(!lines(log).contains("A build end"), "A's sleep ran to its end")
         #expect(!lines(log).contains("A test start") && lines(log).contains("B test end"))
     }
 

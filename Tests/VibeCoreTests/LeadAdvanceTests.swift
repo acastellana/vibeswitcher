@@ -522,6 +522,51 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(reports(runtime).contains { $0.contains("Merged add-b") && $0.contains("on its passing audit") })
     }
 
+    /// A clean verdict that judged contract v1, and the lead changed the acceptance since (v2): VibeSwitcher doesn't
+    /// merge it, it starts a re-audit that judges what changed since v1, and says so naming both versions. That
+    /// re-audit's verdict, on v2, merges.
+    @Test func aCleanVerdictOnAnOlderContractVersionIsAuditedAgainOnWhatChangedNotMerged() async throws {
+        let (root, runtime, lead) = try team()
+        _ = try await auditUnderWay(root, runtime, lead)
+        let first = try #require(task("add-b", root)?.verifier)
+        let clean: [String: Any] = ["completion": "complete", "integrity": "clean", "summary": "checked", "tests": "passed"]
+        let verdict = try seat("verify-add-b", runtime).call("submit_audit", clean)
+        #expect(!verdict.isError, "\(verdict.text)")
+        #expect(task("add-b", root)?.evidence?.contract == 1)
+        let updated = lead.call("update_task", ["task": "add-b", "acceptance": ["test -f b.txt", "grep -q bee b.txt"]])
+        #expect(updated.text.contains("contract now v2"), "\(updated.text)")
+
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        #expect(await advancing.until { reports(runtime).contains { $0.contains("Started the audit of add-b") && $0.contains("judged contract v1, and its contract is now v2") } })
+        let report = try #require(reports(runtime).last { $0.contains("judged contract v1, and its contract is now v2") })
+        #expect(report.contains("not merged") && report.contains("only what changed since v1"), "\(report)")
+        // Not merged: no test run, nothing on main, a new verifier on the same commit.
+        #expect(task("add-b", root)?.status == .review && (try? String(contentsOfFile: log, encoding: .utf8)) == nil)
+        #expect(!Git.run(["show", "main:b.txt"], in: root).ok)
+        let second = try #require(task("add-b", root)?.verifier)
+        #expect(second != first)
+        #expect(vault.current(.verifier, root: root, task: "add-b")?.auditing == head("agent/add-b", root))
+        let spawn = try #require(runtime.spawned.last { $0.id == second })
+        let range = try #require(spawn.command.range(of: #"--append-system-prompt-file '([^']+)'"#, options: .regularExpression))
+        let prompt = try String(contentsOfFile: String(spawn.command[range].dropFirst("--append-system-prompt-file '".count).dropLast()), encoding: .utf8)
+        #expect(prompt.contains("## What this audit judges") && prompt.contains("against contract v1") && prompt.contains("Judge only what changed since v1")
+                && prompt.contains("Added: grep -q bee b.txt") && prompt.contains("This is contract v2."), "\(prompt)")
+        // The re-audit of a contract's change isn't told what a re-audit of a worker's fixes is: it would rule the change out.
+        #expect(prompt.contains("New findings come from what this audit judges") && !prompt.contains("A re-audit checks only the concerns")
+                && !prompt.contains("only for a problem the fix itself brought in"), "\(prompt)")
+        // Once: another pass doesn't start a third.
+        await advancing.settle()
+        #expect(task("add-b", root)?.verifier == second)
+
+        // The re-audit's verdict judged v2: it merges as any passing verdict does.
+        let again = try seat("verify-add-b", runtime).call("submit_audit", clean)
+        #expect(!again.isError, "\(again.text)")
+        #expect(task("add-b", root)?.evidence?.contract == 2)
+        #expect(await advancing.until { task("add-b", root)?.status == .done && reports(runtime).contains { $0.contains("Merged add-b") } })
+        #expect(Git.run(["show", "main:b.txt"], in: root).output == "bee")
+    }
+
     @Test func openImportantFindingsGoBackToTheWorkerOnceAndTheTaskDoesntMerge() async throws {
         let (root, runtime, lead) = try team()
         let advancing = Advancing(lead)

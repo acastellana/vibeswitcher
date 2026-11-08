@@ -7,7 +7,9 @@ import Foundation
 /// - a review none task whose worker reported done on its branch's head merges (merge's full test run is its check),
 ///   unless the risk check (`LeadRisk`) raises it to audit from what its branch changes, or the audit sample
 ///   (`LeadAuditSample`, audit_sample_percent of them at random) draws it: then it's audited instead;
-/// - an audit task reported done gets its audit, and a passing verdict on its head merges;
+/// - an audit task reported done gets its audit, and a passing verdict on its head merges, unless it judged an older
+///   version of the task's contract than it has now (`LeadToolset.StaleVerdict`): then it's audited again, on what
+///   changed since that version;
 /// - a verdict that left Important findings open sends its worker the open ids to answer with answer_findings (once
 ///   per verdict), or starts a worker to get them when its own has ended; a verdict the round cap says to reconsider
 ///   (the lead's call: re-plan, or update_task reroll), or one that isn't clean, is left to the lead;
@@ -43,6 +45,7 @@ public final class LeadAdvance: @unchecked Sendable {
     /// What the lead is told with a report when VibeSwitcher takes the next step itself.
     static let mergesItself = "auto_advance is on: VibeSwitcher merges it by itself (the same merge, with its test run and every check), and you get one report of what happened; don't merge it yourself."
     static let auditsItself = "auto_advance is on: VibeSwitcher starts its audit by itself, and you get one report of what happened; don't audit it yourself."
+    static let reauditsItself = "auto_advance is on: its passing verdict judged an older version of its contract, so VibeSwitcher doesn't merge it; it starts a re-audit of what changed since by itself, and you get one report. merge(…, accept_stale_verdict: …) only if that verdict covers the current contract."
     static let sendsBackItself = "auto_advance is on: VibeSwitcher sends its worker the open Important findings by itself and audits again once it reports; you get one report. Dismiss a finding, add_task(from_finding: …) or re-plan only if that's your call."
 
     private static let key = "VibeSwitcher.LeadAdvance"
@@ -480,6 +483,14 @@ public final class LeadAdvance: @unchecked Sendable {
             let ledger = vault.audits(root: root, task: slug)
             // Nothing Important open, nor an unconfirmed one held by strict_paths (`LeadToolset.hold`).
             guard lead.hold(slug, ledger, head: head).isEmpty, verdict.passes || verdict.dismissed(in: ledger) != nil else { return }
+            // Judged an older version of the contract than it has now: not merged, audited again on what changed.
+            if let task = lead.store.load().task(slug), let stale = LeadToolset.staleVerdict(task) {
+                // The lead's accept_stale_verdict merge may be running its tests: no verifier for one about to land.
+                guard lead.mergeIdle(slug) else { return }
+                return audit(slug, head: head, busy: busy, why: "not merged: its passing audit \(stale.text), so this re-audit judges "
+                             + (stale.changes == nil ? "the whole of v\(stale.current) (v\(stale.judged)'s text isn't on record)" : "only what changed since v\(stale.judged)"),
+                             key: "audit|\(slug)|\(head)|v\(stale.current)")
+            }
             toMerge(Ready(slug: slug, head: head, audited: true), busy: busy, batching: batching)
             return
         }
@@ -501,7 +512,7 @@ public final class LeadAdvance: @unchecked Sendable {
     }
 
     /// Starts `slug`'s audit at `head` (`why`: what sends it there) once the Mac has room for its finders.
-    private func audit(_ slug: String, head: String, busy: Bool, why needed: String) {
+    private func audit(_ slug: String, head: String, busy: Bool, why needed: String, key: String? = nil) {
         let finders = lead.workflow.findersInForce
         guard !busy, hasRoom(slug, need: finders) else {
             // Raised: the lead hears why now, though its audit waits for the Mac's room.
@@ -511,7 +522,7 @@ public final class LeadAdvance: @unchecked Sendable {
             return roomWait("audit(\(slug))", need: finders)
         }
         if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug))) { return }
-        step("audit|\(slug)|\(head)") {
+        step(key ?? "audit|\(slug)|\(head)") {
             guard let before = due(slug, [.review]) else { throw NotDue() }
             _ = try lead.advanceAudit(slug)
             return "Started the audit of \(slug) at \(head.prefix(8)) (\(needed.trimmingCharacters(in: CharacterSet(charactersIn: "."))))." + releasedText(slug, worker: before.worker)
