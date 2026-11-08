@@ -96,7 +96,11 @@ import Testing
         var live = ended
         live.isLive = { _ in true }
         let controller = try window(actions: live)
-        let transcript = temp.url("product-fixes-chat.jsonl")
+        // Where the chat reads conversations from: under the (scratch) home's .claude/projects.
+        let home = try #require(ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"], "Run with CFFIXED_USER_HOME on a scratch folder")
+        let projects = temp.adopt(URL(fileURLWithPath: home).appendingPathComponent(".claude/projects/product-fixes-\(UUID().uuidString)"))
+        try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+        let transcript = projects.appendingPathComponent("chat.jsonl")
         try #"{"type":"user","uuid":"u1","timestamp":"2026-11-08T10:00:00Z","message":{"role":"user","content":"hello"}}"#
             .appending("\n").write(to: transcript, atomically: true, encoding: .utf8)
         select(controller, transcript: transcript.path)

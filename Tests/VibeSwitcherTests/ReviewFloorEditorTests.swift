@@ -48,7 +48,7 @@ struct ReviewFloorEditorTests {
         #expect(try vault.reviewFloor(root: root)?.auditFinders == 3)
     }
 
-    /// Two projects with a lead's workflow.md, and an editor whose vault answers at once.
+    /// Two projects with a lead's workflow.md (their floors' audit sample 20 % and 40 %), and an editor whose vault answers at once.
     func floors() throws -> (editor: ReviewFloorEditor, vault: LeadVault, a: String, b: String) {
         let (a, b) = (temp.url("a").resolvingSymlinksInPath().path, temp.url("b").resolvingSymlinksInPath().path)
         for root in [a, b] {
@@ -57,8 +57,8 @@ struct ReviewFloorEditorTests {
         }
         let book = LeadVault.Book()
         let vault = LeadVault(folder: temp.url("vault")) { book.answer($0, from: .app) }
-        try vault.setReviewFloor(LeadReviewFloor(auditFinders: 2), root: a)
-        try vault.setReviewFloor(LeadReviewFloor(auditFinders: 4), root: b)
+        try vault.setReviewFloor(LeadReviewFloor(auditSamplePercent: 20), root: a)
+        try vault.setReviewFloor(LeadReviewFloor(auditSamplePercent: 40), root: b)
         let editor = ReviewFloorEditor(vault: vault, projects: { [a, b] }, inline: true)
         editor.reload()
         return (editor, vault, a, b)
@@ -67,58 +67,58 @@ struct ReviewFloorEditorTests {
     /// Settings' category shown again reads the floor again: what you were writing stays, with Save still on offer.
     @Test func comingBackToTheCategoryKeepsTheDraft() throws {
         let (editor, vault, a, _) = try floors()
-        #expect(editor.root == a && editor.finders == 2 && !editor.unsaved)
-        editor.finders = 5
+        #expect(editor.root == a && editor.samplePercent == 20 && !editor.unsaved)
+        editor.samplePercent = 55
         editor.sensitive = "src/vault/"
         editor.reload()
-        #expect(editor.finders == 5 && editor.sensitive == "src/vault/")
+        #expect(editor.samplePercent == 55 && editor.sensitive == "src/vault/")
         #expect(editor.unsaved && editor.changed)
-        #expect(try vault.reviewFloor(root: a)?.auditFinders == 2, "a draft isn't saved")
+        #expect(try vault.reviewFloor(root: a)?.auditSamplePercent == 20, "a draft isn't saved")
     }
 
     @Test func switchingProjectKeepsEachDraftAndShowsTheOthersOwn() throws {
         let (editor, _, a, b) = try floors()
-        editor.finders = 5
+        editor.samplePercent = 55
         editor.root = b
-        #expect(editor.finders == 4 && !editor.unsaved)
-        editor.finders = 3
+        #expect(editor.samplePercent == 40 && !editor.unsaved)
+        editor.samplePercent = 65
         editor.root = a
-        #expect(editor.finders == 5 && editor.unsaved)
+        #expect(editor.samplePercent == 55 && editor.unsaved)
         editor.root = b
-        #expect(editor.finders == 3 && editor.unsaved)
+        #expect(editor.samplePercent == 65 && editor.unsaved)
     }
 
     @Test func revertAndSaveEndTheDraftAndUntouchedFieldsFollowTheVault() throws {
         let (editor, vault, a, b) = try floors()
-        editor.finders = 5
+        editor.samplePercent = 55
         editor.root = b
         editor.root = a
-        #expect(editor.finders == 5)
+        #expect(editor.samplePercent == 55)
         editor.revert()
-        #expect(editor.finders == 2 && !editor.unsaved)
+        #expect(editor.samplePercent == 20 && !editor.unsaved)
         editor.root = b
         editor.root = a
-        #expect(editor.finders == 2, "a reverted draft doesn't come back")
+        #expect(editor.samplePercent == 20, "a reverted draft doesn't come back")
 
-        editor.finders = 3
+        editor.samplePercent = 75
         editor.save()
-        #expect(!editor.unsaved && editor.recorded?.auditFinders == 3)
-        #expect(try vault.reviewFloor(root: a)?.auditFinders == 3)
+        #expect(!editor.unsaved && editor.recorded?.auditSamplePercent == 75)
+        #expect(try vault.reviewFloor(root: a)?.auditSamplePercent == 75)
 
         // Nothing edited: the fields follow what the vault says now.
-        try vault.setReviewFloor(LeadReviewFloor(auditFinders: 4), root: a)
+        try vault.setReviewFloor(LeadReviewFloor(auditSamplePercent: 85), root: a)
         editor.reload()
-        #expect(editor.finders == 4 && !editor.unsaved)
+        #expect(editor.samplePercent == 85 && !editor.unsaved)
     }
 
     /// A draft put back by hand to what's recorded is no draft: nothing to Save or Revert.
     @Test func editsUndoneByHandLeaveNoDraft() throws {
         let (editor, _, a, b) = try floors()
-        editor.finders = 5
-        editor.finders = 2
+        editor.samplePercent = 55
+        editor.samplePercent = 20
         editor.root = b
         editor.root = a
-        #expect(editor.finders == 2 && !editor.unsaved)
+        #expect(editor.samplePercent == 20 && !editor.unsaved)
     }
 
     /// With no floor recorded the fields show the project's values: nothing typed, so nothing is a draft.
