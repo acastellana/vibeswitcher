@@ -1899,7 +1899,32 @@ private final class Driver: NSObject, NSApplicationDelegate {
         return SetupQuality(all: all, byAgent: [QualityGroup(name: "Claude", figures: claude), QualityGroup(name: "Codex", figures: codex)],
                             byModel: [QualityGroup(name: "fable", figures: fable), QualityGroup(name: "opus", figures: opus),
                                       QualityGroup(name: "sonnet", figures: sonnet)],
-                            weeks: weeks)
+                            weeks: weeks, scorecard: sandboxScorecard(range))
+    }
+
+    /// The scorecard's two weeks: this week with n ≥ 10 merges (a trend said), the week before with fewer (none said).
+    static func sandboxScorecard(_ range: DateInterval) -> SetupScorecard {
+        let end = range.end, day = 86_400.0
+        var week = ScorecardWeek(start: end.addingTimeInterval(-7 * day), end: end)
+        week.origins = LeadOrigins(counts: [.userReport: 3, .audit: 4, .incident: 1, .flake: 1, .lead: 5], unsaid: 2)
+        (week.merged, week.questions, week.userMinutes) = (12, 5, 64)
+        (week.costed, week.cost) = (11, 112.4)
+        (week.leadSpread, week.leadUnspread, week.leadKept) = (22.1, 5.2, true)
+        week.installTimes = [5.2, 7.9, 26, 3.1, 9.4, 30.5, 12, 6.6, 4.4, 18].map { $0 * 3600 }
+        week.notInstalled = 2
+        var previous = ScorecardWeek(start: end.addingTimeInterval(-14 * day), end: end.addingTimeInterval(-7 * day))
+        previous.origins = LeadOrigins(counts: [.userReport: 5, .audit: 2], unsaid: 1)
+        (previous.merged, previous.questions, previous.userMinutes) = (8, 6, 70)
+        (previous.costed, previous.cost) = (8, 96)
+        (previous.leadSpread, previous.leadKept) = (18, true)
+        previous.installTimes = [8, 20, 31, 6, 11, 9, 14, 22].map { $0 * 3600 }
+        let now = end.timeIntervalSince1970 - day / 2
+        let titles = ["Paste images into the chat", "Clean up ended sessions' folders", "Price Codex tokens", "Scorecard in Statistics"]
+        let installs = titles.enumerated().map { index, title in
+            ScorecardInstall(slug: "task-\(index)", title: title, createdAt: now - Double(index + 1) * day, mergedAt: now - Double(index + 1) * day + 4 * 3600,
+                             installedAt: index == 0 ? nil : now - Double(index + 1) * day + Double(5 + index) * 3600)
+        }
+        return SetupScorecard(week: week, previous: previous, installs: installs)
     }
 
     /// The `all-done` sheet's mark: a batch of four, three merged with receipts and one folded.

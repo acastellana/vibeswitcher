@@ -240,6 +240,71 @@ struct StatisticsModelTests {
         }
     }
 
+    /// The scorecard: two weeks, each line with its n; a trend only when both weeks have n ≥ 10.
+    static func scorecardWeek(_ start: Double, merged: Int, costed: Int, cost: Double, lead: Double, installs: [Double], notInstalled: Int,
+                              origins: LeadOrigins, questions: Int, minutes: Double) -> ScorecardWeek {
+        var week = ScorecardWeek(start: Date(timeIntervalSince1970: start), end: Date(timeIntervalSince1970: start + 7 * 86_400))
+        week.origins = origins
+        (week.merged, week.questions, week.userMinutes) = (merged, questions, minutes)
+        (week.costed, week.cost, week.leadSpread, week.leadKept) = (costed, cost, lead, true)
+        week.installTimes = installs
+        week.notInstalled = notInstalled
+        return week
+    }
+
+    @Test func theScorecardShowsBothWeeksWithTheirNAndNoTrendUnderTen() throws {
+        let start = Self.now.timeIntervalSince1970 - 7 * 86_400
+        let small = Self.scorecardWeek(start, merged: 4, costed: 3, cost: 9, lead: 2, installs: [3600, 7200], notInstalled: 2,
+                                       origins: LeadOrigins(counts: [.userReport: 2, .audit: 1, .lead: 1]), questions: 2, minutes: 20)
+        let before = Self.scorecardWeek(start - 7 * 86_400, merged: 12, costed: 12, cost: 48, lead: 6, installs: Array(repeating: 10_800, count: 12),
+                                        notInstalled: 0, origins: LeadOrigins(counts: [.userReport: 5], unsaid: 7), questions: 6, minutes: 30)
+        let install = ScorecardInstall(slug: "a", title: "Paste images", createdAt: start, mergedAt: start + 3600, installedAt: start + 7200)
+        let pending = ScorecardInstall(slug: "b", title: "Scorecard", createdAt: start, mergedAt: start + 3600, installedAt: nil)
+        var quality = SetupQuality(all: QualityFigures(), byAgent: [], byModel: [], weeks: [])
+        quality.scorecard = SetupScorecard(week: small, previous: before, installs: [install, pending])
+        let page = QualityPage(quality, calendar: Self.utc)
+        let section = try #require(page.sections.first)
+        #expect(section.title == QualityPage.scorecardTitle)
+        func figure(_ label: String) throws -> StatisticsPage.Figure { try #require(section.figures.first { $0.label == label }) }
+
+        let bugs = try figure("Bugs you reported vs found by the system")
+        #expect(bugs.value == "2 vs 1")
+        #expect(bugs.detail == "Tasks created: 2 user_report, 1 audit, 1 lead (n = 4) · the 7 days before: 5 vs 0; 5 user_report, 7 not said (n = 12) · "
+            + "n < 10 in a week: no trend", "\(bugs.detail ?? "")")
+        let questions = try figure("Questions per delivered task")
+        #expect(questions.value == "0.5")
+        #expect(questions.detail == "n = 4 merges: 2 questions, 5 min of your waiting per task · the 7 days before: 0.5, 2.5 min waiting (n = 12) · "
+            + "n < 10 in a week: no trend", "\(questions.detail ?? "")")
+        // $9 over 3 costed + the lead's $2 over 4 merges = $3.50.
+        let cost = try figure("Cost per merged task, with the lead's share")
+        #expect(cost.value == "$3.50")
+        #expect(cost.detail?.hasPrefix("n = 3 of 4 merges with a known cost: receipts $3.00 per task + lead $0.50 per task") == true, "\(cost.detail ?? "")")
+        #expect(cost.detail?.contains("the 7 days before: $4.50 (n = 12)") == true)
+        let time = try figure("Time to install")
+        #expect(time.value == "median 1.5 h" && time.detail?.hasPrefix("n = 2 of 4 merges installed, 2 not installed yet") == true, "\(time.detail ?? "")")
+        let rows = try figure("Time to install, per task")
+        #expect(rows.detail == "Paste images: 2 h to install\nScorecard: not installed yet", "\(rows.detail ?? "")")
+        // Every line says its n; none claims a trend while a week has fewer than 10.
+        for line in section.figures.dropLast() {
+            #expect(line.detail?.contains("n = ") == true, "\(line.label)")
+            #expect(line.detail?.contains("no trend") == true && line.detail?.contains("from the week before") == false, "\(line.label)")
+            #expect(line.help?.isEmpty == false)
+        }
+
+        // Both weeks at n ≥ 10: the trend is said.
+        var big = before
+        big.start = small.start
+        big.cost = 60
+        quality.scorecard = SetupScorecard(week: big, previous: before, installs: [])
+        let grown = try #require(QualityPage(quality, calendar: Self.utc).sections.first)
+        let grownCost = try #require(grown.figures.first { $0.label == "Cost per merged task, with the lead's share" })
+        #expect(grownCost.detail?.hasSuffix("cost per task: up from the week before") == true, "\(grownCost.detail ?? "")")
+        #expect(grown.figures.first { $0.label == "Questions per delivered task" }?.detail?.hasSuffix("questions per task: same as the week before") == true)
+        #expect(!grown.figures.contains { $0.label == "Time to install, per task" })
+        // No scorecard worked out: no section.
+        #expect(QualityPage(SetupQuality(all: QualityFigures(), byAgent: [], byModel: [], weeks: []), calendar: Self.utc).sections.first?.title == "Quality")
+    }
+
     @Test func thePageShowsSampledAuditsWithTheirNAndAuditsSplitBySameModel() throws {
         var all = QualityFigures()
         all.merged = 20
