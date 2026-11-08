@@ -3736,3 +3736,5 @@
 - 2026-11-08 00:45 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-11-08 00:46 Audit of dictation-test: complete, clean, round 1: 1 Pre-existing open
 - 2026-11-08 00:47 Audit of flake-ledger-its-own: complete, clean, round 1: 3 Nit open
+- 2026-11-08 01:07 Planned config-seal-covers: Config seal covers plugins and the hook scripts settings name (review audit)
+- 2026-11-08 01:11 The worker on branch-code-can-t answered findings: branch-code-can-t:F1 fixed at 1ff9204e: The app seals what it writes itself, as it writes it. New LeadVault.appWrite fingerprints the watched items before and after the write, then sends ConfigSeal.wroteKey ("name\tbefore\tafter"). The vault takes this from the app only and hashes the files itself. Wrapped writes: HookBinary.sync (at launch and in installAll), HookInstaller.install and uninstall (settings.json, hooks.json), and Codex trust (config.toml), from AppDelegate, Onboarding and main.swi…
