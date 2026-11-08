@@ -284,6 +284,135 @@ import Testing
         queue.sync {}
         #expect(log.items == [.closed])
     }
+
+    /// A small bound, so a few MB from the host are many times it.
+    static let smallBacklog = HostConnection.Backlog(bytes: 64 << 10, batches: 64)
+
+    /// The most the reader may hand over past the bound: what one read (64 KB) completes, a frame at most.
+    static let overshoot = 65_536 + HostFrame.maxPayload
+
+    /// About 4 MB of screens, each a few KB: 64 times the small bound.
+    private func flood(of session: UUID) -> [HostEventEnvelope] {
+        let text = String(repeating: "x", count: 2_000)
+        return (0..<2_000).map { HostEventEnvelope(replyTo: nil, event: .screenText(id: session, text: "\($0) \(text)")) }
+    }
+
+    /// The caller's queue held (a loaded Mac's main thread) while the host sends 64 times the bound: the reader stops
+    /// with no more than the bound and a read handed over, the rest waits in the socket (the host's write with it), and
+    /// once the queue is free everything arrives, in order, the reader going on as it's delivered.
+    @Test func aHeldQueueStopsTheReaderAndThenGetsEverythingInOrder() async throws {
+        let host = try StandIn()
+        let queue = callersQueue()
+        let log = Log()
+        let closed = DispatchSemaphore(value: 0)
+        let paused = DispatchSemaphore(value: 0)
+        let decoded = Counter()
+        let burst = flood(of: UUID())
+        let frames = try burst.map(frame)
+        let connection = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Darwin.write($0, $1, $2) },
+                                            backlog: Self.smallBacklog) { tap in
+            switch tap {
+            case .decoded: _ = decoded.add()
+            case .paused: paused.signal()
+            case .ended: break
+            }
+        }
+        watch(connection, on: queue, log: log, closed: closed)
+        host.accept()
+        let release = DispatchSemaphore(value: 0)
+        await hold(queue, until: release)
+        let written = DispatchSemaphore(value: 0)
+        let wrote = Counter()
+        DispatchQueue.global().async {
+            if host.write(frames) { _ = wrote.add() }
+            written.signal()
+        }
+        #expect(await offPool { paused.wait(timeout: .now() + hangGuard) } == .success, "the reader didn't stop for the backlog")
+        // Stopped: what it decoded is about the bound, far from all the host sent, which waits in the socket.
+        let decodedWhenPaused = decoded.value
+        #expect(decodedWhenPaused < burst.count / 4, "decoded \(decodedWhenPaused) of \(burst.count) before stopping")
+        #expect(connection.peakBacklog <= Self.smallBacklog.bytes + Self.overshoot)
+        #expect(wrote.value == 0, "the host wrote all of it with the caller's queue held")
+        #expect(log.items.isEmpty)
+        release.signal()
+        #expect(await offPool { written.wait(timeout: .now() + hangGuard) } == .success, "the host's write didn't finish")
+        #expect(wrote.value == 1)
+        host.hangUp()
+        #expect(await offPool { closed.wait(timeout: .now() + hangGuard) } == .success, "no close")
+        queue.sync {}
+        let seen = log.items
+        #expect(seen.count == burst.count + 1)
+        #expect(seen == burst.map { .event($0) } + [.closed])
+        // Never more held than the bound and a read, with the reader stopping and going on.
+        #expect(connection.peakBacklog <= Self.smallBacklog.bytes + Self.overshoot, "peak \(connection.peakBacklog)")
+    }
+
+    /// Closed while the reader is stopped for the backlog: the socket is let go (the host's write fails), and nothing
+    /// is delivered after the close.
+    @Test func closingWhileTheReaderIsStoppedLetsTheSocketGo() async throws {
+        let host = try StandIn()
+        let queue = callersQueue()
+        let log = Log()
+        let paused = DispatchSemaphore(value: 0)
+        let frames = try flood(of: UUID()).map(frame)
+        let connection = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Darwin.write($0, $1, $2) },
+                                            backlog: Self.smallBacklog) { tap in
+            if case .paused = tap { paused.signal() }
+        }
+        watch(connection, on: queue, log: log)
+        host.accept()
+        var on: Int32 = 1
+        setsockopt(host.peer, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        let release = DispatchSemaphore(value: 0)
+        await hold(queue, until: release) { connection.close() }
+        let written = DispatchSemaphore(value: 0)
+        let wrote = Counter()
+        DispatchQueue.global().async {
+            if host.write(frames) { _ = wrote.add() }
+            written.signal()
+        }
+        #expect(await offPool { paused.wait(timeout: .now() + hangGuard) } == .success, "the reader didn't stop for the backlog")
+        release.signal()
+        #expect(await offPool { written.wait(timeout: .now() + hangGuard) } == .success, "the socket wasn't let go")
+        #expect(wrote.value == 0, "the host wrote all of it to a closed connection")
+        queue.sync {}
+        #expect(log.items.isEmpty)
+    }
+
+    /// Let go of without a close while the reader is stopped (freeing a suspended source is a crash): it's freed, and
+    /// so is the socket.
+    @Test func lettingGoWhileTheReaderIsStoppedFreesIt() async throws {
+        let host = try StandIn()
+        let queue = callersQueue()
+        let log = Log()
+        let paused = DispatchSemaphore(value: 0)
+        let frames = try flood(of: UUID()).map(frame)
+        var connection: HostConnection? = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Darwin.write($0, $1, $2) },
+                                                             backlog: Self.smallBacklog) { tap in
+            if case .paused = tap { paused.signal() }
+        }
+        weak var freed = connection
+        watch(connection!, on: queue, log: log)
+        host.accept()
+        var on: Int32 = 1
+        setsockopt(host.peer, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        let release = DispatchSemaphore(value: 0)
+        await hold(queue, until: release)
+        let written = DispatchSemaphore(value: 0)
+        let wrote = Counter()
+        DispatchQueue.global().async {
+            if host.write(frames) { _ = wrote.add() }
+            written.signal()
+        }
+        #expect(await offPool { paused.wait(timeout: .now() + hangGuard) } == .success, "the reader didn't stop for the backlog")
+        connection = nil
+        #expect(freed == nil, "still held")
+        #expect(await offPool { written.wait(timeout: .now() + hangGuard) } == .success, "the socket wasn't let go")
+        #expect(wrote.value == 0)
+        release.signal()
+        queue.sync {}
+        #expect(log.items.isEmpty)
+    }
 }
 
 extension HostConnectionWriteTests.StandIn {

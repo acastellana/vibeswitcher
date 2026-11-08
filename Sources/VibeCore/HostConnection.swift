@@ -30,8 +30,8 @@ public final class HostConnection: @unchecked Sendable {
     private var decoder = HostFrameDecoder()
     /// Cancelled once closed (from either queue: cancelling is safe from any thread, and again).
     private let readSource: DispatchSourceRead
-    /// What the reader did, on its queue (tests: where decoding runs, when the reader saw the end).
-    enum ReaderTap { case decoded(HostEventEnvelope), ended }
+    /// What the reader did, on its queue (tests: where decoding runs, when it stopped for a backlog, saw the end).
+    enum ReaderTap { case decoded(HostEventEnvelope), paused, ended }
     private let tap: ((ReaderTap) -> Void)?
     /// The sources on `fd` not cancelled yet, and the writes still to make on it: it's closed once there are none
     /// (libdispatch's rule, as the read source's own cancel handler closing it could while a write source was still on it).
@@ -39,6 +39,21 @@ public final class HostConnection: @unchecked Sendable {
     private let writer: Writer
     private var nextSeq = 1
     private var closed = false
+    /// How much decoded and not yet delivered on `queue` stops the reader: a held main thread (a loaded Mac) would
+    /// otherwise have it take all the host sends into memory, where before the socket filled and the host held back.
+    struct Backlog: Equatable {
+        var bytes: Int
+        var batches: Int
+        static let bound = Backlog(bytes: 4 << 20, batches: 64)
+    }
+    private let backlogBound: Backlog
+    /// Handed to `queue` and not delivered yet, and the most it has been (tests). Under `sending`.
+    private var backlog = Backlog(bytes: 0, batches: 0)
+    private var backlogPeak = 0
+    /// The read source is suspended for the backlog: resumed once `queue` has delivered half of it, or once closed (a
+    /// suspended source never runs its cancel handler, so `fd` would stay open, and freeing one is a crash). Under
+    /// `sending`, with the suspend and resume made under it too, so each resume follows its suspend.
+    private var paused = false
     /// What sending touches (the next number, the held requests, the proof's state, `closed`), and the handing over
     /// to the writer, under one lock: requests sent from any thread get their numbers in the order they go out.
     private let sending = NSLock()
@@ -59,9 +74,10 @@ public final class HostConnection: @unchecked Sendable {
     }
 
     init(path: String, queue: DispatchQueue, appKey: SymmetricKey?, patience: TimeInterval = 0, write: @escaping Write,
-         tap: ((ReaderTap) -> Void)? = nil) throws {
+         backlog: Backlog = .bound, tap: ((ReaderTap) -> Void)? = nil) throws {
         fd = try UnixSocket.connect(path: path, patience: patience)
         self.queue = queue
+        backlogBound = backlog
         self.tap = tap
         writer = Writer(fd: fd, write: write, sources: sources)
         self.appKey = appKey
@@ -79,6 +95,7 @@ public final class HostConnection: @unchecked Sendable {
     deinit {
         writer.stop()
         readSource.cancel()
+        if paused { readSource.resume() }
     }
 
     /// Why a request didn't go out: none of it was sent.
@@ -178,12 +195,13 @@ public final class HostConnection: @unchecked Sendable {
     private func readAvailable() {
         var buffer = [UInt8](repeating: 0, count: 65_536)
         var received = 0
-        while !isClosed, received < 256 * 1024 {
+        while sendingState({ !closed && !paused }), received < 256 * 1024 {
             let count = Darwin.read(fd, &buffer, buffer.count)
             if count > 0 {
                 received += count
                 decoder.append(Data(buffer[0..<count]))
                 if !decodeAndHand() { return ended() }
+                if pauseForBacklog() { return }
                 continue
             }
             if count < 0, errno == EINTR { continue }
@@ -192,16 +210,45 @@ public final class HostConnection: @unchecked Sendable {
             return ended()
         }
         // The rest on another turn, so a host that sends without pause doesn't hold this queue's thread for good.
-        if !isClosed { reading.async { [weak self] in self?.readAvailable() } }
+        if sendingState({ !closed && !paused }) { reading.async { [weak self] in self?.readAvailable() } }
     }
+
+    /// Suspends the read source while `queue` has more than `backlogBound` still to deliver: the host's bytes wait in
+    /// the socket, and the host holds back once it's full, as it did when the reading was on `queue`. On `reading`.
+    private func pauseForBacklog() -> Bool {
+        let pausing = sendingState { () -> Bool in
+            guard !closed, !paused, backlog.bytes > backlogBound.bytes || backlog.batches > backlogBound.batches else { return false }
+            paused = true
+            readSource.suspend()
+            return true
+        }
+        if pausing { tap?(.paused) }
+        return pausing
+    }
+
+    /// A batch of `bytes` (its frames' payloads) delivered on `queue`: the reader goes on once half the backlog is.
+    private func delivered(_ bytes: Int) {
+        sendingState {
+            backlog.bytes -= bytes
+            backlog.batches -= 1
+            guard paused, backlog.bytes <= backlogBound.bytes / 2, backlog.batches <= backlogBound.batches / 2 else { return }
+            paused = false
+            readSource.resume()
+        }
+    }
+
+    /// The most ever handed to `queue` and not delivered yet, in bytes (tests).
+    var peakBacklog: Int { sendingState { backlogPeak } }
 
     /// The frames whole so far, decoded and handed to `queue` in one go. False when the stream can't be read on (a
     /// broken frame): what came before it is still handed over. On `reading`.
     private func decodeAndHand() -> Bool {
         var batch: [Delivery] = []
+        var bytes = 0
         var readable = true
         do {
             while !isClosed, let frame = try decoder.next() {
+                bytes += frame.payload.count
                 switch frame.kind {
                 case .control:
                     // An event this app doesn't know (a newer host) is skipped, not fatal.
@@ -238,14 +285,19 @@ public final class HostConnection: @unchecked Sendable {
         } catch {
             readable = false
         }
-        hand(batch)
+        hand(batch, bytes: bytes)
         return readable
     }
 
     /// `batch` to the handlers, on `queue`, after what was handed before. A handler that closes the connection lets go
     /// of them all, so nothing after that is called.
-    private func hand(_ batch: [Delivery]) {
+    private func hand(_ batch: [Delivery], bytes: Int) {
         guard !batch.isEmpty else { return }
+        sendingState {
+            backlog.bytes += bytes
+            backlog.batches += 1
+            backlogPeak = max(backlogPeak, backlog.bytes)
+        }
         queue.async { [weak self] in
             guard let self else { return }
             for delivery in batch {
@@ -255,6 +307,7 @@ public final class HostConnection: @unchecked Sendable {
                 case .proofRefused(let reason): onProofRefused?(reason)
                 }
             }
+            delivered(bytes)
         }
     }
 
@@ -269,14 +322,17 @@ public final class HostConnection: @unchecked Sendable {
 
     /// Closed now, by this call (false: it already was): nothing more is sent or read.
     private func markClosed() -> Bool {
-        let closing = sendingState { () -> Bool in
+        sendingState { () -> Bool in
             guard !closed else { return false }
             closed = true
             writer.stop()
+            readSource.cancel()
+            if paused {
+                paused = false
+                readSource.resume()
+            }
             return true
         }
-        if closing { readSource.cancel() }
-        return closing
     }
 
     /// On `queue`.
