@@ -115,9 +115,23 @@ struct StatisticsPage: Equatable {
         var meter: Meter?
         /// What it is, in one line: shown on hover.
         var help: String?
+        /// Its value day by day, oldest first, drawn as bars when the range has more than one day.
+        var trend: [TrendDay]?
         var id: String { label }
         /// What VoiceOver reads for it.
-        var spoken: String { [label + ": " + value, detail].compactMap { $0 }.joined(separator: ", ") }
+        var spoken: String {
+            let days = (trend?.count ?? 0) > 1 ? trend.map { "by day: " + $0.map(\.spoken).joined(separator: ", ") } : nil
+            return [label + ": " + value, detail, days].compactMap { $0 }.joined(separator: ", ")
+        }
+    }
+
+    /// One day of a figure's trend: "Nov 7", its value (nil: not counted that day) and what it says on hover.
+    struct TrendDay: Equatable, Identifiable {
+        var label: String
+        var value: Double?
+        var text: String
+        var id: String { label }
+        var spoken: String { "\(label) \(text)" }
     }
 
     /// A usage limit's bar: how much is used (0–1) and, when known, how much of its window has gone (the pace mark).
@@ -165,13 +179,15 @@ struct StatisticsPage: Equatable {
             figures.append(Figure(label: "Load", value: notRecorded))
         }
         if let freezes = mac.freezes {
-            let rate = freezes.perHour.map { " (\(number($0, digits: 2)) an hour)" } ?? ""
-            var detail: [String] = []
+            var detail = ["\(freezes.count) \(freezes.count == 1 ? "freeze" : "freezes") in \(hours(freezes.hours)) counted"]
             if freezes.partial { detail.append("hang reports kept for a week: the hours before the oldest aren't counted") }
             if freezes.unsampled > 0 { detail.append("\(freezes.unsampled) with no load sample near") }
-            figures.append(Figure(label: "Freezes", value: "\(freezes.count)\(rate)", detail: detail.isEmpty ? nil : detail.joined(separator: "; ")))
+            figures.append(Figure(label: freezesLabel, value: freezes.perHour.map { number($0, digits: 2) } ?? none,
+                                  detail: detail.joined(separator: "; "),
+                                  help: "Times the app's main thread stopped answering for 2 s or more (hang reports), an hour",
+                                  trend: freezes.days.isEmpty ? nil : freezes.days.map(trendDay)))
         } else {
-            figures.append(Figure(label: "Freezes", value: notRecorded))
+            figures.append(Figure(label: freezesLabel, value: notRecorded))
         }
         let boostNowText = mac.boostNow.map { $0.on ? "on now (\($0.why))" : "off now" }
         figures.append(Figure(label: "Boost hours", value: mac.hoursBoosted.map { hours($0) } ?? notRecorded, detail: boostNowText))
@@ -185,6 +201,23 @@ struct StatisticsPage: Equatable {
         figures += usage("Codex", mac.codex)
         return figures
     }
+
+    static let freezesLabel = "Freezes per hour"
+
+    /// A day of the freezes' trend: "Nov 7", its rate, "3.9 an hour (94)" or "not counted".
+    static func trendDay(_ day: Freezes.Day) -> TrendDay {
+        TrendDay(label: dayLabel(day.day), value: day.perHour,
+                 text: day.perHour.map { "\(number($0, digits: 2)) an hour (\(day.freezes))" } ?? "not counted")
+    }
+
+    /// "2026-11-07" as "Nov 7" (in English, as the page's other words).
+    static func dayLabel(_ day: String) -> String {
+        let parts = day.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3, (1...12).contains(parts[1]) else { return day }
+        return "\(monthNames[parts[1] - 1]) \(parts[2])"
+    }
+
+    static let monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
     static func usage(_ account: String, _ limits: [UsageNow]?) -> [Figure] {
         guard let limits, !limits.isEmpty else { return [Figure(label: "\(account) usage", value: notRecorded)] }

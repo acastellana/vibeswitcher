@@ -123,6 +123,27 @@ struct SetupStatsTests {
         #expect(out.contains("    unsampled \(freezes.unsampled) (no load sample within 2 minutes)"))
     }
 
+    /// The freezes' daily trend: every day of the range, each with its freezes over the hours of it counted (none before
+    /// the oldest report left, none not yet gone), so the rate reads the same for a whole day and a partial one.
+    @Test func freezesComeDayByDayWithTheHoursOfEachCounted() async throws {
+        let home = temp.url("freeze-days"), debug = home.appendingPathComponent("debug")
+        try FileManager.default.createDirectory(at: debug, withIntermediateDirectories: true)
+        // The oldest report left: Nov 5 12:00. Then 2 on Nov 5, 24 on Nov 6, 3 on Nov 7 (a .txt and a .log: one).
+        var names = ["hang-20261105-120000.txt", "hang-20261105-120000.log", "hang-20261105-230000.txt"]
+        names += (0..<24).map { String(format: "hang-20261106-%02d1500.txt", $0) }
+        names += ["hang-20261107-010000.txt", "hang-20261107-020000.log", "hang-20261107-055959.txt"]
+        for name in names { FileManager.default.createFile(atPath: debug.appendingPathComponent(name).path, contents: Data()) }
+        let range = DateInterval(start: Self.date(2026, 11, 2), end: Self.date(2026, 11, 9))
+        let stats = await collector(home: home, now: Self.date(2026, 11, 7, 6)).collect(projects: [], range: range)
+        let freezes = try #require(stats.mac.freezes)
+        #expect(freezes.count == 29 && freezes.partial && freezes.hours == 42)
+        #expect(freezes.days.map(\.day) == (2...8).map { String(format: "2026-11-%02d", $0) })
+        #expect(freezes.days.map(\.freezes) == [0, 0, 0, 2, 24, 3, 0])
+        #expect(freezes.days.map(\.hours) == [0, 0, 0, 12, 24, 6, 0])
+        #expect(freezes.days.map(\.perHour) == [nil, nil, nil, 2.0 / 12, 1, 0.5, nil])
+        #expect(freezes.days.reduce(0) { $0 + $1.freezes } == freezes.count && freezes.days.reduce(0) { $0 + $1.hours } == freezes.hours)
+    }
+
     @Test func itMatchesLoadReportOnTheFixtureDay() async throws {
         let (_, home) = try layout()
         let out = try await loadReport(home: home, ["2026-10-20", "2026-10-20"])

@@ -95,4 +95,20 @@ public enum Durations {
         if s < 86400 { return s % 3600 >= 60 ? "\(s / 3600)h \(s % 3600 / 60)m" : "\(s / 3600)h" }
         return "\(s / 86400)d \(s % 86400 / 3600)h"
     }
+
+    /// "45 seconds", "12 minutes", "2 hours", "3 days": one unit in English words, what VoiceOver reads for a Team row's
+    /// time. Word for word what a `DateComponentsFormatter` (`.full`, one unit, en_US) said: seconds and minutes cut,
+    /// hours and days rounded at half the next unit. That formatter took 10-50 µs a call, bridging calendars, in every
+    /// Team row's body (hang-20261101-172410, hang-20261107-002528, hang-20261107-011006); this takes well under 1.
+    public static func spoken(_ seconds: TimeInterval) -> String {
+        let s = seconds.isFinite ? max(0, Int(min(seconds, 1e15))) : 0
+        func words(_ count: Int, _ unit: String) -> String { "\(count) \(unit)\(count == 1 ? "" : "s")" }
+        if s < 60 { return words(s, "second") }
+        if s < 3600 { return words(s / 60, "minute") }
+        if s < 86400 {
+            let hours = s / 3600 + (s % 3600 / 60 >= 30 ? 1 : 0)
+            return hours == 24 ? words(1, "day") : words(hours, "hour")
+        }
+        return words(s / 86400 + (s % 86400 / 3600 >= 12 ? 1 : 0), "day")
+    }
 }

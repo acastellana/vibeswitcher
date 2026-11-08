@@ -132,6 +132,7 @@ perf_tests=(
     AccessibilityTreeBenchTests
     HostingViewDepthTests
     SandboxSoakBenchTests/theFootprintIsFlatOverFiveSimulatedHours
+    FreezeCausesTests/aRowsSpokenLabelCostsAFractionOfTheFormatter
 )
 
 source scripts/lib/processes.sh

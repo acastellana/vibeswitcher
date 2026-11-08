@@ -82,7 +82,7 @@ struct StatisticsModelTests {
         #expect(try figure("Load").detail == "1.5 h at 24 or more, 12 min at 36 or more · 14 cores")
         #expect(try figure("Merges per hour").value == "0.5")
         // Not kept anywhere: said so, never 0.
-        #expect(try figure("Freezes").value == "Not recorded")
+        #expect(try figure("Freezes per hour").value == "Not recorded")
         #expect(try figure("Boost hours").value == "Not recorded")
         #expect(try figure("Boost hours").detail == nil)
         #expect(try figure("Codex usage").value == "Not recorded")
@@ -107,13 +107,37 @@ struct StatisticsModelTests {
         #expect(total.cells == ["3", "1", "2 · 3", "2", "7.5 h", "≥ $12.50", "17%", "1 h"])
     }
 
+    /// Freezes per hour, with each day's rate as its trend (backlog B3: the rate is a tracked number).
+    @Test func freezesReadPerHourWithTheirDailyTrend() throws {
+        let range = StatisticsRange.week.interval(now: Self.now, calendar: Self.utc)
+        var stats = Self.stats(range: range)
+        let days = [Freezes.Day(day: "2026-10-31", freezes: 0, hours: 0), Freezes.Day(day: "2026-11-01", freezes: 120, hours: 12),
+                    Freezes.Day(day: "2026-11-02", freezes: 30, hours: 15)]
+        stats.mac.freezes = Freezes.make(count: 150, hours: 27, partial: true, perDay: ["2026-11-01": 120, "2026-11-02": 30], byLoad: nil,
+                                         unsampled: 0, days: days)
+        let page = StatisticsPage(stats, calendar: Self.utc)
+        let figure = try #require(page.mac.first { $0.label == "Freezes per hour" })
+        #expect(figure.value == "5.56")
+        #expect(figure.detail == "150 freezes in 27 h counted; hang reports kept for a week: the hours before the oldest aren't counted")
+        #expect(figure.trend == [StatisticsPage.TrendDay(label: "Oct 31", value: nil, text: "not counted"),
+                                 StatisticsPage.TrendDay(label: "Nov 1", value: 10, text: "10 an hour (120)"),
+                                 StatisticsPage.TrendDay(label: "Nov 2", value: 2, text: "2 an hour (30)")])
+        #expect(figure.spoken.hasSuffix("by day: Oct 31 not counted, Nov 1 10 an hour (120), Nov 2 2 an hour (30)"))
+        // One day: no trend read out.
+        stats.mac.freezes = Freezes.make(count: 1, hours: 4, partial: false, perDay: ["2026-11-02": 1], byLoad: nil, unsampled: 0,
+                                         days: [Freezes.Day(day: "2026-11-02", freezes: 1, hours: 4)])
+        let today = try #require(StatisticsPage(stats, calendar: Self.utc).mac.first { $0.label == "Freezes per hour" })
+        #expect(today.value == "0.25" && today.detail == "1 freeze in 4 h counted" && !today.spoken.contains("by day"))
+        #expect(StatisticsPage.dayLabel("2026-12-25") == "Dec 25" && StatisticsPage.dayLabel("bad") == "bad")
+    }
+
     @Test func nothingReadableIsNotRecordedEverywhere() {
         let range = StatisticsRange.today.interval(now: Self.now, calendar: Self.utc)
         let page = StatisticsPage(SetupStats(range: range, at: Self.now, projects: [], total: nil, mac: SetupStats.MacWide()), calendar: Self.utc)
         #expect(page.span == "Nov 2, 2026")
         #expect(page.total == nil)
         #expect(page.projects.isEmpty)
-        #expect(page.mac.map(\.label) == ["Load", "Freezes", "Boost hours", "Merges per hour", "Claude usage", "Codex usage"])
+        #expect(page.mac.map(\.label) == ["Load", "Freezes per hour", "Boost hours", "Merges per hour", "Claude usage", "Codex usage"])
         #expect(page.mac.allSatisfy { $0.value == "Not recorded" && $0.meter == nil })
         // Cost: nothing ended is $0 spent; every task's cost known is that cost.
         #expect(StatisticsPage.row(name: "idle", note: nil, ProjectFigures(), id: "idle").cells[5] == "$0.00")

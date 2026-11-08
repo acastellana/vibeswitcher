@@ -113,26 +113,9 @@ struct TeamRow: Identifiable, Equatable {
         return "\(task.title): " + parts.joined(separator: ", ")
     }
 
-    static func spokenDuration(_ seconds: TimeInterval) -> String {
-        (seconds < 60 ? secondsFormatter : longerFormatter).string(from: max(0, seconds)) ?? ""
-    }
-
-    /// Made once: every row of the Team view says its time on each draw.
-    private static let secondsFormatter = durationFormatter([.second])
-    private static let longerFormatter = durationFormatter([.day, .hour, .minute])
-
-    /// In English whatever the Mac's language, like the rest of the row's words (its state, the line under it):
-    /// the formatter follows its calendar's locale, and left to the system's it read "Working, 12 minutos".
-    private static func durationFormatter(_ units: NSCalendar.Unit) -> DateComponentsFormatter {
-        let formatter = DateComponentsFormatter()
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.locale = Locale(identifier: "en_US")
-        formatter.calendar = calendar
-        formatter.unitsStyle = .full
-        formatter.maximumUnitCount = 1
-        formatter.allowedUnits = units
-        return formatter
-    }
+    /// "12 minutes": in English whatever the Mac's language, like the rest of the row's words (its state, the line under
+    /// it). Worked out without a formatter: the row's body says it on each draw (`Durations.spoken`).
+    static func spokenDuration(_ seconds: TimeInterval) -> String { Durations.spoken(seconds) }
 }
 
 /// What a board's rows are made of besides the board: what its members' sessions are doing (`TeamRows.seen`, theirs

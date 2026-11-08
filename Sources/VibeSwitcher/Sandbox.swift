@@ -1742,7 +1742,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let mac = SetupStats.MacWide.make(
             load: LoadProfile.make(minutes: 9_840, median: 9.4, p90: 22.8, max: 41.2, minutesAt24: 610, minutesAt36: 42, cores: 14),
             merges: MergeRate.make(recorded: 23, landed: 20, hours: 164),
-            freezes: Freezes.make(count: 2, hours: 164, partial: false, perDay: ["2026-10-29": 2], byLoad: nil, unsampled: 0),
+            freezes: statisticsFreezes(range: range),
             hoursBoosted: 38.5,
             boostNow: BoostState(on: true, why: "automatic: away, on AC", at: now),
             claude: [UsageNow.make(name: "seven_day", model: nil, usedPercent: 64, resetsAt: now + 3.4 * 86_400, reached: false,
@@ -1752,6 +1752,24 @@ private final class Driver: NSObject, NSApplicationDelegate {
             codex: [UsageNow.make(name: "weekly", model: nil, usedPercent: 31, resetsAt: nil, reached: false, pace: UsagePace(used: 31, elapsed: nil))])
         return SetupStats.make(range: range, at: Date(), projects: projects, total: payouts.adding(site), mac: mac,
                                quality: statisticsQuality(range: range))
+    }
+
+    /// The `statistics` sheet's freezes: made up, a falling daily trend over the range's days, today half gone.
+    static func statisticsFreezes(range: DateInterval) -> Freezes {
+        let calendar = Calendar.current
+        let counts = [96, 88, 120, 75, 41, 12, 5]
+        var days: [Freezes.Day] = []
+        var day = calendar.startOfDay(for: range.start)
+        while day < range.end, days.count < 31, let next = calendar.date(byAdding: .day, value: 1, to: day) {
+            let parts = calendar.dateComponents([.year, .month, .day], from: day)
+            let last = next >= range.end
+            let count = counts[days.count % counts.count]
+            days.append(Freezes.Day(day: String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0),
+                                    freezes: last ? count / 2 : count, hours: last ? 12 : 24))
+            day = next
+        }
+        return Freezes.make(count: days.reduce(0) { $0 + $1.freezes }, hours: days.reduce(0) { $0 + $1.hours }, partial: false,
+                            perDay: [:], byLoad: nil, unsampled: 0, days: days)
     }
 
     /// The `statistics` sheet's quality figures: made up, every figure shown; the merge reruns' cost, Codex's cost per

@@ -222,6 +222,24 @@ public struct Freezes: Equatable, Sendable {
     public var byLoad: [LoadBucket]?
     /// Freezes with no load sample within 2 minutes.
     public var unsampled: Int
+    /// Every local day of the range in order, with its freezes and the hours of it counted: the daily trend of the rate.
+    public var days: [Day] = []
+
+    /// One local day: its freezes, and its hours counted (none before the oldest report left, or not yet gone).
+    public struct Day: Equatable, Sendable {
+        /// "2026-11-07".
+        public var day: String
+        public var freezes: Int
+        public var hours: Double
+        /// Nil when none of its hours were counted.
+        public var perHour: Double? { hours > 0 ? Double(freezes) / hours : nil }
+
+        public init(day: String, freezes: Int, hours: Double) {
+            self.day = day
+            self.freezes = freezes
+            self.hours = hours
+        }
+    }
 
     public struct LoadBucket: Equatable, Sendable {
         /// "24-36", "150+".
@@ -690,7 +708,17 @@ public final class SetupStatsCollector: @unchecked Sendable {
         } else {
             unsampled = hangs.count
         }
-        return Freezes(count: hangs.count, hours: hours, partial: start > window.t0, perDay: perDay, byLoad: byLoad, unsampled: unsampled)
+        // Each day of the range: its freezes over the hours of it counted (from the oldest report left, up to now).
+        var days: [Freezes.Day] = []
+        var day = calendar.startOfDay(for: Date(timeIntervalSince1970: window.t0))
+        while day.timeIntervalSince1970 < window.t1, days.count < 3_660, let next = calendar.date(byAdding: .day, value: 1, to: day) {
+            let from = max(day.timeIntervalSince1970, window.t0, coveredFrom), to = min(next.timeIntervalSince1970, window.t1, window.now)
+            let key = dayFormat.string(from: day)
+            days.append(Freezes.Day(day: key, freezes: perDay[key] ?? 0, hours: max(0, to - from) / 3600))
+            day = next
+        }
+        return Freezes(count: hangs.count, hours: hours, partial: start > window.t0, perDay: perDay, byLoad: byLoad, unsampled: unsampled,
+                       days: days)
     }
 
     /// The sample nearest `at` within 2 minutes (`samples` sorted by time), by binary search.
