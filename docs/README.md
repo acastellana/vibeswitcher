@@ -7,10 +7,10 @@ area in depth; the records further down are history, kept as written.
 
 | Guide | What's in it |
 | --- | --- |
-| [Getting started](guide/getting-started.md) | Requirements, building and signing, the keychain dialog, the first run, troubleshooting, where the logs are. |
-| [Everyday use](guide/everyday-use.md) | Statuses, the menu bar, the main window, starting sessions, the chat, notifications, briefings, the command line. |
-| [The project lead](guide/project-lead.md) | How a lead plans, the task contract, workers in worktrees, review levels and audits, the merge gate, auto_advance, Mac-wide limits, the battery hold, receipts, revert, the board archive, and a table of every default with its source. |
-| [Phone access](guide/phone-access.md) | Tailscale, pairing, what the phone shows, replies and answering a lead, dev pages, how it's kept safe. |
+| [Getting started](guide/getting-started.md) | Requirements, building and signing, the keychain dialog, the first run, Settings' 12 categories, troubleshooting, where the logs are. |
+| [Everyday use](guide/everyday-use.md) | Statuses, the menu bar, the main window, starting sessions, the chat, shell and wallet request cards, notifications, dictation, briefings, Statistics, the command line. |
+| [The project lead](guide/project-lead.md) | How a lead plans, the task contract, workers in worktrees, review levels and audits, the review rules floor, the merge gate, the config seal, provenance, the remote, auto_advance, Mac-wide limits and Boost, the battery hold, receipts, revert, the board archive, and a table of every default with its source. |
+| [Phone access](guide/phone-access.md) | Tailscale, pairing, what the phone shows, replies, dictation and answering a lead, dev pages, how it's kept safe. |
 | [Architecture](guide/architecture.md) | The app, the session host and its handover, parsers, hooks, status detection, the tool server and its keeper, the vault and roles, the host's security model and the census, privacy, the files in `~/.vibeswitcher`. |
 | [Development](guide/development.md) | Worktree setup, `scripts/test.sh`, the lints, tests under load, the sandbox, other scripts. |
 

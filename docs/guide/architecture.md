@@ -175,7 +175,8 @@ Everything stays on your Mac, readable only by you (`~/.vibeswitcher` is `0700`,
 few facts per terminal to `~/.vibeswitcher/state/`; the Today totals are kept per day in `~/.vibeswitcher/stats/`
 (project names and seconds). Nothing is sent anywhere except what you ask for: the Team tab's one-line summaries and
 Brief me go to Claude through your own `claude` command, a briefing's text goes to ElevenLabs when you've saved a key
-and press Brief me, and phone notifications pass through the browser's push service, encrypted. Delete
+and press Brief me, dictation goes to Claude's own `/voice` or to OpenAI with your key, a transaction request goes to
+the Wallet Manager when you press Send, and phone notifications pass through the browser's push service, encrypted. Delete
 `~/.vibeswitcher` to remove all of it.
 
 ## Files in ~/.vibeswitcher

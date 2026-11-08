@@ -45,7 +45,7 @@ after the tests (a scratch host, a parser, a bench's app) is ended and named, an
 file the run added to `~/Library/Preferences`.
 
 `swift build` and `swift test` run under `vs-heavy`, the Mac-wide slots for heavy work, so suites and builds from every
-project's workers take turns. The count is `VIBESWITCHER_HEAVY_SLOTS`, else Settings › Project lead's test and build
+project's workers take turns. The count is `VIBESWITCHER_HEAVY_SLOTS`, else Settings › Performance's test and build
 slots (the cores ÷ 6 while unset), raised to boost's while Boost mode is on. A run that finds every slot
 held waits, saying who holds each. Run a full suite or a release build in a session as `vs-heavy <command>`; it gives
 up after 60 minutes unless you pass `--timeout`.
@@ -134,9 +134,10 @@ bash scripts/sandbox-app.sh run              # build this worktree's app and sta
 bash scripts/sandbox-app.sh chat             # show the fake session's chat
 bash scripts/sandbox-app.sh type "hello"     # type into the composer; then: send
 bash scripts/sandbox-app.sh lead             # a fake project lead; then: team, ask, extras
-bash scripts/sandbox-app.sh settings phone   # Settings on a tab
+bash scripts/sandbox-app.sh settings phone   # Settings on a category
 bash scripts/sandbox-app.sh sheet all-done   # a sheet: new-project, results, all-done, lead-team, …
 bash scripts/sandbox-app.sh shot NAME        # light and dark PNGs of each window in .build/sandbox-shots/
+bash scripts/sandbox-app.sh panes off        # collapse the sidebar and inspector first, for a shot of the middle: on macOS 27 a shot draws them without their lists and colors
 bash scripts/sandbox-app.sh quit
 ```
 

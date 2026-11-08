@@ -1,7 +1,8 @@
 # The project lead
 
 A project lead is one Claude Code session per git repository that you talk to about the project. It plans the work,
-runs a small team of Claude sessions to do it, checks what they did and merges what passes. You decide what to build;
+runs a team of coding agents to do it (Claude sessions, or Codex for bounded tasks), checks what they did and merges
+what passes. You decide what to build;
 it handles the rest and asks you only what's yours to decide.
 
 <picture>
@@ -22,7 +23,8 @@ A new lead first reads its status, the project's `workflow.md` notes, `decisions
 With a goal, it plans tasks, starts workers and tells you its plan; without one, it greets you in a line.
 
 The lead's branch (its base) is the one checked out when it first starts in the repository; `base_branch:` in
-`workflow.md` changes it. Workers start from it and their work is merged into it. The lead never pushes.
+`workflow.md` changes it. Workers start from it and their work is merged into it. The lead has no way to push by
+itself: see [The remote](#the-remote).
 
 ## How a lead plans: the task contract
 
@@ -37,7 +39,7 @@ A task can also have a review level (below), an `after` list (tasks that must be
 (`budget_min`), a `model` for its worker (as `claude --model` takes it: `sonnet` for a mechanical task; left out, the
 worker runs on the project's Claude command's model, as before; given, it replaces a `--model` that command names) and `auto_advance: false` to keep it out of automatic
 moves. The lead changes a task with
-`update_task`. A task's state (`LeadBoard.swift:549`) is planned, running, review (reported done, being checked), done
+`update_task`. A task's state (`LeadBoard.swift`) is planned, running, review (reported done, being checked), done
 (merged), failed, blocked, kept, folded, abandoned or reverted. A task made by
 mistake that never ran can be removed.
 
@@ -179,9 +181,19 @@ Some tasks are audited whatever their level says:
 
 - a branch that touches `sensitive_paths` (by default `.claude/`, `.mcp.json`, `CLAUDE.md`, `CLAUDE.local.md`,
   `AGENTS.md`, `.github/`, `.env`, `.env.*`, `*.entitlements`, `*.pem`);
-- a review-none task whose diff is over `risk_lines` (400) lines.
+- a review-none task the **risk check** raises: its diff (`LeadRisk.swift`) is over `risk_lines` (400) lines outside
+  tests, benches and fixtures; or its code deletes or rewrites files or data, changes permissions, spawns processes or
+  adds locks or threads; or it changes the test or build setup or `REVIEW.md`, or takes tests out. Then, unless
+  `risk_model` is off, a small Claude model sees the diff's stat and the contract and may raise it too. Either can only
+  raise, and an error leaves the result as it was;
+- a random **sample** of the review-none tasks left, `audit_sample_percent` of them (10 by default), drawn once per
+  task.
 
-The Team tab shows such a task as **Needs audit**, with why.
+The Team tab shows such a task as **Needs audit**, with why. `REVIEW.md` at the repository's root is your few lines on
+what matters in this code; the verifier and the risk check read it from the base branch, so a worker can't change its
+own audit by editing it.
+
+A verifier runs on a different model from the task's worker when `verifier_model` is empty (the default).
 
 **Findings.** A verdict comes with findings, each at a file and line with its evidence, and a severity:
 
@@ -210,6 +222,12 @@ lead dismisses it (`dismiss_finding`), makes it a task (`add_task(from_finding:)
 worker's answer. The merge refusal, the audit's report, `status` and `board(task)` name each held finding and say
 `strict_paths` holds it. A branch that touches no strict path is as before.
 
+**The review rules floor.** Settings › Project lead › Review rules floor sets, per project, the least strict its rules
+may be: sensitive and strict paths, audit finders, merge policy, risk lines, the risk check's model pass, the audit
+sample, and whether the verifier must run on a different model. It's kept in the session host's vault, written only by
+the app. A lead can make a rule stricter with `configure`, never looser: for paths both lists count, for the rest the
+stricter value does.
+
 A verifier ends itself 20 seconds after it submits its verdict. The app ends every worker and verifier session of a
 task that merged, was folded, abandoned or cleaned up.
 
@@ -226,15 +244,26 @@ then:
 3. fast-forwards the lead's branch to exactly what was tested. Never a merge commit, never a force.
 
 It refuses while an Important finding is open, while the task is **kept** (held back with a reason, such as "don't
-merge until I've looked"), when the lead's branch was moved by something other than its own merges, or when the
-`workflow.md` guard rails differ from what the lead last set.
+merge until I've looked"), when the lead's branch was moved by something other than its own merges, when the
+`workflow.md` guard rails differ from what the lead last set, or while [the agents' config is held](#the-config-seal).
+
+If the lead's branch moved, a card in the lead's chat lists the commits, with **Accept These Commits** (merges start
+from there, with the lead and its team running on) and **Keep Refused**.
+
+Merges wait while the Mac's load is above `load_threshold`. `merge_batching: boost` (only while Boost is on) or `always` tests several passed
+tasks with one run: each is stacked on the base, and a run that fails is split to find the one that breaks it. Each task's
+merge is still recorded on its own, so revert undoes just that one.
+
+A merge is run by the installed app's tool server, so a change to the gate's own code on the base doesn't apply until
+it's installed. `status` says when the base has such commits the running build lacks. `merge_remote` and the merge of a
+branch carrying the remote refuse then, until you install from the base (`scripts/build-app.sh --install`).
 
 **Flaky tests.** When tests fail, the failing tests run once more (up to 20 named tests, else the whole command), at
 most once per merge, and never after a build error or a `regression_command` failure. If they pass, the merge goes
 ahead and each is recorded as a flake, with its evidence in a file. A test that flakes 3 times within 7 days becomes a
 task to fix it, once.
 
-**Merge policy** (`merge_policy:` in `workflow.md`), chosen once per project:
+**Merge policy** (`merge_policy:` in `workflow.md`), chosen once per project, within the floor above:
 
 - `auto`: work merges once its review passes; the lead then posts what changed, how it was checked and how to revert it.
 - `ask_sensitive`: a commit touching `sensitive_paths` waits for you.
@@ -245,6 +274,63 @@ answer "Approve <commit>", which approves that exact commit only. A timer never 
 
 Other endings: **folded** (another task carries its work), **abandoned** (dropped, with a reason), **failed** (tried and
 didn't pass). Folded and abandoned tasks don't count as failed.
+
+## The config seal
+
+Workers, verifiers and a branch's tests run as you, so a shell in any of them could write what your next session loads.
+No sandbox can hold them: macOS refuses a sandbox inside a sandbox, and many test suites start one. So the session
+host's vault keeps a hash of each of these, as last sealed (`ConfigSeal.swift`):
+
+- Claude Code's settings, hooks, skills, commands, agents, output styles and instructions in `~/.claude`, and the MCP
+  servers in `~/.claude.json`;
+- Codex's config, hooks, rules and instructions, your shell's startup files, your git config, and the VibeSwitcher
+  hook binary;
+- the main checkout's git config and hooks, its `.claude` settings, `CLAUDE.local.md` and `.mcp.json`;
+- each enabled plugin's manifest, hooks and servers, and the scripts your settings name by path.
+
+Each is hashed again before a worker or verifier starts and after a merge's tests. A change made while the team ran
+holds new workers, verifiers and merges for that team, and the lead is told. Code that runs (hooks, MCP servers, shell
+startup, git's commands, a plugin's update) holds whoever changed it. A change made while the team was quiet to
+something that only instructs (`CLAUDE.md`, agents, output styles), or by hand to a plugin's files or a script your
+settings name, is taken as yours and sealed.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/config-held-dark.png">
+  <img alt="A card in the lead's chat naming the agents' config that changed while the team ran, with an Accept button" src="../images/config-held-light.png">
+</picture>
+
+A card in the lead's chat names each thing held, what changed in it and when. **I Changed Them: Accept** seals them, and
+only your click in the app can. If you didn't make the change, look at the files and set them back first. The lead's
+own start is never held, and running sessions keep the hooks they started with. It's a detector, not a lock: what a
+shell wrote is on disk, but no worker or verifier VibeSwitcher starts loads it unseen.
+
+## Provenance
+
+Each commit a merge lands on the base ends with git trailers (`LeadProvenance.swift`), so the history says where it came
+from and it goes wherever the commit goes:
+
+| Trailer | What it says |
+| --- | --- |
+| `VS-Task` | The task's slug. |
+| `VS-Review` | `none`, or `audit (pass at <commit>)` with any findings the lead dismissed. |
+| `VS-Worker-Model`, `VS-Verifier-Model` | The models that worked on and audited it. |
+| `VS-Build` | The commit of the tool server that merged it. |
+| `VS-Contract` | A hash of the task's contract, as its worker got it. |
+
+Only slugs, model names, verdict words and hashes go in: no email, path or newline. In a batch each task's commit has its
+own, and a merge carrying the remote keeps them. `scripts/merge-provenance.sh [-n N] [--build PREFIX] [--model TEXT]`
+lists them from `git log` alone.
+
+## The remote
+
+The lead's deny rules refuse `git fetch` and `git push`. It syncs through three fixed-shape tools, whose remote, URL and
+branch come from `workflow.md`, never from the call:
+
+- `fetch_remote` fetches the base branch only, into its remote-tracking ref, and says how far ahead and behind it is;
+- `merge_remote` merges that into the base in a scratch worktree, runs the tests, and fast-forwards the base; a conflict
+  outside the lead's records stops it, with the files named;
+- `push_remote` asks you. A card lists the commits, with **Push N Commits** and **Decline**. Only your click pushes, from
+  the app's own process: exactly that commit, as a fast-forward, never forced. The lead hears the outcome either way.
 
 ## auto_advance
 
@@ -266,7 +352,7 @@ it off for the project; a task's own `auto_advance: false` opts it out.
 
 ## Mac-wide limits
 
-These are set once for the Mac, not per project, in Settings › General › Project lead, and kept in
+These are set once for the Mac, not per project, in Settings › Performance, and kept in
 `~/.vibeswitcher/mac-limits.json`:
 
 - **Team sessions** (`mac_max_sessions`): the most workers and verifiers of all projects together, 10 by default.
@@ -290,7 +376,7 @@ and for SwiftPM `swift build -j 2 -Xswiftc -j$(( (VS_HEAVY_CORES + 1) / 2 ))` (s
 working policy's `vs-heavy` line tells every role so. Uncapped, a `node --test` run on ~9 cores and a Swift build beside
 it held the Mac at load 62 inside the lock (2026-11-01).
 
-**Boost.** Settings › Project lead › Boost is Off, On or Automatic (`Boost.swift`, `BoostWatch.swift`). While on, the
+**Boost.** Settings › Performance › Boost is Off, On or Automatic (`Boost.swift`, `BoostWatch.swift`). While on, the
 Mac-wide limits are raised to the boost values, each editable: `load_threshold` 36, `mac_max_sessions` 18,
 `max_workers` 7 per project (a project's own when higher), test and build slots 3 (from Settings' 2 on a 12-core Mac,
 so `VS_HEAVY_CORES` goes from 6 to 4; for `vs-heavy` and the leads' merges and audits alike); projects whose `merge_batching` is `boost` batch their merges. Automatic boosts only while the Mac is on AC power and
@@ -303,8 +389,8 @@ battery stops below 30%)`. The away rule and the battery hold below still apply.
 in `~/.vibeswitcher/boost.json` (rewritten at least every minute; older than 150 s reads as off, so a quit app leaves
 the normal limits), and each lead's `status` says it: `boost: on (automatic: away, on AC): load_threshold 36, …`. While
 boosted, room freed on the Mac goes first to the project you last worked in: the witness wakes its refused starts first,
-and other projects' starts are held while the room left wouldn't fit it. A menu bar bolt shows while boost is on; its
-tooltip says why.
+and other projects' starts are held while the room left wouldn't fit it. An orange bolt shows in the toolbar and the menu bar
+while boost is on; its tooltip says why, and the toolbar's opens Settings › Performance at Boost.
 
 ## The account's usage limits
 
@@ -331,7 +417,8 @@ resets. VibeSwitcher reads what Claude Code exposes (`AccountUsage.swift`), best
   VibeSwitcher doesn't touch.
 
 At 80 % of a limit, `start_worker` and `audit` start nothing on the models that limit holds back (every model for the
-weekly and 5-hour limits) unless the lead passes `override_usage: true`. Sessions already running carry on.
+weekly and 5-hour limits) unless the lead passes `override_usage: true`, or **Ignore usage limits** is on in
+Settings › Performance (then Boost isn't held off for usage either, and `agent: auto` stays on Claude). Sessions already running carry on.
 auto_advance skips those starts and audits and tells the lead once per limit, with the reset time. `status` shows each
 known limit, how much is used, when it resets and its pace (see [Auto routing](#auto-routing-agent-auto)). What isn't known (an API key, no status line run yet, a reading past
 its reset) means no back-off, never a stop.
@@ -339,12 +426,12 @@ its reset) means no back-off, never a stop.
 ## The battery hold
 
 On battery, below a set charge, lead work pauses: `start_worker`, `audit`, `merge` and `revert` refuse, and work
-already running finishes. The default is 50 %; Settings › General › Project lead sets it from 10 to 90 %, or 0 for
+already running finishes. The default is 50 %; Settings › Performance sets it from 10 to 90 %, or 0 for
 never. The lead is told when the hold starts and ends.
 
 **Keeping the Mac awake.** While a worker, verifier or merge runs, the Mac doesn't go to sleep on its own (the display
-still does). The setting "Keep the Mac awake while the team works" is On power only by default; Always or Never
-change it.
+still does). "Keep the Mac awake while the team works" in Settings › Performance is On power only by default; Always or
+Never change it.
 
 ## Questions to you
 
@@ -356,14 +443,23 @@ work, a merge of a sensitive path, or anything outward-facing (publishing, pushi
 
 You can message the lead any time; your message reaches it at its next step.
 
+Leads of different projects can message each other with `tell_lead`, once you turn on **Let project leads message each
+other** in Settings › Project lead. Every message, sent or refused, shows under **Between leads** in the Team tab. A
+message can't approve or grant anything.
+
 ## The Team tab, the all-done card, receipts and revert
 
 The inspector's **Team** tab is meant to be glanced at: the lead's open questions, its recent decisions, then each task
 in one line with its state and how long it has been in it ("Working 12m", "Rework 1 · 22m", "Needs audit 2m"). Under a
 task at work, a dim line says what its agent is doing, written by a small Claude model (`claude -p` with Haiku, no
 tools) at most every 3 minutes while the tab is open; "Summarize what each agent is doing with AI" in Settings ›
-General › Project lead turns it off. Click a task for its checkpoints, report, audit and links to its
+Project lead turns it off. Click a task for its checkpoints, report, audit and links to its
 sessions. Below are the scorecard, answered questions and the lead's files.
+
+The **scorecard** has four numbers over the lead's merged tasks: audit rounds to pass, the share passing the first audit
+(both shown once there are enough audited tasks), minutes waiting on you per task, and reverts. A footnote says how many
+merged without tests or without an audit. The [Statistics window](everyday-use.md#statistics) has the same across every
+project.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/all-done-dark.png">
@@ -412,14 +508,14 @@ not edit that folder.
 `workflow.md` (in `.vibeswitcher/`, git-ignored) holds the limits and commands below. The lead changes it with its
 `configure` tool, which keeps your comments. The guard rails (the test and setup commands, `merge_policy`,
 `sensitive_paths`, `strict_paths`, `records_dir`, `max_workers`, `heavy_slots`, `audit_finders`, `audit_nit_cap`, `auto_advance`,
-`risk_lines`, `risk_model`, `audit_sample_percent`; `Sources/VibeCore/LeadVaultGuarded.swift:11`)
+`risk_lines`, `risk_model`, `audit_sample_percent`; `Sources/VibeCore/LeadVaultGuarded.swift`)
 count only as the lead last set them: when the file says anything else, `merge` and `start_worker` refuse until the
 lead sets them again.
 
 ## Your working policy
 
 Every lead, worker and verifier gets your working policy in its prompt. It's one text for all projects, kept in
-`~/.vibeswitcher/policy.md` and edited in Settings › General › Project lead. The default is five rules: one agent owns each
+`~/.vibeswitcher/policy.md` and edited in Settings › Project lead. The default is five rules: one agent owns each
 change, affected tests while editing and the full suite once before merging, parallel work with builds and tests
 serialized, only material bugs fixed, stop when it works. Running leads are told once when you change it.
 
@@ -429,37 +525,37 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 
 | Setting or rule | Default | Source |
 | --- | --- | --- |
-| `max_workers` | 3 | `LeadWorkflow.swift:5` |
-| `task_budget_min` | 120 min (0: no budget) | `LeadBudget.swift:10` |
-| `test_timeout_min` | 45 min | `Worktrees.swift:1225` |
-| `stall_min` | 10 min (0: off; merges, audits and `vs-heavy --stall`) | `StallWatch.swift:22` |
-| `audit_finders` | 1 (at most 3) | `LeadWorkflow.swift:38`, `:142` |
-| `audit_nit_cap` | 5 | `LeadWorkflow.swift:40` |
-| `risk_lines` | 400 | `LeadRisk.swift:23` |
-| `risk_model` | true (a model pass may also raise a task to audit) | `LeadWorkflow.swift:61` |
+| `max_workers` | 3 | `LeadWorkflow.swift` |
+| `task_budget_min` | 120 min (0: no budget) | `LeadBudget.swift` |
+| `test_timeout_min` | 45 min | `Worktrees.swift` |
+| `stall_min` | 10 min (0: off; merges, audits and `vs-heavy --stall`) | `StallWatch.swift` |
+| `audit_finders` | 1 (at most 3) | `LeadWorkflow.swift` |
+| `audit_nit_cap` | 5 | `LeadWorkflow.swift` |
+| `risk_lines` | 400 | `LeadRisk.swift` |
+| `risk_model` | true (a model pass may also raise a task to audit) | `LeadWorkflow.swift` |
 | `audit_sample_percent` | 10 (0: off; review none tasks audited anyway at random, the draw kept on the task) | `LeadAdvance.swift`, `LeadAuditSample.defaultPercent` |
-| `auto_advance` | true | `LeadWorkflow.swift:56` |
-| `merge_policy` | unset: handled as `ask_sensitive` | `LeadWorkflow.swift:41-42` |
-| `sensitive_paths` | the list above | `LeadWorkflow.swift:194` |
-| `strict_paths` | none | `LeadWorkflow.swift:49` |
-| `records_dir` | `docs/lead` | `LeadWorkflow.swift:139` |
-| `disk_warning_gb`, `disk_floor_gb` | 10 GB, 3 GB | `LeadWorkflow.swift:23-24` |
-| `watch_app_logs` | false | `LeadWorkflow.swift:64` |
-| Audit round cap | 2 rounds | `LeadBoard.swift:300` |
-| Flake limit | 3 flakes of one test in 7 days | `LeadBoard.swift:1072-1073` |
+| `auto_advance` | true | `LeadWorkflow.swift` |
+| `merge_policy` | unset: handled as `ask_sensitive` | `LeadWorkflow.swift` |
+| `sensitive_paths` | the list above | `LeadWorkflow.swift` |
+| `strict_paths` | none | `LeadWorkflow.swift` |
+| `records_dir` | `docs/lead` | `LeadWorkflow.swift` |
+| `disk_warning_gb`, `disk_floor_gb` | 10 GB, 3 GB | `LeadWorkflow.swift` |
+| `watch_app_logs` | false | `LeadWorkflow.swift` |
+| Audit round cap | 2 rounds | `LeadBoard.swift` |
+| Flake limit | 3 flakes of one test in 7 days | `LeadBoard.swift` |
 | Merge reruns | once, up to 20 named tests | `MergeRerun.swift` |
-| Question timer (`decide_in`) | 10 min | `LeadBoard.swift:777` |
-| Board archive age | 24 h; at most hourly | `LeadBoardArchive.swift:43`, `:45` |
-| `mac_max_sessions` | 10 | `MacLoad.swift:112` |
-| `load_threshold` | 2 × cores | `MacLoad.swift:119-133` |
+| Question timer (`decide_in`) | 10 min | `LeadBoard.swift` |
+| Board archive age | 24 h; at most hourly | `LeadBoardArchive.swift` |
+| `mac_max_sessions` | 10 | `MacLoad.swift` |
+| `load_threshold` | 2 × cores | `MacLoad.swift` |
 | `heavy_slots` | `VIBESWITCHER_HEAVY_SLOTS`, else Settings' (cores ÷ 6 unset); raised to boost's while on | `TestLock.slotCount`, `MacLimits.heavySlotsInForce` |
 | `vs-heavy` timeout | 60 min | `Resources/bin/vs-heavy` |
 | `vs-heavy` stall | 10 min with no progress, the Mac under `load_threshold` (`--stall`, `VIBESWITCHER_HEAVY_STALL`) | `Resources/bin/vs-heavy` |
-| Battery hold | below 50 % on battery | `PowerSource.swift:74` |
+| Battery hold | below 50 % on battery | `PowerSource.swift` |
 | Usage back-off | 80 % of a limit on the model | `AccountUsage.swift` |
-| Stall: silent, idle, compacted | 15, 10, 5 min | `LeadStall.swift:44-46` |
-| Verifier ends after its verdict | 20 s | `Sources/VibeHost/HostServer.swift:83` |
-| Records commit | after each merge, at most every 5 min | `LeadRecords.swift:65` |
+| Stall: silent, idle, compacted | 15, 10, 5 min | `LeadStall.swift` |
+| Verifier ends after its verdict | 20 s | `Sources/VibeHost/HostServer.swift` |
+| Records commit | after each merge, at most every 5 min | `LeadRecords.swift` |
 
 The rules the lead itself follows (when to audit, when to ask) are in its prompt (`LeadWorkflow.swift`) and in
 [docs/process/lead-rules.md](../process/lead-rules.md).
