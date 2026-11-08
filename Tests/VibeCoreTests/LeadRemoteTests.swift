@@ -178,6 +178,43 @@ struct LeadRemoteTests: LeadTeamFixture {
         #expect(runtime.steered.count == 1 && runtime.steered[0].text.contains(next))
     }
 
+    /// A vault that counts what the lead's tool server asks the host.
+    final class Asked: @unchecked Sendable {
+        let lock = NSLock()
+        private(set) var count = 0
+        func tally() { lock.withLock { count += 1 } }
+    }
+
+    @Test func automaticFetchAsksTheVaultNothingBeforeItsNextFetchIsDue() throws {
+        let scene = try makeScene()
+        let runtime = FakeRuntime()
+        let plain = vault(for: runtime)
+        let grant = try vault.startLead(root: scene.root, branch: "main")
+        try vault.bind(grant, root: scene.root, session: try #require(runtime.me.session))
+        let asked = Asked()
+        let counted = LeadVault(folder: plain.folder) { request in
+            asked.tally()
+            return try plain.ask(request)
+        }
+        let lead = LeadToolset(root: scene.root, runtime: runtime, vault: counted)
+        lead.power = { nil }
+        #expect(!lead.call("fetch_remote", [:]).isError) // The lead alone pins the URL.
+        let start = Date(timeIntervalSince1970: 10_000)
+        let poller = LeadRemotePoller(lead: lead)
+        poller.tick(now: start)
+        let before = asked.count
+        #expect(before > 0)
+        poller.tick(now: start.addingTimeInterval(60))
+        poller.tick(now: start.addingTimeInterval(LeadRemotePoller.interval - 1))
+        #expect(asked.count == before)
+        // Restarted, the schedule is read the same.
+        LeadRemotePoller(lead: lead).tick(now: start.addingTimeInterval(LeadRemotePoller.interval - 1))
+        #expect(asked.count == before)
+        // Once it's due, it asks.
+        poller.tick(now: start.addingTimeInterval(LeadRemotePoller.interval))
+        #expect(asked.count > before)
+    }
+
     @Test func automaticFetchBacksOffFailuresUpToTwelveHoursAndRecovers() throws {
         let scene = try makeScene()
         let runtime = FakeRuntime()

@@ -35,10 +35,15 @@ final class LeadRemotePoller: @unchecked Sendable {
     }
 
     /// Clock injected by callers in tests; no sleeps, real remotes, or alternate git path needed.
+    /// `state.next` is checked first of all: a tick that isn't due asks the session host nothing, however many a day.
     func tick(now: Date = Date()) {
-        guard let lead, lead.role == .lead, (try? lead.authenticate()) != nil else { return }
+        guard let lead, lead.role == .lead else { return }
         let workflow = lead.workflow
-        guard (try? lead.checkSettings(workflow, not: "Not fetched")) != nil,
+        let dueFile = lead.vault.scratch(root: lead.root, "remote-poll")
+            .appendingPathComponent(LeadVault.hash(workflow.remoteName + "\n" + workflow.base) + ".next")
+        if let next = (try? Data(contentsOf: dueFile)).flatMap({ try? JSONDecoder().decode(Date.self, from: $0) }), now < next { return }
+        guard (try? lead.authenticate()) != nil,
+               (try? lead.checkSettings(workflow, not: "Not fetched")) != nil,
               (try? lead.checkBattery(not: "Not fetched")) != nil,
               !(lead.runtime.steadyLoad().map { $0 > lead.macLimits().loadLimit } ?? false),
               let pin = try? lead.vault.guardedSettings(root: lead.root)?[LeadRemote.urlKey(workflow.remoteName)] else { return }
@@ -51,7 +56,11 @@ final class LeadRemotePoller: @unchecked Sendable {
         var state = (try? JSONDecoder().decode(State.self, from: Data(contentsOf: file))) ?? State()
         guard now >= state.next,
               let url = try? lead.pinnedURL(workflow.remoteName, not: "Not fetched", first: false).url else { return }
-        defer { try? LeadVault.writePrivate(JSONEncoder().encode(state), to: file) }
+        defer {
+            try? LeadVault.writePrivate(JSONEncoder().encode(state), to: file)
+            // What the next tick reads before asking the vault for anything.
+            try? LeadVault.writePrivate(JSONEncoder().encode(state.next), to: dueFile)
+        }
         let remote = workflow.remoteName, base = workflow.base
         let scratch = lead.vault.scratch(root: lead.root, "remote-git")
         do {

@@ -14,7 +14,7 @@ import Foundation
 /// so the next merge's check that nothing else moved the branch takes it.
 public final class LeadRecords: @unchecked Sendable {
     public enum Kind: CaseIterable, Sendable {
-        case decisions, progress, incidents, archive
+        case decisions, progress, incidents, archive, progressArchive
 
         public var name: String {
             switch self {
@@ -22,6 +22,7 @@ public final class LeadRecords: @unchecked Sendable {
             case .progress: return "progress.md"
             case .incidents: return "incidents.md"
             case .archive: return "decisions-archive.md"
+            case .progressArchive: return "progress-archive.md"
             }
         }
         var header: String {
@@ -30,10 +31,11 @@ public final class LeadRecords: @unchecked Sendable {
             case .progress: return "# Progress\n\n"
             case .incidents: return "# Incidents\n\n"
             case .archive: return "# Archived decisions\n\nMoved here from decisions.md by archive_decisions, unchanged: superseded, obsolete or now enforced by a check.\n\n"
+            case .progressArchive: return "# Archived progress\n\nEarlier months of progress.md, moved here unchanged when a new month began.\n\n"
             }
         }
         /// How each entry's first line starts.
-        var marker: String { self == .progress ? "- " : "## " }
+        var marker: String { self == .progress || self == .progressArchive ? "- " : "## " }
     }
 
     /// What a flush did.
@@ -53,7 +55,7 @@ public final class LeadRecords: @unchecked Sendable {
     /// No trailer (Co-Authored-By or any other): a project's workflow may refuse them (project-c's regression_command
     /// does), and these commits land on its base among its own.
     static func message(_ dir: String, inventory: Bool = false) -> String {
-        "\(subject)\n\nThe project lead's \(dir)/decisions.md, \(dir)/progress.md, \(dir)/incidents.md and \(dir)/decisions-archive.md"
+        "\(subject)\n\nThe project lead's \(dir)/decisions.md, \(dir)/progress.md, \(dir)/incidents.md, \(dir)/decisions-archive.md and \(dir)/progress-archive.md"
             + (inventory ? ", and \(ProductInventory.output) as \(ProductInventory.script) makes it from the code before this commit," : "")
             + " committed by VibeSwitcher for the lead (its tool server); nothing else is in this commit."
     }
@@ -97,7 +99,7 @@ public final class LeadRecords: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         lastFlush = now
-        let outcome = commit(base: base)
+        let outcome = commit(base: base, now: now)
         lastOutcome = outcome
         return outcome
     }
@@ -155,7 +157,9 @@ public final class LeadRecords: @unchecked Sendable {
         }
     }
 
-    private func commit(base: String) -> Outcome {
+    private func commit(base: String, now: Date) -> Outcome {
+        // Earlier months of progress.md move to its archive, in `records_dir` or `.vibeswitcher` alike.
+        try? store.withRecordsLock { _ = try Self.rollProgress(store, now: now) }
         guard let dir = store.recordsDir, Git.run(["rev-parse", "--git-dir"], in: root).ok else { return .local }
         do { try store.withRecordsLock { try Self.migrate(store) } } catch { return .failed("moving the old logs from .vibeswitcher failed (\(error)).") }
         var paths = Self.paths(dir)
@@ -355,10 +359,79 @@ public final class LeadRecords: @unchecked Sendable {
             else if found.isEmpty { preamble.append(line) }
             else { found[found.count - 1].append(line) }
         }
-        let ending = kind == .progress ? "\n" : "\n\n"
+        let ending = kind.marker == "- " ? "\n" : "\n\n"
         let entries = found.map { $0.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) + ending }
         let head = preamble.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         return (head.isEmpty ? "" : head + "\n\n", entries)
+    }
+
+    // MARK: Rolling progress.md over
+
+    /// Moves the entries of progress.md from before `now`'s month to progress-archive.md, byte for byte (under the
+    /// records' lock, as the commit reads them): the archive first, so a crash leaves them in both and never in neither;
+    /// the next roll appends none again. An entry with no date stays with the one before it; those before the first dated
+    /// entry stay. Returns how many moved.
+    @discardableResult
+    static func rollProgress(_ store: BoardStore, now: Date = Date()) throws -> Int {
+        let path = store.recordPath(Kind.progress.name)
+        let month = String(LeadDecision.stamp(now).prefix(7))
+        // Read once a flush: the first dated entry's month says when there's nothing to do.
+        guard let first = firstStampedMonth(path), first < month, let text = try? String(contentsOfFile: path, encoding: .utf8) else { return 0 }
+        let (preamble, entries) = stampedEntries(text)
+        var moving: [String] = [], kept: [String] = []
+        var last = month
+        for entry in entries {
+            if let stamp = entryMonth(entry) { last = stamp }
+            if last < month { moving.append(entry) } else { kept.append(entry) }
+        }
+        guard !moving.isEmpty else { return 0 }
+        let archivePath = store.recordPath(Kind.progressArchive.name)
+        let before = (try? String(contentsOfFile: archivePath, encoding: .utf8)) ?? Kind.progressArchive.header
+        let known = Set(stampedEntries(before).entries.map { $0.trimmingCharacters(in: .newlines) })
+        let new = moving.filter { !known.contains($0.trimmingCharacters(in: .newlines)) }
+        try write(before + (before.hasSuffix("\n") ? "" : "\n") + new.map { $0.hasSuffix("\n") ? $0 : $0 + "\n" }.joined(), to: archivePath, in: store)
+        try write(preamble + kept.joined(), to: path, in: store)
+        return moving.count
+    }
+
+    /// The first dated entry's month ("2026-10") in the log at `path`, reading only its head: nil when it has none there.
+    private static func firstStampedMonth(_ path: String) -> String? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        guard let head = try? handle.read(upToCount: 64 * 1024) else { return nil }
+        return String(decoding: head, as: UTF8.self).components(separatedBy: "\n").lazy.compactMap { entryMonth($0) }.first
+    }
+
+    /// A progress entry's month ("2026-10"); nil when `line` isn't a dated entry's first line.
+    static func entryMonth(_ line: String) -> String? {
+        guard line.range(of: #"^- \d{4}-\d{2}-\d{2} \d{2}:\d{2}(\s|$)"#, options: .regularExpression) != nil else { return nil }
+        return String(line.dropFirst(2).prefix(7))
+    }
+
+    /// A progress log's text before its first dated entry, and its dated entries (each from a dated line to the next),
+    /// exactly as they are.
+    static func stampedEntries(_ text: String) -> (preamble: String, entries: [String]) {
+        let lines = text.components(separatedBy: "\n")
+        var preamble = ""
+        var found: [String] = []
+        for (index, line) in lines.enumerated() {
+            let piece = line + (index < lines.count - 1 ? "\n" : "")
+            if entryMonth(line) != nil { found.append(piece) }
+            else if found.isEmpty { preamble += piece }
+            else { found[found.count - 1] += piece }
+        }
+        return (preamble, found)
+    }
+
+    /// progress.md's size past which status says to read its tail: every lead start could read it, and a month of it
+    /// is megabytes.
+    public static let progressNudgeBytes = 256 * 1024
+
+    /// For status, once progress.md passes `progressNudgeBytes`: a line saying to read its tail; nil below.
+    static func progressNudge(bytes: Int) -> String? {
+        guard bytes > progressNudgeBytes else { return nil }
+        return "progress.md is \(bytes / 1024) KB this month: read its tail, not the whole file (`tail -n 200`). "
+            + "Earlier months roll over to \(Kind.progressArchive.name) by themselves."
     }
 
     // MARK: Archiving decisions

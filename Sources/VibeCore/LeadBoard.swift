@@ -1250,6 +1250,9 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     public var archivedBatch: [LeadTask]?
 
     public static let keptReports = 50
+    /// Past these, the oldest updates and closed questions move to the board's archive (`BoardStore.archive`).
+    public static let keptUpdates = 50
+    public static let keptClosedQuestions = 50
     /// A test that flakes `flakeLimit` times within `flakeWindow` becomes a task to fix it, once.
     public static let flakeLimit = 3
     public static let flakeWindow: Double = 7 * 86_400
@@ -1522,7 +1525,7 @@ public final class BoardStore: @unchecked Sendable {
     /// The archive as last read, by its size and change time (it's only appended to), and the tasks `restore` brought
     /// back in this `update`, with the status they had there.
     let archiveLock = NSLock()
-    var archiveCache: (size: Int, changed: Date, tasks: [LeadTask])?
+    var archiveCache: (size: Int, changed: Date, contents: ArchiveContents)?
     var restoring: [String: LeadTask.Status] = [:]
 
     public init(root: String) { self.root = root }

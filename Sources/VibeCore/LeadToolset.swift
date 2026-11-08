@@ -236,6 +236,8 @@ public final class LeadToolset: MCPToolset {
     private let tellingIgnoredKeys = NSLock()
     /// Status said once that decisions.md is past the size to archive (`LeadRecords.archiveNudge`).
     private var toldArchive = false
+    /// Status said once that progress.md is past the size to read in full (`LeadRecords.progressNudge`).
+    private var toldProgress = false
     /// When this server last moved finished tasks to the board's archive (`archiveFinished`), and its clock (faked in
     /// tests).
     var archivedAt: Double?
@@ -395,6 +397,65 @@ public final class LeadToolset: MCPToolset {
         if !force, let last = archivedAt, now - last < BoardStore.archiveEvery { return }
         archivedAt = now
         _ = try? store.archive(now: now)
+        removeArchivedLogs()
+    }
+
+    /// The scratch folder for names `vault.scratch` puts directly under a project's.
+    private var scratchTop: URL { vault.scratch(root: root, "x").deletingLastPathComponent() }
+
+    /// Folders under scratch the sweep never takes: they're not left by a task.
+    private static let keptScratch: Set<String> = ["remote-git", "remote-poll"]
+
+    /// The merge logs (`saveMergeLog`, `<slug>/`) of tasks that are in the archive now and not on the board: they go
+    /// when the task does.
+    private func removeArchivedLogs() {
+        let top = scratchTop
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: top.path), !names.isEmpty else { return }
+        let onBoard = Set(store.load().tasks.map(\.slug))
+        let archived = Set(store.archived().map(\.slug))
+        for name in names where archived.contains(name) && !onBoard.contains(name) && !Self.keptScratch.contains(name) {
+            _ = removeFolder(top.appendingPathComponent(name).path)
+        }
+    }
+
+    /// Removes what merges and audits cut short left under this project's scratch folder (`merge-*`, `revert-*`,
+    /// `audit-*`, each with its `-home`): at the lead's tool server's start, off the first call. Never a task's
+    /// that isn't finished (a running or reviewed task's folder), nor one a live lock holds: an audit's
+    /// `run/audit-<slug>.lock`, a merge or revert's `merge-into-*.lock` (held while it's removed). Each was a scratch
+    /// worktree: git forgets it. Returns the names removed.
+    @discardableResult
+    func sweepScratch() -> [String] {
+        let top = scratchTop
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: top.path), !names.isEmpty else { return [] }
+        let finished: [LeadTask.Status] = [.done, .folded, .abandoned, .reverted]
+        let live = Set(store.load().tasks.filter { !finished.contains($0.status) }.map(\.slug))
+        // Every base's lock held while merges' folders go, or none of them if one is busy.
+        let locks = names.filter { $0.hasPrefix("merge-into-") && $0.hasSuffix(".lock") }.map { FileLock.attempt(top.appendingPathComponent($0).path) }
+        let mergesFree = !locks.contains { $0 == nil }
+        defer { locks.forEach { $0?.release() } }
+        var removed: [String] = []
+        for name in names where !name.hasPrefix("merge-into-") && !Self.keptScratch.contains(name) {
+            guard let prefix = ["merge-", "revert-", "audit-"].first(where: name.hasPrefix) else { continue }
+            let rest = String(name.dropFirst(prefix.count))
+            // The folder's task, or a slug that itself ends in -home: both looked at.
+            let slugs = rest.hasSuffix("-home") ? [String(rest.dropLast("-home".count)), rest] : [rest]
+            guard Set(slugs).isDisjoint(with: live) else { continue }
+            var holds: [FileLock] = []
+            defer { holds.forEach { $0.release() } }
+            if prefix == "audit-" {
+                let taken = slugs.map { FileLock.attempt((store.folder as NSString).appendingPathComponent("run/audit-\($0).lock")) }
+                guard !taken.contains(where: { $0 == nil }) else { continue }
+                holds = taken.compactMap { $0 }
+            } else if !mergesFree {
+                continue
+            }
+            let path = top.appendingPathComponent(name).path
+            Git.run(["worktree", "remove", "--force", path], in: root)
+            _ = removeFolder(path)
+            if !FileManager.default.fileExists(atPath: path) { removed.append(name) }
+        }
+        if !removed.isEmpty { Git.run(["worktree", "prune"], in: root) }
+        return removed
     }
 
     /// The server as `vibeswitcher-mcp` starts it: `--root <repo>` (plus `--role`/`--task` as it was started).
@@ -518,6 +579,10 @@ public final class LeadToolset: MCPToolset {
             remotePolling = poller
             poller.start(run: run)
         }
+        // What merges and audits cut short left behind, off this call: a full disk's worth is minutes of deleting.
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            _ = run { self?.sweepScratch() }
+        }
         records.start(run: run) { [weak self] in
             guard let self, (try? self.authenticate()) != nil else { return nil }
             return self.base
@@ -566,7 +631,7 @@ public final class LeadToolset: MCPToolset {
         case .lead?:
             return [
                 MCPToolInfo(name: "status", description: "The board at a glance: tasks by state, workers and what they're doing, open questions, and each report that came in since you last asked, in one line (board(task) or read_session has the full text)."),
-                MCPToolInfo(name: "board", description: "The board in one line per task, with the open questions and the latest updates; with task, that task in full: its contract, evidence, setback, reports, checkpoints and merge.",
+                MCPToolInfo(name: "board", description: "The board in one line per task, with the open questions and the latest updates; with task, that task in full: its contract, evidence, setback, reports, questions, updates naming it, checkpoints and merge. Not a task: the updates whose title holds it.",
                             properties: ["task": P(type: "string", description: "A task's slug (or id): that task in full")]),
                 MCPToolInfo(name: "add_task", description: "Put a task on the board with its contract (title, goal and acceptance), or make one of an audit's finding (from_finding: the contract comes from it, anything you pass replaces that part, and the finding is closed as moved to the new task).",
                             properties: ["title": P(type: "string", description: "Short title"),
@@ -1369,6 +1434,7 @@ public final class LeadToolset: MCPToolset {
                 if status == .planned, board.tasks[index].status != .planned {
                     board.tasks[index].worked = nil
                     board.tasks[index].workedAt = nil
+                    store.dropBudgetClock(board.tasks[index].id)
                     board.tasks[index].overBudget = nil
                 }
                 let before = board.tasks[index].status
@@ -1513,6 +1579,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].blocker = nil
             board.tasks[index].worked = nil
             board.tasks[index].workedAt = nil
+            store.dropBudgetClock(board.tasks[index].id)
             board.tasks[index].overBudget = nil
             if let replanned { board.tasks[index].audits = replanned }
         }
@@ -4177,6 +4244,8 @@ public final class LeadToolset: MCPToolset {
         var update = LeadUpdate(title: title, body: body)
         update.images = try keptImages(strings(arguments["images"]), as: "\(KeptImages.updates)/\(update.id)", relativeTo: root, not: "Not posted")
         try store.update { board in board.updates.append(update) }
+        // Past the cap the oldest go to the archive (at most hourly: `archiveFinished`).
+        archiveFinished(force: false)
         // In the log too, so a later lead sees the updates, check-ins and retrospectives.
         let first = body.split(whereSeparator: \.isNewline).first.map { Self.clip(String($0), 200) }
         try? store.appendProgress("Update: \(Self.clip(title, 200))" + (first.map { " — \($0)" } ?? ""))
@@ -5246,6 +5315,7 @@ public final class LeadToolset: MCPToolset {
         if let line = records.statusLine { lines.append(line) }
         if let lag = gateLag(workflow) { lines.append(lag.text(base: workflow.base)) }
         if let line = archiveNudgeOnce() { lines.append(line) }
+        if let line = progressNudgeOnce() { lines.append(line) }
         if let listing {
             do {
                 let mac = try macLoad(listing, load: runtime.steadyLoad())
@@ -5576,7 +5646,8 @@ public final class LeadToolset: MCPToolset {
 
     /// Every question, open first (as status orders them), then answered and withdrawn ones, each with its history.
     private func questionsText() -> String {
-        let board = store.load()
+        // With the archive: the closed ones past the cap too.
+        let board = store.loadAll()
         guard !board.questions.isEmpty else { return "No questions to the user yet." }
         let now = Date().timeIntervalSince1970
         func block(_ question: LeadQuestion) -> [String] {
@@ -5670,6 +5741,18 @@ public final class LeadToolset: MCPToolset {
         return nudge
     }
 
+    /// `LeadRecords.progressNudge` for progress.md as it is, the first time status finds it past the size in this tool
+    /// server; nil after, or below it.
+    private func progressNudgeOnce() -> String? {
+        tellingIgnoredKeys.lock()
+        defer { tellingIgnoredKeys.unlock() }
+        guard !toldProgress else { return nil }
+        let bytes = (try? FileManager.default.attributesOfItem(atPath: store.recordPath(LeadRecords.Kind.progress.name))[.size] as? Int) ?? 0
+        let nudge = LeadRecords.progressNudge(bytes: bytes)
+        if nudge != nil { toldProgress = true }
+        return nudge
+    }
+
     private func workflowWarnings(_ workflow: LeadWorkflow) -> [String] {
         var lines: [String] = []
         if let problem = workflow.problem { lines.append("workflow.md: \(problem). Fix it with configure.") }
@@ -5743,6 +5826,13 @@ public final class LeadToolset: MCPToolset {
     /// How many of the latest updates the board lists.
     static let boardUpdates = 5
 
+    /// The updates whose title holds `wanted` (or whose id starts with it), each in full, oldest first; nil when none.
+    static func updatesText(_ updates: [LeadUpdate], matching wanted: String) -> String? {
+        let found = updates.filter { $0.id.hasPrefix(wanted) || $0.title.localizedCaseInsensitiveContains(wanted) }
+        guard !found.isEmpty else { return nil }
+        return found.map { "Update \($0.id) (\(LeadBoard.clock($0.at))): \($0.title)\n\($0.body)" }.joined(separator: "\n\n")
+    }
+
     /// The board in one bounded line per task, with the open questions and the latest updates; with `task`, that task
     /// in full, with the reports about it.
     private func boardText(task wanted: String?) throws -> String {
@@ -5750,7 +5840,11 @@ public final class LeadToolset: MCPToolset {
         let board = store.loadAll()
         let sessions = (try? listed()).map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
         if let wanted, !wanted.isEmpty {
-            guard let task = board.task(wanted) else { throw Problem(text: "No task \(wanted) on the board. board without task lists them.") }
+            guard let task = board.task(wanted) else {
+                // Not a task: an update, by its title or id (they have no task of their own).
+                if let found = Self.updatesText(board.updates, matching: wanted) { return found }
+                throw Problem(text: "No task \(wanted) on the board. board without task lists them.")
+            }
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             var lines = [String(decoding: try encoder.encode(task), as: UTF8.self)]
@@ -5783,6 +5877,17 @@ public final class LeadToolset: MCPToolset {
             let reports = (board.reports ?? []).filter { $0.task == task.slug }
             lines.append(reports.isEmpty ? "\nNo reports about it on the board." : "\nReports about it (oldest first):")
             lines += reports.map { "- \(LeadBoard.clock($0.at)) \($0.about): \($0.text)" }
+            // Those the archive took past the cap too: `board` here is loadAll's.
+            let asked = board.questions.filter { $0.task == task.slug }
+            if !asked.isEmpty {
+                lines.append("\nQuestions about it (oldest first):")
+                lines += asked.map { "- [\($0.state.rawValue)] \($0.text)" + ($0.answer.map { " → \($0)" } ?? "") }
+            }
+            let updates = board.updates.filter { $0.title.contains(task.slug) || $0.body.contains(task.slug) }
+            if !updates.isEmpty {
+                lines.append("\nUpdates naming it (oldest first):")
+                lines += updates.map { "- \(LeadBoard.clock($0.at)) \($0.title): \($0.body)" }
+            }
             return lines.joined(separator: "\n")
         }
         var counts: [LeadTask.Status: Int] = [:]

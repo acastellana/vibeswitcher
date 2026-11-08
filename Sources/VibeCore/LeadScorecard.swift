@@ -154,7 +154,7 @@ public struct LeadScorecard: Equatable, Sendable {
         counted = rounds.count + archived.counted
         meanRoundsToPass = counted == 0 ? nil : Double(rounds.reduce(0, +) + archived.rounds) / Double(counted)
         firstAuditPassRate = counted == 0 ? nil : Double(rounds.filter { $0 == 1 }.count + archived.firstPass) / Double(counted)
-        userMinutes = board.questions.reduce(0) { $0 + $1.waitingOnUser(now: now) } / 60
+        userMinutes = (board.questions.reduce(0) { $0 + $1.waitingOnUser(now: now) } + (archived.questionSeconds ?? 0)) / 60
         userMinutesPerMergedTask = self.merged == 0 ? nil : userMinutes / Double(self.merged)
         reverts = scores.filter { $0.revertedBy != nil }.count + archived.reverts
         mergedWithoutTests = scores.filter { $0.mergedWithoutTests == true }.count + archived.withoutTests

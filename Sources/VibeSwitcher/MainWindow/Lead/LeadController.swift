@@ -323,7 +323,9 @@ struct WitnessWork {
         stuckPrompts = LeadWitness.stuckPrompts(board: board, seen: seen, now: now, advanced: advanced).filter { !told($0.key) }
         step?("working")
         working = LeadBudget.working(board: board, seen: seen)
-        notesWork = board.notesWork(working, defaultMinutes: budgetMinutes, now: now.timeIntervalSince1970)
+        // The count not on board.json yet (`LeadBudgetClock`): a few bytes, read here off the main thread.
+        let clock = recoveryRoot.map { BoardStore(root: $0).budgetClock() } ?? LeadBudgetClock()
+        notesWork = board.notesWork(working, defaultMinutes: budgetMinutes, now: now.timeIntervalSince1970, clock: clock)
         step?("stalls")
         stalls = LeadWitness.stalls(board: board, seen: seen, now: now)
         var noted = board
@@ -1927,7 +1929,7 @@ final class LeadController: ObservableObject {
         if work.notesWork {
             let sessions = team.sessions
             reads.async({ _ in
-                (try? BoardStore(root: root).update { $0.noteWork(working, defaultMinutes: budget, now: at).reached }) ?? []
+                (try? BoardStore(root: root).noteWork(working, defaultMinutes: budget, now: at)) ?? []
             }) { [weak self] reached in
                 for task in reached {
                     let agent = task.worker.flatMap { worker in sessions[worker].map { LeadAgent(pid: $0.pid, tty: $0.tty, session: worker) } }
