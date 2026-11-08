@@ -365,6 +365,80 @@ struct ConfigSealTests: LeadTeamFixture {
         #expect(try asLead.checkConfig(root: root) == LeadVault.ConfigCheck())
     }
 
+    /// The vault as the host answers a connection that hasn't proved it's the app yet, then one that has.
+    final class Proof: @unchecked Sendable {
+        private let lock = NSLock()
+        private var proven = false
+        private(set) var asks = 0
+        func prove() { lock.withLock { proven = true } }
+        func caller() -> LeadVault.Caller { lock.withLock { asks += 1; return proven ? .app : .unknown } }
+    }
+
+    /// The 2026-11-08 13:34 install: the app's seal of the hook binary went out before it had read its key, the host
+    /// refused it as no one's, and it was thrown away, so the card stayed. A refused seal is kept and lands once the
+    /// app has proved itself, and the card a look raised meanwhile goes with it.
+    @Test func aSealRefusedBeforeTheAppProvedItselfLandsOnceItHas() throws {
+        let runtime = FakeRuntime()
+        let hook = home + "/.vibeswitcher/bin/vibeswitcher-hook"
+        let (root, asLead) = try runningTeam([".vibeswitcher/bin/vibeswitcher-hook": "v1"], runtime: runtime)
+        let proof = Proof()
+        let launching = book.vault(folder: vault.folder, as: { proof.caller() })
+        try launching.appWrite([hook], home: home) { try write("v2", hook) }
+        launching.sealAppWrites()
+        #expect(try asLead.checkConfig(root: root).held == ["~/.vibeswitcher/bin"])
+        proof.prove()
+        launching.sealAppWrites()
+        #expect(try asLead.checkConfig(root: root) == LeadVault.ConfigCheck())
+        #expect(vault.heldConfig(root: root).isEmpty)
+    }
+
+    /// A look's retry leaves a refused seal for a while (each ask has the host hash your home's config), then asks.
+    @Test func aPeriodicLookWaitsOutARefusalThenAsksAgain() throws {
+        let runtime = FakeRuntime()
+        let hook = home + "/.vibeswitcher/bin/vibeswitcher-hook"
+        let (root, asLead) = try runningTeam([".vibeswitcher/bin/vibeswitcher-hook": "v1"], runtime: runtime)
+        let proof = Proof()
+        let launching = book.vault(folder: vault.folder, as: { proof.caller() })
+        try launching.appWrite([hook], home: home) { try write("v2", hook) }
+        launching.sealAppWrites()
+        let asked = proof.asks
+        launching.retrySealingAppWrites(now: Date())
+        #expect(proof.asks == asked)
+        proof.prove()
+        launching.retrySealingAppWrites(now: Date().addingTimeInterval(31))
+        #expect(proof.asks == asked + 1)
+        #expect(try asLead.checkConfig(root: root) == LeadVault.ConfigCheck())
+    }
+
+    /// The hook binary changed by anything but the app's write is held: on its own, right after the app's write and
+    /// before its seal lands, and before the app's write, which doesn't launder it.
+    @Test func theHookBinaryChangedByAnythingButTheAppsWriteIsHeld() throws {
+        let hook = home + "/.vibeswitcher/bin/vibeswitcher-hook"
+        let names = ["~/.vibeswitcher/bin"]
+        let team = try runningTeam([".vibeswitcher/bin/vibeswitcher-hook": "v1"], runtime: FakeRuntime())
+        try write("evil", hook)
+        #expect(try team.asLead.checkConfig(root: team.root).held == names)
+
+        // After the app's write, before its seal reaches the vault.
+        try write("v1", hook)
+        #expect(try vault.checkConfig(root: team.root).held.isEmpty)
+        let unreachable = LeadVault(folder: vault.folder) { _ in throw CocoaError(.fileReadNoSuchFile) }
+        try unreachable.appWrite([hook], home: home) { try write("v2", hook) }
+        unreachable.sealAppWrites()
+        try write("v2 and evil", hook)
+        vault.sealAppWrites()
+        #expect(try team.asLead.checkConfig(root: team.root).held == names)
+
+        // Before the app's write: what's there isn't what was sealed (v2, the app's write above), so the write seals
+        // nothing.
+        try write("v2", hook)
+        #expect(try vault.checkConfig(root: team.root).held.isEmpty)
+        try write("evil", hook)
+        try vault.appWrite([hook], home: home) { try write("v3", hook) }
+        vault.sealAppWrites()
+        #expect(try team.asLead.checkConfig(root: team.root).held == names)
+    }
+
     /// F2: something watched that isn't a regular file (a FIFO, a link to one, one in a watched folder) is hashed as
     /// such, never read: the look doesn't wait on it.
     @Test(.timeLimit(.minutes(1))) func aFIFOOrDeviceIsNeverRead() throws {
