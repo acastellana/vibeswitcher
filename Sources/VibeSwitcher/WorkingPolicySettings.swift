@@ -77,7 +77,7 @@ struct WorkingPolicySection: View {
         } header: {
             Text("Working policy")
         } footer: {
-            SettingsFooter("Every project's lead, workers and verifiers get this in their prompts. When you save a change, each lead running now is told it once and applies it from then on. Kept in ~/.vibeswitcher/policy.md.")
+            SettingsFooter(.workingPolicy)
         }
         .onAppear { editor.reload() }
     }

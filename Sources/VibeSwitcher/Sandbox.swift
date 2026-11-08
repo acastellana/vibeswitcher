@@ -1235,6 +1235,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("boost off|on|away|present|battery|battery-on|battery-low|veto|mark", "boost mark clicks the main window's Boost mark (Settings › Performance at Boost). Otherwise Boost mode in a made-up state (the power source, the charge, your presence and the usage made up): off; On on AC; Automatic away on AC (boosted), at the Mac, away on battery; On on battery with Also on battery at 86 % (boosted) or 24 %; or away on AC with the usage watch's veto. Settings and the menu-bar sheet show it"),
         ("settings [TAB] [OPTION]", "opens Settings on a category: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")
             + "; scrolled to and highlighting an option: an id in the settings catalog, or boost, review-floor (it makes the made-up project sandbox-floor first)"),
+        ("settings-help NOTE", "opens the \"?\" popover of a footer in the Settings category shown (\"shot\" draws it): " + SettingsNote.allCases.map(\.rawValue).joined(separator: ", ")),
         ("settings-search [TEXT]", "types TEXT in Settings' search field, opening Settings if it's closed (no TEXT clears it), and says what it found"),
         ("settings-pick N|ID", "picks the Nth search result (from 1), or the option with that catalog id, as a click on it does"),
         ("toolchain [dismiss]", "shows or dismisses a fake developer tools notice"),
@@ -2251,6 +2252,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
             if section == .reviewFloor { _ = Driver.floorProject(home: home) }
             showSettings(tab, option: option)
             settle { reply(true, "settings shown on \(self.settings?.searchSelection.tab.rawValue ?? tab.rawValue)" + (option.map { " at \($0)" } ?? "")) }
+        case "settings-help":
+            guard let selection = settings?.searchSelection else { return reply(false, "no settings shown") }
+            guard let note = SettingsNote(rawValue: rest) else {
+                return reply(false, "settings-help NOTE: " + SettingsNote.allCases.map(\.rawValue).joined(separator: ", "))
+            }
+            selection.openHelp = note
+            settle { selection.openHelp = nil; reply(true, "help open for \(note.section)") }
         case "settings-search":
             if settings == nil { showSettings(.general) }
             guard let selection = settings?.searchSelection else { return reply(false, "no settings shown") }
@@ -2916,6 +2924,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         if let main = window?.window, main.isVisible { windows.append(("main", main)) }
         if let sheet, sheet.isVisible { windows.append(("sheet-\(sheetName ?? "sheet")", sheet)) }
         if let settings = settings?.window, settings.isVisible { windows.append(("settings", settings)) }
+        // A "?" popover opened by settings-help: its own small window.
+        for popover in NSApp.windows where popover.isVisible && String(describing: type(of: popover)).contains("Popover") { windows.append(("help", popover)) }
         guard !windows.isEmpty else { return reply(false, "no window to draw") }
         if model.showsChat { window?.chat.poll() }
         var written: [String] = []

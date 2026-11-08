@@ -100,8 +100,7 @@ struct HostRestartSection: View {
         } header: {
             Text("Session host")
         } footer: {
-            SettingsFooter(host.restartOffer?.help ?? host.proofRefusal.map { "It shows this app none of its sessions: \($0)" }
-                ?? "Runs the window's sessions; it's updated with the app.")
+            SettingsFooter(.sessionHost(offer: host.restartOffer, refused: host.proofRefusal != nil), detail: host.proofRefusal)
         }
     }
 

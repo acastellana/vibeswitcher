@@ -156,11 +156,7 @@ struct WalletSettingsTab: View {
             } header: {
                 Text("Wallet Manager's Mac")
             } footer: {
-                SettingsFooter("An agent asks for a transaction with vs-wallet request (on every session's PATH; vs-wallet help says how), "
-                    + "and the request shows as a card in its chat. Only when you press Send to Wallet Manager does it go "
-                    + "through Passage to the Wallet Manager on its Mac (or, with \(Self.onThisMacTitle) chosen, through a "
-                    + "folder only you can use), which checks it; you sign there on the hardware wallet. "
-                    + "VibeSwitcher never signs. The Wallet Manager's answers go back to the agent as messages.")
+                SettingsFooter(.walletManager)
             }
             Section {
                 SettingRow("wallet-passage") { label in
@@ -179,8 +175,7 @@ struct WalletSettingsTab: View {
             } header: {
                 Text("Passage")
             } footer: {
-                SettingsFooter("The passage command requests go through: a passage link, Passage.app or its binary. "
-                    + "Empty: passage on your PATH, else Passage.app in /Applications or ~/Applications.")
+                SettingsFooter(.passage)
             }
         }
         .formStyle(.grouped)

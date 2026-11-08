@@ -103,6 +103,7 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .environment(\.settingsHighlight, selection.highlighted)
+        .environment(\.settingsOpenHelp, selection.openHelp)
         .frame(width: SettingsWindowController.size.width, height: SettingsWindowController.size.height)
     }
 
@@ -177,7 +178,7 @@ struct GeneralSettings: View {
             } header: {
                 Text("Startup")
             } footer: {
-                SettingsFooter("Window sessions keep running when VibeSwitcher quits or updates. Ended sessions stay listed for a day.")
+                SettingsFooter(.startup)
             }
             Section {
                 SettingRow("projects-folder") { label in
@@ -198,7 +199,7 @@ struct GeneralSettings: View {
             } header: {
                 Text("Projects")
             } footer: {
-                SettingsFooter("If this folder isn't there yet, it's made (0755) when you create the first project, and the sheet says so first.")
+                SettingsFooter(.projects)
             }
         }
         .formStyle(.grouped)
@@ -206,9 +207,6 @@ struct GeneralSettings: View {
 }
 
 struct NotificationSettings: View {
-    /// What a lead's team notifies about (see `AlertRules`).
-    static let teamNote = "A project lead's team notifies you only when all its work is done or you're needed (a question for you, a prompt in the lead's terminal). These settings apply to those too."
-
     @ObservedObject var preferences: Preferences
     @ObservedObject var setup: SetupModel
 
@@ -232,7 +230,7 @@ struct NotificationSettings: View {
             } header: {
                 Text("Banners and sounds")
             } footer: {
-                SettingsFooter(Self.teamNote)
+                SettingsFooter(.notifications)
             }
         }
         .formStyle(.grouped)
@@ -295,7 +293,7 @@ struct ProjectLeadSettings: View {
             } header: {
                 Text("Team")
             } footer: {
-                SettingsFooter("Summaries are written by claude -p with haiku and no tools, from the task's title, checkpoints and last steps: at most every 3 minutes per task, while the Team tab is open. Off, it shows the latest checkpoint or activity. Messages between leads, sent or refused, are in the lead's Team tab, under Between leads.")
+                SettingsFooter(.team)
             }
             if let policy { WorkingPolicySection(editor: policy) }
             if let floor { ReviewFloorSection(editor: floor) }
@@ -323,7 +321,7 @@ struct PerformanceSettings: View {
             } header: {
                 Text("Power")
             } footer: {
-                SettingsFooter("While a worker, verifier or merge runs, the Mac doesn't go to sleep on its own; on battery only if set to Always. Work in flight finishes when the battery limit is reached; above it, leads work as on power.")
+                SettingsFooter(.power)
             }
         }
         .formStyle(.grouped)
@@ -399,7 +397,7 @@ struct AgentsSettings: View {
             } header: {
                 Text("Shells")
             } footer: {
-                SettingsFooter(Self.openShellsHelp)
+                SettingsFooter(.shells)
             }
             Section {
                 SettingRow("hooks") { label in
@@ -432,7 +430,7 @@ struct AgentsSettings: View {
             } header: {
                 Text("Hooks")
             } footer: {
-                SettingsFooter("Installing adds VibeSwitcher's entries beside yours; the first install keeps a copy of each file as …vibeswitcher-backup.")
+                SettingsFooter(.hooks)
             }
             Section {
                 SettingRow("codex-trust") { label in
@@ -443,7 +441,7 @@ struct AgentsSettings: View {
             } header: {
                 Text("Codex")
             } footer: {
-                SettingsFooter("Installing trusts them for you (in ~/.codex/config.toml, like Codex's /hooks screen).")
+                SettingsFooter(.codex)
             }
         }
         .formStyle(.grouped)
@@ -452,19 +450,6 @@ struct AgentsSettings: View {
     static func tildePath(_ path: String) -> String {
         let home = NSHomeDirectory()
         return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
-    }
-}
-
-/// A section's explanation, under it and aligned with its rows.
-struct SettingsFooter: View {
-    let text: String
-    init(_ text: String) { self.text = text }
-
-    var body: some View {
-        Text(text).font(.caption).foregroundStyle(.secondary)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -785,7 +770,7 @@ struct BriefingSettings: View {
         } header: {
             Text("Spoken briefing")
         } footer: {
-            SettingsFooter("Brief me (in the window's toolbar and the menu bar) writes 30 seconds on what happened lately across the projects VibeSwitcher leads, with headless Claude, and reads it aloud. Brief me on <project>, at the top of a lead's Team tab or with ⌥⇧⌘B, does the same for that one project. With a key, the text goes to ElevenLabs to be read, only when you press the button; without one, the Mac's own voice reads it. A key typed here is kept in your login Keychain, nowhere else; without one, ELEVENLABS_API_KEY from your shell or ~/.config/elevenlabs/key.env is used, held in memory only.")
+            SettingsFooter(.briefing)
         }
     }
 

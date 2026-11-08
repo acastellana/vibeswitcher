@@ -120,7 +120,7 @@ struct NewProjectSheet: View {
                     TextField("First goal", text: $model.goal, prompt: Text("Optional: what the lead should build first"))
                         .accessibilityLabel("First goal")
                 } footer: {
-                    SettingsFooter("Made with a git repository and a first commit on git's default branch (init.defaultBranch, else main): a README.md titled with the name and a .gitignore for .DS_Store and .build/. The project lead starts in it.")
+                    FooterText("Made with a git repository and a first commit on git's default branch (init.defaultBranch, else main): a README.md titled with the name and a .gitignore for .DS_Store and .build/. The project lead starts in it.")
                 }
             }
             .formStyle(.grouped)

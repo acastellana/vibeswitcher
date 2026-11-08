@@ -330,6 +330,116 @@ struct SettingsCatalogTests {
     }
 }
 
+/// What Settings says under its sections (`SettingsNote`): short, plain, and with the safety facts still there.
+struct SettingsNoteTests {
+    static let maxLength = 200
+    /// Words from the code that mean nothing to someone reading Settings, matched at the start of a word in any case.
+    static let internalTerms = ["VS_HEAVY", "merge_batching", "0755", "sealed", "gate", "heavy_slots", "load_threshold", "mac_max_sessions", "workflow.md", "claude -p"]
+
+    /// Why `text` can't be a footer; empty when it can.
+    static func problems(_ text: String) -> [String] {
+        var found: [String] = []
+        if text.count > maxLength { found.append("\(text.count) characters") }
+        if text.contains("\n") { found.append("more than one line") }
+        let sentences = text.matches(of: #/[.!?](\s|$)/#).count
+        if sentences > 2 { found.append("\(sentences) sentences") }
+        for term in internalTerms where text.range(of: "\\b" + NSRegularExpression.escapedPattern(for: term), options: [.regularExpression, .caseInsensitive]) != nil {
+            found.append("says \(term)")
+        }
+        if text.contains("~/") { found.append("names a file path") }
+        return found
+    }
+
+    @Test func everyFooterIsShortAndPlain() {
+        for note in SettingsNote.allCases {
+            #expect(Self.problems(note.text).isEmpty, "\(note.rawValue): \(Self.problems(note.text))")
+            #expect(!note.text.trimmingCharacters(in: .whitespaces).isEmpty, "\(note.rawValue): nothing to say")
+            #expect(SettingsCatalog.all.contains { $0.section == note.section }, "\(note.rawValue): no section \(note.section) in the catalog")
+        }
+    }
+
+    /// The check itself: last release's Boost footer fails it, and a word that merely contains a term doesn't.
+    @Test func theCheckRefusesWhatItIsFor() {
+        #expect(Self.problems("VS_HEAVY_CORES follows the slots.") == ["says VS_HEAVY"])
+        #expect(Self.problems("Projects whose merge_batching is boost.") == ["says merge_batching"])
+        #expect(Self.problems("It's made (0755) for you.") == ["says 0755"])
+        #expect(Self.problems("Kept sealed.") == ["says sealed"])
+        #expect(Self.problems("A gate holds it.") == ["says gate"])
+        #expect(Self.problems("Leads delegate the work.").isEmpty)
+        #expect(Self.problems(String(repeating: "a", count: 201)) == ["201 characters"])
+        #expect(Self.problems("One. Two. Three.") == ["3 sentences"])
+        #expect(Self.problems("Kept in ~/.vibeswitcher/policy.md") == ["names a file path"])
+    }
+
+    /// A footer in a pane is a note by construction (`SettingsFooter` takes nothing else); every note is shown somewhere.
+    @Test func everyNoteIsShownInAPane() throws {
+        let files = SettingsCatalogTests.panes.map(\.file)
+        let source = try (files + ["Sources/VibeSwitcher/SettingsNotes.swift"]).map(SettingsCatalogTests.read).joined(separator: "\n")
+        for note in SettingsNote.allCases where note.section != "Session host" {
+            #expect(source.contains("SettingsFooter(.\(note.rawValue)"), "\(note.rawValue) isn't shown")
+        }
+        #expect(source.contains("SettingsFooter(.sessionHost("))
+        #expect(!source.contains("SettingsFooter(\""))
+    }
+
+    /// Every state of the session host has a footer, and the restart that ends sessions says so.
+    @Test func theSessionHostsFooterFollowsItsState() {
+        #expect(SettingsNote.sessionHost(offer: nil, refused: false) == .hostCurrent)
+        #expect(SettingsNote.sessionHost(offer: nil, refused: true) == .hostRefused)
+        #expect(SettingsNote.sessionHost(offer: .handOver, refused: false) == .hostHandOver)
+        #expect(SettingsNote.sessionHost(offer: .endAndReplace(live: 0), refused: false) == .hostNoSessions)
+        #expect(SettingsNote.sessionHost(offer: .endAndReplace(live: 3), refused: false) == .hostEndsSessions)
+        #expect(SettingsNote.hostEndsSessions.text.contains("ends every running session"))
+        #expect(SettingsNote.hostHandOver.text.contains("keep running"))
+    }
+
+    /// The "?" shows the note's help, then what only the moment knows; a note with neither has no button.
+    @Test func helpIsTheNotesDetailThenTheLiveOne() {
+        #expect(SettingsFooter(.startup).helpText == nil)
+        #expect(SettingsFooter(.codex).helpText == SettingsNote.codex.help)
+        #expect(SettingsFooter(.hostRefused, detail: "bad proof").helpText == "bad proof")
+        #expect(SettingsFooter(.boost, detail: "Live.").helpText == SettingsNote.boost.help! + "\n\nLive.")
+    }
+
+    /// Where keys are kept, what Boost does on battery, what a limit holds back, what reaches other services and who
+    /// signs: each still said in a footer, a description or a "?".
+    @Test func safetyFactsStayReachable() throws {
+        func description(_ id: String) throws -> String { try #require(SettingsCatalog.option(id)).description }
+        func help(_ note: SettingsNote) throws -> String { try #require(note.help) }
+        // Where keys are kept.
+        #expect(SettingsNote.dictation.text.contains("login Keychain"))
+        #expect(SettingsNote.briefing.text.contains("login Keychain"))
+        #expect(try description("dictation-key").contains("login Keychain"))
+        #expect(try description("briefing-key").contains("login Keychain"))
+        #expect(try help(.briefing).contains("ELEVENLABS_API_KEY") && help(.briefing).contains("held in memory only"))
+        // What leaves the Mac.
+        #expect(SettingsNote.dictation.text.contains("goes to OpenAI"))
+        #expect(try help(.dictation).contains("no recording is kept"))
+        #expect(SettingsNote.briefing.text.contains("goes to ElevenLabs"))
+        // Boost on battery.
+        #expect(SettingsNote.boost.text.contains("on battery it stays off"))
+        #expect(try help(.boost).contains("\(Boost.batteryFloor) %") && help(.boost).contains("battery limit"))
+        #expect(try description("boost-on-battery").contains("\(Boost.batteryFloor) %"))
+        // What a limit holds back.
+        #expect(SettingsNote.macLimits.text.contains("start nothing new") && SettingsNote.macLimits.text.contains("Merges wait"))
+        #expect(try help(.usageLimits).contains("\(Int(AccountUsage.threshold)) %"))
+        #expect(SettingsNote.usageLimits.text.contains("still stops"))
+        #expect(SettingsNote.power.text.contains("nothing new starts"))
+        #expect(try description("battery-hold").contains("start no new work and merge nothing"))
+        // What only you can do.
+        #expect(SettingsNote.shells.text.contains("nothing runs until you press Run") && SettingsNote.shells.text.contains("any command as you"))
+        #expect(try help(.shells) == AgentsSettings.openShellsHelp)
+        #expect(SettingsNote.walletManager.text.contains("VibeSwitcher never signs"))
+        #expect(SettingsNote.reviewFloor.text.contains("never looser"))
+    }
+
+    /// The "?" is a named button, for VoiceOver and for the pointer.
+    @Test func theHelpButtonIsLabelled() throws {
+        let source = try SettingsCatalogTests.read("Sources/VibeSwitcher/SettingsNotes.swift")
+        #expect(source.contains(#".accessibilityLabel("More about \(note.section)")"#) && source.contains(#".help("More about \(note.section)")"#))
+    }
+}
+
 /// The stored keys behind Settings' controls, named so a rename or a move can't change them unnoticed.
 struct SettingsStoredKeysTests {
     let temp = Scratch()

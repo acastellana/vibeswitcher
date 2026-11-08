@@ -230,7 +230,7 @@ struct DictationSettings: View {
         } header: {
             Text("Dictation")
         } footer: {
-            SettingsFooter("Hold the mic in the composer (or \(dictation.shortcuts) in its box), on the Mac or the phone, and speak: when you let go, the recording goes to OpenAI with this key and the text lands in the box for you to check before sending. It goes with the project's, its branches' and recent files' names, to spell them right; nothing else, and no recording is kept. The key stays on this Mac, in your login Keychain, and the phone's recordings are transcribed here. \(OpenAITranscription.defaultModel) is OpenAI's most accurate.")
+            SettingsFooter(.dictation, detail: "To dictate from the keyboard, use \(dictation.shortcuts) in the composer's box.")
         }
     }
 

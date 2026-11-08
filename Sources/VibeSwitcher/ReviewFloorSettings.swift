@@ -186,7 +186,7 @@ struct ReviewFloorSection: View {
         } header: {
             Text("Review rules floor")
         } footer: {
-            SettingsFooter("The least strict each project's review rules may be. Its lead can raise a rule above the floor with configure, never lower one below it; what's in force is the floor joined with the project's workflow.md (paths: both lists; the rest: the stricter). Kept in the session host's vault, written only by VibeSwitcher.")
+            SettingsFooter(.reviewFloor)
         }
         .onAppear { editor.reload() }
     }

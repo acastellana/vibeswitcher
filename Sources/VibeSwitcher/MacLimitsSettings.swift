@@ -107,7 +107,7 @@ struct MacLimitsSection: View {
         } header: {
             Text("Mac-wide limits")
         } footer: {
-            SettingsFooter("Every project's leads share this Mac: they start nothing at the first limit, or while the load (the greater of the 1- and 5-minute averages) is above the second, and merges wait for the load. A lead refused for either is told once there's room. Builds and full test runs take one slot each; each gets VS_HEAVY_CORES, the \(MacLoad.processors) cores ÷ the slots (\(BoostSection.coresPerSlot(editor.heavySlots)) each); a project's heavy_slots in workflow.md sets its own. Kept in ~/.vibeswitcher/mac-limits.json; workflow.md's load_threshold and mac_max_sessions are ignored.")
+            SettingsFooter(.macLimits, detail: BoostSection.slotShare(editor.heavySlots))
         }
         .onAppear { editor.reload() }
         Section {
@@ -118,7 +118,7 @@ struct MacLimitsSection: View {
         } header: {
             Text("Usage limits")
         } footer: {
-            SettingsFooter("Leads start workers and audits at any share of a Claude limit (normally they stop at \(Int(AccountUsage.threshold)) %), Boost isn't held off for usage, and agent: auto stays on Claude until Claude refuses at a limit. A session that reaches a limit still stops, and the lead is told. Usage still shows, marked \(AccountUsage.ignoredMark).")
+            SettingsFooter(.usageLimits)
         }
     }
 }
@@ -164,7 +164,7 @@ struct BoostSection: View {
         } header: {
             Text("Boost")
         } footer: {
-            SettingsFooter("Automatic boosts only while the Mac is on AC power and you're away (screen locked, or no input for 5 minutes), and drops back within \(BoostWatch.every) seconds of either changing: new starts stop above the normal limits, running work finishes. On battery it's off whatever the mode, unless Also on battery is on (the battery limit below still pauses lead work). Projects whose merge_batching is boost test merges in batches while boosted. The usage watch keeps it off at \(MacLoad.number(Boost.vetoPercent)) % of an account limit, unless Ignore usage limits is on. While boosted, room freed on the Mac goes first to the project you last worked in. VS_HEAVY_CORES follows the slots: the \(MacLoad.processors) cores ÷ the slots (\(Self.coresPerSlot(preferences.boostLimits.heavySlots)) each).")
+            SettingsFooter(.boost, detail: Self.slotShare(preferences.boostLimits.heavySlots))
         }
     }
 }
@@ -173,6 +173,11 @@ extension BoostSection {
     /// A slot's share of the cores as vs-heavy gives it (VS_HEAVY_CORES): the cores ÷ the slots, rounded up, at least 2.
     static func coresPerSlot(_ slots: Int, cores: Int = MacLoad.processors) -> Int {
         max(2, (cores + max(1, slots) - 1) / max(1, slots))
+    }
+
+    /// What the slots mean on this Mac now, for a section's "?".
+    static func slotShare(_ slots: Int) -> String {
+        "With \(slots) test and build \(slots == 1 ? "slot" : "slots"), each gets \(coresPerSlot(slots)) of this Mac's \(MacLoad.processors) cores."
     }
 }
 

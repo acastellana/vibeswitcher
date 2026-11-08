@@ -305,6 +305,8 @@ final class SettingsSelection: ObservableObject {
     @Published var picked: String?
     /// The rows drawn highlighted just now: the option revealed and, when it may not be showing, its parent.
     @Published private(set) var highlighted: Set<String> = []
+    /// The note whose "?" the sandbox has opened, for a shot (`settings-help`); nil in the app.
+    @Published var openHelp: SettingsNote?
     /// How long a revealed row stays highlighted.
     static let highlightTime: TimeInterval = 1.6
     /// Runs the work after the delay, on the main thread (a test runs it when it chooses).
