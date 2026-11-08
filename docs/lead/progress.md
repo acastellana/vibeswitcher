@@ -4264,3 +4264,20 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 14:15 Update: Project review: what it found, and what's being fixed — Independent read-only reviews of core correctness, product and performance, on a different model from the one that wrote the code. I spot-checked the most serious findings in the code myself; the rest…
 - 2026-11-08 14:16 Planned the-git-guard-treats: The git guard treats trailer commands as executable config (review audit)
 - 2026-11-08 14:27 Merged settings-plain-language: Settings: plain-language pass over section footers (build 9bb93056766a)
+- 2026-11-08 14:27 Automatically (auto_advance): Merged settings-plain-language (Settings: plain-language pass over section footers) into main at 2d465468, on its passing audit and the full test run.
+- 2026-11-08 14:27 Automatically (auto_advance): Cleaned up settings-plain-language (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-08 14:27 Started a worker on readme-and-guides
+- 2026-11-08 14:27 Automatically (auto_advance): Started a worker on readme-and-guides (README and guides describe what VibeSwitcher is today), its after tasks done (settings-plain-language).
+- 2026-11-08 14:27 Started a worker on an-app-wide-appearance
+- 2026-11-08 14:27 Automatically (auto_advance): Started a worker on an-app-wide-appearance (Theme sets the whole app's look, not only the terminal), its after tasks done (settings-plain-language).
+- 2026-11-08 14:27 Started a worker on a-branch-that-moves
+- 2026-11-08 14:27 Automatically (auto_advance): Started a worker on a-branch-that-moves (A branch that moves during its merge's test run is never lost).
+- 2026-11-08 14:27 Started a worker on wallet-cards-trust-only
+- 2026-11-08 14:27 Automatically (auto_advance): Started a worker on wallet-cards-trust-only (Wallet cards trust only the host-stamped request, and the requester's label can't pass for more than it is).
+- 2026-11-08 14:28 Started a worker on correctness-tests-stop
+- 2026-11-08 14:28 Automatically (auto_advance): Started a worker on correctness-tests-stop (Correctness tests stop judging wall-clock time).
+- 2026-11-08 14:28 Started a worker on host-reply-timers-belong
+- 2026-11-08 14:28 Automatically (auto_advance): Started a worker on host-reply-timers-belong (Host: reply timers belong to their connection, and a failed vault save is logged).
+- 2026-11-08 14:28 Started a worker on the-git-guard-treats
+- 2026-11-08 14:28 Automatically (auto_advance): Started a worker on the-git-guard-treats (The git guard treats trailer commands as executable config).
+- 2026-11-08 14:28 Audit of turn-this-incident-into-15: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
