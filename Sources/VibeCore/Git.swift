@@ -206,7 +206,7 @@ public enum GitGuard {
 
     /// The config keys that name a program git runs (or, for `protocol.*.allow`, a transport it may use), as
     /// `git config --get-regexp` spells them: section and key lowercased, the subsection as written.
-    static let executableKeys = #"^(core\.(sshcommand|pager|editor|askpass)|sequence\.editor|diff\.external|gpg\.program|gpg\..+\.(program|defaultkeycommand)|pager\..+|filter\..+\.(clean|smudge|process|required)|diff\..+\.(textconv|command)|merge\..+\.driver|protocol\..+\.allow|trailer\..+\.(cmd|command))$"#
+    static let executableKeys = #"^(core\.(sshcommand|pager|editor|askpass)|sequence\.editor|diff\.external|gpg\.program|gpg\..+\.(program|defaultkeycommand)|pager\..+|filter\..+\.(clean|smudge|process|required)|diff\..+\.(textconv|command)|merge\..+\.driver|protocol\..+\.allow|trailer\..*\.(cmd|command))$"#
 
     /// Words one of `executableKeys` holds, one of which a config file that sets one (or includes another) must hold.
     private static let executableWords = ["include", "sshcommand", "pager", "editor", "askpass", "external", "program",

@@ -203,6 +203,10 @@ struct GitGuardTests: LeadTeamFixture {
         \tCMD = two
         [TRAILER "ref"]
         \tCoMmAnD = three
+        [trailer ""]
+        \tcmd = four
+        \tcommand = five
+        \twhere = start
         [trailer "cmd"]
         \twhere = start
         [trailer "command"]
@@ -210,7 +214,8 @@ struct GitGuardTests: LeadTeamFixture {
 
         """.write(toFile: file, atomically: true, encoding: .utf8)
         let entries = GitGuard.fileEntries(file, env: [:]).map { "\($0.key)=\($0.value)" }
-        #expect(entries == ["trailer.sign.cmd=one", "trailer.Fix.cmd=two", "trailer.ref.command=three"], "\(entries)")
+        #expect(entries == ["trailer.sign.cmd=one", "trailer.Fix.cmd=two", "trailer.ref.command=three",
+                            "trailer..cmd=four", "trailer..command=five"], "\(entries)")
 
         // A file whose only executable key is one of these is asked of git at all: `executableWords` holds their names.
         for (spelled, key) in [("cmd", "cmd"), ("CMD", "cmd"), ("Cmd", "cmd"), ("command", "command"), ("COMMAND", "command")] {
@@ -226,7 +231,9 @@ struct GitGuardTests: LeadTeamFixture {
         let marks = try marks()
         try commit(["b.txt": "bee\n"], in: root, "the branch's")
         for (key, value) in [("trailer.evil.cmd", touching(marks, "trailer-cmd", then: "echo planted")),
-                             ("trailer.worse.command", touching(marks, "trailer-command", then: "echo planted"))] {
+                             ("trailer.worse.command", touching(marks, "trailer-command", then: "echo planted")),
+                             ("trailer..cmd", touching(marks, "trailer-no-token-cmd", then: "echo planted")),
+                             ("trailer..command", touching(marks, "trailer-no-token-command", then: "echo planted"))] {
             #expect(Git.run(["config", key, value], in: root).ok)
         }
         let trailers = [Worktrees.Trailer("VS-Task", "x"), Worktrees.Trailer("VS-Build", "1")]
@@ -237,7 +244,8 @@ struct GitGuardTests: LeadTeamFixture {
         #expect(message.contains("VS-Task: x") && message.contains("VS-Build: 1"), "\(message)")
         #expect(!message.contains("planted"), "\(message)")
 
-        // One planted under a key the stamp itself writes doesn't run or say what lands either.
+        // One planted under a key the stamp itself writes doesn't run and its output doesn't land. (That line's value
+        // isn't checked: the guard's stand-in, `neutral`'s false, leaves it empty.)
         #expect(Git.run(["config", "trailer.vs-task.cmd", touching(marks, "trailer-own-key", then: "echo planted")], in: root).ok)
         let again = Worktrees.stamp(trailers, onto: "HEAD~1", in: root)
         #expect(again == nil, "\(String(describing: again))")
