@@ -77,7 +77,7 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         #expect(merged.text.contains("Next: cleanup(add-b). " + LeadPrompts.Policy.updates), "\(merged.text)")
         #expect(!merged.text.contains("Post an update for the user"))
         #expect(Git.run(["merge-base", "--is-ancestor", mine, "main"], in: root).ok)
-        #expect(vault.head(root: root, branch: "main") == head("main", root))
+        #expect(try vault.head(root: root, branch: "main") == head("main", root))
         let update = try #require(BoardStore(root: root).load().updates.last)
         #expect(update.body.contains("accepted 1 commit on main from your session"), "\(update.body)")
         #expect(update.body.contains(String(mine.prefix(7))))
@@ -198,7 +198,7 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         try audited(lead, runtime, root: root)
-        let known = try #require(vault.head(root: root, branch: "main"))
+        let known = try #require(try vault.head(root: root, branch: "main"))
         // Its hooks record the commit as its session's: the host tells the worker's process apart, and a session that
         // holds a role in the team isn't yours, even had the app opened it.
         let worker = try launched("worker-add-b", runtime).session
@@ -211,7 +211,7 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         #expect(merged.isError)
         #expect(merged.text.contains("moved since the lead last left it"), "\(merged.text)")
         #expect(merged.text.contains("isn't one of yours"), "\(merged.text)")
-        #expect(vault.head(root: root, branch: "main") == known)
+        #expect(try vault.head(root: root, branch: "main") == known)
         #expect(try vault.acceptMove(root: root, branch: "main").accepted == false)
         // The refusal is marked: the lead's merges wait on the user now, so the window tells them (`AlertRules.baseMoved`).
         let refusal = try #require(LeadVault.BaseMoveRefusal.load(root: root))
@@ -223,7 +223,7 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         try audited(lead, runtime, root: root)
-        let known = try #require(vault.head(root: root, branch: "main"))
+        let known = try #require(try vault.head(root: root, branch: "main"))
         let worker = try launched("worker-add-b", runtime).session
         let workers = book.vault(folder: vault.folder, as: { .session(worker) })
         // The worker moves main with plumbing, writing a reflog entry that reads like a commit, and its process tells
@@ -245,7 +245,7 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         #expect(move.reason?.contains("isn't one of yours") == true, "\(move.reason ?? "")")
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(merged.isError)
-        #expect(vault.head(root: root, branch: "main") == known)
+        #expect(try vault.head(root: root, branch: "main") == known)
         #expect(head("main", root) == unaudited)
     }
 
@@ -278,7 +278,7 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         try ran("git commit -m 'first, amended'", in: root, as: yours) { try commit("d.txt", "dee\n", in: root, ["--amend"]) }
         #expect(try vault.acceptMove(root: root, branch: "main").accepted == false)
         // A rebase, even one that only fast-forwards: its entries aren't a commit, merge, cherry-pick, revert, am or pull.
-        #expect(Git.run(["reset", "-q", "--hard", try #require(vault.head(root: root, branch: "main"))], in: root).ok)
+        #expect(Git.run(["reset", "-q", "--hard", try #require(try vault.head(root: root, branch: "main"))], in: root).ok)
         Git.run(["checkout", "-q", "-b", "side"], in: root)
         try commit("s.txt", "side\n", in: root)
         Git.run(["checkout", "-q", "main"], in: root)

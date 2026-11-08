@@ -506,7 +506,7 @@ public final class LeadToolset: MCPToolset {
             board.leadSession = me.session ?? board.leadSession
         }
         let base = self.base
-        if vault.head(root: root, branch: base) == nil, let head = branchHead(base) { try? vault.setHead(head, root: root, branch: base) }
+        if vault.noHeadRecorded(root: root, branch: base), let head = branchHead(base) { try? vault.setHead(head, root: root, branch: base) }
     }
 
     /// The lead's server commits the decision and progress logs every few minutes while it holds the role
@@ -2876,7 +2876,7 @@ public final class LeadToolset: MCPToolset {
     /// none, its worker's done report there), no Important finding open or held by strict_paths, and the merge policy
     /// (the user's approval of that commit when it asks for one), and a verdict that judged the contract's current
     /// version (or the lead's reason for merging on one that judged an older one, `acceptStale`). Throws the refusal.
-    func mergeGate(_ slug: String, acceptStale: String? = nil) throws -> MergeGate {
+    func mergeGate(_ slug: String, acceptStale: String? = nil, fetched: String?) throws -> MergeGate {
         guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
         if task.status == .done {
             throw Problem(text: "\(slug) is already merged" + (task.merged.map { " at \($0.commit.prefix(8)) (\(LeadBoard.clock($0.at)))" } ?? "")
@@ -2947,12 +2947,15 @@ public final class LeadToolset: MCPToolset {
                 + ". Have the worker fix \(blocking.count == 1 ? "it" : "them") and audit again, or dismiss_finding with a reason, or add_task(from_finding: …) to move one to a task of its own.")
         }
         try checkMergePolicy(task, commit: commit)
-        try checkRemoteCarried(slug, commit: commit)
+        try checkRemoteCarried(slug, commit: commit, fetched: fetched)
         return MergeGate(task: task, commit: commit, audited: audited, dismissed: dismissed, staleAccepted: staleAccepted)
     }
 
     private func merge(_ slug: String, acceptStale: String? = nil) throws -> MCPToolResult {
-        let gate = try mergeGate(slug, acceptStale: acceptStale)
+        // The remote's tip, read once: what the gate checks the branch against, what it lands as and whose records are
+        // taken after are the same answer, and no answer stops it here, before anything is tested.
+        let fetched = try fetchedTip(self.workflow, not: "Not merged (nothing was tested)")
+        let gate = try mergeGate(slug, acceptStale: acceptStale, fetched: fetched)
         let (task, commit, audited, dismissed) = (gate.task, gate.commit, gate.audited, gate.dismissed)
         guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
             throw Problem(text: "A merge of \(slug) is already running; its result comes back to the call that started it.")
@@ -2996,7 +2999,7 @@ public final class LeadToolset: MCPToolset {
         let checked = Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
                                               scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
                                               timeout: workflow.testTimeout, lock: heavyLock(workflow), records: workflow.recordsDir,
-                                              remote: fetchedTip(workflow), trailers: provenance(gate), rerun: { output in
+                                              remote: fetched, trailers: provenance(gate), rerun: { output in
                                                   rerun = MergeRerun.plan(after: output, workflow: workflow)
                                                   return rerun?.command
                                               }, baseline: baseline(on: current, plan: { rerun }, pairing: pairing),
@@ -3113,8 +3116,11 @@ public final class LeadToolset: MCPToolset {
         if let moved = movedMeanwhile(slug, since: task, tested: commit, tests: "passed") { throw moved }
         switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tested, from: current) }) {
         case .merged:
-            try vault.setHead(tested, root: root, branch: base)
-            foldRemoteRecords(landed: tested, from: current)
+            // The records first: they don't depend on the vault, and a retry finds nothing left to fold.
+            foldRemoteRecords(landed: tested, from: current, fetched: fetched)
+            // A head the vault didn't take doesn't stop the board's record: the merge has happened, and a merge run
+            // again on a board that doesn't say so would record an empty one. Said when it's done, below.
+            let unrecorded = recordLanding(base: base, from: current, to: tested, with: slug)
             let flakes = flaked.map { MergeRerun.flakes(in: $0.failed) } ?? []
             // Each flaky test's failure lines, where every session can read them (the merge's log is in the vault).
             let flakeLines = flaked.map { MergeRerun.evidence(in: $0.failed, tests: flakes) } ?? [:]
@@ -3125,7 +3131,8 @@ public final class LeadToolset: MCPToolset {
             let usage = receiptUsage(task)
             let build = runningBuild()?.label
             let brought = Int(Git.run(["rev-list", "--count", "\(current)..\(tested)"], in: root).output)
-            let flakePlan = try store.update { board -> FlakePlan in
+            let flakePlan: FlakePlan
+            do { flakePlan = try store.update { board -> FlakePlan in
                 guard let index = board.taskIndex(slug) else { return FlakePlan() }
                 board.tasks[index].status = .done
                 board.tasks[index].merged = LeadMergeRecord(commit: tested, tested: workflow.testCommand != nil, onto: current,
@@ -3137,6 +3144,10 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].receipt?.build = build
                 return planFlakeFixes(&board, flakes: flakes, slug: slug, commit: tested, at: flakedAt, logged: Set(flakeLines.keys),
                                       log: flakeLog, load: begun?.load.first, filtered: flaked?.plan.filtered, workflow: workflow)
+            } } catch {
+                let text = "\(base) moved to \(tested.prefix(8)) with \(slug), but the board couldn't be written (\(error)), so its merge isn't recorded: check \(base) and the board before merging anything more."
+                try? store.appendProgress(text)
+                throw Problem(text: [unrecorded, text].compactMap { $0 }.joined(separator: " "))
             }
             let planned = flakePlan.planned
             sendFlakeNotes(flakePlan)
@@ -3180,7 +3191,10 @@ public final class LeadToolset: MCPToolset {
             let caughtUp = tellToCatchUp(merged: slug, from: current, to: tested, base: base)
             archiveFinished(force: false)
             let staleNote = gate.staleAccepted.map { " (Its passing audit \($0.stale.text): merged on it with your reason, in the progress log.)" } ?? ""
-            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(overruled)\(staleNote)\(unaudited)\(ran)\(patience)\(evidence)\(flakeNote)\(caughtUp)")
+            let reply = "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(overruled)\(staleNote)\(unaudited)\(ran)\(patience)\(evidence)\(flakeNote)\(caughtUp)"
+            // An error, so auto_advance tells the lead too; the board and the branch already say merged.
+            if let unrecorded { throw Problem(text: "\(unrecorded) \(reply)") }
+            return MCPToolResult(text: reply)
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason)")
         }
@@ -3292,8 +3306,20 @@ public final class LeadToolset: MCPToolset {
     /// The base moves only through merges and reverts: anything else that moved it from where the vault last saw it
     /// (a worker's git, a hand-made commit) is something nobody audited, and is refused (`BaseMoveRefusal`). Except
     /// the user's own commits, which the vault takes when their sessions' hooks account for every one.
+    ///
+    /// A host that didn't answer isn't "none recorded": nothing is recorded then, and the caller stops. A move of the
+    /// lead's own that the vault couldn't record (`recordLanding`) is recorded now rather than refused.
     func checkBaseMoves(base: String, current: String) throws {
-        if let known = vault.head(root: root, branch: base), known != current {
+        let recorded = try recordedHead(base, "the lead last left \(base)", not: "Stopped, nothing changed")
+        if let known = recorded, known != current {
+            do {
+                if try records.landed.settle(base: base, known: known, current: current, root: root, vault: vault) {
+                    try? store.appendProgress("Recorded \(base) at \(current.prefix(8)): the lead's own move, which the vault couldn't record when it landed")
+                    return
+                }
+            } catch {
+                throw Problem(text: "Stopped, nothing changed: \(base) is at \(current.prefix(8)), the lead's own move, and the vault still couldn't record it. \(error) Try again once the session host answers.")
+            }
             let move = Result { try vault.acceptMove(root: root, branch: base) }
             guard case .success(let taken) = move, taken.accepted, taken.to == current else {
                 // Its merges wait on the user now: the window tells them (`AlertRules.baseMoved`).
@@ -3302,8 +3328,23 @@ public final class LeadToolset: MCPToolset {
             }
             try? store.update { $0.updates.append(LeadUpdate(title: "Took \(taken.count) on \(base)", body: taken.acceptedLine)) }
             try? store.appendProgress(taken.acceptedLine)
-        } else if vault.head(root: root, branch: base) == nil {
+        } else if recorded == nil {
             try vault.setHead(current, root: root, branch: base)
+        }
+    }
+
+    /// `base` was fast-forwarded from `from` to `to` (with `what`): the vault records it. Nil when it did. Else what's
+    /// wrong, said in the progress log too, and the move noted (`LandedMoves`) so this server's next check of the base
+    /// finishes recording it instead of refusing the lead's own merge as a move nobody made.
+    func recordLanding(base: String, from: String, to: String, with what: String) -> String? {
+        do {
+            try vault.setHead(to, root: root, branch: base)
+            return nil
+        } catch {
+            records.landed.note(base: base, from: from, to: to)
+            let text = "\(base) moved to \(to.prefix(8)) with \(what), but the vault couldn't record its head (\(error)). The next merge from this tool server records it and doesn't take it for a move nobody made; if the server restarts first, that merge asks the user about it."
+            try? store.appendProgress(text)
+            return text
         }
     }
 
@@ -3401,7 +3442,7 @@ public final class LeadToolset: MCPToolset {
         }
         switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: made, from: current) }) {
         case .merged:
-            try vault.setHead(made, root: root, branch: base)
+            if let unrecorded = recordLanding(base: base, from: current, to: made, with: "the revert of \(slug)") { throw Problem(text: unrecorded) }
             let now = Date().timeIntervalSince1970
             try store.update { board in
                 guard let index = store.restore(slug, into: &board) else { return }
@@ -4374,7 +4415,7 @@ public final class LeadToolset: MCPToolset {
         }
         // A branch the lead hasn't merged into yet: its head now is where merges into it start from.
         let base = self.base
-        if vault.head(root: root, branch: base) == nil, let head = branchHead(base) { try? vault.setHead(head, root: root, branch: base) }
+        if vault.noHeadRecorded(root: root, branch: base), let head = branchHead(base) { try? vault.setHead(head, root: root, branch: base) }
         let set = changes.map { $0.value.isEmpty ? "cleared \($0.key)" : "\($0.key) = `\($0.value)`" }.joined(separator: ", ")
         try? store.appendProgress("Workflow: \(set)")
         return MCPToolResult(text: "Set \(set).\n\n\(workflowText())")
@@ -5818,7 +5859,7 @@ extension LeadToolset {
     func advanceCleanup(_ slug: String) throws -> MCPToolResult { try cleanup(slug, force: false) }
     /// Merge's own checks of `slug` before its tests (`mergeGate`): nil when it may merge now, else the refusal.
     func advanceGate(_ slug: String) -> String? {
-        do { _ = try mergeGate(slug); return nil } catch let problem as Problem { return problem.text } catch { return "\(error)" }
+        do { _ = try mergeGate(slug, fetched: try fetchedTip(self.workflow, not: "Not merged (nothing was tested)")); return nil } catch let problem as Problem { return problem.text } catch { return "\(error)" }
     }
     func advanceMessage(_ slug: String, _ text: String, clearDraft: Bool) throws -> (delivered: LeadDelivery.Delivered, result: MCPToolResult) {
         try sent(slug, ["text": text, "clear_draft": clearDraft])

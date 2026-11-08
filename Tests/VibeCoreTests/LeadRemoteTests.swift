@@ -136,7 +136,7 @@ struct LeadRemoteTests: LeadTeamFixture {
         let expected = mode == "fast-forward" ? "fast-forward main" : mode == "clean" ? "it merges cleanly" : "conflicts in a.txt"
         #expect(text.contains(expected), "\(text)")
         #expect(head(scene.root) == before)
-        #expect(lead.vault.head(root: scene.root, branch: "refs/remotes/origin/main") == tip)
+        #expect(try lead.vault.head(root: scene.root, branch: "refs/remotes/origin/main") == tip)
         // Reconstruct the poller to prove the persisted tip survives server restarts.
         LeadRemotePoller(lead: lead).tick(now: due.addingTimeInterval(LeadRemotePoller.interval))
         #expect(runtime.steered.count == 1)
@@ -377,7 +377,7 @@ struct LeadRemoteTests: LeadTeamFixture {
         #expect(read(progress).contains("Merged origin/main into main"))
         #expect(Git.run(["show", "main:docs/lead/progress.md"], in: scene.root).output.contains("- uncommitted line"))
         // Taken as the user's work: the vault's head is main's, so a merge of a task wouldn't refuse it as a move.
-        #expect(vault.head(root: scene.root, branch: "main") == head(scene.root))
+        #expect(try vault.head(root: scene.root, branch: "main") == head(scene.root))
         #expect(lead.call("merge_remote", [:]).text.contains("Nothing to merge"))
     }
 
@@ -399,7 +399,7 @@ struct LeadRemoteTests: LeadTeamFixture {
         // The remote's tip is an ancestor of main: a push of main is a fast-forward.
         #expect(isAncestor(tip, of: "main", in: scene.root) && isAncestor(local, of: "main", in: scene.root))
         #expect(read(scene.root + "/b.txt") == "bee\n" && read(scene.root + "/d.txt") == "dee\n")
-        #expect(vault.head(root: scene.root, branch: "main") == head(scene.root))
+        #expect(try vault.head(root: scene.root, branch: "main") == head(scene.root))
     }
 
     /// No .gitattributes here: merge_remote's own union takes both sides' lines of the lead's records, the
@@ -599,6 +599,44 @@ struct LeadRemoteTests: LeadTeamFixture {
         // So push_remote asks for the push, rather than refusing it as no fast-forward.
         let push = lead.call("push_remote", [:])
         #expect(!push.text.contains("wouldn't be a fast-forward"), "\(push.text)")
+    }
+
+    /// 2026-11-07 19:46: the merge's read of what fetch_remote fetched timed out on a loaded Mac and was taken for
+    /// "never fetched", so a task that had merged the remote in landed squashed, its commits copies, and the remote's
+    /// records weren't taken. No answer now stops the merge before its tests; and one answer serves all of it.
+    @Test func aFetchedTipThatGetsNoAnswerNeverSquashesTheRemoteOrSkipsItsRecords() throws {
+        let scene = try makeScene()
+        _ = try pushed(scene, "docs/lead/decisions.md", "## the other Mac's decision\n", append: true, message: "Remote decision")
+        let tip = try pushed(scene, "b.txt", "bee\n", message: "Remote b")
+        try commit("a.txt", "ours\n", in: scene.root, message: "Local a")
+        let runtime = FakeRuntime()
+        let flaky = FlakyHost()
+        let lead = try lead(scene.root, runtime, through: flaky)
+        #expect(!lead.call("configure", ["auto_advance": false]).isError)
+        #expect(!lead.call("fetch_remote", [:]).isError)
+        #expect(!lead.call("add_task", ["title": "Merge the remote", "goal": "origin/main merged", "acceptance": ["a"]]).isError)
+        #expect(!lead.call("start_worker", ["task": "merge-the-remote"]).isError)
+        let worktree = Worktrees.path(root: scene.root, slug: "merge-the-remote")
+        #expect(Git.run(["merge", "-q", "--no-edit", "origin/main"], in: worktree).ok)
+        try commit("w.txt", "w\n", in: worktree, message: "w")
+        #expect(!(try seat("worker-merge-the-remote", runtime)).call("report", doneReport("merged origin/main")).isError)
+        let tracking = FlakyHost.readsHead(of: "refs/remotes/origin/main")
+        let before = head(scene.root)
+
+        flaky.drop(tracking)
+        let refused = lead.call("merge", ["task": "merge-the-remote"])
+        #expect(refused.isError && refused.text.contains("nothing was tested") && refused.text.contains("didn't answer"), "\(refused.text)")
+        #expect(head(scene.root) == before)
+        #expect(BoardStore(root: scene.root).load().task("merge-the-remote")?.status != .done)
+
+        // One answer, and none after it: whatever the merge still needed to read would find the host gone.
+        flaky.drop(firstAnswered: tracking)
+        let merged = lead.call("merge", ["task": "merge-the-remote"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(flaky.count(tracking) == 1)
+        // The remote's commit is on main as itself (a squash leaves a copy), and its records are in the checkout's.
+        #expect(isAncestor(tip, of: head(scene.root), in: scene.root))
+        #expect(read(BoardStore(root: scene.root).recordPath("decisions.md")).contains("## the other Mac's decision"))
     }
 
     /// A branch holding the remote's commits that fetch_remote didn't fetch (the ref moved past it, by hand or by

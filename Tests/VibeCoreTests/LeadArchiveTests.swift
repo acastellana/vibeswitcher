@@ -86,7 +86,7 @@ struct LeadArchiveTests: LeadTeamFixture {
         #expect(Set(files).isSuperset(of: ["docs/lead/decisions-archive.md", "docs/lead/decisions.md"]), "\(files)")
         #expect(files.allSatisfy { $0.hasPrefix("docs/lead/") }, "\(files)")
         #expect(Git.run(["show", "\(commit):docs/lead/decisions-archive.md"], in: root).output + "\n" == after)
-        #expect(vault.head(root: root, branch: "main") == commit)
+        #expect(try vault.head(root: root, branch: "main") == commit)
     }
 
     @Test func anUnknownOrAmbiguousEntryChangesNothing() throws {

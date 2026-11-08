@@ -63,6 +63,9 @@ public final class LeadRecords: @unchecked Sendable {
 
     let store: BoardStore
     let vault: LeadVault
+    /// The lead's own moves of the base the vault couldn't record: this commit, and the merges (`checkBaseMoves`), take
+    /// them instead of waiting on them as moves nobody made.
+    let landed = LandedMoves()
     /// The least time between two commits, but for the one after a merge.
     public var interval: TimeInterval = 300
     /// How long a commit waits for a held index.lock in the main checkout.
@@ -168,8 +171,18 @@ public final class LeadRecords: @unchecked Sendable {
         let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(base)"], in: root).output
         guard !head.isEmpty else { return .failed("there's no branch \(base).") }
         // On top of a head the lead hasn't taken, the commit would take it too: the next merge decides on it first.
-        if let known = vault.head(root: root, branch: base), known != head {
-            return .waiting("\(base) moved since the lead last left it (\(known.prefix(8)) → \(head.prefix(8))), not through merge; committed once a merge takes the move.")
+        let known: String?
+        do { known = try vault.head(root: root, branch: base) } catch {
+            return .waiting("the session host didn't answer where the lead last left \(base), so nothing is committed on it (\(error)).")
+        }
+        if let known, known != head {
+            let settled: Bool
+            do { settled = try landed.settle(base: base, known: known, current: head, root: root, vault: vault) } catch {
+                return .waiting("the vault couldn't record \(base) at \(head.prefix(8)), the lead's own move (\(error)).")
+            }
+            guard settled else {
+                return .waiting("\(base) moved since the lead last left it (\(known.prefix(8)) → \(head.prefix(8))), not through merge; committed once a merge takes the move.")
+            }
         }
         // Only the lead's session (or the app) records where the branch is: asked before anything is committed.
         do { try vault.setHead(head, root: root, branch: base) } catch { return .failed("\(error)") }
@@ -202,7 +215,8 @@ public final class LeadRecords: @unchecked Sendable {
                 try? inventory.write(to: file)
             }
             do { try vault.setHead(commit, root: root, branch: base) } catch {
-                return .failed("committed \(commit.prefix(8)) on \(base), but couldn't record it as the lead's (\(error)): the next merge asks the user about it.")
+                landed.note(base: base, from: head, to: commit)
+                return .failed("committed \(commit.prefix(8)) on \(base), but couldn't record it as the lead's (\(error)): the next merge or commit from this tool server records it; if it restarts first, the next merge asks the user about it.")
             }
             return .committed(commit)
         }
@@ -478,5 +492,35 @@ public final class LeadRecords: @unchecked Sendable {
         let listed = rules.map { " (\($0) lists them)" } ?? ""
         return "decisions.md has \(entries) entries (\(bytes / 1024) KB), and every lead start reads it: archive_decisions the superseded "
             + "and obsolete ones, and those a check now enforces\(listed). They move to \(Kind.archive.name) unchanged."
+    }
+}
+
+/// Moves of a base the lead's tool server made itself and couldn't record in the vault (`setHead` failed after the
+/// fast-forward: the host timed out on a loaded Mac). The next check of the base finishes recording exactly that move
+/// instead of refusing it as one nobody made. Held in this process's memory only: anything on disk could be written by
+/// the sessions whose moves the vault's head is there to catch. A tool server that restarted has forgotten it, and the
+/// move goes to the user as any other (`LeadVault.BaseMoveRefusal`).
+final class LandedMoves: @unchecked Sendable {
+    private let lock = NSLock()
+    private var moves: [String: (from: String, to: String)] = [:]
+
+    func note(base: String, from: String, to: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        moves[base] = (from, to)
+    }
+
+    /// True when the vault's head (`known`) and the branch (`current`) are exactly the two ends of a move noted here,
+    /// once the vault has recorded it. Throws when it couldn't, and the move stays noted.
+    func settle(base: String, known: String, current: String, root: String, vault: LeadVault) throws -> Bool {
+        lock.lock()
+        let move = moves[base]
+        lock.unlock()
+        guard let move, move.from == known, move.to == current else { return false }
+        try vault.setHead(current, root: root, branch: base)
+        lock.lock()
+        defer { lock.unlock() }
+        moves[base] = nil
+        return true
     }
 }

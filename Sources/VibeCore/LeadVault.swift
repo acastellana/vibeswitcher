@@ -314,7 +314,7 @@ public struct LeadVault: Sendable {
     public func startLead(root: String, branch: String, takeHead: Bool = false, floor: LeadReviewFloor? = nil) throws -> String {
         let grant = try issue(role: .lead, root: root, task: nil)
         if let floor { _ = try? setReviewFloor(floor, root: root, onlyIfUnset: true) }
-        if let now = Self.branchHead(branch, root: root), takeHead || head(root: root, branch: branch) == nil {
+        if let now = Self.branchHead(branch, root: root), takeHead || noHeadRecorded(root: root, branch: branch) {
             try setHead(now, root: root, branch: branch)
         }
         return grant
@@ -337,8 +337,9 @@ public struct LeadVault: Sendable {
     }
 
     /// The branch moved since the lead last left it, and not through its merges: where it was left, and where it is.
+    /// Nil too when the host didn't answer: this only tells the user of a move, and the merge checks again.
     public func headMoved(root: String, branch: String) -> (recorded: String, now: String)? {
-        guard let recorded = head(root: root, branch: branch), let now = Self.branchHead(branch, root: root), recorded != now else { return nil }
+        guard let recorded = try? head(root: root, branch: branch), let now = Self.branchHead(branch, root: root), recorded != now else { return nil }
         return (recorded, now)
     }
 
@@ -430,10 +431,18 @@ public struct LeadVault: Sendable {
 
     // MARK: The lead's branch
 
-    /// The branch's head as the lead last left it.
-    public func head(root: String, branch: String) -> String? {
-        guard case .head(let head)? = try? call(.head(root: root, branch: branch)) else { return nil }
+    /// The branch's head as the lead last left it; nil when none is recorded. Throws when the host refuses or can't be
+    /// asked: never "none" then, since a caller that takes that for none records the branch as it is now, a move nobody
+    /// audited included (its 5-second timeout does run out on a loaded Mac).
+    public func head(root: String, branch: String) throws -> String? {
+        guard case .head(let head) = try call(.head(root: root, branch: branch)) else { throw Self.unexpected }
         return head
+    }
+
+    /// Whether the host answered that no head is recorded for the branch: false when one is, and when it didn't answer.
+    public func noHeadRecorded(root: String, branch: String) -> Bool {
+        guard case .head(nil)? = try? call(.head(root: root, branch: branch)) else { return false }
+        return true
     }
 
     public func setHead(_ commit: String, root: String, branch: String) throws {

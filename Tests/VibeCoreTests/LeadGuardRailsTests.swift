@@ -193,12 +193,12 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         let lead = try lead(root, runtime)
         let worktree = try reported(lead, runtime, root: root)
         try passingAudit(lead, runtime)
-        let known = try #require(vault.head(root: root, branch: "main"))
+        let known = try #require(try vault.head(root: root, branch: "main"))
         let unaudited = Git.run(["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "unaudited"], in: worktree).output
         #expect(Git.run(["update-ref", "refs/heads/main", unaudited], in: worktree).ok)
 
         let restarted = try self.lead(root, runtime)
-        #expect(vault.head(root: root, branch: "main") == known)
+        #expect(try vault.head(root: root, branch: "main") == known)
         #expect(vault.headMoved(root: root, branch: "main")?.now == unaudited)
         let merged = restarted.call("merge", ["task": "add-b"])
         #expect(merged.isError)
@@ -208,7 +208,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         // You moved it (you say so in the app): from now on merges start from there.
         let grant = try vault.startLead(root: root, branch: "main", takeHead: true)
         try vault.bind(grant, root: root, session: try #require(runtime.me.session))
-        #expect(vault.head(root: root, branch: "main") == unaudited)
+        #expect(try vault.head(root: root, branch: "main") == unaudited)
         #expect(vault.headMoved(root: root, branch: "main") == nil)
         let taken = LeadToolset(root: root, runtime: runtime, vault: vault(for: runtime)).call("merge", ["task": "add-b"])
         #expect(!taken.text.contains("moved since the lead last left it"), "\(taken.text)")
@@ -232,7 +232,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
             #expect(!merged.isError, "\(merged.text)")
         }
         #expect(FileManager.default.fileExists(atPath: root + "/one.txt") && FileManager.default.fileExists(atPath: root + "/two.txt"))
-        #expect(vault.head(root: root, branch: "main") == head("main", root))
+        #expect(try vault.head(root: root, branch: "main") == head("main", root))
     }
 
     @Test func aFastForwardIsOnlyFromTheHeadThatWasChecked() throws {

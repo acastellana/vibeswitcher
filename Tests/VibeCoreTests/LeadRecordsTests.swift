@@ -145,7 +145,7 @@ struct LeadRecordsTests: LeadTeamFixture {
         // The logs are clean in the checkout: committed, in the index as in the commit.
         #expect(Git.run(["status", "--porcelain", "--", "docs"], in: root).output.isEmpty)
         // The lead's own move: the next merge's check takes it.
-        #expect(vault.head(root: root, branch: "main") == commit)
+        #expect(try vault.head(root: root, branch: "main") == commit)
         // Nothing new: nothing committed.
         #expect(lead.records.flush(base: "main") == .unchanged)
         #expect(head("main", root) == commit)
@@ -239,7 +239,7 @@ struct LeadRecordsTests: LeadTeamFixture {
         #expect(await offPool { asked.wait(timeout: .now() + 30) } == .success)
         #expect(switches.get() >= 1)
         #expect(head("main~1", root) == first)
-        #expect(vault.head(root: root, branch: "main") == head("main", root))
+        #expect(try vault.head(root: root, branch: "main") == head("main", root))
     }
 
     @Test func indexLockIsWaitedForAndAFailureIsReported() throws {
@@ -361,7 +361,7 @@ struct LeadRecordsTests: LeadTeamFixture {
         #expect(files(of: records, root) == ["docs/lead/progress.md"])
         #expect(underRecords("main", in: root) == BoardStore(root: root).load().task("add-b")?.merged?.commit)
         #expect(Git.run(["show", "main:docs/lead/progress.md"], in: root).output.contains("Merged add-b"))
-        #expect(vault.head(root: root, branch: "main") == records)
+        #expect(try vault.head(root: root, branch: "main") == records)
         // The next merge goes on top: the records commit is the lead's own, not a move to ask about.
         _ = lead.call("cleanup", ["task": "add-b"])
         try audited(lead, runtime, root: root, slug: "add-d", file: "d.txt")

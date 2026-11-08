@@ -91,13 +91,15 @@ extension LeadToolset {
         guard workflow.testCommand != nil, let checks = workflow.mergeChecks else {
             throw Problem(text: "Not merged as a batch: there's no test_command to run on the stack. Merge each on its own.")
         }
+        // One read of the remote's tip for the whole batch: its gates, its stack and the records it folds.
+        let fetched = try fetchedTip(workflow, not: "Not merged (nothing was tested)")
         var ends: [String: BatchEnd] = [:]
         var gates: [MergeGate] = []
         var locks: [FileLock] = []
         defer { for lock in locks { lock.release() } }
         for slug in slugs {
             do {
-                let gate = try mergeGate(slug)
+                let gate = try mergeGate(slug, fetched: fetched)
                 guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
                     ends[slug] = .refused("A merge of \(slug) is already running; its result comes back to the call that started it.")
                     continue
@@ -130,7 +132,7 @@ extension LeadToolset {
         let place = vault.scratch(root: root, "merge-batch")
         try vault.ensurePrivate(place.deletingLastPathComponent())
         let stack = Worktrees.Stack(root: root, scratch: place, home: vault.scratch(root: root, "merge-batch-home"), records: workflow.recordsDir,
-                                     remote: fetchedTip(workflow))
+                                     remote: fetched)
         defer { stack.remove() }
         let called = Date()
         var begun: (at: Date, load: [Double])?
@@ -261,8 +263,12 @@ extension LeadToolset {
                 try? store.appendProgress("Batch merge of \(order.joined(separator: ", ")) not recorded: \(text)")
                 return false
             }
-            do { try vault.setHead(tip, root: root, branch: base) } catch { return unrecorded("the vault couldn't record its head", error) }
-            foldRemoteRecords(landed: tip, from: onto)
+            // The records first: they don't depend on the vault, and a retry finds nothing left to fold.
+            foldRemoteRecords(landed: tip, from: onto, fetched: fetched)
+            do { try vault.setHead(tip, root: root, branch: base) } catch {
+                records.landed.note(base: base, from: onto, to: tip)
+                return unrecorded("the vault couldn't record its head", error)
+            }
             let last = order[order.count - 1]
             var flaked: (plan: MergeRerun.Plan, failed: String, log: String?)?
             if case .flaked(let plan, let failed, let again) = passing.outcome {
@@ -393,7 +399,7 @@ extension LeadToolset {
                 pending = pending.compactMap { gate in
                     let slug = gate.task.slug
                     do {
-                        let again = try mergeGate(slug)
+                        let again = try mergeGate(slug, fetched: fetched)
                         if let changed = changedMeanwhile(slug, since: gate.task, tests: "were run in a batch, and it's to be tested again") {
                             ends[slug] = .refused(changed.text)
                             return nil

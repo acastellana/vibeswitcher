@@ -138,7 +138,7 @@ struct ProductInventoryTests: LeadTeamFixture {
         #expect(Git.run(["show", "main:\(ProductInventory.output)"], in: root).output == "# Inventory\na.txt\nb.txt")
         let status = Git.run(["status", "--porcelain", "--", "docs"], in: root).output
         #expect(status.isEmpty, "\(status)")
-        #expect(vault.head(root: root, branch: "main") == records)
+        #expect(try vault.head(root: root, branch: "main") == records)
         #expect(runs(runsFile) == 1)
 
         // Records alone, and a merge outside the inputs: the script isn't run again, and nothing else goes in.
