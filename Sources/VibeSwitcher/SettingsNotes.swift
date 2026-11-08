@@ -122,6 +122,7 @@ struct FooterText: View {
         Text(text).font(.caption).foregroundStyle(.secondary)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -164,7 +165,6 @@ struct SettingsFooter: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: openHelp) { _, open in if open == note { showingHelp = true } }
     }
 }
