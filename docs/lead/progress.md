@@ -4432,3 +4432,5 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-08 22:19 Automatically (auto_advance): Cleaned up anything-needing-a-real (freed 2.1 GB of build output and temporary folders). It stays done.
 - 2026-11-08 22:19 Automatically (auto_advance): Cleaned up auto-advance-keeps (freed 2.3 GB of build output and temporary folders). It stays done.
 - 2026-11-08 22:37 Merged the-board-and-records: The board and records stop growing without bound, and scratch folders are swept (build 767537e5ec09)
+- 2026-11-08 22:37 Automatically (auto_advance): Merged the-board-and-records (The board and records stop growing without bound, and scratch folders are swept) into main at 657f161e, on its passing audit and the full test run.
+- 2026-11-08 22:37 Automatically (auto_advance): Cleaned up the-board-and-records (freed 2.3 GB of build output and temporary folders). It stays done.
