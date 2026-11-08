@@ -49,16 +49,19 @@ public struct LeadContract: Codable, Equatable, Sendable {
 
 /// The contract its audit's verifiers have: the version their brief was written from, or the last amendment sent to
 /// them while they audit (see `LeadToolset.sendContractChange`), with that version's text to tell the next change
-/// from. `judged`: the lowest version a verifier that submitted said it judged (a finder that submitted before an
-/// amendment judged the older one).
+/// from. `briefed`: the version their brief was written from, which a verifier that doesn't say what it judged is
+/// taken to have judged (an amendment sent reaches it only at its next step). `judged`: the lowest version a verifier
+/// that submitted judged (a finder that submitted before an amendment judged the older one).
 public struct LeadAuditBrief: Codable, Equatable, Sendable {
     public var version: Int
     public var contract: LeadContract
+    public var briefed: Int?
     public var judged: Int?
 
     public init(version: Int, contract: LeadContract, judged: Int? = nil) {
         self.version = version
         self.contract = contract
+        self.briefed = version
         self.judged = judged
     }
 }

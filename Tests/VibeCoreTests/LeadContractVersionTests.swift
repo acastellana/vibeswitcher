@@ -159,6 +159,18 @@ struct LeadContractVersionTests: LeadTeamFixture {
         #expect(try task(root).staleContract == "judged contract v1, current v2")
     }
 
+    /// Sent, but it submitted without saying what it judged: its brief's version, not the one sent (an amendment
+    /// reaches it at its next step, which may come after its verdict).
+    @Test func aVerifierThatDoesntSayWhatItJudgedIsTakenToHaveJudgedItsBrief() throws {
+        let (root, runtime, lead) = try reported()
+        #expect(!lead.call("audit", ["task": "add-b"]).isError)
+        #expect(lead.call("update_task", ["task": "add-b", "acceptance": ["test -f b.txt", "grep -q b b.txt"]]).text.contains("was sent what changed"))
+        #expect(try task(root).auditBrief?.version == 2)
+        #expect(!(try seat("verify-add-b", runtime)).call("submit_audit", Self.clean).isError)
+        #expect(try task(root).evidence?.contract == 1)
+        #expect(toldLead(runtime).last?.contains("This verdict judged contract v1, current v2") == true)
+    }
+
     @Test func anUpdateBeforeTheVerifierIsUpIsSentOnceItIs() throws {
         let (root, runtime, lead) = try reported()
         // The lead amends the contract while audit starts the verifier: between its board read and the verifier's start.

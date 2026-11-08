@@ -4629,10 +4629,10 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "\(error)")
         }
         // The version it judged: what it says, never past the newest it was sent (one sent as it submitted may
-        // not have reached it); with several finders, the oldest any of them judged.
+        // not have reached it); its brief's when it doesn't say; with several finders, the oldest any of them judged.
         try? store.update { board in
             guard let index = board.taskIndex(slug), var brief = board.tasks[index].auditBrief, board.tasks[index].evidence == nil else { return }
-            let said = min(stated ?? brief.version, brief.version)
+            let said = min(stated ?? brief.briefed ?? brief.version, brief.version)
             brief.judged = min(brief.judged ?? said, said)
             board.tasks[index].auditBrief = brief
         }
