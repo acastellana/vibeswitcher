@@ -4114,3 +4114,13 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-08 06:37 Audit of config-seal-covers: complete, clean, round 1: 1 Important open, 4 Nit open
 - 2026-11-08 06:38 Folded plugin-updates-always into config-seal-covers: that task carries its work
 - 2026-11-08 06:45 Merged config-seal-a-merge: Config seal: a merge's own branch run doesn't make the next look unquiet (build ebed973e8025)
+- 2026-11-08 06:45 Automatically (auto_advance): Merged config-seal-a-merge (Config seal: a merge's own branch run doesn't make the next look unquiet) into main at f436a7c0, on its passing audit and the full test run.
+- 2026-11-08 06:45 Started a worker on config-seal-covers
+- 2026-11-08 06:45 Automatically (auto_advance): Sent config-seal-covers's worker the open Important findings config-seal-covers:F1 from its audit at d546a066 (in a new worker: its last one was released during the audit).
+- 2026-11-08 06:45 Automatically (auto_advance): Cleaned up config-seal-a-merge (freed 3.9 GB of build output and temporary folders). It stays done.
+- 2026-11-08 06:47 Automatically (auto_advance): Started the audit of scorecard-small-version at 4a019db5 (Its review is audit).
+- 2026-11-08 06:47 Released scorecard-small-version's worker (idle since its done report on 4a019db5) while its audit runs
+- 2026-11-08 06:47 Automatically (auto_advance): Released scorecard-small-version's worker, idle since its done report on 4a019db5, while its audit runs (ended pid 99347 (Worker: Scorecard, small version: user-found bugs, questions, cost per delivery and time to install (backlog A1))): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-08 06:49 Automatically (auto_advance): Started the audit of auto-advance-doesn-t at 589ed490 (Its review is audit).
+- 2026-11-08 06:49 Released auto-advance-doesn-t's worker (idle since its done report on 589ed490) while its audit runs
+- 2026-11-08 06:49 Automatically (auto_advance): Released auto-advance-doesn-t's worker, idle since its done report on 589ed490, while its audit runs (ended pid 185 (Worker: auto_advance doesn't merge a clean verdict that judged an older contract version)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
