@@ -217,8 +217,77 @@ struct WalletDeskCopiesTests {
         s.desk.verifyMessages = { _ in throw WalletAsk.Refusal("no session host") }
         await browser.refreshed(s.desk)
         #expect(s.desk.cards.isEmpty)
+        #expect(!logged.lines.contains { $0.contains("no card and no Retry") })
         s.desk.verifyMessages = WalletTestStamps.verifyMessages
         await browser.refreshed(s.desk)
         #expect(s.desk.cards.first?.amount == "1.25")
+    }
+
+    /// Blind check: a Wallet Manager result taken while the host can't be asked about its sealed record isn't lost (the
+    /// courier hands a result over once): it's told at the look after the host answers.
+    @Test func aResultForASealedRecordWaitsForTheHostAndIsToldOnce() async throws {
+        let logged = WalletBrowserDeskTests.Logged()
+        let s = try setup(logged)
+        defer { s.desk.close() }
+        let request = WalletBrowserDeskTests.request()
+        var rewritten = request
+        rewritten.amount = "9000000000000000000"
+        try WalletAsk.file(rewritten, in: s.base.asked)
+        try s.base.store.save(WalletRequestStore.Record(request: request, state: .sent, seal: try WalletTestStamps.sealMessage(request.sealedCopy(.record))))
+        s.desk.verifyMessages = { _ in throw WalletAsk.Refusal("no session host") }
+        await browser.refreshed(s.desk)
+        try s.base.fake.receive(WalletDeskTests.result(request, .received, sequence: 1), second: 1)
+        var polled = false
+        s.desk.poll { polled = true }
+        _ = await until { polled }
+        await browser.refreshed(s.desk)
+        #expect(s.base.told.messages.isEmpty)
+        s.desk.verifyMessages = WalletTestStamps.verifyMessages
+        await browser.refreshed(s.desk)
+        #expect(await until { s.base.told.messages.count == 1 })
+        #expect(s.base.told.messages.first?.session == WalletDeskTests.session.uuidString.lowercased())
+        await browser.refreshed(s.desk)
+        #expect(s.base.told.messages.count == 1)
+        #expect(!logged.lines.contains { $0.contains("no card and no Retry") })
+    }
+
+    /// Blind check: the same for an unsealed record equal to its filed request, while the host hasn't confirmed the
+    /// filed request's stamp yet (a launch): the filed request isn't known until it answers.
+    @Test func aResultForAnUnsealedRecordWaitsForTheStampToBeConfirmed() async throws {
+        let s = try setup()
+        defer { s.desk.close() }
+        let request = WalletBrowserDeskTests.request()
+        try WalletAsk.file(request, in: s.base.asked)
+        try s.base.store.save(WalletRequestStore.Record(request: request, state: .sent))
+        s.desk.verifyStamps = { _ in throw WalletAsk.Refusal("no session host") }
+        await browser.refreshed(s.desk)
+        try s.base.fake.receive(WalletDeskTests.result(request, .received, sequence: 1), second: 1)
+        var polled = false
+        s.desk.poll { polled = true }
+        _ = await until { polled }
+        await browser.refreshed(s.desk)
+        #expect(s.base.told.messages.isEmpty)
+        s.desk.verifyStamps = WalletTestStamps.verify
+        await browser.refreshed(s.desk)
+        #expect(await until { s.base.told.messages.count == 1 })
+    }
+
+    /// Blind check: another request's sealed mark moved to this one's file says nothing even once the filed request is
+    /// gone, when there's no filed id left to compare it with.
+    @Test func aSealedMarkMovedToAnotherIdIsRefusedWithItsFiledRequestGone() async throws {
+        let logged = WalletBrowserDeskTests.Logged()
+        let s = try setup(logged)
+        defer { s.desk.close() }
+        let filed = WalletBrowserDeskTests.request(40), elsewhere = WalletBrowserDeskTests.request(41, session: Self.other)
+        try WalletAsk.file(filed, in: s.base.asked)
+        let seal = try WalletTestStamps.sealMessage(elsewhere.sealedCopy(.browserMark))
+        try WalletBrowser.setMark(.init(state: .opened, at: WalletDeskTests.created, request: elsewhere, seal: seal), for: filed.id, in: s.base.asked)
+        await browser.refreshed(s.desk)
+        #expect(s.desk.cards.isEmpty)
+        try FileManager.default.removeItem(at: s.base.asked.appendingPathComponent("\(filed.id).json"))
+        await browser.refreshed(s.desk)
+        await browser.refreshed(s.desk)
+        #expect(s.base.told.messages.isEmpty)
+        #expect(logged.lines.filter { $0.contains("no card and no Retry") }.count == 1)
     }
 }

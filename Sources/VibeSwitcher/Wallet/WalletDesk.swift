@@ -140,6 +140,8 @@ final class WalletDesk: ObservableObject {
     private var checkedCopies: [String: (copy: WalletRequest, seal: String, valid: Bool)] = [:]
     /// Whether the host couldn't be asked about a copy's seal last time (logged once until it can).
     private var copiesUnasked = false
+    /// Results taken while the host couldn't say whether their record may speak: told at a later look, once it can.
+    private var heldResults: [WalletResult] = []
 
     init(folder: URL = WalletAsk.folder, store: WalletRequestStore = WalletRequestStore(), inbox: URL = PassageLink.defaultInbox,
          local: WalletLocalLink = WalletLocalLink(), config: @escaping () -> Config, now: @escaping @Sendable () -> Date = { Date() },
@@ -207,6 +209,9 @@ final class WalletDesk: ObservableObject {
         work.async { [self] in
             self.names = names
             reload()
+            let held = heldResults
+            heldResults = []
+            if !held.isEmpty { taken(held) }
             redeliver()
             // The folder on this Mac is looked at each tick (the watch on it is what shows a result at once; this is
             // for a watch that ended): listing it runs nothing.
@@ -360,8 +365,8 @@ final class WalletDesk: ObservableObject {
         // the copy the page was made from, also when the filed request is gone since (its mark then goes too).
         for (id, mark) in marks.sorted(by: { $0.key < $1.key }) where mark.state == .opened && pages[id].map({ time >= $0.until }) ?? true {
             // A mark read from disk is told from only if it may speak for its request; a page of this run's copy is in memory.
-            if pages[id] == nil, let copy = mark.request, !vouched(copy, seal: mark.seal, .browserMark, filed: filed.first { $0.id == id }) {
-                refuseCopy(id, "browser mark")
+            if pages[id] == nil, let copy = mark.request,
+               !believed(vouched(copy, seal: mark.seal, .browserMark, id: id, filed: filed.first { $0.id == id }), id, "browser mark") {
                 continue
             }
             let page = pages.removeValue(forKey: id)
@@ -423,6 +428,8 @@ final class WalletDesk: ObservableObject {
                 if !stampsUnasked { log("couldn't ask the session host whether it stamped \(asked.count) filed request(s) (\(error)): no card until it answers") }
                 stampsUnasked = true
             }
+        } else {
+            stampsUnasked = false
         }
         return filed.filter { stamped[$0.id] != nil }
     }
@@ -663,10 +670,18 @@ final class WalletDesk: ObservableObject {
             // The record and its results decide the card now.
             local[result.id] = nil
             let filed = requests.first { $0.id == result.id }
-            // A record that may not speak for its request says nothing to any session.
-            if let record = courier?.record(result.id), !vouched(record.request, seal: record.seal, .record, filed: filed) {
-                refuseCopy(result.id, "record")
-                continue
+            // A record that may not speak for its request says nothing to any session; one the host can't say about
+            // yet waits for it (the courier won't hand this result over again).
+            if let record = courier?.record(result.id) {
+                switch vouched(record.request, seal: record.seal, .record, id: result.id, filed: filed) {
+                case .yes: break
+                case .no:
+                    refuseCopy(result.id, "record")
+                    continue
+                case .unasked:
+                    heldResults.append(result)
+                    continue
+                }
             }
             guard let request = courier?.record(result.id)?.request ?? filed else { continue }
             tell(request, WalletCardModel.message(for: result, request: request), key: "result-\(result.sequence)")
@@ -949,13 +964,11 @@ final class WalletDesk: ObservableObject {
     /// The request a card for `filed` is drawn from and its buttons act on: the sent or opened copy when it may speak
     /// for `filed` (`vouched`), else nil (no card, no Retry, one line in the log, naming no field of the copy).
     private func spoken(for filed: WalletRequest, record: WalletRequestStore.Record?) -> WalletRequest? {
-        if let record, !vouched(record.request, seal: record.seal, .record, filed: filed) {
-            refuseCopy(filed.id, "record")
+        if let record, !believed(vouched(record.request, seal: record.seal, .record, id: filed.id, filed: filed), filed.id, "record") {
             return nil
         }
         let mark = marks[filed.id]
-        if let copy = mark?.request, !vouched(copy, seal: mark?.seal, .browserMark, filed: filed) {
-            refuseCopy(filed.id, "browser mark")
+        if let copy = mark?.request, !believed(vouched(copy, seal: mark?.seal, .browserMark, id: filed.id, filed: filed), filed.id, "browser mark") {
             return nil
         }
         refusedCopies.remove(filed.id)
@@ -965,12 +978,14 @@ final class WalletDesk: ObservableObject {
     /// Whether a record's or browser mark's copy of a request may speak for it. Any process of the user's can write those
     /// files: a copy is believed when it equals the host-stamped filed request, or carries a seal the session host
     /// confirms (`WalletRequest.sealedCopy`, what this app wrote, so a rewrite of the filed file can't hide what was sent),
-    /// and is under the filed request's own id. While the host can't be asked, a copy that differs is not believed.
-    private func vouched(_ copy: WalletRequest, seal: String?, _ kind: WalletRequest.CopyKind, filed: WalletRequest?) -> Bool {
-        if copy == filed { return true }
-        guard let seal, copy.id == filed?.id ?? copy.id else { return false }
+    /// and only under its own request's id (`id`: the file it was read from). `.unasked` while the host can't say: not
+    /// believed yet, not refused either.
+    private func vouched(_ copy: WalletRequest, seal: String?, _ kind: WalletRequest.CopyKind, id: String, filed: WalletRequest?) -> Vouch {
+        guard copy.id == id else { return .no }
+        if copy == filed { return .yes }
+        guard let seal else { return filed == nil && stampsUnasked ? .unasked : .no }
         let key = "\(kind.rawValue)/\(copy.id)"
-        if let known = checkedCopies[key], known.copy == copy, known.seal == seal { return known.valid }
+        if let known = checkedCopies[key], known.copy == copy, known.seal == seal { return known.valid ? .yes : .no }
         var message = copy.sealedCopy(kind)
         message.seal = seal
         do {
@@ -978,13 +993,21 @@ final class WalletDesk: ObservableObject {
             guard valid.count == 1 else { throw WalletAsk.Refusal("it answered for \(valid.count) of 1") }
             copiesUnasked = false
             checkedCopies[key] = (copy, seal, valid[0])
-            return valid[0]
+            return valid[0] ? .yes : .no
         } catch {
             if !copiesUnasked { log("couldn't ask the session host about a saved copy's seal (\(error)): no card from it until it answers") }
             copiesUnasked = true
-            return false
+            return .unasked
         }
     }
+
+    /// What `vouched` found: `.no` is refused and logged (`refuseCopy`), and only `.yes` is believed.
+    private func believed(_ verdict: Vouch, _ id: String, _ what: String) -> Bool {
+        if verdict == .no { refuseCopy(id, what) }
+        return verdict == .yes
+    }
+
+    private enum Vouch { case yes, no, unasked }
 
     /// Notes, once per request, that `what` (its record or browser mark) may not speak for it: its id and the kind of
     /// copy only, nothing the copy says.
