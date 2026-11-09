@@ -46,7 +46,7 @@ Ranking is expected effect on the goal divided by cost. Line numbers are at the 
 
 - **Source:** `TESTING.md:160-169`: evidence that a reviewer ran is the tool record; "child-written receipts and parent summaries" can't stand in for it. `tests/unit/test_claude_traces.py` applies this to transcripts.
 - **VibeSwitcher today:** `report` requires `blind_check` to be non-empty text (`Sources/VibeCore/LeadToolset.swift:5195`). Lead-rules G13 already notes that a self-reported line proves little, and E5 has shown that a proof record can replace a claim (`Sources/VibeCore/LeadToolset.swift:5215`). VibeSwitcher reads transcripts already (`Sources/VibeCore/TranscriptReader.swift`).
-- **Change, in two steps:** first, a zero-token script scans past Claude workers' transcripts: before each done report, was there a subagent call after the last code commit, and did its prompt hold the contract's goal and a diff? Only if the scan shows real skipping (say over 5%) does `report` start refusing a done without that call, with a lead override. This follows the "incident first, then the check" policy (decision 2026-11-06 22:35). Codex workers are out of scope; they're always audited.
+- **Change, in two steps:** first, a zero-token script scans past Claude workers' transcripts: before each done report, was there a subagent call on the branch's work, after its first code commit, whose prompt held the contract's goal and a diff? Commits after that call don't count as skipping, because fixing what the blind check found is the intended order. Only if the scan shows real skipping (say over 5%) does `report` start refusing a done without that call, with a lead override. This follows the "incident first, then the check" policy (decision 2026-11-06 22:35). Codex workers are out of scope; they're always audited.
 - **Serves:** fewer issues.
 - **Size:** S for the scan, M for the gate. **Risk:** the transcript format can change, and matching the prompt's content is a heuristic, so false refusals are possible.
 - **Measure:** the share of done reports backed by a matching call, and first-audit pass rate with and without one.
@@ -55,11 +55,11 @@ Ranking is expected effect on the goal divided by cost. Line numbers are at the 
 ### 5. A planted-marker probe of what a verifier really sees
 
 - **Source:** `tests/integration/test_claude.py:96-172`: a live run plants random markers the child must not see and fails if they come back. `TESTING.md:134` and `:137` record why it matters: instruction files were reported reaching children on some CLI releases, so isolation can change with a harness update.
-- **VibeSwitcher today:** `VerifierIsolationTests` assert the launch configuration (`Tests/VibeCoreTests/VerifierIsolationTests.swift`; the memory switch is at `Sources/VibeCore/LeadLaunch.swift:233-240`). Nothing checks what a real verifier ends up reading. Backlog C8 proposes a scratch worktree to close the channel fully; this is the measurement that says whether C8 is needed.
+- **VibeSwitcher today:** `VerifierIsolationTests` assert the launch configuration (`Tests/VibeCoreTests/VerifierIsolationTests.swift`; the memory switch is at `Sources/VibeCore/LeadLaunch.swift:233-240`). Nothing checks what a real verifier ends up reading. Backlog C8 proposes a scratch worktree to close the worker-to-verifier channel fully; this probe is narrower and tests only what gets loaded into a verifier's context.
 - **Change:** a case beside `scripts/verifier-eval.sh`, run when the Claude Code version changes: plant random markers in a worker's auto-memory folder and in its chat, start a real verifier on a cheap model in a scratch clone, and fail if it can name one. Do the same for a blind-check subagent, with a marker in the worker's conversation.
 - **Serves:** safer.
 - **Size:** S. **Risk:** false comfort. It covers what's loaded into context, not files a worker's shell leaves for the verifier to read (the repository says the same of its own isolation, `docs/claude.md:164`).
-- **Measure:** pass or fail per CLI version. Several passes argue against building C8; a failure gives C8 its evidence.
+- **Measure:** pass or fail per CLI version. A pass shows only that the context-loading path holds, and says nothing either way about C8, whose channel is files in the shared worktree. A failure is a bug to fix now, and evidence for C8.
 - **Verdict:** adapt.
 
 ### 6. A size ceiling on each role's prompt
