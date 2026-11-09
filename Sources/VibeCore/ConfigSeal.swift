@@ -136,6 +136,18 @@ public enum ConfigSeal {
     /// The key that asks the vault to look at the agents' config now (it hashes everything itself).
     public static let checkKey = keyPrefix + "#check"
 
+    /// `checkKey`'s value when your Accept passes back what its card showed: this, then "<key>\t<hash>" lines
+    /// (`encode`). The vault seals only those hashes (`LeadVault.Book.judge`).
+    static let shownPrefix = "shown\n"
+
+    static func shownValue(_ shown: [String: String]) -> String { shownPrefix + encode(shown) }
+
+    /// What a `checkKey` value says the card showed; nil for any other value (the lead's look, an older app's click).
+    static func shown(fromCheck value: String?) -> [String: String]? {
+        guard let value, value.hasPrefix(shownPrefix) else { return nil }
+        return decode(String(value.dropFirst(shownPrefix.count)))
+    }
+
     /// Where the vault keeps the names of what's held (one per line), for the app to show; set only by the vault.
     public static let heldKey = keyPrefix + "#held"
 
@@ -167,25 +179,49 @@ public enum ConfigSeal {
         return times
     }
 
+    /// One held thing as `heldKey` keeps it.
+    struct HeldLine {
+        var hash: String
+        var outside = false
+        var changes = ""
+        var at: Double?
+        var detail: HeldDetail?
+    }
+
     /// What's held, by key, with the hash it had when it was held (`heldKey`'s lines:
-    /// "<key>\t<hash>\t<r|q>\t<keys>\t<at>", q: changed outside a team session; keys: `heldChanges`'; at: `heldTimes`', absent on
-    /// a line an older version wrote).
-    static func heldLines(in guarded: [String: String]?) -> [String: (hash: String, outside: Bool, changes: String, at: Double?)] {
-        var held: [String: (hash: String, outside: Bool, changes: String, at: Double?)] = [:]
+    /// "<key>\t<hash>\t<r|q>\t<keys>\t<at>\t<detail>", q: changed outside a team session; keys: `heldChanges`'; at:
+    /// `heldTimes`'; detail: `HeldDetail` as JSON, which holds no tab or newline; the last ones absent on a line an older
+    /// version wrote, and a detail that doesn't read is no detail).
+    static func heldLines(in guarded: [String: String]?) -> [String: HeldLine] {
+        var held: [String: HeldLine] = [:]
         for line in (guarded?[heldKey] ?? "").split(separator: "\n") {
             let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-            if parts.count >= 2 { held[parts[0]] = (parts[1], parts.count > 2 && parts[2] == "q", parts.count > 3 ? parts[3] : "", parts.count > 4 ? Double(parts[4]) : nil) }
+            guard parts.count >= 2 else { continue }
+            held[parts[0]] = HeldLine(hash: parts[1], outside: parts.count > 2 && parts[2] == "q", changes: parts.count > 3 ? parts[3] : "",
+                                      at: parts.count > 4 ? Double(parts[4]) : nil, detail: parts.count > 5 ? HeldDetail.read(parts[5]) : nil)
         }
         return held
     }
 
-    static func heldHashes(in guarded: [String: String]?) -> [String: String] { heldLines(in: guarded).mapValues(\.hash) }
+    /// What's held, by key, with the hash each had when it was held: what a card that shows it passes back to Accept
+    /// (`LeadVault.checkConfig(root:shown:)`), so only that is sealed.
+    public static func heldHashes(in guarded: [String: String]?) -> [String: String] { heldLines(in: guarded).mapValues(\.hash) }
+
+    /// Each held thing's detail, by name, for the card: which files, and which sessions ran. Names, hashes and times,
+    /// never contents.
+    public static func heldDetails(in guarded: [String: String]?) -> [String: HeldDetail] {
+        var details: [String: HeldDetail] = [:]
+        for (key, line) in heldLines(in: guarded) { if let detail = line.detail { details[name(ofKey: key)] = detail } }
+        return details
+    }
 
     /// `heldKey`'s value for these keys and hashes, `outside` the ones changed outside a team session, `changes` what
-    /// changed in each (`changedKeys`, `changedFiles`), `times` when a folder's newest changed file was.
-    static func heldValue(_ held: [String: String], outside: Set<String>, changes: [String: String] = [:], times: [String: Double] = [:]) -> String {
+    /// changed in each (`changedKeys`, `changedFiles`), `times` when a folder's newest changed file was, `details` the
+    /// card's detail of each.
+    static func heldValue(_ held: [String: String], outside: Set<String>, changes: [String: String] = [:], times: [String: Double] = [:],
+                          details: [String: HeldDetail] = [:]) -> String {
         held.keys.sorted().map { key in
-            "\(key)\t\(held[key] ?? "")\t\(outside.contains(key) ? "q" : "r")\t\(clean(changes[key] ?? ""))\t\(times[key].map { String($0) } ?? "")"
+            "\(key)\t\(held[key] ?? "")\t\(outside.contains(key) ? "q" : "r")\t\(clean(changes[key] ?? ""))\t\(times[key].map { String($0) } ?? "")\t\(details[key]?.written ?? "")"
         }.joined(separator: "\n")
     }
 
@@ -501,13 +537,30 @@ public enum ConfigSeal {
     static func changedFiles(from old: String?, to new: String?, shown: Int = 5) -> (said: String?, at: Double?) {
         guard let new else { return (nil, nil) }
         let after = decode(new)
-        func hash(_ entry: String?) -> Substring? { entry?.split(separator: " ").first }
-        func time(_ entry: String?) -> Double? { entry?.split(separator: " ").last.flatMap { Double($0) } }
+        let listed = changedEntries(from: old, to: after)
+        guard !listed.isEmpty else { return (nil, after.values.compactMap { entryTime($0) }.max()) }
+        let said = listed.prefix(shown).map { "\($0.path) \($0.word)" }.joined(separator: ", ")
+            + (listed.count > shown ? " and \(listed.count - shown) more" : "")
+        return (said, listed.compactMap { after[$0.path].flatMap { entryTime($0) } }.max())
+    }
+
+    /// A folder entry's parts (`FolderRead.entries`: "<hash> <kind> <mtime>"; "<hash> <mtime>" from a version before
+    /// kinds were kept).
+    static func entryHash(_ entry: String?) -> String? { entry?.split(separator: " ").first.map(String.init) }
+    static func entryTime(_ entry: String?) -> Double? { entry?.split(separator: " ").last.flatMap { Double($0) } }
+    static func entryKind(_ entry: String?) -> String? {
+        guard let parts = entry?.split(separator: " "), parts.count == 3 else { return nil }
+        return String(parts[1])
+    }
+
+    /// What changed between a folder's per-path hashes as sealed (`old`; nil: sealed by a version before them, nothing
+    /// to name) and as they are (`after`), by name: a folder only when nothing under it changed too.
+    static func changedEntries(from old: String?, to after: [String: String]) -> [(path: String, word: String)] {
         var changed: [(path: String, word: String)] = []
         if let old {
             let before = decode(old)
             for path in Set(before.keys).union(after.keys).sorted() {
-                switch (hash(before[path]), hash(after[path])) {
+                switch (entryHash(before[path]), entryHash(after[path])) {
                 case (nil, _?): changed.append((path, "added"))
                 case (_?, nil): changed.append((path, "removed"))
                 case let (was?, now?) where was != now: changed.append((path, "changed"))
@@ -523,11 +576,7 @@ public enum ConfigSeal {
                 parents.insert(rest)
             }
         }
-        let listed = changed.filter { !parents.contains(Substring($0.path)) }
-        guard !listed.isEmpty else { return (nil, after.values.compactMap { time($0) }.max()) }
-        let said = listed.prefix(shown).map { "\($0.path) \($0.word)" }.joined(separator: ", ")
-            + (listed.count > shown ? " and \(listed.count - shown) more" : "")
-        return (said, listed.compactMap { time(after[$0.path]) }.max())
+        return changed.filter { !parents.contains(Substring($0.path)) }
     }
 
     /// The name a key stands for.
@@ -740,8 +789,9 @@ public enum ConfigSeal {
         var hash: String
         /// Its hash with the bookkeeping counted. Without any bookkeeping there, `hash`.
         var countingHash: String
-        /// Each entry but the bookkeeping, by relative path: "<its line's hash> <mtime, seconds>". What a held folder's
-        /// card names comes from these (`changedFiles`): paths, hashes and times, never contents.
+        /// Each entry but the bookkeeping, by relative path: "<its line's hash> <its kind: f, d, l or o> <mtime, seconds>".
+        /// What a held folder's card names comes from these (`changedFiles`, `heldDetail`): paths, hashes and times,
+        /// never contents.
         var entries: [String: String]
     }
 
@@ -762,7 +812,7 @@ public enum ConfigSeal {
             counting.update(data: text)
             guard !line.bookkeeping else { return }
             hasher.update(data: text)
-            if let path = line.path { entries[path] = hex(SHA256.hash(data: text).prefix(8)) + " \(line.mtime)" }
+            if let path = line.path { entries[path] = hex(SHA256.hash(data: text).prefix(8)) + " \(line.text.prefix(1)) \(line.mtime)" }
         }
         return FolderRead(hash: hex(hasher.finalize()), countingHash: hex(counting.finalize()), entries: entries)
     }
@@ -836,9 +886,9 @@ public enum ConfigSeal {
 
     /// A regular file's whole contents (a link at `path` followed), at most `limit` bytes: nil when it isn't a regular
     /// file, can't be read or is bigger.
-    static func regularContents(_ path: String, limit: Int) -> Data? {
+    static func regularContents(_ path: String, limit: Int, followLink: Bool = true) -> Data? {
         var data = Data()
-        guard case .digest = readRegular(path, followLink: true, limit: limit, chunk: { data.append($0) }) else { return nil }
+        guard case .digest = readRegular(path, followLink: followLink, limit: limit, chunk: { data.append($0) }) else { return nil }
         return data
     }
 
@@ -879,7 +929,7 @@ public enum ConfigSeal {
         return String(decoding: json, as: UTF8.self)
     }
 
-    private static func hex<D: Sequence>(_ digest: D) -> String where D.Element == UInt8 {
+    static func hex<D: Sequence>(_ digest: D) -> String where D.Element == UInt8 {
         digest.map { String(format: "%02x", $0) }.joined()
     }
 
@@ -1045,12 +1095,13 @@ extension LeadVault {
 
     /// Asks the vault to look at the agents' config now: it hashes everything watched itself; what's as sealed is
     /// found so, what's new is recorded, and a change is sealed anew when the team was quiet and it doesn't execute,
-    /// else held (`Book`'s rule). From the app (your click in its notice), what its card showed is sealed. The app's
-    /// or the lead's.
-    public func checkConfig(root: String) throws -> ConfigCheck {
+    /// else held (`Book`'s rule). From the app (your click in its notice), what its card showed is sealed: `shown`,
+    /// each held thing's hash as the card drew it (`ConfigSeal.heldHashes`), so a change after that is held anew, even
+    /// one a look has held since. The app's or the lead's.
+    public func checkConfig(root: String, shown: [String: String]? = nil) throws -> ConfigCheck {
         let before = try guardedRecord(root: root) ?? [:]
         var check = ConfigCheck()
-        do { try setGuardedSettings([ConfigSeal.checkKey: "1"], root: root) } catch let refused as Refused where refused.description == ConfigSeal.heldRefusal {
+        do { try setGuardedSettings([ConfigSeal.checkKey: shown.map(ConfigSeal.shownValue) ?? "1"], root: root) } catch let refused as Refused where refused.description == ConfigSeal.heldRefusal {
             let record = try guardedRecord(root: root)
             check.held = ConfigSeal.held(in: record)
             check.outside = ConfigSeal.heldOutside(in: record)

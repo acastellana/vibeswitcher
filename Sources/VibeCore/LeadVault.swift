@@ -632,6 +632,9 @@ extension LeadVault {
 
         private var state: State
         private let lock = NSLock()
+        private let copiesLock = NSLock()
+        /// The sealed skills folder the kept copies were last brought in line with (`retainSkills`).
+        private var copiedHash: String?
         /// The whole state, encoded, after each change (the host keeps it sealed on disk).
         public var onChange: ((Data) -> Void)?
         /// The home whose agents' config this vault seals (`ConfigSeal`): its own process's (a test's scratch one).
@@ -730,13 +733,32 @@ extension LeadVault {
                     config = ConfigSeal.hashes(of: ConfigSeal.homeWatched(home: configHome))
                 }
             }
-            lock.lock()
-            defer { lock.unlock() }
-            var changed = false
-            let reply = answer(request, from: caller, userOpened: userOpened, agentSession: agentSession, liveSessions: liveSessions,
-                               config: config, changed: &changed)
-            if changed, let onChange, let data = try? JSONEncoder().encode(state) { onChange(data) }
+            let (reply, skills): (Reply, (hash: String, entries: String)?) = {
+                lock.lock()
+                defer { lock.unlock() }
+                var changed = false
+                let reply = answer(request, from: caller, userOpened: userOpened, agentSession: agentSession, liveSessions: liveSessions,
+                                   config: config, changed: &changed)
+                if changed, let onChange, let data = try? JSONEncoder().encode(state) { onChange(data) }
+                let key = ConfigSeal.keyPrefix + ConfigSeal.copiedFolder
+                guard config != nil, let hash = state.config?.hashes[key], let entries = state.config?.hashes[ConfigSeal.keysKey(of: key)] else {
+                    return (reply, nil)
+                }
+                return (reply, (hash, entries))
+            }()
+            // It reads files: outside the lock.
+            if let skills { retainSkills(skills.hash, entries: skills.entries) }
             return reply
+        }
+
+        /// Keeps the skills' text as sealed, for the card's differences (`ConfigSeal.SealCopies`): a sealed folder's
+        /// hash already handled is skipped, so a look with nothing newly sealed costs nothing.
+        private func retainSkills(_ hash: String, entries: String) {
+            copiesLock.lock()
+            defer { copiesLock.unlock() }
+            guard hash != copiedHash else { return }
+            ConfigSeal.SealCopies(home: configHome).reconcile(sealed: ConfigSeal.decode(entries))
+            copiedHash = hash
         }
 
         /// The base moved since the lead last left it: the head moves on to where it is when the move is the user's
@@ -1279,14 +1301,19 @@ extension LeadVault {
             // Quiet since `sealedAt`: no team's branch code ran at or after it (a run as it was sealed is as new).
             func quiet(since sealedAt: Double?) -> Bool { !inUse.contains { ($0.branchCodeAt ?? -1) >= (sealedAt ?? 0) } }
             let watchedNow = hashes.filter { ConfigSeal.isWatchedKey($0.key) }
+            // Your click passes back what its card showed: only that is sealed. The app's alone.
+            let shown = caller == .app ? ConfigSeal.shown(fromCheck: asked[ConfigSeal.checkKey]) : nil
+            let sessions = Self.teamSessions(state.teams.filter { $0.key == own || !Self.retired($0.value, live: ids, now: now) }, own: own, live: ids)
             var mac = state.config ?? MacSeal()
             var team = state.teams[own] ?? Team(root: LeadVault.canonical(root))
             var guarded = team.guarded ?? [:]
             let home = Self.judge(watchedNow.filter { ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &mac.hashes, held: &mac.held,
-                                  quiet: quiet(since: mac.sealedAt), caller: caller, home: true)
+                                  quiet: quiet(since: mac.sealedAt), caller: caller, home: true, shown: shown,
+                                  sessions: sessions, sessionsKnown: ids != nil)
             var projectHeld = guarded[ConfigSeal.heldKey]
             let project = Self.judge(watchedNow.filter { !ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &guarded, held: &projectHeld,
-                                     quiet: quiet(since: team.configSealedAt), caller: caller, home: false)
+                                     quiet: quiet(since: team.configSealedAt), caller: caller, home: false, shown: shown,
+                                     sessions: sessions, sessionsKnown: ids != nil)
             guarded[ConfigSeal.heldKey] = projectHeld
             // Sealed, or found as sealed, now: what ran before is seen. A session still running is as new (not quiet).
             if home { mac.sealedAt = now }
@@ -1309,7 +1336,8 @@ extension LeadVault {
         /// hashes, `recorded` and `held` (`heldKey`'s value) as sealed, updated here; `home`: the Mac-wide seal's. True
         /// when nothing is held: all of it sealed or found as sealed.
         private static func judge(_ now: [String: String], hashes: [String: String], recorded: inout [String: String], held: inout String?,
-                                  quiet: Bool, caller: Caller, home: Bool) -> Bool {
+                                  quiet: Bool, caller: Caller, home: Bool, shown: [String: String]? = nil,
+                                  sessions: [ConfigSeal.TeamSession] = [], sessionsKnown: Bool = false) -> Bool {
             // A seal made while the sync bookkeeping still counted, of a folder as it is now: the same folder, carried
             // over to the hash that leaves it out, so that alone holds nothing. Whatever else moved doesn't match, and
             // is judged as ever.
@@ -1349,8 +1377,10 @@ extension LeadVault {
             // A plugin whose version folder moved (`ConfigSeal.isUpdate`: Claude Code's update, or a shell's forged one,
             // alike on disk) is new code: it waits for your click like other code, whoever made it, quiet or not.
             let updates = Set(differ.keys.filter { ConfigSeal.isUpdate(key: $0, recorded: recorded, now: hashes) })
-            // Something already held is never the lead's look's to seal, quiet or not: only your click clears it.
-            let unseen = caller == .app ? differ.filter { before[$0.key]?.hash != $0.value }
+            // Something already held is never the lead's look's to seal, quiet or not: only your click clears it. Your
+            // click seals what its card showed (`shown`), held anew by a look since or not; a click that says nothing
+            // of that (an older app) what's held.
+            let unseen = caller == .app ? differ.filter { key, value in (shown != nil ? shown?[key] : before[key]?.hash) != value }
                 : differ.filter { key, _ in
                     !quiet || !ConfigSeal.sealsWhenQuiet(key: key) || before[key] != nil || returned.contains(key) || updates.contains(key)
                 }
@@ -1359,7 +1389,7 @@ extension LeadVault {
             // comes back unchanged only as you accepted it.
             var unread = before.filter { now[$0.key] == nil && recorded[$0.key] != nil }
             if caller == .app {
-                for (key, line) in unread where ConfigSeal.isPlugin(name: ConfigSeal.name(ofKey: key)) {
+                for (key, line) in unread where ConfigSeal.isPlugin(name: ConfigSeal.name(ofKey: key)) && shown.map({ $0[key] == line.hash }) ?? true {
                     recorded[key] = line.hash
                     unread[key] = nil
                 }
@@ -1383,24 +1413,54 @@ extension LeadVault {
             // contents. A folder's also says when its newest changed file was.
             var changes: [String: String] = [:]
             var times: [String: Double] = [:]
+            var details: [String: ConfigSeal.HeldDetail] = [:]
             for key in holding.keys {
                 let keys = ConfigSeal.keysKey(of: key)
+                let folder = hashes[ConfigSeal.countingKey(of: key)] != nil
                 if firstSeen.contains(key) {
                     changes[key] = "first watched"
-                } else if hashes[ConfigSeal.countingKey(of: key)] != nil {
+                } else if folder {
                     let files = ConfigSeal.changedFiles(from: recorded[keys], to: hashes[keys])
                     changes[key] = files.said
                     times[key] = files.at
                 } else {
                     changes[key] = ConfigSeal.changedKeys(from: recorded[keys], to: hashes[keys])
                 }
+                // Held as it was: what was seen then stays what the card says (which sessions ran then).
+                details[key] = before[key]?.hash == holding[key] ? before[key]?.detail : nil
+                if details[key] == nil {
+                    details[key] = ConfigSeal.heldDetail(name: ConfigSeal.name(ofKey: key), from: folder ? recorded[keys] : nil, to: folder ? hashes[keys] : nil,
+                                                         sessions: sessions, known: sessionsKnown)
+                }
             }
             seal(sealed.keys, from: hashes, into: &recorded)
             for key in now.keys where recorded[key] == now[key] { recorded[ConfigSeal.goneKey(of: key)] = nil }
             held = ConfigSeal.heldValue(holding.merging(unread.mapValues(\.hash)) { $1 }, outside: outside.union(unread.filter(\.value.outside).keys),
                                         changes: changes.merging(unread.mapValues(\.changes)) { $1 },
-                                        times: times.merging(unread.compactMapValues(\.at)) { $1 })
+                                        times: times.merging(unread.compactMapValues(\.at)) { $1 },
+                                        details: details.merging(unread.compactMapValues(\.detail)) { $1 })
             return false
+        }
+
+        /// The sessions of `teams` as the card names them: each worker and verifier (holding its role or former), and
+        /// the lead; only those the host runs now when it says (`live`), every one when it can't. Another team's says
+        /// which project: your home's seal is the Mac's, so its worker can write it too.
+        private static func teamSessions(_ teams: [String: Team], own: String, live ids: Set<String>?) -> [ConfigSeal.TeamSession] {
+            var sessions: [ConfigSeal.TeamSession] = []
+            for id in teams.keys.sorted() {
+                guard let team = teams[id] else { continue }
+                let project = id == own ? "" : " (\(LeadMail.project(of: team.root)))"
+                for entry in team.roster() where ids.map({ $0.contains(entry.session.lowercased()) }) ?? true {
+                    let task = entry.task ?? "a task"
+                    let role = entry.role == .verifier ? "verifier of \(task)" : "worker \(task)"
+                    sessions.append(.init(label: role + project, boundAt: entry.boundAt))
+                }
+                for member in team.members where member.role == .lead {
+                    guard let session = member.session, ids.map({ $0.contains(session.lowercased()) }) ?? true else { continue }
+                    sessions.append(.init(label: "the lead" + project, boundAt: member.boundAt))
+                }
+            }
+            return sessions
         }
 
         /// A team no longer in use: none of its sessions (its lead's included) runs, and nothing of it (a grant issued
@@ -1444,9 +1504,9 @@ extension LeadVault {
         }
 
         /// `heldKey`'s value for `held` (`ConfigSeal.heldLines`'), nil when nothing is.
-        private static func heldValue(_ held: [String: (hash: String, outside: Bool, changes: String, at: Double?)]) -> String? {
+        private static func heldValue(_ held: [String: ConfigSeal.HeldLine]) -> String? {
             let value = ConfigSeal.heldValue(held.mapValues(\.hash), outside: Set(held.filter(\.value.outside).keys), changes: held.mapValues(\.changes),
-                                             times: held.compactMapValues(\.at))
+                                             times: held.compactMapValues(\.at), details: held.compactMapValues(\.detail))
             return value.isEmpty ? nil : value
         }
 
