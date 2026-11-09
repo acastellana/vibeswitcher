@@ -298,3 +298,7 @@ The lead told the user "at least one merge really did hang" from the hung log, w
 
 The user asked to see what's possible and said they'll probably delete them. Local npm install with --ignore-scripts in the prototype or scratch folder only, by the user's request to use this library; its MCP server and Claude plugin stay out because they'd write agent config and trip the seal.
 
+## 2026-11-09 09:50:05 3D representations of a session (67js seed head, river, railway yard) were built on 2026-11-09, the user looked and said "meh - remove them"; all three are deleted. Don't propose 3D session views again unless the user brings it up.
+
+It was a look at what's possible, not a direction, and the user didn't like the result. This supersedes the earlier decision to hold those three prototypes as kept.
+

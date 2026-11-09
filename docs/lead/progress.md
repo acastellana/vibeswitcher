@@ -2079,3 +2079,20 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 09:34 Merged readme-a-real-feature: README: a real feature list, and screenshots that show what their captions say (in a batch: readme-a-real-feature, ideas-review-addyosmani, ideas-review-cloudflare landed on one test run) (build 16ca360977ec)
 - 2026-11-09 09:34 Merged ideas-review-addyosmani: Ideas review: addyosmani/agent-skills (no audit: review none) (in a batch: readme-a-real-feature, ideas-review-addyosmani, ideas-review-cloudflare landed on one test run) (build 16ca360977ec)
 - 2026-11-09 09:34 Merged ideas-review-cloudflare: Ideas review: cloudflare/security-audit-skill (no audit: review none) (in a batch: readme-a-real-feature, ideas-review-addyosmani, ideas-review-cloudflare landed on one test run) (build 16ca360977ec)
+- 2026-11-09 09:34 Automatically (auto_advance): Merged readme-a-real-feature at 15b6a7c7 (its passing audit), ideas-review-addyosmani at 83f33d61 (review none: its worker's done report on a9498b2d), ideas-review-cloudflare at f2d05d8b (review none: its worker's done report on 6b2f5a0c) into main as one batch, on 1 test run for 3 tasks.
+- 2026-11-09 09:34 Automatically (auto_advance): Cleaned up readme-a-real-feature (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 09:34 Automatically (auto_advance): Cleaned up ideas-review-addyosmani (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 09:34 Automatically (auto_advance): Cleaned up ideas-review-cloudflare (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 09:34 Fetched origin/main at 28f6e0ac: main is 11 commits ahead of origin/main and 0 commits behind it
+- 2026-11-09 09:34 Asked the user to push main at 87340fff (11 commits) to origin/main
+- 2026-11-09 09:35 Pushed main at 87340fff (11 commits) to origin/main, on the user's click
+- 2026-11-09 09:44 Kept prototype-67js-a-session unmerged: Throwaway prototype for the user to look at; never merged (decision on the 67js prototypes). Delete or keep is the user's call.
+- 2026-11-09 09:44 Kept prototype-67js-a-lead unmerged: Throwaway prototype for the user to look at; never merged (decision on the 67js prototypes). Delete or keep is the user's call.
+- 2026-11-09 09:45 Kept prototype-67js-a-session-2 unmerged: Throwaway prototype for the user to look at; never merged (decision on the 67js prototypes). Delete or keep is the user's call.
+- 2026-11-09 09:46 Update: Three 67js prototypes of a session — Three throwaway 3D pages built with 67js, all with invented data. They stay on their own branches and aren't merged. To open one, double-click its `index.html`; no server or build is needed.
+- 2026-11-09 09:48 Automatically fetched origin/main at 87340fff: 0 commits from the other Mac at origin/main (87340fffd9fdf2deabdadcb45e8a0cf88eeac08b): merge_remote would do nothing: main has everything origin/main has.
+- 2026-11-09 09:49 Abandoned prototype-67js-a-session: The user looked at the three 67js prototypes and said "meh - remove them".
+- 2026-11-09 09:49 Abandoned prototype-67js-a-session-2: The user looked at the three 67js prototypes and said "meh - remove them".
+- 2026-11-09 09:49 Abandoned prototype-67js-a-lead: The user looked at the three 67js prototypes and said "meh - remove them".
+- 2026-11-09 09:52 Merged ideas-review-mattpocock: Ideas review: mattpocock/skills (in a batch: ideas-review-mattpocock, ideas-review-google landed on one test run) (build 16ca360977ec)
+- 2026-11-09 09:52 Merged ideas-review-google: Ideas review: google/elephant-goldfish-model (in a batch: ideas-review-mattpocock, ideas-review-google landed on one test run) (build 16ca360977ec)
