@@ -3267,7 +3267,7 @@ public final class LeadToolset: MCPToolset {
                 ? "If they only need longer, raise test_timeout_min (\(Self.gb(workflow.testTimeoutMinutes)) in workflow.md) with configure; else have the worker find what hangs."
                 : "If they only work silently that long, raise stall_min (\(Self.gb(workflow.stallMinutes)) in workflow.md) with configure; else have the worker find what hangs."
             throw Problem(text: "Not merged: the \(what) \(Worktrees.hung(after: after, stall: stall)) on \(slug) rebased onto \(base); \(they) stopped, with everything started under them. \(slug) stays as it was. "
-                          + named + ledger
+                          + MergeRerun.causeText(output) + named + ledger
                           + (readable.map { "Those and the output's last \(MergeRerun.hungTail) lines, readable by the worker who fixes it: \($0). " } ?? "")
                           + (saved.map { "The output so far: \($0). " } ?? "(The output couldn't be saved.) ")
                           + advice)
@@ -3611,7 +3611,7 @@ public final class LeadToolset: MCPToolset {
         case .hung(let command, let after, let output, let stall):
             let saved = saveMergeLog(output, slug: slug, name: "revert-test.log")
             throw Problem(text: "Not reverted: the \(command) \(Worktrees.hung(after: after, stall: stall)) with \(slug) reverted on \(base), and was stopped with everything started under it. \(base) is as it was. "
-                          + (saved.map { "The output so far: \($0)." } ?? "(The output couldn't be saved.)"))
+                          + MergeRerun.causeText(output) + (saved.map { "The output so far: \($0)." } ?? "(The output couldn't be saved.)"))
         case .cancelled:
             throw Problem(text: "The revert of \(slug) was cancelled; \(base) is as it was, and \(slug) stays merged.")
         case .error(let text):
@@ -5456,13 +5456,19 @@ public final class LeadToolset: MCPToolset {
             lines.append("The session host can't be read right now: what the workers are doing isn't known; the states below are the board's.")
         }
         // Stalled workers first: VibeSwitcher's witness noticed them stop making progress, whatever their screens say.
-        let stalled = board.stalled
+        let stalled = board.stalled.filter { !$0.stall!.waitsOnOwnJob }
         if !stalled.isEmpty {
             let now = Date()
             lines.append("\nStalled (\(stalled.count)):")
             lines += stalled.prefix(Self.statusTasks).map { task in
-                Self.clip("- \(task.slug): \(task.stall!.text(now: now)). \(task.stall!.advice(slug: task.slug))", 300)
+                Self.clip("- \(task.slug): \(task.stall!.report(now: now)). \(task.stall!.advice(slug: task.slug))", 600)
             }
+        }
+        let waitingOnJobs = board.stalled.filter { $0.stall!.waitsOnOwnJob }
+        if !waitingOnJobs.isEmpty {
+            let now = Date()
+            lines.append("\nWaiting on their own background jobs, not stalled (\(waitingOnJobs.count)):")
+            lines += waitingOnJobs.prefix(Self.statusTasks).map { task in Self.clip("- \(task.slug): \(task.stall!.report(now: now))", 600) }
         }
         // Over their time budget: each waits on the lead's decision (see `LeadBudget`).
         let over = board.overBudget

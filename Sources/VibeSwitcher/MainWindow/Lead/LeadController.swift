@@ -419,6 +419,8 @@ final class LeadController: ObservableObject {
     /// question id: its card says so.
     @Published private(set) var answerNotices: [String: String] = [:]
     /// Witness events already told, so each is told once.
+    /// How long the Mac has slept since this app started, noted at each witness look (`MacSleepLog`).
+    private var macSleep = MacSleepLog()
     private var told: Set<String> = []
     /// When the witness first saw each verifier that auto_advance audits again end without a verdict (by root and
     /// session; see `LeadWitness.leftToAdvance`).
@@ -1817,6 +1819,8 @@ final class LeadController: ObservableObject {
         let hosted = team.hosted
         var seen: [String: LeadWitness.Seen] = [:]
         let now = Date()
+        // Before anything is judged: a look just after a sleep sees that sleep.
+        macSleep.note(.real)
         let workers = Set(board.tasks.compactMap(\.worker))
         for id in board.tasks.flatMap(\.members) {
             guard let info = hosted[id] else { continue }
@@ -1850,7 +1854,9 @@ final class LeadController: ObservableObject {
                                         lastActivity: watched?.progress?.lastWritten, compactedAt: watched?.progress?.compactedAt,
                                         shells: shells, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) },
                                         started: info.startedAt.timeIntervalSince1970, submittedAt: submitted[id],
-                                        boundAt: toolTimes[id]?.bound, toolsAt: toolTimes[id]?.tools, lockWait: team.lockWaits[id])
+                                        boundAt: toolTimes[id]?.bound, toolsAt: toolTimes[id]?.tools, lockWait: team.lockWaits[id],
+                                        backgroundTasks: watched?.tail?.background ?? [],
+                                        shellsRead: workers.contains(id) && session != nil && watched != nil, sleep: macSleep)
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
         // What to tell and do is worked out off the main thread (see `WitnessWork`), with what's told and seen so far;

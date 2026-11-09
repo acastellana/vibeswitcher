@@ -48,6 +48,12 @@ public enum LeadWitness {
         /// Its place in line for the Mac-wide test and build lock, while a run in its folder waits for a slot (see
         /// `TestLock.waits`): it waits on the lock, not stalled (11 of 19 stall alarms in TGE were workers in line).
         public var lockWait: TestLock.Wait?
+        /// What its transcript names still running in the background (`TranscriptTail.background`).
+        public var backgroundTasks: [TranscriptTail.Background]
+        /// `shells` comes from a reading of the process table for this session, so a job missing from it has no process.
+        public var shellsRead: Bool
+        /// How long the Mac has slept, by the awake clock (see `MacSleepLog`).
+        public var sleep: MacSleepLog
 
         /// How it ended, in words; its exit code when that wasn't said.
         var ending: String { cause ?? "exit \(exit ?? 0)" }
@@ -63,6 +69,8 @@ public enum LeadWitness {
         /// else its shells, as the lead's status says them ("1 shell: bash calm-check.sh", "2 shells"). Its turn goes
         /// on when that's done.
         public var waitingOn: String? {
+            // The job its transcript names has no process left: its turn won't go on, whatever else runs.
+            if diedJob != nil { return nil }
             if case .idle(let running?)? = activity { return running }
             let waited = waitedShells
             guard activity?.betweenTurns ?? [.done, .idle, .background].contains(status ?? .unknown), let first = waited.first else { return nil }
@@ -92,9 +100,13 @@ public enum LeadWitness {
                     pending: PendingPrompt? = nil, agentQuit: Bool = false, apiError: String? = nil, apiErrorAt: Double? = nil, activity: LeadActivity? = nil,
                     lastActivity: Double? = nil, compactedAt: Double? = nil, shells: [BackgroundJob] = [],
                     heldSince: Double? = nil, heldFrom: String? = nil, started: Double? = nil, submittedAt: Double? = nil,
-                    boundAt: Double? = nil, toolsAt: Double? = nil, lockWait: TestLock.Wait? = nil) {
+                    boundAt: Double? = nil, toolsAt: Double? = nil, lockWait: TestLock.Wait? = nil,
+                    backgroundTasks: [TranscriptTail.Background] = [], shellsRead: Bool = false, sleep: MacSleepLog = MacSleepLog()) {
             self.live = live
             self.lockWait = lockWait
+            self.backgroundTasks = backgroundTasks
+            self.shellsRead = shellsRead
+            self.sleep = sleep
             self.started = started
             self.submittedAt = submittedAt
             self.boundAt = boundAt
@@ -260,12 +272,13 @@ public enum LeadWitness {
                     add("\(worker)|api-error-\(Int(info.apiErrorAt ?? 0))", "The worker on \(task.slug) stopped mid-task: its turn ended on an API error (\(error)). Tell it to go on with message(\(task.slug), …); it picks up where it was.")
                 } else if info.live, !info.agentQuit, let event = waiting(info, session: worker, now: now,
                                                          input: waitingText("The worker on \(task.slug)", info, now: now, advice: "Answer it with message, or ask the user if it's theirs to decide."),
-                                                         stopped: task.status == .running ? "The worker on \(task.slug) stopped without calling report. read_session to see where it is, then message it." : nil) {
+                                                         stopped: task.status == .running ? "The worker on \(task.slug) stopped without calling report\(info.diedJob.map { ": the background job it waited on (\($0.text)) has no process any more" } ?? ""). read_session to see where it is, then message it." : nil) {
                     events.append(event)
                 }
                 if info.live {
-                    for stall in LeadStall.detect(info, task: task, now: now) {
-                        add(stall.key(session: worker), "The worker on \(task.slug) is \(stall.text(now: now)). \(stall.advice(slug: task.slug))")
+                    for stall in LeadStall.detect(info, task: task, now: now) where !stall.heldBack {
+                        // A job of its own that's alive is labelled so, not as a stall needing the lead.
+                        add(stall.key(session: worker), "The worker on \(task.slug) is \(stall.report(now: now)). \(stall.waitsOnOwnJob ? "If that shell isn't what it's waiting for, read_session(\(task.slug)) or message it." : stall.advice(slug: task.slug))")
                     }
                 }
             }
@@ -550,7 +563,7 @@ public enum LeadWitness {
         var found: [String: LeadStall] = [:]
         for task in board.tasks {
             guard let worker = task.worker, worker != task.stopped, let info = seen[worker], !info.neverGotTools(now: now),
-                  let stall = LeadStall.detect(info, task: task, now: now).first else { continue }
+                  let stall = LeadStall.detect(info, task: task, now: now).first ?? LeadStall.awaitingPrompt(info, task: task, now: now) else { continue }
             found[task.id] = stall
         }
         return found

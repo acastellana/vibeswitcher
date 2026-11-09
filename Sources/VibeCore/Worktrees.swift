@@ -256,7 +256,7 @@ public enum Shell {
     public static func run(executable: String, args: [String], in directory: String, env: [String: String] = [:],
                            timeout: TimeInterval = 120, grace: TimeInterval = 5, interleaved: Bool = false,
                            branchCode: Bool = false, ownSession: Bool = false, watch: StallWatch? = nil,
-                           time: MacTime = .real) -> Git.Result {
+                           time: MacTime = .real, beforeStop: (() -> Void)? = nil) -> Git.Result {
         // Its limits count the time the Mac was awake. On 2026-11-08 a merge's run had 4.9 minutes awake out of 51.8:
         // the first look after a dark wake found test_timeout_min passed and called it hung, and the merges behind it waited.
         let now = time.awake
@@ -325,6 +325,8 @@ public enum Shell {
             let heard = [output.last, errors.last].compactMap { $0 }.max() ?? began
             quiet = timedOut ? max(0, now() - heard) : nil
             if cancelled { stall = nil }
+            // Whoever asked to see the run as it was, before it's stopped (its folder's place in a slot's line goes with it).
+            if timedOut { beforeStop?() }
             // Out of time: its children (a test runner's workers) go too, or they'd keep running in the worktree.
             // Asked first; whatever is still there after `grace` (it ignores TERM) is killed.
             stop(process, group: group, grace: grace)
@@ -1400,14 +1402,24 @@ public enum Worktrees {
             }
             let started = Date()
             let stop = progress?.heartbeat { "Running the \(name) (\(duration(Date().timeIntervalSince(started))) so far)." }
+            // The two clocks at its start: what the Mac slept of its run, if it's stopped as hung (`MergeRerun.causeNote`).
+            let clocks = (wall: time.wall(), awake: time.awake())
+            // Something in its folder still in line for a slot when it's stopped: its ticket goes with the run.
+            var queued: TestLock.Wait?
             // The branch's code (its build, its tests): never the lead to the session host (see `BranchCode`).
             let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path, env: env, timeout: timeout, interleaved: true,
-                                branchCode: true, watch: lock?.watch, time: time)
+                                branchCode: true, watch: lock?.watch, time: time,
+                                beforeStop: { queued = lock?.waits(for: ["run": path])["run"] })
             stop?()
             // A run stopped for making no progress says so first, then what it was stuck on, after its output.
             // Stopped at test_timeout_min, it says how long it had been silent: a crawl keeps writing, a stuck one doesn't.
             let silent = run.stall == nil ? run.quiet.map { "\n\n" + MergeRerun.quietNote($0) } : nil
-            let said = (name == "rerun" ? rerunHeader : "") + header + run.output + (run.stall.map { "\n\n" + $0.report } ?? silent ?? "")
+            var said = (name == "rerun" ? rerunHeader : "") + header + run.output + (run.stall.map { "\n\n" + $0.report } ?? silent ?? "")
+            if run.timedOut, !run.cancelled {
+                let stopped = time.wall(), window = stopped.timeIntervalSince(clocks.wall)
+                said += "\n\n" + MergeRerun.causeNote(stall: run.stall, quiet: run.quiet, slept: max(0, window - (time.awake() - clocks.awake)), window: window,
+                                                      started: clocks.wall, stopped: stopped, queued: queued, recorded: recorded)
+            }
             outputs.append((name, said))
             if run.cancelled || cancel?.isCancelled == true { return (.cancelled, outputs) }
             if let stall = run.stall {
@@ -1470,7 +1482,9 @@ public enum Worktrees {
         switch stopped {
         case nil: outcome = outputs.contains { $0.name == "test command" } ? .passed : .noTests
         case .failed: outcome = .failed(outputs.last?.name ?? "test command")
-        case .hung(let command, let after, _, let stall): outcome = .hung(command, after: after, stall: stall?.summary)
+        case .hung(let command, let after, let output, let stall):
+            let said = [stall?.summary, MergeRerun.cause(in: output)].compactMap { $0 }.joined(separator: ". ")
+            outcome = .hung(command, after: after, stall: said.isEmpty ? nil : said)
         case .cancelled: outcome = .cancelled
         case .error(let text): outcome = .error(text)
         case .passed, .passedOnRerun, .conflict: outcome = .error("unexpected")

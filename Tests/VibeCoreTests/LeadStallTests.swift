@@ -806,6 +806,39 @@ struct LeadStallStatusTests: LeadTeamFixture {
         #expect(!text[stalled.upperBound..<running.lowerBound].contains("- one:"))
     }
 
+    /// status's Stalled lines name the cause with its evidence; a worker on its own live job is told apart, not called stalled.
+    @Test func statusSaysWhatAStalledWorkerIsReallyWaitingOn() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        for title in ["One", "Two", "Three"] {
+            _ = lead.call("add_task", ["title": title, "goal": "g", "acceptance": ["a"]])
+            _ = lead.call("start_worker", ["task": title.lowercased()])
+        }
+        let now = Date().timeIntervalSince1970
+        let slept = MacSleepLog.Reading(from: now - 1500, slept: 1400, sleeps: 3, lastWoke: now - 100, unwatchedBefore: nil)
+        try BoardStore(root: root).update { board in
+            board.noteStalls([
+                board.task("one")!.id: LeadStall(reason: .silent, lastActivity: now - 1500, at: now - 60, cause: .macAsleep(slept)),
+                board.task("two")!.id: LeadStall(reason: .idle, lastActivity: now - 3000, at: now - 60, background: "the eval",
+                                                 cause: .backgroundJob(what: "the eval", pid: 4242, startedAt: now - 3000, named: true)),
+                board.task("three")!.id: LeadStall(reason: .idle, lastActivity: now - 700, at: now - 60,
+                                                   cause: .unknown(read: ["status done", "no shells of its own in the process table"])),
+            ])
+        }
+        let text = lead.call("status", [:]).text
+        let stalled = try #require(text.range(of: "Stalled (2):"))
+        let running = try #require(text.range(of: "\nrunning:"))
+        let lines = text[stalled.upperBound..<running.lowerBound]
+        #expect(lines.contains("- one: stalled:") && lines.contains("Cause: the Mac was asleep: the Mac slept 23 min of the 25 min since"), "\(lines)")
+        #expect(lines.contains("(3 sleeps, last woke"), "\(lines)")
+        #expect(lines.contains("- three: stalled:") && lines.contains("Cause: couldn't tell why. What was read: status done; no shells of its own in the process table"), "\(lines)")
+        // Its own live job is said apart, and isn't under Stalled.
+        #expect(!lines.contains("- two: stalled"), "\(lines)")
+        #expect(lines.contains("Waiting on their own background jobs, not stalled (1):"), "\(lines)")
+        #expect(lines.contains("- two: not stalled: waiting on its own background job (the eval): pid 4242"), "\(lines)")
+    }
+
     @Test func aQuestionToTheLeadIsPendingUntilItAnswers() throws {
         let root = try repo()
         let runtime = FakeRuntime()

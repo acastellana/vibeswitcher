@@ -111,6 +111,34 @@ struct MergeRunMacSleepTests {
         #expect(stopped == nil, "\(String(describing: stopped))")
     }
 
+    /// The run's report says how long the Mac slept in its window, by the clocks its limits use: most of it here.
+    @Test func aRunStoppedAcrossASleepSaysTheMacSlept() async throws {
+        let mac = Mac(), (command, started, _) = gated("slept-report")
+        let run = runChecks(command, timeout: 45 * 60, mac: mac)
+        #expect(await eventually { exists(started) }, "the command never started")
+        mac.sleep(2 * 60 * 60)
+        mac.stayAwake(46 * 60)
+        guard case .hung(_, _, let output, _)? = await run.value else { Issue.record("not stopped as hung"); return }
+        let why = try #require(MergeRerun.cause(in: output), "\(output)")
+        #expect(why.hasPrefix("the Mac slept through most of it: the Mac slept 120 min of the "), "\(why)")
+    }
+
+    /// Awake the whole run, stopped for no progress: the report names the live process and says the Mac was awake.
+    @Test func aRunStoppedAwakeSaysWhichProcessWasSilent() async throws {
+        let mac = Mac(), (command, started, _) = gated("awake-report")
+        let watch = StallWatch(after: 600, every: 0.05, loadLimit: 24, load: { 4.2 })
+        let run = runChecks(command, timeout: 45 * 60, watch: watch, mac: mac)
+        #expect(await eventually { exists(started) }, "the command never started")
+        for _ in 0..<4 {
+            mac.stayAwake(170)
+            #expect(await runHasLooked(mac))
+        }
+        guard case .hung(_, _, let output, let stall?)? = await run.value else { Issue.record("not stopped as hung"); return }
+        let why = try #require(MergeRerun.cause(in: output), "\(output)")
+        #expect(why.hasPrefix("a live process with no output for \(Worktrees.duration(stall.idle)) of awake time, its processes when stopped: "), "\(why)")
+        #expect(why.contains("the Mac was awake the whole "), "\(why)")
+    }
+
     /// The limit still holds: a run that really had its 45 awake minutes is stopped as hung, and says how long it was
     /// silent in awake time.
     @Test func aMergeRunPastItsLimitInAwakeTimeIsStillStopped() async throws {

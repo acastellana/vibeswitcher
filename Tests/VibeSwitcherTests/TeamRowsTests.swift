@@ -195,6 +195,17 @@ struct TeamRowsTests {
         #expect(self.row(task, ["w-fix": Self.ended]).problem == "The worker ended without reporting.")
     }
 
+    /// A worker waiting on its own live background job, or on a prompt, isn't a red "Stalled" row: nothing's stuck.
+    @Test func aWaitOnItsOwnJobOrAPromptIsntARedStalledRow() {
+        let at = Self.now.timeIntervalSince1970
+        var task = Self.task("fix", .running)
+        task.stall = LeadStall(reason: .idle, lastActivity: at - 3000, at: at - 60, background: "the eval",
+                               cause: .backgroundJob(what: "the eval", pid: 1, startedAt: at - 3000, named: true))
+        #expect(row(task, ["w-fix": Self.working]).mark != .stalled)
+        task.stall = LeadStall(reason: .prompt, lastActivity: at - 3000, at: at - 60, cause: .prompt(text: "Run: ls", since: at - 3000))
+        #expect(row(task, ["w-fix": Self.working]).mark != .stalled)
+    }
+
     @Test func otherStates() {
         #expect(row(Self.task("q", .planned)).stateText(now: Self.now) == "Queued")
         var blocked = Self.task("b", .blocked)

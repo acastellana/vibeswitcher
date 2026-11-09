@@ -1291,7 +1291,10 @@ public struct LeadBoard: Codable, Equatable, Sendable {
             var new = found[tasks[index].id]
             if let old, let fresh = new, old.reason == fresh.reason, old.lastActivity == fresh.lastActivity,
                old.waitingSince == fresh.waitingSince {
+                // When it was first noticed stays; what it's waiting on can change (the Mac woke; a slot came free).
                 new = old
+                new?.cause = fresh.cause
+                new?.sleep = fresh.sleep
             }
             if new != old {
                 tasks[index].stall = new

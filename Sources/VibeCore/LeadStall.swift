@@ -13,6 +13,8 @@ public struct LeadStall: Codable, Equatable, Sendable {
         case compacted
         /// A message has waited in its inbox, undelivered.
         case undelivered
+        /// A permission prompt or question has waited on its screen past `promptAfter` (see `awaitingPrompt`).
+        case prompt
     }
 
     public var reason: Reason
@@ -28,9 +30,16 @@ public struct LeadStall: Codable, Equatable, Sendable {
     /// For `silent` and `idle`: the shells it left running in the background, which weren't counted as it doing
     /// anything ("npm run dev · 2h", see `BackgroundJobs.summary`).
     public var shells: String?
+    /// What it's really waiting on, with what shows it (see `StallCause`).
+    public var cause: StallCause?
+    /// How long the Mac slept in its window, by the awake clock (nil: not watched).
+    public var sleep: MacSleepLog.Reading?
 
     public init(reason: Reason, lastActivity: Double, at: Double = Date().timeIntervalSince1970,
-                waitingSince: Double? = nil, waitingFrom: String? = nil, background: String? = nil, shells: String? = nil) {
+                waitingSince: Double? = nil, waitingFrom: String? = nil, background: String? = nil, shells: String? = nil,
+                cause: StallCause? = nil, sleep: MacSleepLog.Reading? = nil) {
+        self.cause = cause
+        self.sleep = sleep
         self.reason = reason
         self.lastActivity = lastActivity
         self.at = at
@@ -63,6 +72,7 @@ public struct LeadStall: Codable, Equatable, Sendable {
             return "it's between turns without having reported, and has no question to the lead pending"
                 + (shells.map { "; \(Self.left($0)) runs on" } ?? "")
         case .compacted: return "its transcript ends at a context-compaction summary and nothing followed"
+        case .prompt: return "it has waited on a permission prompt or question"
         case .undelivered:
             let waited = LeadToolset.age(now.timeIntervalSince1970 - (waitingSince ?? at))
             return "a message\(waitingFrom.map { " from \($0)" } ?? "") has waited \(waited) in its inbox, undelivered"
@@ -80,6 +90,39 @@ public struct LeadStall: Codable, Equatable, Sendable {
         return "stalled: \(why(now: now)), \(last ?? "no activity seen yet")"
     }
 
+    /// What status's Stalled lines and the witness tell the lead: `text` with what it's really waiting on and what
+    /// shows it (the Mac's sleep, a test slot, a prompt, a live process, a background job, or that it couldn't tell).
+    /// A worker waiting on a live job of its own is labelled so, and isn't called stalled.
+    public func report(now: Date = Date()) -> String {
+        guard let cause else { return text(now: now) }
+        if waitsOnOwnJob {
+            let last = Self.known(lastActivity).map { ", last activity \(LeadToolset.age(now.timeIntervalSince1970 - $0)) ago" } ?? ""
+            return "not stalled: \(cause.text(now: now))\(last)\(sleepNote(now: now))"
+        }
+        return "\(text(now: now)). Cause: \(cause.text(now: now))\(sleepNote(now: now))"
+    }
+
+    /// The Mac's sleep in the window, when the cause isn't that already and there was any.
+    private func sleepNote(now: Date) -> String {
+        if case .macAsleep? = cause { return "" }
+        guard let sleep, sleep.slept > 0 else { return "" }
+        return "; \(sleep.text(now: now))"
+    }
+
+    /// Waiting between turns on a live background job of its own: the process table shows it alive, so this isn't a
+    /// stall that needs the lead. Told apart in status and left out of the Team view's red "Stalled".
+    public var waitsOnOwnJob: Bool { reason == .idle && cause?.isOwnJob == true }
+
+    /// Whether the witness keeps this from the lead: its own job, which its transcript names and which still runs (the
+    /// report would be a wake-up with nothing to do).
+    public var heldBack: Bool {
+        if case .backgroundJob(_, _, _, named: true)? = cause { return reason == .idle }
+        return false
+    }
+
+    /// Whether the Team view shows it as a red "Stalled": not a wait on its own job, nor a prompt, which shows as waiting for input.
+    public var showsAsStalled: Bool { !waitsOnOwnJob && reason != .prompt }
+
     /// A time, unless it's a placeholder for none (`.distantPast`, or anything before 2001).
     static func known(_ at: Double) -> Double? { at >= Date(timeIntervalSinceReferenceDate: 0).timeIntervalSince1970 ? at : nil }
 
@@ -90,6 +133,7 @@ public struct LeadStall: Codable, Equatable, Sendable {
         case .idle: return "read_session(\(slug)) to see where it stopped, then message it what to do next."
         case .compacted: return "It lost its place after the compaction: message(\(slug), …) what it was doing and what's next."
         case .undelivered: return "read_session(\(slug)) to see what holds it (a draft in its box, a prompt); message again with clear_draft: true, or tell the user."
+        case .prompt: return "Answer it with message(\(slug), …), or ask the user if it's theirs to decide."
         }
     }
 
@@ -99,6 +143,7 @@ public struct LeadStall: Codable, Equatable, Sendable {
         switch reason {
         case .undelivered: return "\(session)|held-\(Int(waitingSince ?? at))"
         case .silent, .idle, .compacted: return "\(session)|stalled-\(Int(lastActivity))"
+        case .prompt: return "\(session)|prompt-\(Int(waitingSince ?? at))"
         }
     }
 
@@ -129,20 +174,29 @@ public struct LeadStall: Codable, Equatable, Sendable {
             let quiet = at - last
             // A compaction once its turn was over is Claude tidying an idle session: it's idle, if anything.
             if let compacted = seen.compactedAt, !betweenTurns, quiet >= compactedAfter {
-                stalls.append(LeadStall(reason: .compacted, lastActivity: max(last, compacted), at: at))
+                stalls.append(explained(LeadStall(reason: .compacted, lastActivity: max(last, compacted), at: at), seen, from: last, needed: compactedAfter, background: nil))
             } else if working, turnShells.isEmpty, quiet >= silentAfter {
-                stalls.append(LeadStall(reason: .silent, lastActivity: last, at: at, shells: shells))
+                stalls.append(explained(LeadStall(reason: .silent, lastActivity: last, at: at, shells: shells), seen, from: last, needed: silentAfter, background: nil))
             } else if betweenTurns, task.leadQuestionAt == nil, quiet >= (background == nil ? idleAfter : backgroundCeiling) {
-                stalls.append(LeadStall(reason: .idle, lastActivity: last, at: at, background: background,
-                                        shells: background == nil ? shells : nil))
+                stalls.append(explained(LeadStall(reason: .idle, lastActivity: last, at: at, background: background,
+                                                  shells: background == nil ? shells : nil), seen, from: last,
+                                        needed: background == nil ? idleAfter : backgroundCeiling, background: background))
             }
         }
         // A worker at work with its turn's command running (or waiting for the lock) takes the message at its next step.
         if let held = seen.heldSince, at - held >= undeliveredAfter, !(working && (!turnShells.isEmpty || seen.lockWait != nil)) {
-            stalls.append(LeadStall(reason: .undelivered, lastActivity: seen.lastActivity ?? held, at: at,
-                                    waitingSince: held, waitingFrom: seen.heldFrom))
+            stalls.append(explained(LeadStall(reason: .undelivered, lastActivity: seen.lastActivity ?? held, at: at,
+                                              waitingSince: held, waitingFrom: seen.heldFrom), seen, from: held, needed: undeliveredAfter, background: background))
         }
         return stalls
+    }
+
+    /// `stall` with what it's really waiting on and the Mac's sleep in its window (see `cause`).
+    private static func explained(_ stall: LeadStall, _ seen: LeadWitness.Seen, from: Double, needed: TimeInterval, background: String?) -> LeadStall {
+        var explained = stall
+        explained.cause = cause(seen, reason: stall.reason, from: from, at: stall.at, needed: needed, background: background)
+        explained.sleep = seen.sleep.reading(from: from, to: stall.at)
+        return explained
     }
 }
 

@@ -460,6 +460,7 @@ public enum MergeRerun {
         }
         // How long it had been silent (stopped at test_timeout_min; a stall's summary above says its own).
         if let quiet = masked.last(where: { $0.hasPrefix(quietPrefix) }) { text += quiet + "\n" }
+        if let why = masked.last(where: { $0.hasPrefix(causePrefix) }) { text += why + "\n" }
         text += "\nIts output's last \(tail.count) lines (secrets masked, each cut at \(evidenceWidth) characters):\n"
             + tail.map { "    " + $0 }.joined(separator: "\n") + "\n"
         return text

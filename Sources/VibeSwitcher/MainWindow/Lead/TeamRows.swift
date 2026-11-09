@@ -416,7 +416,7 @@ enum TeamRows {
                 return row
             }
             // The witness saw it stop making progress, whatever its screen says: "Stalled 2h", since it last did something.
-            if let stall = task.stall, worker?.live ?? false {
+            if let stall = task.stall, stall.showsAsStalled, worker?.live ?? false {
                 let why = stall.why()
                 red(.stalled, "Stalled", why.prefix(1).uppercased() + why.dropFirst() + ".", since: Date(timeIntervalSince1970: stall.lastActivity))
                 row.agent = task.worker

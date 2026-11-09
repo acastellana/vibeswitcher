@@ -572,7 +572,7 @@ extension LeadToolset {
         case .hung(let command, let after, let output, let stall):
             let saved = saveMergeLog(output, slug: "merge-remote")
             throw Problem(text: "Not merged: \(command == "init_command" ? "init_command" : "the tests") \(Worktrees.hung(after: after, stall: stall)) on \(label) merged into \(base), and \(command == "init_command" ? "it was" : "they were") stopped; \(unmoved) "
-                          + (saved.map { "The output so far: \($0)." } ?? ""))
+                          + MergeRerun.causeText(output) + (saved.map { "The output so far: \($0)." } ?? ""))
         case .cancelled:
             throw Problem(text: "merge_remote was cancelled; nothing was merged, and \(unmoved)")
         case .error(let text):
