@@ -2273,3 +2273,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 20:06 Automatically (auto_advance): Cleaned up the-config-seal-s (freed 2.4 GB of build output and temporary folders). It stays done.
 - 2026-11-09 20:24 Planned the-worker-brief-stops: The worker brief stops offering vs-shell, which the host refuses from a worker (review audit)
 - 2026-11-09 20:25 Update: Today: phone review and security fixes landed; audits pause until Nov 12 — **Landed**
+- 2026-11-09 21:45 Workflow: verifier_model = `opus`
+- 2026-11-09 21:45 Automatically (auto_advance): Didn't audit a-test-run-s: a-test-run-s's verifier not started: ~/.claude/skills changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made the change…

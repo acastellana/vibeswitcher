@@ -338,3 +338,7 @@ The lead proposed it with a 30 min timer and the user didn't answer in time, so 
 
 Two paid evals were lost in part on 2026-11-09: about $12 when a session ended mid-run on battery, and six of twelve cases when the Fable limit ran out, with about $29 of that still usable. The lead also told the user the second merge flattening came from batching, that the size cap could run early, and that the user's app caused a merge failure, each without checking; the records said otherwise or couldn't confirm it.
 
+## 2026-11-09 21:46:02 Audits run on Opus until the Fable limit resets on Nov 12, 12:00 (the user's late answer to E8B48BFD, and they lowered the review floor in Settings to allow it). This replaces the wait for those audits. After the reset, the lead clears verifier_model so audits run on Fable again, and tells the user they can restore the floor. The audit prompt eval still waits for Fable, so it stays comparable with the baseline.
+
+The user preferred same-model audits to waiting. Two infrastructure audits can go ahead now, and the eval must keep the baseline's model to mean anything.
+
