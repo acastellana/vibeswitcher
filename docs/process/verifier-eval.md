@@ -155,18 +155,20 @@ per case:
   a-slash-command-that: 0 of 1 found (0 as Important), $3.81, 1 permission denial(s)
   the-briefing-uses: 1 of 1 found (0 as Important), $3.40, 0 permission denial(s)
   ending-a-session-ends: 1 of 3 found (0 as Important), $5.58, 3 permission denial(s)
-  memory-the-host-parser: 1 of 1 found (1 as Important), $6.50, 0 permission denial(s)
-  lead-record-commits: 0 of 1 found (0 as Important), $3.44, 0 permission denial(s)
+  memory-the-host-parser: 1 of 1 found (1 as Important), $6.50, 4 permission denial(s)
+  lead-record-commits: 0 of 1 found (0 as Important), $3.44, 1 permission denial(s)
   a-base-branch-the: 1 of 2 found (1 as Important), $4.73, 4 permission denial(s)
-  finished-work-lands: 0 of 1 found (0 as Important), $5.61, 0 permission denial(s)
-  steadier-merge-gate: 1 of 1 found (1 as Important), $4.50, 0 permission denial(s)
-  the-lead-s-rules: clean, 0 Important finding(s), $4.14, 0 permission denial(s)
+  finished-work-lands: 0 of 1 found (0 as Important), $5.61, 1 permission denial(s)
+  steadier-merge-gate: 1 of 1 found (1 as Important), $4.50, 1 permission denial(s)
+  the-lead-s-rules: clean, 0 Important finding(s), $4.14, 8 permission denial(s)
   the-phone-shows-needs: clean, 0 Important finding(s), $2.36, 1 permission denial(s)
   every-task-gets-a: clean, 0 Important finding(s), $5.68, 0 permission denial(s)
 ```
 
 No case errored or was left unscored. An earlier attempt the same day stopped at 3 of 12 when its session went away,
-and none of it is counted here.
+and none of it is counted here. The denial figures are from re-scoring this run's kept streams offline (`--score`, then
+`--summary`), after the script was fixed to add up every result event's denials instead of reading only the last
+event's. Bugs found, Important findings, false alarms, tokens, cost and minutes came out the same.
 
 | Case | Time | By place, 2026-11-01 → now | What the findings say |
 |---|---|---|---|
@@ -200,7 +202,7 @@ by place. When a prompt change is measured against this baseline, read the findi
   allow-rule options (`--remote`, `--exec`, `--add-file`, a symlinked folder) are a-fix-s-regression's bugs, "read once,
   then acted on" is finished-work-lands', and "one session's state kept in a value all sessions share" is
   a-slash-command-that's. A score on those says less about a new bug of the same kind.
-- 14 permission denials in 5 cases, all of them Bash commands the verifier was refused. Only counted, but two of
+- 29 permission denials in 10 cases, all of them Bash commands the verifier was refused. Only counted, but two of
   a-fix-s-regression's Nits say "not run: my sandbox denied the probe", so a denial can weaken a finding's evidence.
 - 10 of 12 cases report the same Pre-existing finding: `scripts/test-under-load.sh` at the case's old commit looks for
   one test bundle, and today's toolchain builds one per target. It comes from replaying old commits on a new toolchain,
