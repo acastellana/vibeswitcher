@@ -2054,3 +2054,5 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 Error lines in app.log within 10 min, by kind: host: couldn't ×1
 Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
 - 2026-11-09 08:17 Update: Today: everything queued is merged and installed — **Landed since the last summary:** a merge's tests no longer block audits and new starts (`auto-advance-keeps`); merge and test time limits count only the time the Mac is awake (`the-other-time-limits…
+- 2026-11-08 16:53 Planned merge-github-s-main: Merge GitHub's main (226 commits from the other Mac) into this Mac's main
+- 2026-11-08 16:53 Started a worker on merge-github-s-main
