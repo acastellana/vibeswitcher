@@ -56,18 +56,29 @@ async function api(path, options = {}, authToken = token) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeout || 10000);
   let response;
+  let body = {};
   try {
+    // The timer runs through the body too: a connection that dies halfway through one mustn't hold a poll for minutes.
     response = await fetch(path, { ...options, headers, cache: 'no-store', credentials: 'omit', signal: controller.signal });
+    try {
+      body = await response.json();
+    } catch (error) {
+      // An empty or non-JSON error (Tailscale's 502) is read below. A 200 whose JSON broke off isn't an answer.
+      if (response.ok) throw error;
+    }
   } catch (error) {
     // A slow answer the caller expected (reading Chrome's tabs) isn't the Mac being unreachable.
-    if (controller.signal.aborted && options.timeoutMessage) throw new Error(options.timeoutMessage);
-    setOnline(false);
+    if (controller.signal.aborted && options.timeoutMessage) {
+      const slow = connectionError(options.timeoutMessage);
+      slow.timedOut = true;
+      throw slow;
+    }
+    // Not for a phone that has been unpaired since this was sent: nothing would take the banner away.
+    if (!authToken || authToken === token) setOnline(false);
     throw connectionError(UNREACHABLE);
   } finally {
     clearTimeout(timer);
   }
-  let body = {};
-  try { body = await response.json(); } catch (e) { /* empty or non-JSON body (e.g. Tailscale's 502) */ }
   // A bare 502 or 504 to a request that types something: the Mac may still be typing it, so it's unknown, not off.
   if (!response.ok && !body.error && (response.status === 502 || response.status === 504) && options.unknownOutcome) {
     throw new Error(options.unknownOutcome);
@@ -79,7 +90,8 @@ async function api(path, options = {}, authToken = token) {
     setOnline(false, message);
     throw connectionError(message);
   }
-  if (!REFUSED.has(response.status)) setOnline(true);
+  // Pairing has no token: a wrong code is an answer, and no poll would follow to clear it.
+  if (!REFUSED.has(response.status) || !authToken) setOnline(true);
   // Only a phone the Mac removed hears 401 (a restart answers 503): it forgets its token and says why.
   if (response.status === 401 && authToken === token) {
     forgetToken(body.error || "This phone isn't paired with the Mac any more.");
@@ -1020,13 +1032,12 @@ async function checkCleared() {
 // ---------- Conversation ----------
 
 const conversation = { cursor: null, file: null, eventAt: null, status: null, hasTranscript: null, busy: false,
-                       loaded: false, retry: null, gen: 0, errorAt: 0, readAt: 0 };
+                       loaded: false, retry: null, gen: 0, errorAt: 0 };
 
 function resetConversation() {
   conversation.gen += 1;
   conversation.busy = false;
   conversation.errorAt = 0;
-  conversation.readAt = 0;
   conversation.hasTranscript = null;
   conversation.cursor = null;
   conversation.file = null;
@@ -1122,9 +1133,7 @@ async function refreshConversation(force = false) {
   // A transcript can appear without a new hook event (Claude creates the file a moment after the session starts).
   const unchanged = session && session.eventAt === conversation.eventAt && session.status === conversation.status &&
     session.hasTranscript === conversation.hasTranscript;
-  // No hook events (a Codex session or one without hooks): nothing else says the transcript grew, so look every so often.
-  const noEvents = session && session.hasTranscript && !session.eventAt && Date.now() - conversation.readAt >= 5000;
-  if (!force && conversation.loaded && unchanged && !noEvents) return;
+  if (!force && conversation.loaded && unchanged) return;
   if (!force && Date.now() - conversation.errorAt < 10000) return;   // after a failure, not on every poll
   // No transcript (no hooks, or an agent that doesn't write one): say so without asking the Mac.
   if (session && session.hasTranscript === false) {
@@ -1159,7 +1168,6 @@ async function refreshConversation(force = false) {
     conversation.hasTranscript = session ? session.hasTranscript : null;
     conversation.loaded = true;
     conversation.errorAt = 0;
-    conversation.readAt = Date.now();
     // The agent is still writing a line: ask again shortly rather than waiting for the next hook event.
     clearTimeout(conversation.retry);
     if (result.pending) conversation.retry = setTimeout(() => refreshConversation(true), 1000);
@@ -1613,14 +1621,16 @@ async function briefMe() {
   try {
     const project = briefProject();
     let result = await api('/api/briefing', { method: 'POST', body: JSON.stringify(project ? { project } : {}) });
+    let slowAsks = 0;
     for (let asked = 0; result.writing && asked < BRIEF_WAIT; asked++) {
       await wait(BRIEF_POLL);
       if (gen !== brief.gen) return;
       try {
         result = await api('/api/briefing', BRIEF_ASK);
       } catch (error) {
-        // A connection that dropped meanwhile (the banner says so): the Mac is still writing it, so keep asking.
-        if (!error.connection) throw error;
+        // A connection that dropped meanwhile (the banner says so): the Mac is still writing it, so keep asking. Not
+        // for ever on one too slow to bring the audio.
+        if (!error.connection || (error.timedOut && ++slowAsks >= 2)) throw error;
       }
     }
     if (gen !== brief.gen) return;

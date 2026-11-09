@@ -1,6 +1,6 @@
 // What the phone does when the connection or the Mac goes away and comes back, and that what it then shows is current:
 // a restart's 503, a dropped poll on a lead's page, coming back from the background, a removed token, a slow network,
-// a dropped poll during a briefing, a session with no hook events; and the kinds the board grew (folded, over budget).
+// a dropped poll during a briefing; and the kinds the board grew (folded, over budget).
 // Runs the unmodified Web/app.js in node on a fake DOM with a fake fetch: nothing is served, paired or answered.
 // Run by scripts/test.sh, or by hand: node Tests/Web/phone-recovery.test.mjs
 import assert from 'node:assert/strict';
@@ -112,6 +112,12 @@ async function fakeFetch(path, options = {}) {
 const dropped = () => { throw new TypeError('network'); };
 
 let lastTimer = 0;
+const timers = [];
+let timerID = 0;
+// Fires the newest timer armed for `ms` (api()'s timeout, say), as the clock reaching it would.
+const fire = ms => { const timer = timers.filter(t => t.ms === ms).at(-1); assert.ok(timer, `a ${ms} ms timer is armed`); timer.fn(); };
+// A body that never finishes, or a request that hangs: it rejects when api()'s timer aborts it, as a real one does.
+const hangs = options => new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted'))));
 let clock = 1_800_000_000_000;
 class FakeDate extends Date {
   constructor(...args) { super(...(args.length ? args : [clock])); }
@@ -124,8 +130,8 @@ const context = vm.createContext({
   history: { replaceState() {} }, fetch: fakeFetch, AbortController, URLSearchParams, JSON, console, Promise, Date: FakeDate, Notification: notifications,
   Blob, URL: Object.assign(function () {}, { createObjectURL: () => 'blob:x', revokeObjectURL() {} }), Uint8Array, DataView, CSS: { escape: s => s },
   atob: s => Buffer.from(s, 'base64').toString('binary'),
-  setTimeout: (fn, ms) => { lastTimer = ms; if (ms === 1000) setImmediate(fn); return 0; },
-  clearTimeout() {}, setInterval: () => 0, clearInterval() {},
+  setTimeout: (fn, ms) => { lastTimer = ms; const id = ++timerID; timers.push({ fn, ms, id }); if (ms === 1000) setImmediate(fn); return id; },
+  clearTimeout: id => { const at = timers.findIndex(t => t.id === id); if (at >= 0) timers.splice(at, 1); }, setInterval: () => 0, clearInterval() {},
   localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key) },
 });
 let reloads = 0;
@@ -313,6 +319,50 @@ on('/api/state', () => reply(200, macState()));
 run('show("list")');
 await flush();
 
+// ---------- 4a. A body that never finishes, or arrives torn: not an answer ----------
+
+on('/api/state', (path, options) => ({ ok: true, status: 200, json: () => hangs(options) }));
+run('refreshList()');
+await flush();
+assert.equal($('offline').hidden, true, 'nothing wrong yet');
+assert.equal(run('listBusy'), true, 'a poll is waiting on the body');
+fire(10000);
+await flush();
+assert.equal(run('listBusy'), false, 'the timer covers the body too: polls go on');
+assert.match($('offline').textContent, /Can't reach your Mac/);
+assert.equal($('offline').hidden, false);
+on('/api/state', () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('torn'); } }));
+const before = run('state');
+await run('refreshList()');
+await flush();
+assert.equal(run('state'), before, 'a torn answer is not a state');
+assert.equal($('offline').hidden, false, 'and the banner stays');
+on('/api/state', () => reply(200, macState()));
+await run('refreshList()');
+await flush();
+assert.equal($('offline').hidden, true);
+
+// A pairing code the Mac refuses is an answer: no banner from before stays over the pairing screen.
+on('/api/state', dropped);
+run('token = "test-token"; show("list")');
+await flush();
+assert.equal($('offline').hidden, false);
+run('forgetToken()');
+on('/api/pair', () => reply(403, { error: 'Wrong or expired code.' }));
+on('/api/state', () => reply(200, macState()));
+await run('setOnline(false); api("/api/pair", { method: "POST", body: "{}" }, null).catch(() => {})');
+await flush();
+assert.equal($('offline').hidden, true, 'a refused code clears it');
+// A request left over from before unpairing that fails now doesn't put the banner back over the pairing screen.
+on('/api/state', dropped);
+await run('api("/api/state", {}, "the-old-token").catch(() => {})');
+await flush();
+assert.equal($('offline').hidden, true, 'a request for a token this phone no longer has');
+run('token = "test-token"');
+on('/api/state', () => reply(200, macState()));
+run('show("list")');
+await flush();
+
 // ---------- 5. Slow network: the big reads get time, and a timeout there isn't "unreachable" ----------
 
 run(`state = ${JSON.stringify(macState({ sessions: [session('ttys001', 'notes', { hasTranscript: true, eventAt: 5 })] }))}; openSession('ttys001'); showTab('conversation')`);
@@ -327,25 +377,6 @@ await flush();
 const historyRequest = requests.filter(r => r.path.startsWith('/api/history')).at(-1);
 assert.ok(historyRequest.timeout >= 30000, `a scrollback page is given time (allowed ${historyRequest.timeout} ms)`);
 
-// ---------- 6. A session with no hook events (Codex without hooks): its Conversation keeps up ----------
-
-const entriesAfter = [];
-on('/api/conversation', path => {
-  entriesAfter.push(path);
-  return reply(200, { tty: 'ttys009', entries: [], cursor: 20 + entriesAfter.length, file: 'f', fresh: !path.includes('after='), pending: false, truncatedBefore: false });
-});
-const codex = session('ttys009', 'codexy', { agent: 'codex', hasTranscript: true });
-run(`state = ${JSON.stringify(macState({ sessions: [codex] }))}; openSession('ttys009'); showTab('conversation')`);
-await flush();
-assert.equal(entriesAfter.length, 1, 'read when opened');
-run('refreshConversation()');
-await flush();
-assert.equal(entriesAfter.length, 1, 'not on every poll');
-clock += 6000;
-run('refreshConversation()');
-await flush();
-assert.equal(entriesAfter.length, 2, 'asked again within seconds: nothing else would say it has grown');
-assert.match(entriesAfter[1], /after=/, 'only what is new');
 run('$("back").click(); show("list")');
 await flush();
 
@@ -386,6 +417,21 @@ await run('briefMe()');
 await flush();
 await flush();
 assert.equal($('briefText').textContent, 'All quiet.', 'the briefing arrives after the connection comes back');
+// A request that hangs until its timer: asked again, not given up on.
+asks = 0;
+on('GET /api/briefing', (path, options) => {
+  asks += 1;
+  if (asks === 1) return hangs(options);
+  return reply(200, { text: 'Still quiet.', language: 'en', at: now });
+});
+run('briefMe()');
+await flush();
+await flush();
+fire(60000);
+await flush();
+await flush();
+assert.equal($('briefText').textContent, 'Still quiet.', 'a hung ask is asked again');
+assert.equal($('briefError').hidden, true);
 assert.equal($('briefError').hidden, true, 'and no error is left');
 assert.ok(requests.filter(r => r.path === '/api/briefing' && r.method === 'GET').at(-1).timeout >= 60000, 'the audio is given time to download');
 // An error that isn't the connection still shows at once.

@@ -26,7 +26,7 @@ Remove a phone in Settings › Phone, or unpair it from the phone; its access st
   window has no status and isn't listed.
 - **A session**, in two tabs. **Terminal** is the live screen; scroll up for earlier output (up to the last 5,000
   lines). **Conversation** is the session as a timeline from Claude Code's (or Codex's) transcript: your prompts, the
-  agent's replies and one row per tool call. A session without hooks is looked at every few seconds instead.
+  agent's replies and one row per tool call. A session without hooks has no transcript to show and says so.
 - **Leads**: each lead's open questions (with a proposal's timer, or held), its all-done card, its tasks and its
   scorecard. The card says **All tasks finished** only while nothing else is going on; with work on the board since, it
   moves below the tasks as an earlier batch, with its day. A task past its time budget says so on its row; kept, folded,
