@@ -252,7 +252,7 @@ try:
 except Exception:
     review_md = ""
 tolerance = 3
-result, texts, version = None, [], None
+result, texts, version, denials = None, [], None, 0
 for raw in open(out + "/stream.jsonl", errors="replace"):
     try:
         event = json.loads(raw)
@@ -263,7 +263,10 @@ for raw in open(out + "/stream.jsonl", errors="replace"):
     elif event.get("type") == "system" and event.get("subtype") == "init":
         version = event.get("claude_code_version") or version
     elif event.get("type") == "result":
+        # A stream can hold several results. The last one's cost and usage are the run's total, but each result's
+        # permission_denials are only its own turn's, so they're added up.
         result = event
+        denials += len(event.get("permission_denials") or [])
 if result is None:
     print(f"no answer from claude; see {out}/stderr.log")
     sys.exit(2)
@@ -327,7 +330,6 @@ for f in findings:
 report.append("tokens: " + ", ".join(f"{k} {v}" for k, v in tokens.items()) + f"; total {sum(tokens.values())}")
 report.append((f"cost: ${cost:.2f} (Claude's total_cost_usd)" if isinstance(cost, (int, float)) else "cost: not given")
               + f", {len(texts)} messages, {seconds / 60:.1f} min")
-denials = len(result.get("permission_denials") or [])
 # Only counted: a read-only verifier is denied edits by design.
 report.append(f"permission denials: {denials}")
 report.append(f"Claude Code: {version or 'unknown'}")

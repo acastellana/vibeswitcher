@@ -101,11 +101,16 @@ struct VerifierEvalScriptTests {
 
     /// A case folder with `result` as its stream's last event, after an init event (no version: an older CLI).
     func caseFolder(result: [String: Any], version: String? = "2.1.319") throws -> URL {
+        try caseFolder(results: [result], version: version)
+    }
+
+    /// A case folder whose stream holds `results` in order, after an init event.
+    func caseFolder(results: [[String: Any]], version: String? = "2.1.319") throws -> URL {
         let folder = temp.url("case")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         var initEvent: [String: Any] = ["type": "system", "subtype": "init"]
         initEvent["claude_code_version"] = version
-        let events: [[String: Any]] = [initEvent, result.merging(["type": "result"]) { first, _ in first }]
+        let events: [[String: Any]] = [initEvent] + results.map { $0.merging(["type": "result"]) { first, _ in first } }
         let text = try events.map { String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self) }.joined(separator: "\n")
         try (text + "\n").write(to: folder.appendingPathComponent("stream.jsonl"), atomically: true, encoding: .utf8)
         return folder
@@ -143,6 +148,24 @@ struct VerifierEvalScriptTests {
         let saved = try score(folder)
         #expect(saved["denials"] as? Int == 2)
         #expect(saved["claude_version"] as? String == "2.1.319")
+    }
+
+    /// Each result holds its own turn's denials, while its cost is the running total: the last result's cost is the
+    /// run's, and the denials are every result's added up.
+    @Test func aCaseAddsUpTheDenialsOfEveryResultInItsStream() async throws {
+        let denial: [String: Any] = ["tool_name": "Bash"]
+        let folder = try caseFolder(results: [
+            ["subtype": "success", "is_error": false, "total_cost_usd": 1.0, "permission_denials": [denial, denial, denial]],
+            ["subtype": "success", "is_error": false, "total_cost_usd": 2.0, "permission_denials": [] as [[String: Any]]],
+            ["subtype": "success", "is_error": false, "total_cost_usd": 3.5, "permission_denials": [denial]],
+            ["subtype": "success", "is_error": false, "total_cost_usd": 4.0],
+        ])
+        let (status, output) = try await eval(["--score", folder.path, "the-phone-shows-needs"])
+        #expect(status == 0, "\(output)")
+        #expect(output.contains("permission denials: 4"), "\(output)")
+        let saved = try score(folder)
+        #expect(saved["denials"] as? Int == 4)
+        #expect(saved["cost"] as? Double == 4.0)
     }
 
     @Test func aCaseWithoutAnInitVersionSavesUnknown() async throws {
