@@ -2159,3 +2159,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 14:20 Started a worker on a-stalled-or-hung
 - 2026-11-09 14:20 Automatically (auto_advance): Started a worker on a-stalled-or-hung (A stalled or hung report says what it's really waiting on, with evidence).
 - 2026-11-09 14:20 Planned start-worker-warns-when: start_worker warns when two tasks claim the same send path or file (review audit)
+- 2026-11-09 15:03 Started a worker on start-worker-warns-when (auto → Claude: Claude weekly 59%, on pace, not tight; Codex 59%)
+- 2026-11-09 15:03 Automatically (auto_advance): Started a worker on start-worker-warns-when (start_worker warns when two tasks claim the same send path or file); its agent is auto, so it went to Claude: Claude weekly 59%, on pace, not tight; Codex 59%.
+- 2026-11-09 15:03 Released phone-day-to-day's worker (idle since its done report on 74527dc7) while its audit runs
+- 2026-11-09 15:03 Automatically (auto_advance): Started the audit of phone-day-to-day at 74527dc7 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
