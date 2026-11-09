@@ -580,8 +580,9 @@ else
     for run in $(seq 1 "$runs"); do
         mkdir -p "$(tmpdir "$run")" "$(home "$run")"
         : > "$logs/run-$run.log"
-        # The ledger of suites a run's test processes open (scripts/test.sh's `check_preferences`), one a run, as there.
-        HOME="$(home "$run")" CFFIXED_USER_HOME="$(home "$run")" VIBESWITCHER_PREFERENCE_LEDGER="$(tmpdir "$run")/preference-suites" \
+        # The ledger of suites a run's test processes open (scripts/test.sh's `check_preferences`), one a run, as there:
+        # in this script's scratch, as the run's TMPDIR is checked for what it leaves.
+        HOME="$(home "$run")" CFFIXED_USER_HOME="$(home "$run")" VIBESWITCHER_PREFERENCE_LEDGER="$scratch/preference-suites-$run" \
             with_tmpdir "$(tmpdir "$run")/" run_bundles "$run" 8>&- &
         tests+=($!)
         echo $! >> "$scratch/pids"
