@@ -353,6 +353,18 @@ public final class HostServer {
         }
     }
 
+    /// Whether `caller` may put a role on session `target`: the app, or the session that started it. A team's members are
+    /// what `mayKill` and the vault's `mayType` go by, so a lead can't make a session it didn't start its team's.
+    private func mayBind(_ target: String, from caller: LeadVault.Caller) -> Bool {
+        switch caller {
+        case .app: return true
+        case .unknown: return false
+        case .session(let from):
+            guard let target = UUID(uuidString: target), let from = UUID(uuidString: from) else { return false }
+            return startedBy[target] == from
+        }
+    }
+
     private var allInfo: [HostSession] { order.compactMap { sessions[$0]?.info } }
 
     /// Session access is scoped equally for reads, subscriptions and mutations. A lead may access its
@@ -515,6 +527,10 @@ public final class HostServer {
         case .vault(let request):
             guard let vault = config.vault else { return reply(.vault(.refused("This session host keeps no lead vault."))) }
             let from = caller(of: client)
+            if case .bind(_, _, let target) = request, !mayBind(target, from: from) {
+                log.note("vault: refused a role for session \(target.prefix(8)): not one its binder started, \(HostLog.peer(client.peerPID))")
+                return reply(.vault(.refused("A role goes only on a session its lead started.")))
+            }
             let opened: Bool = {
                 guard case .session(let id) = from, let id = UUID(uuidString: id) else { return false }
                 return isYours(id)
