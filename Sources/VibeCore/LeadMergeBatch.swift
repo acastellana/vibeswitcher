@@ -205,11 +205,12 @@ extension LeadToolset {
             case .failed(let output): outcome = .failed(output)
             case .hung(let command, let after, let output, let stall):
                 _ = saveMergeLog(output, slug: "merge-batch", name: "hung.log")
-                let copy = copyMergeLog(output, slug: "merge-batch", commit: stack.tips[count - 1], name: "hung.log", inWorktree: false)
-                stoppedEnd = MergeFailure.end(of: scrubbed(output))
+                let copy = copyMergeLog(output, slug: "merge-batch", commit: stack.tips[count - 1], name: "merge-hung.log", inWorktree: false)
+                let shown = scrubbed(output)
+                stoppedEnd = MergeFailure.end(of: shown)
                 outcome = .stopped(kind: "hung", text: "the \(command) \(Worktrees.hung(after: after, stall: stall)) on the stack's first \(count) task\(count == 1 ? "" : "s") and was stopped. "
-                                   + MergeRerun.causeText(output) + MergeRerun.phaseText(output)
-                                   + " " + copy.said("The output so far"))
+                                   + copy.said("The output so far") + " "
+                                   + MergeRerun.causeText(shown) + MergeRerun.phaseText(shown))
             case .cancelled: outcome = .stopped(kind: "cancelled", text: "it was cancelled")
             case .error(let text): outcome = .stopped(kind: "error", text: text)
             case .conflict: outcome = .stopped(kind: "error", text: "a test run reported a conflict")

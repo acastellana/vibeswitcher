@@ -287,6 +287,8 @@ extension LeadStall {
 extension MergeRerun {
     /// What a hung run's cause note starts with: a line after its output, as `quietNote` is.
     static let causePrefix = "Why it stopped: "
+    /// The most of a cause a message carries: a run can print a line of any length that starts like one.
+    static let causeLimit = 1000
 
     /// What the times and the process table say of a hung run, one line: why it stopped (a slot queue if something in
     /// its folder sat in line, the live process with no output, or that it was still writing), then the Mac's sleep in
@@ -321,7 +323,7 @@ extension MergeRerun {
 
     /// "Why it stopped: …. ", for a message about a stopped run: empty when its output carries no cause.
     public static func causeText(_ output: String) -> String {
-        cause(in: output).map { causePrefix + Redaction.secrets(in: $0) + " " } ?? ""
+        cause(in: output).map { causePrefix + String(Redaction.secrets(in: $0).prefix(causeLimit)) + " " } ?? ""
     }
 
     /// The cause a stopped run's `output` carries, without its prefix; nil when it carries none.

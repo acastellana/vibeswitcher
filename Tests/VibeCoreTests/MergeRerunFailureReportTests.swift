@@ -166,6 +166,7 @@ struct MergeRerunFailureReportTests: LeadTeamFixture {
         ("echo '✘ Test firstBad() recorded an issue at A.swift:3:5: nope'; echo '✘ Test firstBad() failed after 0.01 seconds with 1 issue.'", "firstBad()"),
         ("echo 'src/main.c:3: error: boom happened'", "src/main.c:3: error: boom happened"),
         ("echo 'just a line'", "it exited non-zero and its output names no failing test or error"),
+        ("echo 'WEB TEST FAILED: Tests/Web/x.test.mjs (exit 1)'", "WEB TEST FAILED: Tests/Web/x.test.mjs (exit 1)"),
     ])
     func theReasonNamesWhatFailedNotTheLastLine(failure: String, expected: String) throws {
         let root = try repo()
@@ -178,7 +179,52 @@ struct MergeRerunFailureReportTests: LeadTeamFixture {
         #expect(!reason.contains("web tests"), "\(reason)")
     }
 
+    /// A run's own "Why it stopped" line can be any length: what's told stays capped.
+    @Test func aVeryLongWhyLineIsCapped() throws {
+        let root = try repo()
+        let (runtime, lead) = try team(root, suite: """
+            #!/bin/bash
+            printf 'Why it stopped: %s\\n' "$(head -c 200000 /dev/zero | tr '\\0' y)"
+            exit 1
+            """)
+        try audited(lead, runtime, root: root)
+
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(merged.isError)
+        #expect(merged.text.utf8.count < 20_000, "capped: \(merged.text.utf8.count)")
+        #expect(merged.text.contains("Why it stopped: yyy"), "\(merged.text.prefix(300))")
+    }
+
     // MARK: A failed copy
+
+    /// A copy no worktree holds is the repository's to keep: only the newest stay, and what else is in the folder does.
+    @Test func wholeLogCopiesOutsideAWorktreeDontPileUp() throws {
+        let root = try repo()
+        let (_, lead) = try team(root, suite: Self.incident())
+        let flakes = root + "/.vibeswitcher/flakes"
+        try VibePaths.ensurePrivate(URL(fileURLWithPath: flakes))
+        let fm = FileManager.default
+        let old = Date(timeIntervalSince1970: 1_000_000)
+        for index in 0..<25 {
+            let file = "\(flakes)/2026-01-01-task\(index)-aaaaaaaa-merge-test.log"
+            try "old".write(toFile: file, atomically: true, encoding: .utf8)
+            try fm.setAttributes([.modificationDate: old.addingTimeInterval(Double(index))], ofItemAtPath: file)
+        }
+        // The flake ledger's own evidence, and its ledger: not copies, and old.
+        for name in ["2026-01-01-task-aaaaaaaa.log", "2026-01-01-task-aaaaaaaa-hung.log", "ledger.jsonl"] {
+            try "kept".write(toFile: "\(flakes)/\(name)", atomically: true, encoding: .utf8)
+            try fm.setAttributes([.modificationDate: old], ofItemAtPath: "\(flakes)/\(name)")
+        }
+
+        let made = lead.copyMergeLog("the log", slug: "merge-remote", commit: "bbbbbbbb", inWorktree: false)
+        let path = try #require(made.path)
+
+        let files = try fm.contentsOfDirectory(atPath: flakes)
+        #expect(fm.fileExists(atPath: path))
+        #expect(files.filter { $0.hasSuffix("-merge-test.log") }.count == 20, "\(files.sorted())")
+        #expect(!files.contains("2026-01-01-task0-aaaaaaaa-merge-test.log") && files.contains("2026-01-01-task24-aaaaaaaa-merge-test.log"), "\(files.sorted())")
+        for name in ["2026-01-01-task-aaaaaaaa.log", "2026-01-01-task-aaaaaaaa-hung.log", "ledger.jsonl"] { #expect(files.contains(name), "\(name)") }
+    }
 
     /// A log too large to copy: the merge still reports, with the reason and the log's end inline.
     @Test func aLogTooLargeToCopyStillReports() throws {
@@ -233,6 +279,7 @@ struct MergeRerunFailureReportTests: LeadTeamFixture {
         let root = try repo()
         let (runtime, lead) = try team(root, suite: """
             #!/bin/bash
+            echo "\(vault.scratch(root: root, "merge-add-b").path)/Sources/A.swift:1:1: warning: slow"
             echo "◇ Test hangs() started."
             echo "it holds X-Auth: Bearer \(Self.secret)"
             exec sleep \(ShellTests.childRuns)
@@ -245,6 +292,11 @@ struct MergeRerunFailureReportTests: LeadTeamFixture {
         #expect(merged.text.contains("X-Auth: Bearer •••"), "the log's end: \(merged.text)")
         let path = copy(root, name: "merge-hung.log")
         #expect(merged.text.contains("The output so far: \(path)"), "\(merged.text)")
+        // The hung file a worker is pointed at says the file by the repository's path, not the merge's vault folder.
+        let flakes = root + "/.vibeswitcher/flakes"
+        let hung = try #require(try FileManager.default.contentsOfDirectory(atPath: flakes).first { $0.hasSuffix("-hung.log") })
+        let file = try String(contentsOfFile: "\(flakes)/\(hung)", encoding: .utf8)
+        #expect(!file.contains(vault.folder.path) && file.contains("Sources/A.swift:1:1: warning: slow"), "\(file)")
         try expectReadable(path, role: .worker, cwd: Worktrees.path(root: root, slug: "add-b"), holding: ["◇ Test hangs() started."])
         #expect(BoardStore(root: root).load().task("add-b")?.status == .review)
     }

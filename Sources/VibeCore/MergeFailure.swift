@@ -18,6 +18,10 @@ public enum MergeFailure {
     /// masking and parsing a log of hundreds of MB would hold up the merge that has to report.
     public static let copyLimit = 16 << 20
     static let readWindow = 4 << 20
+    /// The whole-log copies outside a worktree that stay (nothing else removes them: no cleanup owns merge_remote's or a
+    /// batch's), and what their names end with. At most `copyLimit` each.
+    static let copiesKept = 20
+    static let copyNames = ["merge-test.log", "revert-test.log", "merge-hung.log"]
 
     /// `output` as it may be shown, secrets masked: only its end when it's past `copyLimit`.
     static func readable(_ output: String) -> String {
@@ -29,12 +33,22 @@ public enum MergeFailure {
     public static func reason(in output: String) -> String {
         let text = readable(output)
         let failures = TestFailures(output: text)
-        let named = failures.tests.isEmpty ? failures.errors.first : failures.tests.joined(separator: ", ")
+        let named = failures.tests.isEmpty ? failures.errors.first ?? failureLine(in: text) : failures.tests.joined(separator: ", ")
         switch (named.map { clip($0, namedWidth) }, stopped(failures, text).map { clip($0, stoppedWidth) }) {
         case let (named?, stopped?): return named + "; " + stopped
         case let (named?, nil): return named
         case let (nil, stopped?): return stopped
         case (nil, nil): return "it exited non-zero and its output names no failing test or error"
+        }
+    }
+
+    /// The first line that says something failed without a test name `TestFailures` reads: another runner's in one suite
+    /// ("WEB TEST FAILED: x.mjs (exit 1)", "web tests: 2 of 3 passed; failed: x.mjs", pytest's "FAILED a.py::b"). Told
+    /// here only: `TestFailures` decides what a merge reruns, and that doesn't change. A count of none is no failure.
+    private static func failureLine(in text: String) -> String? {
+        text.components(separatedBy: "\n").lazy.map { $0.trimmingCharacters(in: .whitespaces) }.first { line in
+            line.range(of: #"(^|\s)FAILED(:|\s|$)|; failed:\s*\S"#, options: .regularExpression) != nil
+                && line.range(of: #"\b0 (failed|FAILED)\b"#, options: .regularExpression) == nil
         }
     }
 
@@ -65,7 +79,13 @@ public enum MergeFailure {
             let cause = MergeRerun.causeText(text).trimmingCharacters(in: .whitespaces)
             if !cause.isEmpty { parts.append(cause) }
         }
-        parts.append(failures.summary(limit: summaryLimit) ?? "Nothing in the output names a failing test or an error.")
+        let line = failures.tests.isEmpty && failures.errors.isEmpty ? failureLine(in: text) : nil
+        if let line { parts.append("The first line that says what failed: " + clip(line, MergeRerun.evidenceWidth)) }
+        if let summary = failures.summary(limit: summaryLimit) {
+            parts.append(summary)
+        } else if line == nil {
+            parts.append("Nothing in the output names a failing test or an error.")
+        }
         if let end = end(ofMasked: text) { parts.append(end) }
         return parts.joined(separator: "\n")
     }
@@ -144,7 +164,20 @@ extension LeadToolset {
         }
         let log = String(MergeRerun.evidencePath(task: slug, commit: commit, at: Date()).dropLast(".log".count)) + "-\(name)"
         guard let saved = saveEvidence(text, log: log) else { return MergeLogCopy(path: nil, why: refused ?? "the folder for it couldn't be written") }
-        return MergeLogCopy(path: MergeRerun.evidenceFile(root: root, log: saved), why: refused)
+        let path = MergeRerun.evidenceFile(root: root, log: saved)
+        pruneMergeLogCopies(in: (path as NSString).deletingLastPathComponent)
+        return MergeLogCopy(path: path, why: refused)
+    }
+
+    /// Only the newest `MergeFailure.copiesKept` whole-log copies stay in `folder`, the flake ledger's own evidence and
+    /// its hung files untouched.
+    private func pruneMergeLogCopies(in folder: String) {
+        let fm = FileManager.default
+        let copies = ((try? fm.contentsOfDirectory(atPath: folder)) ?? []).filter { name in MergeFailure.copyNames.contains { name.hasSuffix("-" + $0) } }
+        let dated = copies.map { name -> (name: String, at: Date) in
+            (name, ((try? fm.attributesOfItem(atPath: folder + "/" + name))?[.modificationDate] as? Date) ?? .distantPast)
+        }
+        for old in dated.sorted(by: { $0.at > $1.at }).dropFirst(MergeFailure.copiesKept) { try? fm.removeItem(atPath: folder + "/" + old.name) }
     }
 
     /// `output` without the vault's paths, as the sessions may see it: a merge runs in the vault's scratch, so its

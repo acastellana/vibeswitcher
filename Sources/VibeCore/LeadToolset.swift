@@ -3491,11 +3491,12 @@ public final class LeadToolset: MCPToolset {
             let (what, they) = command == "init_command" ? ("init_command", "it was") : ("tests", "they were")
             _ = saveMergeLog(output, slug: slug)
             let copy = copyMergeLog(output, slug: slug, commit: commit, name: "merge-hung.log")
+            let shown = scrubbed(output)
             // The tests that never finished and the output's tail, where the worker who fixes the hang can read them
             // (the merge's log is in the vault).
             // What it was doing: the tests it left unfinished, or the build's last line when no test had started.
-            let phase = Self.clip(MergeRerun.phaseText(output))
-            let readable = saveEvidence(MergeRerun.hungLog(task: slug, commit: commit, command: command, after: after, output: output, stall: stall),
+            let phase = Self.clip(MergeRerun.phaseText(shown))
+            let readable = saveEvidence(MergeRerun.hungLog(task: slug, commit: commit, command: command, after: after, output: shown, stall: stall),
                                         log: MergeRerun.hungPath(task: slug, commit: commit, at: Date()))
                 .map { MergeRerun.evidenceFile(root: root, log: $0) }
             let named = phase + " "
@@ -3522,10 +3523,10 @@ public final class LeadToolset: MCPToolset {
                 ? "If they only need longer, raise test_timeout_min (\(Self.gb(workflow.testTimeoutMinutes)) in workflow.md) with configure; else have the worker find what hangs."
                 : "If they only work silently that long, raise stall_min (\(Self.gb(workflow.stallMinutes)) in workflow.md) with configure; else have the worker find what hangs."
             throw Problem(text: "Not merged: the \(what) \(Worktrees.hung(after: after, stall: stall)) on \(slug) rebased onto \(base); \(they) stopped, with everything started under them. \(slug) stays as it was. "
-                          + MergeRerun.causeText(output) + named + ledger
-                          + (readable.map { "Those and the output's last \(MergeRerun.hungTail) lines, readable by the worker who fixes it: \($0). " } ?? "")
                           + copy.said("The output so far", stop: ".") + " "
-                          + advice + "\n" + MergeFailure.end(of: scrubbed(output)))
+                          + MergeRerun.causeText(shown) + named + ledger
+                          + (readable.map { "Those and the output's last \(MergeRerun.hungTail) lines, readable by the worker who fixes it: \($0). " } ?? "")
+                          + advice + "\n" + MergeFailure.end(of: shown))
         case .conflict:
             if let changed = changedMeanwhile(slug, since: task, tests: "didn't run: the branch conflicts with \(base)") { throw changed }
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Conflicts with \(base): the branch needs bringing up to date."))
@@ -3865,7 +3866,7 @@ public final class LeadToolset: MCPToolset {
             _ = saveMergeLog(output, slug: slug, name: "revert-test.log")
             let copy = copyMergeLog(output, slug: slug, commit: merged.commit, name: "revert-test.log", inWorktree: false)
             throw Problem(text: "Not reverted: the \(command) \(Worktrees.hung(after: after, stall: stall)) with \(slug) reverted on \(base), and was stopped with everything started under it. \(base) is as it was. "
-                          + MergeRerun.causeText(output) + copy.said("The output so far", stop: ".") + "\n" + MergeFailure.end(of: scrubbed(output)))
+                          + copy.said("The output so far", stop: ".") + " " + MergeRerun.causeText(scrubbed(output)) + "\n" + MergeFailure.end(of: scrubbed(output)))
         case .cancelled:
             throw Problem(text: "The revert of \(slug) was cancelled; \(base) is as it was, and \(slug) stays merged.")
         case .error(let text):
