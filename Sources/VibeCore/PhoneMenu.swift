@@ -92,6 +92,14 @@ public enum PhoneMenu {
         return Self.fingerprint(shown, sid: sid) == fingerprint && shown.menu.selected == index
     }
 
+    /// The cursor is on a question's free-text row ("Type something."), so text typed now is that row's answer. Not a
+    /// multi-select's: its field is ticked by typing into it, and the reply's Enter would untick it.
+    public static func takesText(_ shown: Shown) -> Bool {
+        let menu = shown.menu
+        guard !menu.multiSelect, menu.options.indices.contains(menu.selected) else { return false }
+        return menu.options[menu.selected].lowercased().hasPrefix("type something")
+    }
+
     /// The tap on option `index` of the menu with `fingerprint`, against the screen read again right now.
     public static func answer(choose index: Int, fingerprint: String, screen: String, needsInput: Bool, sid: String) -> Answer {
         guard let shown = read(screen: screen, needsInput: needsInput), Self.fingerprint(shown, sid: sid) == fingerprint else {

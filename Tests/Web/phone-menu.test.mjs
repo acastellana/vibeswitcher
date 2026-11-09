@@ -235,8 +235,8 @@ assert.equal($('quickReplies').hidden, false);
 await pressKey('1');
 assert.deepEqual(posts[4], { tty: 'ttys001', sid: 's1', text: '1', submit: false });
 
-// 8. ⏎ and the arrows while a menu is shown go with its fingerprint too: ⏎ is a tap on the highlighted option, ↑ ↓ move
-//    only while that menu is still up. With none shown they're the raw keys, as before.
+// 8. ⏎ and the arrows while a menu is shown go with its fingerprint too: ⏎ takes what's highlighted when it reaches the
+//    Mac, ↑ ↓ move only while that menu is still up. With none shown they're the raw keys, as before.
 const pressNamedKey = async key => {
   context.keyButton = Object.assign(new FakeElement('button'), { dataset: { key } });
   context.keyButton.textContent = key;
@@ -244,9 +244,11 @@ const pressNamedKey = async key => {
   await flush();
 };
 open(stateWith(session({ ...menu, selected: 1 })));
+inputReply = { status: 200, body: { ok: true, chose: menu.options[1] } };
 await pressNamedKey('enter');
-assert.deepEqual(posts[5], { tty: 'ttys001', sid: 's1', choose: 1, fingerprint: 'fp-one' });
-assert.equal($('inputStatus').textContent, `“${menu.options[1]}” ✓`);
+assert.deepEqual(posts[5], { tty: 'ttys001', sid: 's1', choose: 'highlighted', fingerprint: 'fp-one' });
+assert.equal($('inputStatus').textContent, `“${menu.options[1]}” ✓`, 'says the option the Mac took');
+inputReply = { status: 200, body: { ok: true } };
 open(stateWith(session(menu)));
 await pressNamedKey('down');
 assert.deepEqual(posts[6], { tty: 'ttys001', sid: 's1', key: 'down', fingerprint: 'fp-one' });
@@ -256,7 +258,7 @@ assert.deepEqual(posts[7], { tty: 'ttys001', sid: 's1', key: 'up', fingerprint: 
 open(stateWith(session({ question: 'Which toppings?', options: ['Cream', 'Nuts'], descriptions: [null, null], selected: 2,
                          checked: [true, false], submit: 'Submit', fingerprint: 'fp-three' })));
 await pressNamedKey('enter');
-assert.deepEqual(posts[8], { tty: 'ttys001', sid: 's1', choose: 2, fingerprint: 'fp-three' });
+assert.deepEqual(posts[8], { tty: 'ttys001', sid: 's1', choose: 'highlighted', fingerprint: 'fp-three' });
 // Esc stays a raw key (it only cancels).
 await pressNamedKey('escape');
 assert.deepEqual(posts[9], { tty: 'ttys001', sid: 's1', key: 'escape' });
@@ -269,6 +271,15 @@ assert.deepEqual(posts.slice(10), [{ tty: 'ttys001', sid: 's1', key: 'enter' }, 
 open(stateWith({ ...session(menu), paused: true }));
 await pressNamedKey('enter');
 assert.deepEqual(posts[12], { tty: 'ttys001', sid: 's1', key: 'enter' });
+
+// 9. ↓ then ⏎ before the next state: this phone still has the old cursor, and ⏎ must not send it (the Mac would move
+//    back up and pick the option the arrow just left: "Yes", on a permission prompt where ↓ went to "No").
+open(stateWith(session(menu)));
+const before = posts.length;
+await pressNamedKey('down');
+await pressNamedKey('enter');
+assert.deepEqual(posts.slice(before), [{ tty: 'ttys001', sid: 's1', key: 'down', fingerprint: 'fp-one' },
+                                       { tty: 'ttys001', sid: 's1', choose: 'highlighted', fingerprint: 'fp-one' }]);
 
 console.log('phone-menu: ok');
 process.exit(0);

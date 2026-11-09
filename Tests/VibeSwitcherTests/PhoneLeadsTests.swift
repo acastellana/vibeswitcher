@@ -145,6 +145,28 @@ struct PhoneLeadsTests {
         #expect(world.controller.answerNotices[question.id] == "Already answered: Testers first. Your new answer wasn't sent.")
     }
 
+    /// The connection dropped after the Mac took the answer, so the phone was never told, and it's sent again: that tap
+    /// finds it answered with these words. It mustn't hear "your answer wasn't sent", which sends you looking for a way
+    /// to say it again. Other words on an answered question are still refused as not sent.
+    @Test func aRetryOfAnAnswerThatWentInIsToldItWentIn() async throws {
+        let world = try world()
+        let question = try ask(world)
+        let body = answerBody(world, question, "Testers first")
+        #expect(try await call(world, "POST", "/api/lead/answer", token: world.token, body: body).0 == 200)
+        for _ in 0..<2 {   // Before the phone's read of the board catches up, and after it.
+            let (status, retry) = try await call(world, "POST", "/api/lead/answer", token: world.token, body: body)
+            #expect(status == 409)
+            #expect(retry["error"] as? String == "You answered this already: your answer went in.")
+            #expect(retry["wentIn"] as? Bool == true, "the phone shows it as answered, not as a failure")
+            world.read()
+        }
+        let (status, other) = try await call(world, "POST", "/api/lead/answer", token: world.token, body: answerBody(world, question, "Everyone"))
+        #expect(status == 409)
+        #expect(other["error"] as? String == PhoneAccess.questionClosed)
+        #expect(other["wentIn"] == nil)
+        #expect(onBoard(world, question)?.answer == "Testers first")
+    }
+
     @Test func anAnswerIsTiedToTheVersionThePhoneShowed() async throws {
         let world = try world()
         let question = try ask(world)

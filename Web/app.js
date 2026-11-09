@@ -75,7 +75,9 @@ async function api(path, options = {}, authToken = token) {
     }
     // Not for a phone that has been unpaired since this was sent: nothing would take the banner away.
     if (!authToken || authToken === token) setOnline(false);
-    throw connectionError(UNREACHABLE);
+    // A request that types something: a dropped connection doesn't say whether the Mac took it, so "unreachable" would
+    // read as "press it again" (a ⌃C pressed twice ends the session).
+    throw connectionError(options.unknownOutcome || UNREACHABLE);
   } finally {
     clearTimeout(timer);
   }
@@ -99,6 +101,7 @@ async function api(path, options = {}, authToken = token) {
   }
   if (!response.ok) {
     const failure = new Error(body.error || `Error ${response.status}`);
+    failure.reply = body;
     failure.status = response.status;
     throw failure;
   }
@@ -380,8 +383,9 @@ function questionStack(lead) {
   for (const [id, done] of answeredHere) {
     if (Date.now() - done.at > 60000) { answeredHere.delete(id); continue; }
     if (done.lead !== lead.id || shown.has(id)) continue;
-    const line = el('div', 'qClosed answered');
-    line.append(el('div', 'status', `✓ Answered: ${done.answer}`), el('div', 'qClosedText', done.text));
+    const line = el('div', done.refused ? 'qClosed refused' : 'qClosed answered');
+    line.append(done.refused ? el('div', 'error', done.refused) : el('div', 'status', `✓ Answered: ${done.answer}`),
+                el('div', 'qClosedText', done.text));
     stack.append(line);
   }
   return stack;
@@ -394,6 +398,9 @@ function questionCard(lead, q) {
       ? el('div', 'qClosedWhy', `✕ Withdrawn: ${q.withdrawReason || 'no reason given'}`)
       : el('div', 'qClosedWhy', `✓ Went ahead with ${q.proposal || ''}: no answer in ${q.decideIn} min`));
     line.append(el('div', 'qClosedText', q.text));
+    // An answer sent as it closed: the card it was typed on is this line now, so what became of it goes here.
+    const note = answerNotes.get(q.id);
+    if (note) line.append(el('div', note.error ? 'error qNote' : 'status qNote', note.text));
     return line;
   }
   const card = el('div', `qCard ${q.priority}`);
@@ -482,7 +489,17 @@ async function answerQuestion(lead, q, text) {
     answerNotes.set(q.id, { text: reply.notice || `Answered: ${text} ✓`, error: Boolean(reply.notice) });
     answeredHere.set(q.id, { lead: lead.id, text: q.text, answer: text, at: Date.now() });
   } catch (error) {
-    answerNotes.set(q.id, { text: error.message, error: true });
+    // Sent again after a dropped connection, and it had gone in: answered, not failed, and said once the card is gone.
+    const wentIn = Boolean(error.reply && error.reply.wentIn);
+    if (wentIn) {
+      drafts.delete(q.id);
+      answeredHere.set(q.id, { lead: lead.id, text: q.text, answer: text, at: Date.now() });
+    } else if (error.reply && (error.reply.question || error.status === 404)) {
+      // It closed under this answer (someone else's answer, or it's gone): its card leaves the stack with the next
+      // state and takes the note with it, so "not sent" stays said for a minute, as an answer that went in does.
+      answeredHere.set(q.id, { lead: lead.id, text: q.text, answer: text, at: Date.now(), refused: error.message });
+    }
+    answerNotes.set(q.id, { text: error.message, error: !wentIn });
   } finally {
     answering.delete(q.id);
   }
@@ -730,6 +747,7 @@ function openSession(tty) {
   resetConversation();
   showTab('terminal');
   $('screenError').hidden = true;
+  $('pauseStatus').hidden = true;
   setInputStatus('');
   $('reply').value = '';
   growReply();
@@ -826,24 +844,20 @@ function optionButton(menu, index, label, description, canAnswer) {
 /// Sends the tap with the fingerprint of the menu it was drawn from: the Mac types it only if that menu is still up.
 async function chooseOption(index, fingerprint, label) {
   for (const button of $('askOptions').children) button.disabled = true;
-  await send({ choose: index, fingerprint }, null, `“${label}” ✓`);
+  await send({ choose: index, fingerprint }, null, label === null ? null : `“${label}” ✓`);
   drawnMenu = '';   // redrawn from the next state: the answered menu, the next one, or a changed one after a 409
   refreshList(false);
 }
 
 /// A key button. While a menu is shown, its keys carry its fingerprint, as a tap does: a bare key would answer whatever
-/// question is up by the time it arrives. 1, 2 and 3 are taps on its options, ⏎ a tap on the highlighted one, and ↑ ↓
-/// move only while that menu is still up.
+/// question is up by the time it arrives. 1, 2 and 3 are taps on its options, ↑ ↓ move only while that menu is still up,
+/// and ⏎ takes what's highlighted when it reaches the Mac: this phone's copy of the cursor lags behind an arrow just
+/// pressed (the next state is seconds away), and sending that index would move the cursor back and pick what it left.
 function pressKey(button) {
   const session = shownSession();
   const menu = session && !session.paused ? session.menu : null;
   const key = button.dataset.key;
-  if (menu && key === 'enter') {
-    const index = menu.selected;
-    const label = index < menu.options.length ? menu.options[index] : menu.submit;
-    if (!Number.isInteger(index) || label === undefined) return setInputStatus('Tap an option.', true);
-    return chooseOption(index, menu.fingerprint, label);
-  }
+  if (menu && key === 'enter') return chooseOption('highlighted', menu.fingerprint, null);
   if (menu && (key === 'up' || key === 'down')) return send({ key, fingerprint: menu.fingerprint }, button);
   if (key) return send({ key }, button);
   if (menu && /^[1-9]$/.test(button.dataset.text)) {
@@ -876,11 +890,14 @@ function renderPauseControls(session) {
 async function setPause(duration, control) {
   if (!current || !duration) return;
   control.disabled = true;
+  $('pauseStatus').hidden = true;
   try {
     await api('/api/pause', { method: 'POST', body: JSON.stringify({ tty: current, sid: currentSid, duration }) });
     setTimeout(() => refreshList(false), 300);
   } catch (error) {
-    setInputStatus(error.message, true);
+    // Its own line: pausing works with replies off, when the composer (and the line under it) is hidden.
+    $('pauseStatus').textContent = error.message;
+    $('pauseStatus').hidden = false;
   } finally {
     control.disabled = false;
     if (control.tagName === 'SELECT') control.value = '';
@@ -1283,11 +1300,12 @@ async function send(payload, button, doneLabel) {
     // Typing waits for a jump in progress on the Mac and takes a moment for long text: allow for it, and on a
     // timeout say what's unknown rather than "unreachable" (a retry could type it twice).
     const unknown = "The Mac didn't confirm in time. Check the screen before sending again.";
-    await api('/api/input', { method: 'POST', body: JSON.stringify({ tty: current, sid: currentSid, ...payload }),
-                              timeout: 30000, timeoutMessage: unknown, unknownOutcome: unknown });
+    const result = await api('/api/input', { method: 'POST', body: JSON.stringify({ tty: current, sid: currentSid, ...payload }),
+                                             timeout: 30000, timeoutMessage: unknown, unknownOutcome: unknown });
     if (reply) unconfirmed = null;
     const label = button && button.classList.contains('quickChip') ? `“${payload.text}” sent ✓` : 'Sent ✓';
-    setInputStatus(doneLabel || (payload.text && payload.submit ? label : `${button ? button.textContent : 'Key'} ✓`));
+    const said = result.chose ? `“${result.chose}” ✓` : null;   // the Mac says which option ⏎ took
+    setInputStatus(doneLabel || said || (payload.text && payload.submit ? label : `${button ? button.textContent : 'Key'} ✓`));
     setTimeout(refreshScreen, 250);
     setTimeout(refreshScreen, 1200);
     return true;
@@ -1803,6 +1821,8 @@ document.addEventListener('DOMContentLoaded', () => {
   applyViewPrefs();
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+      // The phone locked or the app went away with the mic held: no release is coming, and its timer stops with the page.
+      stopDictation();
       hiddenAt = Date.now();
       // An answer box left focused would hold the list still when you come back; its text is kept in `drafts`.
       if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('qInput')) document.activeElement.blur();

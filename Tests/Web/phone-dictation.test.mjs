@@ -88,7 +88,8 @@ const document = {
   createDocumentFragment: () => new FakeFragment(),
   querySelector: () => new FakeElement('header'),
   querySelectorAll: () => [],
-  addEventListener(type, handler) { if (type === 'DOMContentLoaded') ready = handler; },
+  listeners: {},
+  addEventListener(type, handler) { if (type === 'DOMContentLoaded') ready = handler; else (this.listeners[type] ||= []).push(handler); },
 };
 const $ = id => document.getElementById(id);
 // The page's elements as index.html has them: present, and hidden where it says so.
@@ -287,6 +288,27 @@ assert.equal(recorders.length, recorded);
 assert.ok($('dictationStatus').textContent.includes('Settings… › Dictation & Briefing'));
 fire(mic, 'pointerup');
 
+// 7b. The page goes away with the mic held (the phone locks, another app comes up): no release will come, so the
+//     microphone is let go there, and what was said is transcribed as usual.
+run(`state.dictation = 'on'; renderSessionMeta();`);
+const beforeHidden = recorders.length;
+fire(mic, 'pointerdown');
+await flush();
+assert.equal(recorders.length, beforeHidden + 1);
+clock += 1500;
+document.hidden = true;
+for (const handler of document.listeners.visibilitychange) handler();
+document.hidden = false;
+await flush();
+assert.equal(recorders.at(-1).state, 'inactive');
+assert.ok(streams.at(-1).tracks[0].stopped, 'the microphone is released');
+assert.equal(dictations().length, 4);
+answer('/api/dictation', 200, { text: 'kept' });
+await flush();
+reply.value = '';
+assert.equal(inputs().length, 0, 'never sent by itself');
+run(`state.dictation = 'needsKey'; renderSessionMeta();`);
+
 // 8. A Mac without dictation (an older one, or none offered): no button.
 run(`state.dictation = 'off'; renderSessionMeta();`);
 assert.equal(mic.hidden, true);
@@ -299,7 +321,7 @@ micAllowed = false;
 fire(mic, 'pointerdown');
 await flush();
 assert.ok($('dictationStatus').textContent.includes('may not use the microphone'));
-assert.equal(dictations().length, 3);
+assert.equal(dictations().length, 4);
 
 console.log('phone-dictation: ok');
 process.exit(0);

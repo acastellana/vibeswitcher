@@ -106,7 +106,7 @@ struct PhoneRepliesTests {
         let clock = clock
         access.replyClock = { clock.value }
         access.agentRunning = { _, _, _ in true }
-        access.readTerminalScreen = { _ in nil }
+        access.readTerminalScreen = { _ in "" }
         access.typeInTerminal = { _, _, _, _, _, _ in .notInTerminal }
         access.sendToWindow = { _, _, _, confirmed in confirmed(false) }
         try before(access)
@@ -444,6 +444,208 @@ struct PhoneRepliesTests {
         #expect(await until { bad.value != nil })
         #expect(bad.value?.status == 400)
         #expect(keys.value == ["down"])
+    }
+
+    /// ⏎ on the phone picks what's highlighted when its turn comes, not what the phone last heard: after ↓ the phone's
+    /// copy of the cursor is seconds behind, and an index from it moved the cursor back and picked the option the arrow
+    /// had just left. Enter goes alone, the phone hears which option it took, and a cursor that moved between the read
+    /// and Enter stops it.
+    @Test func enterPicksWhatsHighlightedWhenItsTurnComes() async throws {
+        let store = try await store()
+        let (access, token, done) = try serve(store)
+        defer { done() }
+        let moved = Self.menuScreen.replacingOccurrences(of: "❯ 1. Yes\n", with: "  1. Yes\n")
+            .replacingOccurrences(of: "  2. Yes, allow", with: "❯ 2. Yes, allow")
+        let reads = Box<[String?]>([moved, moved])
+        access.readTerminalScreen = { _ in
+            var left = reads.value
+            let next = left.isEmpty ? moved : left.removeFirst()
+            reads.value = left
+            return next
+        }
+        let keys = Box<[String]>([])
+        access.typeInTerminal = { _, _, _, _, key, _ in
+            keys.value.append(key?.rawValue ?? "")
+            return nil
+        }
+        let sid = try sid(store)
+        let fingerprint = PhoneMenu.fingerprint(try #require(PhoneMenu.read(screen: moved, needsInput: true)), sid: sid)
+        let enter = #"{"tty":"\#(Self.tty)","sid":"\#(sid)","choose":"highlighted","fingerprint":"\#(fingerprint)"}"#
+        let answer = send(access, try request("POST", "/api/input", token: token, body: enter))
+        #expect(await until { answer.value != nil })
+        #expect(answer.value?.status == 200)
+        #expect(keys.value == ["enter"], "Enter alone: the cursor is already on the option")
+        #expect(answer.value?.json["chose"] as? String == "Yes, allow all edits during this session (shift+tab)")
+    }
+
+    @Test func enterStopsWhenTheCursorMovesBeforeItGoes() async throws {
+        let store = try await store()
+        let (access, token, done) = try serve(store)
+        defer { done() }
+        let onTwo = Self.menuScreen.replacingOccurrences(of: "❯ 1. Yes\n", with: "  1. Yes\n")
+            .replacingOccurrences(of: "  2. Yes, allow", with: "❯ 2. Yes, allow")
+        let reads = Box<[String?]>([onTwo, Self.menuScreen])
+        access.readTerminalScreen = { _ in
+            var left = reads.value
+            let next = left.isEmpty ? Self.menuScreen : left.removeFirst()
+            reads.value = left
+            return next
+        }
+        let keys = Box<[String]>([])
+        access.typeInTerminal = { _, _, _, _, key, _ in
+            keys.value.append(key?.rawValue ?? "")
+            return nil
+        }
+        let sid = try sid(store)
+        let fingerprint = PhoneMenu.fingerprint(try #require(PhoneMenu.read(screen: onTwo, needsInput: true)), sid: sid)
+        let enter = #"{"tty":"\#(Self.tty)","sid":"\#(sid)","choose":"highlighted","fingerprint":"\#(fingerprint)"}"#
+        let answer = send(access, try request("POST", "/api/input", token: token, body: enter))
+        #expect(await until { answer.value != nil })
+        #expect(answer.value?.status == 409)
+        #expect(answer.value?.error == PhoneAccess.menuMoved)
+        #expect(keys.value.isEmpty, "the cursor moved under it: Enter isn't pressed")
+    }
+
+    /// A paused session's menu has no buttons on the phone: the refusal says how to get them, instead of "use its options".
+    @Test func aKeyRefusedOnAPausedSessionsMenuSaysResume() async throws {
+        let store = try await store()
+        store.minimizeOnPause = false
+        let (access, token, done) = try serve(store)
+        defer { done() }
+        access.readTerminalScreen = { _ in Self.menuScreen }
+        let typed = Box(0)
+        access.typeInTerminal = { _, _, _, _, _, _ in
+            typed.value += 1
+            return nil
+        }
+        let session = try #require(store.sessions.first { $0.tty == Self.tty })
+        store.pause(session, for: .hours(1))
+        defer { store.resume(session) }
+        #expect(await until { store.sessions.first { $0.tty == Self.tty }?.pausedUntil != nil })
+        let body = #"{"tty":"\#(Self.tty)","sid":"\#(try sid(store))","text":"1","submit":false}"#
+        let answer = send(access, try request("POST", "/api/input", token: token, body: body))
+        #expect(await until { answer.value != nil })
+        #expect(answer.value?.status == 409)
+        #expect(answer.value?.error.contains("Tap Resume") == true)
+        #expect(typed.value == 0)
+    }
+
+    @Test func aRefusalNamesTheWayOutEachSessionHas() throws {
+        let start = Date()
+        var session = Session(tty: Self.tty, agent: .claude, pid: 1, startedAt: start, cwd: nil, project: "p", task: nil,
+                              status: .needsInput, statusSince: start, detail: nil, hasHooks: true, inTerminalApp: true)
+        #expect(PhoneAccess.menuOpen(in: session) == PhoneAccess.menuOpen)
+        session.pausedUntil = .distantFuture
+        #expect(PhoneAccess.menuOpen(in: session).contains("Tap Resume"))
+        session.teamRole = .worker
+        #expect(PhoneAccess.menuOpen(in: session).contains("Its lead answers it"))
+    }
+
+    // MARK: - A menu the phone didn't mean it for
+
+    /// A reply, a digit or a bare Enter reaching a screen with a menu on it: its Enter would pick the highlighted option
+    /// (Yes, on a permission prompt) and a digit picks that option. Refused, nothing typed, on both paths; Esc still
+    /// goes (it's how you close one), and with no menu up the reply goes as usual. Run from a screen read at its turn:
+    /// the phone may have drawn no menu because none was up then.
+    @Test(arguments: [false, true]) func aReplyDigitOrEnterIsntTypedIntoAMenuThatIsUp(window: Bool) async throws {
+        let store = try await store(window: window)
+        let (access, token, done) = try serve(store)
+        defer { done() }
+        let host = useHost(access)
+        let typed = Box<[String]>([])
+        access.typeInTerminal = { _, _, text, _, key, _ in
+            typed.value.append(text ?? key?.rawValue ?? "")
+            return nil
+        }
+        let screen = Box<String?>(Self.menuScreen)
+        access.readTerminalScreen = { _ in screen.value }
+        let sid = try sid(store)
+        let wentIn = { window ? host.writes.count : typed.value.count }
+        let post = { (fields: String) throws -> Box<Answer?> in
+            self.send(access, try self.request("POST", "/api/input", token: token, body: #"{"tty":"\#(Self.tty)","sid":"\#(sid)",\#(fields)}"#))
+        }
+        for fields in [#""text":"no, use the other file","submit":true,"request":"r1""#, #""text":"1","submit":false"#, #""key":"enter""#] {
+            let answer = try post(fields)
+            #expect(await until { answer.value != nil })
+            #expect(answer.value?.status == 409, "\(fields)")
+            #expect(answer.value?.error.contains("a question is open") == true, "\(fields)")
+            #expect(wentIn() == 0, "\(fields): nothing typed")
+        }
+        // Nothing went in, so the same reply, once the menu is gone, goes in (it wasn't remembered as typed).
+        screen.value = "❯ "
+        let reply = try post(#""text":"no, use the other file","submit":true,"request":"r1""#)
+        #expect(await until { reply.value != nil })
+        #expect(reply.value?.status == 200 && reply.value?.json["duplicate"] == nil)
+        let afterReply = wentIn()
+        #expect(afterReply > 0)
+        // An unreadable screen isn't taken for an empty one.
+        screen.value = nil
+        let unread = try post(#""text":"and again","submit":true"#)
+        #expect(await until { unread.value != nil })
+        #expect(unread.value?.status == 503)
+        #expect(wentIn() == afterReply)
+        // Esc is how a menu is closed: it isn't an answer to it.
+        screen.value = Self.menuScreen
+        let escape = try post(#""key":"escape""#)
+        #expect(await until { escape.value != nil })
+        #expect(escape.value?.status == 200)
+        #expect(wentIn() == afterReply + 1)
+    }
+
+    /// With the cursor on a question's "Type something." row, text is what that row takes: you moved there on purpose.
+    /// Not a bare Enter (nothing typed), not a row that isn't the free-text one, and not a multi-select's (Enter would
+    /// untick it).
+    @Test(arguments: [false, true]) func textGoesIntoAQuestionsFreeTextRowOnlyWithTheCursorOnIt(window: Bool) async throws {
+        let store = try await store(window: window)
+        let (access, token, done) = try serve(store)
+        defer { done() }
+        let host = useHost(access)
+        let typed = Box<[String]>([])
+        access.typeInTerminal = { _, _, text, _, key, _ in
+            typed.value.append(text ?? key?.rawValue ?? "")
+            return nil
+        }
+        let onField = """
+        Which database?
+          1. Postgres
+          2. SQLite
+        ❯ 3. Type something.
+          4. Chat about this
+        Enter to select · ↑/↓ to navigate · Esc to cancel
+        """
+        let screen = Box<String?>(onField)
+        access.readTerminalScreen = { _ in screen.value }
+        let sid = try sid(store)
+        let wentIn = { window ? host.writes.count : typed.value.count }
+        let post = { (fields: String) throws -> Box<Answer?> in
+            self.send(access, try self.request("POST", "/api/input", token: token, body: #"{"tty":"\#(Self.tty)","sid":"\#(sid)",\#(fields)}"#))
+        }
+        let answer = try post(#""text":"MariaDB, it's what we run","submit":true"#)
+        #expect(await until { answer.value != nil })
+        #expect(answer.value?.status == 200)
+        let afterAnswer = wentIn()
+        #expect(afterAnswer > 0)
+        let enter = try post(#""key":"enter""#)
+        #expect(await until { enter.value != nil })
+        #expect(enter.value?.status == 409)
+        #expect(wentIn() == afterAnswer)
+        // The same question with the cursor on another row, and a multi-select's field.
+        let onOption = onField.replacingOccurrences(of: "❯ 3.", with: "  3.").replacingOccurrences(of: "  1. Postgres", with: "❯ 1. Postgres")
+        let multi = """
+        Which toppings?
+          1. [ ] Cream
+          2. [ ] Nuts
+        ❯ 3. [ ] Type something.
+          Submit
+        Enter to select · ↑/↓ to navigate · Esc to cancel
+        """
+        for other in [onOption, multi] {
+            screen.value = other
+            let refused = try post(#""text":"MariaDB","submit":true"#)
+            #expect(await until { refused.value != nil })
+            #expect(refused.value?.status == 409, "\(other)")
+            #expect(wentIn() == afterAnswer, "\(other)")
+        }
     }
 
     // MARK: - A restart keeps the pairing

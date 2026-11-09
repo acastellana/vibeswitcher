@@ -71,19 +71,35 @@ back to the pairing screen and says why. Plain shells, wallet requests and the M
 
 Typing from the phone is a separate switch: **Allow replies and key presses from the phone**, off by default.
 
-- The session view has quick replies (✎ edits the list, kept on that phone) and keys: Esc, 1–3, ↑↓, ⏎, ⌃C.
+- The session view has quick replies (✎ edits the list, kept on that phone) and keys: Esc, 1–3, ↑↓, Tab, ⏎, ⌃C.
 - While a session shows a question or a menu, a quick reply goes into the box instead of being sent: text doesn't
-  answer a menu (use 1–3 or ↑↓ ⏎).
+  answer a menu (use 1–3 or ↑↓ ⏎). The Mac checks too, against the screen as it is when the reply's turn comes: text, a
+  digit or a bare ⏎ that would land on a menu the phone didn't show it for is refused, nothing typed, and the phone
+  says so, with what you can do: a paused session or a lead's worker shows no options, so it says Resume, or that its
+  lead answers it. (⏎ would pick the highlighted option.) The exception is a question's "Type something." row: move the cursor
+  to it with ↑↓ and send your text. Esc still goes: it's how you close one.
+- While a menu shows, 1–3 and its option buttons pick that option, and ⏎ picks whatever is highlighted when it reaches
+  the Mac, so ↓ then ⏎ picks the option you moved to. Each goes only while that menu is still the one on the screen.
+- **Each input goes in once.** A reply (text with ⏎) carries an id: sent again after a dropped connection or "check
+  the screen", within a minute, it isn't typed twice. Keys aren't remembered, since tapping ↓ twice means twice, so when
+  the connection drops the phone says the outcome is unknown: look at the screen before pressing again.
 - **Answering a lead.** A lead's question shows its options and a text field; your answer goes through the same path
   as the Mac's question cards.
   It needs replies on, the Mac unlocked and the question still open; an answer is at most 2,000 characters. With
-  replies off, the phone says "Replying from the phone is off. Turn it on in VibeSwitcher › Settings… › Phone."
+  replies off, the phone says "Replying from the phone is off. Turn it on in VibeSwitcher › Settings… › Phone." A
+  question that closed meanwhile is refused, and the phone says your answer wasn't sent, for a minute even once its
+  card has gone; sent again with the same words after a dropped connection, the phone says it went in and shows it as
+  answered.
 - Nothing is typed while the Mac is locked: the lock is checked again before every batch of keys. Typing into a
   Terminal session needs Accessibility.
-- Pausing a session from the phone works even with replies off.
+- Pausing a session from the phone works even with replies off, or with the Mac locked: nothing is typed. If it
+  couldn't (the session ended, say), the phone says so under the screen.
 - **Dictation.** With replies on, a mic beside the reply box: hold it and speak, and the Mac transcribes it with the
-  OpenAI key from Settings › Dictation & Briefing. The text goes in at the cursor and is never sent by itself. The first
-  use shows a one-time note that the audio goes to OpenAI.
+  OpenAI key from Settings › Dictation & Briefing. The text goes in at the cursor and is never sent by itself, so it
+  works while the Mac is locked too. The first use shows a one-time note that the audio goes to OpenAI. If the phone
+  locks or you leave the page while holding it, the recording stops there and what you said is transcribed.
+- The phone reaches sessions running Claude Code or Codex, in a Terminal tab or the window. A plain shell in the
+  window isn't listed, so it can't be typed into from the phone.
 
 ## Dev pages
 
