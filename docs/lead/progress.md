@@ -2163,3 +2163,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 15:03 Automatically (auto_advance): Started a worker on start-worker-warns-when (start_worker warns when two tasks claim the same send path or file); its agent is auto, so it went to Claude: Claude weekly 59%, on pace, not tight; Codex 59%.
 - 2026-11-09 15:03 Released phone-day-to-day's worker (idle since its done report on 74527dc7) while its audit runs
 - 2026-11-09 15:03 Automatically (auto_advance): Started the audit of phone-day-to-day at 74527dc7 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 15:27 Released phone-input-review-and's worker (idle since its done report on d8b86dae) while its audit runs
+- 2026-11-09 15:27 Automatically (auto_advance): Started the audit of phone-input-review-and at d8b86dae (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 15:27 Audit of phone-day-to-day: complete, clean, round 1: 2 Nit open, 2 Pre-existing open
+- 2026-11-09 15:28 Planned the-sandbox-s-phone: The sandbox's phone keeps a session's identity, and iOS gets its home-screen icon (review audit)
