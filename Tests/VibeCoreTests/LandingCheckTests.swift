@@ -299,6 +299,10 @@ extension LeadRemoteTests {
     @Test func nothingMovesABaseOutsideTheTwoPlacesThatCheck() throws {
         let top = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let folder = top.appendingPathComponent("Sources/VibeCore")
+        // The check's own code is the gate's: a change to it shows as not installed yet (`LeadToolset.gatePaths`).
+        let check = "Sources/VibeCore/LeadLandingCheck.swift"
+        #expect(FileManager.default.fileExists(atPath: top.appendingPathComponent(check).path))
+        #expect(LeadToolset.gatePaths.contains { $0.hasSuffix("*") && check.hasPrefix($0.dropLast()) })
         var fastForwards: [String] = [], moves: [String] = []
         for name in try FileManager.default.contentsOfDirectory(atPath: folder.path) where name.hasSuffix(".swift") {
             let lines = try String(contentsOf: folder.appendingPathComponent(name), encoding: .utf8).components(separatedBy: "\n")
@@ -459,6 +463,26 @@ extension LeadRemoteTests {
         // Without the lock, or over anything else, it's the usual refusal.
         #expect(Git.run(["show", "main:docs/lead/progress.md"], in: root).output.contains("- the candidate's line"))
         #expect(!Git.run(["show", "main:docs/lead/progress.md"], in: root).output.contains("- not committed yet"))
+    }
+
+    /// A candidate that changes the records, over a clean checkout: git replaces the file, so the fast-forward holds the
+    /// records' lock (a line appended to the old file meanwhile would be gone). One that doesn't change them doesn't.
+    @Test func aFastForwardThatChangesTheRecordsHoldsTheirLock() throws {
+        let scene = try makeScene()
+        let root = scene.root
+        let before = head(root)
+        git(["checkout", "-q", "-b", "candidate"], in: root)
+        try commit("docs/lead/progress.md", "- the candidate's line\n", in: root, append: true, message: "c")
+        let changes = head("candidate", root)
+        try commit("other.txt", "x\n", in: root, message: "d")
+        let doesnt = head("candidate", root)
+        git(["checkout", "-q", "main"], in: root)
+        var locked = 0
+        let landing = Worktrees.Landing(route: "test", records: "docs/lead", lockRecords: { body in locked += 1; return try body() })
+        #expect(Worktrees.fastForward(root: root, base: "main", to: changes, from: before, landing: landing) == .merged)
+        #expect(locked == 1)
+        #expect(Worktrees.fastForward(root: root, base: "main", to: doesnt, from: changes, landing: landing) == .merged)
+        #expect(locked == 1)
     }
 
     @Test func uncommittedRecordsStopAFastForwardThatCantKeepThem() throws {

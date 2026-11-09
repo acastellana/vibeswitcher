@@ -879,7 +879,13 @@ public enum Worktrees {
                 } catch {
                     return .refused("The lead's records couldn't be locked to keep their uncommitted lines (\(error)); \(main) wasn't moved.")
                 }
-            case .success: return move()
+            case .success:
+                // git replaces the records' files the commit changes: no line may be appended to the old file meanwhile.
+                guard let lock = landing.lockRecords, let records = landing.records,
+                      !Git.run(["diff", "--quiet", expected, commit, "--"] + LeadRecords.paths(records), in: root).ok else { return move() }
+                do { return try lock(move) } catch {
+                    return .refused("The lead's records couldn't be locked for the fast-forward (\(error)); \(main) wasn't moved.")
+                }
             }
         case .some(let place):
             return .refused(checkedOut(main, in: place, root: root))
