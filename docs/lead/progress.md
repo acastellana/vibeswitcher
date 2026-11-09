@@ -2040,3 +2040,8 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 Error lines in app.log within 10 min, by kind: host: couldn't ×1
 Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
 - 2026-11-09 08:17 Update: Today: everything queued is merged and installed — **Landed since the last summary:** a merge's tests no longer block audits and new starts (`auto-advance-keeps`); merge and test time limits count only the time the Mac is awake (`the-other-time-limits…
+- 2026-11-09 08:22 Fetched origin/main at 3b271e17: main is 112 commits ahead of origin/main and 0 commits behind it
+- 2026-11-09 08:22 Asked the user to push main at 28f6e0ac (112 commits) to origin/main
+- 2026-11-09 08:24 Pushed main at 28f6e0ac (112 commits) to origin/main, on the user's click
+- 2026-11-09 08:26 Planned readme-a-real-feature: README: a real feature list, and screenshots that show what their captions say
+- 2026-11-09 08:26 Automatically (auto_advance): Didn't start readme-a-real-feature: readme-a-real-feature's worker not started: ~/.vibeswitcher/bin changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made …
