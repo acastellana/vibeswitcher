@@ -2179,3 +2179,24 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 16:03 Released start-worker-warns-when's worker (idle since its done report on 9f51c5d3) while its audit runs
 - 2026-11-09 16:03 Automatically (auto_advance): Started the audit of start-worker-warns-when at 9f51c5d3 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-09 16:08 Audit of audit-exceptions-are-a: complete, clean, round 1: 1 Nit open
+- 2026-11-09 16:16 Audit of start-worker-warns-when: complete, clean, round 1: 3 Nit open
+- 2026-11-09 16:30 Released phone-over-tailscale's worker (idle since its done report on 05af122c) while its audit runs
+- 2026-11-09 16:30 Automatically (auto_advance): Started the audit of phone-over-tailscale at 05af122c (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 16:30 Released the-merge-checks-the's worker (idle since its done report on 32f6aa40) while its audit runs
+- 2026-11-09 16:30 Automatically (auto_advance): Started the audit of the-merge-checks-the at 32f6aa40 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 16:31 Automatically (auto_advance): Started the audit of verifier-eval-failed at 174c137b (Its review is audit).
+- 2026-11-09 16:31 Released verifier-eval-failed's worker (idle since its done report on 174c137b) while its audit runs
+- 2026-11-09 16:31 Automatically (auto_advance): Released verifier-eval-failed's worker, idle since its done report on 174c137b, while its audit runs (ended pid 6254 (Worker: Verifier eval: failed runs aren't scored, cases get REVIEW.md, and a true baseline)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-09 16:33 Started a worker on audit-exceptions-are-a
+- 2026-11-09 16:33 Automatically (auto_advance): Merge of audit-exceptions-are-a failed: Tests fail rebased onto main: web tests: 2 of 2 passed Sent its worker the output; it's back at work.
+- 2026-11-09 16:36 Released a-stalled-or-hung's worker (idle since its done report on b71a4206) while its audit runs
+- 2026-11-09 16:36 Automatically (auto_advance): Started the audit of a-stalled-or-hung at b71a4206 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 16:39 Audit of phone-over-tailscale: complete, clean, round 1: 2 Nit open
+- 2026-11-09 16:47 Audit of the-merge-checks-the: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-11-09 16:52 Audit of verifier-eval-failed: incomplete, clean, round 1: 1 Important open, 2 Nit open
+- 2026-11-09 16:52 Started a worker on verifier-eval-failed
+- 2026-11-09 16:52 Automatically (auto_advance): Sent verifier-eval-failed's worker the open Important findings verifier-eval-failed:F1 from its audit at 174c137b (in a new worker: its last one was released during the audit).
+- 2026-11-09 16:52 Sent verifier-eval-failed's audit contract v3 (it had v2)
+- 2026-11-09 16:54 Released phone-input-review-and's worker (idle since its done report on f3e263b2) while its audit runs
+- 2026-11-09 16:54 Automatically (auto_advance): Started the audit of phone-input-review-and at f3e263b2 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 16:54 Merged start-worker-warns-when: start_worker warns when two tasks claim the same send path or file (build 16ca360977ec)
