@@ -2,11 +2,7 @@
 
 Backtest for idea 1 in [the elephant-goldfish review](google-elephant-goldfish-model.md): a cheap headless model reads only a contract, before its worker starts, and says what's being asked, which design choices the worker would have to guess, and whether each acceptance check can be done inside the boundaries.
 
-## Verdict: don't build
-
-The reader doesn't tell contracts that later went wrong from contracts that didn't. It flags 97% of both groups. A contract that later needed changing gets a mean of 4.5 flags, and a clean one gets 4.1 (AUC 0.57, 95% interval 0.48 to 0.66, where 0.5 is a coin toss).
-
-When a contract did go wrong, the reader named the actual problem about one time in five (15 of 70, checked by hand). That is a real signal, but it arrives inside 4 to 5 flags on every contract, so the lead would have to read all of them, on the clean contracts too. Only about 7% of the flags it raised on the changed contracts named what later changed. Money isn't the obstacle: the whole backtest cost $0.52, about $0.0015 a reader call. The cost is the lead's attention, and a gate that fires on 97% of contracts doesn't direct it anywhere.
+**Result: don't build.** The verdict and the numbers behind it are at the end.
 
 ## Method
 
@@ -55,7 +51,7 @@ When a contract did go wrong, the reader named the actual problem about one time
 
 A further 36 of the 70 scored "partial": the same area but a different problem. The shuffled control scored "yes" on 1 of 70 (1%), so the scorer does separate matching from non-matching flags. Among group A's 317 flags, about 22 (7%) named what later changed.
 
-The two gap rows don't add up to the kind rows because the "contract gap" label is a separate judgement, and a noisy one: several boundary cases I'd count as gaps were labelled otherwise.
+The "labelled a contract gap" row cuts across the five kinds below it, which alone sum to 70. That label is a separate judgement, and a noisy one: several boundary cases I'd count as gaps were labelled otherwise.
 
 ### Against the rule
 
@@ -78,3 +74,9 @@ The first two fail on any reading, so the verdict doesn't depend on the third.
 ## Spend
 
 About 520 Haiku calls cost $0.52 at list price, from `total_cost_usd` on each call, including the pilot and both reader runs. The prompts, the case lists and the per-call output are in the worker's scratch folder, not the repository.
+
+## Verdict: don't build
+
+The reader doesn't tell contracts that later went wrong from contracts that didn't. It flags 97% of both groups (68 of 70 each). A contract that later needed changing gets a mean of 4.5 flags, and a clean one gets 4.1 (AUC 0.57, 95% interval 0.48 to 0.66, where 0.5 is a coin toss). The best threshold, 5 flags, separates them by 16 points (49% against 33%), short of the 20 the rule asked for.
+
+When a contract did go wrong, the reader named the actual problem about one time in five (15 of 70, checked by hand; the scorer alone said 25). That is a real signal, but it arrives inside 4 to 5 flags on every contract, so the lead would have to read all of them, on the clean contracts too. Only about 7% of the flags it raised on the changed contracts named what later changed. Money isn't the obstacle: the whole backtest cost $0.52, about $0.0015 a reader call. The cost is the lead's attention, and a gate that fires on 97% of contracts doesn't direct it anywhere.
