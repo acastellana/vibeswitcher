@@ -133,15 +133,6 @@ final class DroppingHost {
         let worktree = Worktrees.path(root: root, slug: "one")
         #expect(Git.run(["worktree", "add", "-q", "-b", Worktrees.branch("one"), worktree], in: root).ok)
         let (app, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
-        let worker = try await app.spawn(keepRunning, cwd: worktree)
-        sessions.append(worker)
-        try BoardStore(root: root).update { board in
-            var task = LeadTask(slug: "one", title: "One", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""), status: .running)
-            task.worker = worker.id.uuidString
-            task.worktree = worktree
-            board.tasks.append(task)
-        }
-
         let folder = host.dir + "/mcp"
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: folder + "/a.in", contents: nil)
@@ -155,6 +146,15 @@ final class DroppingHost {
             Issue.record("the app got no lead grant: \(host.log)"); return
         }
         await #expect(app.vault(.bind(grant: grant, root: root, session: lead.id.uuidString)) == .ok)
+        // Started from the lead's session, as start_worker starts one.
+        let worker = try await courier.spawn(keepRunning, cwd: worktree)
+        sessions.append(worker)
+        try BoardStore(root: root).update { board in
+            var task = LeadTask(slug: "one", title: "One", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""), status: .running)
+            task.worker = worker.id.uuidString
+            task.worktree = worktree
+            board.tasks.append(task)
+        }
         // The worker must be an actual member of the lead's team, not just a board entry. Other
         // projects' sessions are intentionally absent from the lead's host session list now.
         let issued = try await courier.send([.vault(.issue(role: .worker, root: root, task: "one", auditing: nil))])

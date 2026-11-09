@@ -47,19 +47,6 @@ import Testing
                 #expect(Git.run(["worktree", "add", "-q", "-b", Worktrees.branch(slug), Worktrees.path(root: root, slug: slug)], in: root).ok)
             }
             let (app, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
-            let worker = try await app.spawn(keepRunning, cwd: worktree)
-            sessions.append(worker)
-            try BoardStore(root: root).update { board in
-                var task = LeadTask(slug: "live", title: "Live", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""), status: .running)
-                task.worker = worker.id.uuidString
-                task.worktree = worktree
-                board.tasks.append(task)
-                for index in 1...finished {
-                    var done = LeadTask(slug: "done-\(index)", title: "Done \(index)", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""), status: .done)
-                    done.worktree = Worktrees.path(root: root, slug: "done-\(index)")
-                    board.tasks.append(done)
-                }
-            }
 
             let folder = host.dir + "/mcp"
             self.folder = folder
@@ -78,6 +65,20 @@ import Testing
                 throw TestClient.NoWelcome(description: "the app got no lead grant: \(host.log)")
             }
             await #expect(app.vault(.bind(grant: grant, root: root, session: lead.id.uuidString)) == .ok)
+            // Started from the lead's session, as start_worker starts one.
+            let worker = try await courier.spawn(keepRunning, cwd: worktree)
+            sessions.append(worker)
+            try BoardStore(root: root).update { board in
+                var task = LeadTask(slug: "live", title: "Live", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""), status: .running)
+                task.worker = worker.id.uuidString
+                task.worktree = worktree
+                board.tasks.append(task)
+                for index in 1...finished {
+                    var done = LeadTask(slug: "done-\(index)", title: "Done \(index)", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""), status: .done)
+                    done.worktree = Worktrees.path(root: root, slug: "done-\(index)")
+                    board.tasks.append(done)
+                }
+            }
             // The worker is a member of the lead's team, as start_worker checks.
             let issued = try await courier.send([.vault(.issue(role: .worker, root: root, task: "live", auditing: nil))])
             guard case .vault(.grant(let workerGrant))? = issued[2] else {

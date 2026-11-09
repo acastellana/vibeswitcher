@@ -54,6 +54,14 @@ final class Courier {
         FileManager.default.createFile(atPath: "\(folder)/stop\(round)", contents: nil)
         return try replies()
     }
+
+    /// Starts a session from inside this one, as a lead's tool server starts its workers and verifiers.
+    func spawn(_ command: String, cwd: String = "/tmp") async throws -> HostSession {
+        let answers = try await send([.spawn(SpawnRequest(cwd: cwd, command: command, env: [:], cols: 80, rows: 24, keepShell: false,
+                                                          label: "Test", agent: nil))])
+        guard case .spawned(let session)? = answers[2] else { throw TestClient.NoWelcome(description: "no session started: \(answers)") }
+        return session
+    }
 }
 
 extension TestClient {
@@ -101,8 +109,9 @@ extension TestClient {
         let leadCourier = try Courier(host.dir + "/lead", socket: host.socket)
         let workerCourier = try Courier(host.dir + "/worker", socket: host.socket)
         let verifierCourier = try Courier(host.dir + "/verifier", socket: host.socket)
-        let lead = try await app.spawn(leadCourier.command), worker = try await app.spawn(workerCourier.command)
-        let verifier = try await app.spawn(verifierCourier.command)
+        let lead = try await app.spawn(leadCourier.command)
+        let worker = try await leadCourier.spawn(workerCourier.command)
+        let verifier = try await leadCourier.spawn(verifierCourier.command)
         sessions = [lead, worker, verifier]
 
         // The app starts the lead; the lead (its own session) starts a worker and a verifier; the verifier gives its
