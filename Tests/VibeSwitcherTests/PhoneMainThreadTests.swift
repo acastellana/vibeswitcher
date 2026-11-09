@@ -15,7 +15,6 @@ struct PhoneMainThreadTests {
     nonisolated static let host = "mac.tail1234.ts.net"
     nonisolated static let login = "me@example.com"
     nonisolated static let tty = "ttys982"
-    nonisolated static let readTime: TimeInterval = 2
     nonisolated static let menuScreen = """
     Do you want to make this edit to notes.md?
     ❯ 1. Yes
@@ -115,69 +114,45 @@ struct PhoneMainThreadTests {
         if let device = access.devices.first(where: { $0.tokenHash == RemoteAuth.hash(token) }) { access.remove(device) }
     }
 
-    /// What the main thread did while a stand-in Terminal read of `readTime` went on.
+    /// What the main thread did while a stand-in Terminal read went on.
     struct Waited {
         var answer: Answer
         /// Whether any read ran on the main thread.
         var readOnMain: Bool
-        /// How late each main-queue block due while the read went on (and not in its last 0.15 s) ran.
-        var lateness: [TimeInterval]
+        /// Whether a main-queue block asked for while each read went on ran before that read ended.
+        var mainRanDuringRead: Bool
     }
 
-    /// Sends `request` with the Terminal read replaced by one that takes `readTime`; once the read starts, it times
-    /// main-queue blocks every 0.1 s up to its last 0.15 s.
-    ///
-    /// Each block is noted with how late it ran. A read done on the main thread, or one the main thread waits for,
-    /// holds every one of them until the read is over: at least 0.15 s late. Off the main thread they run on time,
-    /// unless other tests running at once (the suite is parallel) keep the main thread busy.
-    ///
-    /// The blocks are timed from the read's own start, not from when the request goes out: the read queue may get to
-    /// it late on a loaded Mac, and blocks due before it started would prove nothing. And it waits for the answer and
-    /// every block with the hang guard, not a window: both need the main thread, which other suites in the run can
-    /// hold for longer than any window (in three merges' runs a 15 s one ran out with the read done and the answer, one
-    /// main-queue hop away, not yet delivered).
+    /// Sends `request` with the Terminal read replaced by one that holds until a main-queue block it asks for has run,
+    /// and only then ends. A read on the main thread, or one the main thread waits for, can't see that block run before
+    /// it ends: the order says whether the main thread stayed free, not how late a block ran. The hang guard is only for
+    /// the failing case: both the block and the answer need the main thread, which other suites can hold for a long time.
     private func whileReading(_ access: PhoneAccess, _ request: HTTPRequest) async throws -> Waited {
-        let started = Box<Date?>(nil), finished = Box<Date?>(nil), onMain = Box(false)
-        let ran = Box<[(due: Date, at: Date)]>([])
-        let steps = Int(((Self.readTime - 0.15) * 10).rounded(.down))
+        let read = Box(false), onMain = Box(false), mainRan = Box(true)
         access.readTerminalScreen = { tty in
-            if Thread.isMainThread { onMain.value = true }
-            let origin = Date()
-            started.value = origin
-            for step in 1...steps {
-                let delay = 0.1 * Double(step)
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { ran.value.append((origin + delay, Date())) }
+            read.value = true
+            if Thread.isMainThread {
+                onMain.value = true
+            } else {
+                let probe = DispatchSemaphore(value: 0)
+                DispatchQueue.main.async { probe.signal() }
+                if probe.wait(timeout: .now() + hangGuard) == .timedOut { mainRan.value = false }
             }
-            Thread.sleep(forTimeInterval: Self.readTime)
-            finished.value = Date()
             return tty == Self.tty ? Self.menuScreen : nil
         }
         var answer: Answer?
         access.handleForTests(request) { answer = Answer(status: $0.status, body: $0.body) }
-        // Every block is in before the read ends, so before the answer; with no read there are none to wait for.
-        #expect(await until { answer != nil && ran.value.count == (started.value == nil ? 0 : steps) })
-        let start = try #require(started.value), end = try #require(finished.value)
-        #expect(end.timeIntervalSince(start) >= Self.readTime - 0.05)
-        return Waited(answer: try #require(answer), readOnMain: onMain.value,
-                      lateness: ran.value.map { $0.at.timeIntervalSince($0.due) })
+        #expect(await until { answer != nil })
+        #expect(read.value, "no read ran")
+        return Waited(answer: try #require(answer), readOnMain: onMain.value, mainRanDuringRead: mainRan.value)
     }
 
-    /// `whileReading`, up to `attempts` times until a main-queue block due during the read ran on time (< 0.1 s late).
-    /// Other tests running at once can keep the main thread busy for seconds, through a whole read; a read on the main
-    /// thread, or one it waits for, makes every attempt late. Each attempt's answer goes to `check`, and no read may
-    /// run on the main thread in any of them.
-    private func mainStaysFree(_ access: PhoneAccess, attempts: Int = 4, pause: TimeInterval = 0,
-                               _ request: () throws -> HTTPRequest, check: (Answer) -> Void) async throws {
-        var seen: [[TimeInterval]] = []
-        for attempt in 1...attempts {
-            if attempt > 1 { try await Task.sleep(nanoseconds: UInt64(pause * 1e9)) }
-            let waited = try await whileReading(access, try request())
-            check(waited.answer)
-            #expect(!waited.readOnMain)
-            seen.append(waited.lateness)
-            if waited.lateness.contains(where: { $0 < 0.1 }) { return }
-        }
-        Issue.record("main-queue blocks ran late through every read: \(seen)")
+    /// `whileReading`, its answer to `check`: no read on the main thread, and the main thread free while it went on.
+    private func mainStaysFree(_ access: PhoneAccess, _ request: () throws -> HTTPRequest, check: (Answer) -> Void) async throws {
+        let waited = try await whileReading(access, try request())
+        check(waited.answer)
+        #expect(!waited.readOnMain)
+        #expect(waited.mainRanDuringRead, "the main thread ran nothing while the read went on")
     }
 
     @Test func theScreenRouteReadsATerminalTabOffTheMainThread() async throws {
@@ -187,8 +162,7 @@ struct PhoneMainThreadTests {
         let (token, unpaired) = try pairBesideAnother(access)
         defer { unpaired() }
 
-        // Apart, so each read isn't answered from the screen kept for 0.8 s.
-        try await mainStaysFree(access, pause: 1, { try request("GET", "/api/screen?tty=\(Self.tty)", token: token) }) { answer in
+        try await mainStaysFree(access, { try request("GET", "/api/screen?tty=\(Self.tty)", token: token) }) { answer in
             #expect(answer.status == 200)
             #expect((answer.json["text"] as? String)?.contains("Do you want to make this edit") == true)
         }

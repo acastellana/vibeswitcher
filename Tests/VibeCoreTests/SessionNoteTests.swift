@@ -50,6 +50,47 @@ struct SessionNoteTests {
         }
     }
 
+    /// 2026-11-08: a lead sent the user to Terminal.app and `!` for a locked signing keychain. The note never reached it (a
+    /// lead's session gets none), and Claude Code's own system prompt says to suggest `! <command>`.
+    static func saysToUseAShellCard(_ text: String, _ who: String) {
+        #expect(text.contains("vs-shell run"), "\(who)")
+        for need in ["needs a real terminal", "a password or other prompt", "an install", "interactive program"] {
+            #expect(text.contains(need), "\(who): \(need)")
+        }
+        #expect(text.contains("one Run click"), "\(who)")
+        #expect(text.contains("replaces Claude Code's advice to suggest `! <command>`"), "\(who)")
+        #expect(text.contains("don't ask the user to open Terminal.app"), "\(who)")
+        #expect(text.contains("or to type `! <command>` for it"), "\(who)")
+        #expect(text.contains("A password is typed only into that shell, never into chat"), "\(who)")
+    }
+
+    @Test func theNoteTheLeadAndWorkersAllSayToFileAShellForARealTerminal() {
+        let workflow = LeadWorkflow()
+        let task = LeadTask(slug: "t", title: "T", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""))
+        let lead = LeadPrompts.lead(project: "p", root: "/r/p", workflow: workflow, policy: "policy")
+        let worker = LeadPrompts.worker(task: task, root: "/r/p", workflow: workflow, policy: "policy")
+        for (who, text) in [("note", SessionNote.text), ("lead", lead), ("worker", worker)] {
+            Self.saysToUseAShellCard(text, who)
+            // One wording, so they can't drift apart.
+            #expect(text.contains(SessionNote.realTerminal), "\(who)")
+        }
+        // A worker's card is in a chat the user may not be looking at.
+        #expect(worker.contains("say with ask_lead that it's waiting for their Run"))
+    }
+
+    /// A lead reads its prompt from the file `--append-system-prompt-file` names: the rule has to be in that file.
+    @Test func theShellRuleIsInWhatALeadStartsFrom() throws {
+        let root = temp.url("lead-start")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let prompt = LeadPrompts.lead(project: "p", root: root.path, workflow: LeadWorkflow(), policy: "policy")
+        let launch = try LeadLaunch.prepare(role: .lead, root: root.path, task: nil, base: "claude", prompt: prompt, start: "Go.",
+                                            server: "/s", name: "lead-x", folder: root.appendingPathComponent("run"), cwd: root.path,
+                                            temporary: root.appendingPathComponent("tmp"))
+        #expect(launch.command.contains("--append-system-prompt-file"))
+        #expect(launch.command.contains(launch.promptFile))
+        Self.saysToUseAShellCard(try String(contentsOfFile: launch.promptFile, encoding: .utf8), "lead's prompt file")
+    }
+
     @Test func noNoteOutsideASessionsStart() {
         // Not a session VibeSwitcher started.
         #expect(SessionNote.output(payload: Self.start(), environment: [:]) == nil)

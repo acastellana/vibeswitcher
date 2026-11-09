@@ -47,4 +47,93 @@ struct ReviewFloorEditorTests {
         #expect(asked.count == 2 && !asked.contains(true), "on the main thread: \(asked)")
         #expect(try vault.reviewFloor(root: root)?.auditFinders == 3)
     }
+
+    /// Two projects with a lead's workflow.md (their floors' audit sample 20 % and 40 %), and an editor whose vault answers at once.
+    func floors() throws -> (editor: ReviewFloorEditor, vault: LeadVault, a: String, b: String) {
+        let (a, b) = (temp.url("a").resolvingSymlinksInPath().path, temp.url("b").resolvingSymlinksInPath().path)
+        for root in [a, b] {
+            try VibePaths.ensurePrivate(URL(fileURLWithPath: BoardStore(root: root).folder))
+            try LeadWorkflow.write(Data(LeadWorkflow.template.utf8), to: ReviewFloorEditor.workflowPath(root))
+        }
+        let book = LeadVault.Book()
+        let vault = LeadVault(folder: temp.url("vault")) { book.answer($0, from: .app) }
+        try vault.setReviewFloor(LeadReviewFloor(auditSamplePercent: 20), root: a)
+        try vault.setReviewFloor(LeadReviewFloor(auditSamplePercent: 40), root: b)
+        let editor = ReviewFloorEditor(vault: vault, projects: { [a, b] }, inline: true)
+        editor.reload()
+        return (editor, vault, a, b)
+    }
+
+    /// Settings' category shown again reads the floor again: what you were writing stays, with Save still on offer.
+    @Test func comingBackToTheCategoryKeepsTheDraft() throws {
+        let (editor, vault, a, _) = try floors()
+        #expect(editor.root == a && editor.samplePercent == 20 && !editor.unsaved)
+        editor.samplePercent = 55
+        editor.sensitive = "src/vault/"
+        editor.reload()
+        #expect(editor.samplePercent == 55 && editor.sensitive == "src/vault/")
+        #expect(editor.unsaved && editor.changed)
+        #expect(try vault.reviewFloor(root: a)?.auditSamplePercent == 20, "a draft isn't saved")
+    }
+
+    @Test func switchingProjectKeepsEachDraftAndShowsTheOthersOwn() throws {
+        let (editor, _, a, b) = try floors()
+        editor.samplePercent = 55
+        editor.root = b
+        #expect(editor.samplePercent == 40 && !editor.unsaved)
+        editor.samplePercent = 65
+        editor.root = a
+        #expect(editor.samplePercent == 55 && editor.unsaved)
+        editor.root = b
+        #expect(editor.samplePercent == 65 && editor.unsaved)
+    }
+
+    @Test func revertAndSaveEndTheDraftAndUntouchedFieldsFollowTheVault() throws {
+        let (editor, vault, a, b) = try floors()
+        editor.samplePercent = 55
+        editor.root = b
+        editor.root = a
+        #expect(editor.samplePercent == 55)
+        editor.revert()
+        #expect(editor.samplePercent == 20 && !editor.unsaved)
+        editor.root = b
+        editor.root = a
+        #expect(editor.samplePercent == 20, "a reverted draft doesn't come back")
+
+        editor.samplePercent = 75
+        editor.save()
+        #expect(!editor.unsaved && editor.recorded?.auditSamplePercent == 75)
+        #expect(try vault.reviewFloor(root: a)?.auditSamplePercent == 75)
+
+        // Nothing edited: the fields follow what the vault says now.
+        try vault.setReviewFloor(LeadReviewFloor(auditSamplePercent: 85), root: a)
+        editor.reload()
+        #expect(editor.samplePercent == 85 && !editor.unsaved)
+    }
+
+    /// A draft put back by hand to what's recorded is no draft: nothing to Save or Revert.
+    @Test func editsUndoneByHandLeaveNoDraft() throws {
+        let (editor, _, a, b) = try floors()
+        editor.samplePercent = 55
+        editor.samplePercent = 20
+        editor.root = b
+        editor.root = a
+        #expect(editor.samplePercent == 20 && !editor.unsaved)
+    }
+
+    /// With no floor recorded the fields show the project's values: nothing typed, so nothing is a draft.
+    @Test func noFloorRecordedIsNotADraftUntilYouEdit() throws {
+        let root = temp.url("fresh").resolvingSymlinksInPath().path
+        try VibePaths.ensurePrivate(URL(fileURLWithPath: BoardStore(root: root).folder))
+        try LeadWorkflow.write(Data(LeadWorkflow.template.utf8), to: ReviewFloorEditor.workflowPath(root))
+        let book = LeadVault.Book()
+        let editor = ReviewFloorEditor(vault: LeadVault(folder: temp.url("vault-fresh")) { book.answer($0, from: .app) },
+                                       projects: { [root] }, inline: true)
+        editor.reload()
+        #expect(editor.recorded == nil && !editor.unsaved && editor.changed)
+        editor.finders = 3
+        #expect(editor.unsaved)
+        editor.reload()
+        #expect(editor.finders == 3)
+    }
 }

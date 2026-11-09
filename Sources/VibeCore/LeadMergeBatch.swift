@@ -80,7 +80,7 @@ extension LeadToolset {
 
     /// Merges `slugs` as one batch (see the extension's comment). Throws, with nothing tested or changed, when the batch
     /// can't start at all (the battery hold, the settings, another merge into the base, the load, no test command).
-    func mergeBatch(_ given: [String]) throws -> BatchResult {
+    func mergeBatch(_ given: [String], locked: (() -> Void)? = nil) throws -> BatchResult {
         var slugs: [String] = []
         for slug in given where !slugs.contains(slug) { slugs.append(slug) }
         guard slugs.count <= Self.batchLimit else { throw Problem(text: "Not merged: a batch takes at most \(Self.batchLimit) tasks; this was \(slugs.count).") }
@@ -91,13 +91,15 @@ extension LeadToolset {
         guard workflow.testCommand != nil, let checks = workflow.mergeChecks else {
             throw Problem(text: "Not merged as a batch: there's no test_command to run on the stack. Merge each on its own.")
         }
+        // One read of the remote's tip for the whole batch: its gates, its stack and the records it folds.
+        let fetched = try fetchedTip(workflow, not: "Not merged (nothing was tested)")
         var ends: [String: BatchEnd] = [:]
         var gates: [MergeGate] = []
         var locks: [FileLock] = []
         defer { for lock in locks { lock.release() } }
         for slug in slugs {
             do {
-                let gate = try mergeGate(slug)
+                let gate = try mergeGate(slug, fetched: fetched)
                 guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
                     ends[slug] = .refused("A merge of \(slug) is already running; its result comes back to the call that started it.")
                     continue
@@ -124,13 +126,14 @@ extension LeadToolset {
         if let lock = Worktrees.indexLock(blocking: base, root: root) {
             throw Problem(text: "Not merged (nothing was tested): \(Worktrees.refusal(lock))")
         }
+        locked?()
         let names = gates.map(\.task.slug).joined(separator: ", ")
         let waited = try waitForLoad(workflow, slug: names)
 
         let place = vault.scratch(root: root, "merge-batch")
         try vault.ensurePrivate(place.deletingLastPathComponent())
         let stack = Worktrees.Stack(root: root, scratch: place, home: vault.scratch(root: root, "merge-batch-home"), records: workflow.recordsDir,
-                                     remote: fetchedTip(workflow))
+                                     remote: fetched)
         defer { stack.remove() }
         let called = Date()
         var begun: (at: Date, load: [Double])?
@@ -233,6 +236,18 @@ extension LeadToolset {
                     stopped = "\(gate.task.slug) was set \(Self.shownState(store.load().task(gate.task.slug) ?? gate.task)) while the tests ran, so the stack tested with it on doesn't land"
                     return false
                 }
+                if let amended = amendedMeanwhile(gate.task.slug, since: gate.task, tests: "passed in a batch") {
+                    ends[gate.task.slug] = .refused(amended.text)
+                    results[gate.task.slug] = ("passed", Date(), passing.plan)
+                    stopped = "\(gate.task.slug)'s contract was amended while the tests ran, so the stack tested with it on doesn't land"
+                    return false
+                }
+                if let moved = movedMeanwhile(gate.task.slug, since: gate.task, tested: gate.commit, tests: "passed in a batch") {
+                    ends[gate.task.slug] = .refused(moved.text)
+                    results[gate.task.slug] = ("passed", Date(), passing.plan)
+                    stopped = "\(Worktrees.branch(gate.task.slug)) moved while the tests ran, so the stack tested with its older commit doesn't land"
+                    return false
+                }
             }
             switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tip, from: onto) }) {
             case .refused(let reason):
@@ -249,8 +264,12 @@ extension LeadToolset {
                 try? store.appendProgress("Batch merge of \(order.joined(separator: ", ")) not recorded: \(text)")
                 return false
             }
-            do { try vault.setHead(tip, root: root, branch: base) } catch { return unrecorded("the vault couldn't record its head", error) }
-            foldRemoteRecords(landed: tip, from: onto)
+            // The records first: they don't depend on the vault, and a retry finds nothing left to fold.
+            foldRemoteRecords(landed: tip, from: onto, fetched: fetched)
+            do { try vault.setHead(tip, root: root, branch: base) } catch {
+                records.landed.note(base: base, from: onto, to: tip)
+                return unrecorded("the vault couldn't record its head", error)
+            }
             let last = order[order.count - 1]
             var flaked: (plan: MergeRerun.Plan, failed: String, log: String?)?
             if case .flaked(let plan, let failed, let again) = passing.outcome {
@@ -280,7 +299,8 @@ extension LeadToolset {
                     board.tasks[at].status = .done
                     board.tasks[at].merged = LeadMergeRecord(commit: stack.tips[index], tested: true, onto: under[gate.task.slug],
                                                              regression: workflow.regressionCommand.map { _ in true },
-                                                             audited: gate.audited ? nil : false, batch: order.count > 1 ? order : nil)
+                                                             audited: gate.audited ? nil : false, batch: order.count > 1 ? order : nil,
+                                                             branchHead: gate.commit)
                     board.tasks[at].receipt = LeadReceipt(board.tasks[at], ending: .merged, questions: board.questions,
                                                           usage: usage[gate.task.slug] ?? LeadReceipts.Usage(),
                                                           tests: passing.tests, mergeReruns: flaked == nil ? 0 : 1, commits: brought[gate.task.slug] ?? nil)
@@ -290,6 +310,7 @@ extension LeadToolset {
                                       log: flakeLog, load: begun?.load.first, filtered: flaked?.plan.filtered, workflow: workflow)
             } } catch { return unrecorded("the board couldn't be written", error) }
             let planned = flakePlan.planned
+            sendFlakeNotes(flakePlan)
             // A fix-the-flaky-test task (or an open one a due flake was noted in) merging fixes its test.
             noteFlakeFixes(prefix.enumerated().map { ($0.element.task.slug, stack.tips[$0.offset]) })
             let decided = Date()
@@ -379,7 +400,7 @@ extension LeadToolset {
                 pending = pending.compactMap { gate in
                     let slug = gate.task.slug
                     do {
-                        let again = try mergeGate(slug)
+                        let again = try mergeGate(slug, fetched: fetched)
                         if let changed = changedMeanwhile(slug, since: gate.task, tests: "were run in a batch, and it's to be tested again") {
                             ends[slug] = .refused(changed.text)
                             return nil
@@ -529,8 +550,8 @@ extension LeadToolset {
     }
 
     /// auto_advance's batch step: `mergeBatch`, with the records flushed after.
-    func advanceMergeBatch(_ slugs: [String]) throws -> BatchResult {
-        let result = try mergeBatch(slugs)
+    func advanceMergeBatch(_ slugs: [String], locked: (() -> Void)? = nil) throws -> BatchResult {
+        let result = try mergeBatch(slugs, locked: locked)
         records.flush(base: base)
         return result
     }

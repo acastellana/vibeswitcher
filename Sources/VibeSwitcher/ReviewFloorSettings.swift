@@ -3,11 +3,18 @@ import VibeCore
 
 /// A project's review rules' floor as Settings › Project lead edits it (see `LeadReviewFloor`): read from the session
 /// host's vault and written there by the app alone, beside the project's own values (its workflow.md, as its lead
-/// set them). Saved only on Save: a floor is a decision, not a draft.
+/// set them). Saved only on Save: a floor is a decision. Edits not saved yet stay as the project's draft, through leaving
+/// the category and switching project, until Save or Revert.
 final class ReviewFloorEditor: ObservableObject {
     /// The projects to choose from: those with a lead's workflow.md.
     @Published private(set) var projects: [String] = []
-    @Published var root: String? { didSet { if root != oldValue { load() } } }
+    @Published var root: String? {
+        didSet {
+            guard root != oldValue else { return }
+            keepDraft(of: oldValue)
+            load()
+        }
+    }
     /// The floor as edited.
     @Published var sensitive = ""
     @Published var strict = ""
@@ -34,6 +41,10 @@ final class ReviewFloorEditor: ObservableObject {
     private let main: (@escaping () -> Void) -> Void
     /// Counts the vault calls asked: an answer to one that a later one replaced (another project chosen) is dropped.
     private var asked = 0
+    /// Each project's edits not saved yet, while another's are shown or the fields are being read again.
+    private var drafts: [String: LeadReviewFloor] = [:]
+    /// The fields as last read or saved, before any edit: what `unsaved` compares with. Nil before the first answer.
+    private var untouched: LeadReviewFloor?
 
     /// `workerModel`: the model a project's workers start with (nil: not known), for the floor shown before one is
     /// recorded. `inline`: the vault answers at once (in-process), so it's asked on the calling thread.
@@ -52,7 +63,19 @@ final class ReviewFloorEditor: ObservableObject {
     func reload() {
         projects = Array(Set(listProjects().map { ($0 as NSString).standardizingPath }
             .filter { FileManager.default.fileExists(atPath: Self.workflowPath($0)) })).sorted()
-        if let root, projects.contains(root) { load() } else { root = projects.first }
+        if let root, projects.contains(root) {
+            keepDraft(of: root)
+            load()
+        } else {
+            root = projects.first
+        }
+    }
+
+    /// What the fields hold for `root`, kept if you've changed them. Not while the vault is asked: they're disabled and
+    /// may still be another project's, and a draft already kept stays.
+    private func keepDraft(of root: String?) {
+        guard let root, !busy, let untouched else { return }
+        drafts[root] = edited == untouched ? nil : edited
     }
 
     /// The project's workflow.md here, and its floor from the vault off the main thread.
@@ -97,7 +120,15 @@ final class ReviewFloorEditor: ObservableObject {
         }
     }
 
+    /// The floor just read or saved in the fields, with the project's draft over it if it has one that still differs.
     private func show(_ floor: LeadReviewFloor) {
+        fill(floor)
+        untouched = edited
+        guard let root, let draft = drafts[root] else { return }
+        if draft == untouched { drafts[root] = nil } else { fill(draft) }
+    }
+
+    private func fill(_ floor: LeadReviewFloor) {
         sensitive = floor.sensitivePaths.joined(separator: ", ")
         strict = floor.strictPaths.joined(separator: ", ")
         finders = floor.auditFinders
@@ -117,14 +148,20 @@ final class ReviewFloorEditor: ObservableObject {
 
     var changed: Bool { root != nil && !busy && edited != recorded }
 
+    /// The fields differ from what the vault (or the project's values, with none recorded) last gave them.
+    var unsaved: Bool { root != nil && !busy && untouched != nil && edited != untouched }
+
     func save() {
         guard let root, !busy else { return }
         let edited = self.edited
+        // Kept until the vault says it's saved: another project chosen meanwhile drops the answer, and a failure is one to say.
+        drafts[root] = edited
         ask { vault in
             let saved = Result { try vault.setReviewFloor(edited, root: root) }
             return { editor in
                 switch saved {
                 case .success(let recorded):
+                    editor.drafts[root] = nil
                     editor.recorded = recorded
                     editor.problem = nil
                     editor.show(recorded ?? edited)
@@ -135,7 +172,11 @@ final class ReviewFloorEditor: ObservableObject {
         }
     }
 
-    func revert() { load() }
+    /// Back to what the vault has: the draft goes.
+    func revert() {
+        if let root { drafts[root] = nil }
+        load()
+    }
 }
 
 extension LeadWorkflow {
@@ -151,32 +192,44 @@ struct ReviewFloorSection: View {
 
     var body: some View {
         Section {
+            // Always there, so a link to the floor has its row to scroll to (a row that's one branch or another isn't found).
+            SettingRow("floor-project") { label in
+                Picker(selection: $editor.root) {
+                    ForEach(editor.projects, id: \.self) { Text(($0 as NSString).lastPathComponent).tag(Optional($0)) }
+                } label: { label }
+                .disabled(editor.projects.isEmpty)
+            }
             if editor.projects.isEmpty {
                 Text("No project has a lead yet.").foregroundStyle(.secondary)
             } else {
-                Picker("Project", selection: $editor.root) {
-                    ForEach(editor.projects, id: \.self) { Text(($0 as NSString).lastPathComponent).tag(Optional($0)) }
-                }
                 ReviewFloorRows(editor: editor).disabled(editor.busy)
-                HStack {
-                    if editor.busy {
-                        ProgressView().controlSize(.small)
-                        Text("Asking the session host…").foregroundStyle(.secondary).font(.caption)
-                    } else if let problem = editor.problem {
-                        Text(problem).foregroundStyle(.red).font(.caption)
-                    } else if editor.recorded == nil {
-                        Text("Not recorded yet: these are the project's values, recorded when its lead next starts.")
-                            .foregroundStyle(.secondary).font(.caption)
+                SettingRow("floor-save") { label in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            if editor.busy {
+                                ProgressView().controlSize(.small)
+                                Text("Asking the session host…").foregroundStyle(.secondary).font(.caption)
+                            } else if let problem = editor.problem {
+                                Text(problem).foregroundStyle(.red).font(.caption)
+                            } else if editor.unsaved {
+                                Text("Unsaved changes: they stay here until you Save or Revert.").foregroundStyle(.secondary).font(.caption)
+                            } else if editor.recorded == nil {
+                                Text("Not recorded yet: these are the project's values, recorded when its lead next starts.")
+                                    .foregroundStyle(.secondary).font(.caption)
+                            } else {
+                                label.stacked
+                            }
+                        }
+                        Spacer()
+                        Button("Revert") { editor.revert() }.disabled(!editor.unsaved)
+                        Button("Save") { editor.save() }.disabled(!editor.changed)
                     }
-                    Spacer()
-                    Button("Revert") { editor.revert() }.disabled(!editor.changed || editor.recorded == nil)
-                    Button("Save") { editor.save() }.disabled(!editor.changed)
                 }
             }
         } header: {
-            Text("Project lead: review rules floor")
+            Text("Review rules floor")
         } footer: {
-            SettingsFooter("The least strict each project's review rules may be. Its lead can raise a rule above the floor with configure, never lower one below it; what's in force is the floor joined with the project's workflow.md (paths: both lists; the rest: the stricter). Kept in the session host's vault, written only by VibeSwitcher.")
+            SettingsFooter(.reviewFloor)
         }
         .onAppear { editor.reload() }
     }
@@ -188,51 +241,67 @@ struct ReviewFloorRows: View {
 
     var body: some View {
         let workflow = editor.workflow
-        row("Sensitive paths", project: workflow.sensitivePaths.map { $0.joined(separator: ", ") } ?? "the defaults") {
-            TextField("Sensitive paths", text: $editor.sensitive, axis: .vertical).lineLimit(1...4)
-                .labelsHidden().accessibilityLabel("Sensitive paths floor, comma-separated")
-                .font(.system(.callout, design: .monospaced))
-        }
-        row("Strict paths", project: workflow.strictPaths?.joined(separator: ", ") ?? "none") {
-            TextField("Strict paths", text: $editor.strict, prompt: Text("none"), axis: .vertical).lineLimit(1...4)
-                .labelsHidden().accessibilityLabel("Strict paths floor, comma-separated")
-                .font(.system(.callout, design: .monospaced))
-        }
-        row("Audit finders, at least", project: String(workflow.auditFinders)) {
-            Stepper("\(editor.finders)", value: $editor.finders, in: 1...LeadWorkflow.maxFinders)
-                .accessibilityLabel("Audit finders floor").accessibilityValue("\(editor.finders)")
-        }
-        row("Merge policy, at least", project: workflow.mergePolicy?.rawValue ?? "not chosen") {
-            Picker("Merge policy", selection: $editor.policy) {
-                ForEach(LeadWorkflow.MergePolicy.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .labelsHidden().accessibilityLabel("Merge policy floor").fixedSize()
-        }
-        row("Risk lines, at most", project: workflow.riskLines == 0 ? "0 (no size trigger)" : String(workflow.riskLines)) {
-            HStack(spacing: 4) {
-                TextField("Risk lines", value: $editor.riskLines, format: .number)
-                    .labelsHidden().accessibilityLabel("Risk lines floor, 0 for none")
-                    .multilineTextAlignment(.trailing).frame(width: 60)
-                if editor.riskLines == 0 { Text("(none)").foregroundStyle(.secondary) }
+        SettingRow("floor-sensitive") { label in
+            row(label, project: workflow.sensitivePaths.map { $0.joined(separator: ", ") } ?? "the defaults") {
+                TextField("Sensitive paths", text: $editor.sensitive, axis: .vertical).lineLimit(1...4)
+                    .labelsHidden().accessibilityLabel("Sensitive paths floor, comma-separated")
+                    .font(.system(.callout, design: .monospaced))
             }
         }
-        row("Risk check's model pass", project: workflow.riskModel ? "on" : "off") {
-            Toggle("Always on", isOn: $editor.riskModel).accessibilityLabel("Keep the risk check's model pass on")
+        SettingRow("floor-strict") { label in
+            row(label, project: workflow.strictPaths?.joined(separator: ", ") ?? "none") {
+                TextField("Strict paths", text: $editor.strict, prompt: Text("none"), axis: .vertical).lineLimit(1...4)
+                    .labelsHidden().accessibilityLabel("Strict paths floor, comma-separated")
+                    .font(.system(.callout, design: .monospaced))
+            }
         }
-        row("Audit sample, at least", project: "\(workflow.auditSamplePercent) %") {
-            Stepper("\(editor.samplePercent) %", value: $editor.samplePercent, in: 0...100, step: 5)
-                .accessibilityLabel("Audit sample percent floor").accessibilityValue("\(editor.samplePercent) percent")
+        SettingRow("floor-finders") { label in
+            row(label, project: String(workflow.auditFinders)) {
+                Stepper("\(editor.finders)", value: $editor.finders, in: 1...LeadWorkflow.maxFinders)
+                    .accessibilityLabel("Audit finders floor").accessibilityValue("\(editor.finders)")
+            }
         }
-        row("Verifier", project: workflow.verifierModel.map { $0.isEmpty ? "another model" : $0 } ?? "another model") {
-            Toggle("Never the workers' model", isOn: $editor.verifierDifferent).accessibilityLabel("Verifier never on the workers' model")
+        SettingRow("floor-merge") { label in
+            row(label, project: workflow.mergePolicy?.rawValue ?? "not chosen") {
+                Picker("Merge policy", selection: $editor.policy) {
+                    ForEach(LeadWorkflow.MergePolicy.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .labelsHidden().accessibilityLabel("Merge policy floor").fixedSize()
+            }
+        }
+        SettingRow("floor-risk-lines") { label in
+            row(label, project: workflow.riskLines == 0 ? "0 (no size trigger)" : String(workflow.riskLines)) {
+                HStack(spacing: 4) {
+                    TextField("Risk lines", value: $editor.riskLines, format: .number)
+                        .labelsHidden().accessibilityLabel("Risk lines floor, 0 for none")
+                        .multilineTextAlignment(.trailing).frame(width: 60)
+                    if editor.riskLines == 0 { Text("(none)").foregroundStyle(.secondary) }
+                }
+            }
+        }
+        SettingRow("floor-risk-model") { label in
+            row(label, project: workflow.riskModel ? "on" : "off") {
+                Toggle("Always on", isOn: $editor.riskModel).accessibilityLabel("Keep the risk check's model pass on")
+            }
+        }
+        SettingRow("floor-sample") { label in
+            row(label, project: "\(workflow.auditSamplePercent) %") {
+                Stepper("\(editor.samplePercent) %", value: $editor.samplePercent, in: 0...100, step: 5)
+                    .accessibilityLabel("Audit sample percent floor").accessibilityValue("\(editor.samplePercent) percent")
+            }
+        }
+        SettingRow("floor-verifier") { label in
+            row(label, project: workflow.verifierModel.map { $0.isEmpty ? "another model" : $0 } ?? "another model") {
+                Toggle("Never the workers' model", isOn: $editor.verifierDifferent).accessibilityLabel("Verifier never on the workers' model")
+            }
         }
     }
 
-    private func row<Control: View>(_ title: String, project: String, @ViewBuilder control: () -> Control) -> some View {
+    private func row<Control: View>(_ label: SettingLabel, project: String, @ViewBuilder control: () -> Control) -> some View {
         LabeledContent {
             control()
         } label: {
-            Text(title)
+            label
             Text("Project: \(project)").lineLimit(2).truncationMode(.middle)
         }
     }

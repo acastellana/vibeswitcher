@@ -111,9 +111,9 @@ public struct WalletRequest: Equatable, Sendable {
         }
         let by = try WalletRequestFormat.Fields(fields.value("requestedBy"), path: fields.name("requestedBy"), allowed: ["project", "session", "label"])
         let requester = Requester(project: try by.string("project"), session: try by.string("session"), label: try by.string("label"))
-        try WalletRequestFormat.checkText(requester.project, field: by.name("project"), limit: 200)
-        try WalletRequestFormat.checkText(requester.session, field: by.name("session"), limit: 200)
-        try WalletRequestFormat.checkText(requester.label, field: by.name("label"), minimum: 0, limit: 200)
+        try WalletRequestFormat.checkRequester(requester.project, field: by.name("project"), minimum: 1)
+        try WalletRequestFormat.checkRequester(requester.session, field: by.name("session"), minimum: 1)
+        try WalletRequestFormat.checkRequester(requester.label, field: by.name("label"), minimum: 0)
         let workspace = try fields.string("workspace")
         guard WalletRequestFormat.isName(workspace) else {
             throw WalletRequestFormat.Failure.invalid(fields.name("workspace"), "must be 1-64 of A-Z a-z 0-9 . _ - starting with a letter or digit")
@@ -207,6 +207,24 @@ public struct WalletRequest: Equatable, Sendable {
         let back = try Self.parse(data)
         guard back == self else { throw WalletRequestFormat.Failure.invalid("createdAt", "times are whole seconds") }
         return data
+    }
+
+    /// A copy of a request the app itself wrote beside its filed one: the record of a send, or a browser mark.
+    public enum CopyKind: String, Sendable {
+        case record
+        case browserMark = "browser-mark"
+    }
+
+    /// The sender a copy is sealed as: VibeSwitcher's own, one no session's process can get sealed.
+    public static let copySender = "wallet copy"
+
+    /// What the session host seals for a copy of this request (the vault's key that outlives restarts, as an outbox
+    /// entry's): VibeSwitcher's own message whose id names the kind of copy and the request, and whose text is the
+    /// whole request. Any process of the user's can write those files, so a copy with no valid seal says nothing the
+    /// host-stamped filed request doesn't.
+    public func sealedCopy(_ kind: CopyKind) -> SteerMessage {
+        SteerMessage(id: "wallet-copy/\(kind.rawValue)/\(id)", text: String(decoding: value.encoded(), as: UTF8.self),
+                     from: .system(Self.copySender), agentPid: 0, at: 0)
     }
 
     /// Past `expiresAt`: the Wallet Manager no longer acts on it.

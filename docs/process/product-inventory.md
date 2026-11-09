@@ -65,6 +65,7 @@ The main window's menus (`MainMenu.build`); standard items go to the first respo
 ### Window
 - Window › Minimize ⌘M — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
 - Window › Zoom — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
+- Window › Statistics… ⌥⌘S — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
 - Window › Bring All to Front — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
 
 ### Help
@@ -84,6 +85,7 @@ Sessions in attention order, then these commands, then New <preset> in <recent p
 - Toggle Sidebar ⌃⌘S — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
 - Focus Terminal ⇧⌘↩ — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
 - Open in Terminal ⌘O — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
+- Statistics… ⌥⌘S — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
 - Settings… ⌘, — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
 - Start Project Lead in … — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
 - New … in … — `Sources/VibeSwitcher/MainWindow/MainWindowController.swift`
@@ -129,134 +131,131 @@ Right-click menus, by where they are. The chat's message text adds Copy and Sele
 
 ## Settings
 
-Settings (⌘,), tab by tab: each section and option, in order, with the views it's made of.
+Settings (⌘,), category by category: each option, under its section, with the file its row is in.
 
 ### General
-- Settings › General tab — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Open at login — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Open the window when VibeSwitcher starts — `Sources/VibeSwitcher/SettingsWindow.swift`
-- LabeledContent: First-run setup — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Button: Show Welcome… — `Sources/VibeSwitcher/SettingsWindow.swift`
-- LabeledContent: Session host — `Sources/VibeSwitcher/HostRestart.swift`
-- LabeledContent: Projects folder — `Sources/VibeSwitcher/SettingsWindow.swift`
-- TextField: Projects folder — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Button: Choose… — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Section: Menu bar — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Picker: Order sessions — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Picker: Floating dots panel — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Section: Sidebar — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Sidebar mode — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Auto-hide the sidebar (show it at the right edge) — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Show briefly after switching desktops — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Minimize a session's window when pausing it — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Summarize what each agent is doing with AI — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Picker: Keep the Mac awake while the team works — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Picker: Start a fresh lead session — `Sources/VibeSwitcher/SettingsWindow.swift`
-- LabeledContent: On battery, pause lead work below — `Sources/VibeSwitcher/SettingsWindow.swift`
-- TextField: Battery limit — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Stepper: Battery limit — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Let project leads message each other — `Sources/VibeSwitcher/SettingsWindow.swift`
-- LabeledContent: Team sessions on this Mac, at most — `Sources/VibeSwitcher/MacLimitsSettings.swift`
-- TextField: Team sessions — `Sources/VibeSwitcher/MacLimitsSettings.swift`
-- Stepper: Team sessions — `Sources/VibeSwitcher/MacLimitsSettings.swift`
-- LabeledContent: Start nothing above a load of — `Sources/VibeSwitcher/MacLimitsSettings.swift`
-- TextField: Load limit — `Sources/VibeSwitcher/MacLimitsSettings.swift`
-- Toggle: Ignore usage limits — `Sources/VibeSwitcher/MacLimitsSettings.swift`
-- Picker: Boost — `Sources/VibeSwitcher/MacLimitsSettings.swift`
-- Toggle: Also on battery — `Sources/VibeSwitcher/MacLimitsSettings.swift`
-- LabeledContent: Start nothing above a load of, while boosted — `Sources/VibeSwitcher/MacLimitsSettings.swift`
-- TextField: Boost load limit — `Sources/VibeSwitcher/MacLimitsSettings.swift`
-- Button: Reset to Default — `Sources/VibeSwitcher/WorkingPolicySettings.swift`
-- Button: Save — `Sources/VibeSwitcher/WorkingPolicySettings.swift`
-- Picker: Project — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
-- TextField: Sensitive paths — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
-- TextField: Strict paths — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
-- Stepper: … — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
-- Picker: Merge policy — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
-- TextField: Risk lines — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
-- Toggle: Always on — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
-- Stepper: … % — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
-- Toggle: Never the workers' model — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
-- Button: Revert — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
-- Button: Save — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
-- Picker: Language — `Sources/VibeSwitcher/SettingsWindow.swift`
-- LabeledContent: ElevenLabs API key — `Sources/VibeSwitcher/SettingsWindow.swift`
-- SecureField: ElevenLabs API key — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Button: Save — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Button: Remove — `Sources/VibeSwitcher/SettingsWindow.swift`
-- LabeledContent: Key in use — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Button: Save to Keychain — `Sources/VibeSwitcher/SettingsWindow.swift`
-- LabeledContent: Voice — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Button: Test voice — `Sources/VibeSwitcher/SettingsWindow.swift`
-- LabeledContent: OpenAI API key for dictation — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
-- SecureField: OpenAI API key for dictation — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
-- Button: Save — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
-- Button: Remove — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
-- LabeledContent: Key in use — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
-- Button: Import from … — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
-- Button: Import — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
-- Button: Cancel — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
-- Picker: Model — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
-- Toggle: Hold Space to dictate — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
-- Toggle: Silence the Mac while dictating — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
-- LabeledContent: Permission — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Notify when a session needs input — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Notify when a session finishes — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Play a sound when a session needs input — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Remind me about waiting or stuck sessions — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Settings › General — `Sources/VibeSwitcher/SettingsCatalog.swift`
+- Startup: Open at login — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Startup: Open the window when VibeSwitcher starts — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Startup: First-run setup — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Projects: Projects folder — `Sources/VibeSwitcher/SettingsWindow.swift`
+
+### Notifications
+- Settings › Notifications — `Sources/VibeSwitcher/SettingsCatalog.swift`
+- Banners and sounds: Permission — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Banners and sounds: Notify when a session needs input — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Banners and sounds: Notify when a session finishes — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Banners and sounds: Play a sound when a session needs input — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Banners and sounds: Remind me about waiting or stuck sessions — `Sources/VibeSwitcher/SettingsWindow.swift`
+
+### Appearance
+- Settings › Appearance — `Sources/VibeSwitcher/SettingsCatalog.swift`
+- Colors: Theme — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Colors: Text color — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Colors: Background color — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Colors: Cursor color — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Colors: Selection color — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Colors: ANSI colors — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Text: Font — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Text: Size — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Behavior: Cursor — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Behavior: Blinking cursor — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Behavior: Scrollback — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Behavior: Use Option as Meta key — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Behavior: Bell — `Sources/VibeSwitcher/SettingsWindow.swift`
+
+### Sessions & Sidebar
+- Settings › Sessions & Sidebar — `Sources/VibeSwitcher/SettingsCatalog.swift`
+- Menu bar: Order sessions — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Menu bar: Floating dots panel — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Sidebar: Sidebar mode — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Sidebar: Auto-hide the sidebar (show it at the right edge) — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Sidebar: Show briefly after switching desktops — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Sidebar: Minimize a session's window when pausing it — `Sources/VibeSwitcher/SettingsWindow.swift`
+
+### Launch Presets
+- Settings › Launch Presets — `Sources/VibeSwitcher/SettingsCatalog.swift`
+- Presets: Presets for — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Presets: Presets — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Presets: Default — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Presets: Name — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Presets: Starts — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Presets: Command — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Presets: Keep a shell open after it exits — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Presets: Runs in — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Presets: Environment — `Sources/VibeSwitcher/SettingsWindow.swift`
 
 ### Agents
-- Settings › Agents tab — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Let agents open shells without asking — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Button: Uninstall — `Sources/VibeSwitcher/SettingsWindow.swift`
-- LabeledContent: Trust VibeSwitcher's hooks — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Button: Trust Now — `Sources/VibeSwitcher/SettingsWindow.swift`
-- LabeledContent: Control Terminal — `Sources/VibeSwitcher/SettingsWindow.swift`
-- LabeledContent: Accessibility — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Button: Allow… — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Settings › Agents — `Sources/VibeSwitcher/SettingsCatalog.swift`
+- Shells: Let agents open shells without asking — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Hooks: Hooks — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Codex: Trust VibeSwitcher's hooks — `Sources/VibeSwitcher/SettingsWindow.swift`
+
+### Project lead
+- Settings › Project lead — `Sources/VibeSwitcher/SettingsCatalog.swift`
+- Team: Summarize what each agent is doing with AI — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Team: Start a fresh lead session — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Team: Let project leads message each other — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Working policy: Working policy — `Sources/VibeSwitcher/WorkingPolicySettings.swift`
+- Review rules floor: Project — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
+- Review rules floor: Sensitive paths — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
+- Review rules floor: Strict paths — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
+- Review rules floor: Audit finders, at least — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
+- Review rules floor: Merge policy, at least — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
+- Review rules floor: Risk lines, at most — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
+- Review rules floor: Risk check's model pass — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
+- Review rules floor: Audit sample, at least — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
+- Review rules floor: Verifier — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
+- Review rules floor: Save or revert — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
+
+### Performance
+- Settings › Performance — `Sources/VibeSwitcher/SettingsCatalog.swift`
+- Boost: Boost — `Sources/VibeSwitcher/MacLimitsSettings.swift`
+- Boost: Also on battery — `Sources/VibeSwitcher/MacLimitsSettings.swift`
+- Boost: Start nothing above a load of, while boosted — `Sources/VibeSwitcher/MacLimitsSettings.swift`
+- Boost: Team sessions on this Mac while boosted, at most — `Sources/VibeSwitcher/MacLimitsSettings.swift`
+- Boost: Workers per project while boosted, at most — `Sources/VibeSwitcher/MacLimitsSettings.swift`
+- Boost: Test and build slots while boosted — `Sources/VibeSwitcher/MacLimitsSettings.swift`
+- Mac-wide limits: Team sessions on this Mac, at most — `Sources/VibeSwitcher/MacLimitsSettings.swift`
+- Mac-wide limits: Start nothing above a load of — `Sources/VibeSwitcher/MacLimitsSettings.swift`
+- Mac-wide limits: Test and build slots at once — `Sources/VibeSwitcher/MacLimitsSettings.swift`
+- Usage limits: Ignore usage limits — `Sources/VibeSwitcher/MacLimitsSettings.swift`
+- Power: Keep the Mac awake while the team works — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Power: On battery, pause lead work below — `Sources/VibeSwitcher/SettingsWindow.swift`
+
+### Dictation & Briefing
+- Settings › Dictation & Briefing — `Sources/VibeSwitcher/SettingsCatalog.swift`
+- Dictation: OpenAI API key for dictation — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
+- Dictation: Key in use — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
+- Dictation: Model — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
+- Dictation: Hold Space to dictate — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
+- Dictation: Silence the Mac while dictating — `Sources/VibeSwitcher/Dictation/DictationViews.swift`
+- Spoken briefing: Language — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Spoken briefing: ElevenLabs API key — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Spoken briefing: Key in use — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Spoken briefing: Voice — `Sources/VibeSwitcher/SettingsWindow.swift`
 
 ### Phone
-- Settings › Phone tab — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Phone notifications only while I'm away from the Mac — `Sources/VibeSwitcher/PhoneAccessView.swift`
-- Button: Open Settings… — `Sources/VibeSwitcher/PhoneAccessView.swift`
-- Button: Check Again — `Sources/VibeSwitcher/PhoneAccessView.swift`
-- Button: Ask — `Sources/VibeSwitcher/PhoneAccessView.swift`
-- Button: Check Again — `Sources/VibeSwitcher/PhoneAccessView.swift`
-- Button: Check Again — `Sources/VibeSwitcher/PhoneAccessView.swift`
-- Button: Cancel — `Sources/VibeSwitcher/PhoneAccessView.swift`
-- Button: Pair a Phone… — `Sources/VibeSwitcher/PhoneAccessView.swift`
-- Button: Remove — `Sources/VibeSwitcher/PhoneAccessView.swift`
-- DisclosureGroup: Activity log — `Sources/VibeSwitcher/PhoneAccessView.swift`
-
-### Launch
-- Settings › Launch tab — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Picker: Presets for — `Sources/VibeSwitcher/SettingsWindow.swift`
-- TextField: Name — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Picker: Starts — `Sources/VibeSwitcher/SettingsWindow.swift`
-- TextField: Command — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Keep a shell open after it exits — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Picker: Runs in — `Sources/VibeSwitcher/SettingsWindow.swift`
-
-### Terminal
-- Settings › Terminal tab — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Section: Text — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Picker: Font — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Stepper: Size: … pt — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Section: Colors — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Picker: Theme — `Sources/VibeSwitcher/SettingsWindow.swift`
-- DisclosureGroup: ANSI colors — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Section: Behavior — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Picker: Cursor — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Blinking cursor — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Stepper: Scrollback: … lines — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Toggle: Use Option as Meta key — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Picker: Bell — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Settings › Phone — `Sources/VibeSwitcher/SettingsCatalog.swift`
+- Phone access: Phone access over Tailscale — `Sources/VibeSwitcher/PhoneAccessView.swift`
+- Phone access: Pair a phone — `Sources/VibeSwitcher/PhoneAccessView.swift`
+- Phone access: Allow replies and key presses from the phone — `Sources/VibeSwitcher/PhoneAccessView.swift`
+- Phone access: Allow opening dev pages — `Sources/VibeSwitcher/PhoneAccessView.swift`
+- Phone access: Chrome access — `Sources/VibeSwitcher/PhoneAccessView.swift`
+- Phone access: Phone notifications only while I'm away from the Mac — `Sources/VibeSwitcher/PhoneAccessView.swift`
+- Phone access: Paired devices — `Sources/VibeSwitcher/PhoneAccessView.swift`
+- Phone access: Activity log — `Sources/VibeSwitcher/PhoneAccessView.swift`
 
 ### Wallet
-- Settings › Wallet tab — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Picker: Wallet Manager — `Sources/VibeSwitcher/Wallet/WalletSettingsTab.swift`
-- LabeledContent: Command path — `Sources/VibeSwitcher/Wallet/WalletSettingsTab.swift`
-- TextField: Passage path — `Sources/VibeSwitcher/Wallet/WalletSettingsTab.swift`
+- Settings › Wallet — `Sources/VibeSwitcher/SettingsCatalog.swift`
+- Wallet Manager's Mac: Wallet Manager — `Sources/VibeSwitcher/Wallet/WalletSettingsTab.swift`
+- Passage: Command path — `Sources/VibeSwitcher/Wallet/WalletSettingsTab.swift`
+
+### Advanced
+- Settings › Advanced — `Sources/VibeSwitcher/SettingsCatalog.swift`
+- Mac permissions: Control Terminal — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Mac permissions: Accessibility — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Session host: Session host — `Sources/VibeSwitcher/HostRestart.swift`
 
 ## Sheets, popovers and dialogs
 
@@ -372,13 +371,21 @@ Settings (⌘,), tab by tab: each section and option, in order, with the views i
 - `wallet [STATE]` — shows a made-up wallet request card as the sheet, in STATE — `Sources/VibeSwitcher/Sandbox.swift`
 - `select TEXT` — selects the first row whose title, project or task contains TEXT — `Sources/VibeSwitcher/Sandbox.swift`
 - `home` — shows the start page — `Sources/VibeSwitcher/Sandbox.swift`
-- `boost off|on|away|present|battery|battery-on|battery-low|veto|mark` — boost mark clicks the main window's Boost mark (Settings › General at Boost). Otherwise Boost mode in a… — `Sources/VibeSwitcher/Sandbox.swift`
-- `settings [TAB] [SECTION]` — opens Settings on a tab — `Sources/VibeSwitcher/Sandbox.swift`
+- `boost off|on|away|present|battery|battery-on|battery-low|veto|mark` — boost mark clicks the main window's Boost mark (Settings › Performance at Boost). Otherwise Boost mode in a… — `Sources/VibeSwitcher/Sandbox.swift`
+- `settings [TAB] [OPTION]` — opens Settings on a category — `Sources/VibeSwitcher/Sandbox.swift`
+- `settings-help NOTE` — opens the "?" popover of a footer in the Settings category shown ("shot" draws it) — `Sources/VibeSwitcher/Sandbox.swift`
+- `settings-search [TEXT]` — types TEXT in Settings' search field, opening Settings if it's closed (no TEXT clears it), and says what it… — `Sources/VibeSwitcher/Sandbox.swift`
+- `settings-pick N|ID` — picks the Nth search result (from 1), or the option with that catalog id, as a click on it does — `Sources/VibeSwitcher/Sandbox.swift`
 - `toolchain [dismiss]` — shows or dismisses a fake developer tools notice — `Sources/VibeSwitcher/Sandbox.swift`
 - `sheet NAME` — shows a sheet on the window — `Sources/VibeSwitcher/Sandbox.swift`
+- `theme [` — sets Settings › Appearance › Theme, as its picker does (none: what it is), and says the app's look: the… — `Sources/VibeSwitcher/Sandbox.swift`
+- `looks` — the main window's views by what each draws in (effectiveAppearance) and how many: what a stale or forced part… — `Sources/VibeSwitcher/Sandbox.swift`
+- `panes [NAME]` — what SwiftUI resolves inside the main window's sidebar and inspector, and those two views drawn again in a… — `Sources/VibeSwitcher/Sandbox.swift`
+- `shot-real NAME` — draws each window in the app's own look, nothing overridden: NAME-main-real.png, NAME-settings-real.png…… — `Sources/VibeSwitcher/Sandbox.swift`
 - `close settings|sheet` — closes Settings or the sheet — `Sources/VibeSwitcher/Sandbox.swift`
-- `shot NAME` — draws each window, light and dark, into the shots folder — `Sources/VibeSwitcher/Sandbox.swift`
+- `shot NAME` — draws each window, light and dark, into the shots folder, its side panes out of their glass (a drawing can't… — `Sources/VibeSwitcher/Sandbox.swift`
 - `pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT` — the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views… — `Sources/VibeSwitcher/Sandbox.swift`
+- `offline on|off` — the app loses its connection to the sandbox's own host and doesn't get it back (the host and fake sessions… — `Sources/VibeSwitcher/Sandbox.swift`
 - `unproved` — connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions — `Sources/VibeSwitcher/Sandbox.swift`
 - `quit` — quits (the host and fake sessions end with it) — `Sources/VibeSwitcher/Sandbox.swift`
 

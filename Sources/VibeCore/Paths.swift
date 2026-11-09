@@ -116,17 +116,32 @@ public enum VibePaths {
     }
 
     /// Writes a file only you can read (0600), atomically. Every file VibeSwitcher writes under `~/.vibeswitcher` or a
-    /// project's `.vibeswitcher/` is written here.
-    public static func writePrivate(_ data: Data, to url: URL) throws {
+    /// project's `.vibeswitcher/` is written here. `syncing`: flushes the new file (given open for writing) before the
+    /// rename, for a file that must not be lost in a crash just after (`syncToDisk`); false fails the write and leaves
+    /// what was at `url`.
+    public static func writePrivate(_ data: Data, to url: URL, syncing: ((Int32) -> Bool)? = nil) throws {
         let temporary = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString)")
         guard FileManager.default.createFile(atPath: temporary.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
             throw CocoaError(.fileWriteNoPermission)
+        }
+        if let syncing {
+            let fd = open(temporary.path, O_WRONLY | O_CLOEXEC)
+            let synced = fd >= 0 && syncing(fd)
+            let failure = errno
+            if fd >= 0 { close(fd) }
+            guard synced else {
+                unlink(temporary.path)
+                throw POSIXError(POSIXErrorCode(rawValue: failure) ?? .EIO)
+            }
         }
         guard rename(temporary.path, url.path) == 0 else {
             unlink(temporary.path)
             throw CocoaError(.fileWriteUnknown)
         }
     }
+
+    /// What `writePrivate` flushes a file with when it must be on disk before its rename.
+    public static let syncToDisk: (Int32) -> Bool = { fsync($0) == 0 }
 
     public static func stateFile(tty: String) -> URL {
         stateDir.appendingPathComponent("\(tty).json")

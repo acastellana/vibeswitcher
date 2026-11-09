@@ -79,8 +79,9 @@ struct TestLockTests {
     // MARK: TestLock (merge and audits)
 
     @Test func theSecondWaitsSayingWhoHoldsItAndTakesItOnceItsLetGo() throws {
-        guard case .held(let first, let waited, let after) = lock.acquire(as: "merge of a", timeout: 5) else { Issue.record("not taken"); return }
-        #expect(waited < 1 && after.isEmpty)
+        guard case .held(let first, _, let after) = lock.acquire(as: "merge of a", timeout: 5) else { Issue.record("not taken"); return }
+        // Taken at its first look: it found no holder to wait behind.
+        #expect(after.isEmpty)
         #expect(lock.holder(1).note?.contains("pid \(getpid()), merge of a, since") == true)
         guard case .busy(let holders) = lock.acquire(as: "merge of b", timeout: 1) else { Issue.record("taken twice"); return }
         #expect(holders.count == 1 && holders.first?.note?.contains("merge of a") == true)
@@ -106,8 +107,9 @@ struct TestLockTests {
         try "pid \(holder.processIdentifier), a run that died, since 01:00:00\n".write(toFile: lock.slotPath(1) + ".holder", atomically: true, encoding: .utf8)
         kill(holder.processIdentifier, SIGKILL)
         #expect(await exited(holder), "pid \(holder.processIdentifier) still running")
-        guard case .held(let held, let waited, _) = lock.acquire(as: "b", timeout: 5) else { Issue.record("not taken"); return }
-        #expect(waited < 1)
+        guard case .held(let held, _, let after) = lock.acquire(as: "b", timeout: 5) else { Issue.record("not taken"); return }
+        // At once: its first look found the lock free, the dead holder's note or not.
+        #expect(after.isEmpty, "\(after)")
         #expect(lock.holder(1).note?.contains(", b, since") == true)
         held.release()
     }
@@ -128,8 +130,8 @@ struct TestLockTests {
         #expect(try String(contentsOfFile: seen, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) == lock.path)
         #expect(outputs.first?.output.contains("Waited ") == true && outputs.first?.output.contains("for a slot of the Mac-wide test and build lock, its one slot held") == true, "\(outputs)")
         // Let go after: the next one takes it at once.
-        guard case .held(let held, let waited, _) = lock.acquire(as: "next", timeout: 2) else { Issue.record("still held"); return }
-        #expect(waited < 1)
+        guard case .held(let held, _, let after) = lock.acquire(as: "next", timeout: hangGuard) else { Issue.record("still held"); return }
+        #expect(after.isEmpty, "\(after)")
         held.release()
         // Held by someone else past the timeout: nothing runs, and it says who held it.
         let stuck = try outsideHolder(lock)
@@ -895,19 +897,20 @@ struct TestLockTests {
         #expect(try String(contentsOfFile: state, encoding: .utf8) == "{\"own\": 1}")
     }
 
+    /// A's swift sleeps for twice the hang guard, so B can only end inside its wait if the Ctrl-C let go of the lock: no
+    /// clock is read. It was `elapsed < 30` s, and two merges' full runs read 192 s here while the same test alone took 3.
     @Test func ctrlCLetsGoOfTheLock() async throws {
         let (bin, log) = try fakes()
-        let a = try start("A", sleep: 60, bin: bin)
+        let a = try start("A", sleep: Int(hangGuard) * 2, bin: bin)
         #expect(await eventually { lines(log).contains("A build start") })
         let b = try start("B", bin: bin)
         #expect(await eventually { lines(b.output).joined().contains("waiting for") })
-        let interrupted = Date()
         kill(-a.process.processIdentifier, SIGINT)
         #expect(await exited(a.process), "pid \(a.process.processIdentifier) still running")
-        #expect(await exited(b.process), "pid \(b.process.processIdentifier) still running")
+        #expect(await exited(b.process), "pid \(b.process.processIdentifier) still running: it waited for A's sleep")
         #expect(a.process.terminationStatus != 0)
         #expect(b.process.terminationStatus == 0, "\(lines(b.output))")
-        #expect(Date().timeIntervalSince(interrupted) < 30, "B waited for A's sleep instead")
+        #expect(!lines(log).contains("A build end"), "A's sleep ran to its end")
         #expect(!lines(log).contains("A test start") && lines(log).contains("B test end"))
     }
 

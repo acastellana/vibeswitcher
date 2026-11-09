@@ -295,6 +295,31 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(!merged.text.contains("bystander()") && !merged.text.contains("aFailingTestsHostIsEnded()"), "\(merged.text)")
     }
 
+    /// A commit that lands on the branch while the merge's tests run (the report path can record done on it with the
+    /// task still in review): the run tested the old commit, so that doesn't land, the reply names both, and the new
+    /// commit is still there. The test command makes the commit itself, so it lands during the run, every time.
+    @Test func aCommitOnTheBranchDuringTheMergesTestsKeepsItFromLanding() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let worktree = RecentProjects.shellQuote(Worktrees.path(root: root, slug: "add-b"))
+        configure(lead, ["test_command": "cd \(worktree) && echo late > late.txt && git add late.txt && git commit -q -m late"])
+        try audited(lead, runtime, root: root)
+        let main = Git.run(["rev-parse", "main"], in: root).output
+        let tested = Git.run(["rev-parse", "agent/add-b"], in: root).output
+
+        let merged = lead.call("merge", ["task": "add-b"])
+
+        let late = Git.run(["rev-parse", "agent/add-b"], in: root).output
+        #expect(late != tested)
+        #expect(merged.isError, "\(merged.text)")
+        #expect(merged.text.contains(String(tested.prefix(8))) && merged.text.contains(String(late.prefix(8))), "\(merged.text)")
+        #expect(Git.run(["rev-parse", "main"], in: root).output == main)
+        let task = try #require(BoardStore(root: root).load().task("add-b"))
+        #expect(task.status == .review && task.merged == nil, "\(task.status)")
+        #expect(Git.run(["show", "agent/add-b:late.txt"], in: root).ok)
+    }
+
     @Test func aFilteredRerunRunsOnlyTheFailingTests() throws {
         let root = try repo()
         try fakeSuite(root, passes: "[[ \"$*\" == *--filter* ]]")
@@ -978,6 +1003,33 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(task.status == .review && task.setback == nil)
         let child = try #require(Int32((try String(contentsOfFile: marks + "/child", encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines)))
         #expect(await eventually { kill(child, 0) != 0 })
+    }
+
+    /// A merge stopped for making no progress with several tests open can't say which were running: the flake ledger
+    /// blames none, and the reply says so. One alone goes in the ledger as before.
+    @Test func aStalledMergeWithSeveralTestsOpenBlamesNoneOfThem() async throws {
+        func run(_ lines: String, _ name: String) throws -> (text: String, ledger: FlakeLedger, isError: Bool) {
+            let root = try repo()
+            try commit(["scripts/test.sh": "#!/bin/bash\n" + lines + "\nexec sleep \(ShellTests.childRuns)\n"], in: root, "a suite that hangs")
+            let runtime = FakeRuntime()
+            let lead = try lead(root, runtime)
+            configure(lead, ["test_command": "bash scripts/test.sh", "test_timeout_min": "30"])
+            try audited(lead, runtime, root: root)
+            var lock = TestLock(directory: temp.url(name + "-locks").path)
+            lock.watch = StallWatch(after: 3, every: 0.05, loadLimit: 24, load: { 4.2 })
+            lead.testLock = lock
+            let merged = lead.call("merge", ["task": "add-b"])
+            return (merged.text, ledger(root), merged.isError)
+        }
+        let queued = try run("echo '◇ Test one() started.'\necho '◇ Test two() started.'\necho '◇ Test three() started.'", "queued")
+        #expect(queued.isError && queued.text.contains("3 tests printed their start and never finished"), "\(queued.text)")
+        #expect(!queued.text.contains("recorded in the flake ledger") && queued.ledger.flakes.isEmpty, "\(queued.text)")
+        let alone = try run("echo '◇ Test only() started.'", "alone")
+        #expect(alone.isError && alone.text.contains("only(), the last test it started, is recorded in the flake ledger"), "\(alone.text)")
+        // The stall's report repeats the output's tail: read once, the one test is named, and three aren't six.
+        #expect(alone.text.contains("Started and never finished: only().") && !alone.text.contains("printed their start"), "\(alone.text)")
+        #expect(!queued.text.contains("6 tests printed their start"), "\(queued.text)")
+        #expect(alone.ledger.flakes.map(\.test) == ["only()"], "\(alone.ledger.flakes)")
     }
 
     /// What a stopped run was doing: building (its last build line) when no test started after it, testing when one

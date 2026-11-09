@@ -276,7 +276,7 @@ extension LeadToolset {
         // The remote's tip as fetch_remote fetched it, as the vault keeps it.
         let ref = LeadRemote.trackingRef(remote: remote, branch: base)
         let tracked = Git.run(["rev-parse", "--verify", "--quiet", ref + "^{commit}"], in: root).output
-        guard let fetched = vault.head(root: root, branch: ref), !tracked.isEmpty else {
+        guard let fetched = try recordedHead(ref, "fetch_remote left \(label)", not: not), !tracked.isEmpty else {
             throw Problem(text: "\(not): fetch_remote hasn't fetched \(label) yet. Run it first: a push is asked for only on top of what it fetched.")
         }
         guard fetched == tracked else {

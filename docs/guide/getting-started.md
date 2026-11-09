@@ -54,8 +54,9 @@ The key can't be exported and only `/usr/bin/codesign` may use it. `build-app.sh
 `setup-signing.sh` (one that saved its password in `~/.vibeswitcher/signing/password`); run the script again to
 replace it. `scripts/test-signing.sh` checks the scripts.
 
-Every binary is signed with the Hardened Runtime (`--options runtime`). The app carries one entitlement,
-`com.apple.security.automation.apple-events`, so it can control Terminal (`Resources/VibeSwitcher.entitlements`).
+Every binary is signed with the Hardened Runtime (`--options runtime`). The app carries two entitlements
+(`Resources/VibeSwitcher.entitlements`): `com.apple.security.automation.apple-events`, so it can control Terminal, and
+`com.apple.security.device.audio-input`, for dictation. macOS asks for the microphone the first time you dictate.
 
 ### The keychain dialog after each install
 
@@ -85,11 +86,33 @@ skipped. Settings (⌘,) › General › **Show Welcome…** opens it again.
 Running Claude Code sessions pick up the hooks at once; Codex sessions started before the install need a restart.
 
 Accessibility isn't a welcome step. The menu bar list asks for it when several Terminal tabs share a window, so it can
-list them in tab order; phone replies need it too.
+list them in tab order; phone replies need it too. Both Mac permissions are in Settings › Advanced.
 
-Settings (⌘,) has five tabs: General, Agents (hooks, Codex trust, Terminal and Accessibility permissions), Phone,
-Launch (presets: command, flags, environment, window or Terminal) and Terminal (font, colours, cursor, scrollback,
-bell).
+### Settings
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/settings-dark.png">
+  <img alt="Settings on the Performance category, with a sidebar of categories and a search field" src="../images/settings-light.png">
+</picture>
+
+Settings (⌘,) has a sidebar of 12 categories. The search field above them (⌘F) finds any option by its name, its
+description or a related word. Each option says what it does in a line; a **?** next to a section's note opens the
+detail.
+
+| Category | What's in it |
+| --- | --- |
+| General | Open at login, open the window at launch, **Show Welcome…**, the projects folder. |
+| Notifications | Banners, the sound and reminders. |
+| Appearance | The terminal's font, theme and colours, cursor, scrollback, Option as Meta, bell. |
+| Sessions & Sidebar | The menu bar's order, the floating dots panel, sidebar mode, minimizing on pause. |
+| Launch Presets | Each preset's command, flags, environment, and whether it runs in the window or in Terminal. |
+| Agents | Whether agents may open shells without asking, the hooks, Codex's trust of them. |
+| Project lead | AI summaries, a fresh lead session when one has grown long, messages between leads, your working policy, the review rules floor. |
+| Performance | Boost, the Mac-wide limits, usage limits, keeping the Mac awake, the battery hold. |
+| Dictation & Briefing | The OpenAI key and model, Hold Space to dictate, silencing the Mac; the briefing's language, ElevenLabs key and voice. |
+| Phone | Phone access over Tailscale, pairing, replies, dev pages, paired devices, the activity log. |
+| Wallet | Which Mac's Wallet Manager gets transaction requests, the Passage command. |
+| Advanced | The Control Terminal and Accessibility permissions, the session host. |
 
 ### Uninstalling the hooks
 

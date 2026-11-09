@@ -275,7 +275,7 @@ struct PhoneLeadsTests {
         #expect(task("Ledger reconciles")?["state"] as? String == "Working")
         #expect(task("Ledger reconciles")?["line"] as? String == "Tests written")
         #expect(task("Clean up folders")?["state"] as? String == "Needs audit")
-        #expect(task("Clean up folders")?["line"] as? String == "Audited: it deletes files")
+        #expect(task("Clean up folders")?["line"] as? String == "Raised to audit: it deletes files")
         #expect(task("Paste images")?["state"] as? String == "Reverted")
         #expect(task("Paste images")?["line"] as? String == "Froze on a large paste")
         #expect(task("Landing copy")?["state"] as? String == "Merged")

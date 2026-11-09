@@ -7,7 +7,9 @@ import Foundation
 /// - a review none task whose worker reported done on its branch's head merges (merge's full test run is its check),
 ///   unless the risk check (`LeadRisk`) raises it to audit from what its branch changes, or the audit sample
 ///   (`LeadAuditSample`, audit_sample_percent of them at random) draws it: then it's audited instead;
-/// - an audit task reported done gets its audit, and a passing verdict on its head merges;
+/// - an audit task reported done gets its audit, and a passing verdict on its head merges, unless it judged an older
+///   version of the task's contract than it has now (`LeadToolset.StaleVerdict`): then it's audited again, on what
+///   changed since that version;
 /// - a verdict that left Important findings open sends its worker the open ids to answer with answer_findings (once
 ///   per verdict), or starts a worker to get them when its own has ended; a verdict the round cap says to reconsider
 ///   (the lead's call: re-plan, or update_task reroll), or one that isn't clean, is left to the lead;
@@ -23,11 +25,17 @@ import Foundation
 /// and each step goes into the progress log; the judgement calls (holds, re-plans, questions to the user) stay the
 /// lead's.
 ///
+/// A merge's test run takes 12 to 45 minutes, and every other step goes on meanwhile (2026-11-08: audits, findings and
+/// starts sat idle through merges, with the Mac idle too). So a pass doesn't run a merge: it hands it to work of its own
+/// (`inBackground`) and goes on, and the merge's end looks again. Merges stay one at a time (this loop has one out at
+/// most, and merge's own locks hold across processes), and no step touches a task whose merge is out (`beingMerged`).
+///
 /// It lives in the lead's tool server, not the app or the session host: that process holds the lead's grant, which
 /// the vault asks of every merge and start (the app's and host's processes aren't the lead's session), it is the one
 /// that ran merges and their test runs before (with the Mac-wide test lock), and it runs as long as the lead's
 /// session does, idle or not. An install replaces it in place: each pass runs as a call does
-/// (`MCPServer.background`), so the switch waits for a pass under way and none starts during one; and since a pass
+/// (`MCPServer.background`), a merge in the background too, so the switch waits for those under way and none starts
+/// during one; and since a pass
 /// takes no step from memory, only from the board and the vault (a merged task is done, an audit started is the
 /// vault's current verifier on that head, findings sent are `LeadTask.autoSentBack`), the new build's first pass
 /// takes whatever is still due, once. Passes are one at a time across processes too (`run/advance.lock`).
@@ -43,6 +51,7 @@ public final class LeadAdvance: @unchecked Sendable {
     /// What the lead is told with a report when VibeSwitcher takes the next step itself.
     static let mergesItself = "auto_advance is on: VibeSwitcher merges it by itself (the same merge, with its test run and every check), and you get one report of what happened; don't merge it yourself."
     static let auditsItself = "auto_advance is on: VibeSwitcher starts its audit by itself, and you get one report of what happened; don't audit it yourself."
+    static let reauditsItself = "auto_advance is on: its passing verdict judged an older version of its contract, so VibeSwitcher doesn't merge it; it starts a re-audit of what changed since by itself, and you get one report. merge(…, accept_stale_verdict: …) only if that verdict covers the current contract."
     static let sendsBackItself = "auto_advance is on: VibeSwitcher sends its worker the open Important findings by itself and audits again once it reports; you get one report. Dismiss a finding, add_task(from_finding: …) or re-plan only if that's your call."
 
     private static let key = "VibeSwitcher.LeadAdvance"
@@ -76,7 +85,9 @@ public final class LeadAdvance: @unchecked Sendable {
     /// The lead's toolset; held only while a run of passes uses it (`lead`), so a toolset let go ends its loop.
     private weak var owner: LeadToolset?
     private var held: LeadToolset?
-    private var lead: LeadToolset { held ?? owner! }
+    /// `held`'s lock: a merge in the background reads `lead` while a run of passes takes it up or lets it go.
+    private let holding = NSLock()
+    private var lead: LeadToolset { holding.withLock { held ?? owner! } }
     /// How a run of passes is run: as the MCP server's background work (see the type's comment); in tests, a thread.
     private let run: (@escaping () -> Void) -> Bool
     private let lock = NSCondition()
@@ -84,6 +95,16 @@ public final class LeadAdvance: @unchecked Sendable {
     /// Stopped: no run starts any more.
     private var stopped = false
     private var again = false
+    /// The tasks of the merge (or batch) this loop has in the background; empty when it has none. One at a time.
+    private var merging: Set<String> = []
+    /// While it's out: something new was said, or a task ready to merge waited behind it. Either way its end looks again;
+    /// a merge refused again as before, with nothing waiting, doesn't (each look would only refuse it again).
+    private var mergeSaid = false
+    private var mergeWaited = false
+    /// Tasks whose merge ended with another waiting behind it: the next pass lets that one go first, so one that doesn't
+    /// land can't keep the turn. `resting` is the pass's own copy, read by passes only.
+    private var rest: Set<String> = []
+    private var resting: Set<String> = []
     /// The folder watch's way to end (its thread waits on the folder and on this pipe), and the lock it holds while it
     /// runs (see `running`).
     private var stopWrite: Int32 = -1
@@ -120,6 +141,7 @@ public final class LeadAdvance: @unchecked Sendable {
     /// When each task was first seen ready, on its head ("slug|head").
     private var readySince: [String: Date] = [:]
     /// Tasks (on their head) a batch stopped short of, or couldn't start with: merged one at a time from then on.
+    /// Unlike the rest it's written by a batch in the background: under `lock`.
     private var unbatched: Set<String> = []
     /// The look again armed for the window's end, at this time.
     private var batchWake: Date?
@@ -191,7 +213,7 @@ public final class LeadAdvance: @unchecked Sendable {
     func stop(wait: Bool = false) {
         lock.lock()
         stopped = true
-        while wait && busy { lock.wait() }
+        while wait && (busy || !merging.isEmpty) { lock.wait() }
         let write = stopWrite
         stopWrite = -1
         let held = runningLock
@@ -217,12 +239,12 @@ public final class LeadAdvance: @unchecked Sendable {
         }
         busy = true
         again = false
-        held = owner
+        holding.withLock { held = owner }
         lock.unlock()
         guard run({ [self] in passes() }) else {
             lock.lock()
             busy = false
-            held = nil
+            holding.withLock { held = nil }
             lock.broadcast()
             lock.unlock()
             return
@@ -254,7 +276,7 @@ public final class LeadAdvance: @unchecked Sendable {
             let ended = self.ended
             if !more {
                 busy = false
-                held = nil
+                holding.withLock { held = nil }
                 lock.broadcast()
             }
             lock.unlock()
@@ -284,6 +306,7 @@ public final class LeadAdvance: @unchecked Sendable {
         try? lead.store.appendProgress("Automatically (auto_advance): \(line)")
         lock.lock()
         lines.append(line)
+        mergeSaid = true
         // What it did may make the next step due (a merge, its cleanup): one more pass before the report.
         again = true
         lock.unlock()
@@ -333,6 +356,10 @@ public final class LeadAdvance: @unchecked Sendable {
 
     /// One look at the board, taking the steps that are due.
     func pass() {
+        lock.lock()
+        resting = rest
+        rest = []
+        lock.unlock()
         guard let rotationGate = FileLock.attempt(LeadRotation.gate(lead.root), shared: true) else { return }
         defer { rotationGate.release() }
         guard (try? lead.authenticate()) != nil else { return }
@@ -377,8 +404,7 @@ public final class LeadAdvance: @unchecked Sendable {
         let limits = lead.macLimits()
         let busy = lead.runtime.steadyLoad().map { $0 > limits.loadLimit } ?? false
         // The quick steps first: findings back to work, merged tasks' sessions ended (room on the Mac); then the starts
-        // (a done report freed its worker's slot already); then the audits and merges, which can take as long as the
-        // suite. Each in board order.
+        // (a done report freed its worker's slot already); then the audits and merges. Each in board order.
         let tasks = board.tasks.filter { $0.autoAdvance != false }
         for task in tasks {
             switch task.status {
@@ -473,13 +499,20 @@ public final class LeadAdvance: @unchecked Sendable {
 
     /// A task in review: its merge, or its audit, when due.
     private func review(_ slug: String, busy: Bool, batching: Bool) {
-        guard due(slug, [.review]) != nil, let head = lead.advanceHead(slug) else { return }
+        // Its merge is out: not audited, sampled or merged again on the way. Its end looks again.
+        guard !beingMerged(slug), due(slug, [.review]) != nil, let head = lead.advanceHead(slug) else { return }
         let vault = lead.vault, root = lead.root
         if let verdict = vault.verdict(root: root, task: slug) {
             guard verdict.commit == head else { return }
             let ledger = vault.audits(root: root, task: slug)
             // Nothing Important open, nor an unconfirmed one held by strict_paths (`LeadToolset.hold`).
             guard lead.hold(slug, ledger, head: head).isEmpty, verdict.passes || verdict.dismissed(in: ledger) != nil else { return }
+            // Judged an older version of the contract than it has now: not merged, audited again on what changed.
+            if let task = lead.store.load().task(slug), let stale = LeadToolset.staleVerdict(task) {
+                return audit(slug, head: head, busy: busy, why: "not merged: its passing audit \(stale.text), so this re-audit judges "
+                             + (stale.changes == nil ? "the whole of v\(stale.current) (v\(stale.judged)'s text isn't on record)" : "only what changed since v\(stale.judged)"),
+                             key: "audit|\(slug)|\(head)|v\(stale.current)")
+            }
             toMerge(Ready(slug: slug, head: head, audited: true), busy: busy, batching: batching)
             return
         }
@@ -501,7 +534,7 @@ public final class LeadAdvance: @unchecked Sendable {
     }
 
     /// Starts `slug`'s audit at `head` (`why`: what sends it there) once the Mac has room for its finders.
-    private func audit(_ slug: String, head: String, busy: Bool, why needed: String) {
+    private func audit(_ slug: String, head: String, busy: Bool, why needed: String, key: String? = nil) {
         let finders = lead.workflow.findersInForce
         guard !busy, hasRoom(slug, need: finders) else {
             // Raised: the lead hears why now, though its audit waits for the Mac's room.
@@ -511,7 +544,7 @@ public final class LeadAdvance: @unchecked Sendable {
             return roomWait("audit(\(slug))", need: finders)
         }
         if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug))) { return }
-        step("audit|\(slug)|\(head)") {
+        step(key ?? "audit|\(slug)|\(head)") {
             guard let before = due(slug, [.review]) else { throw NotDue() }
             _ = try lead.advanceAudit(slug)
             return "Started the audit of \(slug) at \(head.prefix(8)) (\(needed.trimmingCharacters(in: CharacterSet(charactersIn: "."))))." + releasedText(slug, worker: before.worker)
@@ -547,13 +580,15 @@ public final class LeadAdvance: @unchecked Sendable {
     /// A task ready to merge: merged now, or, while batching, kept for the pass's batch (`mergeReady`); one a batch fell
     /// back from merges on its own.
     private func toMerge(_ task: Ready, busy: Bool, batching: Bool) {
-        if batching, !unbatched.contains(task.key) { ready.append(task) } else { merge(task.slug, head: task.head, busy: busy, audited: task.audited) }
+        if batching, !isUnbatched(task.key) { ready.append(task) } else { merge(task.slug, head: task.head, busy: busy, audited: task.audited) }
     }
 
     /// The tasks this pass found ready to merge while batching: once `LeadToolset.batchSize` are ready, or the first of
     /// them has waited `LeadToolset.batchWindow`, they merge as one batch (`LeadToolset.mergeBatch`; a lone one, as merge merges it). Until
     /// then a look again is armed for the window's end: nothing else may change in the folder meanwhile.
     private func mergeReady(busy: Bool) {
+        // One of this loop's merges is out: what's ready keeps its place, and its end looks again.
+        guard !mergeOut(waiting: !ready.isEmpty) else { return }
         let everyReady = ready
         ready = []
         let keys = Set(everyReady.map(\.key))
@@ -561,6 +596,7 @@ public final class LeadAdvance: @unchecked Sendable {
         // Only the ones merge would take now count and go in a batch: one its own checks refuse (waiting on the user's
         // approval, say) is said once and left out, so it never holds back a batch of the ones behind it.
         let found = everyReady.filter { task in
+            guard !resting.contains(task.slug) else { return false }
             guard let refusal = lead.advanceGate(task.slug) else { return true }
             once("merge|\(task.slug)|\(task.head)|\(refusal.prefix(60))", "Didn't merge \(task.slug): \(LeadToolset.clip(refusal, 600))")
             return false
@@ -596,37 +632,39 @@ public final class LeadAdvance: @unchecked Sendable {
             return
         }
         let before = Dictionary(uniqueKeysWithValues: batch.map { ($0.slug, lead.store.load().task($0.slug)?.setback) })
-        let names = batch.map(\.slug).joined(separator: ", ")
-        let result: LeadToolset.BatchResult
-        do {
-            result = try lead.advanceMergeBatch(batch.map(\.slug))
-        } catch {
-            // It couldn't start: one at a time from here, each with merge's own checks and refusals.
-            for task in batch { unbatched.insert(task.key) }
-            let text = (error as? LeadToolset.Problem)?.text ?? "\(error)"
-            did("Didn't merge \(names) as a batch: \(LeadToolset.clip(text, 400)) They merge one at a time from here.")
-            return
-        }
-        var merged: [String] = []
-        for task in batch {
-            switch result.end(task.slug) {
-            case .merged(let commit)?:
-                merged.append("\(task.slug) at \(commit.prefix(8)) (" + (task.audited ? "its passing audit" : "review none: its worker's done report on \(task.head.prefix(8))") + ")")
-                forget(where: { $0.hasPrefix("merge|\(task.slug)|") })
-            case .failed(let text)?, .conflict(let text)?:
-                failed(task.slug, head: task.head, before: before[task.slug] ?? nil, problem: text)
-            case .refused(let text)?:
-                once("merge|\(task.slug)|\(task.head)|\(text.prefix(60))", "Didn't merge \(task.slug): \(LeadToolset.clip(text, 600))")
-            case .untouched?, nil:
-                unbatched.insert(task.key)
+        inBackground(batch.map(\.slug)) { [self] locked in
+            let names = batch.map(\.slug).joined(separator: ", ")
+            let result: LeadToolset.BatchResult
+            do {
+                result = try lead.advanceMergeBatch(batch.map(\.slug), locked: locked)
+            } catch {
+                // It couldn't start: one at a time from here, each with merge's own checks and refusals.
+                for task in batch { markUnbatched(task.key) }
+                let text = (error as? LeadToolset.Problem)?.text ?? "\(error)"
+                did("Didn't merge \(names) as a batch: \(LeadToolset.clip(text, 400)) They merge one at a time from here.")
+                return
             }
-        }
-        if !merged.isEmpty {
-            did("Merged \(merged.joined(separator: ", ")) into \(lead.base) as one batch, on \(result.runs) test run\(result.runs == 1 ? "" : "s") for \(batch.count) tasks.")
-        }
-        if let stopped = result.stopped {
-            let left = batch.filter { unbatched.contains($0.key) }.map(\.slug)
-            did("The batch of \(names) stopped short: \(LeadToolset.clip(stopped, 400))." + (left.isEmpty ? "" : " \(left.joined(separator: ", ")) stay as they were and merge one at a time from here."))
+            var merged: [String] = []
+            for task in batch {
+                switch result.end(task.slug) {
+                case .merged(let commit)?:
+                    merged.append("\(task.slug) at \(commit.prefix(8)) (" + (task.audited ? "its passing audit" : "review none: its worker's done report on \(task.head.prefix(8))") + ")")
+                    forget(where: { $0.hasPrefix("merge|\(task.slug)|") })
+                case .failed(let text)?, .conflict(let text)?:
+                    failed(task.slug, head: task.head, before: before[task.slug] ?? nil, problem: text)
+                case .refused(let text)?:
+                    once("merge|\(task.slug)|\(task.head)|\(text.prefix(60))", "Didn't merge \(task.slug): \(LeadToolset.clip(text, 600))")
+                case .untouched?, nil:
+                    markUnbatched(task.key)
+                }
+            }
+            if !merged.isEmpty {
+                did("Merged \(merged.joined(separator: ", ")) into \(lead.base) as one batch, on \(result.runs) test run\(result.runs == 1 ? "" : "s") for \(batch.count) tasks.")
+            }
+            if let stopped = result.stopped {
+                let left = batch.filter { isUnbatched($0.key) }.map(\.slug)
+                did("The batch of \(names) stopped short: \(LeadToolset.clip(stopped, 400))." + (left.isEmpty ? "" : " \(left.joined(separator: ", ")) stay as they were and merge one at a time from here."))
+            }
         }
     }
 
@@ -640,7 +678,7 @@ public final class LeadAdvance: @unchecked Sendable {
     /// (`LeadToolset.releaseWorker`): by the audit's start when it was idle then, else here once its turn ends (the
     /// app nudges the loop, `LeadWitness.releasableForAdvance`). A host that won't end it is told once.
     private func release(_ slug: String) {
-        guard let task = due(slug, [.review]), let release = lead.releaseWorker(slug) else { return }
+        guard !beingMerged(slug), let task = due(slug, [.review]), let release = lead.releaseWorker(slug) else { return }
         if release.released { did(release.text) } else { once("release|\(slug)|\(task.worker ?? "")", release.text) }
     }
 
@@ -708,30 +746,120 @@ public final class LeadAdvance: @unchecked Sendable {
     }
 
     private func merge(_ slug: String, head: String, busy: Bool, audited: Bool) {
+        // A merge under way (this loop's, the lead's own, or into the same branch): its end, or the board's change once
+        // it's done, looks again. Before the load: a merge's own tests are what loads the Mac.
+        guard !resting.contains(slug), !mergeOut(waiting: true), lead.mergeIdle(slug) else { return }
         // A loaded Mac: merge would wait in its tests' place; the app nudges once the load drops.
         guard !busy else { return roomWait("merge(\(slug))", need: 0) }
-        // A merge under way (the lead's own, or into the same branch): the board's change once it's done looks again.
-        guard lead.mergeIdle(slug) else { return }
-        // Held or switched off while an earlier step ran (another task's merge takes minutes).
+        // Held or switched off while an earlier step ran.
         guard let before = due(slug, [.review]).map({ $0.setback }) else { return }
-        do {
-            let result = try lead.advanceMerge(slug)
-            let task = lead.store.load().task(slug)
-            // Merged on a rerun of its failing tests (`MergeRerun`): merge's own note says which, and what it planned.
-            let rerun = result.text.range(of: "(Its first test run failed").map { " " + LeadToolset.clip(String(result.text[$0.lowerBound...]).components(separatedBy: ".)").first ?? "", 400) + ".)" } ?? ""
-            did("Merged \(slug) (\(task?.title ?? slug)) into \(lead.base) at \(task?.merged?.commit.prefix(8) ?? head.prefix(8)), "
-                + (audited ? "on its passing audit and the full test run." : "review none: on its worker's done report on \(head.prefix(8)) and the full test run.") + rerun)
-        } catch let problem as LeadToolset.Problem {
-            let task = lead.store.load().task(slug)
-            // Its tests failed, or it conflicts: the output goes back to its worker, as the lead would send it.
-            if let setback = task?.setback, setback != before, setback.stage == .merge, task?.status == .failed {
-                failed(slug, head: head, before: before, problem: problem.text)
-            } else {
-                once("merge|\(slug)|\(head)|\(problem.text.prefix(60))", "Didn't merge \(slug): \(LeadToolset.clip(problem.text, 600))")
+        inBackground([slug]) { [self] locked in
+            do {
+                let result = try lead.advanceMerge(slug, locked: locked)
+                let task = lead.store.load().task(slug)
+                // Merged on a rerun of its failing tests (`MergeRerun`): merge's own note says which, and what it planned.
+                let rerun = result.text.range(of: "(Its first test run failed").map { " " + LeadToolset.clip(String(result.text[$0.lowerBound...]).components(separatedBy: ".)").first ?? "", 400) + ".)" } ?? ""
+                did("Merged \(slug) (\(task?.title ?? slug)) into \(lead.base) at \(task?.merged?.commit.prefix(8) ?? head.prefix(8)), "
+                    + (audited ? "on its passing audit and the full test run." : "review none: on its worker's done report on \(head.prefix(8)) and the full test run.") + rerun)
+            } catch let problem as LeadToolset.Problem {
+                let task = lead.store.load().task(slug)
+                // Its tests failed, or it conflicts: the output goes back to its worker, as the lead would send it.
+                if let setback = task?.setback, setback != before, setback.stage == .merge, task?.status == .failed {
+                    failed(slug, head: head, before: before, problem: problem.text)
+                } else {
+                    once("merge|\(slug)|\(head)|\(problem.text.prefix(60))", "Didn't merge \(slug): \(LeadToolset.clip(problem.text, 600))")
+                }
+            } catch {
+                once("merge|\(slug)|\(head)", "Didn't merge \(slug): \(error)")
             }
-        } catch {
-            once("merge|\(slug)|\(head)", "Didn't merge \(slug): \(error)")
         }
+    }
+
+    /// One of this loop's merges is out; `waiting`: a task ready to merge is behind it.
+    private func mergeOut(waiting: Bool) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if waiting, !merging.isEmpty { mergeWaited = true }
+        return !merging.isEmpty
+    }
+
+    /// A merge of `slug` is under way: this loop's, from its handing over to its report, or anyone's by merge's own lock.
+    private func beingMerged(_ slug: String) -> Bool {
+        lock.lock()
+        let here = merging.contains(slug)
+        lock.unlock()
+        return here || lead.mergeUnderWay(slug)
+    }
+
+    private func isUnbatched(_ key: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return unbatched.contains(key)
+    }
+
+    private func markUnbatched(_ key: String) {
+        lock.lock()
+        unbatched.insert(key)
+        lock.unlock()
+    }
+
+    /// Runs `body`, a merge of `slugs` and what's said of it, as work of its own, so the pass goes on: through `run` as a
+    /// pass is (an install's switch waits for it, the server's stop cancels its test run), holding the rotation gate as
+    /// the lead's merge call does, and as automatic as the pass's steps. Returns once the merge is past its refusals and
+    /// about to wait for its tests, holding its locks (the `locked` it's given), or has ended: a refused one is over
+    /// before the pass goes on to the next task, as when it ran in the pass. The pass still holds `run/advance.lock`
+    /// until then, so a pass after it, in any process, finds the merge by those locks. Not started when a merge of this loop's is out, or the server is ending; the
+    /// next pass takes what's still due.
+    private func inBackground(_ slugs: [String], _ body: @escaping (_ locked: @escaping () -> Void) -> Void) {
+        guard let gate = FileLock.attempt(LeadRotation.gate(lead.root), shared: true) else { return }
+        lock.lock()
+        guard merging.isEmpty, !stopped else {
+            lock.unlock()
+            gate.release()
+            return
+        }
+        merging = Set(slugs)
+        mergeSaid = false
+        mergeWaited = false
+        lock.unlock()
+        // Held until the merge's end, though the run of passes that started it lets the toolset go.
+        let keep = lead
+        let holds = DispatchSemaphore(value: 0)
+        let started = run { [self] in
+            withExtendedLifetime(keep) {
+                Self.automatically { body { holds.signal() } }
+                gate.release()
+                mergeEnded()
+                holds.signal()
+            }
+        }
+        if started { holds.wait() } else {
+            gate.release()
+            lock.lock()
+            merging = []
+            lock.broadcast()
+            lock.unlock()
+        }
+    }
+
+    /// The merge in the background ended, its result said: when that's something new, or a task waited behind it, the
+    /// next pass reports it and takes what's due after it. No more passes come once the loop is stopped, so then what it
+    /// said goes out from here.
+    private func mergeEnded() {
+        while true {
+            lock.lock()
+            guard stopped, !lines.isEmpty else { break }
+            let report = lines
+            lines = []
+            lock.unlock()
+            tell(report)
+        }
+        let again = mergeSaid || mergeWaited
+        if mergeWaited { rest = merging }
+        merging = []
+        lock.broadcast()
+        lock.unlock()
+        if again { trigger() }
     }
 
     /// A merge (or a batch) that set `slug` failed with a new merge setback (its tests failed, or it conflicts): the output
@@ -762,7 +890,7 @@ public final class LeadAdvance: @unchecked Sendable {
               let verdict = vault.verdict(root: root, task: slug), verdict.commit == head, verdict.integrity == .clean,
               let ledger = vault.audits(root: root, task: slug), !ledger.reconsider else { return }
         let hold = lead.hold(slug, ledger, head: head)
-        guard !hold.isEmpty else { return }
+        guard !hold.isEmpty, !beingMerged(slug) else { return }
         let open = hold.findings
         let ids = open.map { "\(slug):\($0.id)" }.joined(separator: ", ")
         let why: String = hold.why.isEmpty ? "" : "\n(\(hold.why).)"
@@ -852,7 +980,7 @@ public final class LeadAdvance: @unchecked Sendable {
     /// branch is still there.
     private func cleanup(_ slug: String) {
         guard let task = due(slug, [.done, .reverted]), task.merged != nil,
-              task.worktree != nil || lead.advanceHead(slug) != nil else { return }
+              task.worktree != nil || lead.advanceHead(slug) != nil, !beingMerged(slug) else { return }
         step("cleanup|\(slug)") {
             guard due(slug, [.done, .reverted]) != nil else { throw NotDue() }
             let result = try lead.advanceCleanup(slug)
@@ -860,17 +988,21 @@ public final class LeadAdvance: @unchecked Sendable {
         }
     }
 
+    /// `task` may start by itself now: planned, not opted out, and not on an incident's generic brief still (2026-11-08:
+    /// turn-this-incident-into-16 started on v1 in the turn the lead wrote v2; see `LeadTask.waitsForContract`).
+    private func startsByItself(_ task: LeadTask) -> Bool { isDue(task, [.planned]) && !task.waitsForContract }
+
     /// The planned tasks whose `after` tasks are done, in board order, while there's room.
     private func starts(_ workflow: LeadWorkflow) {
         for task in lead.store.load().tasks where task.status == .planned && task.autoAdvance != false {
             let board = lead.store.load()
-            guard let task = board.task(task.slug), isDue(task, [.planned]), let waits = waiting(task, board) else { continue }
+            guard let task = board.task(task.slug), startsByItself(task), let waits = waiting(task, board) else { continue }
             // Not startable yet (see `LeadLaunch.codexWorkersUsable`): said once, never tried.
             if task.workerAgent == .codex, !lead.codexWorkers {
                 once("codex|\(task.slug)", "\(task.slug) won't start by itself: \(LeadLaunch.codexUnusable) update_task(\(task.slug), agent: claude) to run it on Claude.")
                 continue
             }
-            guard waits.isEmpty else { continue }
+            guard waits.isEmpty, !beingMerged(task.slug) else { continue }
             let running = board.tasks.filter { $0.status == .running }.count
             guard running < lead.maxWorkers(workflow) else { return }
             // The Mac's room as start_worker counts it; a refusal for it waits for the app's nudge.
@@ -884,7 +1016,7 @@ public final class LeadAdvance: @unchecked Sendable {
             let after = (task.after ?? []).joined(separator: ", ")
             step("start|\(task.slug)") {
                 // Asked again in start_worker's lock: a hold set while the room was counted stands.
-                _ = try lead.advanceStart(task.slug, when: { [self] in isDue($0, [.planned]) })
+                _ = try lead.advanceStart(task.slug, when: { [self] in startsByItself($0) })
                 let routed = lead.store.load().task(task.slug)?.routed
                 return "Started a worker on \(task.slug) (\(task.title))" + (after.isEmpty ? "" : ", its after tasks done (\(after))")
                     + (routed.map { "; its agent is auto, so it went to \($0)." } ?? ".")

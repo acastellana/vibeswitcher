@@ -136,12 +136,14 @@ struct WalletSettingsTab: View {
     var body: some View {
         Form {
             Section {
-                Picker("Wallet Manager", selection: $preferences.walletPeerID) {
-                    Text("None").tag("")
-                    Text(Self.onThisMacTitle).tag(Self.onThisMac)
-                    ForEach(Self.choices(peers, saved: preferences.walletPeerID)) { peer in
-                        Text(peer.name).tag(peer.peerID)
-                    }
+                SettingRow("wallet-manager") { label in
+                    Picker(selection: $preferences.walletPeerID) {
+                        Text("None").tag("")
+                        Text(Self.onThisMacTitle).tag(Self.onThisMac)
+                        ForEach(Self.choices(peers, saved: preferences.walletPeerID)) { peer in
+                            Text(peer.name).tag(peer.peerID)
+                        }
+                    } label: { label }
                 }
                 Text(Self.status(peers, saved: preferences.walletPeerID))
                     .font(.callout)
@@ -154,17 +156,15 @@ struct WalletSettingsTab: View {
             } header: {
                 Text("Wallet Manager's Mac")
             } footer: {
-                SettingsFooter("An agent asks for a transaction with vs-wallet request (on every session's PATH; vs-wallet help says how), "
-                    + "and the request shows as a card in its chat. Only when you press Send to Wallet Manager does it go "
-                    + "through Passage to the Wallet Manager on its Mac (or, with \(Self.onThisMacTitle) chosen, through a "
-                    + "folder only you can use), which checks it; you sign there on the hardware wallet. "
-                    + "VibeSwitcher never signs. The Wallet Manager's answers go back to the agent as messages.")
+                SettingsFooter(.walletManager)
             }
             Section {
-                LabeledContent("Command path") {
-                    TextField("Passage path", text: $preferences.walletPassagePath, prompt: Text("passage"))
-                        .labelsHidden().accessibilityLabel("Path to the passage command")
-                        .font(.system(.body, design: .monospaced))
+                SettingRow("wallet-passage") { label in
+                    LabeledContent {
+                        TextField("Passage path", text: $preferences.walletPassagePath, prompt: Text("passage"))
+                            .labelsHidden().accessibilityLabel("Path to the passage command")
+                            .font(.system(.body, design: .monospaced))
+                    } label: { label }
                 }
                 if let using = Self.using(peerList.passage, read: peerList.read, path: peerList.settledPath) {
                     Text(using)
@@ -175,8 +175,7 @@ struct WalletSettingsTab: View {
             } header: {
                 Text("Passage")
             } footer: {
-                SettingsFooter("The passage command requests go through: a passage link, Passage.app or its binary. "
-                    + "Empty: passage on your PATH, else Passage.app in /Applications or ~/Applications.")
+                SettingsFooter(.passage)
             }
         }
         .formStyle(.grouped)

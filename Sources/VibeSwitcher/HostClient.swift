@@ -42,7 +42,12 @@ final class HostClient: ObservableObject {
     /// The user's host; a test's scratch host instead (it never starts one: see `connectIfRunning`).
     private let socketPath: String
     private let proofKey: () -> SymmetricKey?
-    private var replies: [Int: (HostEvent) -> Void] = [:]
+    private(set) var replies: [Int: (HostEvent) -> Void] = [:]
+    /// Counts the connections made. Each numbers its requests from 1, so a reply's timer speaks only for the connection
+    /// it was armed on: on a later one its number is another request's.
+    private var connectionsMade = 0
+    /// How a reply's wait is timed; a test's own instead.
+    var replyLater: (TimeInterval, @escaping () -> Void) -> Void = { DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1) }
     private var sinks: [UUID: (sink: Sink, cols: Int, rows: Int)] = [:]
     /// When each session's last resize line went to app.log, and the newest one since, held (see `logResize`).
     private var resizeLogs: [UUID: (logged: Date, held: (line: String, count: Int)?)] = [:]
@@ -51,7 +56,7 @@ final class HostClient: ObservableObject {
     /// The resize log's clock, and how it writes a held line later; a test's own instead.
     var resizeClock: () -> Date = Date.init
     var resizeLater: (TimeInterval, @escaping () -> Void) -> Void = { DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1) }
-    /// How a request's reply wait and the handover's wait run out later (`request`, `waitForHandover`); a test's clock
+    /// How the handover's wait runs out later (`waitForHandover`; a reply's wait is `replyLater`); a test's clock
     /// instead, so a 15 s window can't run out behind a test the loaded Mac holds up.
     var waitLater: (TimeInterval, @escaping () -> Void) -> Void = { DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1) }
     private var whenReady: [(String?) -> Void] = []
@@ -112,7 +117,7 @@ final class HostClient: ObservableObject {
     /// The bundled host's build (see `HostBuild`); a test's fake build instead.
     private let bundledBuild: () -> Int
     /// How long to wait before each attempt to get back to a host that dropped the connection; then it's gone.
-    private let reconnectDelays: [TimeInterval]
+    var reconnectDelays: [TimeInterval]
 
     /// The reply every request still waiting gets when the connection drops.
     static let wentAway = "The session host went away."
@@ -160,7 +165,9 @@ final class HostClient: ObservableObject {
         Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host")
     }
 
-    var isUsable: Bool {
+    var isUsable: Bool { Self.usable(state) }
+
+    static func usable(_ state: State) -> Bool {
         switch state {
         case .connected, .outdated(_, true): return true
         default: return false
@@ -222,6 +229,7 @@ final class HostClient: ObservableObject {
         if connection != nil { return true }
         guard let connection = try? HostConnection(path: socketPath, queue: .main, appKey: proofKey()) else { return false }
         self.connection = connection
+        connectionsMade += 1
         state = .connecting
         // Each connection proves the app anew.
         proofRefusal = nil
@@ -656,9 +664,12 @@ final class HostClient: ObservableObject {
         guard let reply else { return }
         replies[seq] = reply
         guard let wait else { return }
-        // A reply that never comes must not leave its caller (e.g. a phone request) waiting forever.
-        waitLater(wait) { [weak self] in
-            self?.replies.removeValue(forKey: seq)?(.error("The session host didn't answer."))
+        // A reply that never comes must not leave its caller (e.g. a phone request) waiting forever. A dropped
+        // connection's waits are over (`connectionLost` answered them): its number now belongs to a request of a later one.
+        let armedOn = connectionsMade
+        replyLater(wait) { [weak self] in
+            guard let self, self.connectionsMade == armedOn else { return }
+            self.replies.removeValue(forKey: seq)?(.error("The session host didn't answer."))
         }
     }
 

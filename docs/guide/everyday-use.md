@@ -1,6 +1,6 @@
 # Everyday use
 
-The menu bar, the main window, the chat, notifications and the command line.
+The menu bar, the main window, the chat, notifications, dictation, briefings, Statistics and the command line.
 
 ## Statuses
 
@@ -19,7 +19,7 @@ How the status is worked out is in [Architecture](architecture.md#how-status-is-
 ## The menu bar
 
 One dot per session. They're ordered by desktop (Desktop 1 first, as Mission Control orders them), then windows in
-reading order and tabs in tab order; Settings › General switches to oldest first. Up to 4 dots fit in one row, then two
+reading order and tabs in tab order; Settings › Sessions & Sidebar switches to oldest first. Up to 4 dots fit in one row, then two
 rows of smaller dots, 12 at most.
 
 - Click a dot to jump to that session's Terminal tab (or its place in the window). Hover it to see which one it is.
@@ -29,9 +29,9 @@ rows of smaller dots, 12 at most.
   Waiting counts only while you're at the Mac, and a finished turn counts for its first 30 minutes at most.
 
 On a notched MacBook, macOS hides status icons that don't fit. If VibeSwitcher's is hidden, a floating pill with the
-same dots appears; Settings › General sets it to Always or Never.
+same dots appears; Settings › Sessions & Sidebar › **Floating dots panel** sets it to Always or Never.
 
-**Sidebar mode** (Settings › General, or the list's ⚙︎ menu) puts the list on the right edge of the screen, on every
+**Sidebar mode** (Settings › Sessions & Sidebar, or the list's ⚙︎ menu) puts the list on the right edge of the screen, on every
 desktop. It slides in when the mouse touches the middle of that edge and slides away when it leaves.
 
 ## The main window
@@ -61,7 +61,7 @@ Session…** (⇧⌘⌫) always asks first.
 - **New Project…** asks for a name, a location (the projects folder from Settings › General, `~/dev` by default) and
   an optional first goal. It makes the folder with a git repository, a README.md, a .gitignore and a first commit, and
   can start a session or the project lead in it.
-- Launch presets (Settings › Launch) set the command, flags, environment and whether it runs in the window or in
+- Launch presets (Settings › Launch Presets) set the command, flags, environment and whether it runs in the window or in
   Terminal.
 
 New sessions run in the window by default, in the session host, which keeps them running when VibeSwitcher quits,
@@ -72,7 +72,7 @@ window between turns.
 
 Right-click a row › **Pause**: until you resume it, for 1 hour, until tomorrow morning, or for a week. A paused
 session stays in its place, greyed out, sends no notifications, and its waiting doesn't count in Today. Pausing can
-also minimise its Terminal window to the Dock (Settings › General). Pauses survive restarts. **Rename…** gives a
+also minimise its Terminal window to the Dock (Settings › Sessions & Sidebar). Pauses survive restarts. **Rename…** gives a
 session your own name.
 
 ## The chat
@@ -92,6 +92,19 @@ session your own name.
   than one plain line is shown in full and asks first; a multi-line block runs as one private script file. A block
   with hidden characters or a heredoc gets no Run button.
 
+Agents can ask you for two things as cards in the chat:
+
+- **A shell.** `vs-shell run [--cwd DIR] [--label TEXT] -- COMMAND…` shows the folder and the exact command, with
+  **Run** and **Decline**. Nothing runs until you press Run, unless you've turned on **Let agents open shells without
+  asking** in Settings › Agents. Anything that needs a real terminal comes this way (a password prompt, an install, an
+  interactive program), rather than a request to open Terminal or type a `!` command; a password goes only into that shell.
+- **A transaction.** `vs-wallet request …` shows a card saying what the transaction does, from where and to whom, with
+  the agent's reason. Nothing leaves the Mac until you press **Send to Wallet Manager**, which hands it to the Wallet
+  Manager, a separate app, over Passage to another Mac or in a folder on this one. It checks the request and you sign
+  there. The card can also offer **Sign in browser wallet**, for a plain address on a request not marked for a local
+  fork only; that skips the Wallet Manager's checks. VibeSwitcher never signs or holds a key. For a session with no chat, the
+  card sits along the terminal. The format is [wallet-request.md](../protocol/wallet-request.md).
+
 Claude Code may show `Ran 1 stop hook` / `Stop hook feedback: [VibeSwitcher · messages, v2] …` when a message arrives
 as a turn ends. That is the message being delivered, not an error ([docs/eval/stop-hook-shapes](../eval/stop-hook-shapes/README.md)).
 
@@ -109,18 +122,55 @@ as a turn ends. That is the message being delivered, not an error ([docs/eval/st
 - Credentials in commands and messages (tokens, passwords, API keys, bearer headers, private keys, webhook URLs) are
   masked before they're stored or shown.
 
-Choose which you get in Settings › General.
+Choose which you get in Settings › Notifications.
+
+## Dictation
+
+Hold the mic button in the composer, or ⌥Space, and speak; let go, and the text lands at the cursor for you to read. It
+is never sent by itself. Esc or the ✕ cancels. Holding the Space bar in the box starts it too, unless you turn off
+**Hold Space to dictate** in Settings › Dictation & Briefing; what's in the box is kept.
+
+- A Claude Code session in the window dictates through Claude's own `/voice`, with your claude.ai sign-in and no key.
+  If its voice mode is off or in tap mode, the composer offers a one-click `/voice hold`; without a claude.ai sign-in
+  it says so.
+- Anything else (Codex, a Terminal tab) records on the Mac and has OpenAI transcribe it, with the key saved in
+  Settings › Dictation & Briefing, kept in your login keychain. The first such press shows a one-time note that the
+  audio goes to OpenAI.
+- macOS asks for the microphone the first time. **Silence the Mac while dictating** mutes its sound while you hold.
+
+A recording stops by itself after 2 minutes.
 
 ## Briefings
 
 **Brief me** (the speech-bubble button, or ⇧⌘B) tells you in about 30 seconds what happened across every project
-VibeSwitcher leads: what landed, what's stuck, what waits on you. It covers what's new since your last briefing, or the
-last 3 hours if that's longer. It's written by Claude (`claude -p` with Haiku and no tools) from each lead's progress
-log and board, redacted first, in 70–90 words, in the language set in Settings › General › Briefing. Without Claude,
-a plain English summary of the same notes is shown.
+VibeSwitcher leads: what landed, what's stuck, what waits on you. **Brief Me on Project** (⌥⇧⌘B) does it for one.
+A briefing covers what's new since your last one, or the last 3 hours if that's longer. It's written by Claude
+(`claude -p` with Haiku and no tools) from each lead's progress log and board, redacted first, in 70–90 words, in the
+language set in Settings › Dictation & Briefing. Without Claude, a plain English summary of the same notes is shown.
 
-It's read aloud by ElevenLabs when you've saved an ElevenLabs API key in Settings, else by the Mac's own voice. The text
+It's read aloud by ElevenLabs when you've saved an ElevenLabs API key in Settings › Dictation & Briefing, else by the
+Mac's own voice. The text
 goes to ElevenLabs only when you press Brief me, Play or Test voice. The key is kept only in your login keychain.
+
+## Statistics
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/statistics-dark.png">
+  <img alt="The Statistics window: this week's scorecard against last week's, then quality figures" src="../images/statistics-light.png">
+</picture>
+
+The **Statistics** window (the chart button in the toolbar, Window › Statistics… ⌥⌘S, ⌘K, or Statistics… in the menu bar list's gear menu) covers all
+your projects over today, the last 7 or the last 30 days:
+
+- **The scorecard**, the last 7 days against the 7 before: bugs you reported against those the system found, questions
+  per delivered task and how long they waited, cost per merged task with the lead's share, and time to install. A
+  comparison between the weeks is shown only when both have enough tasks behind them.
+- **Quality, autonomy, where time goes and cost**, with each figure's count, by who did the work and over the last 8
+  weeks.
+- **Compared with working solo**, labelled as an estimate, its method in a note.
+- **This Mac** and a table of the projects with their totals.
+
+Each lead's own scorecard is in its [Team tab](project-lead.md#the-team-tab-the-all-done-card-receipts-and-revert).
 
 ## The command line
 
@@ -135,7 +185,8 @@ VibeSwitcher --window move:ttys012         # move that Terminal session into the
 VibeSwitcher --open ttys012                # open a session, as clicking its row does
 VibeSwitcher --focus ttys012               # select a Terminal tab directly
 VibeSwitcher --toggle                      # open or close the list (bind it in Raycast and the like)
-VibeSwitcher --settings [TAB]              # open Settings
+VibeSwitcher --settings [CATEGORY]         # open Settings: general, notifications, appearance, sessions, launch,
+                                           # agents, lead, performance, dictation, phone, wallet or advanced
 VibeSwitcher --install-hooks | --uninstall-hooks
 VibeSwitcher --dump                        # detected sessions and raw hook state
 ```

@@ -111,10 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         resumeCommand: { [weak self] row in self?.resumeCommandLine(for: row) },
         settings: { [weak self] in self?.showSettings(tab: .general) },
         moveToWindow: { [weak self] in self?.moveToWindow($0) },
-        startLead: { [weak self] folder in
-            self?.showMainWindow()
-            self?.leadController.startLead(in: folder)
-        },
+        startLead: ProjectFolderStart.leadStart { [weak self] in self?.projectFolderStart },
         projectsFolder: { [weak self] in
             ProjectCreation.tildePath(self?.preferences.projectsFolderPath ?? ProjectCreation.expand(ProjectCreation.defaultLocation))
         },
@@ -161,7 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private lazy var dictation: DictationController = {
         let controller = DictationController(keyStore: dictationKey, recorder: EngineRecorder(), microphone: SystemMicrophone(),
                                              silencer: outputSilencer)
-        controller.openSettings = { [weak self] in self?.showSettings(tab: .general) }
+        controller.openSettings = { [weak self] in self?.showSettings(tab: .dictation, reveal: .dictationKey) }
         return controller
     }()
     private var statusItem: NSStatusItem!
@@ -195,6 +192,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private static let positionKey = "NSStatusItem Preferred Position VibeSwitcher"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // First, so no window is ever drawn in the wrong look.
+        AppLook.follow(preferences, on: NSApp).store(in: &cancellables)
+        // A status item's popover takes the system's look, not the app's: it follows the setting itself.
+        AppLook.follow(preferences, on: popover).store(in: &cancellables)
         Breadcrumbs.shared.note("app: launched \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") build \(HostBuild.id(ofExecutableAt: Bundle.main.executablePath ?? ""))")
         HangWatchdog.shared.describeState = { [weak self] in
             guard let self else { return "" }
@@ -212,14 +213,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         let firstRun = FirstRun.shouldWelcome(
             defaults: .standard, stateDirExists: FileManager.default.fileExists(atPath: VibePaths.stateDir.path),
             hooksInstalled: Dictionary(uniqueKeysWithValues: Agent.allCases.map { ($0, HookInstaller.isInstalled(agent: $0)) }))
-        HookBinary.sync()
         VibePaths.ensurePrivateDirectories()
         PrivateRepair.atLaunch()
         // The sound a dictation silenced when this app last ended without quitting (its marker), put back.
         outputSilencer.recover()
         // Script blocks' files a crash left behind (see `RunnableCommand.Script`).
         RunnableCommand.Script.removeAll()
-        hostClient.connectIfRunning()
+        HookBinary.atLaunch(connect: { hostClient.connectIfRunning() })
         // Leads' witness and questions work with the window closed too.
         _ = leadController
         // Requests filed or sent while the feature was called vault requests, carried over once.
@@ -611,7 +611,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
 
     func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
               userData data: UnsafeMutableRawPointer?) -> String {
-        if Int(bitPattern: data) == Self.boostToolTip { return boostWatch.menuText.map { "\($0)\nSettings › General › Project lead: Boost" } ?? "" }
+        if Int(bitPattern: data) == Self.boostToolTip { return boostWatch.menuText.map { "\($0)\nSettings › Performance › Boost" } ?? "" }
         let index = Int(bitPattern: data) - 1
         let own = store.split.own
         guard own.indices.contains(index) else { return "" }
@@ -790,7 +790,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                                   leads: leadController, briefing: briefing, dictation: dictation, wallet: walletDesk,
                                                   boost: boostWatch, shells: shellDesk)
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
-            controller.onBoostMark = { [weak self] in self?.showSettings(tab: .general, reveal: .boost) }
+            controller.onBoostMark = { [weak self] in self?.showSettings(tab: .performance, reveal: .boost) }
             controller.onStatistics = { [weak self] in self?.showStatistics() }
             controller.pane.configure = { [weak self] view in
                 guard let self else { return }
@@ -1181,21 +1181,43 @@ enum HookBinary {
         return url.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
     }
 
-    /// The app's own write, sealed as written (`LeadVault.appWrite`): an update's new binary never waits for your
-    /// Accept.
-    @discardableResult
-    static func sync() -> Bool {
-        LeadVault.standard.appWrite([VibePaths.hookBinary.path]) { write() }
+    /// What a launch does about the binary, in this order. `connect` makes the app's connection to the host, which
+    /// reads the app's key from the Keychain; only then does `replace` write the binary and seal it. Before the key is
+    /// read the host takes the app for no one and refuses the seal, and a new build's first read can wait for your
+    /// click (84 s at the 2026-11-08 13:34 install, in which a lead's look held the new binary and refused a merge).
+    /// Until the write, the binary is still the one sealed, so a look holds nothing. Off the main thread: the seal
+    /// waits on the host.
+    static func atLaunch(connect: () -> Void,
+                         background: (@escaping () -> Void) -> Void = { DispatchQueue.global(qos: .userInitiated).async(execute: $0) },
+                         replace: @escaping () -> Void = {
+                             sync()
+                             LeadVault.standard.sealAppWrites()
+                         }) {
+        connect()
+        background(replace)
     }
 
-    private static func write() -> Bool {
-        guard let source = bundled, let data = try? Data(contentsOf: source) else { return false }
-        let target = VibePaths.hookBinary
+    /// The app's own write, sealed as written (`LeadVault.appWrite`): an update's new binary never waits for your
+    /// Accept. The parameters are for tests.
+    @discardableResult
+    static func sync(vault: LeadVault = .standard, home: String = VibePaths.home, source: URL? = bundled, target: URL = VibePaths.hookBinary) -> Bool {
+        vault.appWrite([target.path], home: home) { write(source: source, to: target) }
+    }
+
+    /// One write at a time: launch's, off the main thread, and Settings' or onboarding's share a temporary file.
+    private static let writing = NSLock()
+
+    private static func write(source: URL?, to target: URL) -> Bool {
+        guard let source, let data = try? Data(contentsOf: source) else { return false }
+        writing.lock()
+        defer { writing.unlock() }
+        let folder = target.deletingLastPathComponent()
         if let existing = try? Data(contentsOf: target), existing == data { return true }
         do {
-            try FileManager.default.createDirectory(at: VibePaths.binDir, withIntermediateDirectories: true)
-            // Write-then-rename so a hook that is running right now never sees a half-written binary.
-            let temp = VibePaths.binDir.appendingPathComponent(".vibeswitcher-hook.tmp")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            // Write-then-rename so a hook that is running right now never sees a half-written binary. Beside the bin
+            // folder, not in it: the folder is sealed, and a look while the temporary file was there would hold it.
+            let temp = folder.deletingLastPathComponent().appendingPathComponent(".vibeswitcher-hook.tmp")
             try data.write(to: temp)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: temp.path)
             _ = try FileManager.default.replaceItemAt(target, withItemAt: temp)

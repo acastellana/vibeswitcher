@@ -949,9 +949,18 @@ struct BoardView {
               let board = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         let decoder = JSONDecoder()
         tasks = (board["tasks"] as? [Any] ?? []).compactMap { ($0 as? [String: Any]).flatMap { TaskView($0, decoder: decoder) } }
-        questions = (board["questions"] as? [Any] ?? []).compactMap { question in
+        func decoded(_ question: Any) -> LeadQuestion? {
             (try? JSONSerialization.data(withJSONObject: question)).flatMap { try? decoder.decode(LeadQuestion.self, from: $0) }
         }
+        questions = (board["questions"] as? [Any] ?? []).compactMap(decoded)
+        // The closed questions the board's archive took (`BoardStore.archive`) count here too, each once.
+        let archivePath = ((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent("board-archive.jsonl")
+        var archived: [String: LeadQuestion] = [:]
+        for line in SetupStatsCollector.jsonLines(archivePath) ?? [] {
+            if let object = line["question"], let question = decoded(object) { archived[question.id] = question }
+        }
+        let onBoard = Set(questions.map(\.id))
+        questions += archived.values.filter { !onBoard.contains($0.id) }
         flakes = (board["flakes"] as? [Any]).map { entries in
             entries.compactMap { $0 as? [String: Any] }.map { ($0["test"] as? String ?? "", $0["task"] as? String ?? "", number($0["at"])) }
         }

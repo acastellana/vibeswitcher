@@ -91,7 +91,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     /// Settings: a key found in your shell or Codex's file, offered for import (nil: none, or not looked).
     @Published private(set) var found: FoundOpenAIKey?
     @Published private(set) var keyNotice: String?
-    /// Opens Settings › General (the composer's link when a key is needed).
+    /// Opens Settings › Dictation & Briefing at the key (the composer's link when a key is needed).
     var openSettings: () -> Void = {}
     /// Opens System Settings › Privacy & Security › Microphone.
     var openPrivacy: () -> Void = { SystemMicrophone.openSettings() }

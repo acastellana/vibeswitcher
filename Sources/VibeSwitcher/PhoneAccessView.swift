@@ -9,41 +9,37 @@ struct PhoneAccessView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Toggle(isOn: $access.enabled) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Phone access over Tailscale").font(.headline)
-                    Text("See your sessions, their screens and notifications on your phone. Only devices on your tailnet, "
-                         + "logged in as you and paired below, can connect.")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
+            Text("Phone access").font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
+            SettingRow("phone-access") { label in
+                Toggle(isOn: $access.enabled) { label.stacked.font(.headline) }
+                    .toggleStyle(.switch)
             }
-            .toggleStyle(.switch)
             statusLine
             if access.state == .on {
                 Divider()
                 pairingSection
                 Divider()
-                Toggle(isOn: $access.inputAllowed) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Allow replies and key presses from the phone")
-                        Text("Your sessions can run commands on this Mac, so this is remote control of it. The tab is brought "
-                             + "to the front before typing; nothing is typed while the Mac is locked. Every input is logged "
-                             + "and announced here.")
-                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                Toggle(isOn: $access.devPagesAllowed) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Allow opening dev pages")
-                        Text("Localhost pages open in Chrome on this Mac can be opened from your paired phone.")
-                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        if access.devPagesAllowed { chromeAccessLine }
-                        if let problem = access.devPagesProblem {
-                            Text(problem).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                SettingRow("phone-replies") { label in
+                    Toggle(isOn: $access.inputAllowed) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            label.stacked
+                            Text("The tab is brought to the front before typing; nothing is typed while the Mac is locked. Every input is announced here.")
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
-                Toggle("Phone notifications only while I'm away from the Mac", isOn: $access.pushOnlyWhenAway)
+                SettingRow("phone-dev-pages") { label in
+                    Toggle(isOn: $access.devPagesAllowed) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            label.stacked
+                            if access.devPagesAllowed { chromeAccessLine }
+                            if let problem = access.devPagesProblem {
+                                Text(problem).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+                SettingRow("phone-push-away") { label in Toggle(isOn: $access.pushOnlyWhenAway) { label.stacked } }
                 devicesSection
                 activitySection
             }
@@ -54,7 +50,7 @@ struct PhoneAccessView: View {
 
     /// Whether macOS lets VibeSwitcher read Chrome's tabs, and the one action that fixes it if not.
     @ViewBuilder private var chromeAccessLine: some View {
-        HStack(spacing: 6) {
+        SettingRow("phone-chrome") { _ in HStack(spacing: 6) {
             switch access.chromeAccess {
             case .allowed?:
                 Text("Chrome access: allowed ✓").foregroundStyle(.green)
@@ -77,6 +73,7 @@ struct PhoneAccessView: View {
         }
         .font(.caption)
         .onAppear { if access.chromeAccess == nil { access.checkChromeAccess(ask: false) } }
+        }
     }
 
     @ViewBuilder private var statusLine: some View {
@@ -98,6 +95,8 @@ struct PhoneAccessView: View {
     }
 
     @ViewBuilder private var pairingSection: some View {
+        SettingRow("phone-pair") { label in
+        VStack(alignment: .leading) {
         if let pairing = access.pairing, let url = access.pairingURL {
             HStack(alignment: .top, spacing: 16) {
                 if let qr = Self.qrCode(for: url.absoluteString) {
@@ -119,17 +118,20 @@ struct PhoneAccessView: View {
             }
         } else {
             HStack {
-                Text("Add a phone").font(.callout)
+                label.stacked
                 Spacer()
                 Button("Pair a Phone…") { access.startPairing() }
             }
+        }
+        }
         }
     }
 
     @ViewBuilder private var devicesSection: some View {
         if !access.devices.isEmpty {
+            SettingRow("phone-devices") { label in
             VStack(alignment: .leading, spacing: 6) {
-                Text("Paired devices").font(.subheadline.weight(.semibold))
+                label.stacked.font(.subheadline.weight(.semibold))
                 ForEach(access.devices) { device in
                     HStack {
                         Image(systemName: device.push != nil ? "bell.fill" : "iphone").foregroundStyle(.secondary)
@@ -146,12 +148,14 @@ struct PhoneAccessView: View {
                     }
                 }
             }
+            }
         }
     }
 
     @ViewBuilder private var activitySection: some View {
         if !access.recentActivity.isEmpty {
-            DisclosureGroup("Activity log") {
+            SettingRow("phone-activity") { label in
+            DisclosureGroup {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
                         ForEach(access.recentActivity, id: \.self) { line in
@@ -161,8 +165,9 @@ struct PhoneAccessView: View {
                     }
                 }
                 .frame(maxHeight: 120)
-            }
+            } label: { label.stacked }
             .font(.callout)
+            }
         }
     }
 

@@ -1,31 +1,36 @@
 # VibeSwitcher
 
-A macOS app that keeps track of every Claude Code and Codex session on your Mac, tells you which one needs you, and
-can run a small team of Claude sessions on a repository for you.
+A macOS app with a project lead that runs a team of coding agents on your repository, on top of tracking every Claude
+Code and Codex session on your Mac.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/lead-dark.png">
-  <img alt="The main window: a project lead's chat with its team strip, an all-done card and the sessions list" src="docs/images/lead-light.png">
+  <img alt="A project lead's chat: its team strip, an all-done card and two questions waiting for you" src="docs/images/lead-light.png">
 </picture>
 
 ## What it does
 
+You tell a project lead what you want. It plans the work, starts workers in their own git worktrees, gets the risky
+work reviewed, merges what passes and reports back, and asks you only what's yours to decide. Underneath is the session
+switcher it started as: every Claude Code and Codex session on the Mac, with a live status and one click to reach it.
+
+- **Leads a project.** A project lead is one Claude session per repository. It keeps a board of tasks with contracts,
+  runs up to 3 workers at once (Claude or Codex), and records its decisions and progress in the repository.
+- **Checks work before it lands.** A read-only verifier audits risky changes, a risk check reads each branch's diff,
+  and once a project has a test command, nothing reaches your branch unless its tests pass on it.
+- **Stops when something looks wrong.** If the agents' own config changes while a team runs, or your branch moves under
+  a lead, work waits for your click.
 - **Shows every session at a glance.** One dot per session in the menu bar: red needs you, orange is working, blue
   has background work, green is done and unread, grey is idle.
-- **Takes you to it.** Click a dot to jump to that session's Terminal tab, or open the main window: a list of all
-  sessions, each one's live terminal or a readable chat, and an inspector.
 - **Runs sessions itself.** New sessions run in VibeSwitcher's own window, in a background session host that keeps
   them alive when the app quits, crashes or updates.
 - **Lets you answer from the chat.** Questions and permission prompts show as cards you answer with a click. While the
   agent works, a message you send steers it at its next step.
-- **Leads a project.** A project lead is one Claude session per repository. You tell it what you want; it plans tasks,
-  starts workers in their own git worktrees, has risky work audited, merges what passes its tests and tells you what
-  landed.
 - **Works from your phone.** Over Tailscale, a paired phone sees the list, each screen, notifications and the leads'
   questions, and can answer them if you allow it.
 
-It's for people who run several coding agents at once and lose track of which one is waiting. Everything stays on your
-Mac; see [Privacy](docs/guide/architecture.md#privacy).
+It's for people who run several coding agents at once. Sessions and their transcripts stay on your Mac; see
+[Privacy](docs/guide/architecture.md#privacy) for what goes where.
 
 ## Requirements
 
@@ -72,8 +77,8 @@ only branch), so `git pull` there fails or brings nothing. Move the clone to mai
 git fetch origin --prune && git switch main && git pull
 ```
 
-Every binary in the app is signed with the Hardened Runtime; the app's only entitlement is Apple Events (to control
-Terminal).
+Every binary in the app is signed with the Hardened Runtime. The app's entitlements are Apple Events (to control
+Terminal) and the microphone (for dictation).
 More in [Getting started](docs/guide/getting-started.md).
 
 ## First run
@@ -90,9 +95,155 @@ A welcome window walks you through setup. Each step says why it's needed and can
 Settings (⌘,) › General › **Show Welcome…** brings it back. Running Claude Code sessions pick up the hooks at once;
 Codex sessions started before need a restart.
 
-## A tour
+## The project lead
 
-### Sessions and the sidebar
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/team-tab-dark.png">
+  <img alt="The lead's Team tab: tasks with their state, the scorecard, answered questions and the lead's files" src="docs/images/team-tab-light.png">
+</picture>
+
+Start a lead from the start page, ⌘K, the ⊕ menu, or `VibeSwitcher --lead FOLDER --goal "…"`. Then talk to it
+like any session. It:
+
+- plans the work into tasks, each with a contract: a goal, acceptance checks and boundaries;
+- starts up to 3 workers at once (`max_workers`), each in its own git worktree on an `agent/<task>` branch. A worker is
+  a Claude session, or a Codex one for a bounded task (the lead, verifiers and the risk check stay on Claude);
+- moves finished work along by itself (`auto_advance`): starts audits, sends findings back, merges what passes;
+- asks you only what's yours to decide, as cards in its chat, and records its decisions and progress in `docs/lead/`.
+
+When the board runs out of work it posts an all-done card with what landed and what it cost. The inspector's Team tab
+shows each task's state at a glance, and the Team strip above the chat shows it without opening the tab. Leads of
+different projects can message each other unless you turn that off in Settings › Project lead; every message shows in
+the Team tab. See [The project lead](docs/guide/project-lead.md).
+
+### Merge gates and reviews
+
+A task is reviewed at one of two levels, and the lead picks audit for security, irreversible or complex work. Others
+get raised to it anyway:
+
+- **The risk check** reads a review-none task's diff before it merges. Over 400 changed lines (`risk_lines`), code that
+  deletes or rewrites files, changes permissions, spawns processes or adds locks or threads, a change to the test or
+  build setup, or tests taken out: all go to audit. A small Claude model can raise it too. Nothing here can lower it.
+- **Sensitive paths** (`.claude/`, `.github/`, `.env`, entitlements and the like) are always audited.
+- **A random sample** (10 % by default) of the rest is audited anyway, for tasks `auto_advance` moves on (the default).
+
+An audit is a read-only verifier, on a different model from the workers unless you say otherwise, working from the
+contract with real commands. It can run as 1 to 3 finders with different focuses. An Important finding blocks the merge
+until it's fixed or dismissed with a reason. After 2 failed rounds the lead re-plans or starts the task over instead of
+sending it back again.
+
+A merge takes exactly the commit that was checked, rebases it onto the lead's branch in a worktree no agent works in,
+runs the project's tests there and fast-forwards. There's never a force, and any merge can be undone with a revert
+commit. A project with no `test_command` runs no tests: audited work still merges and is logged as merged without
+tests, and a task that wasn't audited is refused. `merge_policy` decides what waits for you: `auto`, `ask_sensitive`
+(how merges go until you choose) or `ask_all`.
+
+The lead can change its project's review rules, but not below a floor: Settings › Project lead › **Review rules floor**
+sets the least each project may have. The floor starts at the project's rules when its lead first starts, with `auto`
+for a merge policy nobody has chosen, so raise it to keep a lead from loosening them. The lead doesn't push on its own
+either: it asks, and only your click on the card's **Push** sends that exact commit, as a fast-forward.
+
+### The config seal and Accept cards
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/config-held-dark.png">
+  <img alt="A card in the lead's chat naming the agents' config that changed while the team ran, with an Accept button" src="docs/images/config-held-light.png">
+</picture>
+
+Workers, verifiers and a branch's tests run as you, so they could write what your next session loads: `~/.claude`
+settings, hooks, skills and MCP servers, shell startup files, git config, the main checkout's `.git`. The session host
+keeps a hash of each. If one changed while the team ran, no new worker or verifier starts and nothing merges until you
+click **I Changed Them: Accept** on the card, which names what changed and when. A hook, MCP server or shell startup
+file waits for that click whoever changed it. This detects a change; it doesn't prevent one.
+
+If the lead's branch moves by something other than its own merges, its merges are refused until you pick **Accept
+These Commits** or **Keep Refused** on a similar card.
+
+### Boost and the Mac-wide limits
+
+Every project on the Mac shares one set of limits, in Settings › Performance: team sessions (10), the load above which
+leads start nothing (twice the cores), and test and build slots (the cores ÷ 6). A lead that's refused is told when
+there's room again. On battery below 50 %, leads start and merge nothing new; at 80 % of a Claude usage limit they stop
+starting work unless you turn on **Ignore usage limits**.
+
+**Boost** raises those limits (load 36, 18 team sessions, 7 workers per project, 3 slots by default, each editable).
+It's Off, On or Automatic, which boosts only while you're away and on AC power. An orange bolt shows in the toolbar
+while it's on.
+
+### The scorecard and Statistics
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/statistics-dark.png">
+  <img alt="The Statistics window: this week's scorecard against last week's, then quality figures" src="docs/images/statistics-light.png">
+</picture>
+
+The Team tab's scorecard shows four numbers for the lead: audit rounds to pass, the share passing the first audit,
+minutes waiting on you per task, and reverts. Every merged task keeps a receipt with its time, tokens and estimated
+cost.
+
+The **Statistics** window (the chart button in the toolbar, or Statistics… in the menu bar list's gear menu) covers all
+your projects over today, 7 or 30 days: a two-week scorecard, quality, autonomy, where the time goes, cost by who did
+the work, an 8-week trend and a per-project table. Figures are shown with how many tasks they're from; a comparison
+with working solo is labelled as an estimate.
+
+### Git provenance
+
+The top commit of each merge ends with trailers saying where it came from: `VS-Task`, `VS-Review`, `VS-Worker-Model`,
+`VS-Verifier-Model`, `VS-Build` and `VS-Contract` (a hash of the task's contract). They go wherever the commit goes.
+
+```sh
+scripts/merge-provenance.sh -n 20          # the last merges: task, review, models, build, contract
+```
+
+## Around the lead
+
+### Wallet requests
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/wallet-card-dark.png">
+  <img alt="A transaction request card: amount, chain, addresses, the agent's reason, and Send to Wallet Manager or Discard" src="docs/images/wallet-card-light.png">
+</picture>
+
+An agent can ask for a blockchain transaction with `vs-wallet request`. It shows as a card saying what the transaction
+does, and nothing leaves the Mac until you press **Send to Wallet Manager**, which hands it to a separate Wallet Manager
+app (over Passage to another Mac, or on this one) to check and sign. The card can also offer your browser's wallet.
+VibeSwitcher never signs or holds a key. Choose where requests go in Settings › Wallet. The format is in
+[wallet-request.md](docs/protocol/wallet-request.md).
+
+An agent can also ask to open a shell with `vs-shell run`: its card shows the folder and the exact command, and it runs
+when you press **Run**, unless you've let agents open shells without asking in Settings › Agents.
+
+### The phone
+
+Settings › Phone turns on a small web app for your phone, served only over your tailnet with `tailscale serve`. Pair a
+phone with a QR code. It shows the list, each screen and transcript, your leads' questions and boards, a spoken
+briefing, and push notifications. Replies, key presses, dictation and answers to a lead's questions need a separate
+switch. See [Phone access](docs/guide/phone-access.md).
+
+### Dictation and the spoken briefing
+
+Hold the mic button in the composer, or ⌥Space, and let go: the text lands at the cursor and is never sent by itself.
+Holding Space in the composer does the same, unless you turn that off. A Claude Code session in the window dictates through
+Claude's own `/voice`, with your claude.ai sign-in; anything else records on the Mac and uses OpenAI with your API key.
+
+**Brief me** (⇧⌘B, or ⌥⇧⌘B for one project) tells you in about 30 seconds what happened across your leads: what
+landed, what's stuck, what waits on you. ElevenLabs reads it if you've saved a key, else the Mac's own voice does. Both
+are set in Settings › Dictation & Briefing.
+
+### Settings
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/settings-dark.png">
+  <img alt="Settings on the Performance category, with a sidebar of categories and a search field" src="docs/images/settings-light.png">
+</picture>
+
+Settings (⌘,) has a sidebar of 12 categories: General, Notifications, Appearance, Sessions & Sidebar, Launch Presets,
+Agents, Project lead, Performance, Dictation & Briefing, Phone, Wallet and Advanced. Search (⌘F) finds any option. Each
+one says what it does in a line, and a **?** next to a section's note has the detail.
+
+## Sessions
+
+### The window and the sidebar
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/question-card-dark.png">
@@ -127,43 +278,13 @@ write back: ↩ sends (or steers a working agent), ⌥↩ queues the message for
 A shell code block in a reply has a **Run** button; a block of several lines is shown in full and asks before it
 runs.
 
-### Phone access
-
-Settings › Phone turns on a small web app for your phone, served only over your tailnet with `tailscale serve`. Pair a
-phone with a QR code. It shows the list, each screen and transcript, and push notifications. Replies and key presses,
-and answers to a lead's questions, need a separate switch. See [Phone access](docs/guide/phone-access.md).
-
-### The project lead and its team
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/team-tab-dark.png">
-  <img alt="The lead's Team tab: tasks with their state, the scorecard, answered questions and the lead's files" src="docs/images/team-tab-light.png">
-</picture>
-
-Start a lead from the start page, ⌘K, the ⊕ menu, or `VibeSwitcher --lead FOLDER --goal "…"`. Then talk to it
-like any session. It:
-
-- plans the work into tasks, each with a contract: a goal, acceptance checks and boundaries;
-- starts up to 3 workers at once (`max_workers`), each a Claude session in its own git worktree on an `agent/<task>`
-  branch;
-- has a verifier audit the risky tasks (security, irreversible, complex, or touching sensitive paths), and gives up
-  on a fix after 2 failed audit rounds to re-plan or start over instead;
-- merges each passing task onto its branch by rebase and fast-forward, after the project's tests pass, never with a
-  force;
-- asks you only what's yours to decide, as cards in its chat, and records its decisions and progress in `docs/lead/`.
-
-When the board runs out of work it posts an all-done card with what landed and what it cost. Any merge can be undone
-with a revert commit. The Team tab shows each task's state at a glance. Limits are shared across the Mac (team
-sessions, load, heavy builds), and on battery below 50 % the team starts and merges nothing new. See
-[The project lead](docs/guide/project-lead.md).
-
 ### Notifications
 
 A banner when a session needs you (with a sound) or finishes, saying what's asked: the question, the exact command
 waiting for approval, or the plan's title. One reminder follows if a session has waited on you for 10 minutes, or a
 working one has shown no progress for 15. No banner comes from the session you're looking at, and reminders wait while
 you're away from the Mac. Workers and verifiers stay quiet; their lead speaks for them. Choose what you get in
-Settings › General.
+Settings › Notifications.
 
 ### Health and freeze reports
 
@@ -186,11 +307,12 @@ and the sandbox are in [Development](docs/guide/development.md).
 
 ## Documentation
 
-- [Getting started](docs/guide/getting-started.md): install, first run, troubleshooting, logs.
-- [Everyday use](docs/guide/everyday-use.md): the window, the chat, the menu bar, notifications, briefings, the
-  command line.
-- [The project lead](docs/guide/project-lead.md): plans, contracts, workers, audits, the merge gate and every default.
-- [Phone access](docs/guide/phone-access.md): Tailscale, pairing, replies, dev pages, how it's kept safe.
+- [Getting started](docs/guide/getting-started.md): install, first run, Settings, troubleshooting, logs.
+- [Everyday use](docs/guide/everyday-use.md): the window, the chat, the menu bar, notifications, dictation, briefings,
+  Statistics, the command line.
+- [The project lead](docs/guide/project-lead.md): plans, contracts, workers, audits, the merge gate, the config seal,
+  provenance and every default.
+- [Phone access](docs/guide/phone-access.md): Tailscale, pairing, replies, dictation, dev pages, how it's kept safe.
 - [Architecture](docs/guide/architecture.md): the app, the session host, the tool server, hooks, the vault and the
   security model.
 - [Development](docs/guide/development.md): tests, lints, load tests and the sandbox.

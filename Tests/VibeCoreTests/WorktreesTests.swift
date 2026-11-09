@@ -32,6 +32,25 @@ struct WorktreesTests {
         #expect(Worktrees.mainBranch(root: root) == "main")
     }
 
+    /// A test run's output can hold anything: its logs are only the user's to read.
+    @Test func anAuditRunsLogsArePrivate() throws {
+        let root = try repo()
+        let head = Git.run(["rev-parse", "HEAD"], in: root).output
+        let logs = temp.url("audit-logs").appendingPathComponent("add-b/\(head.prefix(12))")
+        let scratches = temp.url("audit-scratch")
+        let run = Worktrees.auditRun(root: root, commit: head, setup: "echo set up", test: "echo tested", scratch: scratches.appendingPathComponent("run"),
+                                     home: scratches.appendingPathComponent("home"), logs: logs, lock: lock)
+        #expect(run.outcome == .passed, "\(run)")
+        let fm = FileManager.default
+        #expect(try Set(fm.contentsOfDirectory(atPath: logs.path)) == ["init.log", "test.log", "run.txt"])
+        #expect(run.logs == ["init.log", "test.log"].map { logs.appendingPathComponent($0).path })
+        for name in ["init.log", "test.log", "run.txt"] {
+            let attributes = try fm.attributesOfItem(atPath: logs.appendingPathComponent(name).path)
+            #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600, "\(name)")
+        }
+        #expect((try fm.attributesOfItem(atPath: logs.path)[.posixPermissions] as? NSNumber)?.intValue == 0o700)
+    }
+
     func scratch() -> URL { temp.url("wt-scratch").appendingPathComponent("merge") }
 
     /// The test and build lock a merge's tests take: a scratch one, never the Mac-wide one other runs hold.
@@ -68,6 +87,28 @@ struct WorktreesTests {
         #expect(await eventually { !inside.isRunning })
         #expect(outside.isRunning)
         #expect(!FileManager.default.fileExists(atPath: worktree))
+    }
+
+    /// What a branch holds beyond its merge: a rebased, stamped copy on the base isn't, by the head the merge took or
+    /// (a record older than that field) by patch; a commit made after it is; a branch that's gone holds nothing.
+    @Test func aBranchHoldsOnlyWhatDidntMergeNotTheStampedCopy() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "add-b")
+        try commit("b.txt", "bee\n", in: worktree)
+        let merged = Git.run(["rev-parse", "agent/add-b"], in: root).output
+        #expect(Git.run(["cherry-pick", merged], in: root).ok)
+        #expect(Git.run(["commit", "--amend", "-q", "-m", "change b.txt\n\nVS-Task: add-b"], in: root).ok)
+        #expect(Git.run(["rev-parse", "main"], in: root).output != merged)
+        #expect(try Worktrees.unmerged(root: root, slug: "add-b", base: "main", merged: merged).get() == [])
+        #expect(try Worktrees.unmerged(root: root, slug: "add-b", base: "main", merged: nil).get() == [])
+
+        try commit("late.txt", "late\n", in: worktree)
+        let late = Git.run(["rev-parse", "agent/add-b"], in: root).output
+        #expect(try Worktrees.unmerged(root: root, slug: "add-b", base: "main", merged: merged).get() == [late])
+        #expect(try Worktrees.unmerged(root: root, slug: "add-b", base: "main", merged: nil).get() == [late])
+
+        try Worktrees.remove(root: root, slug: "add-b", force: true)
+        #expect(try Worktrees.unmerged(root: root, slug: "add-b", base: "main", merged: merged).get() == [])
     }
 
     @Test func aPassingBranchFastForwardsMainAndIsCleanedUp() throws {

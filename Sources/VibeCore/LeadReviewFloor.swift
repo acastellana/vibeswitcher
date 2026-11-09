@@ -68,7 +68,7 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
     }
 
     /// Where the user changes it, as a refusal names it.
-    public static let place = "VibeSwitcher's Settings › General › Project lead › Review rules floor"
+    public static let place = "VibeSwitcher's Settings › Project lead › Review rules floor"
 
     /// The keys of workflow.md it's a floor for.
     public static let keys = ["sensitive_paths", "strict_paths", "audit_finders", "merge_policy", "risk_lines", "risk_model", "verifier_model",

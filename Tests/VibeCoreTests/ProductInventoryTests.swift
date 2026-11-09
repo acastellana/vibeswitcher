@@ -42,7 +42,15 @@ struct ProductInventoryTests: LeadTeamFixture {
         let titles = source.matches(of: #/item\("([^"]+)"/#).map { String($0.output.1) }.filter { $0 != "Services" && !$0.hasPrefix("Session ") }
         #expect(titles.count > 40)
         for title in titles { #expect(text.contains(" › \(title)"), "menu item \(title) missing") }
-        for tab in ["General", "Agents", "Phone", "Launch", "Terminal", "Wallet"] { #expect(text.contains("\n### \(tab)\n- Settings › \(tab) tab")) }
+        for category in ["General", "Notifications", "Appearance", "Sessions & Sidebar", "Launch Presets", "Agents", "Project lead", "Performance",
+                         "Dictation & Briefing", "Phone", "Wallet", "Advanced"] {
+            #expect(text.contains("\n### \(category)\n- Settings › \(category) — `Sources/VibeSwitcher/SettingsCatalog.swift`\n"), "\(category)")
+        }
+        // Every option in the catalog, listed by its section and title.
+        for option in ["- Startup: Open at login — `Sources/VibeSwitcher/SettingsWindow.swift`", "- Usage limits: Ignore usage limits — `Sources/VibeSwitcher/MacLimitsSettings.swift`",
+                       "- Review rules floor: Merge policy, at least — `Sources/VibeSwitcher/ReviewFloorSettings.swift`"] {
+            #expect(text.contains("\n" + option + "\n"), "\(option)")
+        }
         #expect(text.contains("\n## Sandbox (`scripts/sandbox-app.sh`)\n") && text.contains("- `sheet NAME`"))
         // Each entry names its source file, and every curated feature's code was found.
         let entries = text.split(separator: "\n").filter { $0.hasPrefix("- ") }
@@ -130,7 +138,7 @@ struct ProductInventoryTests: LeadTeamFixture {
         #expect(Git.run(["show", "main:\(ProductInventory.output)"], in: root).output == "# Inventory\na.txt\nb.txt")
         let status = Git.run(["status", "--porcelain", "--", "docs"], in: root).output
         #expect(status.isEmpty, "\(status)")
-        #expect(vault.head(root: root, branch: "main") == records)
+        #expect(try vault.head(root: root, branch: "main") == records)
         #expect(runs(runsFile) == 1)
 
         // Records alone, and a merge outside the inputs: the script isn't run again, and nothing else goes in.

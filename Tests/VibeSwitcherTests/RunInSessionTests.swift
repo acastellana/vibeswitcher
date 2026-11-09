@@ -121,10 +121,14 @@ struct RunInSessionTests {
         try await h.waitFor { !ChatSync.alive(pid: Int32(pid), on: h.session.tty) }
         try await h.waitFor { ProcessTable.holdsForeground(pid: shell) == true }
         h.targetAgent = nil
+        // Its prompt, in the pane: the process table says the shell is back before the pane has read the agent's last
+        // output, and until it has, the Run reads the agent's paste mode there and sends /bin/sh paste markers.
+        try await h.paneShows { $0.split(separator: "\n").last?.hasSuffix("$") == true }
         // At its prompt: typed as it is, no `!`.
         let ran = try await Self.run("echo RAN_$((6*7))", h)
         #expect(ran == .some(nil))
-        try await h.paneShows { $0.contains("RAN_42") }
+        // And the prompt after it: drawn once the screen is taken as `before` below, it would count as something typed.
+        try await h.paneShows { $0.contains("RAN_42") && $0.split(separator: "\n").last?.hasSuffix("$") == true }
         // A program in the foreground: refused, saying why, and nothing typed into it.
         h.keys("sleep 30\r")
         try await h.waitFor { ProcessTable.holdsForeground(pid: shell) == false }

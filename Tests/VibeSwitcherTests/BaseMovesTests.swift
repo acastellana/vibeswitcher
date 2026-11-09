@@ -127,7 +127,7 @@ final class BaseMovesTests {
 
         moves.accept(root)
         #expect(moves.asking.isEmpty)
-        #expect(app.head(root: root, branch: "main") == move.to)
+        #expect(try app.head(root: root, branch: "main") == move.to)
         #expect(app.headMoved(root: root, branch: "main") == nil)
         #expect(taken.count == 1 && taken.first?.byYou == true)
         #expect(board().updates.last?.body.hasPrefix("You accepted 1 commit on main") == true)
@@ -136,14 +136,14 @@ final class BaseMovesTests {
     }
 
     @Test func keptRefusedIsNotAskedAgainUntilItMovesAgain() throws {
-        let left = try #require(app.head(root: root, branch: "main"))
+        let left = try #require(try app.head(root: root, branch: "main"))
         try commit("b.txt")
         let moves = moves()
         moves.look([root])
         #expect(moves.asking[root] != nil)
         moves.keepRefused(root)
         #expect(moves.asking.isEmpty)
-        #expect(app.head(root: root, branch: "main") == left)
+        #expect(try app.head(root: root, branch: "main") == left)
         moves.look([root], now: Date().addingTimeInterval(60))
         #expect(moves.asking.isEmpty)
         #expect(asked.count == 1)
@@ -192,7 +192,7 @@ final class BaseMovesTests {
 
     @Test func aCommitOnABaseSwitchedSinceTheLastLookIsAskedAboutAndTheMergeSaysSo() throws {
         let (moves, worktree) = try switchedBase()
-        let left = try #require(app.head(root: root, branch: "fair-launch"))
+        let left = try #require(try app.head(root: root, branch: "fair-launch"))
         // A terminal, or a `!` line typed straight into the session's terminal: nothing accounts for it.
         commit("README.md", in: worktree)
         let now = Git.run(["rev-parse", "fair-launch"], in: root).output
@@ -234,7 +234,7 @@ final class BaseMovesTests {
         #expect(moves.asking.isEmpty)
         #expect(asked.isEmpty)
         #expect(takers == [.typed])
-        #expect(app.head(root: root, branch: "fair-launch") == now)
+        #expect(try app.head(root: root, branch: "fair-launch") == now)
         let update = try #require(board().updates.last)
         #expect(update.body.hasPrefix("accepted 1 commit on fair-launch that you ran from VibeSwitcher's window"), "\(update.body)")
         // Used up: a later commit nobody accounts for is asked about.

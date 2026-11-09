@@ -38,19 +38,22 @@ public final class ShellCancel: @unchecked Sendable {
 private final class PipeText: @unchecked Sendable {
     private let lock = NSLock()
     private var data = Data()
-    private var lastRead: Date?
+    private var lastRead: TimeInterval?
+    private let now: () -> TimeInterval
+
+    init(now: @escaping () -> TimeInterval) { self.now = now }
 
     func drain(_ handle: FileHandle) {
         while case let chunk = handle.availableData, !chunk.isEmpty {
             lock.lock()
             data.append(chunk)
-            lastRead = Date()
+            lastRead = now()
             lock.unlock()
         }
     }
 
-    /// When output last came, nil before any.
-    var last: Date? {
+    /// When output last came, on the run's clock (`now`), nil before any.
+    var last: TimeInterval? {
         lock.lock()
         defer { lock.unlock() }
         return lastRead
@@ -249,9 +252,14 @@ public enum Shell {
     /// the lead's terminal) isn't stopped by SIGTTOU as it takes the terminal from a background group.
     /// With `watch`, a run that makes no progress (no new output, almost no CPU in its tree, the Mac not loaded) for
     /// its `after` is stopped as one past `timeout` is: `timedOut`, with `stall` saying what it was stuck on.
+    /// `timeout`, the watch's `after` and what's said of its silence count the time the Mac was awake (`time`).
     public static func run(executable: String, args: [String], in directory: String, env: [String: String] = [:],
                            timeout: TimeInterval = 120, grace: TimeInterval = 5, interleaved: Bool = false,
-                           branchCode: Bool = false, ownSession: Bool = false, watch: StallWatch? = nil) -> Git.Result {
+                           branchCode: Bool = false, ownSession: Bool = false, watch: StallWatch? = nil,
+                           time: MacTime = .real) -> Git.Result {
+        // Its limits count the time the Mac was awake. On 2026-11-08 a merge's run had 4.9 minutes awake out of 51.8:
+        // the first look after a dark wake found test_timeout_min passed and called it hung, and the merges behind it waited.
+        let now = time.awake
         let environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
         let out: ShellPipe, err: ShellPipe
         do {
@@ -276,7 +284,7 @@ public enum Shell {
         // Read while it runs, so a chatty program can't fill the pipe and stall.
         // Their own threads, not the shared pool: callers block too, and many at once (parallel tests, several tool
         // calls) could leave the readers no thread to run on.
-        let output = PipeText(), errors = PipeText()
+        let output = PipeText(now: now), errors = PipeText(now: now)
         let readers = DispatchGroup()
         readers.enter()
         Thread.detachNewThread { output.drain(out.reading); readers.leave() }
@@ -285,26 +293,27 @@ public enum Shell {
             readers.enter()
             Thread.detachNewThread { errors.drain(err.reading); readers.leave() }
         }
-        let began = Date()
-        let deadline = began.addingTimeInterval(timeout)
+        let began = now()
+        let deadline = began + timeout
         let cancel = ShellCancel.current
-        var judge = watch.map { StallWatch.Judge(after: $0.after, loadLimit: $0.loadLimit, start: Date()) }
-        var nextLook = Date(), stall: StallWatch.Stall?
-        while process.isRunning, Date() < deadline, cancel?.isCancelled != true {
-            if let watch, Date() >= nextLook {
+        var judge = watch.map { StallWatch.Judge(after: $0.after, loadLimit: $0.loadLimit, start: Date(timeIntervalSinceReferenceDate: now())) }
+        var nextLook = now(), stall: StallWatch.Stall?
+        while process.isRunning, now() < deadline, cancel?.isCancelled != true {
+            if let watch, now() >= nextLook {
                 let members = StallWatch.tree(of: pid, group: group)
                 let look = StallWatch.Look(output: output.count + errors.count,
                                            cpu: members.map { Dictionary($0.map { ($0.pid, $0.cpu) }, uniquingKeysWith: max) },
                                            load: watch.load())
-                let now = Date()
-                if judge?.observe(look, at: now) == true, process.isRunning {
+                let looked = now()
+                let at = Date(timeIntervalSinceReferenceDate: looked)
+                if judge?.observe(look, at: at) == true, process.isRunning {
                     // What it was stuck on, read before it's stopped: no debugger, no sample; the kernel's records.
-                    let (test, tail) = StallWatch.stuck(in: output.text + (interleaved ? "" : "\n" + errors.text))
-                    stall = StallWatch.Stall(idle: judge?.idle(at: now) ?? watch.after, load: look.load, loadLimit: watch.loadLimit,
-                                             lastTest: test, processes: StallWatch.lines(members ?? []), tail: tail)
+                    let (test, unknown, tail) = StallWatch.stuck(in: output.text + (interleaved ? "" : "\n" + errors.text))
+                    stall = StallWatch.Stall(idle: judge?.idle(at: at) ?? watch.after, load: look.load, loadLimit: watch.loadLimit,
+                                             lastTest: test, unknownTests: unknown, processes: StallWatch.lines(members ?? []), tail: tail)
                     break
                 }
-                nextLook = now.addingTimeInterval(watch.every)
+                nextLook = looked + watch.every
             }
             usleep(20_000)
         }
@@ -314,7 +323,7 @@ public enum Shell {
             timedOut = !cancelled
             // How long it had written nothing (since it started, when it never wrote), read before it's stopped.
             let heard = [output.last, errors.last].compactMap { $0 }.max() ?? began
-            quiet = timedOut ? max(0, Date().timeIntervalSince(heard)) : nil
+            quiet = timedOut ? max(0, now() - heard) : nil
             if cancelled { stall = nil }
             // Out of time: its children (a test runner's workers) go too, or they'd keep running in the worktree.
             // Asked first; whatever is still there after `grace` (it ignores TERM) is killed.
@@ -1287,7 +1296,8 @@ public enum Worktrees {
     /// it is a cancel.
     static func runChecks(setup: String?, test: String?, in path: String, home: String, timeout: TimeInterval,
                           lock: TestLock? = nil, as holder: String = "VibeSwitcher's test run", place: String? = nil,
-                          rerun: ((String) -> String?)? = nil, baseline: Baseline? = nil, begun: ((Date) -> Void)? = nil)
+                          rerun: ((String) -> String?)? = nil, baseline: Baseline? = nil, begun: ((Date) -> Void)? = nil,
+                          time: MacTime = .real)
         -> (stopped: Check?, outputs: [(name: String, output: String)]) {
         let cancel = ShellCancel.current
         let tmp = home + "/tmp"
@@ -1306,7 +1316,7 @@ public enum Worktrees {
         let runs = [setup, test].contains { !($0 ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
         if let lock, runs {
             let slots = lock.slots == 1 ? "its one slot" : "all \(lock.slots) slots"
-            let outcome = lock.acquire(as: holder, in: place, timeout: timeout, cancel: cancel, every: progress?.every ?? 30,
+            let outcome = lock.acquire(as: holder, in: place, timeout: timeout, cancel: cancel, every: progress?.every ?? 30, time: time,
                                        waiting: progress.map { progress in { holders, ahead, waited in
                 progress.send("Waiting \(duration(waited)) for a slot of the Mac-wide test and build lock (\(slots) held), \(TestLock.place(behind: ahead)): \(TestLock.text(holders)).")
             } })
@@ -1347,7 +1357,7 @@ public enum Worktrees {
             let started = Date()
             let stop = progress?.heartbeat { "Running the failing tests once on the base \(baseline.commit.prefix(8)), record only (\(duration(Date().timeIntervalSince(started))) so far)." }
             let run = Shell.run(executable: "/bin/zsh", args: ["-lc", "export HOME=\(RecentProjects.shellQuote(home))\n" + command], in: path, env: env,
-                                timeout: timeout, interleaved: true, branchCode: true, watch: lock?.watch)
+                                timeout: timeout, interleaved: true, branchCode: true, watch: lock?.watch, time: time)
             stop?()
             if run.cancelled || cancel?.isCancelled == true { return true }
             baseline.heard(run.stall != nil || run.timedOut ? .hung : .ran(ok: run.ok, output: run.output))
@@ -1368,7 +1378,7 @@ public enum Worktrees {
             let stop = progress?.heartbeat { "Running the \(name) (\(duration(Date().timeIntervalSince(started))) so far)." }
             // The branch's code (its build, its tests): never the lead to the session host (see `BranchCode`).
             let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path, env: env, timeout: timeout, interleaved: true,
-                                branchCode: true, watch: lock?.watch)
+                                branchCode: true, watch: lock?.watch, time: time)
             stop?()
             // A run stopped for making no progress says so first, then what it was stuck on, after its output.
             // Stopped at test_timeout_min, it says how long it had been silent: a crawl keeps writing, a stuck one doesn't.
@@ -1399,7 +1409,8 @@ public enum Worktrees {
     /// An audit's shared run (audit_finders 2 or 3): `setup` and `test` on exactly `commit`, as the branch is (not
     /// rebased), in a detached worktree of its own at `scratch` under a scratch home, both removed afterwards. Each
     /// command's whole output goes to `<logs>/init.log` and `<logs>/test.log` for the finders to read, with
-    /// `<logs>/run.txt` saying how it went (written last: a folder without it holds no finished run).
+    /// `<logs>/run.txt` saying how it went (written last: a folder without it holds no finished run). A test run's
+    /// output can hold anything: `logs` is made 0700 and each file 0600.
     public static func auditRun(root: String, commit: String, setup: String?, test: String?, scratch: URL, home: URL,
                                 logs: URL, timeout: TimeInterval = testTimeout, lock: TestLock?) -> AuditRun {
         let path = scratch.path, homePath = home.path
@@ -1415,7 +1426,7 @@ public enum Worktrees {
         if FileManager.default.fileExists(atPath: path) || FileManager.default.fileExists(atPath: homePath) { remove() }
         try? FileManager.default.removeItem(at: logs)
         do {
-            try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+            try VibePaths.ensurePrivate(logs)
             try FileManager.default.createDirectory(at: scratch.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
         } catch { return AuditRun(outcome: .error("Couldn't make \(logs.path) for the run's logs: \(error.localizedDescription)"), logs: []) }
@@ -1429,7 +1440,7 @@ public enum Worktrees {
         var files: [String] = []
         for (name, output) in outputs {
             let file = logs.appendingPathComponent(name == "init_command" ? "init.log" : "test.log")
-            if (try? Data(output.utf8).write(to: file, options: .atomic)) != nil { files.append(file.path) }
+            if (try? VibePaths.writePrivate(Data(output.utf8), to: file)) != nil { files.append(file.path) }
         }
         let outcome: AuditRun.Outcome
         switch stopped {
@@ -1441,7 +1452,7 @@ public enum Worktrees {
         case .passed, .passedOnRerun, .conflict: outcome = .error("unexpected")
         }
         if case .cancelled = outcome { return AuditRun(outcome: outcome, logs: files) }
-        try? Data((outcome.text + "\n").utf8).write(to: logs.appendingPathComponent("run.txt"), options: .atomic)
+        try? VibePaths.writePrivate(Data((outcome.text + "\n").utf8), to: logs.appendingPathComponent("run.txt"))
         return AuditRun(outcome: outcome, logs: files)
     }
 
@@ -1879,6 +1890,20 @@ public enum Worktrees {
         guard deleted.ok else { throw Failure(description: deleted.error) }
     }
 
+    /// The commits on `agent/<slug>` a merge didn't take, newest first: on neither `base` nor behind `merged`, the
+    /// branch's head that merge took (what landed is a rebased, stamped copy with another hash, or a squash, so the base
+    /// alone can't tell). Without `merged` (a record older than the field), by patch: the rebased copies are left out,
+    /// and a squashed merge's commits count as not merged, kept rather than lost. Empty when the branch is gone; a
+    /// failure when git can't say.
+    public static func unmerged(root: String, slug: String, base: String, merged: String?) -> Swift.Result<[String], Failure> {
+        let ref = "refs/heads/\(branch(slug))", onBase = "refs/heads/\(base)"
+        guard Git.run(["rev-parse", "--verify", "--quiet", ref], in: root).ok else { return .success([]) }
+        let listed = merged.map { Git.run(["rev-list", ref, "--not", onBase, $0], in: root) }
+            ?? Git.run(["rev-list", "--cherry-pick", "--right-only", "--no-merges", "\(onBase)...\(ref)"], in: root)
+        guard listed.ok else { return .failure(Failure(description: listed.error)) }
+        return .success(listed.output.split(separator: "\n").map(String.init))
+    }
+
     /// Where `branch` is checked out, if anywhere.
     static func checkout(of branch: String, root: String) -> String? {
         var current: String?
@@ -2152,14 +2177,15 @@ public struct TestFailures: Equatable, Sendable {
     public var lines: [String] = []
     /// Swift Testing's closing line ("✘ Test run with 547 tests failed after … with 1 issue.").
     public var run: String?
-    /// Tests that started and never ended (the test process crashed or was stopped).
+    /// Tests that printed their start and never ended (the test process crashed or was stopped): some may only have
+    /// been queued for a slot, so this says a run stopped partway, not what was running (`running`).
     public var unfinished: [String] = []
     /// Error lines that name no test: the compiler's, a crash's.
     public var errors: [String] = []
 
     public init(output: String) {
         // Lines since the last issue line, while they may still be part of it.
-        var started: [String] = [], ended: Set<String> = [], inIssue: Int?
+        var started: [String] = [], ended: [String] = [], inIssue: Int?
         for raw in output.components(separatedBy: "\n") {
             let plain = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
             let line = plain.trimmingCharacters(in: .whitespaces)
@@ -2181,12 +2207,12 @@ public struct TestFailures: Equatable, Sendable {
                 // A failure with no issue line of its own (a time limit) still shows.
                 if !tests.contains(name) { lines.append(line) }
                 add(name)
-                ended.insert(name)
+                ended.append(name)
             } else if let name = Self.swiftTesting(line, " started.", marks: ["◇"]) {
                 started.append(name)
             } else if let name = Self.swiftTesting(line, " passed after", marks: ["✔", "􁁛", "➜", "􀟈"]) ?? Self.swiftTesting(line, " skipped")
                         ?? Self.passedWithKnownIssues(line) {
-                ended.insert(name)
+                ended.append(name)
             } else if line.range(of: #"^[✘􀢄] Test run with "#, options: .regularExpression) != nil {
                 run = line
             } else if let match = line.range(of: #": error: -?\[?[^ :\]]+[ .][^ :\]]+\]? : "#, options: .regularExpression) {
@@ -2200,7 +2226,21 @@ public struct TestFailures: Equatable, Sendable {
                 errors.append(line)
             }
         }
-        unfinished = started.filter { !ended.contains($0) }
+        unfinished = Self.stillOpen(started, ended: ended)
+    }
+
+    /// The unfinished tests that were executing: the only one, when there's just one (`MergeRerun.running` says why
+    /// two or more can't be told from queued ones). Swift Testing's lines only, as `unfinished` is.
+    public var running: [String] { unfinished.count == 1 ? unfinished : [] }
+
+    /// `started` without one start for each of `ended`, in order: a test that started twice and ended once is still open.
+    static func stillOpen(_ started: [String], ended: [String]) -> [String] {
+        var left = Dictionary(ended.map { ($0, 1) }, uniquingKeysWith: +)
+        return started.filter { name in
+            guard let count = left[name], count > 0 else { return true }
+            left[name] = count - 1
+            return false
+        }
     }
 
     /// The files the compiler's errors are in ("/path/File.swift:51:10: error: …"), in the order they first appear.
@@ -2252,7 +2292,12 @@ public struct TestFailures: Equatable, Sendable {
             head = ["Failing tests (\(tests.count)): \(tests.prefix(20).joined(separator: ", "))\(more)"]
             body = lines + [run].compactMap { $0 }
         } else if !unfinished.isEmpty || !errors.isEmpty {
-            if !unfinished.isEmpty { head.append("Started and never finished: \(unfinished.joined(separator: ", "))") }
+            if !running.isEmpty {
+                head.append("Started and never finished: \(running.joined(separator: ", "))")
+            } else if !unfinished.isEmpty {
+                let said = MergeRerun.cantTell(unfinished.count)
+                head.append(said.prefix(1).uppercased() + said.dropFirst())
+            }
             body = errors + [run].compactMap { $0 }
             if !errors.isEmpty { head.append(unfinished.isEmpty ? "No test failed by name; the errors:" : "The errors:") }
         } else {

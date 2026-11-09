@@ -193,12 +193,12 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         let lead = try lead(root, runtime)
         let worktree = try reported(lead, runtime, root: root)
         try passingAudit(lead, runtime)
-        let known = try #require(vault.head(root: root, branch: "main"))
+        let known = try #require(try vault.head(root: root, branch: "main"))
         let unaudited = Git.run(["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "unaudited"], in: worktree).output
         #expect(Git.run(["update-ref", "refs/heads/main", unaudited], in: worktree).ok)
 
         let restarted = try self.lead(root, runtime)
-        #expect(vault.head(root: root, branch: "main") == known)
+        #expect(try vault.head(root: root, branch: "main") == known)
         #expect(vault.headMoved(root: root, branch: "main")?.now == unaudited)
         let merged = restarted.call("merge", ["task": "add-b"])
         #expect(merged.isError)
@@ -208,7 +208,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         // You moved it (you say so in the app): from now on merges start from there.
         let grant = try vault.startLead(root: root, branch: "main", takeHead: true)
         try vault.bind(grant, root: root, session: try #require(runtime.me.session))
-        #expect(vault.head(root: root, branch: "main") == unaudited)
+        #expect(try vault.head(root: root, branch: "main") == unaudited)
         #expect(vault.headMoved(root: root, branch: "main") == nil)
         let taken = LeadToolset(root: root, runtime: runtime, vault: vault(for: runtime)).call("merge", ["task": "add-b"])
         #expect(!taken.text.contains("moved since the lead last left it"), "\(taken.text)")
@@ -232,7 +232,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
             #expect(!merged.isError, "\(merged.text)")
         }
         #expect(FileManager.default.fileExists(atPath: root + "/one.txt") && FileManager.default.fileExists(atPath: root + "/two.txt"))
-        #expect(vault.head(root: root, branch: "main") == head("main", root))
+        #expect(try vault.head(root: root, branch: "main") == head("main", root))
     }
 
     @Test func aFastForwardIsOnlyFromTheHeadThatWasChecked() throws {
@@ -259,8 +259,34 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         let worktree = try reported(lead, runtime, root: root)
         try passingAudit(lead, runtime)
         let audited = head("agent/add-b", root)
+        let base = head("main", root)
         // While the tests run, the worker commits and edits in its worktree; the tests read b.txt.
         let set = lead.call("configure", ["test_command": "grep -q bee b.txt && echo late > \(worktree)/late.txt && git -C \(worktree) add late.txt && git -C \(worktree) commit -qm late && echo evil > \(worktree)/b.txt"])
+        #expect(!set.isError, "\(set.text)")
+        let merged = lead.call("merge", ["task": "add-b"])
+        // The run tested the audited commit and the branch is past it now: neither the late commit nor the older one
+        // lands, and the late commit stays on the branch (cleanup would have deleted it behind a landed merge).
+        let late = head("agent/add-b", root)
+        #expect(late != audited)
+        #expect(merged.isError, "\(merged.text)")
+        #expect(merged.text.contains(String(audited.prefix(8))) && merged.text.contains(String(late.prefix(8))), "\(merged.text)")
+        #expect(head("main", root) == base)
+        #expect(!Git.run(["cat-file", "-e", "main:late.txt"], in: root).ok)
+        #expect(!FileManager.default.fileExists(atPath: root + "/late.txt"))
+        #expect(Git.run(["cat-file", "-e", "agent/add-b:late.txt"], in: root).ok)
+        let task = try #require(BoardStore(root: root).load().task("add-b"))
+        #expect(task.status == .review && task.merged == nil, "\(task.status)")
+    }
+
+    @Test func whatTheWorkerLeavesUncommittedDuringTheMergeIsntMerged() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let worktree = try reported(lead, runtime, root: root)
+        try passingAudit(lead, runtime)
+        let audited = head("agent/add-b", root)
+        // While the tests run, the worker edits in its worktree and commits nothing; the tests read b.txt.
+        let set = lead.call("configure", ["test_command": "grep -q bee b.txt && echo late > \(worktree)/late.txt && echo evil > \(worktree)/b.txt"])
         #expect(!set.isError, "\(set.text)")
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
@@ -269,8 +295,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(MergeProvenanceTests.isStamped(underRecords("main", in: root), from: audited, in: root))
         #expect(try String(contentsOfFile: root + "/b.txt", encoding: .utf8) == "bee\n")
         #expect(!FileManager.default.fileExists(atPath: root + "/late.txt"))
-        // The worker's branch did move; only the audited commit landed.
-        #expect(head("agent/add-b", root) != audited)
+        #expect(head("agent/add-b", root) == audited)
     }
 
     @Test func theBranchMovingDuringTheAuditIsSaid() throws {

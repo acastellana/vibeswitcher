@@ -1,6 +1,6 @@
 # Decisions
 
-Archived decisions: 123 entries (superseded, obsolete or now enforced by a check) are in decisions-archive.md, moved there unchanged (last on 2026-11-08).
+Archived decisions: 128 entries (superseded, obsolete or now enforced by a check) are in decisions-archive.md, moved there unchanged (last on 2026-11-08).
 
 ## 2026-10-17 17:45 The lead's decisions.md and progress.md move into the repository (docs/lead/ by default) and are committed to the base branch automatically by the tool server, touching only those files. board.json, workflow.md and run/ stay local and git-ignored.
 
@@ -254,17 +254,9 @@ On 2026-11-07 the app showed items waiting on the user. They were two chat tasks
 
 The user's goal: exactly what they want, without issues, safely, cheaply, fast, with only necessary questions. The lead's review judged A1–A6 and A9 worth doing (A1 and A4 in cheaper forms) and A8 lukewarm. B3 was added because 75–94 freezes a day hit the user directly. The user answered "yes".
 
-## 2026-11-08 04:14:20 branch-code-can-t merges with its round-3 audit passed. The one Important finding round 3 raised, F10, moved to its own audited task, config-seal-a-merge: after a merge, the merge's own branch run makes the next look unquiet, so the user's quiet edit is held anyway. config-seal-covers now runs after branch-code-can-t. The install that carries the seal waits until config-seal-a-merge has merged, so the user never runs a build that holds their own edits after every merge.
-
-This replaces the 01:28 plan to re-roll the task if round 3 left an Important finding open. F10 is new, small and narrow: the order of one end call against one check. It only errs toward safety: it raises a hold too many, never lets a change through unheld. Round 3 confirmed the F9 redesign and the 7 fixes before it. A re-roll would discard about 3.5 h of audited security work to fix an ordering bug. It's the same pattern as resume-work-cut-off's F6 on 2026-11-07 12:56. Gate code only takes effect after an install, so holding the install closes the gap.
-
 ## 2026-11-08 05:42:44 swift-testing-s-parallel merges as built: under a heavy slot, Swift Testing's parallel width is capped to VS_HEAVY_CORES. Its cost gets measured on the merges that follow, not tuned in the task: the next 5 merge test runs' swift-test times against the earlier 290–400 s, and the app's freezes per hour (IM-18) against 3.43/h. If merge runs stay above about 1.5x (around 600 s) on a calm Mac, the width goes to 2× the slot's share.
 
 On 2026-11-08 from 03:40 to 05:35, the load reached 100–225 on 12 cores whenever full suites overlapped, and the app froze dozens of times. Each suite ran 12 tests at once whatever its slot. The worker's two timings (1003–1093 s) came while the Mac was loaded at 57 to 225, so they can't separate the width's cost from the load.
-
-## 2026-11-08 06:32:41 Plugin updates and the config seal. A plugin's hooks run as code in every Claude session. The new plugin seal currently accepts a plugin update silently, but a shell in a worker could fake an update the same way, and nothing on disk tells the two apart. Your rule so far has been "anything that runs as code always needs your Accept". How should plugin updates be handled? → Always ask: a card for every plugin update, like other code (the safest; one click per update)
-
-The lead proposed it with a 15 min timer and the user didn't answer in time, so it went ahead (question CEDA0180).
 
 ## 2026-11-08 06:33:00 Plugin updates always need the user's Accept, like any other code change, whoever made them and whether or not team sessions ran. config-seal-covers merges as built, and plugin-updates-always (after it, audited) removes its silent sealing of updates. The plugin seal ships in an install only once both have merged.
 
@@ -278,11 +270,27 @@ Question CEDA0180, 2026-11-08: the user didn't answer in 15 min, so the lead's p
 
 On 2026-11-08 from 03:40 to 06:00, load was 100–225 with idle CPU, 504 MB of RAM free and swap at 85%. The overload came from parallel full suites, 12 tests wide each, the old-host rebuild in every merge and audit, and up to 7 boosted sessions. The width cap and the old-host cache address the suites; nothing yet holds new sessions while the Mac pages.
 
-## 2026-11-08 08:49:29 config-seal-covers isn't re-rolled after "reconsider the approach". Its one open Important finding, F6, is a progress-line wording collision with config-seal-a-merge's test on main, so a fresh worker continues on the same branch to merge main and restore the wording. Round 2 confirmed the plugin seal logic, F1 and the always-Accept rule for plugin updates.
+## 2026-11-08 11:20:21 The app icon stays as it is (the user, 2026-11-08, after two rounds of options: "meh lets leave the current logo"). brand-new-app-icon is abandoned, and no tagline or About text changes in the app. The README rewrite goes ahead with a plain opening description. This supersedes the 2026-11-08 brand decision (1A1D1711).
 
-A re-roll would throw away a seal the audit has confirmed in order to fix one line of text. The collision came from the two seal tasks running side by side, the planning slip already covered by the 2026-11-08 rule to chain tasks that share a file.
+Ten icons and eight taglines didn't win over the current look. Per the 2026-11-07 rule, a lukewarm answer means dropping the idea rather than holding it open.
 
-## 2026-11-08 09:19:10 config-seal-covers gets a third, targeted round on its branch instead of merging on the F6-only re-audit. It fixes: (1) only what runs counts as code, not redirect targets or data-file arguments; (2) relative paths and `sh -c` scripts are watched, and command text never reaches a held line or card; (3) a plugin going from no version folder to a version folder is held even when quiet.
+## 2026-11-08 14:15:49 The 2026-11-08 project review's material findings became 8 tasks (a-branch-that-moves, the-vault-s-no, host-reply-timers-belong, wallet-cards-trust-only, every-text-that-crosses, product-fixes-from-the, the-board-and-records, correctness-tests-stop). Tasks that share LeadToolset.swift are chained with `after`. The minor findings are left alone. The security review's phone, host-authentication and tool-boundary parts didn't run: Fable's safety filter stopped it, and whether to run them another way is the user's call.
 
-The F6 worker's blind check found all three by reading the code, and a re-audit of F6 alone wouldn't cover them. (1) would hold starts and merges again after every Accept for any hook that logs to a file. (2c) could put a token on the card, which breaks the seal's "never values". (3) breaks the user's always-Accept rule for code (CEDA0180). Fixing them on the branch keeps known-bad gate code out of main; the re-plan restarts its audit rounds, and the next audit judges the whole branch.
+The user asked for a pass to find issues; their working policy is to fix material bugs and not to turn cosmetic observations into tasks. A filter stop isn't something for the lead to route around.
+
+## 2026-11-08 17:52:40 Narrows the 2026-11-08 07:28 rule (1): tasks that name the same source file may run side by side when they change different functions of it and the Mac has room. Two tasks that change the same function, or the same whole file (LeadRecords.swift), still chain with `after`. Applied now: every-text-that-crosses runs after a-branch-that-moves, alongside the-vault-s-no, and the-board-and-records runs after the-vault-s-no (they share LeadRecords.swift).
+
+The user asked "why not start more?" on 2026-11-08 while the Mac sat at load 7 with one session of this project. The three review tasks were chained only because their boundaries all name LeadToolset.swift, in unrelated places (checkBaseMoves and the merge's recording, saveMergeLog, the scratch sweep), and git merges separate hunks cleanly. The rule came from two seal tasks that edited the same seal code. A strict chain of three audited tasks costs hours.
+
+## 2026-11-08 20:08:48 When the user needs to run something that wants a real terminal (a password prompt, an install, anything interactive), the lead and workers file `vs-shell run` so the user gets a one-click Run card. They don't tell the user to open Terminal.app, paste a command or type `! <command>`, and never take a password in chat. This replaces Claude Code's generic "suggest `!`" advice inside VibeSwitcher sessions. Task anything-needing-a-real puts it in the prompts and makes build-app.sh's locked-keychain failure say what to do.
+
+On 2026-11-08 an install failed on a locked signing keychain. The lead said to use Terminal.app, the user ran it through `!` twice, which has no terminal for the password, and only `vs-shell run` worked. The user: "you should have asked to do a shell like you did now".
+
+## 2026-11-08 20:36:08 Correction to the incident recorded 2026-11-08 about hung merge tests: the merge test of 2aa1e894 wasn't a hang. The Mac was asleep (51.8 min on the wall clock, 4.9 min awake; `pmset -g log` shows 41 sleeps between 15:00 and 20:00 on battery). The fix is that a merge's timeout counts awake time (turn-this-incident-into-16, contract v3). The stall limit isn't lowered.
+
+The lead told the user "at least one merge really did hang" from the hung log, which can't show sleep. The worker checked the power log and the lead confirmed it. The afternoon's slow runs and the "tests stopped at 16:08" reading also fit the Mac sleeping, so neither test width nor battery load was the cause.
+
+## 2026-11-08 23:16:41 From the 2026-11-08 batch retrospective: (1) Before calling a long merge or test run hung, check `pmset -g log` for sleep and the load recorder, and don't tell the user "it hung" until that's done. (2) A task's contract change no longer assumes a running worker has it: task incident-tasks-wait makes record_incident's task wait for the lead's contract and delivers a changed contract to a running worker. (3) The test-width timer is closed with no change: this evening's merge-sized full runs took 423-660 s, around the 600 s line, and the width was never shown to be the cause.
+
+(1) The lead told the user a merge "really did hang" from a log that can't show sleep; the Mac had slept 41 times. (2) The 2026-11-05 decision said to make a product task if an incident task auto-started again on its generic brief. turn-this-incident-into-16 did, and its worker reported that v2 never reached it, which cost a round trip.
 

@@ -1,6 +1,6 @@
 import Foundation
 
-/// How the window's terminals look and behave (Settings › Terminal).
+/// How the window's terminals look and behave (Settings › Appearance).
 public struct TerminalAppearance: Codable, Equatable, Sendable {
     public enum Theme: String, Codable, CaseIterable, Sendable {
         case system, light, dark, solarizedLight, solarizedDark, custom

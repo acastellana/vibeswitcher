@@ -46,15 +46,28 @@ struct ProcessTableTests {
         #expect(ProcessTable.trySnapshot().map { $0[pid] == nil } == true)
     }
 
+    /// What holds at any load: a read that came back is whole, and none waits past its limit (a caller is told nil then).
+    @Test func aSnapshotIsWholeAndWithinItsLimit() {
+        let times = (0..<8).map { _ -> TimeInterval in
+            let started = Date()
+            let table = ProcessTable.trySnapshot()
+            let took = Date().timeIntervalSince(started)
+            if let table { expectWhole(table) }
+            return took
+        }
+        #expect(times.allSatisfy { $0 < ProcessTable.snapshotLimit + 1 }, "snapshots took \(times)")
+    }
+
     /// Every core busy twice over, a snapshot stays about as quick as on this Mac without them: each one whole, the
-    /// median of five within 20 times the fastest of three taken before, and none near a hang (the whole-table sysctl it
-    /// replaced stalled 10 to 80 s). Relative, not a bare bound: a loaded Mac stalls any one read now and then (0.741 s
-    /// once at load 49), while a regression makes every one slow.
+    /// median of five within 20 times the fastest of three taken before (the whole-table sysctl it replaced stalled 10 to
+    /// 80 s). Relative, not a bare bound: a loaded Mac stalls any one read now and then (0.741 s once at load 49), while a
+    /// regression makes every one slow. A bench: its burners and its ratio are what a busy Mac decides.
     ///
     /// On a Mac already over scripts/test-under-load.sh's threshold (2 × ncpu: a merge's run beside other leads' teams,
     /// 1.2 to 2.1 s a read at load 81.6) its speed is the other sessions', not this code's: no burners, and only what
     /// holds at any load is checked, that a read that came back is whole. The numbers are printed with the load.
-    @Test func aSnapshotIsQuickOnABusyMac() throws {
+    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly))
+    func aSnapshotIsQuickOnABusyMac() throws {
         let cores = ProcessInfo.processInfo.activeProcessorCount
         let ambient = AmbientLoad()
         var unread = 0
@@ -86,8 +99,6 @@ struct ProcessTableTests {
         let median = times.sorted()[times.count / 2]
         let shown = { (times: [TimeInterval]) in times.map { String(format: "%.3f s", $0) } }
         print("ProcessTableTests: \(ambient) on \(cores) cores, \(burners.count) burners added; snapshots took \(shown(quiet)) before, \(shown(times)) with them; \(unread) of 8 not read within \(ProcessTable.snapshotLimit) s")
-        // No read waits past its limit, whatever the load (a caller is told nil then).
-        #expect(times.allSatisfy { $0 < ProcessTable.snapshotLimit + 1 }, "snapshots took \(shown(times))")
         guard ambient.allows else { return }
         #expect(unread == 0, "\(unread) of 8 snapshots not read at \(ambient)")
         #expect(median <= 20 * fastest, "median \(shown([median])[0]), fastest before the burners \(shown([fastest])[0])")

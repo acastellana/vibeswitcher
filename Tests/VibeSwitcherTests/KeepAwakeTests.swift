@@ -59,13 +59,32 @@ struct KeepAwakeTests {
 
         private func wait() {
             started.signal()
-            if let gate { _ = gate.wait(timeout: .now() + 5) }
+            // No timeout, as `SlowPower`'s gate: until the test (or `comesBack`'s guard) opens it.
+            gate?.wait()
         }
 
         /// Lets every call through from now on.
         func open() { for _ in 0..<16 { gate?.signal() } }
 
         var names: Set<String> { Set(held.values) }
+    }
+
+    /// Whether `look`, on the calling thread, came back while the power daemon stayed stuck: the stuck call ends only
+    /// when `open` lets it, and that's the test's, after this returns, unless the look is waiting on it. Then the guard
+    /// opens the gate, so a look that waits fails here instead of hanging. Ordering, not a time: 0.05 s budgets failed
+    /// on loaded Macs with the look off the main path and the Mac only busy.
+    @MainActor static func comesBack(unstuck open: @escaping @Sendable () -> Void, _ look: @MainActor () -> Void) -> Bool {
+        let back = DispatchSemaphore(value: 0)
+        final class Flag: @unchecked Sendable { var waited = false }
+        let flag = Flag()
+        Thread {
+            guard back.wait(timeout: .now() + hangGuard) == .timedOut else { return }
+            flag.waited = true
+            open()
+        }.start()
+        look()
+        back.signal()
+        return !flag.waited
     }
 
     /// Waits until every hold and release `awake` asked for so far has ended and its `held` says so.
@@ -323,17 +342,11 @@ struct KeepAwakeTests {
         defer { power.open() }
         let awake = KeepAwake(power: power)
         awake.mode = { .always }
-        func look(_ roots: Set<String>) -> TimeInterval {
-            let began = Date()
-            awake.update(working: roots)
-            return Date().timeIntervalSince(began)
-        }
-        var took = look([Self.root])
-        #expect(took < 0.05, "update took \(took) s")
+        func look(_ roots: Set<String>) -> Bool { Self.comesBack(unstuck: power.open) { awake.update(working: roots) } }
+        #expect(look([Self.root]), "the look waited for the power daemon")
         // The hold reached powerd and waits there; the team's work ends meanwhile.
-        try #require(power.started.wait(timeout: .now() + 5) == .success)
-        took = look([])
-        #expect(took < 0.05, "update took \(took) s")
+        try #require(power.started.wait(timeout: .now() + hangGuard) == .success)
+        #expect(look([]), "the look waited for the power daemon")
         // Nothing held yet as far as the Team view knows.
         #expect(awake.held.isEmpty)
         power.open()
@@ -396,7 +409,7 @@ struct KeepAwakeTests {
     static func settle(_ source: PowerSourceCache) throws {
         let done = DispatchSemaphore(value: 0)
         source.settled { done.signal() }
-        try #require(done.wait(timeout: .now() + 10) == .success)
+        try #require(done.wait(timeout: .now() + hangGuard) == .success)
     }
 
     /// The freeze of 17:02 replayed: the power daemon stuck under a read, a lead's team working, the setting on power
@@ -407,18 +420,13 @@ struct KeepAwakeTests {
         let slow = SlowPower()
         let source = PowerSourceCache(read: slow.read)
         defer { slow.open() }
-        try #require(slow.started.wait(timeout: .now() + 5) == .success)
+        try #require(slow.started.wait(timeout: .now() + hangGuard) == .success)
         let awake = KeepAwake(power: SystemPower(source: source))
         awake.mode = { .onPower }
         var team = Team()
         team.set(team.worker, .working)
-        func look() -> TimeInterval {
-            let began = Date()
-            awake.update(working: KeepAwake.working([Self.root: team.board], teams: [Self.root: team.reading]))
-            return Date().timeIntervalSince(began)
-        }
-        let took = look()
-        #expect(took < 0.05, "the look took \(took) s")
+        func look() { awake.update(working: KeepAwake.working([Self.root: team.board], teams: [Self.root: team.reading])) }
+        #expect(Self.comesBack(unstuck: slow.open, look), "the look waited for the read")
         // Nothing read yet: taken as AC power, as before when the system didn't say.
         await Self.settle(awake)
         #expect(awake.held == [Self.root])
@@ -427,7 +435,7 @@ struct KeepAwakeTests {
         slow.open()
         try Self.settle(source)
         #expect(!source.onACPower && source.state?.percent == 40)
-        #expect(look() < 0.05)
+        look()
         // On battery: released at the first look after the read.
         await Self.settle(awake)
         #expect(awake.held.isEmpty)

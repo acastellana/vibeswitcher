@@ -59,7 +59,7 @@ struct DictationButton: View {
         .accessibilityAction {
             if recording { dictation.release(rowID) } else { dictation.press(rowID, agent: agent, vocabulary: vocabulary()) }
         }
-        .help(missing ? "Dictation needs an OpenAI API key: add one in Settings › General › Dictation"
+        .help(missing ? "Dictation needs an OpenAI API key: add one in Settings › Dictation & Briefing"
               : claude ? "Hold to dictate with Claude's /voice (or hold \(dictation.shortcuts) in the box); let go and the text lands here to check before sending. Esc cancels."
               : "Hold to dictate (or hold \(dictation.shortcuts) in the box); let go and the text lands here to check before sending")
         .padding(.bottom, 6)
@@ -173,7 +173,7 @@ final class DictationInbox {
     }
 }
 
-/// Settings › General › Dictation: the OpenAI key (kept in the Keychain only; one in your shell or Codex's file
+/// Settings › Dictation & Briefing: the OpenAI key (kept in the Keychain only; one in your shell or Codex's file
 /// offered for import, after you confirm) and the transcription model.
 struct DictationSettings: View {
     @ObservedObject var dictation: DictationController
@@ -182,49 +182,55 @@ struct DictationSettings: View {
 
     var body: some View {
         Section {
-            LabeledContent("OpenAI API key for dictation") {
-                HStack {
-                    SecureField("OpenAI API key for dictation", text: $key,
-                                prompt: Text(dictation.keyState == .saved ? "Saved in your Keychain" : "sk-…"))
-                        .labelsHidden()
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 220)
-                        .onSubmit(save)
-                    Button("Save", action: save).disabled(key.trimmingCharacters(in: .whitespaces).isEmpty)
-                    if dictation.keyState == .saved {
-                        Button("Remove") { dictation.saveKey(nil) }
+            SettingRow("dictation-key") { label in
+                LabeledContent {
+                    HStack {
+                        SecureField("OpenAI API key for dictation", text: $key,
+                                    prompt: Text(dictation.keyState == .saved ? "Saved in your Keychain" : "sk-…"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 220)
+                            .onSubmit(save)
+                        Button("Save", action: save).disabled(key.trimmingCharacters(in: .whitespaces).isEmpty)
+                        if dictation.keyState == .saved {
+                            Button("Remove") { dictation.saveKey(nil) }
+                        }
                     }
-                }
+                } label: { label }
             }
-            LabeledContent("Key in use") {
-                HStack {
-                    Text(Self.line(dictation.keyState)).foregroundStyle(.secondary)
-                    if dictation.keyState != .saved, let found = dictation.found {
-                        Button("Import from \(found.source == .shell ? "your shell" : "Codex")…") { confirmingImport = true }
-                            .confirmationDialog("Import \(found.source.name) into your Keychain for dictation?",
-                                                isPresented: $confirmingImport) {
-                                Button("Import") { dictation.importFound() }
-                                Button("Cancel", role: .cancel) {}
-                            } message: {
-                                Text("VibeSwitcher keeps a copy in your login Keychain and uses it only to send your recordings to OpenAI.")
-                            }
+            SettingRow("dictation-key-in-use") { label in
+                LabeledContent {
+                    HStack {
+                        Text(Self.line(dictation.keyState)).foregroundStyle(.secondary)
+                        if dictation.keyState != .saved, let found = dictation.found {
+                            Button("Import from \(found.source == .shell ? "your shell" : "Codex")…") { confirmingImport = true }
+                                .confirmationDialog("Import \(found.source.name) into your Keychain for dictation?",
+                                                    isPresented: $confirmingImport) {
+                                    Button("Import") { dictation.importFound() }
+                                    Button("Cancel", role: .cancel) {}
+                                } message: {
+                                    Text("VibeSwitcher keeps a copy in your login Keychain and uses it only to send your recordings to OpenAI.")
+                                }
+                        }
                     }
-                }
+                } label: { label }
             }
-            Picker("Model", selection: $dictation.model) {
-                ForEach(OpenAITranscription.models, id: \.self) { Text($0).tag($0) }
+            SettingRow("dictation-model") { label in
+                Picker(selection: $dictation.model) {
+                    ForEach(OpenAITranscription.models, id: \.self) { Text($0).tag($0) }
+                } label: { label }
             }
-            Toggle("Hold Space to dictate", isOn: $dictation.holdSpace)
-                .help(Self.holdSpaceHelp)
-            Text(Self.holdSpaceHelp).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Toggle("Silence the Mac while dictating", isOn: $dictation.silenceMac)
-                .help(Self.silenceHelp)
-            Text(Self.silenceHelp).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            SettingRow("dictation-hold-space") { label in
+                Toggle(isOn: $dictation.holdSpace) { label }.help(Self.holdSpaceHelp)
+            }
+            SettingRow("dictation-silence") { label in
+                Toggle(isOn: $dictation.silenceMac) { label }.help(Self.silenceHelp)
+            }
             if let notice = dictation.keyNotice { Text(notice).font(.caption).foregroundStyle(.red) }
         } header: {
             Text("Dictation")
         } footer: {
-            SettingsFooter("Hold the mic in the composer (or \(dictation.shortcuts) in its box), on the Mac or the phone, and speak: when you let go, the recording goes to OpenAI with this key and the text lands in the box for you to check before sending. It goes with the project's, its branches' and recent files' names, to spell them right; nothing else, and no recording is kept. The key stays on this Mac, in your login Keychain, and the phone's recordings are transcribed here. \(OpenAITranscription.defaultModel) is OpenAI's most accurate.")
+            SettingsFooter(.dictation, detail: "To dictate from the keyboard, use \(dictation.shortcuts) in the composer's box.")
         }
     }
 

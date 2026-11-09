@@ -555,7 +555,7 @@ extension HostTerminalView {
         getTerminal().setCursorStyle(style)
     }
 
-    /// A short flash over the terminal (Settings › Terminal › Bell: Visual).
+    /// A short flash over the terminal (Settings › Appearance › Bell: Visual).
     func flash() {
         let overlay = NSView(frame: bounds)
         overlay.wantsLayer = true

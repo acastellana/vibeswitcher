@@ -113,7 +113,9 @@ public final class WalletCourier: @unchecked Sendable {
     /// it as `wallet-request-<id>.json`, and drops the record only when passage says it didn't go (2–5). When the Wallet Manager
     /// may have it all the same (exit 1, a signal, out of time) the record stays, `unsure`, and still takes results; the
     /// same request may then be sent again, under its id (the Wallet Manager acts on an id once, and ignores a repeat).
-    public func send(_ request: WalletRequest) -> SendOutcome {
+    /// `seal`: the session host's on `request` (`WalletRequest.sealedCopy`), kept in the record; a record from before
+    /// seals were kept takes it at a resend.
+    public func send(_ request: WalletRequest, seal: String? = nil) -> SendOutcome {
         let bytes: Data
         do {
             bytes = try request.encoded()
@@ -137,7 +139,7 @@ public final class WalletCourier: @unchecked Sendable {
                 return .refused("a request with id \(request.id) was sent already")
             }
         } else {
-            let record = WalletRequestStore.Record(request: request, state: .sending)
+            let record = WalletRequestStore.Record(request: request, state: .sending, seal: seal)
             do {
                 try store.save(record)
             } catch {
@@ -171,6 +173,7 @@ public final class WalletCourier: @unchecked Sendable {
             // A resend that didn't go leaves the first send's doubt as it was.
             if arrived || resend || (written && outcome.mayHaveArrived) {
                 record.state = arrived ? .sent : .unsure
+                record.seal = record.seal ?? seal
                 if outcome == .sent, record.sentAt == nil { record.sentAt = Date(timeIntervalSince1970: floor(now().timeIntervalSince1970)) }
                 records[request.id] = record
                 do { try store.save(record) } catch { log("couldn't record request \(request.id) as \(record.state.rawValue): \(error)") }

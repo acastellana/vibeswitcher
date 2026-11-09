@@ -154,7 +154,7 @@ import Testing
         #expect(merged?.isError == false && merged?.text.contains("Merged add-b into main") == true, "merge: \(merged?.text ?? "no answer") \(server.errors)")
         #expect(FileManager.default.fileExists(atPath: team.root + "/b.txt"))
         let main = Git.run(["rev-parse", "main"], in: team.root).output
-        #expect(team.book.vault(folder: URL(fileURLWithPath: team.dir + "/vault"), as: { .app }).head(root: team.root, branch: "main") == main)
+        #expect(try team.book.vault(folder: URL(fileURLWithPath: team.dir + "/vault"), as: { .app }).head(root: team.root, branch: "main") == main)
         #expect(kill(worker.childPID, 0) == 0, "the worker's session was ended")
     }
 

@@ -204,7 +204,7 @@ public struct AccountUsage: Equatable, Sendable {
             }.joined(separator: " — ")
         }
         return line
-            + (ignored ? ". The user set Ignore usage limits in Settings › Project lead: start_worker, audit and auto_advance start at any share of a limit, "
+            + (ignored ? ". The user set Ignore usage limits in Settings › Performance: start_worker, audit and auto_advance start at any share of a limit, "
                 + "Boost isn't held off for usage, and agent: auto stays on Claude; only a limit Claude refused a request at still holds back its model."
                 : ". At \(Int(Self.threshold))% of a limit, start_worker and audit stop starting sessions on the models it holds back (override_usage: true overrides).")
     }

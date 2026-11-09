@@ -77,27 +77,30 @@ extension AppDelegate: NSMenuItemValidation {
     }
 }
 
-/// Settings › General › Session host: the restart, found with the window closed too.
+/// Settings › Advanced › Session host: the restart, found with the window closed too.
 struct HostRestartSection: View {
     @ObservedObject var host: HostClient
 
     var body: some View {
         Section {
-            LabeledContent("Session host") {
-                if let plan = host.restartOffer {
-                    HStack {
-                        Text("Older than this app").foregroundStyle(.orange)
-                        HostRestartButton(plan: plan) { HostRestart.confirmAndRestart(host) }.controlSize(.small)
+            SettingRow("session-host") { label in
+                LabeledContent {
+                    if let plan = host.restartOffer {
+                        HStack {
+                            Text("Older than this app").foregroundStyle(.orange)
+                            HostRestartButton(plan: plan) { HostRestart.confirmAndRestart(host) }.controlSize(.small)
+                        }
+                    } else if let refusal = host.proofRefusal {
+                        Text("Doesn't recognise this app").foregroundStyle(.red).lineLimit(1).help(refusal)
+                    } else {
+                        Text(Self.status(host.state)).foregroundStyle(.secondary).lineLimit(1)
                     }
-                } else if let refusal = host.proofRefusal {
-                    Text("Doesn't recognise this app").foregroundStyle(.red).lineLimit(1).help(refusal)
-                } else {
-                    Text(Self.status(host.state)).foregroundStyle(.secondary).lineLimit(1)
-                }
+                } label: { label }
             }
+        } header: {
+            Text("Session host")
         } footer: {
-            SettingsFooter(host.restartOffer?.help ?? host.proofRefusal.map { "It shows this app none of its sessions: \($0)" }
-                ?? "Runs the window's sessions; it's updated with the app.")
+            SettingsFooter(.sessionHost(offer: host.restartOffer, refused: host.proofRefusal != nil), detail: host.proofRefusal)
         }
     }
 

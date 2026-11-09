@@ -113,13 +113,13 @@ extension LeadToolsetTests {
             let refused = call(lead, "configure", arguments)
             #expect(refused.isError, "\(refused.text)")
             #expect(refused.text.hasPrefix("Nothing was changed"), "\(refused.text)")
-            #expect(refused.text.contains("Settings › Project lead"), "\(refused.text)")
+            #expect(refused.text.contains("Settings › Performance"), "\(refused.text)")
             #expect(refused.text.contains("load_threshold 30 in Settings, mac_max_sessions 10"), "\(refused.text)")
         }
         #expect(FileManager.default.contents(atPath: root + "/.vibeswitcher/workflow.md") == before)
         // configure shows them, as the Mac's.
         let shown = call(lead, "configure").text
-        #expect(shown.contains("Mac-wide, set by the user in VibeSwitcher's Settings › Project lead"), "\(shown)")
+        #expect(shown.contains("Mac-wide, set by the user in VibeSwitcher's Settings › Performance"), "\(shown)")
         #expect(shown.contains("- load_threshold: 30 in Settings") && shown.contains("- mac_max_sessions: 10"), "\(shown)")
     }
 
@@ -133,7 +133,7 @@ extension LeadToolsetTests {
         runtime.others = Self.neighbours
         let refused = call(lead, "start_worker", ["task": "one"])
         #expect(refused.isError && refused.text.contains("(mac_max_sessions 6)"), "\(refused.text)")
-        let said = "workflow.md's mac_max_sessions and load_threshold are ignored: the Mac-wide limits are set once for every project in VibeSwitcher's Settings › Project lead."
+        let said = "workflow.md's mac_max_sessions and load_threshold are ignored: the Mac-wide limits are set once for every project in VibeSwitcher's Settings › Performance."
         #expect(call(lead, "status").text.contains(said))
         #expect(!call(lead, "status").text.contains("are ignored"))
         // configure still says it, as the file's settings.
@@ -421,6 +421,51 @@ extension LeadToolsetTests {
         let merged = call(lead, "merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
         #expect(runtime.loadReads - reads == 4)
+    }
+
+    /// The Mac's limits for a wait for the load, on `mac`'s clocks: at the wait's second poll, `then` happens to the Mac.
+    func loadWait(_ lead: LeadToolset, mac: MergeRunMacSleepTests.Mac, then: @escaping () -> Void) {
+        var polls = 0
+        lead.macTime = mac.time
+        lead.loadPoll = 0.01
+        lead.macLimits = {
+            polls += 1
+            if polls == 2 { then() }
+            return MacLimits(maxSessions: 6, loadThreshold: 24)
+        }
+    }
+
+    /// The Mac sleeps 2 hours through merge's 45-minute wait for the load: the wait goes on awake, and ends when the load
+    /// drops. Its polls are the test's events, on one thread: no time is waited for.
+    @Test func aWaitForTheLoadTheMacSleepsThroughIsNotOver() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let mac = MergeRunMacSleepTests.Mac()
+        loadWait(lead, mac: mac) { mac.sleep(2 * 60 * 60) }
+        runtime.loadReadings = [150, 150, 150, 150, 3]
+        var workflow = LeadWorkflow()
+        workflow.testTimeoutMinutes = 45
+        let waited = try lead.waitForLoad(workflow, slug: "add-b")
+        #expect(waited?.from == 150)
+    }
+
+    /// The limit still holds: a wait that really had its 45 awake minutes refuses, the load still high.
+    @Test func aWaitForTheLoadPastItsLimitInAwakeTimeRefuses() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let mac = MergeRunMacSleepTests.Mac()
+        loadWait(lead, mac: mac) { mac.stayAwake(46 * 60) }
+        runtime.load = 150
+        var workflow = LeadWorkflow()
+        workflow.testTimeoutMinutes = 45
+        do {
+            _ = try lead.waitForLoad(workflow, slug: "add-b")
+            Issue.record("it never refused")
+        } catch {
+            #expect(String(describing: error).contains("stayed above load_threshold"), "\(error)")
+        }
     }
 
     @Test func mergeRefusesWhenTheLoadStaysAboveTheThreshold() throws {

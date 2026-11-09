@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import VibeCore
@@ -362,6 +363,80 @@ struct ConfigSealTests: LeadTeamFixture {
         unreachable.sealAppWrites()
         vault.sealAppWrites()
         #expect(try asLead.checkConfig(root: root) == LeadVault.ConfigCheck())
+    }
+
+    /// The vault as the host answers a connection that hasn't proved it's the app yet, then one that has.
+    final class Proof: @unchecked Sendable {
+        private let lock = NSLock()
+        private var proven = false
+        private(set) var asks = 0
+        func prove() { lock.withLock { proven = true } }
+        func caller() -> LeadVault.Caller { lock.withLock { asks += 1; return proven ? .app : .unknown } }
+    }
+
+    /// The 2026-11-08 13:34 install: the app's seal of the hook binary went out before it had read its key, the host
+    /// refused it as no one's, and it was thrown away, so the card stayed. A refused seal is kept and lands once the
+    /// app has proved itself, and the card a look raised meanwhile goes with it.
+    @Test func aSealRefusedBeforeTheAppProvedItselfLandsOnceItHas() throws {
+        let runtime = FakeRuntime()
+        let hook = home + "/.vibeswitcher/bin/vibeswitcher-hook"
+        let (root, asLead) = try runningTeam([".vibeswitcher/bin/vibeswitcher-hook": "v1"], runtime: runtime)
+        let proof = Proof()
+        let launching = book.vault(folder: vault.folder, as: { proof.caller() })
+        try launching.appWrite([hook], home: home) { try write("v2", hook) }
+        launching.sealAppWrites()
+        #expect(try asLead.checkConfig(root: root).held == ["~/.vibeswitcher/bin"])
+        proof.prove()
+        launching.sealAppWrites()
+        #expect(try asLead.checkConfig(root: root) == LeadVault.ConfigCheck())
+        #expect(vault.heldConfig(root: root).isEmpty)
+    }
+
+    /// A look's retry leaves a refused seal for a while (each ask has the host hash your home's config), then asks.
+    @Test func aPeriodicLookWaitsOutARefusalThenAsksAgain() throws {
+        let runtime = FakeRuntime()
+        let hook = home + "/.vibeswitcher/bin/vibeswitcher-hook"
+        let (root, asLead) = try runningTeam([".vibeswitcher/bin/vibeswitcher-hook": "v1"], runtime: runtime)
+        let proof = Proof()
+        let launching = book.vault(folder: vault.folder, as: { proof.caller() })
+        try launching.appWrite([hook], home: home) { try write("v2", hook) }
+        launching.sealAppWrites()
+        let asked = proof.asks
+        launching.retrySealingAppWrites(now: Date())
+        #expect(proof.asks == asked)
+        proof.prove()
+        launching.retrySealingAppWrites(now: Date().addingTimeInterval(31))
+        #expect(proof.asks == asked + 1)
+        #expect(try asLead.checkConfig(root: root) == LeadVault.ConfigCheck())
+    }
+
+    /// The hook binary changed by anything but the app's write is held: on its own, right after the app's write and
+    /// before its seal lands, and before the app's write, which doesn't launder it.
+    @Test func theHookBinaryChangedByAnythingButTheAppsWriteIsHeld() throws {
+        let hook = home + "/.vibeswitcher/bin/vibeswitcher-hook"
+        let names = ["~/.vibeswitcher/bin"]
+        let team = try runningTeam([".vibeswitcher/bin/vibeswitcher-hook": "v1"], runtime: FakeRuntime())
+        try write("evil", hook)
+        #expect(try team.asLead.checkConfig(root: team.root).held == names)
+
+        // After the app's write, before its seal reaches the vault.
+        try write("v1", hook)
+        #expect(try vault.checkConfig(root: team.root).held.isEmpty)
+        let unreachable = LeadVault(folder: vault.folder) { _ in throw CocoaError(.fileReadNoSuchFile) }
+        try unreachable.appWrite([hook], home: home) { try write("v2", hook) }
+        unreachable.sealAppWrites()
+        try write("v2 and evil", hook)
+        vault.sealAppWrites()
+        #expect(try team.asLead.checkConfig(root: team.root).held == names)
+
+        // Before the app's write: what's there isn't what was sealed (v2, the app's write above), so the write seals
+        // nothing.
+        try write("v2", hook)
+        #expect(try vault.checkConfig(root: team.root).held.isEmpty)
+        try write("evil", hook)
+        try vault.appWrite([hook], home: home) { try write("v3", hook) }
+        vault.sealAppWrites()
+        #expect(try team.asLead.checkConfig(root: team.root).held == names)
     }
 
     /// F2: something watched that isn't a regular file (a FIFO, a link to one, one in a watched folder) is hashed as
@@ -773,6 +848,220 @@ struct ConfigSealTests: LeadTeamFixture {
         let team = try #require((saved["teams"] as? [String: Any])?[LeadVault.key(root)] as? [String: Any])
         #expect(team["branchCodeAt"] != nil)
         #expect(team["openRuns"] == nil, "\(team["openRuns"] ?? "")")
+    }
+
+    // MARK: Claude Code's skill sync (2026-11-08): its bookkeeping holds nothing; a held folder says what changed
+
+    /// Where the sync keeps an account's skills.
+    static let account = ".claude/skills/synced/acct-1/"
+
+    var skills: ConfigSeal.Watched { ConfigSeal.homeWatched(home: home).first { $0.name == "~/.claude/skills" }! }
+
+    /// Rewriting only the sync's two bookkeeping files in an account's folder, as each of its rounds does, holds
+    /// nothing while a worker runs, and the folder's hash stays as it was.
+    @Test func theSyncsBookkeepingAloneHoldsNothing() throws {
+        let runtime = FakeRuntime()
+        let account = Self.account
+        let (root, asLead) = try runningTeam([account + ".last-complete-round": "1", account + "manifest.json": #"{"round":1}"#, account + "a/SKILL.md": "a\n"],
+                                             runtime: runtime)
+        let sealed = try #require(ConfigSeal.fingerprint(skills))
+        try write("2", home + "/" + account + ".last-complete-round")
+        try write(#"{"round":2}"#, home + "/" + account + "manifest.json")
+        #expect(ConfigSeal.fingerprint(skills) == sealed)
+        #expect(try asLead.checkConfig(root: root) == LeadVault.ConfigCheck())
+        #expect(vault.heldConfig(root: root).isEmpty)
+    }
+
+    /// Everything else stays watched: a synced skill's file or script, the same two names at any other depth or beside
+    /// them, a look-alike, and the same path under another watched folder.
+    @Test(arguments: [".claude/skills/synced/acct-1/a/SKILL.md", ".claude/skills/synced/acct-1/a/run.sh", ".claude/skills/foo/manifest.json",
+                      ".claude/skills/foo/.last-complete-round", ".claude/skills/manifest.json", ".claude/skills/synced/manifest.json",
+                      ".claude/skills/synced/acct-1/a/manifest.json", ".claude/skills/synced/acct-1/.last-complete-round.bak",
+                      ".claude/commands/synced/acct-1/manifest.json"])
+    func everythingButTheBookkeepingStaysWatched(file: String) throws {
+        let runtime = FakeRuntime()
+        let (root, asLead) = try runningTeam([file: "before\n"], runtime: runtime)
+        try write("after\n", home + "/" + file)
+        let name = file.hasPrefix(".claude/commands") ? "~/.claude/commands" : "~/.claude/skills"
+        #expect(try asLead.checkConfig(root: root).held == [name])
+    }
+
+    /// A link or a folder that bears one of the two names at that depth is no bookkeeping: it stays watched, and so
+    /// does what's under it.
+    @Test func aLinkOrFolderNamedLikeTheBookkeepingStaysWatched() throws {
+        let account = home + "/" + Self.account
+        try FileManager.default.createDirectory(atPath: account + ".last-complete-round", withIntermediateDirectories: true)
+        try write("a\n", account + ".last-complete-round/hook.sh")
+        try FileManager.default.createSymbolicLink(atPath: account + "manifest.json", withDestinationPath: "/one")
+        let first = ConfigSeal.fingerprint(skills)
+        try write("b\n", account + ".last-complete-round/hook.sh")
+        let second = ConfigSeal.fingerprint(skills)
+        #expect(second != first)
+        try FileManager.default.removeItem(atPath: account + "manifest.json")
+        try FileManager.default.createSymbolicLink(atPath: account + "manifest.json", withDestinationPath: "/two")
+        #expect(ConfigSeal.fingerprint(skills) != second)
+    }
+
+    /// `name`'s time on the held line as the vault wrote it (its fifth field).
+    func heldTime(_ record: [String: String]?, _ name: String) -> Double? {
+        for line in (record?[ConfigSeal.heldKey] ?? "").split(separator: "\n") {
+            let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            if parts[0] == ConfigSeal.keyPrefix + name, parts.count > 4 { return Double(parts[4]) }
+        }
+        return nil
+    }
+
+    func setTime(_ seconds: Double, _ path: String) throws {
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: seconds)], ofItemAtPath: path)
+    }
+
+    /// A held folder's card names its changed paths, five at most and how many more, never contents, and its time is
+    /// the newest changed file's: an unshown one counts, an unchanged newer one or the folder's own time doesn't. The
+    /// seal keeps paths and hashes for that, and no contents.
+    @Test func aHeldFolderNamesItsPathsNeverContentsWithItsNewestChangedFilesTime() throws {
+        let runtime = FakeRuntime()
+        let root = home + "/.claude/skills/"
+        var files = ["same.md": "s3cret-same\n", "gone/old.sh": "s3cret-gone\n"]
+        for name in ["a", "b", "c", "d", "e"] { files[".claude/skills/\(name)/SKILL.md"] = "s3cret-before-\(name)\n" }
+        let (team, asLead) = try runningTeam(files.reduce(into: [:]) { $0[$1.key.hasPrefix(".claude") ? $1.key : ".claude/skills/" + $1.key] = $1.value }, runtime: runtime)
+        for name in ["a", "b", "c", "d", "e"] { try write("s3cret-after-\(name)\n", root + "\(name)/SKILL.md") }
+        try write("s3cret-new\n", root + "z/new.sh")
+        try FileManager.default.removeItem(atPath: root + "gone/old.sh")
+        for (at, name) in ["a", "b", "c", "d", "e"].enumerated() { try setTime(1_700_000_000 + Double(at), root + "\(name)/SKILL.md") }
+        // The newest changed file is past the five shown; the unchanged file and the folder itself are newer still.
+        try setTime(1_700_000_500, root + "z/new.sh")
+        try setTime(1_800_000_000, root + "same.md")
+        try setTime(1_800_000_000, root + "z")
+        try setTime(1_800_000_000, home + "/.claude/skills")
+
+        #expect(try asLead.checkConfig(root: team).held == ["~/.claude/skills"])
+        let record = try #require(try vault.guardedRecord(root: team))
+        #expect(ConfigSeal.heldChanges(in: record) == ["~/.claude/skills": "a/SKILL.md changed, b/SKILL.md changed, c/SKILL.md changed, d/SKILL.md changed, e/SKILL.md changed and 2 more"])
+        #expect(heldTime(record, "~/.claude/skills") == 1_700_000_500)
+        // Stored: the paths; never a file's contents, there or in what the app and the lead are told.
+        let stored = String(decoding: book.serialized, as: UTF8.self).replacingOccurrences(of: "\\/", with: "/")
+        #expect(stored.contains("a/SKILL.md"), "\(stored)")
+        #expect(!stored.contains("s3cret"), "\(stored)")
+        #expect(!record.map { $0.key + " " + $0.value }.joined().contains("s3cret"))
+        #expect(!record.keys.contains { $0.hasPrefix(ConfigSeal.keysPrefix) })
+        // Only what changed is listed: fewer than five, no count.
+        #expect(try vault.checkConfig(root: team).resealed == ["~/.claude/skills"])
+        try write("s3cret-z\n", root + "z/new.sh")
+        try setTime(1_750_000_000, root + "z/new.sh")
+        #expect(try asLead.checkConfig(root: team).held == ["~/.claude/skills"])
+        let next = try vault.guardedRecord(root: team)
+        #expect(ConfigSeal.heldChanges(in: next) == ["~/.claude/skills": "z/new.sh changed"])
+        #expect(heldTime(next, "~/.claude/skills") == 1_750_000_000)
+    }
+
+    /// A folder added whole is named by its files, not the folder too.
+    @Test func aNewFolderIsNamedByItsFiles() throws {
+        let runtime = FakeRuntime()
+        let (root, asLead) = try runningTeam([".claude/skills/a/SKILL.md": "a\n"], runtime: runtime)
+        try write("b\n", home + "/.claude/skills/new/SKILL.md")
+        #expect(try asLead.checkConfig(root: root).held == ["~/.claude/skills"])
+        #expect(ConfigSeal.heldChanges(in: try vault.guardedRecord(root: root)) == ["~/.claude/skills": "new/SKILL.md added"])
+    }
+
+    /// The hash an older version recorded for a folder of these lines, spelled out (the format it wrote, on disk in
+    /// every existing vault).
+    func olderHash(_ lines: [String]) -> String {
+        SHA256.hash(data: Data(lines.map { $0 + "\n" }.joined().utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    func digest(_ text: String) -> String { SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined() }
+
+    /// A folder with the sync's bookkeeping in it, and the lines an older version hashed for it.
+    func folderWithBookkeeping() throws -> [String] {
+        let account = home + "/.claude/skills/synced/a/"
+        try write("1", account + ".last-complete-round")
+        try write("m", account + "manifest.json")
+        try write("skill\n", account + "s/SKILL.md")
+        for file in [".last-complete-round", "manifest.json", "s/SKILL.md"] {
+            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: account + file)
+        }
+        return ["d synced", "d synced/a", "f synced/a/.last-complete-round 420 \(digest("1"))", "f synced/a/manifest.json 420 \(digest("m"))",
+                "d synced/a/s", "f synced/a/s/SKILL.md 420 \(digest("skill\n"))"]
+    }
+
+    /// The fixture's vault as an older version would have left it: `~/.claude/skills` recorded as `hash`, without its
+    /// per-path hashes, and `held` as the Mac's held lines.
+    func olderVault(skillsHash hash: String, held: String? = nil) throws -> LeadVault.Book {
+        var saved = try #require(try JSONSerialization.jsonObject(with: book.serialized) as? [String: Any])
+        var mac = try #require(saved["config"] as? [String: Any])
+        var hashes = try #require(mac["hashes"] as? [String: String])
+        hashes[ConfigSeal.keyPrefix + "~/.claude/skills"] = hash
+        hashes[ConfigSeal.keysPrefix + "~/.claude/skills"] = nil
+        mac["hashes"] = hashes
+        mac["held"] = held
+        saved["config"] = mac
+        let older = LeadVault.Book(restoring: try JSONSerialization.data(withJSONObject: saved))
+        older.configHome = home
+        return older
+    }
+
+    func guarded(_ root: String, in book: LeadVault.Book) -> [String: String]? {
+        guard case .guarded(let record) = book.answer(.guarded(root: root), from: .app) else { return nil }
+        return record
+    }
+
+    /// The migration: a seal an older version made, bookkeeping counted, raises no card for it, with a worker running:
+    /// it's carried over at the first look, the next sync round holds nothing, and a real change after is named.
+    @Test func aSealFromBeforeTheBookkeepingWasLeftOutRaisesNoCard() throws {
+        let runtime = FakeRuntime()
+        let root = try repo()
+        _ = try lead(root, runtime)
+        let lines = try folderWithBookkeeping()
+        #expect(try vault(for: runtime).checkConfig(root: root) == LeadVault.ConfigCheck())
+        let asLead = vault(for: runtime)
+        try asLead.bind(try asLead.issue(role: .worker, root: root, task: "t"), root: root, session: "W1")
+        let older = try olderVault(skillsHash: olderHash(lines))
+
+        #expect(try look(root, runtime, live: ["w1"], in: older) == .ok)
+        #expect(ConfigSeal.held(in: guarded(root, in: older)).isEmpty)
+        try write("2", home + "/.claude/skills/synced/a/.last-complete-round")
+        try write("n", home + "/.claude/skills/synced/a/manifest.json")
+        #expect(try look(root, runtime, live: ["w1"], in: older) == .ok)
+        try write("evil\n", home + "/.claude/skills/synced/a/s/SKILL.md")
+        #expect(try look(root, runtime, live: ["w1"], in: older) == .refused(ConfigSeal.heldRefusal))
+        #expect(ConfigSeal.heldChanges(in: guarded(root, in: older)) == ["~/.claude/skills": "synced/a/s/SKILL.md changed"])
+    }
+
+    /// The migration is no way past the seal: a folder that isn't what the older version sealed is held.
+    @Test func anOlderSealOfADifferentFolderIsStillHeld() throws {
+        let runtime = FakeRuntime()
+        let root = try repo()
+        _ = try lead(root, runtime)
+        var lines = try folderWithBookkeeping()
+        #expect(try vault(for: runtime).checkConfig(root: root) == LeadVault.ConfigCheck())
+        // What the older version sealed had another SKILL.md.
+        lines[5] = "f synced/a/s/SKILL.md 420 \(digest("older\n"))"
+        let older = try olderVault(skillsHash: olderHash(lines))
+        #expect(try look(root, runtime, live: [], in: older) == .refused(ConfigSeal.heldRefusal))
+        #expect(ConfigSeal.held(in: guarded(root, in: older)) == ["~/.claude/skills"])
+    }
+
+    /// A folder with no bookkeeping hashes as an older version's did: nothing to carry over.
+    @Test func aFolderWithoutBookkeepingHashesAsBefore() throws {
+        try write("skill\n", home + "/.claude/skills/one/SKILL.md")
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: home + "/.claude/skills/one/SKILL.md")
+        #expect(ConfigSeal.fingerprint(skills) == olderHash(["d one", "f one/SKILL.md 420 \(digest("skill\n"))"]))
+    }
+
+    /// A card already up when this version arrives (the folder held as it is, bookkeeping counted) stays a card, and
+    /// one Accept seals it: what it showed is carried over with the seal.
+    @Test func aCardAlreadyUpAcrossTheUpgradeIsSealedByOneAccept() throws {
+        let runtime = FakeRuntime()
+        let root = try repo()
+        _ = try lead(root, runtime)
+        let lines = try folderWithBookkeeping()
+        #expect(try vault(for: runtime).checkConfig(root: root) == LeadVault.ConfigCheck())
+        let key = ConfigSeal.keyPrefix + "~/.claude/skills"
+        let older = try olderVault(skillsHash: digest("sealed before the sync's round"), held: "\(key)\t\(olderHash(lines))\tr\t")
+        #expect(ConfigSeal.held(in: guarded(root, in: older)) == ["~/.claude/skills"])
+        #expect(older.answer(.setGuarded(root: root, hashes: [ConfigSeal.checkKey: "1"]), from: .app, liveSessions: []) == .ok)
+        #expect(ConfigSeal.held(in: guarded(root, in: older)).isEmpty)
+        #expect(try look(root, runtime, live: [], in: older) == .ok)
     }
 }
 

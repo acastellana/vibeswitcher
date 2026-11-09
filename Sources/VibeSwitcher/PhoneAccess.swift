@@ -1457,7 +1457,7 @@ final class PhoneAccess: ObservableObject {
         guard duration <= DictationLimits.maxDuration + 1 else { return respond(.error(413, "Keep a dictation under 2 minutes.")) }
         guard let transcribe else { return respond(.error(503, "Dictation isn't available on this Mac.")) }
         if dictationReady() == false {
-            return respond(.error(503, "Dictation needs an OpenAI API key on the Mac: add one in Settings › General › Dictation."))
+            return respond(.error(503, "Dictation needs an OpenAI API key on the Mac: add one in Settings › Dictation & Briefing."))
         }
         let source = RemoteGate.source(login: request.header("tailscale-user-login"), forwardedFor: request.header("x-forwarded-for"))
         if dictationStarts.isThrottled(source) { return respond(.error(429, "That's a lot of dictation; wait a few minutes.")) }
@@ -1468,7 +1468,7 @@ final class PhoneAccess: ObservableObject {
         transcribe(DictationAudio(data: request.body, mimeType: type, duration: duration), sid) { result in
             switch result {
             case .success(let text): respond(.json(["text": text]))
-            case .failure(.noKey): respond(.error(503, "Dictation needs an OpenAI API key on the Mac: add one in Settings › General › Dictation."))
+            case .failure(.noKey): respond(.error(503, "Dictation needs an OpenAI API key on the Mac: add one in Settings › Dictation & Briefing."))
             case .failure(let failure): respond(.error(502, failure.notice))
             }
         }

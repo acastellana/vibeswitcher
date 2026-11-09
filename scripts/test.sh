@@ -122,7 +122,7 @@ run_web_tests() {
 }
 
 # The benches, as `swift test --filter` patterns: the tests tagged `.perf` (Tag.perf in
-# Tests/VibeSwitcherTests/TestSupport.swift), no more and no fewer (PerfRunTests checks).
+# Tests/VibeSwitcherTests/TestSupport.swift and Tests/VibeCoreTests/PerfTag.swift), no more and no fewer (PerfRunTests checks).
 perf_tests=(
     ChatBenchTests/theChatSettlesWithoutAStall
     ChatBenchTests/aReopenSettlesAtTheFirstOpensHeight
@@ -134,6 +134,11 @@ perf_tests=(
     HostingViewDepthTests
     SandboxSoakBenchTests/theFootprintIsFlatOverFiveSimulatedHours
     FreezeCausesTests/aRowsSpokenLabelCostsAFractionOfTheFormatter
+    ConfigSealPluginBenchTests/aRealSizedPluginCacheIsFingerprintedFast
+    HookBoundsTests/aKeptLockIsGivenUpInTime
+    HookBoundsTests/theBuiltHookLeavesInTime
+    AppleScriptRunnerTests/aHungScriptEndsInTime
+    ProcessTableTests/aSnapshotIsQuickOnABusyMac
 )
 
 source scripts/lib/processes.sh

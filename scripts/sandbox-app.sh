@@ -21,7 +21,7 @@
 # --dir DIR (where the sandbox's pid, state pointer and app.log are kept, .build/sandbox), --wait S (how long a
 # command's reply is waited for, 120), --passage PATH --passage-inbox DIR (run: wallet requests go through this
 # stand-in passage and their results are read from this inbox, instead of the sandbox's own fake one: the dev side of
-# scripts/e2e/loop-passage, as scripts/e2e/wallet-e2e.sh runs it; never the real Passage).
+# scripts/e2e/loop-passage, as scripts/e2e/wallet-e2e.sh runs it; never the real Passage), --theme NAME (run: as if Settings › Appearance › Theme had been set before this launch).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
@@ -36,6 +36,7 @@ empty=""
 wait_for=120
 passage=""
 passage_inbox=""
+launch_theme=""
 # TMPDIR as given: scratch_tmpdir (the build's) replaces it and removes its own when this script exits.
 given_tmpdir=${TMPDIR:-}
 
@@ -49,6 +50,7 @@ while [[ $# -gt 0 ]]; do
         --wait) wait_for=$2; shift 2 ;;
         --passage) passage=$2; shift 2 ;;
         --passage-inbox) passage_inbox=$2; shift 2 ;;
+        --theme) launch_theme=$2; shift 2 ;;
         -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
         --*) echo "unknown option $1 (--help)"; exit 64 ;;
         *) break ;;
@@ -148,6 +150,7 @@ run_sandbox() {
     with_tmpdir "$state/tmp/" env HOME="$state/home" CFFIXED_USER_HOME="$state/home" VIBESWITCHER_HOME="$state/home/.vibeswitcher" \
         nohup "$binary" --sandbox "$state" --shots "$shots" --minutes "$minutes" --fake-claude "$state/fake_claude.py" ${empty:+"$empty"} \
         ${passage:+--wallet-passage "$passage" --wallet-inbox "$passage_inbox"} \
+        ${launch_theme:+--theme "$launch_theme"} \
         >>"$dir/app.log" 2>&1 </dev/null &
     local launched=$! deadline=$((SECONDS + wait_for))
     disown 2>/dev/null || true

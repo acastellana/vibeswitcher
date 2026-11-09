@@ -45,7 +45,7 @@ after the tests (a scratch host, a parser, a bench's app) is ended and named, an
 file the run added to `~/Library/Preferences`.
 
 `swift build` and `swift test` run under `vs-heavy`, the Mac-wide slots for heavy work, so suites and builds from every
-project's workers take turns. The count is `VIBESWITCHER_HEAVY_SLOTS`, else Settings › Project lead's test and build
+project's workers take turns. The count is `VIBESWITCHER_HEAVY_SLOTS`, else Settings › Performance's test and build
 slots (the cores ÷ 6 while unset), raised to boost's while Boost mode is on. A run that finds every slot
 held waits, saying who holds each. Run a full suite or a release build in a session as `vs-heavy <command>`; it gives
 up after 60 minutes unless you pass `--timeout`.
@@ -86,7 +86,7 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|DocLinksLint|HomePathLint|KeychainLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
 ```
 
 | Lint | What it catches |
@@ -95,6 +95,7 @@ bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|D
 | `AgentExportLint` | A script or test that writes a git tree into the worktree with its agent files (AGENTS.md, `CLAUDE*.md`, `.claude/`, `.mcp.json`). |
 | `DebugAidsLint` | A notification handler that writes a session's screen where the (unknown) sender says. |
 | `DocLinksLint` | A relative link or `#anchor` in README.md or `docs/**/*.md` that doesn't resolve, an image in `docs/images` no doc shows, or a lint suite missing from the command above. |
+| `ElapsedTimeLint` | A correctness test judging an elapsed time against a bare number (`took < 0.05`, `Date().timeIntervalSince(x) < 5`): it judges the order of events, a baseline from the same test, or it's a `.perf` bench; the short allow list is in `ElapsedTimeLintTests.swift`. |
 | `HomePathLint` | A path under the home folder worked out once per process. |
 | `KeychainLint` | A test that can reach the real keychain. |
 | `PreferencesLint` | A test that makes a defaults suite in the real `~/Library/Preferences`. |
@@ -134,7 +135,7 @@ bash scripts/sandbox-app.sh run              # build this worktree's app and sta
 bash scripts/sandbox-app.sh chat             # show the fake session's chat
 bash scripts/sandbox-app.sh type "hello"     # type into the composer; then: send
 bash scripts/sandbox-app.sh lead             # a fake project lead; then: team, ask, extras
-bash scripts/sandbox-app.sh settings phone   # Settings on a tab
+bash scripts/sandbox-app.sh settings phone   # Settings on a category
 bash scripts/sandbox-app.sh sheet all-done   # a sheet: new-project, results, all-done, lead-team, …
 bash scripts/sandbox-app.sh shot NAME        # light and dark PNGs of each window in .build/sandbox-shots/
 bash scripts/sandbox-app.sh quit

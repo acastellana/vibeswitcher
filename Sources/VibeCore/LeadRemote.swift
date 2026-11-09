@@ -420,18 +420,28 @@ extension LeadToolset {
     }
 
     /// The remote's tip as fetch_remote last fetched it (the vault's, never the ref's: any session can move that); nil
-    /// before a fetch. merge lands a task that carries commits of it as a true merge (`Worktrees.put`).
-    func fetchedTip(_ workflow: LeadWorkflow) -> String? {
+    /// before a fetch. merge lands a task that carries commits of it as a true merge (`Worktrees.put`). Throws, opening
+    /// with `not`, when the host didn't answer: taken for "never fetched", the task's merge of the remote lands squashed
+    /// and the remote's records are skipped (2026-11-07 19:46). A merge reads it once and uses that for all it does.
+    func fetchedTip(_ workflow: LeadWorkflow, not: String) throws -> String? {
         let remote = workflow.remoteName
         guard LeadRemote.isName(remote) else { return nil }
-        return vault.head(root: root, branch: LeadRemote.trackingRef(remote: remote, branch: workflow.base))
+        return try recordedHead(LeadRemote.trackingRef(remote: remote, branch: workflow.base), "fetch_remote left \(remote)/\(workflow.base)", not: not)
+    }
+
+    /// The head the vault has for `branch`; nil when none is recorded. Throws a refusal opening with `not`, naming
+    /// `what` couldn't be read, when the host didn't answer, which isn't "none recorded".
+    func recordedHead(_ branch: String, _ what: String, not: String) throws -> String? {
+        do { return try vault.head(root: root, branch: branch) } catch {
+            throw Problem(text: "\(not): couldn't read where \(what). \(error) Try again once the session host answers.")
+        }
     }
 
     /// Refuses a task whose branch holds commits of the remote's branch that fetch_remote didn't fetch (nothing fetched
     /// yet, or the remote-tracking ref moved past what it fetched): merge lands a branch that carries the remote's
     /// commits as a true merge and takes the remote's records as fetch_remote fetched them (`foldRemoteRecords`), so
     /// records past that would be dropped for good (merge_remote then has nothing to merge).
-    func checkRemoteCarried(_ slug: String, commit: String) throws {
+    func checkRemoteCarried(_ slug: String, commit: String, fetched: String?) throws {
         let workflow = self.workflow
         let remote = workflow.remoteName
         guard LeadRemote.isName(remote), let base = branchHead(workflow.base) else { return }
@@ -440,7 +450,7 @@ extension LeadToolset {
         let found = Git.run(["merge-base", commit, ref.output], in: root)
         guard found.ok, !found.output.isEmpty, !Git.run(["merge-base", "--is-ancestor", found.output, base], in: root).ok else { return }
         let label = "\(remote)/\(workflow.base)"
-        guard let fetched = fetchedTip(workflow) else {
+        guard let fetched else {
             throw Problem(text: "Not merged (nothing was tested): agent/\(slug) holds commits of \(label) (up to \(found.output.prefix(8))) that \(workflow.base) lacks, and fetch_remote hasn't fetched \(label). Run fetch_remote, then merge again: a branch that carries the remote's commits lands as a true merge, with the remote's records as fetch_remote fetched them.")
         }
         guard Git.run(["merge-base", "--is-ancestor", found.output, fetched], in: root).ok else {
@@ -454,10 +464,11 @@ extension LeadToolset {
     }
 
     /// After a merge moved the base from `base` to `landed`: the lead's records the remote's commits it brought in have
-    /// (as fetch_remote fetched them), taken into the main checkout's (`LeadRecords.takeRemote`), for the flush after
-    /// the merge to commit. A failure is said in progress; the code has landed either way.
-    func foldRemoteRecords(landed: String, from base: String) {
-        guard let carried = Worktrees.carried(fetchedTip(workflow), head: landed, onto: base, in: root) else { return }
+    /// (as fetch_remote fetched them: `fetched`, the merge's one read of `fetchedTip`), taken into the main checkout's
+    /// (`LeadRecords.takeRemote`), for the flush after the merge to commit. A failure is said in progress; the code has
+    /// landed either way.
+    func foldRemoteRecords(landed: String, from base: String, fetched: String?) {
+        guard let carried = Worktrees.carried(fetched, head: landed, onto: base, in: root) else { return }
         if let failure = records.takeRemote(carried, since: base) {
             try? store.appendProgress("The remote's lead records (\(carried.prefix(8))) weren't taken into ours after the merge: \(failure)")
         }
@@ -492,7 +503,7 @@ extension LeadToolset {
         // turn-this-incident-into-12: the other Mac's commits land through the installed build's gate.
         if let lag = gateLag(workflow) { throw Problem(text: lag.refusal(base: base, what: "merge_remote")) }
         let tip = tracked.output
-        let fetched = vault.head(root: root, branch: LeadRemote.trackingRef(remote: remote, branch: base))
+        let fetched = try fetchedTip(workflow, not: "Not merged (nothing was tested)")
         guard fetched == tip else {
             throw Problem(text: "Not merged: \(label) is at \(tip.prefix(8)), " + (fetched.map { "not at \($0.prefix(8)) where fetch_remote left it" } ?? "and fetch_remote hasn't fetched it")
                           + ": something else moved it (any session can). Run fetch_remote again; merge_remote merges only what it fetched.")
@@ -561,7 +572,7 @@ extension LeadToolset {
         case .merged:
             // The remote's commits are the user's work, as the commits the user merges by hand: the base's head as the
             // vault knows it moves with them, so the next merge doesn't take them for a move nobody made.
-            try vault.setHead(made, root: root, branch: base)
+            if let unrecorded = recordLanding(base: base, from: current, to: made, with: label) { throw Problem(text: unrecorded) }
             let brought = Int(Git.run(["rev-list", "--count", "\(current)..\(tip)"], in: root).output) ?? 0
             let how = merged ? "a merge commit, \(made.prefix(8))" : "a fast-forward"
             try? store.appendProgress("Merged \(label) into \(base): \(Self.commits(brought)) from the remote, as \(how); the tests passed on it" + buildNote)

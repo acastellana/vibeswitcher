@@ -66,6 +66,18 @@ public struct LeadAuditBrief: Codable, Equatable, Sendable {
     }
 }
 
+/// The contract its worker has: the version its brief was written from, or the last amendment sent to it (see
+/// `LeadToolset.sendWorkerContractChange`), with that version's text to tell the next change from.
+public struct LeadWorkerBrief: Codable, Equatable, Sendable {
+    public var version: Int
+    public var contract: LeadContract
+
+    public init(version: Int, contract: LeadContract) {
+        self.version = version
+        self.contract = contract
+    }
+}
+
 /// The verifier's report: what it found in the worker's branch, not what the worker said.
 public struct LeadEvidence: Codable, Equatable, Sendable {
     public enum Completion: String, Codable, Sendable { case complete, incomplete, blocked }
@@ -182,15 +194,19 @@ public struct LeadMergeRecord: Codable, Equatable, Sendable {
     /// The tasks that landed with it on one test run of a batch (merge_batching, see `LeadToolset.mergeBatch`), in the
     /// order they were stacked, itself among them; nil: it merged on a test run of its own.
     public var batch: [String]?
+    /// The task's branch head the merge took, before it was rebased and stamped (`commit` is the copy that landed, with
+    /// another hash): what's on the branch past this didn't merge (`Worktrees.unmerged`). Nil on older records.
+    public var branchHead: String?
 
     public init(commit: String, tested: Bool, onto: String? = nil, regression: Bool? = nil, audited: Bool? = nil, batch: [String]? = nil,
-                at: Double = Date().timeIntervalSince1970) {
+                branchHead: String? = nil, at: Double = Date().timeIntervalSince1970) {
         self.commit = commit
         self.tested = tested
         self.onto = onto
         self.regression = regression
         self.audited = audited
         self.batch = batch
+        self.branchHead = branchHead
         self.at = at
     }
 
@@ -727,6 +743,11 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var contractVersion: Int?
     /// The contract its running (or last) audit's verifiers have, and the version they judged (see `LeadAuditBrief`).
     public var auditBrief: LeadAuditBrief?
+    /// The contract its worker has (see `LeadWorkerBrief`); nil: no worker started since this was kept.
+    public var workerBrief: LeadWorkerBrief?
+    /// record_incident planned it on its generic brief: it doesn't start by itself (see `waitsForContract`) until the
+    /// lead changes that contract or sets it going (update_task auto_advance: true, start_worker). nil: any other task.
+    public var genericBrief: Bool?
     /// How it went, in the scorecard's numbers, as of the board's last change (see `LeadTaskScore`).
     public var score: LeadTaskScore?
     /// Its review level as the lead set it (for showing, and never lowering: merge goes by the stricter of this and
@@ -851,6 +872,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
 
     /// Its contract's version, 1 until update_task first changes it.
     public var contractRevision: Int { contractVersion ?? 1 }
+    /// Still on the generic brief record_incident wrote and not set going: auto_advance leaves it planned. Only the
+    /// lead ends the wait (`genericBrief`): a flake note merge adds to its context is a new version, not its contract.
+    public var waitsForContract: Bool { genericBrief == true }
 
     /// "judged contract vN, current vM" when its verdict (or the one a newer report outdated) judged an older version
     /// of its contract than it has now: the lead amended it after its verifiers last heard; nil otherwise.
@@ -1246,6 +1270,9 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     public var archivedBatch: [LeadTask]?
 
     public static let keptReports = 50
+    /// Past these, the oldest updates and closed questions move to the board's archive (`BoardStore.archive`).
+    public static let keptUpdates = 50
+    public static let keptClosedQuestions = 50
     /// A test that flakes `flakeLimit` times within `flakeWindow` becomes a task to fix it, once.
     public static let flakeLimit = 3
     public static let flakeWindow: Double = 7 * 86_400
@@ -1518,7 +1545,7 @@ public final class BoardStore: @unchecked Sendable {
     /// The archive as last read, by its size and change time (it's only appended to), and the tasks `restore` brought
     /// back in this `update`, with the status they had there.
     let archiveLock = NSLock()
-    var archiveCache: (size: Int, changed: Date, tasks: [LeadTask])?
+    var archiveCache: (size: Int, changed: Date, contents: ArchiveContents)?
     var restoring: [String: LeadTask.Status] = [:]
 
     public init(root: String) { self.root = root }

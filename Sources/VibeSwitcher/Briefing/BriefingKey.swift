@@ -1,7 +1,7 @@
 import Foundation
 import VibeCore
 
-/// Where the briefing's ElevenLabs key comes from (Settings › General › Briefing names it, never the value).
+/// Where the briefing's ElevenLabs key comes from (Settings › Dictation & Briefing › Spoken briefing names it, never the value).
 enum BriefingKeySource: Equatable, Sendable {
     /// Typed in Settings: the login Keychain item (`AppProof.KeychainSecret`).
     case keychain

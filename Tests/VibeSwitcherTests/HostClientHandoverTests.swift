@@ -171,7 +171,10 @@ struct HostClientHandoverTests {
             client.handoverWait = wait.handover
             client.handoverBreadcrumb = wait.breadcrumb
         }
-        if let clock { client.waitLater = clock.schedule }
+        if let clock {
+            client.waitLater = clock.schedule
+            client.replyLater = clock.schedule
+        }
         client.connectIfRunning()
         return client
     }

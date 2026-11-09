@@ -349,6 +349,42 @@ struct WalletRequestFormatTests {
         }
     }
 
+    /// A requester's project, session and label have the limits a reason has on what it can draw: they sit beside it on
+    /// the card and the signing page.
+    @Test func requesterFieldsCantImitateOtherRows() throws {
+        let request = Self.request().value
+        for field in ["project", "session", "label"] {
+            func parsed(_ text: String) throws -> WalletRequest { try Self.parseRequest(Self.edit(request, field, .string(text), in: "requestedBy")) }
+            // Two marks on a letter is writing, and a mark may end the field; three is stacking.
+            #expect((try? parsed("Tie\u{0323}\u{0302}n")) != nil)
+            #expect(throws: WalletRequestFormat.Failure.invalid("requestedBy.\(field)", "stacks more than 2 combining marks on one character")) {
+                try parsed("Wallet Manager e\u{0323}\u{0302}\u{0301}")
+            }
+            #expect(throws: WalletRequestFormat.Failure.invalid("requestedBy.\(field)", "stacks more than 2 combining marks on one character")) {
+                try parsed("Z" + String(repeating: "\u{0336}", count: 20))
+            }
+            for blank in WalletRequestFormat.blankLookalikes.sorted() {
+                let scalar = String(Unicode.Scalar(blank)!)
+                #expect(throws: WalletRequestFormat.Failure.invalid("requestedBy.\(field)", "holds a character that draws as blank space (U+\(String(format: "%04X", blank)))")) {
+                    try parsed("Treasury\(scalar)")
+                }
+            }
+            // Ordinary spaces, emoji and non-Latin scripts are fine.
+            #expect((try? parsed("Pay\u{00A0}the 👍\u{FE0F} 請求書 · счёт")) != nil)
+        }
+        // A label may still be empty; a project or session may not.
+        #expect((try? Self.parseRequest(Self.edit(request, "label", .string(""), in: "requestedBy"))) != nil)
+        #expect(throws: WalletRequestFormat.Failure.invalid("requestedBy.project", "must not be empty")) {
+            try Self.parseRequest(Self.edit(request, "project", .string(""), in: "requestedBy"))
+        }
+        // The CLI refuses the same, with the parser's words.
+        #expect(throws: WalletRequestFormat.Failure.self) {
+            var made = Self.request()
+            made.requestedBy.label = "a\u{3164}"
+            _ = try made.encoded()
+        }
+    }
+
     // MARK: Key material
 
     static let hex64 = String(repeating: "0123456789abcdef", count: 4)

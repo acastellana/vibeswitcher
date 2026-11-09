@@ -130,3 +130,17 @@ Evidence: progress.md 09:16: "Didn't merge starts-and-audits-wait … ~/.claude/
 Task: config-seal-claude-s
 Check: task turn-this-incident-into-14 turns it into a check that runs before merge.
 
+## 2026-11-08 13:37:18 Installing VibeSwitcher raised an Accept card for ~/.vibeswitcher/bin and refused a passing merge, though the app's own write of its hook binary should be sealed as it's written.
+
+Evidence: The install finished at 13:34:25 (pid 62375). ~/.vibeswitcher/bin/vibeswitcher-hook has mtime 13:34. progress.md 13:35: "Didn't merge config-seal-covers: … ~/.vibeswitcher/bin changed while the team's sessions ran". The user accepted the card for ~/.claude/skills and ~/.vibeswitcher/bin. The lead told the user that installs raise no card; the contract and the audit of branch-code-can-t said the same (F1, "the app seals what it writes itself"). AppDelegate.swift:215 and :1148 call HookBinary.sync.
+
+Task: branch-code-can-t
+Check: task turn-this-incident-into-15 turns it into a check that runs before merge.
+
+## 2026-11-08 19:21:36 Merge test runs stalled for tens of minutes on an idle Mac, delaying every merge behind them by hours on 2026-11-08
+
+Evidence: .vibeswitcher/flakes/2026-11-08-an-app-wide-appearance-2aa1e894-hung.log: the merge test of 2aa1e894 ran past test_timeout_min (45 min) and was stopped. Its last output line came 21 min before the stop, at load 5-8. Many tests are listed as started and never finished, including the merge-simulation tests (aTaskSetKeptDuringItsMergesTestRunStaysKept, aCleanVerdictOnAnOlderContractVersionIsAuditedAgainOnWhatChangedNotMerged) and a wallet test (aPlantedRecordGetsNoCardNoRetryAndALineWithNoContent). The same commit's change then passed in a batch on one test run at about 18:55, so the hang is intermittent and not caused by that branch. Batch 211190bb also held its slot for about 38 min. A verifier's full suite took 603 s on the same Mac in the same period. Merge flow: nothing reached main between 15:21 and 17:17, and Theme waited until about 18:55.
+
+Task: an-app-wide-appearance
+Check: task turn-this-incident-into-16 turns it into a check that runs before merge.
+

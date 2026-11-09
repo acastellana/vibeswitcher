@@ -135,6 +135,8 @@ final class ChatModel: ObservableObject {
     @Published var answerNotice: String?
     /// Shown under the composer about its last send ("waits until you answer the question").
     @Published var sendNotice: String?
+    /// The app is connected to its session host: what the composer types can reach the session. (Send dims without it.)
+    @Published var hostConnected = true
     /// An answer is being typed into the question on screen: the card waits for the screen to show it.
     @Published var answering = false
     @Published var mode: AgentMode?

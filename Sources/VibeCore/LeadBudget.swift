@@ -8,8 +8,12 @@ import Foundation
 public enum LeadBudget {
     /// The default budget when workflow.md sets none (`task_budget_min:`).
     public static let defaultMinutes = 120
-    /// Worked time is written to the board at most this often.
+    /// Worked time is counted at most this often, on the side clock (`LeadBudgetClock`).
     public static let step: TimeInterval = 60
+    /// board.json takes the count at most this often for the budget's accounting alone: it's megabytes rewritten and
+    /// read back by everything watching it. A task reaching its budget, or leaving running, writes it at once
+    /// (`BoardStore.noteWork`).
+    public static let boardEvery: TimeInterval = 5 * 60
     /// The most one step between two looks counts: past it the app wasn't looking (asleep, quit), so it isn't known
     /// what the worker did meanwhile.
     public static let longestStep: TimeInterval = 5 * 60
@@ -69,6 +73,92 @@ public enum LeadBudget {
     }
 }
 
+/// The running tasks' working time since board.json last took it (`.vibeswitcher/budget-clock.json`): a minute's count
+/// is written here, a few bytes, and the board takes it every `LeadBudget.boardEvery` (`BoardStore.noteWork`). Written
+/// and read under the board's lock. A board that hasn't taken it yet is behind by at most that much: status and the
+/// Team view may show a task's worked time up to 5 minutes old; the budget's stop uses the fresh count.
+public struct LeadBudgetClock: Codable, Equatable, Sendable {
+    public struct Entry: Codable, Equatable, Sendable {
+        public var worked: Double?
+        public var workedAt: Double?
+    }
+
+    /// By task id, what `LeadTask.worked` and `workedAt` are now: each task the count looked at since board.json took it.
+    public var entries: [String: Entry] = [:]
+    /// When board.json last took the count.
+    public var flushedAt: Double?
+
+    public init() {}
+
+    /// `task`'s count, as this clock has it.
+    func apply(to task: inout LeadTask) {
+        guard let entry = entries[task.id] else { return }
+        task.worked = entry.worked
+        task.workedAt = entry.workedAt
+    }
+
+    /// `board`'s tasks with this clock's count on them.
+    public func apply(to board: inout LeadBoard) {
+        guard !entries.isEmpty else { return }
+        for index in board.tasks.indices where entries[board.tasks[index].id] != nil { apply(to: &board.tasks[index]) }
+    }
+
+    /// Whether board.json should take the count now: `boardEvery` has passed, or a task with a count waiting left
+    /// running (its receipt reads it from the board) or the board.
+    func due(on board: LeadBoard, now: Double) -> Bool {
+        guard !entries.isEmpty else { return false }
+        if let flushedAt, now - flushedAt < LeadBudget.boardEvery {
+            return entries.keys.contains { board.task($0)?.status != .running }
+        }
+        return true
+    }
+}
+
+extension BoardStore {
+    var budgetClockFile: String { (folder as NSString).appendingPathComponent("budget-clock.json") }
+
+    /// The count not on board.json yet (empty when there's none).
+    public func budgetClock() -> LeadBudgetClock {
+        (FileManager.default.contents(atPath: budgetClockFile).flatMap { try? JSONDecoder().decode(LeadBudgetClock.self, from: $0) }) ?? LeadBudgetClock()
+    }
+
+    /// Counts working time as the board's `noteWork` does, on the board with the clock's count on it, and writes the
+    /// count: to the clock, and to board.json when it's due (`LeadBudgetClock.due`) or a task reached its budget now.
+    /// Under the board's lock. Returns the tasks that reached their budget now.
+    @discardableResult
+    public func noteWork(_ working: Set<String>, defaultMinutes: Int, now: Double = Date().timeIntervalSince1970) throws -> [LeadTask] {
+        try locked {
+            var board = try read()
+            var clock = budgetClock()
+            clock.apply(to: &board)
+            let noted = board.noteWork(working, defaultMinutes: defaultMinutes, now: now)
+            if !noted.reached.isEmpty || clock.due(on: board, now: now) {
+                board.refreshScores(now: now)
+                try write(board)
+                clock = LeadBudgetClock()
+                clock.flushedAt = now
+            } else if noted.changed {
+                if clock.flushedAt == nil { clock.flushedAt = now }
+                for index in board.budgeted {
+                    clock.entries[board.tasks[index].id] = LeadBudgetClock.Entry(worked: board.tasks[index].worked, workedAt: board.tasks[index].workedAt)
+                }
+            } else {
+                return noted.reached
+            }
+            try VibePaths.writePrivate(try JSONEncoder().encode(clock), to: URL(fileURLWithPath: budgetClockFile))
+            return noted.reached
+        }
+    }
+
+    /// Forgets task `id`'s count: the lead re-planned it, and its next worker's time starts from zero. Under the
+    /// board's lock (from `update`).
+    func dropBudgetClock(_ id: String) {
+        var clock = budgetClock()
+        guard clock.entries.removeValue(forKey: id) != nil else { return }
+        try? VibePaths.writePrivate(try JSONEncoder().encode(clock), to: URL(fileURLWithPath: budgetClockFile))
+    }
+}
+
 /// A task whose working time reached its budget (see `LeadBudget`): kept on it until the lead changes budget_min.
 public struct LeadOverBudget: Codable, Equatable, Sendable {
     /// The budget it reached, in minutes.
@@ -115,11 +205,15 @@ extension LeadBoard {
         return (reached, changed)
     }
 
-    /// Whether `noteWork` would change anything, without changing the board: the witness asks on the main thread, and
-    /// only then writes it, off it.
-    public func notesWork(_ working: Set<String>, defaultMinutes: Int, now: Double = Date().timeIntervalSince1970) -> Bool {
-        budgeted.contains { index in
-            var task = tasks[index]
+    /// Whether `noteWork` would change anything, the clock's count on the board, without changing the board, or the
+    /// count is due on board.json: the witness asks on the main thread, and only then writes it, off it.
+    public func notesWork(_ working: Set<String>, defaultMinutes: Int, now: Double = Date().timeIntervalSince1970,
+                          clock: LeadBudgetClock = LeadBudgetClock()) -> Bool {
+        var board = self
+        clock.apply(to: &board)
+        if clock.due(on: board, now: now) { return true }
+        return board.budgeted.contains { index in
+            var task = board.tasks[index]
             return Self.noteWork(&task, working: working.contains(task.id), defaultMinutes: defaultMinutes, now: now).changed
         }
     }

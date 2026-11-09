@@ -47,6 +47,9 @@ Typing from the phone is a separate switch: **Allow replies and key presses from
 - Nothing is typed while the Mac is locked: the lock is checked again before every batch of keys. Typing into a
   Terminal session needs Accessibility.
 - Pausing a session from the phone works even with replies off.
+- **Dictation.** With replies on, a mic beside the reply box: hold it and speak, and the Mac transcribes it with the
+  OpenAI key from Settings › Dictation & Briefing. The text goes in at the cursor and is never sent by itself. The first
+  use shows a one-time note that the audio goes to OpenAI.
 
 ## Dev pages
 

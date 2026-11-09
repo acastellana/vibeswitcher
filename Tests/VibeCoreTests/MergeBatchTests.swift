@@ -111,6 +111,34 @@ struct MergeBatchTests: LeadTeamFixture {
         }
     }
 
+    // MARK: A branch that moves
+
+    /// A commit on one task's branch while the stack's tests run: the stack tested its old commit, so nothing lands,
+    /// the reply names both commits, every task stays in review and the new commit is still there.
+    @Test func aCommitOnABranchDuringTheBatchsTestsKeepsTheStackFromLanding() throws {
+        let (root, runtime, lead) = try team(["merge_batching": "always"])
+        lead.batchSize = 2
+        let worktree = RecentProjects.shellQuote(Worktrees.path(root: root, slug: "add-y"))
+        let set = lead.call("configure", ["test_command": "cd \(worktree) && echo late > late.txt && git add late.txt && git commit -q -m late"])
+        #expect(!set.isError, "\(set.text)")
+        try audited(lead, runtime, root: root, "add-x", ["x.txt": "x\n"])
+        try audited(lead, runtime, root: root, "add-y", ["y.txt": "y\n"])
+        let main = Git.run(["rev-parse", "main"], in: root).output
+        let tested = Git.run(["rev-parse", "agent/add-y"], in: root).output
+
+        let batch = try lead.mergeBatch(["add-x", "add-y"])
+
+        let late = Git.run(["rev-parse", "agent/add-y"], in: root).output
+        #expect(late != tested)
+        #expect(batch.text.contains(String(tested.prefix(8))) && batch.text.contains(String(late.prefix(8))), "\(batch.text)")
+        #expect(Git.run(["rev-parse", "main"], in: root).output == main)
+        for slug in ["add-x", "add-y"] {
+            let task = try #require(board(root).task(slug))
+            #expect(task.status == .review && task.merged == nil, "\(slug) \(task.status)")
+        }
+        #expect(Git.run(["show", "agent/add-y:late.txt"], in: root).ok)
+    }
+
     // MARK: The setting
 
     @Test func mergeBatchingReadsOffBoostOrAlwaysAndAnythingElseIsOff() {

@@ -4,7 +4,7 @@
 #
 # scripts/product-inventory.sh [--root DIR] [--write]
 #   prints docs/process/product-inventory.md as the code in DIR (default: this repository) makes it:
-#   the menu bar with its shortcuts, the command palette, context menus, Settings' tabs and options, sheets and
+#   the menu bar with its shortcuts, the command palette, context menus, Settings' categories and options, sheets and
 #   dialogs, the chat's, the terminal's and the window's features, and the sandbox's commands and sheets; each line
 #   names its source file.
 #   --write   writes it to DIR/docs/process/product-inventory.md instead of printing it
@@ -395,52 +395,37 @@ def context_menus():
 
 # MARK: Settings
 
-CONTROLS = ["Section", "Toggle", "Picker", "Stepper", "TextField", "SecureField", "Button", "LabeledContent",
-            "DisclosureGroup", "Link"]
-
 def settings():
-    f = f"{SRC}/SettingsWindow.swift"
+    f = f"{SRC}/SettingsCatalog.swift"
     if f not in code:
         warnings.append(f"no {f}"); return
     s = code[f]
-    tv = s.find("TabView(selection:")
-    if tv < 0:
-        warnings.append("Settings: no TabView"); return
-    brace = s.index("{", tv)
-    block = s[brace + 1:match(s, brace)]
+    titles = dict(re.findall(r'case \.(\w+): return "([^"]+)"', s[s.index("var title"):s.index("var symbol")]))
+    # Which pane file has each option's SettingRow.
+    rows = {}
+    for vf in files:
+        for m in re.finditer(r'SettingRow\("([^"]+)"', code[vf]):
+            rows.setdefault(m.group(1), vf)
     emit("## Settings")
     emit()
-    emit("Settings (⌘,), tab by tab: each section and option, in order, with the views it's made of.")
-    prev = 0
-    for m in re.finditer(r'\.tabItem \{ Label\("([^"]+)"', block):
-        tab = m.group(1)
-        segment = block[prev:m.start()]
-        prev = m.end()
-        roots = [n for _, n, _ in calls(segment, VIEWS)]
-        emit()
-        emit(f"### {tab}")
-        emit(f"- Settings › {tab} tab — {where(f)}")
-        visited = set()
-        def walk(name, depth):
-            if name in visited or depth > 4:
-                return
-            visited.add(name)
-            for vf, body in types[name]["bodies"]:
-                tokens = []
-                for p, kind, c in calls(body, CONTROLS):
-                    a = split_args(body[c + 1:match(body, c)])
-                    title = literal(a[0]) if a else None
-                    if title:
-                        tokens.append((p, "control", f"{kind}: {title}"))
-                for p, n, _ in calls(body, [v for v in VIEWS if v != name]):
-                    tokens.append((p, "view", n))
-                for p, kind, value in sorted(tokens):
-                    if kind == "control":
-                        emit(f"- {value} — {where(vf)}")
-                    else:
-                        walk(value, depth + 1)
-        for r in roots:
-            walk(r, 0)
+    emit("Settings (⌘,), category by category: each option, under its section, with the file its row is in.")
+    # The catalog in its own order; each option's line is section, title.
+    last = None
+    for block in re.finditer(r'entries\(\.(\w+), "([^"]+)", \[(.*?)\n    \]\)', s, re.S):
+        category, section, body = block.groups()
+        if category != last:
+            if category not in titles:
+                warnings.append(f"Settings: no title for {category}")
+            title = titles.get(category, category)
+            emit()
+            emit(f"### {title}")
+            emit(f"- Settings › {title} — {where(f)}")
+            last = category
+        for m in re.finditer(r'Entry\("([^"]+)", "([^"]+)"', body):
+            option, label = m.groups()
+            if option not in rows:
+                warnings.append(f"Settings: no SettingRow for {option}")
+            emit(f"- {section}: {label} — {where(rows.get(option, f))}")
     emit()
 
 # MARK: Sheets, popovers and dialogs
