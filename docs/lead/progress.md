@@ -2047,3 +2047,15 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 08:26 Automatically (auto_advance): Didn't start readme-a-real-feature: readme-a-real-feature's worker not started: ~/.vibeswitcher/bin changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made …
 - 2026-11-09 08:42 Started a worker on readme-a-real-feature (auto → Claude: Claude weekly 50%, 5 points behind pace, not tight; Codex 59%)
 - 2026-11-09 08:42 Automatically (auto_advance): Started a worker on readme-a-real-feature (README: a real feature list, and screenshots that show what their captions say); its agent is auto, so it went to Claude: Claude weekly 50%, 5 points behind pace, not tight; Codex 59%.
+- 2026-11-09 08:56 Planned ideas-review-mattpocock: Ideas review: mattpocock/skills
+- 2026-11-09 08:56 Started a worker on ideas-review-mattpocock
+- 2026-11-09 08:56 Automatically (auto_advance): Started a worker on ideas-review-mattpocock (Ideas review: mattpocock/skills).
+- 2026-11-09 08:56 Planned ideas-review-addyosmani: Ideas review: addyosmani/agent-skills
+- 2026-11-09 08:57 Started a worker on ideas-review-addyosmani
+- 2026-11-09 08:57 Automatically (auto_advance): Started a worker on ideas-review-addyosmani (Ideas review: addyosmani/agent-skills).
+- 2026-11-09 08:57 Planned ideas-review-cloudflare: Ideas review: cloudflare/security-audit-skill
+- 2026-11-09 08:57 Started a worker on ideas-review-cloudflare
+- 2026-11-09 08:57 Automatically (auto_advance): Started a worker on ideas-review-cloudflare (Ideas review: cloudflare/security-audit-skill).
+- 2026-11-09 08:57 Planned ideas-review-google: Ideas review: google/elephant-goldfish-model
+- 2026-11-09 08:57 Started a worker on ideas-review-google
+- 2026-11-09 08:57 Automatically (auto_advance): Started a worker on ideas-review-google (Ideas review: google/elephant-goldfish-model).
