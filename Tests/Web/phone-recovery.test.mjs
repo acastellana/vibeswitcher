@@ -300,6 +300,13 @@ await flush();
 assert.equal($('pair').hidden, false, 'the pairing screen');
 assert.equal($('offline').hidden, true, 'no offline banner over it');
 assert.match($('pairError').textContent, /isn't paired/);
+// Forgetting it on the phone while the Mac can't be reached: no poll is left to take the banner away.
+on('/api/state', dropped);
+run('token = "test-token"; show("list")');
+await flush();
+assert.equal($('offline').hidden, false);
+run('forgetToken()');
+assert.equal($('offline').hidden, true, 'nothing left to clear it, so the pairing screen does');
 // Paired again for the rest of the checks.
 run('token = "test-token"');
 on('/api/state', () => reply(200, macState()));
