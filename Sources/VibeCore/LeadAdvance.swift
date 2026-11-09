@@ -1014,13 +1014,16 @@ public final class LeadAdvance: @unchecked Sendable {
             // A Codex task runs on the Codex account: Claude's limits don't hold it.
             if (route?.agent ?? task.workerAgent) != .codex, usageHeld(model: lead.workerModel(for: task)) { continue }
             let after = (task.after ?? []).joined(separator: ", ")
+            var overlap: String?
             step("start|\(task.slug)") {
                 // Asked again in start_worker's lock: a hold set while the room was counted stands.
-                _ = try lead.advanceStart(task.slug, when: { [self] in startsByItself($0) })
+                _ = try lead.advanceStart(task.slug, when: { [self] in startsByItself($0) }, warned: { overlap = $0 })
                 let routed = lead.store.load().task(task.slug)?.routed
                 return "Started a worker on \(task.slug) (\(task.title))" + (after.isEmpty ? "" : ", its after tasks done (\(after))")
                     + (routed.map { "; its agent is auto, so it went to \($0)." } ?? ".")
             }
+            // A line of its own, so the report wakes the lead (`wakes`): "Started a worker" alone is FYI.
+            if let overlap { did(overlap) }
         }
     }
 

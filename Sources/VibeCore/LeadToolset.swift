@@ -1720,8 +1720,10 @@ public final class LeadToolset: MCPToolset {
     /// One start at a time, in this server and any other: each counts the workers running and starts its own before
     /// the next counts, so calls at once can't go past max_workers (or start two workers on one task).
     /// `when` (an automatic start, see `LeadAdvance`): whether the task is still due, asked in that one-at-a-time lock.
-    private func startWorker(_ slug: String, recover: Bool = false, overrideUsage: Bool = false, when: ((LeadTask) -> Bool)? = nil) throws -> MCPToolResult {
-        try exclusively("start-worker") { try startWorkerAlone(slug, recover: recover, overrideUsage: overrideUsage, when: when) }
+    /// `warned` (an automatic start): given the overlap warning (see `LeadOverlap`) of a start that went ahead.
+    private func startWorker(_ slug: String, recover: Bool = false, overrideUsage: Bool = false, when: ((LeadTask) -> Bool)? = nil,
+                             warned: ((String) -> Void)? = nil) throws -> MCPToolResult {
+        try exclusively("start-worker") { try startWorkerAlone(slug, recover: recover, overrideUsage: overrideUsage, when: when, warned: warned) }
     }
 
     // MARK: The account's usage (see `AccountUsage`)
@@ -1885,7 +1887,7 @@ public final class LeadToolset: MCPToolset {
         return try body()
     }
 
-    private func startWorkerAlone(_ slug: String, recover: Bool, overrideUsage: Bool, when: ((LeadTask) -> Bool)?) throws -> MCPToolResult {
+    private func startWorkerAlone(_ slug: String, recover: Bool, overrideUsage: Bool, when: ((LeadTask) -> Bool)?, warned: ((String) -> Void)?) throws -> MCPToolResult {
         let board = try store.read()
         guard let task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
         // Held, or no longer due, since the automatic step looked: not started, and nothing said.
@@ -2002,6 +2004,8 @@ public final class LeadToolset: MCPToolset {
         // Keep the agent/model this launch selected; the contract, review and budget are current.
         briefed.agent = codex ? .codex : nil
         briefed.model = launchModel
+        // Told, never held: the start goes ahead whatever this says.
+        let overlap = overlapWarning(briefed)
         let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(briefed.title)", trust: true,
                                  prompt: LeadPrompts.worker(task: briefed, root: root, workflow: workflow),
                                  start: "Start on your task (it's in your instructions)." + finish + " Call progress at each milestone. When done, call report.",
@@ -2038,7 +2042,9 @@ public final class LeadToolset: MCPToolset {
         let runsOn = (codex ? ", Codex" : "") + (launchModel.map { ", on \($0)" } ?? "")
         let audited = codex ? " " + Self.codexStartNote : ""
         let why = route.map { " Its agent is auto, so it went to \($0.why)." } ?? ""
-        return MCPToolResult(text: noTools + offSaid + recovered + locked + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)\(runsOn)).\(why) You'll get a message when it reports, needs input or stalls.\(audited)\(amended)")
+        if let overlap { warned?(overlap) }
+        return MCPToolResult(text: noTools + offSaid + recovered + locked + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)\(runsOn)).\(why) You'll get a message when it reports, needs input or stalls.\(audited)\(amended)"
+                             + (overlap.map { "\n" + $0 } ?? ""))
     }
 
     private func stopWorker(_ slug: String) throws -> MCPToolResult {
@@ -6071,7 +6077,9 @@ extension LeadToolset {
         return ![.kept, .blocked, .folded, .abandoned, .reverted].contains(task.status)
     }
 
-    func advanceStart(_ slug: String, when: @escaping (LeadTask) -> Bool) throws -> MCPToolResult { try startWorker(slug, when: when) }
+    func advanceStart(_ slug: String, when: @escaping (LeadTask) -> Bool, warned: ((String) -> Void)? = nil) throws -> MCPToolResult {
+        try startWorker(slug, when: when, warned: warned)
+    }
     func advanceAudit(_ slug: String, restarting head: String? = nil) throws -> MCPToolResult { try audit(slug, restart: head != nil, expectedHead: head) }
     /// `locked`: called once the merge holds its locks and is past its refusals, about to wait for its tests.
     func advanceMerge(_ slug: String, locked: (() -> Void)? = nil) throws -> MCPToolResult {
