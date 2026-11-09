@@ -105,4 +105,31 @@ extension LeadAdvanceTests {
         #expect(try #require(earlier.startedAt) <= (try #require(second.startedAt)))
         #expect(earlier.worker != nil && second.worker != nil)
     }
+
+    /// A boundary that gives one file and forbids another in the same breath still gives the first (blind check,
+    /// 2026-11-09: the whole clause was dropped, so the send path's overlap went unsaid).
+    @Test func overlapKeepsTheFileAClauseGrantsBesideOneItForbids() throws {
+        let (root, _, lead) = try team(test: nil, ["max_workers": 8])
+        try withInputPath(root)
+        plan(lead, "Phone", ["May change Sources/VibeSwitcher/PhoneAccess.swift and its tests, and must not change Sources/VibeSwitcher/RemoteInput.swift"])
+        #expect(!lead.call("start_worker", ["task": "phone"]).isError)
+        plan(lead, "Status", ["Sources/App/Status.swift: the read-only status view"])
+        #expect(!lead.call("start_worker", ["task": "status"]).isError)
+
+        plan(lead, "Composer", ["PhoneAccess's send functions", "May change Sources/App/Status.swift, don't touch Sources/App/Other.swift"])
+        let composer = lead.call("start_worker", ["task": "composer"])
+        #expect(composer.text.contains("Sources/VibeSwitcher/PhoneAccess.swift: phone (running: its boundaries name it)"), "\(composer.text)")
+        #expect(composer.text.contains("Sources/App/Status.swift: status (running: its boundaries name it)"), "\(composer.text)")
+
+        plan(lead, "Client", ["May change HostClient.send and leave its callers untouched"])
+        #expect(!lead.call("start_worker", ["task": "client"]).isError)
+        plan(lead, "Callers", ["HostClient.send only and do not change the host"])
+        let callers = lead.call("start_worker", ["task": "callers"])
+        #expect(callers.text.contains("Sources/VibeSwitcher/HostClient.swift: client (running: its boundaries name it)"), "\(callers.text)")
+
+        // What the clause forbids stays out: phone's RemoteInput.swift is no overlap.
+        plan(lead, "Remote", ["RemoteInput"])
+        let remote = lead.call("start_worker", ["task": "remote"])
+        #expect(!remote.isError && !remote.text.contains("Overlap"), "\(remote.text)")
+    }
 }

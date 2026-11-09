@@ -35,8 +35,11 @@ enum LeadOverlap {
     private static let sourceExtensions = "swift|m|mm|h|c|cc|cpp|hpp|sh|bash|zsh|py|js|jsx|mjs|ts|tsx|rs|go|rb|java|kt|php|css|scss|html|sql|ex|exs|metal"
     private static let pathPattern = try? NSRegularExpression(
         pattern: #"(?<![\w./*-])(?:\.?/)?(?:[\w.+-]+/)*[\w+-][\w.+-]*\.(?:"# + sourceExtensions + #")(?![\w/-])(?!\.\w)"#)
-    /// A boundary is read a sentence at a time, and "A.swift but not B.swift" as two clauses.
-    private static let clauseBreak = try? NSRegularExpression(pattern: #"(?<=[.;!?])\s+|;\s*|\n+|\s+but\s+|,\s*(?=(?:not|never|no|except)\b)"#, options: [.caseInsensitive])
+    /// A boundary is read a sentence at a time, and "A.swift but not B.swift" or "A.swift, and must not change B.swift"
+    /// as two clauses: what's forbidden is only what follows the negation.
+    private static let clauseBreak = try? NSRegularExpression(
+        pattern: #"(?<=[.;!?])\s+|;\s*|\n+|\s+but\s+|(?:,\s*(?:and\s+)?|\s+and\s+)(?=(?:not|never|no|except|must not|mustn['’]t|may not|do not|don['’]t|leave|avoid)\b)"#,
+        options: [.caseInsensitive])
 
     /// The input path's files this repository has: another project's HostClient is none of the rule's business.
     static func inputFiles(root: String) -> [String] {
@@ -76,10 +79,10 @@ enum LeadOverlap {
         // "No changes outside A.swift" gives it A.swift.
         if text.contains(" outside ") { return false }
         let starts = ["no ", "not ", "never ", "don't ", "do not ", "does not ", "must not ", "mustn't ", "may not ", "can't ", "cannot ",
-                      "avoid ", "leave ", "without ", "except ", "excluding ", "out of scope", "hands off"]
+                      "avoid ", "leave ", "without ", "except ", "excluding ", "out of scope", "hands off", "read-only", "read only"]
         if starts.contains(where: text.hasPrefix) { return true }
         return [" must not ", " mustn't ", " may not ", "don't touch", "do not touch", "don't change", "do not change",
-                "out of scope", "off limits", "untouched", " stays as ", "read-only", "read only"].contains(where: text.contains)
+                "out of scope", "off limits", "untouched", " stays as "].contains(where: text.contains)
     }
 
     /// The source files `boundaries` name, read from their text; the input path's by its names too. Nothing for text
@@ -132,7 +135,7 @@ enum LeadOverlap {
         if !onInput.isEmpty {
             let who = Set(onInput.flatMap { files[$0, default: [:]].keys }).sorted().joined(separator: ", ")
             text += " Input path: \(onInput.joined(separator: ", ")) \(onInput.count == 1 ? "is" : "are") on the phone and session send path (\(inputPathWords))."
-                + " The 2026-10-23 rule has tasks on it run one after another, never in parallel, the later one starting from the base after the earlier merges: \(slug) and \(who). Put them in order with after, unless they already are, or hold one."
+                + " The 2026-10-23 rule has tasks on it run one after another, never in parallel, the later one starting from the base after the earlier merges: \(slug) and \(who). Put them in order with after, unless they already are, or hold one. This is told by file: tasks in other functions of it, off the send path, may run side by side."
         }
         return text
     }
