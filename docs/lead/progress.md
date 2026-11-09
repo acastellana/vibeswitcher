@@ -2215,3 +2215,13 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 17:14 Merged phone-over-tailscale: Phone over Tailscale: review and fix setup, pairing and staying connected (in a batch: phone-over-tailscale, the-merge-checks-the, a-stalled-or-hung landed on one test run) (build 16ca360977ec)
 - 2026-11-09 17:14 Merged the-merge-checks-the: The merge checks the commit it's about to land before main moves (in a batch: phone-over-tailscale, the-merge-checks-the, a-stalled-or-hung landed on one test run) (build 16ca360977ec)
 - 2026-11-09 17:14 Merged a-stalled-or-hung: A stalled or hung report says what it's really waiting on, with evidence (in a batch: phone-over-tailscale, the-merge-checks-the, a-stalled-or-hung landed on one test run) (build 16ca360977ec)
+- 2026-11-09 17:14 Automatically (auto_advance): Merged phone-over-tailscale at 622440e0 (its passing audit), the-merge-checks-the at 261b2d00 (its passing audit), a-stalled-or-hung at 92a26aa0 (its passing audit) into main as one batch, on 1 test run for 3 tasks.
+- 2026-11-09 17:14 Automatically (auto_advance): Cleaned up phone-over-tailscale (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-09 17:14 Automatically (auto_advance): Cleaned up the-merge-checks-the (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-09 17:14 Automatically (auto_advance): Cleaned up a-stalled-or-hung (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-09 17:30 Planned the-config-seal-s: The config seal's card says exactly what changed and what most likely changed it (review audit)
+- 2026-11-09 17:30 Started a worker on the-config-seal-s
+- 2026-11-09 17:30 Automatically (auto_advance): Started a worker on the-config-seal-s (The config seal's card says exactly what changed and what most likely changed it).
+- 2026-11-09 17:33 Merged verifier-eval-failed: Verifier eval: failed runs aren't scored, cases get REVIEW.md, and a true baseline (in a batch: verifier-eval-failed, phone-input-review-and, audit-exceptions-are-a landed on one test run) (build 16ca360977ec)
+- 2026-11-09 17:33 Merged phone-input-review-and: Phone input: review and fix replies, keys, lead answers and dictation (in a batch: verifier-eval-failed, phone-input-review-and, audit-exceptions-are-a landed on one test run) (build 16ca360977ec)
+- 2026-11-09 17:33 Merged audit-exceptions-are-a: Audit exceptions are a structured record the verifier gets before it starts (in a batch: verifier-eval-failed, phone-input-review-and, audit-exceptions-are-a landed on one test run) (build 16ca360977ec)

@@ -326,3 +326,7 @@ The 2026-11-08 decision left how to run it to the user, and they chose Opus. The
 
 The incidents point to handoffs the system controls, not to too few reviewers. The verifier passed a correct branch and the merge step changed the result; two 2026-11-07 send-backs were the lead failing to pass on an acceptance; and a five-hour misdiagnosis came from a report that couldn't show Mac sleep. The 15 oldest impact entries are all still pending. The hand pilot is narrower than the backtested contract reader, which gave no signal across all contracts. 14 user-found and 14 system-found bugs count discoveries, not escapes, so the follow-up measure is needed.
 
+## 2026-11-09 17:30:54 Updates to Claude's own synced skills keep needing the user's Accept (their answer to A200C514, 2026-11-09). The card gets clearer instead (task the-config-seal-s): which skill and files, the text difference, when, and the likely source and how sure that is.
+
+A skill runs in every Claude session, and a forged sync update can't be told from a real one on disk, the same reasoning as the 2026-11-08 06:33 plugin decision. The user's complaint was not knowing what changed or why, and real skill-content changes are rare.
+
