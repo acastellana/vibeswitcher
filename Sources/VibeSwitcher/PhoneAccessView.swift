@@ -15,6 +15,10 @@ struct PhoneAccessView: View {
                     .toggleStyle(.switch)
             }
             statusLine
+            if access.devicesUnreadable {
+                Text("Couldn't read the list of paired phones (\(access.devicesFilePath)). Phones can't connect until it reads again: restore the file, or delete it and pair your phones again.")
+                    .foregroundStyle(.red).font(.callout).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
             if access.state == .on {
                 Divider()
                 pairingSection
@@ -42,6 +46,9 @@ struct PhoneAccessView: View {
                 SettingRow("phone-push-away") { label in Toggle(isOn: $access.pushOnlyWhenAway) { label.stacked } }
                 devicesSection
                 activitySection
+            } else {
+                // Tailscale down or the switch off is when you may need to remove a lost phone.
+                devicesSection
             }
         }
         .padding(18)
@@ -90,7 +97,9 @@ struct PhoneAccessView: View {
                 }
             }
         case .failed(let message):
+            // Selectable: it can hold a command to run or the address to enable Serve at.
             Text(message).foregroundStyle(.red).font(.callout).fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
         }
     }
 
@@ -109,11 +118,16 @@ struct PhoneAccessView: View {
                         .textSelection(.enabled)
                     TimelineView(.ticking(every: 1)) { context in
                         let left = max(0, Int(pairing.expires.timeIntervalSince(context.date)))
-                        Text(left > 0 ? "Valid for \(left / 60):\(String(format: "%02d", left % 60)), once"
-                                      : "Expired")
-                            .font(.caption).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(left > 0 ? "Valid for \(left / 60):\(String(format: "%02d", left % 60)), once"
+                                          : "This code expired.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                if left == 0 { Button("New Code") { access.startPairing() }.controlSize(.small) }
+                                Button("Cancel") { access.cancelPairing() }.controlSize(.small)
+                            }
+                        }
                     }
-                    Button("Cancel") { access.cancelPairing() }.controlSize(.small)
                 }
             }
         } else {

@@ -31,7 +31,7 @@ let clockOffset = 0;          // Mac clock minus phone clock, seconds
 
 // ---------- API ----------
 
-const UNREACHABLE = "Can't reach your Mac. Is Tailscale on here, and is the Mac awake?";
+const UNREACHABLE = "Can't reach your Mac. Is Tailscale on here, is the Mac awake, and is Phone Access on in VibeSwitcher?";
 const SLOW_READ = 'This is taking a long time on this connection. Try again.';
 // The big reads (a transcript's tail, a page of scrollback): more than a poll's 10 s, and a slow answer isn't an offline Mac.
 const BIG_READ = { timeout: 30000, timeoutMessage: SLOW_READ };

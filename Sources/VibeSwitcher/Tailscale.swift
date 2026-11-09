@@ -20,17 +20,41 @@ enum TailscaleCLI {
 
         var description: String {
             switch self {
-            case .notInstalled: return "Tailscale isn't installed on this Mac."
+            case .notInstalled: return "Tailscale isn't installed on this Mac. Install Tailscale from tailscale.com, log in, and this connects by itself."
             case .notRunning: return "Tailscale isn't connected. Open Tailscale and log in."
             case .httpsDisabled: return "Turn on HTTPS certificates for your tailnet (admin console › DNS › HTTPS Certificates)."
-            case .portInUse(let port, let target): return "Port \(port) is already served by Tailscale (to \(target))."
+            case .portInUse(let port, let target):
+                return "Port \(port) is already served by Tailscale (\(target)). Stop that, or run \(Self.freeing(port: port, target: target)), and this connects by itself."
             case .command(let message): return "Tailscale: \(message)"
             }
         }
+
+        /// The command that frees a port, for what `servedTargets` said is on it: each kind takes its own.
+        private static func freeing(port: Int, target: String) -> String {
+            if target.hasPrefix("a TCP forward") { return "tailscale serve --tcp=\(port) off" }
+            if let mount = target.range(of: " at /", options: .backwards), mount.upperBound < target.endIndex {
+                return "tailscale serve --https=\(port) --set-path=/\(target[mount.upperBound...]) off"
+            }
+            return "tailscale serve --https=\(port) off"
+        }
     }
 
+    #if DEBUG
+    /// Tests: what to run instead of looking for Tailscale (`.some(nil)`: not installed). Once a test sets this, the
+    /// real CLI can't run, whatever is on the Mac: every call goes through `executable`.
+    private static let testExecutable = NSLock()
+    private static var testExecutablePath: String??
+    static var executableForTests: String?? {
+        get { testExecutable.withLock { testExecutablePath } }
+        set { testExecutable.withLock { testExecutablePath = newValue } }
+    }
+    #endif
+
     static var executable: String? {
-        ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "/opt/homebrew/bin/tailscale", "/usr/local/bin/tailscale"]
+        #if DEBUG
+        if let override = executableForTests { return override }
+        #endif
+        return ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "/opt/homebrew/bin/tailscale", "/usr/local/bin/tailscale"]
             .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
@@ -40,7 +64,9 @@ enum TailscaleCLI {
         // Tell "couldn't ask Tailscale" apart from "Tailscale says it isn't connected".
         guard let data = result.output.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            let detail = (result.error.isEmpty ? result.output : result.error).trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = saying(result)
+            // The service itself is down (the CLI's own words): the same answer as logged out, open Tailscale.
+            if detail.localizedCaseInsensitiveContains("failed to connect to local") { return .failure(.notRunning) }
             return .failure(.command("couldn't read its status (\(detail.isEmpty ? "exit \(result.status)" : String(detail.prefix(160))))"))
         }
         guard json["BackendState"] as? String == "Running",
@@ -54,19 +80,34 @@ enum TailscaleCLI {
         return .success(Status(dnsName: dnsName, login: login, httpsAvailable: certDomains.contains(dnsName)))
     }
 
-    /// What each of this Mac's HTTPS ports proxies to (port → target), or nil if it can't be read.
+    /// What each of this Mac's ports serves (port → what), or nil if it can't be read. Every port in use is here, not
+    /// only those proxying `/`: `tailscale serve` replaces a `/` handler without asking and adds beside other paths, so
+    /// a port that looks free here gets overwritten. A proxy of `/` reads as its target, the one thing that can be ours.
     static func servedTargets(host: String, timeout: TimeInterval = 10) -> [Int: String]? {
         let result = run(["serve", "status", "--json"], timeout: timeout)
         guard result.status == 0, let data = result.output.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         var targets: [Int: String] = [:]
         for (key, value) in json["Web"] as? [String: Any] ?? [:] {
-            guard key.hasPrefix("\(host):"), let port = Int(key.dropFirst(host.count + 1)),
-                  let site = value as? [String: Any], let handlers = site["Handlers"] as? [String: Any],
-                  let root = handlers["/"] as? [String: Any], let proxy = root["Proxy"] as? String else { continue }
-            targets[port] = proxy
+            guard key.hasPrefix("\(host):"), let port = Int(key.dropFirst(host.count + 1)) else { continue }
+            targets[port] = served(by: (value as? [String: Any])?["Handlers"] as? [String: Any] ?? [:])
+        }
+        for (key, value) in json["TCP"] as? [String: Any] ?? [:] {
+            guard let port = Int(key), let forward = (value as? [String: Any])?["TCPForward"] as? String else { continue }
+            targets[port] = "a TCP forward to \(forward)"
         }
         return targets
+    }
+
+    /// One web port's handlers, in words: `/`'s proxy target as it is, anything else as what it is and where.
+    private static func served(by handlers: [String: Any]) -> String {
+        if let proxy = (handlers["/"] as? [String: Any])?["Proxy"] as? String { return proxy }
+        guard let (mount, value) = handlers.sorted(by: { $0.key < $1.key }).first, let handler = value as? [String: Any] else {
+            return "another web server"
+        }
+        if let proxy = handler["Proxy"] as? String { return "\(proxy) at \(mount)" }
+        if let path = handler["Path"] as? String { return "the files in \(path) at \(mount)" }
+        return handler["Text"] != nil ? "a text reply at \(mount)" : "another web server at \(mount)"
     }
 
     /// What one HTTPS port currently proxies to, if anything.
@@ -76,11 +117,16 @@ enum TailscaleCLI {
 
     /// Maps https://<this mac>:<httpsPort> on the tailnet to a loopback server. Never `funnel`: tailnet only.
     static func startServing(host: String, httpsPort: Int = PhoneAccess.httpsPort, localTarget: String) -> Failure? {
-        if let existing = servedTarget(host: host, httpsPort: httpsPort) {
+        // Couldn't tell what's on the port: nothing is overwritten on a guess.
+        guard let served = servedTargets(host: host) else { return .command("couldn't read which ports it serves") }
+        if let existing = served[httpsPort] {
             return existing == localTarget ? nil : .portInUse(port: httpsPort, target: existing)
         }
         let result = run(["serve", "--bg", "--https=\(httpsPort)", localTarget])
-        guard result.status == 0 else { return .command(result.error.isEmpty ? result.output : result.error) }
+        guard result.status == 0 else {
+            let detail = saying(result)
+            return .command(detail.isEmpty ? "tailscale serve didn't answer (exit \(result.status))" : detail)
+        }
         return servedTarget(host: host, httpsPort: httpsPort) == localTarget ? nil : .command("serve config didn't take effect")
     }
 
@@ -98,6 +144,15 @@ enum TailscaleCLI {
 
     static func stopServing(host: String, localTarget: String, timeout: TimeInterval = 10) {
         stopServing(host: host, mappings: [PhoneAccess.httpsPort: localTarget], timeout: timeout)
+    }
+
+    /// What a failed call said: both streams (a prompt to enable Serve is on stdout), without the CLI's version warning.
+    private static func saying(_ result: (output: String, error: String, status: Int32)) -> String {
+        [result.error, result.output].map { text in
+            text.split(separator: "\n", omittingEmptySubsequences: false)
+                .filter { !$0.hasPrefix("Warning: client version") }.joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
     private static func run(_ arguments: [String], timeout: TimeInterval = 10) -> (output: String, error: String, status: Int32) {

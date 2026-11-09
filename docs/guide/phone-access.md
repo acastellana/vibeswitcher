@@ -14,10 +14,35 @@ It's off by default.
 2. Settings (⌘,) › **Phone** › turn on **Phone access over Tailscale**. VibeSwitcher runs
    `tailscale serve --bg --https=8443` for its local server, and removes that mapping when you turn it off or quit.
 3. **Pair a Phone…** shows a QR code and a code. Scan the QR code with the phone (Tailscale on), or open the address
-   shown and type the code. The code has 8 characters, works for 10 minutes and allows 5 tries.
+   shown and type the code. The code has 8 characters, works for 10 minutes and allows 5 tries. When it has expired,
+   Settings offers **New Code**.
 4. On the phone, add the page to your home screen, then tap **Turn on notifications**.
 
-Remove a phone in Settings › Phone, or unpair it from the phone; its access stops at once.
+Remove a phone in Settings › Phone, or unpair it from the phone; its access stops at once. Settings lists your phones
+with the switch off or Tailscale down too, so you can remove one then.
+
+### If it doesn't connect
+
+The switch stays on and VibeSwitcher tries again every 30 seconds, and a few seconds after the Mac wakes, so Tailscale
+starting after VibeSwitcher at login needs nothing from you. The problem shows in red under the switch:
+
+- **Tailscale isn't installed**: install it, and log in.
+- **Tailscale isn't connected**: open Tailscale and log in.
+- **Turn on HTTPS certificates**: in the admin console › DNS.
+- **Serve is not enabled on your tailnet**: open the address it gives you.
+- **Port 8443 is already served**: VibeSwitcher won't replace what's there, whether that's another address, files, a
+  sub-path or a TCP forward. Stop it, or run the command the message gives you (`tailscale serve --https=8443 off`,
+  or its `--tcp` or `--set-path` form).
+
+- **Couldn't read the list of paired phones**: `devices.json` is damaged. Phones wait with a message and stay paired,
+  and nobody can pair over it. Restore the file, or delete it and pair your phones again.
+
+A mapping left behind by a crash is VibeSwitcher's own, and is reused. If the mapping goes missing while the switch is
+on, it's put back.
+
+If this Mac's tailnet name or Tailscale account changes, Phone Access restarts on the new one within about a minute.
+The phone's saved page still points at the old address: open the new one shown in Settings. Phones paired from another
+account have to pair again.
 
 ## What the phone shows
 

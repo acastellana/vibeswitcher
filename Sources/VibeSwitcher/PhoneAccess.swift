@@ -17,7 +17,9 @@ import VibeCore
 final class PhoneAccess: ObservableObject {
     static let port = PhonePorts.server
     static let httpsPort = PhonePorts.https
-    static let localTarget = "http://127.0.0.1:\(port)"
+    /// The loopback server's port; tests use one of their own (the real app may hold `port`).
+    var listenPort = PhoneAccess.port
+    private var localTarget: String { "http://127.0.0.1:\(listenPort)" }
 
     enum State: Equatable {
         case off, starting, on
@@ -32,6 +34,10 @@ final class PhoneAccess: ObservableObject {
     /// `devices`, for the server's queue: whether a request may send a recording is decided there, before its body.
     private let pairedNow = PairedDevices()
     @Published private(set) var pairing: PairingCode?
+    /// The devices file is there but can't be read: who's paired isn't known, which isn't the same as nobody. Nothing
+    /// under /api/ is served meanwhile (503, so no phone forgets its token) and the file is never overwritten.
+    @Published private(set) var devicesUnreadable = false
+    var devicesFilePath: String { devicesFile.path }
     @Published private(set) var recentActivity: [String] = []
     @Published var enabled: Bool {
         didSet {
@@ -65,7 +71,9 @@ final class PhoneAccess: ObservableObject {
     /// Announces pairings and remote input on the Mac (title, body).
     var onEvent: ((String, String) -> Void)?
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+    /// Where the paired phones are kept (`devicesURL`, a test's own otherwise).
+    private let devicesFile: URL
     private let store: SessionStore
     /// Screens, scrollback and replies of sessions in the window go through the session host.
     weak var hostClient: HostClient?
@@ -162,14 +170,18 @@ final class PhoneAccess: ObservableObject {
     /// What the phone may post: what MediaRecorder makes in Safari and Chrome, and what OpenAI reads.
     static let dictationTypes: Set<String> = ["audio/webm", "audio/mp4", "audio/ogg", "audio/mpeg", "audio/wav", "audio/x-m4a", "audio/aac"]
 
-    init(store: SessionStore) {
+    init(store: SessionStore, defaults: UserDefaults = .standard, devicesFile: URL? = nil) {
         self.store = store
+        self.defaults = defaults
+        self.devicesFile = devicesFile ?? Self.devicesURL
         defaults.register(defaults: ["phonePushOnlyWhenAway": true])
         enabled = defaults.bool(forKey: "phoneAccessEnabled")
         inputAllowed = defaults.bool(forKey: "phoneInputAllowed")
         devPagesAllowed = defaults.bool(forKey: "phoneDevPagesAllowed")
         pushOnlyWhenAway = defaults.bool(forKey: "phonePushOnlyWhenAway")
-        devices = Self.loadDevices()
+        let loaded = Self.loadDevices(self.devicesFile)
+        devices = loaded ?? []
+        devicesUnreadable = loaded == nil
         pairedNow.value = devices   // an initializer's assignment runs no didSet
         recentActivity = Self.tailOfAuditLog()
         // Network and Tailscale come back a few seconds after wake.
@@ -246,7 +258,7 @@ final class PhoneAccess: ObservableObject {
         }
         server.paired = { [pairedNow] in pairedNow.value }
         self.server = server
-        server.start(port: Self.port, onReady: { [weak self] in
+        server.start(port: listenPort, onReady: { [weak self] in
             guard let self, self.isCurrent(run) else { return server.stop() }
             self.startServing(run: run, host: host)
         }, onFailure: { [weak self] message in
@@ -262,13 +274,14 @@ final class PhoneAccess: ObservableObject {
 
     /// "On" only once both halves exist: the listener is ready and Tailscale points at it.
     private func startServing(run: Int, host: String) {
+        let localTarget = self.localTarget
         control.async {
-            let failure = TailscaleCLI.startServing(host: host, localTarget: Self.localTarget)
+            let failure = TailscaleCLI.startServing(host: host, localTarget: localTarget)
             DispatchQueue.main.async {
                 guard self.isCurrent(run) else {
                     // Turned off while this was in flight: take the mapping back down.
                     if failure == nil, !self.enabled {
-                        self.control.async { TailscaleCLI.stopServing(host: host, localTarget: Self.localTarget) }
+                        self.control.async { TailscaleCLI.stopServing(host: host, localTarget: localTarget) }
                     }
                     return
                 }
@@ -323,7 +336,8 @@ final class PhoneAccess: ObservableObject {
         state = .off
         url = nil
         if let host = tailscale?.dnsName {
-            control.async { TailscaleCLI.stopServing(host: host, localTarget: Self.localTarget) }
+            let localTarget = self.localTarget
+            control.async { TailscaleCLI.stopServing(host: host, localTarget: localTarget) }
         }
         audit("phone access off")
     }
@@ -342,7 +356,7 @@ final class PhoneAccess: ObservableObject {
         }
         if enabled, let dnsName = tailscale?.dnsName {
             host = dnsName
-            mappings[Self.httpsPort] = Self.localTarget
+            mappings[Self.httpsPort] = localTarget
         }
         guard let host, !mappings.isEmpty else { return }
         TailscaleCLI.stopServing(host: host, mappings: mappings, timeout: 4)
@@ -370,7 +384,8 @@ final class PhoneAccess: ObservableObject {
         let previewsWanted = devPagesAllowed
         control.async {
             let status = TailscaleCLI.status()
-            let served = (try? status.get()).flatMap { TailscaleCLI.servedTarget(host: $0.dnsName) }
+            // nil: couldn't be read this time, which says nothing about the mapping.
+            let served = (try? status.get()).flatMap { TailscaleCLI.servedTargets(host: $0.dnsName) }
             if previewsWanted { self.previews.repairMappings() }
             DispatchQueue.main.async {
                 self.healthCheckRunning = false
@@ -388,7 +403,7 @@ final class PhoneAccess: ObservableObject {
                     self.previews.stop()
                     self.syncPreviews()
                 }
-                if served != Self.localTarget {
+                if let served, served[Self.httpsPort] != self.localTarget {
                     self.audit("tailscale serve mapping was missing; restored")
                     self.startServing(run: run, host: current.dnsName)
                 }
@@ -432,6 +447,7 @@ final class PhoneAccess: ObservableObject {
         // Only requests relayed by `tailscale serve` for this Mac's own account.
         guard request.header("tailscale-user-login") == owner else { return respond(.error(403, "not your tailnet account")) }
         if request.method == "GET", let asset = WebAssets.response(for: request.path) { return respond(asset) }
+        if request.path.hasPrefix("/api/"), !devicesReadable() { return respond(.error(503, Self.devicesUnreadableMessage)) }
         if request.method == "POST", request.path == "/api/pair" { return respond(pair(request, owner: owner)) }
         guard request.path.hasPrefix("/api/") else { return respond(.error(404, "not found")) }
         // A valid token always gets in; only the source of failed attempts is slowed down (so nothing can
@@ -543,6 +559,8 @@ final class PhoneAccess: ObservableObject {
     /// What a phone hears for a token the Mac doesn't know (it was removed, or never paired): it forgets it, and the
     /// pairing screen says how to pair again.
     static let unpaired = "This phone isn't paired with the Mac any more."
+    static let devicesUnreadableMessage = "The Mac couldn't read its list of paired phones. This phone stays paired; look at VibeSwitcher › Settings… › Phone on the Mac."
+
     /// Why nothing is served while Phone Access isn't on: the phone keeps its token either way.
     private var notServing: String {
         state == .off ? "Phone Access is off on the Mac." : "Phone Access is restarting on the Mac. Try again in a moment."
@@ -578,6 +596,30 @@ final class PhoneAccess: ObservableObject {
         })
     }
 
+    /// The sandbox's `phone-show`: Settings › Phone as in one setup state, nothing started. False: no such state.
+    func showInSandbox(_ name: String) -> Bool {
+        guard Sandbox.isOn else { return false }
+        let failure: TailscaleCLI.Failure?
+        switch name {
+        case "off", "expired", "unreadable": failure = nil
+        case "notinstalled": failure = .notInstalled
+        case "notrunning": failure = .notRunning
+        case "https": failure = .httpsDisabled
+        case "portinuse": failure = .portInUse(port: Self.httpsPort, target: "http://127.0.0.1:3000")
+        default: return false
+        }
+        pairing = nil
+        url = nil
+        devicesUnreadable = name == "unreadable"
+        state = failure.map { .failed($0.description) } ?? .off
+        if name == "expired" {
+            state = .on
+            url = URL(string: "https://sandbox-mac.tail0000.ts.net:\(Self.httpsPort)/")
+            pairing = PairingCode(code: "ABCDEFGH", expires: Date().addingTimeInterval(-1))
+        }
+        return true
+    }
+
     #if DEBUG
     /// Tests: requests answered as once `tailscale serve` is up for `status`, with nothing listening or started.
     func serveForTests(_ status: TailscaleCLI.Status) {
@@ -589,6 +631,17 @@ final class PhoneAccess: ObservableObject {
     func restartForTests() { state = .starting }
 
     func handleForTests(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) { route(request, respond: respond) }
+
+    /// Tests: a pairing code of their own (one that has already expired, say).
+    func setPairingForTests(_ code: PairingCode?) { pairing = code }
+
+    func setURLForTests(_ value: URL?) { url = value }
+
+    /// Tests: `done` runs once what's already queued for the CLI has run and answered on the main thread.
+    func afterControlForTests(_ done: @escaping () -> Void) { control.async { DispatchQueue.main.async(execute: done) } }
+
+    /// Tests: whether a `checkHealth` is still under way (it answers on the main thread once the CLI has).
+    var healthCheckRunningForTests: Bool { healthCheckRunning }
     #endif
 
     private func body(_ request: HTTPRequest) -> [String: Any]? {
@@ -598,11 +651,13 @@ final class PhoneAccess: ObservableObject {
     private func pair(_ request: HTTPRequest, owner: String) -> HTTPResponse {
         guard var code = pairing else { return .error(403, "No pairing code is active. Start pairing on the Mac.") }
         let candidate = body(request)?["code"] as? String ?? ""
+        let expired = Date() >= code.expires
         let matched = code.check(candidate)
         pairing = matched || !code.isUsable ? nil : code
         guard matched else {
             audit("pairing attempt failed")
-            return .error(403, code.isUsable ? "Wrong or expired code." : "Too many wrong codes. Start pairing again on the Mac.")
+            if expired { return .error(403, "This code has expired. Start pairing again on the Mac.") }
+            return .error(403, code.isUsable ? "Wrong code. Check it and try again." : "Too many wrong codes. Start pairing again on the Mac.")
         }
         let rawName = (body(request)?["name"] as? String) ?? "Phone"
         let name = String(rawName.filter { !$0.isNewline }.prefix(40)).trimmingCharacters(in: .whitespaces)
@@ -1557,18 +1612,37 @@ final class PhoneAccess: ObservableObject {
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
-    private static func loadDevices() -> [PairedDevice] {
-        guard let data = try? Data(contentsOf: devicesURL) else { return [] }
+    /// The phones in `url`: none if there's no file; nil if there is one that can't be read or decoded.
+    private static func loadDevices(_ url: URL) -> [PairedDevice]? {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            // A link to nowhere says "no such file" too, and doesn't mean no phones.
+            return (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil ? [] : nil
+        } catch {
+            return nil
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([PairedDevice].self, from: data)) ?? []
+        return try? decoder.decode([PairedDevice].self, from: data)
+    }
+
+    /// Whether the phones are known; a file that couldn't be read is read again, so restoring it needs no restart.
+    private func devicesReadable() -> Bool {
+        guard devicesUnreadable else { return true }
+        guard let loaded = Self.loadDevices(devicesFile) else { return false }
+        devices = loaded
+        devicesUnreadable = false
+        return true
     }
 
     private func saveDevices() {
+        guard !devicesUnreadable else { return }   // never over the phones it couldn't read
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(devices) { Self.writePrivate(data, to: Self.devicesURL) }
+        if let data = try? encoder.encode(devices) { Self.writePrivate(data, to: devicesFile) }
     }
 
     private static func loadOrCreateVapidKey() -> P256.Signing.PrivateKey {

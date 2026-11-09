@@ -1057,12 +1057,20 @@ private final class Driver: NSObject, NSApplicationDelegate {
         done(nil)
     }
 
+    /// The Phone Access Settings shows and `phone` serves: one, so what `phone-show` sets is what Settings shows.
+    private func sharedPhone() -> PhoneAccess {
+        if let phone { return phone }
+        let access = PhoneAccess(store: store)
+        phone = access
+        return access
+    }
+
     /// The phone's web app, served for this sandbox (`PhoneAccess.serveInSandbox`) on a free port of 127.0.0.1, its
     /// lead views reading this sandbox's leads: STATE/phone.json says where, the phone's token, and the headers
     /// `tailscale serve` would add (a scratch proxy in front of it adds them; the web app is the Mac's, as served).
     private func servePhone(_ reply: @escaping (Bool, String) -> Void) {
         let status = TailscaleCLI.Status(dnsName: "sandbox-mac.tail0000.ts.net", login: "sandbox@example.invalid", httpsAvailable: true)
-        let access = phone ?? PhoneAccess(store: store)
+        let access = sharedPhone()
         access.hostClient = host
         access.inputAllowed = true
         let phoneDictation = PhoneDictation(keyStore: dictationKey, transcription: OpenAITranscription(client: SandboxTranscriber()),
@@ -1190,7 +1198,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         if settings == nil {
             settings = SettingsWindowController(
                 preferences: preferences, setup: SetupModel(preferences: preferences, system: .fixed(hooks: [.claude: true, .codex: false], terminal: .notAsked, notifications: .off)),
-                phoneAccess: PhoneAccess(store: store), recentProjects: { [] }, showWelcome: { [weak self] in self?.refuse("the welcome window") },
+                phoneAccess: sharedPhone(), recentProjects: { [] }, showWelcome: { [weak self] in self?.refuse("the welcome window") },
                 host: host, briefing: briefing, dictation: dictation, policy: WorkingPolicyEditor(), boost: boostWatch,
                 // The sandbox's own projects with a workflow.md, against its own host's vault (the app's proof, as ever).
                 floor: ReviewFloorEditor(projects: { [home] in
@@ -1249,6 +1257,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
         ("leadmail", "writes made-up messages between the fake lead and other projects' leads (start the lead first) to its private lead-mail record, one of them refused, and shows its Team tab: they're under Between leads"),
         ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
+        ("phone-show off|notinstalled|notrunning|https|portinuse|expired|unreadable", "Settings › Phone as in that setup state, with nothing started (run phone first to have a phone listed): the switch off, each problem under it, an expired pairing code, a list of paired phones that can't be read"),
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
         ("soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. every other cycle a worker shaped like a real one (a task on the lead's board, a transcript of MB MB of tool calls, default 4, its steer inbox, its chat and its terminal fed a build's output) ended by the role sweep, its footprint once removed, and RESULT soak-worker-growth-mb. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet, workers. With no MINUTES: the log so far"),
@@ -2294,6 +2303,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "leadmail": leadMail { problem in reply(problem == nil, problem ?? "5 messages between leads in the fake lead's record, one refused; its Team tab shows them under Between leads") }
         case "extras": extras { problem in reply(problem == nil, problem ?? "the lead's board has a proposal, a revised question, an all-done card and results") }
         case "phone": servePhone(reply)
+        case "phone-show":
+            if settings == nil { showSettings(.phone) }
+            guard sharedPhone().showInSandbox(rest) else { return reply(false, "phone-show off|notinstalled|notrunning|https|portinuse|expired|unreadable") }
+            settle { reply(true, "Settings › Phone shows \(rest)") }
         case "dictation": dictate(rest, reply)
         case "soak": soak(rest, reply)
         case "select":
