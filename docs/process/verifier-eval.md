@@ -2,8 +2,8 @@
 
 "Our incidents are the eval": every real miss becomes a case, and a change to the verifier's prompt or model is
 scored against all of them instead of guessed. `scripts/verifier-eval.sh` replays each case to one verifier, started
-as an audit starts it (its prompt, permission rules, model and the security checklist where an audit would put it),
-in a scratch clone with a scratch HOME, and scores its findings.
+as an audit starts it (its prompt, permission rules, model, today's REVIEW.md and the security checklist where an
+audit would put it), in a scratch clone with a scratch HOME, and scores its findings.
 
 **When to run it.** Before merging a change to the verifier's prompt (`LeadPrompts.verifier`, the checklist, REVIEW.md
 handling) or its model (`verifier_model`): `scripts/verifier-eval.sh --all`, then compare its summary with the last
@@ -12,19 +12,33 @@ one below and add the new one. The lead's brief says so where a project has the 
 ```sh
 scripts/verifier-eval.sh --all --dry-run        # free: every case builds its clone and prompt, no model call
 scripts/verifier-eval.sh --all                  # every case, one summary (about $45–60, two hours)
+scripts/verifier-eval.sh --all --total-usd 80   # the same, stopped before it can pass $80
 scripts/verifier-eval.sh steadier-merge-gate    # one case
+scripts/verifier-eval.sh --summary RUN_FOLDER   # an --all run's summary again, from its kept score.json files
 scripts/verifier-eval.sh --patch NAME HEAD      # store a new case's audited commit as a patch (below)
 ```
 
 **Cost.** A case costs what an audit does: $2.87 to $5.02 in the runs below, about 10 minutes each (1.6–2.7 M
 tokens, nearly all cache reads). The set has 12 cases, so a full run is about $45–60 and, one case after another,
-about two hours. Each case's `--max-usd` (20 by default) caps a runaway.
+about two hours. Each case's `--max-usd` (20 by default) caps a runaway; `--total-usd N` caps a whole `--all` run.
 
 **Reading a score.** One run of one case is one sample: a verifier that finds a bug once may miss it the next
 time. Compare whole summaries, and rerun a case that changed before calling it a regression. A bug counts as found
 when a finding names its file within 3 lines of one of its places (as the audit's vote matches findings), at any
 severity; the summary also says how many were found by an Important finding, the only kind that stops a merge.
 On a clean case, every Important finding is a false alarm.
+
+**Not scored.** A run that ended with an error (Claude's budget cap, say) measures nothing about the verifier: the
+summary lists it as "not scored", leaves it out of every total and exits 2, as for a case that couldn't run; its cost
+is on its own line. A summary with a not-scored case is not a comparable baseline: rerun that case.
+
+**What each summary pins.** Its first line says which Claude Code ran (`unknown` when the stream didn't say) and which
+REVIEW.md (the blob from the base branch, the same for every case in the run). Each case prints its permission
+denials: only counted, since a read-only verifier is denied edits by design.
+
+**REVIEW.md.** A real audit reads the project's REVIEW.md from the base branch (`LeadRisk.reviewGuide`). None of the
+cases' bases has one, so the script adds today's to the clone's base and under its branch, the same file on both, and
+checks the case's diff didn't change. Summaries before 2026-11-09 were run without it.
 
 ## The cases
 
