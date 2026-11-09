@@ -2248,3 +2248,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 18:39 Automatically (auto_advance): Started the audit of security-review-of-the at b9930882 (Its review is audit).
 - 2026-11-09 18:40 Released security-review-of-the's worker (idle since its done report on b9930882) while its audit runs
 - 2026-11-09 18:40 Automatically (auto_advance): Released security-review-of-the's worker, idle since its done report on b9930882, while its audit runs (ended pid 61205 (Worker: Security review of the phone, host authentication and tool boundaries (on Opus))): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-09 18:52 Released the-sandbox-s-phone's worker (idle since its done report on f53aa259) while its audit runs
+- 2026-11-09 18:52 Automatically (auto_advance): Started the audit of the-sandbox-s-phone at f53aa259 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
