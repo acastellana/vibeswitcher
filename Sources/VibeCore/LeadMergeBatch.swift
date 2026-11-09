@@ -140,6 +140,8 @@ extension LeadToolset {
         var runs = 0
         var firstRun: String?
         var stopped: String?
+        // The end of a hung run's output, told once in the batch's result (not with each task it left undecided).
+        var stoppedEnd: String?
         // For each task's stats line: its result, when it was decided, and the rerun of the run that decided it.
         var results: [String: (result: String, at: Date, plan: MergeRerun.Plan?)] = [:]
         var landed: [String] = []
@@ -202,10 +204,12 @@ extension LeadToolset {
                 }
             case .failed(let output): outcome = .failed(output)
             case .hung(let command, let after, let output, let stall):
-                let saved = saveMergeLog(output, slug: "merge-batch", name: "hung.log")
+                _ = saveMergeLog(output, slug: "merge-batch", name: "hung.log")
+                let copy = copyMergeLog(output, slug: "merge-batch", commit: stack.tips[count - 1], name: "hung.log", inWorktree: false)
+                stoppedEnd = MergeFailure.end(of: scrubbed(output))
                 outcome = .stopped(kind: "hung", text: "the \(command) \(Worktrees.hung(after: after, stall: stall)) on the stack's first \(count) task\(count == 1 ? "" : "s") and was stopped. "
                                    + MergeRerun.causeText(output) + MergeRerun.phaseText(output)
-                                   + (saved.map { " (the output so far: \($0))" } ?? ""))
+                                   + " " + copy.said("The output so far"))
             case .cancelled: outcome = .stopped(kind: "cancelled", text: "it was cancelled")
             case .error(let text): outcome = .stopped(kind: "error", text: text)
             case .conflict: outcome = .stopped(kind: "error", text: "a test run reported a conflict")
@@ -281,9 +285,10 @@ extension LeadToolset {
                 return unrecorded("the vault couldn't record its head", error)
             }
             let last = order[order.count - 1]
-            var flaked: (plan: MergeRerun.Plan, failed: String, log: String?)?
+            var flaked: (plan: MergeRerun.Plan, failed: String)?
             if case .flaked(let plan, let failed, let again) = passing.outcome {
-                flaked = (plan, failed, saveMergeLog(failed + "\n" + again, slug: last))
+                _ = saveMergeLog(failed + "\n" + again, slug: last)
+                flaked = (plan, failed)
             }
             // A flake is one event: recorded once, under the task whose commit the run tested (the stack's top).
             let flakes = flaked.map { MergeRerun.flakes(in: $0.failed) } ?? []
@@ -345,7 +350,6 @@ extension LeadToolset {
                                               + ": \(test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days")
                 }
                 flakeNotes.append("Its first test run failed on \(Self.clip(names, 300)) and the rerun of \(flaked.plan.filtered ? "those tests" : "the whole test command") passed, so \(order.joined(separator: ", ")) merged on the rerun: recorded once in the flake ledger (under \(last)), which status lists."
-                                  + (flaked.log.map { " Both runs' output: \($0)." } ?? "")
                                   + (flakeLog.map { " Each flaky test's failing lines, readable by its fixer: \(MergeRerun.evidenceFile(root: root, log: $0))." } ?? "")
                                   + planned.map { test, fix, noted in " \(test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days: " + (noted ? "the open task \(fix) names it, so that's noted in its context." : "planned \(fix) to fix it.") }.joined()
                                   + tellRecurrences(flakePlan.recurred, slug: last))
@@ -364,11 +368,12 @@ extension LeadToolset {
                 ends[slug] = .refused(changed.text)
                 return
             }
-            let tests = TestFailures(output: output).tests.joined(separator: ", ")
-            let last = tests.isEmpty ? output.split(whereSeparator: \.isNewline).last.map(String.init) ?? "" : tests
+            let reason = MergeFailure.reason(in: scrubbed(output))
             let what = output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker) ? "regression_command fails" : "Tests fail"
+            // Told to this task's worker and copied to this task's worktree: each task that broke the stack has its own.
+            let told = testFailure(output, slug: slug, base: base, commit: gate.commit, onto: onto, worktree: place)
             do {
-                try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "\(what) rebased onto \(base) (in a batch)" + (last.isEmpty ? "." : ": \(last.prefix(200))")))
+                try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "\(what) rebased onto \(base) (in a batch): \(reason)", detail: MergeFailure.capped(told)))
             } catch {
                 ends[slug] = .refused("Its tests failed in the batch, but the board couldn't be written (\(error)).")
                 return
@@ -376,10 +381,9 @@ extension LeadToolset {
             // First on the stack: what failed was the base with it alone on top.
             let context = before.isEmpty ? "It was tested in a batch, first on the stack: it fails on \(base) with it on top."
                 : "It was tested in a batch: the stack with it on top fails, the stack without it passes. The batch's tasks before it on the stack (\(before.joined(separator: ", "))) merged first, so they're on \(base) now."
-            ends[slug] = .failed(testFailure(output, slug: slug, base: base, commit: gate.commit, onto: onto, worktree: place)
-                                 + "\n" + context)
-            try? store.appendProgress("Didn't merge \(slug) in the batch: \(what.lowercased()) with it on \(base)" + (last.isEmpty ? "" : " (\(Self.clip(last, 200)))") + "; back to its worker")
-            lines.append("\(slug) breaks the stack: \(what.lowercased())" + (last.isEmpty ? "" : " (\(Self.clip(last, 200)))") + "; it's failed, with the output for its worker.")
+            ends[slug] = .failed(told + "\n" + context)
+            try? store.appendProgress("Didn't merge \(slug) in the batch: \(what.lowercased()) with it on \(base) (\(Self.clip(reason, 200))); back to its worker")
+            lines.append("\(slug) breaks the stack: \(what.lowercased()) (\(Self.clip(reason, 200))); it's failed, with the output for its worker.")
         }
 
         /// `gate`'s task doesn't apply with the batch's tasks before it (`before`) on the base.
@@ -533,6 +537,7 @@ extension LeadToolset {
         var text = head + patience + "\n" + lines.filter { !$0.isEmpty }.map { "- " + $0 }.joined(separator: "\n")
         if !flakeNotes.isEmpty { text += "\n" + flakeNotes.map { "(" + $0 + ")" }.joined(separator: "\n") }
         if stopped != nil { text += "\nThe batch stopped short: \(why); what wasn't decided stays as it was, to merge one at a time." }
+        if let stoppedEnd, !stoppedEnd.isEmpty { text += "\n" + stoppedEnd }
         text += "\n" + Self.endLines(slugs, ends)
         if !landed.isEmpty { text += "\nNext: cleanup each merged task. \(LeadPrompts.Policy.updates)" }
         return BatchResult(ends: slugs.map { ($0, ends[$0]!) }, runs: runs, stopped: stopped, text: text)

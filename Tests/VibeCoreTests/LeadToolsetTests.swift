@@ -1369,7 +1369,8 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(merged.text.contains("↳ the answer drifted"))
         #expect(!merged.text.contains("resumed"))
         let log = vault.scratch(root: root, "add-b/merge-test.log")
-        #expect(lines.last == "Full output: \(log.path)")
+        // The message names the copy its worker can read, never the vault's.
+        #expect(lines.last == "Full output: \(Worktrees.path(root: root, slug: "add-b"))/.vibeswitcher/merge-failure/merge-test.log")
         let saved = try String(contentsOf: log, encoding: .utf8)
         #expect(saved.contains("Test run with 5 tests failed") && saved.contains("captured var 'resumed'"))
         // The log is the rerun's: its first line says so, the next names the scratch home the tests ran with, gone by now.

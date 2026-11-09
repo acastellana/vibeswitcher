@@ -161,6 +161,27 @@ struct LeadRevertTests: LeadTeamFixture {
         #expect(Git.run(["worktree", "list", "--porcelain"], in: root).output.components(separatedBy: "worktree ").count == 2 + 1)
     }
 
+    /// The 2026-11-09 incident on this route: no failing test named, a passing line last, a secret in the output.
+    @Test func aRevertsFailedRunIsToldWithNoVaultPathOrPassingLineAsItsCause() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let test = #"test -f b.txt || { echo "◇ Test one() started."; echo "◇ Test two() started."; echo "X-Auth: Bearer abc123def456"; echo "web tests: 2 of 2 passed"; exit 1; }"#
+        #expect(!lead.call("configure", ["merge_policy": "auto", "test_command": test]).isError)
+        let change = try merged(lead, runtime, root: root, "Change", [("b.txt", "bee\n")])
+
+        let refused = lead.call("revert", ["task": change, "reason": "it broke"])
+        #expect(refused.isError)
+        #expect(!refused.text.contains(vault.folder.path), "\(refused.text)")
+        #expect(refused.text.contains("The run stopped partway"), "\(refused.text)")
+        #expect(refused.text.contains("X-Auth: Bearer •••") && !refused.text.contains("abc123def456"), "\(refused.text)")
+        let flakes = root + "/.vibeswitcher/flakes"
+        let file = try #require(try FileManager.default.contentsOfDirectory(atPath: flakes).first { $0.hasSuffix("-revert-test.log") })
+        #expect(refused.text.contains("Full output: \(flakes)/\(file)"), "\(refused.text)")
+        #expect(!LeadGuardRailsTests.denied("cat \(flakes)/\(file)", by: LeadLaunch.deny(.lead)))
+        #expect(!(try String(contentsOfFile: "\(flakes)/\(file)", encoding: .utf8)).contains("abc123def456"))
+    }
+
     @Test func aConflictLeavesTheBaseUntouchedAndNamesTheFilesAndTheLaterTasks() throws {
         let root = try repo()
         let runtime = FakeRuntime()

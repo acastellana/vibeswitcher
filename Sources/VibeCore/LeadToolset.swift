@@ -3415,7 +3415,7 @@ public final class LeadToolset: MCPToolset {
         // (`MergeRerun`): what failed, then the rerun that passed, when that's how it passed.
         let tested: String
         var rerun: MergeRerun.Plan?
-        var flaked: (plan: MergeRerun.Plan, failed: String, log: String?)?
+        var flaked: (plan: MergeRerun.Plan, failed: String)?
         // The passing run's test count, for its receipt.
         var testCount: Int?
         // When its commands started (the slot taken) and the load then, for the merge stats line.
@@ -3474,19 +3474,23 @@ public final class LeadToolset: MCPToolset {
             guard unshown.isEmpty else {
                 let names = unshown.prefix(8).joined(separator: ", ")
                 if let changed = changedMeanwhile(slug, since: task, tests: "failed") { throw changed }
-                try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Tests fail rebased onto \(base): \(Self.clip(plan.tests.joined(separator: ", "), 200))"))
-                throw Problem(text: testFailure(failed, slug: slug, base: base, commit: commit, onto: current)
-                              + "\nIts rerun of the failing tests exited 0 but didn't show \(names) passing (a filter that matched nothing), so it doesn't count.")
+                let told = testFailure(failed, slug: slug, base: base, commit: commit, onto: current)
+                    + "\nIts rerun of the failing tests exited 0 but didn't show \(names) passing (a filter that matched nothing), so it doesn't count."
+                try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Tests fail rebased onto \(base): \(Self.clip(plan.tests.joined(separator: ", "), 200))",
+                                                                  detail: MergeFailure.capped(told)))
+                throw Problem(text: told)
             }
             tested = commit
-            flaked = (plan, failed, saveMergeLog(failed + "\n" + again, slug: slug))
+            _ = saveMergeLog(failed + "\n" + again, slug: slug)
+            flaked = (plan, failed)
         case .cancelled:
             // Stopped by the caller: nothing is known about the work, and the task stays as it was.
             throw Problem(text: "The merge of \(slug) was cancelled; nothing was merged, and \(slug) stays as it was.")
         case .hung(let command, let after, let output, let stall):
             // Not a failure of the work as far as anyone knows: the task stays as it was, and the lead decides.
             let (what, they) = command == "init_command" ? ("init_command", "it was") : ("tests", "they were")
-            let saved = saveMergeLog(output, slug: slug)
+            _ = saveMergeLog(output, slug: slug)
+            let copy = copyMergeLog(output, slug: slug, commit: commit, name: "merge-hung.log")
             // The tests that never finished and the output's tail, where the worker who fixes the hang can read them
             // (the merge's log is in the vault).
             // What it was doing: the tests it left unfinished, or the build's last line when no test had started.
@@ -3520,20 +3524,18 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "Not merged: the \(what) \(Worktrees.hung(after: after, stall: stall)) on \(slug) rebased onto \(base); \(they) stopped, with everything started under them. \(slug) stays as it was. "
                           + MergeRerun.causeText(output) + named + ledger
                           + (readable.map { "Those and the output's last \(MergeRerun.hungTail) lines, readable by the worker who fixes it: \($0). " } ?? "")
-                          + (saved.map { "The output so far: \($0). " } ?? "(The output couldn't be saved.) ")
-                          + advice)
+                          + copy.said("The output so far", stop: ".") + " "
+                          + advice + "\n" + MergeFailure.end(of: scrubbed(output)))
         case .conflict:
             if let changed = changedMeanwhile(slug, since: task, tests: "didn't run: the branch conflicts with \(base)") { throw changed }
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Conflicts with \(base): the branch needs bringing up to date."))
             throw Problem(text: "\(slug) conflicts with \(base). " + Self.bringUpToDate(base))
         case .failed(let output):
-            // The setback names the failing tests; the output's last line only when none is named.
-            let tests = TestFailures(output: output).tests.joined(separator: ", ")
-            let last = tests.isEmpty ? output.split(whereSeparator: \.isNewline).last.map(String.init) ?? "" : tests
             let what = output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker) ? "regression_command fails" : "Tests fail"
             if let changed = changedMeanwhile(slug, since: task, tests: "failed") { throw changed }
-            try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "\(what) rebased onto \(base)" + (last.isEmpty ? "." : ": \(last.prefix(200))")))
-            throw Problem(text: testFailure(output, slug: slug, base: base, commit: commit, onto: current))
+            let told = testFailure(output, slug: slug, base: base, commit: commit, onto: current)
+            try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "\(what) rebased onto \(base): \(MergeFailure.reason(in: scrubbed(output)))", detail: MergeFailure.capped(told)))
+            throw Problem(text: told)
         case .error(let text):
             throw Problem(text: "Not merged: \(text)")
         }
@@ -3614,7 +3616,6 @@ public final class LeadToolset: MCPToolset {
                     return "\(test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days: " + what
                 }
                 flakeNote = " (Its first test run failed on \(Self.clip(names, 300)) and the rerun of \(flaked.plan.filtered ? "those tests" : "the whole test command") passed, so it merged on the rerun: recorded in the flake ledger, which status lists."
-                    + (flaked.log.map { " Both runs' output: \($0)." } ?? "")
                 let readable = flakeLog.map { " Each flaky test's failing lines, readable by its fixer: \(MergeRerun.evidenceFile(root: root, log: $0))." } ?? ""
                 flakeNote += readable
                     + (due.isEmpty ? "" : " " + due.joined(separator: " "))
@@ -3854,17 +3855,17 @@ public final class LeadToolset: MCPToolset {
                           + shown.joined(separator: "; ") + (files.count > 12 ? "; …" : "") + ". \(base) is as it was, and \(slug) stays merged. "
                           + "Undoing it would mean undoing those too: plan a fix-forward task instead (add_task), saying what \(slug) broke (\(Self.clip(reason, 120))).")
         case .failed(let output):
-            let saved = saveMergeLog(output, slug: slug, name: "revert-test.log")
-            let found = TestFailures(output: output).summary()
-                ?? "Nothing in the output names a failing test or an error; it ends:\n" + String(output.suffix(1500))
+            _ = saveMergeLog(output, slug: slug, name: "revert-test.log")
+            let copy = copyMergeLog(output, slug: slug, commit: merged.commit, name: "revert-test.log", inWorktree: false)
             let which = output.hasPrefix("init_command failed:\n") ? "init_command" : "test command"
-            throw Problem(text: "Not reverted: the \(which) fails with \(slug) reverted on \(base). \(base) is as it was, and \(slug) stays merged.\n\(found)\n"
-                          + (saved.map { "Full output: \($0)" } ?? "(The full output couldn't be saved.)")
+            throw Problem(text: "Not reverted: the \(which) fails with \(slug) reverted on \(base). \(base) is as it was, and \(slug) stays merged.\n\(MergeFailure.detail(scrubbed(output)))\n"
+                          + copy.said("Full output")
                           + "\nIf the tests fail without the change too, fix forward (add_task); if they only fail reverted, its later work depends on it.")
         case .hung(let command, let after, let output, let stall):
-            let saved = saveMergeLog(output, slug: slug, name: "revert-test.log")
+            _ = saveMergeLog(output, slug: slug, name: "revert-test.log")
+            let copy = copyMergeLog(output, slug: slug, commit: merged.commit, name: "revert-test.log", inWorktree: false)
             throw Problem(text: "Not reverted: the \(command) \(Worktrees.hung(after: after, stall: stall)) with \(slug) reverted on \(base), and was stopped with everything started under it. \(base) is as it was. "
-                          + MergeRerun.causeText(output) + (saved.map { "The output so far: \($0)." } ?? "(The output couldn't be saved.)"))
+                          + MergeRerun.causeText(output) + copy.said("The output so far", stop: ".") + "\n" + MergeFailure.end(of: scrubbed(output)))
         case .cancelled:
             throw Problem(text: "The revert of \(slug) was cancelled; \(base) is as it was, and \(slug) stays merged.")
         case .error(let text):
@@ -4093,14 +4094,14 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// A failed merge's test run, told by what failed: the failing tests and their lines first (the output's end
-    /// is usually the build's warnings), with all of the output saved where the lead can read it.
+    /// is usually the build's warnings), then the log's end, with the whole log copied where its reader can read it.
+    /// Masked and capped (`MergeFailure`): this is what goes to the worker and onto the board.
     func testFailure(_ output: String, slug: String, base: String, commit: String, onto current: String, worktree: URL? = nil) -> String {
         let setup = output.hasPrefix("init_command failed:\n")
         let output = setup ? String(output.dropFirst("init_command failed:\n".count)) : output
-        let saved = saveMergeLog(output, slug: slug)
+        _ = saveMergeLog(output, slug: slug)
+        let copy = copyMergeLog(output, slug: slug, commit: commit)
         let failures = TestFailures(output: output)
-        let found = failures.summary()
-            ?? "Nothing in the output names a failing test or an error; it ends:\n" + String(output.suffix(1500))
         // The errors name files in the merge's own worktree (see rebaseAndTest).
         let place = worktree ?? vault.scratch(root: root, "merge-\(slug)")
         let inside = [place.path, place.resolvingSymlinksInPath().path].map { $0 + "/" }
@@ -4111,8 +4112,7 @@ public final class LeadToolset: MCPToolset {
         let which = setup ? "init_command" : regression ? "regression_command (the checks incidents became; test_command passed)" : "test command"
         // A rerun (`MergeRerun`) failed too: its output is what's told.
         let again = output.hasPrefix(Worktrees.rerunHeader) ? ", and again on its rerun (run once, after the first run failed)" : ""
-        return "The \(which) fails on \(slug) rebased onto \(base)\(again).\n\(found)\n\(touched)"
-            + (saved.map { "Full output: \($0)" } ?? "(The full output couldn't be saved.)")
+        return "The \(which) fails on \(slug) rebased onto \(base)\(again).\n\(MergeFailure.detail(scrubbed(output)))\n\(touched)" + copy.said("Full output")
     }
 
     /// For each file in a build's errors, the base's commits since the branch last
@@ -4154,8 +4154,9 @@ public final class LeadToolset: MCPToolset {
         return log
     }
 
-    /// Saves a merge's test output where the lead can read it (0600, in a 0700 folder in the vault); its path, or nil
-    /// when it couldn't be saved.
+    /// Saves a merge's test output unmasked in the vault (0600, in a 0700 folder), the user's to read: every session's
+    /// rules refuse that folder, so no message names it (`copyMergeLog` makes the copy they read). Its path, or nil when
+    /// it couldn't be saved.
     func saveMergeLog(_ output: String, slug: String, name: String = "merge-test.log") -> String? {
         let log = vault.scratch(root: root, "\(slug)/\(name)")
         return (try? vault.ensurePrivate(log.deletingLastPathComponent())).flatMap {

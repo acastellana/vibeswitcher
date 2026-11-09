@@ -240,12 +240,15 @@ public struct LeadSetback: Codable, Equatable, Sendable {
     public var reason: String
     /// The verdict, when an audit failed it.
     public var evidence: LeadEvidence?
+    /// A merge's: what its worker was told, capped and masked (`MergeFailure.capped`), for board(task).
+    public var detail: String?
     public var at: Double
 
-    public init(stage: Stage, reason: String, evidence: LeadEvidence? = nil, at: Double = Date().timeIntervalSince1970) {
+    public init(stage: Stage, reason: String, evidence: LeadEvidence? = nil, detail: String? = nil, at: Double = Date().timeIntervalSince1970) {
         self.stage = stage
         self.reason = reason
         self.evidence = evidence
+        self.detail = detail
         self.at = at
     }
 }

@@ -565,14 +565,16 @@ extension LeadToolset {
             throw Problem(text: "Not merged: \(label) (\(tip.prefix(8))) conflicts with \(base) in \(files.prefix(12).joined(separator: ", "))\(files.count > 12 ? ", …" : ""). "
                           + "Nothing was picked for either side, and \(unmoved) Ask the user to resolve it, or plan a task whose worker merges \(label) and resolves those files.")
         case .failed(let output):
-            let saved = saveMergeLog(output, slug: "merge-remote")
-            try? store.appendProgress("merge_remote stopped: the tests fail on \(label) merged into \(base)")
-            throw Problem(text: "Not merged: the tests fail on \(label) merged into \(base); \(unmoved) "
-                          + (saved.map { "Their output: \($0). " } ?? "") + "The end of it:\n" + Self.tail(output))
+            _ = saveMergeLog(output, slug: "merge-remote")
+            let copy = copyMergeLog(output, slug: "merge-remote", commit: tip, inWorktree: false)
+            try? store.appendProgress("merge_remote stopped: the tests fail on \(label) merged into \(base): \(Self.clip(MergeFailure.reason(in: scrubbed(output)), 300))")
+            throw Problem(text: "Not merged: the tests fail on \(label) merged into \(base); \(unmoved)\n\(MergeFailure.detail(scrubbed(output)))\n"
+                          + copy.said("Their output"))
         case .hung(let command, let after, let output, let stall):
-            let saved = saveMergeLog(output, slug: "merge-remote")
+            _ = saveMergeLog(output, slug: "merge-remote")
+            let copy = copyMergeLog(output, slug: "merge-remote", commit: tip, name: "merge-hung.log", inWorktree: false)
             throw Problem(text: "Not merged: \(command == "init_command" ? "init_command" : "the tests") \(Worktrees.hung(after: after, stall: stall)) on \(label) merged into \(base), and \(command == "init_command" ? "it was" : "they were") stopped; \(unmoved) "
-                          + MergeRerun.causeText(output) + (saved.map { "The output so far: \($0)." } ?? ""))
+                          + MergeRerun.causeText(output) + copy.said("The output so far", stop: ".") + "\n" + MergeFailure.end(of: scrubbed(output)))
         case .cancelled:
             throw Problem(text: "merge_remote was cancelled; nothing was merged, and \(unmoved)")
         case .error(let text):
@@ -596,10 +598,5 @@ extension LeadToolset {
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason) The tests passed on \(made.prefix(8)), but \(base) wasn't moved; run merge_remote again.")
         }
-    }
-
-    /// A failure's last lines, as a reply shows them.
-    static func tail(_ output: String, lines: Int = 30) -> String {
-        Self.clip(output.split(separator: "\n", omittingEmptySubsequences: false).suffix(lines).joined(separator: "\n"), 3000)
     }
 }
