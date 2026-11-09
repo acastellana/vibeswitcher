@@ -673,9 +673,9 @@ public final class LeadToolset: MCPToolset {
                                          "review": Self.reviewProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
                                          "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty,
                                          "origin": Self.originProperty]),
-                MCPToolInfo(name: "dismiss_finding", description: "Close one of a task's open audit findings with a reason (it isn't a problem, it's out of scope, the user accepted it): it no longer holds the merge back, and no verifier raises it again.",
+                MCPToolInfo(name: "dismiss_finding", description: "Close one of a task's open audit findings with a reason (it isn't a problem, it's out of scope, the user accepted it): it no longer holds the merge back, and no verifier raises it again. An Important finding's reason must cite something that can be checked, or it's refused: a file and line (path/File.swift:123), a decision's timestamp as decisions.md has it (2026-11-07 20:08:15), or the question id of the user's answer (its full id, or question 1A2B3C4D). If the only evidence is your memory, record_decision first and cite it, or ask_user. A Nit or Pre-existing finding takes any reason.",
                             properties: ["task": task, "id": P(type: "string", description: "The finding's id (F2), or <task>:<id>"),
-                                         "reason": P(type: "string", description: "Why, in one line (it's kept with the finding)")],
+                                         "reason": P(type: "string", description: "Why, in one line (it's kept with the finding); for an Important finding, with its citation")],
                             required: ["task", "id", "reason"]),
                 MCPToolInfo(name: "update_task", description: "Change a task: its contract, or its state. planned, blocked (waits on something), failed (tried and didn't pass); kept: deliberately not merged, which merge then refuses; folded into another task that carries its work (overtaken or batched); abandoned with a reason when nothing will carry it; folded and abandoned tasks are finished, never counted as failed, and cleanup removes their worktree and branch. removed: only for a record made by mistake that never ran (no worker, branch or merge); it leaves the board.",
                             properties: ["task": task, "title": P(type: "string", description: "New title"), "goal": P(type: "string", description: "New goal"),
@@ -1193,6 +1193,16 @@ public final class LeadToolset: MCPToolset {
         if let cut = id.lastIndex(where: { ":/#".contains($0) }) { id = String(id[id.index(after: cut)...]) }
         let reason = try text(arguments, "reason", missing: "Say why it's dismissed.")
         guard !id.isEmpty else { throw Problem(text: "Which finding? Pass its id (F2).") }
+        // Unreadable findings are held to the Important bar: not knowing the severity must not lift the requirement.
+        // An unknown or closed finding goes on to the vault, which says so.
+        let recorded = vault.audits(root: root, task: slug)
+        let finding = recorded?.finding(id)
+        if recorded == nil || (finding?.severity == .important && finding?.isLive == true), !Self.citesEvidence(reason) {
+            let what = finding.map { "\($0.label) is Important" } ?? "\(slug)'s findings couldn't be read and \(id) may be Important"
+            throw Problem(text: "Not dismissed: \(what), so the reason must cite something that can be checked: "
+                + "a file and line (path/File.swift:123), a decision's timestamp as decisions.md has it (2026-11-07 20:08:15), or the question id of the user's answer "
+                + "(its full id, or question 1A2B3C4D). If the only evidence is your memory, record_decision first and cite it, or ask_user.")
+        }
         let ledger: LeadAuditLedger?
         do { ledger = try vault.dismissFinding(root: root, task: slug, id: id, reason: reason) } catch { throw Problem(text: "\(error)") }
         mirror(ledger, on: slug)
@@ -1201,6 +1211,18 @@ public final class LeadToolset: MCPToolset {
         let left = hold.findings
         let mergeable = backToReview(slug, ledger).map { " No Important finding is open now and \($0): \(slug) is back in review; merge(\(slug)) when you're ready." } ?? ""
         return MCPToolResult(text: "Dismissed \(slug):\(id).\(left.isEmpty ? "" : " Still open and holding the merge back: \(left.map(\.label).joined(separator: ", "))\(hold.why.isEmpty ? "" : " (\(hold.why))").")\(mergeable)")
+    }
+
+    /// Whether a dismissal's reason names something that can be checked. The format only: it doesn't look the citation up.
+    /// A file and line (a name with an extension or a folder, so `round:3` and a URL's port aren't one), a decision's
+    /// `yyyy-MM-dd HH:mm[:ss]` as decisions.md heads it, or a question's id. The 8 characters the lead is shown need the
+    /// word "question", since bare they'd pass for a commit.
+    static func citesEvidence(_ reason: String) -> Bool {
+        let fileAndLine = #"(?<![\w.\-/:~+@])[\w.\-~+@/]*(?:\.[A-Za-z][A-Za-z0-9]*|/[\w.\-~+@]+):[1-9]\d*(?!\w)"#
+        let decision = #"(?<![\d-])\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]) (?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?!\d)"#
+        let questionID = #"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"#
+        let shortQuestionID = #"(?i)\bquestion(?:[\s_-]+id)?[\s:#=(]+[0-9a-f]{8}\b"#
+        return [fileAndLine, decision, questionID, shortQuestionID].contains { reason.range(of: $0, options: .regularExpression) != nil }
     }
 
     /// What holds a task's merge back: its open Important findings, and on a branch that touches strict_paths, the

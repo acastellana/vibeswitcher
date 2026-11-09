@@ -368,13 +368,90 @@ struct LeadFindingsToolTests: LeadTeamFixture {
 
         // Dismissed with a reason, it no longer holds the merge back; the Nit and the Pre-existing one never did.
         #expect(call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": ""]).isError)
-        let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": "add-b:F1", "reason": "the contract only asks for the file"])
+        let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": "add-b:F1", "reason": "the contract only asks for the file: docs/contract.md:4"])
         #expect(!dismissed.isError, "\(dismissed.text)")
         #expect(vault.audits(root: root, task: "add-b")?.finding("F1")?.status == .dismissed)
-        #expect(BoardStore(root: root).load().task("add-b")?.audits?.finding("F1")?.reason == "the contract only asks for the file")
+        #expect(BoardStore(root: root).load().task("add-b")?.audits?.finding("F1")?.reason == "the contract only asks for the file: docs/contract.md:4")
         let merged = call(lead, "merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
         #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
+    }
+
+    /// An Important finding holds the merge back, and the lead both drives the work and clears what blocks it: its
+    /// dismissal has to name something someone else can check. A format check; it doesn't look the citation up.
+    @Test func dismissingAnImportantFindingIsRefusedWithoutACitation() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "checked", "findings": Self.threeKinds])
+        for reason in ["not a real problem", "see the 2026-11-07 notes", "fixed in 4a019db5", "round:3", "https://example.com:443"] {
+            let refused = call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": reason])
+            #expect(refused.isError, "\(reason): \(refused.text)")
+            #expect(refused.text.contains("file and line") && refused.text.contains("decisions.md") && refused.text.contains("question id"), "\(refused.text)")
+            #expect(refused.text.contains("record_decision") && refused.text.contains("ask_user"), "\(refused.text)")
+        }
+        #expect(vault.audits(root: root, task: "add-b")?.finding("F1")?.status == .open)
+        #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
+        #expect(call(lead, "merge", ["task": "add-b"]).isError)
+    }
+
+    @Test(arguments: ["the contract only asks for the file: path/File.swift:123",
+                      "see `Sources/VibeCore/LeadBoard.swift:516-530`.",
+                      "b.txt:1 says what the contract asks",
+                      "the user ruled on this, decision 2026-11-07 20:08:15",
+                      "older decision 2026-10-17 17:45: the lead's records",
+                      "the user answered in 410B8EB5-89F6-467F-A655-6944D08280F8",
+                      "the user accepted it, question 410B8EB5",
+                      "question id: 410b8eb5"])
+    func dismissingAnImportantFindingSucceedsOnACitation(reason: String) throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "checked", "findings": Self.threeKinds])
+        let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": reason])
+        #expect(!dismissed.isError, "\(reason): \(dismissed.text)")
+        #expect(vault.audits(root: root, task: "add-b")?.finding("F1")?.status == .dismissed)
+        #expect(vault.audits(root: root, task: "add-b")?.finding("F1")?.reason == reason)
+    }
+
+    @Test func nitsAndPreExistingFindingsAreDismissedOnAnyReason() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "checked", "findings": Self.threeKinds])
+        for id in ["F2", "F3"] {
+            #expect(call(lead, "dismiss_finding", ["task": "add-b", "id": id, "reason": ""]).isError)
+            let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": id, "reason": "not a real problem"])
+            #expect(!dismissed.isError, "\(id): \(dismissed.text)")
+            #expect(vault.audits(root: root, task: "add-b")?.finding(id)?.status == .dismissed)
+        }
+    }
+
+    /// A finding that can't be dismissed anyway says so, rather than asking for a citation it wouldn't use.
+    @Test func anUnknownOrClosedFindingIsToldSoRatherThanAskedToCite() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "checked", "findings": Self.threeKinds])
+        let unknown = call(lead, "dismiss_finding", ["task": "add-b", "id": "F9", "reason": "not a real problem"])
+        #expect(unknown.isError && unknown.text.contains("No finding F9"), "\(unknown.text)")
+        #expect(!call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "b.txt:1 is what the contract asks"]).isError)
+        let again = call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "not a real problem"])
+        #expect(again.isError && again.text.contains("already"), "\(again.text)")
+    }
+
+    @Test func theToolAndTheLeadPromptSayWhatAnImportantDismissalMustCite() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let tool = try #require(lead.tools.first { $0.name == "dismiss_finding" })
+        #expect(tool.description.contains("file and line") && tool.description.contains("decisions.md") && tool.description.contains("question id"), "\(tool.description)")
+        let prompt = LeadPrompts.lead(project: "p", root: "/r", workflow: LeadWorkflow())
+        #expect(prompt.contains("dismiss_finding") && prompt.contains("file and line") && prompt.contains("question id"), "\(prompt)")
     }
 
     @Test func onlyTheLeadDismissesAFinding() throws {
@@ -635,7 +712,7 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "checked", "findings": Self.threeKinds])
         #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
         #expect(BoardStore(root: root).load().task("add-b")?.setback != nil)
-        let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the contract only asks for the file"])
+        let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the contract only asks for the file: docs/contract.md:4"])
         #expect(!dismissed.isError, "\(dismissed.text)")
         #expect(dismissed.text.contains("add-b is back in review; merge(add-b) when you're ready"), "\(dismissed.text)")
         let task = try #require(BoardStore(root: root).load().task("add-b"))
@@ -661,7 +738,7 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         let lead = try lead(root, runtime)
         try started(lead, runtime, root: root)
         _ = try audit(lead, runtime, ["completion": "incomplete", "integrity": "clean", "summary": "c.txt is missing", "findings": [Self.threeKinds[0]]])
-        let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "not a problem"])
+        let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "not a problem: b.txt:1 is what the contract asks"])
         #expect(!dismissed.isError, "\(dismissed.text)")
         #expect(!dismissed.text.contains("merge("), "\(dismissed.text)")
         let task = try #require(BoardStore(root: root).load().task("add-b"))
@@ -689,17 +766,17 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
         let open = call(lead, "merge", ["task": "add-b"])
         #expect(open.isError && open.text.contains("2 open Important findings"), "\(open.text)")
-        let first = call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the worker's routine call: wiring the goal needs"])
+        let first = call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the worker's routine call: wiring the goal needs, a.txt:1"])
         #expect(!first.text.contains("merge("), "\(first.text)")
         let half = call(lead, "merge", ["task": "add-b"])
         #expect(half.isError && half.text.contains("1 open Important finding") && half.text.contains("F2"), "\(half.text)")
-        let second = call(lead, "dismiss_finding", ["task": "add-b", "id": "F2", "reason": "a test helper the worker listed"])
+        let second = call(lead, "dismiss_finding", ["task": "add-b", "id": "F2", "reason": "a test helper the worker listed, c.txt:1"])
         #expect(second.text.contains("complete with its tests passing") && second.text.contains("add-b is back in review; merge(add-b) when you're ready"), "\(second.text)")
         let task = try #require(BoardStore(root: root).load().task("add-b"))
         #expect(task.status == .review && task.setback == nil)
         let merged = call(lead, "merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
-        #expect(merged.text.contains("the 2 Important findings that failed it you dismissed: F1 a.txt:1 (the worker's routine call: wiring the goal needs); F2 c.txt:1 (a test helper the worker listed)"), "\(merged.text)")
+        #expect(merged.text.contains("the 2 Important findings that failed it you dismissed: F1 a.txt:1 (the worker's routine call: wiring the goal needs, a.txt:1); F2 c.txt:1 (a test helper the worker listed, c.txt:1)"), "\(merged.text)")
         #expect(BoardStore(root: root).load().task("add-b")?.status == .done)
     }
 
@@ -719,7 +796,7 @@ struct LeadFindingsToolTests: LeadTeamFixture {
             try started(lead, runtime, root: root)
             _ = try audit(lead, runtime, verdict.merging(["summary": "checked", "findings": Self.excursions]) { $1 })
             for id in ["F1", "F2"] {
-                let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": id, "reason": "a routine call"])
+                let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": id, "reason": "a routine call, \(id == "F1" ? "a" : "c").txt:1"])
                 #expect(!dismissed.isError && !dismissed.text.contains("merge("), "\(dismissed.text)")
             }
             #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)

@@ -996,7 +996,9 @@ public enum LeadPrompts {
         Resolve each Important one: message the worker the open ids; it answers each with answer_findings, fixed (in \
         a commit) or disagree with a reason, and board(task) shows the answers; then audit again (a re-audit checks \
         only those findings' concerns and judges the answers: it closes a finding whose disagreement it accepts, \
-        and a closed finding isn't raised again); or dismiss_finding with a reason when it isn't a real problem; or \
+        and a closed finding isn't raised again); or dismiss_finding with a reason when it isn't a real problem (for \
+        an Important one the reason must cite a file and line, a decision's timestamp from decisions.md, or the \
+        question id of the user's answer; if the only evidence is your memory, record_decision first or ask_user); or \
         add_task(from_finding: <task>:<id>) to make it a task of its own (good for Pre-existing ones that matter). \
         \(Policy.nits) After \(LeadAuditLedger.roundCap) audits in a row that left Important findings open, the task's \
         status line says "reconsider the approach": don't send the worker back for a third round; re-roll it \
