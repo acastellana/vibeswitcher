@@ -28,6 +28,19 @@ enum Sandbox {
     /// default, so nothing can turn it on in the user's running app. What it guards does nothing in the sandbox.
     private(set) static var isOn = false
 
+    /// When every fake process started, fixed for the sandbox's life: a session's id (`sid`) is its tty, pid and start
+    /// time, so a start time taken afresh at each scan would change every fake session's sid from one scan to the next.
+    static let fakeLaunch = Date().addingTimeInterval(-3600)
+
+    /// The process table a scan sees for these fakes (tty to pid): the same start time every time.
+    static func fakeProcessTable(claude: [String: Int32], codex: [String: Int32]) -> [Int32: ProcInfo] {
+        var table = UIBench.processTable(agents: claude, launched: fakeLaunch)
+        for (tty, pid) in codex {
+            table[pid] = ProcInfo(pid: pid, ppid: 60_000, tty: tty, comm: "codex", startTime: fakeLaunch, agent: .codex)
+        }
+        return table
+    }
+
     /// Where the sandbox's windows sit: far off every screen.
     static let offscreen = NSPoint(x: -20_000, y: -20_000)
     /// The command the drive is on (for what the window guard notes).
@@ -574,12 +587,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     private func processes() -> [Int32: ProcInfo] {
         let fakes = lock.withLock { self.fakes }
-        let launched = Date().addingTimeInterval(-3600)
-        var table = UIBench.processTable(agents: fakes.filter { $0.value.agent == .claude }.mapValues(\.pid), launched: launched)
-        for (tty, fake) in fakes where fake.agent == .codex {
-            table[fake.pid] = ProcInfo(pid: fake.pid, ppid: 60_000, tty: tty, comm: "codex", startTime: launched, agent: .codex)
-        }
-        return table
+        return Sandbox.fakeProcessTable(claude: fakes.filter { $0.value.agent == .claude }.mapValues(\.pid),
+                                        codex: fakes.filter { $0.value.agent == .codex }.mapValues(\.pid))
     }
 
     private func cwd(_ pid: Int32) -> String? {
