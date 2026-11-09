@@ -144,8 +144,8 @@ struct LeadPolicyTextsTests {
         // The worker: in its evidence, next to what the done report carries and the blind check.
         let workflow = LeadWorkflow.parse("---\nbase_branch: project-lead\n---")
         let worker = LeadPrompts.Policy.regressionTest(base: "project-lead")
-        #expect(LeadPrompts.worker(task: Self.task, root: "/r", workflow: workflow)
-            .contains(LeadPrompts.Policy.workerEvidence(base: "project-lead") + "\n" + worker + "\n" + LeadPrompts.Policy.workerFindings))
+        let sequence = [LeadPrompts.Policy.workerEvidence(base: "project-lead"), LeadPrompts.Policy.bugTasks, worker, LeadPrompts.Policy.workerFindings]
+        #expect(LeadPrompts.worker(task: Self.task, root: "/r", workflow: workflow).contains(sequence.joined(separator: "\n")))
         for needle in ["for a bug fix or a fixed audit finding, the evidence includes the new test's failing run on the commit before the fix",
                        "the branch's merge-base with project-lead", "then its passing run after it",
                        "a test that would pass either way doesn't cover the fix", "by reverting the fix locally and restoring it, in this worktree",

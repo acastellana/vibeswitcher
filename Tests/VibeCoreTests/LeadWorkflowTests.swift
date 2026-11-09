@@ -174,4 +174,30 @@ struct LeadWorkflowTests {
             #expect(verifier.localizedCaseInsensitiveContains(needle), "missing \(needle)")
         }
     }
+
+    /// Misread symptoms cost real work (three freeze or hang misdiagnoses) and 25% of flaky fixes flaked again
+    /// (docs/process/reviews/mattpocock-skills.md, idea 1): a bug task starts from a red run on the quoted symptom.
+    @Test func aBugTaskStartsFromACommandThatGoesRedOnTheQuotedSymptom() throws {
+        let workflow = LeadWorkflow.parse("---\nbase_branch: dev\n---")
+        let brief = LeadPrompts.worker(task: task, root: "/r", workflow: workflow)
+        let rule = try #require(brief.split(separator: "\n").first { $0.hasPrefix("Bug tasks:") }.map(String.init), "no Bug tasks line in the brief")
+        for needle in ["before changing code, run one command that goes red on the symptom the contract quotes",
+                       "A flake: record its failure rate over N runs under load", "show that rate over N runs after the fix",
+                       "With no such command, report blocked with what was tried",
+                       "If no test can reach the real bug path, say so in your report instead of adding a shallow test"] {
+            #expect(rule.contains(needle), "worker: missing \(needle)")
+        }
+        // Right before the regression-test rule, the same run seen from the start of the work.
+        #expect(brief.contains(rule + "\n" + LeadPrompts.Policy.regressionTest(base: "dev")))
+
+        let prompt = LeadPrompts.lead(project: "acme", root: "/r", workflow: workflow)
+        let step = try #require(prompt.split(separator: "\n").first { $0.hasPrefix("2. Break the work") }.map(String.init), "no contract step")
+        #expect(step.contains("For a bug task, quote the reported symptom in the contract"), "\(step)")
+        #expect(step.contains("reports blocked when it can't"), "\(step)")
+
+        // The AGENTS.md ban on debuggers stands, and a worker doesn't take its theories to the user.
+        for text in [rule, step] {
+            for banned in ["debugger", "lldb", "hypothes"] { #expect(!text.localizedCaseInsensitiveContains(banned), "\(banned) in \(text)") }
+        }
+    }
 }
