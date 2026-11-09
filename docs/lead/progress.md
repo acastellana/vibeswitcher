@@ -2253,3 +2253,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 19:01 Audit of the-sandbox-s-phone: complete, clean, round 2: 1 Nit open
 - 2026-11-09 19:01 Audit of security-review-of-the: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
 - 2026-11-09 19:01 Planned a-test-run-s: A test run's leftover-preferences check blames it only for files it made (review audit)
+- 2026-11-09 19:05 Started a worker on a-test-run-s
+- 2026-11-09 19:05 Automatically (auto_advance): Started a worker on a-test-run-s (A test run's leftover-preferences check blames it only for files it made).
+- 2026-11-09 19:19 Merged security-review-of-the: Security review of the phone, host authentication and tool boundaries (on Opus) (in a batch: security-review-of-the, the-sandbox-s-phone landed on one test run) (build 16ca360977ec)
+- 2026-11-09 19:19 Merged the-sandbox-s-phone: The sandbox's phone keeps a session's identity, and iOS gets its home-screen icon (in a batch: security-review-of-the, the-sandbox-s-phone landed on one test run) (build 16ca360977ec)
