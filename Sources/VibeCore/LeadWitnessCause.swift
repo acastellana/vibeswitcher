@@ -100,7 +100,8 @@ public enum StallCause: Codable, Equatable, Sendable {
     case testSlot(what: String, since: Double?, ahead: Int, holders: [SlotHolder])
     /// Waiting on a permission prompt or a question.
     case prompt(text: String, since: Double?)
-    /// A process of its own lives on (`pid`), and nothing has been written for how long since `quietSince`.
+    /// A process of its own lives on (`pid`) while its transcript has been silent since `quietSince`. Only that is
+    /// known: the witness doesn't read the process's output (a hung run's report does, `MergeRerun.causeNote`).
     case liveProcess(pid: Int32, command: String, startedAt: Double, quietSince: Double)
     /// A background job it waits on, its process alive. `named`: its transcript says it waits on it; otherwise only
     /// the process table shows a shell it may be waiting on.
@@ -110,9 +111,11 @@ public enum StallCause: Codable, Equatable, Sendable {
     /// Nothing read says why: what was read, as it was.
     case unknown(read: [String])
 
-    /// How far apart a background task's start in the transcript and its shell's start in the process table may be and
-    /// still be the same job: its call returns as the shell starts, later on a loaded Mac.
+    /// How long before a background task's call returned (its time in the transcript) its shell may have started and
+    /// still be the same job: the call returns as the shell starts, later on a loaded Mac. Never after it.
     static let sameJobWithin: TimeInterval = 120
+    /// The two clocks' disagreement a shell started "after" its call returned is put down to.
+    static let sameJobSkew: TimeInterval = 5
 
     /// The evidence, in words, with its times as of `now`.
     public func text(now: Date) -> String {
@@ -131,7 +134,7 @@ public enum StallCause: Codable, Equatable, Sendable {
             let waited = since.map { " since \(LeadBoard.clock($0)) (\(LeadToolset.age(now.timeIntervalSince1970 - $0)))" } ?? ""
             return "a permission prompt or question is on its screen\(waited): “\(text)”"
         case let .liveProcess(pid, command, startedAt, quietSince):
-            return "a live process with no output: pid \(pid) (\(command)), started \(LeadBoard.clock(startedAt)), and nothing written for \(LeadToolset.age(now.timeIntervalSince1970 - quietSince)), since \(LeadBoard.clock(quietSince))"
+            return "a live process of its own, its transcript silent: pid \(pid) (\(command)), started \(LeadBoard.clock(startedAt)), and nothing written to the transcript for \(LeadToolset.age(now.timeIntervalSince1970 - quietSince)), since \(LeadBoard.clock(quietSince)); that process's own output isn't read, so whether it's what holds the worker can't be told"
         case let .backgroundJob(what, pid, startedAt, named):
             return "waiting on its own background job (\(what)): pid \(pid), started \(LeadBoard.clock(startedAt)), still alive after \(LeadToolset.age(now.timeIntervalSince1970 - startedAt))"
                 + (named ? "" : "; its transcript names no task it waits on, only this shell")
@@ -155,8 +158,11 @@ extension LeadWitness.Seen {
 
     /// The live shell of a task its transcript names: the one started as its call returned.
     func liveShell(of task: TranscriptTail.Background) -> BackgroundJob? {
-        guard let at = task.startedAt else { return nil }
-        return shells.first { abs($0.startedAt.timeIntervalSince1970 - at) <= StallCause.sameJobWithin }
+        guard task.isShell, let at = task.startedAt else { return nil }
+        return shells.first {
+            let started = $0.startedAt.timeIntervalSince1970
+            return started >= at - StallCause.sameJobWithin && started <= at + StallCause.sameJobSkew
+        }
     }
 
     /// The task its transcript says it waits on, once no process of it is left: every task named is a shell (an agent
@@ -169,6 +175,16 @@ extension LeadWitness.Seen {
         return tasks.first
     }
 
+    /// Takes this look at `session` into `jobs`: until the job its transcript names has stayed missing (`MissingJobs`),
+    /// `shellsRead` is off, so nothing calls it gone.
+    public mutating func confirmMissingJob(_ session: String, in jobs: inout LeadWitness.MissingJobs, awake: TimeInterval) {
+        guard shellsRead else { return }
+        let missing = diedJob != nil
+        let gone = jobs.confirmed(session, missing: missing, awake: awake)
+        shellsRead = !missing || gone
+        jobCheckPending = missing && !gone
+    }
+
     /// The live job it waits on, if the transcript names one that has its shell.
     var liveNamedJob: (task: TranscriptTail.Background, shell: BackgroundJob)? {
         for task in waitedTasks {
@@ -178,17 +194,38 @@ extension LeadWitness.Seen {
     }
 }
 
+extension LeadWitness {
+    /// When a job its transcript names was first seen with no process, by session, on the awake clock. One look proves
+    /// nothing: a process the table couldn't read that once drops out of the list, and a job that just finished has no
+    /// process until Claude Code writes its notification. Only after `LeadWitness.quiet` of time awake is it gone
+    /// (2026-10-27: live agents reported as quit).
+    public struct MissingJobs: Sendable {
+        private var since: [String: TimeInterval] = [:]
+
+        public init() {}
+
+        /// Takes in a look at `session` (`missing`: no process for its job), the Mac's awake clock at `awake`: true once
+        /// its job has been missing long enough to say so.
+        public mutating func confirmed(_ session: String, missing: Bool, awake: TimeInterval) -> Bool {
+            guard missing else {
+                since[session] = nil
+                return false
+            }
+            let first = since[session] ?? awake
+            since[session] = first
+            return awake - first >= LeadWitness.quiet
+        }
+    }
+}
+
 extension LeadStall {
     /// What a stall detected from `seen` over `from`…`at` is really waiting on, by what was read: the most telling that
     /// can be shown, or that it couldn't tell. Never a guess: each case needs what it names to have been read.
     /// `needed`: the awake time this stall takes to count, so a Mac that slept through most of it is the cause.
     static func cause(_ seen: LeadWitness.Seen, reason: Reason, from: Double, at: Double, needed: TimeInterval, background: String?) -> StallCause {
         let sleep = seen.sleep.reading(from: from, to: at)
-        if let sleep, at - from - sleep.slept < needed, sleep.slept > 0 { return .macAsleep(sleep) }
-        if let wait = seen.lockWait {
-            return .testSlot(what: String(wait.waiter.name.prefix(120)), since: wait.waiter.who.since?.timeIntervalSince1970, ahead: wait.ahead,
-                             holders: wait.holders.map(StallCause.SlotHolder.init(held:)))
-        }
+        // What the process table shows of its own job comes first: alive, it's what the worker waits on however long the
+        // Mac slept (the sleep is said beside it); gone, no amount of sleep brings it back.
         if let died = seen.diedJob { return .jobDied(what: died.what, startedAt: died.startedAt) }
         if reason == .idle || reason == .undelivered, background != nil {
             if let job = seen.liveNamedJob {
@@ -200,7 +237,13 @@ extension LeadStall {
                                       startedAt: shell.startedAt.timeIntervalSince1970, named: false)
             }
         }
-        if reason == .silent, let shell = seen.shells.first {
+        if let sleep, at - from - sleep.slept < needed, sleep.slept > 0 { return .macAsleep(sleep) }
+        if let wait = seen.lockWait {
+            return .testSlot(what: String(wait.waiter.name.prefix(120)), since: wait.waiter.who.since?.timeIntervalSince1970, ahead: wait.ahead,
+                             holders: wait.holders.map(StallCause.SlotHolder.init(held:)))
+        }
+        // The newest: the likeliest to be what it's at. Only what was read is said of it (see `text`).
+        if reason == .silent, let shell = seen.shells.last {
             return .liveProcess(pid: shell.pid, command: String(shell.command.prefix(120)),
                                 startedAt: shell.startedAt.timeIntervalSince1970, quietSince: from)
         }
@@ -245,8 +288,9 @@ extension MergeRerun {
     /// What a hung run's cause note starts with: a line after its output, as `quietNote` is.
     static let causePrefix = "Why it stopped: "
 
-    /// What the times and the process table say of a hung run, one line: why it stopped, the Mac's sleep in its
-    /// window by the same two clocks its limits count, and a slot queue if something in its folder sat in line.
+    /// What the times and the process table say of a hung run, one line: why it stopped (a slot queue if something in
+    /// its folder sat in line, the live process with no output, or that it was still writing), then the Mac's sleep in
+    /// its window by the same two clocks its limits count.
     static func causeNote(stall: StallWatch.Stall?, quiet: TimeInterval?, slept: TimeInterval, window: TimeInterval, started: Date, stopped: Date,
                           queued: TestLock.Wait?, recorded: ([TestLock.Holder]) -> String = { TestLock.text($0) }) -> String {
         // The two clocks are read a moment apart: a difference this small is that, not the Mac asleep.
@@ -256,11 +300,10 @@ extension MergeRerun {
         let sleep = slept > 0
             ? "the Mac slept \(Worktrees.duration(slept)) of the \(Worktrees.duration(window)) it ran \(times), by its awake clock, so it had \(Worktrees.duration(awake)) awake"
             : "the Mac was awake the whole \(Worktrees.duration(window)) it ran, \(times)"
+        // The limits count only the time awake, so however long the Mac slept the run used them up awake: the sleep is
+        // said beside why it stopped, never instead of it.
         var why: String
-        if slept > 0, slept >= awake {
-            why = "the Mac slept through most of it: \(sleep). The run's limits only count the time awake."
-            return causePrefix + why
-        } else if let queued {
+        if let queued {
             let wait = queued.waiter.who.since.map { " since \(LeadBoard.clock($0.timeIntervalSince1970))" } ?? ""
             why = "something it started sat in line for a Mac-wide test slot\(wait) (\(queued.waiter.name)), \(recorded(queued.holders))"
         } else if let stall {

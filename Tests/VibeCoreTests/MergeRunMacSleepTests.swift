@@ -120,7 +120,8 @@ struct MergeRunMacSleepTests {
         mac.stayAwake(46 * 60)
         guard case .hung(_, _, let output, _)? = await run.value else { Issue.record("not stopped as hung"); return }
         let why = try #require(MergeRerun.cause(in: output), "\(output)")
-        #expect(why.hasPrefix("the Mac slept through most of it: the Mac slept 120 min of the "), "\(why)")
+        #expect(why.hasPrefix("a live process with no output: its last line came "), "\(why)")
+        #expect(why.contains("the Mac slept 120 min of the "), "\(why)")
     }
 
     /// Awake the whole run, stopped for no progress: the report names the live process and says the Mac was awake.

@@ -97,7 +97,7 @@ public struct LeadStall: Codable, Equatable, Sendable {
         guard let cause else { return text(now: now) }
         if waitsOnOwnJob {
             let last = Self.known(lastActivity).map { ", last activity \(LeadToolset.age(now.timeIntervalSince1970 - $0)) ago" } ?? ""
-            return "not stalled: \(cause.text(now: now))\(last)\(sleepNote(now: now))"
+            return "\(heldBack ? "not stalled" : "not known to be stalled"): \(cause.text(now: now))\(last)\(sleepNote(now: now))"
         }
         return "\(text(now: now)). Cause: \(cause.text(now: now))\(sleepNote(now: now))"
     }
@@ -142,7 +142,10 @@ public struct LeadStall: Codable, Equatable, Sendable {
     public func key(session: String) -> String {
         switch reason {
         case .undelivered: return "\(session)|held-\(Int(waitingSince ?? at))"
-        case .silent, .idle, .compacted: return "\(session)|stalled-\(Int(lastActivity))"
+        case .silent, .idle, .compacted:
+            // Told as the Mac's sleep, it's told again if the worker is still silent once it has had its time awake.
+            if case .macAsleep? = cause { return "\(session)|stalled-\(Int(lastActivity))|asleep" }
+            return "\(session)|stalled-\(Int(lastActivity))"
         case .prompt: return "\(session)|prompt-\(Int(waitingSince ?? at))"
         }
     }
@@ -177,7 +180,7 @@ public struct LeadStall: Codable, Equatable, Sendable {
                 stalls.append(explained(LeadStall(reason: .compacted, lastActivity: max(last, compacted), at: at), seen, from: last, needed: compactedAfter, background: nil))
             } else if working, turnShells.isEmpty, quiet >= silentAfter {
                 stalls.append(explained(LeadStall(reason: .silent, lastActivity: last, at: at, shells: shells), seen, from: last, needed: silentAfter, background: nil))
-            } else if betweenTurns, task.leadQuestionAt == nil, quiet >= (background == nil ? idleAfter : backgroundCeiling) {
+            } else if betweenTurns, !seen.jobCheckPending, task.leadQuestionAt == nil, quiet >= (background == nil ? idleAfter : backgroundCeiling) {
                 stalls.append(explained(LeadStall(reason: .idle, lastActivity: last, at: at, background: background,
                                                   shells: background == nil ? shells : nil), seen, from: last,
                                         needed: background == nil ? idleAfter : backgroundCeiling, background: background))

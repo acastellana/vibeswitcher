@@ -62,6 +62,12 @@ struct LeadWitnessCauseTests {
         let report = stall.report(now: now)
         #expect(report.contains("the Mac was asleep: the Mac slept 20 min of the 20 min since \(Self.clock(0)), by its awake clock (1 sleep, last woke \(Self.clock(20)))"), "\(report)")
         #expect(LeadWitness.events(board: Self.board(), seen: ["w1": Self.silent(sleep: log)], now: now).first?.text.contains("the Mac was asleep") == true)
+        // Still silent after a full stall's time awake: told again, as what it is now.
+        let later = Self.at(36)
+        let awakeSince = Self.log([-1, 0.1, 20, 36], sleeps: [(0.1, 20)])
+        let again = try #require(LeadStall.detect(Self.silent(sleep: awakeSince), task: Self.task(), now: later).first)
+        #expect(again.key(session: "w1") != stall.key(session: "w1"))
+        guard case .unknown? = again.cause else { Issue.record("\(String(describing: again.cause))"); return }
     }
 
     @Test func aMacAwakeLongEnoughForTheStallIsntTheCauseButIsSaid() throws {
@@ -133,7 +139,8 @@ struct LeadWitnessCauseTests {
         let stall = try #require(LeadStall.detect(Self.silent(shells: [Self.job(77, "npm test", started: -130)]), task: Self.task(), now: now).first)
         #expect(stall.reason == .silent)
         let report = stall.report(now: now)
-        #expect(report.contains("a live process with no output: pid 77 (npm test), started \(Self.clock(-130)), and nothing written for 20 min, since \(Self.clock(0))"), "\(report)")
+        #expect(report.contains("a live process of its own, its transcript silent: pid 77 (npm test), started \(Self.clock(-130)), and nothing written to the transcript for 20 min, since \(Self.clock(0))"), "\(report)")
+        #expect(report.contains("that process's own output isn't read, so whether it's what holds the worker can't be told"), "\(report)")
     }
 
     // MARK: A background job of its own
@@ -151,6 +158,17 @@ struct LeadWitnessCauseTests {
         #expect(!report.contains("for over 45 min"))
     }
 
+    /// A job that's alive is what the worker waits on, however long the Mac slept: still held back, the sleep said beside it.
+    @Test func aLiveJobOnAMacThatSleptIsStillHeldBack() throws {
+        var seen = Self.waiting(tasks: [Self.eval], shells: [Self.job(started: 0)])
+        seen.sleep = Self.log([-1, 1, 41, 46], sleeps: [(1, 41)])
+        let now = Self.at(46)
+        #expect(LeadWitness.events(board: Self.board(), seen: ["w1": seen], now: now).isEmpty)
+        let stall = try #require(LeadStall.detect(seen, task: Self.task(), now: now).first)
+        #expect(stall.heldBack)
+        #expect(stall.report(now: now).contains("the Mac slept 40 min of the 46 min"), "\(stall.report(now: now))")
+    }
+
     @Test func aShellItsTranscriptDoesntNameIsLabelledNotHeldBack() throws {
         let seen = Self.waiting(tasks: [], shells: [Self.job(started: -1)], status: .background)
         let now = Self.at(46)
@@ -158,7 +176,7 @@ struct LeadWitnessCauseTests {
         #expect(!stall.heldBack && stall.waitsOnOwnJob)
         // It could be a server it left running, so the lead still hears, labelled as what it is.
         let event = try #require(LeadWitness.events(board: Self.board(), seen: ["w1": seen], now: now).first)
-        #expect(event.text.contains("is not stalled: waiting on its own background job (swift test)"), "\(event.text)")
+        #expect(event.text.contains("is not known to be stalled: waiting on its own background job (swift test)"), "\(event.text)")
         #expect(event.text.contains("its transcript names no task it waits on, only this shell"), "\(event.text)")
         #expect(!event.text.contains("for over 45 min"))
     }
@@ -173,6 +191,53 @@ struct LeadWitnessCauseTests {
         #expect(event.text.contains("has no process any more"), "\(event.text)")
         // It isn't said in the quiet minute it takes for a notification to arrive.
         #expect(LeadWitness.events(board: Self.board(), seen: ["w1": seen], now: Self.at(1)).isEmpty)
+    }
+
+    /// One look proves nothing: a job is gone only once it has stayed missing for the quiet, on the awake clock, and a
+    /// process seen again starts that over.
+    @Test func aJobIsCalledGoneOnlyOnceItHasStayedMissing() {
+        var jobs = LeadWitness.MissingJobs()
+        func look(_ awake: TimeInterval, session: String = "w1", missing: Bool = true) -> Bool { jobs.confirmed(session, missing: missing, awake: awake) }
+        var gone = [look(100), look(189)]
+        #expect(gone == [false, false])
+        gone = [look(190)]
+        #expect(gone == [true])
+        // Seen again (the table couldn't read it that once): the wait starts over.
+        gone = [look(200, missing: false), look(210), look(299)]
+        #expect(gone == [false, false, false])
+        // Another session's is its own.
+        gone = [look(300, session: "w2")]
+        #expect(gone == [false])
+    }
+
+    @Test func aSingleLookWithoutTheJobTellsNothingUntilItHasStayedMissing() throws {
+        var jobs = LeadWitness.MissingJobs()
+        // The job just finished, its notification not written yet (or the table couldn't read it): nothing is said.
+        var first = Self.waiting(tasks: [Self.eval], shells: [])
+        first.confirmMissingJob("w1", in: &jobs, awake: 1000)
+        #expect(first.diedJob == nil && first.waitingOn != nil)
+        #expect(LeadWitness.events(board: Self.board(), seen: ["w1": first], now: Self.at(46)).isEmpty)
+        // Still missing after the quiet, on the awake clock: stopped.
+        var later = Self.waiting(tasks: [Self.eval], shells: [])
+        later.confirmMissingJob("w1", in: &jobs, awake: 1090)
+        #expect(later.diedJob == Self.eval)
+        let event = try #require(LeadWitness.events(board: Self.board(), seen: ["w1": later], now: Self.at(46)).first)
+        #expect(event.text.contains("has no process any more"), "\(event.text)")
+        // A job seen alive resets it, and stays "read".
+        var alive = Self.waiting(tasks: [Self.eval], shells: [Self.job(started: 0)])
+        alive.confirmMissingJob("w1", in: &jobs, awake: 1100)
+        #expect(alive.shellsRead && alive.liveNamedJob != nil)
+        var again = Self.waiting(tasks: [Self.eval], shells: [])
+        again.confirmMissingJob("w1", in: &jobs, awake: 1110)
+        #expect(again.diedJob == nil)
+    }
+
+    @Test func aShellOfAnotherJobIsntMatchedToANamedOne() {
+        // Started after the call returned: not the shell it started.
+        #expect(Self.waiting(tasks: [Self.eval], shells: [Self.job(started: 2)]).liveNamedJob == nil)
+        // A background agent has no shell, whatever started beside it.
+        let agent = TranscriptTail.Background(id: "a1", what: "review", startedAt: Self.t0 - 5, isShell: false)
+        #expect(Self.waiting(tasks: [agent], shells: [Self.job(started: 0)]).liveNamedJob == nil)
     }
 
     @Test func anUnreadProcessTableOrAnAgentIsNotCalledDead() {
@@ -262,11 +327,12 @@ struct LeadWitnessCauseTests {
         #expect(unread.contains("couldn't tell why"), "\(unread)")
     }
 
-    @Test func aHungRunAcrossSleepIsSaidToBeTheMacAsleep() {
-        // The incident's shape: hours on the wall clock, its limit reached in awake time alone.
+    @Test func aHungRunAcrossSleepSaysTheSleepBesideWhyItStopped() {
+        // The incident's shape: hours on the wall clock, its limit reached in awake time alone. The limits count only
+        // the time awake, so the sleep isn't why it stopped: the silent process is, and the sleep is said with it.
         let note = MergeRerun.causeNote(stall: Self.stall, quiet: nil, slept: 4 * 3600, window: 5 * 3600, started: Self.at(0), stopped: Self.at(300), queued: nil)
-        #expect(note.hasPrefix("Why it stopped: the Mac slept through most of it: the Mac slept 240 min of the 300 min it ran"), "\(note)")
-        #expect(note.contains("so it had 60 min awake"), "\(note)")
+        #expect(note.hasPrefix("Why it stopped: a live process with no output for 10 min of awake time"), "\(note)")
+        #expect(note.contains("the Mac slept 240 min of the 300 min it ran from \(Self.clock(0)) to \(Self.clock(300)), by its awake clock, so it had 60 min awake"), "\(note)")
     }
 
     @Test func aHungRunStillInLineForASlotNamesIt() {

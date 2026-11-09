@@ -50,10 +50,14 @@ public enum LeadWitness {
         public var lockWait: TestLock.Wait?
         /// What its transcript names still running in the background (`TranscriptTail.background`).
         public var backgroundTasks: [TranscriptTail.Background]
-        /// `shells` comes from a reading of the process table for this session, so a job missing from it has no process.
+        /// `shells` comes from a reading of the process table for this session, and a job missing from it has stayed
+        /// missing (`MissingJobs`), so it has no process.
         public var shellsRead: Bool
         /// How long the Mac has slept, by the awake clock (see `MacSleepLog`).
         public var sleep: MacSleepLog
+        /// Its job has no process in this look but hasn't stayed missing yet (`MissingJobs`): for that minute and a
+        /// half it's neither waiting on a live job nor stopped, and nothing is said of it.
+        public var jobCheckPending = false
 
         /// How it ended, in words; its exit code when that wasn't said.
         var ending: String { cause ?? "exit \(exit ?? 0)" }
