@@ -24,7 +24,7 @@ Line numbers below are as of VibeSwitcher commit `72533c6e`. "Measure" says how 
 ### 2. Audits ask what the diff added that nobody asked for
 
 - **Source:** `skills/engineering/code-review/SKILL.md` (the Spec sub-agent's brief).
-- **Today:** the verifier looks for edits outside the boundaries and anything that only looks done (`LeadWorkflow.swift:1495`); the contract finder compares the branch with its goal (`:1305`). Boundaries are about files, so extra behaviour inside an allowed file isn't asked about, and the worker's blind check asks only for blockers (`:791`). The user's stated goal is "exactly what they want", and `docs/process/backlog.md:17` records "little UI noise, no extra chrome".
+- **Today:** the verifier looks for edits outside the boundaries and anything that only looks done (`LeadWorkflow.swift:1495`); the contract finder compares the branch with its goal (`:1305`). Boundaries list only what a task must not touch or do (`Sources/VibeCore/LeadBoard.swift:9`), so extra behaviour nobody thought to forbid isn't asked about, and the worker's blind check asks only for blockers (`:791`). The user's stated goal is "exactly what they want", and `docs/process/backlog.md:17` records "little UI noise, no extra chrome".
 - **Change:** the verifier's check and the contract finder's brief ask three things, each quoting the contract line: what's missing or partial; what the diff does that the contract doesn't ask for; what looks done but is wrong. The second is a Nit unless it does harm or the user would see it, and never fires on routine calls the worker listed (`:1461`).
 - **Goal:** fewer issues (fewer corrections after delivery). **Size:** S to write, but `docs/process/verifier-eval.md:8` requires a full eval run first (about $45–60).
 - **Risk:** false alarms on sensible small additions, and more audit rounds. The file is a sensitive path, so the change is itself audited.
@@ -44,12 +44,12 @@ Line numbers below are as of VibeSwitcher commit `72533c6e`. "Measure" says how 
 ### 4. A record of concepts the user turned down
 
 - **Source:** `skills/engineering/triage/OUT-OF-SCOPE.md`.
-- **Today:** the lead checks the code, the inventory, decisions and the backlog before proposing (`LeadWorkflow.swift:638`). A lukewarm answer means abandoning the idea or moving it to the backlog (`docs/lead/decisions.md:249`), so the reason ends up in progress.md (`docs/lead/progress.md:1169`, `:1170`, `:1795`) or in the archive, and "every lead start reads decisions.md, not the archive" (`LeadToolset.swift:758`). A later lead's check doesn't reach any of those.
-- **Change:** `docs/process/rejected.md`, one entry per concept: what, the user's words, the date, the task, and what would reopen it. The lead adds one when it abandons on the user's answer; `productCheck` names the file. Take its two sharp rules: match by concept, not keyword; and never list something as rejected because it already exists.
+- **Today:** partly covered. The lead checks decisions before proposing (`LeadWorkflow.swift:638`), and `status` lists abandoned tasks with their reasons (`LeadToolset.swift:5605`). The gaps are narrower: a reason in `status` is clipped to 60 characters and named only until its task is archived; a turned-down idea reaches decisions.md only sometimes (`docs/lead/decisions.md:273` did, the chat ideas at `docs/lead/progress.md:1169` and `:1170` didn't); and an entry moved to the archive is no longer read (`LeadToolset.swift:758`).
+- **Change:** no new file. When the user turns an idea down, the lead always calls record_decision with the concept, the user's words and what would reopen it, and archive_decisions leaves those entries in place. Take its two sharp rules: match by concept, not keyword; and never record something as rejected because it already exists.
 - **Goal:** fewer questions. **Size:** S.
-- **Risk:** "meh" hardens into "never"; the reopen condition is the guard. Nothing in the records shows a rejected idea proposed twice yet, so this is cheap prevention, not a fix (the nearest incident is the four existing features proposed on 2026-11-07).
-- **Measure:** proposals that repeat a listed concept, from the scorecard (backlog A1).
-- **Verdict:** adopt.
+- **Risk:** "meh" hardens into "never"; the reopen condition is the guard. decisions.md grows slightly. Nothing in the records shows a rejected idea proposed twice yet, so this is cheap prevention, not a fix (the nearest incident is the four existing features proposed on 2026-11-07).
+- **Measure:** proposals that repeat a recorded concept, from the scorecard (backlog A1).
+- **Verdict:** adapt.
 
 ### 5. A new test's expected value comes from somewhere other than the code
 
@@ -57,14 +57,14 @@ Line numbers below are as of VibeSwitcher commit `72533c6e`. "Measure" says how 
 - **Today:** whether a test would fail without the change is asked only of the tests finder (`LeadWorkflow.swift:1313`), which needs audit_finders 3 on a non-sensitive branch. The red-run rule covers fixes only (`:814`), so a new feature's tests have no such check. `REVIEW.md` has no line on it. The one recorded miss is `docs/lead/decisions.md:69`.
 - **Change:** one line under Important in `REVIEW.md`: a new test whose expected value is recomputed the way the code computes it, so it can't disagree with the code. Keep VibeSwitcher's source-scanning lints and prompt-text tests: its "implementation-coupled" anti-pattern doesn't apply to them.
 - **Goal:** fewer issues. **Size:** S.
-- **Risk:** low; a verifier could over-apply it to table-driven tests. The evidence is thin: `docs/lead/decisions.md:225` found no failure that a mechanical check would have caught that week, so this stays a review line, not a gate.
+- **Risk:** low; a verifier could over-apply it to table-driven tests. The evidence is thin: `docs/lead/decisions.md:227` found no failure that a mechanical check would have caught that week, so this stays a review line, not a gate.
 - **Measure:** one planted tautological test in the verifier eval; found or not, with clean-case false alarms unchanged.
 - **Verdict:** adapt.
 
 ### 6. A short retrospective on the worker sessions that went wrong
 
 - **Source:** `skills/engineering/retro/SKILL.md` (its categories), `skills/in-progress/chief-of-staff/SKILL.md` (retro on a sample of subagent sessions, the bad ones first; beta).
-- **Today:** the lead runs a retrospective per batch, from outcomes (`LeadWorkflow.swift:1023`). Backlog A3 mines app.log, B5 writes skills from successes, C1 proposes prompt edits weekly; none reads what a struggling worker actually did.
+- **Today:** the lead runs a retrospective per batch, from outcomes (`LeadWorkflow.swift:1023`). Backlog A3 mines app.log, B5 writes skills from successes, C1 proposes prompt edits weekly, and B7 has the verifier read a transcript to judge that task. The nearest precedent is a one-off review of other projects' sessions (`docs/lead/decisions.md:61`). Nothing routinely asks of a struggling worker's session what in the environment would have helped.
 - **Change:** when a task runs over budget or fails its first audit, one cheap-model agent reads that worker's transcript and answers fixed questions: what took long to find, what check would have caught the mistake, what information was missing, which tool calls were expensive. At most 3 candidates go to the lead, each becoming a task or check as step 10 requires. Event-triggered only, because `docs/lead/decisions.md:85` rules out a scheduled gardener.
 - **Goal:** cheaper, fewer issues. **Size:** M.
 - **Risk:** transcripts are untrusted text, so candidates are data for the lead and never instructions; noise and spend, so cap the runs per day.
@@ -84,8 +84,8 @@ Line numbers below are as of VibeSwitcher commit `72533c6e`. "Measure" says how 
 ### 8. A project glossary
 
 - **Source:** `skills/engineering/domain-modeling/GLOSSARY-FORMAT.md`, and the README's section on shared language.
-- **Today:** there's no glossary. The one recorded name clash was fixed by renaming (`docs/lead/decisions.md:138`), and `docs/lead/decisions.md:85` found that context files cost about 20% and overviews don't help. `docs/process/product-inventory.md` already maps what exists.
-- **Change:** none now. Revisit, as a file reached by a pointer, if a second naming mix-up is recorded: incident first, then the check (`docs/lead/decisions.md:225`).
+- **Today:** there's no glossary. The one recorded name clash was fixed by renaming (`docs/lead/decisions.md:138`), and `docs/lead/decisions.md:87` records that context files add about 20% cost and overviews don't help. `docs/process/product-inventory.md` already maps what exists.
+- **Change:** none now. Revisit, as a file reached by a pointer, if a second naming mix-up is recorded: incident first, then the check (`docs/lead/decisions.md:227`).
 - **Goal:** cheaper (the README's claim, unmeasured). **Size:** S.
 - **Risk:** always-loaded context that goes stale.
 - **Measure:** none proposed: nothing here would show a benefit yet.
@@ -103,11 +103,11 @@ Line numbers below are as of VibeSwitcher commit `72533c6e`. "Measure" says how 
 - **Handoff between sessions:** the lead's handover (`LeadWorkflow.swift:915`).
 - **Task graph, integration branch, staying up to date:** `after`, batched merges (`docs/lead/decisions.md:162`), and `docs/process/lead-rules.md:42`.
 - **Interactive helper for human-only steps:** `vs-shell run` (`docs/lead/decisions.md:285`).
-- **Git guardrail hook:** deny rules (`docs/process/lead-rules.md:35`, `:36`).
+- **Git guardrail hook** (`skills/misc/git-guardrails-claude-code/SKILL.md`): deny rules (`docs/process/lead-rules.md:35`, `:36`).
 - **Capping loops before a human:** the audit round cap (`docs/process/lead-rules.md:45`).
 - **Questions with a recommended answer, asked together:** `ask_user`'s proposal (`LeadWorkflow.swift:955`) and backlog A4's digest.
 - **Loading fewer skills per role:** backlog B4; the repo's user-invoked versus model-invoked split is one way to do it.
 - **Grilling the user before every change (rejected):** the user wants only necessary questions (`docs/process/lead-rules.md:75`, `docs/lead/decisions.md:17`); intent capture for visible work is backlog B1.
-- **Briefs without file paths (rejected):** VibeSwitcher's tasks start soon after they're written, and its planning rules and audits use the boundaries' paths (`docs/lead/decisions.md:281`).
-- **Code-smell baseline in review (rejected):** cosmetic findings never block or become tasks (`LeadWorkflow.swift:890`, `docs/process/lead-rules.md:27`, `:28`).
 - **Architecture survey every few days (rejected):** no scheduled gardener (`docs/lead/decisions.md:85`).
+
+Not taken, on this review's judgement alone, with no earlier decision behind it: its code-smell baseline, because a list of twelve smells would add Nits, and the one that matters here (speculative generality) is what idea 2 asks; and briefs without file paths, because VibeSwitcher's tasks start soon after they're written and its planning rules use the boundaries' paths.
