@@ -45,8 +45,9 @@ on the Mac has a live status and is one click away.
 **Around the agents**
 
 - [**Wallet requests and shells**](#wallet-requests): an agent's blockchain transaction waits as a card until you send
-  it to a separate Wallet Manager to check and sign; VibeSwitcher never holds a key. An agent can also ask for a shell,
-  run when you press **Run** unless you've allowed it in Settings.
+  it to a separate Wallet Manager to check and sign, or sign it in your browser's wallet if the card offers that;
+  VibeSwitcher never holds a key. An agent can also ask for a shell, run when you press **Run** unless you've allowed
+  it in Settings.
 - [**Phone**](#the-phone): over Tailscale, a paired phone sees the list, each screen, notifications and the leads'
   questions, and can answer them if you allow it.
 - [**Dictation and the spoken briefing**](#dictation-and-the-spoken-briefing): push to talk in the composer, and

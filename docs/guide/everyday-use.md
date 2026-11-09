@@ -156,7 +156,7 @@ goes to ElevenLabs only when you press Brief me, Play or Test voice. The key is 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/statistics-dark.png">
-  <img alt="The Statistics window: this week's scorecard against last week's, then quality figures" src="../images/statistics-light.png">
+  <img alt="The Statistics window: a scorecard of the last 7 days against the 7 before, then quality figures" src="../images/statistics-light.png">
 </picture>
 
 The **Statistics** window (the chart button in the toolbar, Window › Statistics… ⌥⌘S, ⌘K, or Statistics… in the menu bar list's gear menu) covers all

@@ -839,7 +839,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 try "echo status\n".write(toFile: home + "/.claude/status.sh", atomically: true, encoding: .utf8)
                 try #"{"model":"opus",\#(statusLine)}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
                 try "export PATH\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
-                let skills = (0..<7).map { home + "/.claude/skills/skill-\($0)/SKILL.md" }
+                let skills = ["api-review", "changelog", "code-style", "db-migrations", "deploy-checklist", "release-notes", "test-plan"].map { home + "/.claude/skills/\($0)/SKILL.md" }
                 for path in skills {
                     try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
                     try "before\n".write(toFile: path, atomically: true, encoding: .utf8)
