@@ -69,7 +69,7 @@ public enum LeadProvenance {
     /// `url`'s last line saying a version and when, nil when that's before `since` (lines are in time order). A line
     /// that doesn't parse, as one still being written, is passed over.
     private static func lastVersion(in url: URL, since: Double) -> (at: Double, version: String)? {
-        guard let data = try? Data(contentsOf: url, options: .alwaysMapped) else { return nil }
+        guard let data = try? Data(contentsOf: url) else { return nil }
         for line in data.split(separator: UInt8(ascii: "\n")).reversed() {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
                   let version = object["version"] as? String, !version.isEmpty,
