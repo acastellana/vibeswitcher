@@ -302,3 +302,7 @@ The user asked to see what's possible and said they'll probably delete them. Loc
 
 It was a look at what's possible, not a direction, and the user didn't like the result. This supersedes the earlier decision to hold those three prototypes as kept.
 
+## 2026-11-09 10:29:38 Which ideas from the four repository reviews should the team build? 1–6 are cheap fixes: don't score failed eval runs, give the eval REVIEW.md, make dismissing an Important finding cite evidence, start bug tasks by reproducing the symptom, record the Claude Code version on merges, and cap prompt size. 7–9 change the audit prompt and share one eval run of about $50: settle doubts instead of filing them as Nits, check crashed and in-flight states, and flag what a diff added that nobody asked for. 10–11 get tested on past data first. → Build 1–9, and test 10–11 on past data
+
+The lead proposed it with a 15 min timer and the user didn't answer in time, so it went ahead (question AC8DD1C8). Why it was asked: All four reviews are merged, and nothing starts until this is chosen.
+
