@@ -310,3 +310,7 @@ The lead proposed it with a 15 min timer and the user didn't answer in time, so 
 
 The reviews found the eval scores errored runs and runs without REVIEW.md, so verifier prompt changes can't be measured until that's fixed. Real audit quality gains (4 of 8 found bugs were Nit-only; 5 of 6 misses were unwalked states) depend on that measurement. Items resting on hypotheses get backtested first, in line with incident-first (2026-11-06 22:35).
 
+## 2026-11-09 11:14:36 Not building the fresh-reader contract check or the tests-got-weaker check (2026-11-09). Reopen the first only with a reader that separates good contracts from bad; reopen the second on an incident where a weakened test let a bug through.
+
+Backtests in docs/process/reviews/: the cheap reader flagged 97% of both failed and clean contracts (AUC 0.57), so it gives no signal; the tests check would have raised 4 of the last 100 merges, 1 of them new, and that one was a correct refactor.
+

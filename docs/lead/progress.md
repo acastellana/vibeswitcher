@@ -2121,3 +2121,9 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 10:40 Planned a-size-ceiling-on: A size ceiling on each role's prompt
 - 2026-11-09 10:59 Released bug-tasks-start-from's worker (idle since its done report on c8f6637f) while its audit runs
 - 2026-11-09 10:59 Automatically (auto_advance): Started the audit of bug-tasks-start-from at c8f6637f (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 11:05 Released dismissing-an-important's worker (idle since its done report on b3fb1e1a) while its audit runs
+- 2026-11-09 11:05 Automatically (auto_advance): Started the audit of dismissing-an-important at b3fb1e1a (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 11:06 Audit of bug-tasks-start-from: complete, clean, round 1: 1 Nit open
+- 2026-11-09 11:17 Audit of dismissing-an-important: complete, clean, round 1: 2 Nit open
+- 2026-11-09 11:20 Merged each-merge-records-the: Each merge records the Claude Code version that made it (no audit: review none) (in a batch: each-merge-records-the, backtest-how-often-would landed on one test run) (build 16ca360977ec)
+- 2026-11-09 11:20 Merged backtest-how-often-would: Backtest: how often would a 'tests got weaker' check have fired? (no audit: review none) (in a batch: each-merge-records-the, backtest-how-often-would landed on one test run) (build 16ca360977ec)
