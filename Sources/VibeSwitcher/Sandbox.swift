@@ -590,11 +590,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// with a short conversation already in its transcript and the hook state a Claude session leaves. `agent` .codex:
     /// the same fake, told apart as Codex; nil: a shell's `cat`, with no agent at all.
     func startFake(label: String, slug named: String? = nil, transcript firstLines: String = Driver.firstTurn, agent: Agent? = .claude,
-                   title: String? = nil, zsh: Bool = false, _ done: @escaping (String?) -> Void) {
+                   title: String? = nil, firstPrompt: String = Driver.firstPrompt, zsh: Bool = false, _ done: @escaping (String?) -> Void) {
         let fakeClaude = agent == nil ? nil : self.fakeClaude
         fakeCount += 1
         let number = fakeCount
-        let slug = named ?? "sandbox-project" + (number == 1 ? "" : "-\(number)")
+        let slug = named ?? "example-api" + (number == 1 ? "" : "-\(number)")
         let folder = (home as NSString).appendingPathComponent("projects/\(slug)")
         let files = state.appendingPathComponent("fake-\(number)", isDirectory: true)
         let projects = (home as NSString).appendingPathComponent(".claude/projects/-sandbox-\(slug)")
@@ -624,7 +624,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             case .failure(let error): done(error.message)
             case .success(let session):
                 self.adopt(session, label: label, folder: folder, transcript: fakeClaude == nil ? nil : transcript,
-                           control: fakeClaude == nil ? nil : controlFile, agentState: agentState, agent: agent, done)
+                           control: fakeClaude == nil ? nil : controlFile, agentState: agentState, agent: agent, firstPrompt: firstPrompt, done)
             }
         }
     }
@@ -632,15 +632,15 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// A fake agent's session, once its agent said its pid: listed as the agent it is, with the hook state a Claude
     /// session leaves (`transcript` nil: a plain shell's, with none).
     private func adopt(_ session: HostSession, label: String, folder: String, transcript: String?, control: String?, agentState: String,
-                       agent: Agent?, _ done: @escaping (String?) -> Void) {
+                       agent: Agent?, firstPrompt: String = Driver.firstPrompt, _ done: @escaping (String?) -> Void) {
         waitForPid(agentState, tries: 300) { pid in
             guard let pid else { return done("the fake agent never said its pid") }
             var hook = HookState(agent: agent ?? .claude, tty: session.tty, lastEvent: "Stop", lastEventAt: Date().timeIntervalSince1970 - 30)
             hook.agentPid = pid
             hook.sessionId = UUID().uuidString
             hook.cwd = folder
-            hook.firstPrompt = "What does the sandbox do?"
-            hook.lastMessage = "Drive it with scripts/sandbox-app.sh."
+            hook.firstPrompt = firstPrompt
+            hook.lastMessage = "Running the job's tests before changing it."
             hook.transcriptPath = transcript
             if transcript != nil { try? hook.save(to: VibePaths.stateFile(tty: session.tty)) }
             self.lock.withLock {
@@ -715,18 +715,34 @@ private final class Driver: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.waitForPid(path, tries: tries - 1, done) }
     }
 
-    /// The fake session's conversation so far: a question and an answer with some markdown.
+    /// A fake session's first prompt: its title, and the first line of its conversation.
+    static let firstPrompt = "Why does the payout job run twice?"
+
+    /// The fake session's conversation so far: a question, the files read for it and an answer with some markdown.
     static let firstTurn: String = {
         let stamp = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-60))
-        let answer = "It's a copy of VibeSwitcher built from this worktree, on a session host of its own:\\n\\n"
-            + "- the real window, chat and settings\\n- fake sessions only, like this one\\n- nothing of yours: "
-            + "its own defaults, folder and host\\n\\nDrive it with `scripts/sandbox-app.sh`."
-        return """
-        {"type":"user","uuid":"u0","timestamp":"\(stamp)","isSidechain":false,"message":{"role":"user","content":"What does the sandbox do?"}}
-        {"type":"assistant","uuid":"a0","timestamp":"\(stamp)","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"\(answer)"}]}}
-
-        """
+        let answer = "The job takes its lock after it reads the schedule, so two workers can both see a run as due:\\n\\n"
+            + "- the scheduler starts one worker per region\\n- each reads the schedule before it takes the lock\\n- "
+            + "the second to get the lock runs the job again\\n\\nThe fix is to take the lock first, in `jobs/payouts.py`. "
+            + "Running its tests before I change it."
+        func line(_ type: String, _ id: String, _ content: String) -> String {
+            #"{"type":"\#(type)","uuid":"\#(id)","timestamp":"\#(stamp)","isSidechain":false,"message":{"role":"\#(type)","content":\#(content)}}"#
+        }
+        func tool(_ number: Int, _ name: String, _ input: String, _ result: String) -> [String] {
+            [line("assistant", "t\(number)", #"[{"type":"tool_use","id":"toolu_\#(number)","name":"\#(name)","input":\#(input)}]"#),
+             line("user", "r\(number)", #"[{"type":"tool_result","tool_use_id":"toolu_\#(number)","content":"\#(result)"}]"#)]
+        }
+        let reply = #"[{"type":"text","text":"\#(answer)"}]"#
+        let usage = #"{"type":"assistant","uuid":"a0","timestamp":"\#(stamp)","isSidechain":false,"message":{"role":"assistant","model":"claude-opus-5-5","usage":{"input_tokens":18400,"output_tokens":612},"content":\#(reply)}}"#
+        return ([line("user", "u0", #""\#(firstPrompt)""#)]
+                + tool(1, "Read", #"{"file_path":"jobs/payouts.py"}"#, "def run_nightly(region):")
+                + tool(2, "Read", #"{"file_path":"jobs/schedule.py"}"#, "def is_due(job):")
+                + tool(3, "Bash", #"{"command":"git log --oneline -3 -- jobs/payouts.py"}"#, "4c1d2e9 Run the payout job per region")
+                + [usage]).joined(separator: "\n") + "\n"
     }()
+
+    /// The fake lead's first prompt: its title, and the first line of its conversation.
+    static let leadFirstPrompt = "Sync the landing pages and finish the sidebar review."
 
     /// The sandbox's stand-in for the session host's vault for push requests: the fake lead's session asks through
     /// it, and the app reads and settles through it as itself, as with the host's.
@@ -738,7 +754,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// card's buttons do: Push pushes to that bare remote.
     func pushRequest(_ how: String, _ done: @escaping (String?) -> Void) {
         guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
-        let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+        let root = ((home as NSString).appendingPathComponent("projects/example-site") as NSString).standardizingPath
         if how == "click" || how == "decline" {
             guard let request = leads.pushes.open[root] else { return done("no push request open: push first") }
             leads.pushes.settle(root, request, push: how == "click")
@@ -780,9 +796,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
             do {
                 let app = book.vault(folder: folder, as: { .app })
                 if (try? app.current(.lead, root: root, task: nil)) == nil {
-                    try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "sandbox-lead")
+                    try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "example-site")
                 }
-                let lead = book.vault(folder: folder, as: { .session("sandbox-lead") })
+                let lead = book.vault(folder: folder, as: { .session("example-site") })
                 try lead.setGuardedSettings([LeadRemote.urlKey("origin"): LeadVault.hash(url)], root: root)
                 try lead.requestPush(LeadPush.Request(commit: head, remote: "origin", branch: "main", url: url, ahead: ahead, subjects: subjects), root: root)
             } catch {
@@ -803,7 +819,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// card, with Accept, is under the lead's chat. `accept` clicks it.
     func configHold(_ how: String, _ done: @escaping (String?) -> Void) {
         guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
-        let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+        let root = ((home as NSString).appendingPathComponent("projects/example-site") as NSString).standardizingPath
         if how == "accept" {
             guard leads.configHolds.held[root] != nil else { return done("nothing held: confighold first") }
             leads.configHolds.accept(root)
@@ -823,17 +839,17 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 try "echo status\n".write(toFile: home + "/.claude/status.sh", atomically: true, encoding: .utf8)
                 try #"{"model":"opus",\#(statusLine)}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
                 try "export PATH\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
-                let skills = (0..<7).map { home + "/.claude/skills/skill-\($0)/SKILL.md" }
+                let skills = ["api-review", "changelog", "code-style", "db-migrations", "deploy-checklist", "release-notes", "test-plan"].map { home + "/.claude/skills/\($0)/SKILL.md" }
                 for path in skills {
                     try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
                     try "before\n".write(toFile: path, atomically: true, encoding: .utf8)
                 }
                 let app = book.vault(folder: folder, as: { .app })
                 if (try? app.current(.lead, root: root, task: nil)) == nil {
-                    try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "sandbox-lead")
+                    try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "example-site")
                 }
                 _ = try app.checkConfig(root: root)
-                let lead = book.vault(folder: folder, as: { .session("sandbox-lead") })
+                let lead = book.vault(folder: folder, as: { .session("example-site") })
                 // `outside`: no team session ran since, so it's held as changed outside one (code that runs).
                 if how != "outside" {
                     try lead.bind(try lead.issue(role: .worker, root: root, task: "sandbox-task"), root: root, session: "sandbox-worker")
@@ -859,7 +875,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// A fake project lead: a session labelled as a lead, its board (tasks in every state, a question it withdrew)
     /// in its folder, and a conversation of short replies between tool calls, with a worker's FYI and a worker's question.
     func startLead(transcript: String? = nil, _ done: @escaping (String?) -> Void) {
-        let slug = "sandbox-lead"
+        let slug = "example-site"
         let root = ((home as NSString).appendingPathComponent("projects/\(slug)") as NSString).standardizingPath
         var (lines, withdrawnAt) = Self.leadTurns(now: Date())
         if let transcript { lines = transcript }
@@ -887,13 +903,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
         } catch {
             return done("couldn't write the lead's board: \(error)")
         }
-        startFake(label: "Lead · \(slug)", slug: slug, transcript: lines, done)
+        startFake(label: "Lead · \(slug)", slug: slug, transcript: lines, firstPrompt: Self.leadFirstPrompt, done)
     }
 
     /// A fake worker on the fake lead's running task, in its worktree, named on the board as that task's worker; with
     /// `title`, titled as Claude Code titles it ("worker-<slug>").
     func startWorker(title: String? = nil, _ done: @escaping (String?) -> Void) {
-        let lead = "sandbox-lead", slug = "sync-landing-base-with-2", label = "Worker: Sync landing-base with main"
+        let lead = "example-site", slug = "sync-landing-base-with-2", label = "Worker: Sync landing-base with main"
         guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
         startFake(label: label, slug: "\(lead)/.vibeswitcher/worktrees/\(slug)", title: title) { [weak self] problem in
             guard let self else { return }
@@ -922,7 +938,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         startWorker(title: "worker-\(slug)") { [weak self] problem in
             guard let self else { return }
             if let problem { return done(problem) }
-            self.startFake(label: "Verifier: Sync landing-base with main", slug: "sandbox-lead/.vibeswitcher/worktrees/\(slug)",
+            self.startFake(label: "Verifier: Sync landing-base with main", slug: "example-site/.vibeswitcher/worktrees/\(slug)",
                            title: "verify-\(slug)") { [weak self] problem in
                 guard let self else { return }
                 if let problem { return done(problem) }
@@ -943,7 +959,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// answered; done once the lead's session reads it (`Session.leadAsks`).
     func ask(_ text: String, answer: Bool, _ done: @escaping (String?) -> Void) {
         guard let lead = fakeList.first(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
-        let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+        let root = ((home as NSString).appendingPathComponent("projects/example-site") as NSString).standardizingPath
         do {
             try BoardStore(root: root).update { board in
                 if answer {
@@ -968,19 +984,19 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// one refused for a credential's shape, one that found no lead.
     static func leadMail(now: Double) -> [LeadMail.Record] {
         [
-            LeadMail.Record(at: now - 3_400, from: "sandbox-lead", to: "example-api", kind: .question,
+            LeadMail.Record(at: now - 3_400, from: "example-site", to: "example-api", kind: .question,
                             text: "Does /v2/sessions still return the host id as a string? The sidebar's new grouping reads it.",
                             outcome: .delivered, detail: "Delivered to the lead of example-api while it works: it gets it at its next step."),
-            LeadMail.Record(at: now - 2_900, from: "example-api", to: "sandbox-lead", kind: .answer,
+            LeadMail.Record(at: now - 2_900, from: "example-api", to: "example-site", kind: .answer,
                             text: "Yes, a string, and it stays one through v2. v3 (next month) makes it a UUID object; I'll report when that lands.",
-                            outcome: .delivered, detail: "Delivered: typed in as the lead of sandbox-lead's next prompt."),
-            LeadMail.Record(at: now - 1_500, from: "sandbox-lead", to: "example-api", kind: .report,
+                            outcome: .delivered, detail: "Delivered: typed in as the lead of example-site's next prompt."),
+            LeadMail.Record(at: now - 1_500, from: "example-site", to: "example-api", kind: .report,
                             text: "Here's the staging token so you can try it: [masked]",
                             outcome: .refused, detail: "Refused, not sent: the text holds something shaped like a credential (API key): never send one to another lead; leave it out."),
-            LeadMail.Record(at: now - 600, from: "sandbox-lead", to: "example-docs", kind: .report,
+            LeadMail.Record(at: now - 600, from: "example-site", to: "example-docs", kind: .report,
                             text: "The sidebar grouping merged: the screenshots in the guide's Sessions page are out of date.",
                             outcome: .noLead, detail: "Not sent: no lead is running for example-docs on this Mac right now."),
-            LeadMail.Record(at: now - 120, from: "sandbox-lead", to: "example-api", kind: .report,
+            LeadMail.Record(at: now - 120, from: "example-site", to: "example-api", kind: .report,
                             text: "The grouping is on main; it reads the host id as a string, as you said.",
                             outcome: .waiting, detail: "Sent: the lead of example-api is between turns, so it waits in its inbox and VibeSwitcher wakes it to read it."),
         ]
@@ -989,7 +1005,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// `leadmail`: the made-up messages written to the fake lead's record, as tell_lead keeps them, and its Team tab shown.
     func leadMail(_ done: @escaping (String?) -> Void) {
         guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
-        let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+        let root = ((home as NSString).appendingPathComponent("projects/example-site") as NSString).standardizingPath
         do {
             for record in Driver.leadMail(now: Date().timeIntervalSince1970) { try LeadMail.append(record, root: root) }
         } catch {
@@ -1005,7 +1021,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// reverted, an all-done card with its receipts, and two results.
     func extras(_ done: @escaping (String?) -> Void) {
         guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
-        let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+        let root = ((home as NSString).appendingPathComponent("projects/example-site") as NSString).standardizingPath
         let now = Date().timeIntervalSince1970
         let contract = LeadContract(goal: "A sandbox task.", acceptance: ["It shows."], boundaries: [], context: "")
         do {
@@ -1089,7 +1105,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             add("assistant", [["type": "tool_use", "id": id, "name": name, "input": input]])
             add("user", [["type": "tool_result", "tool_use_id": id, "content": result]])
         }
-        add("user", "Sync the landing pages with main, and finish the sidebar review.")
+        add("user", leadFirstPrompt)
         say("On it. The board first.")
         tool("mcp__vibeswitcher__board", [:], "8 tasks: 1 working, 2 blocked, 4 done, 1 abandoned.")
         say("Two tasks wait on the base. Starting a worker on the sync.")
@@ -1217,6 +1233,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("scroll top|middle|bottom", "scrolls the shown chat"),
         ("scroll settings top|middle|bottom|FRACTION", "scrolls the shown Settings tab (FRACTION: that far down, e.g. 0.4)"),
         ("size WxH", "resizes the main window's content (e.g. 1728x1015)"),
+        ("inspector team|overview|activity|hide|show", "the inspector on that tab, or collapsed or shown, as its segmented control and Toggle Inspector do"),
         ("board [N]", "adds N finished tasks (default 250) to the fake lead's board (start the lead first)"),
         ("churn [N]", "changes the fake lead's board N times (default 40), 0.15 s apart, each read and shown as a real change is"),
         ("publish [N]", "has the lead controller publish N times (default 50), each laid out and drawn, and times them"),
@@ -1317,6 +1334,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         // The menu bar icon as the app draws it for the fake sessions, with the boost mark while `boost` has it on, on a
         // strip of the bar's colour (the sandbox has no menu bar of its own).
         ("menu-bar", { driver in AnyView(MenuBarStrip(sessions: SessionTeams.split(driver.store.sessions).own, watch: driver.boostWatch)) }),
+        // The same icon, one made-up session in each status (the README's picture of the dots): no tooltip words under it.
+        ("menu-bar-dots", { driver in AnyView(MenuBarStrip(sessions: Driver.menuBarSessions(), watch: driver.boostWatch, caption: false)) }),
         ("results", { driver in AnyView(ResultsList(updates: Driver.results(home: driver.home)).frame(width: 460).padding(12)) }),
         // A lead's Team tab: a task at work, two blocked (one after it, one with no word why), one whose verifier ended
         // twice, merged ones of which
@@ -1344,15 +1363,15 @@ private final class Driver: NSObject, NSApplicationDelegate {
         // The Team tab's Between leads on made-up messages, one refused and one opened whole.
         ("lead-mail", { _ in
             let records = Driver.leadMail(now: Date().timeIntervalSince1970)
-            return AnyView(ScrollView { LeadMailList(feed: LeadMailFeed(records, project: "sandbox-lead"), openItems: [1]).padding(14) }
+            return AnyView(ScrollView { LeadMailList(feed: LeadMailFeed(records, project: "example-site"), openItems: [1]).padding(14) }
                 .frame(width: 360, height: 620))
         }),
         ("lead-team", { driver in
             let team = Driver.leadTeam()
-            return AnyView(LeadTeamView(root: driver.home + "/projects/sandbox-project", board: team.board, seen: team.seen, open: { _ in },
+            return AnyView(LeadTeamView(root: driver.home + "/projects/example-payouts", board: team.board, seen: team.seen, open: { _ in },
                                         decisions: team.decisions, keepingAwake: true,
                                         mac: MacLine(text: "Mac: load 16.5, 5 team sessions across 3 projects", spoken: "", isOver: false))
-                .frame(width: 360, height: 980))
+                .frame(width: 380, height: 740))
         }),
     ]
 
@@ -1597,7 +1616,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     private func walletPage(_ name: String, _ reply: @escaping (Bool, String) -> Void) {
         var url = walletPageURL
         if url == nil {
-            let request = WalletRequest.make(requestedBy: .init(project: "sandbox-project", session: UUID().uuidString.lowercased(), label: "example-agent"),
+            let request = WalletRequest.make(requestedBy: .init(project: "example-api", session: UUID().uuidString.lowercased(), label: "example-agent"),
                                              workspace: "example", from: "0x0000000000000000000000000000000000000001", chainId: 8453,
                                              action: .transfer, to: "0x0000000000000000000000000000000000000002", asset: "native",
                                              amount: "12500000000000000000", reason: "Pay the example invoice for the test deployment.")
@@ -1715,6 +1734,15 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("installing-tools", { _ in ToolInstaller.waitingPanel(ToolInstaller.waitingText) {} }),
     ] }
 
+    /// The `menu-bar-dots` sheet's sessions: made up, one in each status a dot can show.
+    static func menuBarSessions() -> [Session] {
+        let now = Date()
+        return ([.needsInput, .working, .background, .done, .idle] as [SessionStatus]).enumerated().map { index, status in
+            Session(tty: "ttys0\(index)", agent: .claude, pid: Int32(10_000 + index), startedAt: now, cwd: nil, project: "example-\(index)", task: nil,
+                    status: status, statusSince: now, detail: nil, hasHooks: true, inTerminalApp: false)
+        }
+    }
+
     /// The `lead-team` sheet's board, as of now.
     static func leadTeam() -> (board: LeadBoard, seen: [String: MemberSeen], decisions: [LeadDecision]) {
         let now = Date().timeIntervalSince1970
@@ -1732,18 +1760,24 @@ private final class Driver: NSObject, NSApplicationDelegate {
         var after = task("Payout report shows reconciled totals", .blocked, since: 18 * 60)
         after.after = [working.slug]
         let unsaid = task("Add dark mode to the settings page", .blocked, since: 18 * 60)
-        var merged = (1...4).map { index -> LeadTask in
-            var done = task("Merged task \(index)", .done, since: Double(index) * 3_000)
+        // Three audited (on the first or second audit, as the scorecard needs at least three to show its rates), one not.
+        let shipped = [("Round payout totals to the cent", 2), ("Retry failed bank webhooks", 1), ("Export the ledger as CSV", 1), ("Cache the exchange rates", 0)]
+        let merged = shipped.enumerated().map { offset, item -> LeadTask in
+            let (title, auditRounds) = item
+            let index = offset + 1
+            var done = task(title, .done, since: Double(index) * 3_000)
             done.worktree = nil
-            done.merged = LeadMergeRecord(commit: "abc\(index)def0", tested: true, audited: index == 1 ? nil : false, at: now - Double(index) * 3_000)
-            done.review = index == 1 ? .audit : LeadTask.Review.none
-            done.receipt = Driver.receipt(worked: Double(index) * 1_500, opus: index * 900_000, fable: index == 1 ? 2_400_000 : nil, end: now - Double(index) * 3_000)
+            done.merged = LeadMergeRecord(commit: "abc\(index)def0", tested: true, audited: auditRounds > 0 ? nil : false, at: now - Double(index) * 3_000)
+            done.review = auditRounds > 0 ? .audit : LeadTask.Review.none
+            done.receipt = Driver.receipt(worked: Double(index) * 1_500, opus: index * 900_000, fable: auditRounds > 0 ? 2_400_000 : nil, end: now - Double(index) * 3_000)
+            if auditRounds > 0 {
+                var audits = LeadAuditLedger()
+                audits.rounds = auditRounds
+                audits.passed = true
+                done.audits = audits
+            }
             return done
         }
-        var audits = LeadAuditLedger()
-        audits.rounds = 6
-        audits.passed = true
-        merged[0].audits = audits
         var abandoned = task("Old upload widget", .abandoned, since: 9_000)
         abandoned.abandonedBecause = "Replaced by the payout report."
         // auto_advance audited it again once after its verifier's agent quit; the retry's verifier ended too.
@@ -2045,7 +2079,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "board":
             // The fake lead's board grown by N finished tasks (a day's worth of a busy lead's), each with a contract.
             let count = max(1, Int(rest) ?? 250)
-            let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+            let root = ((home as NSString).appendingPathComponent("projects/example-site") as NSString).standardizingPath
             let contract = LeadContract(goal: "A finished sandbox task, its goal as long as a real one's: what changes, where, and how it's checked.",
                                         acceptance: ["It shows."], boundaries: [], context: "")
             do {
@@ -2067,7 +2101,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             // The fake lead's board changing N times, 0.15 s apart (a checkpoint each, as a busy team's do), each read
             // and shown the way a real change is (`LeadController.refresh`): `hangs` then says what it cost.
             let count = max(1, Int(rest) ?? 40)
-            let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+            let root = ((home as NSString).appendingPathComponent("projects/example-site") as NSString).standardizingPath
             func step(_ index: Int) {
                 guard index < count else { return settle { reply(true, "board changed \(count) times") } }
                 try? BoardStore(root: root).update { board in
@@ -2129,6 +2163,14 @@ private final class Driver: NSObject, NSApplicationDelegate {
             guard parts.count == 2, let shown = window?.window else { return reply(false, "size WIDTHxHEIGHT") }
             shown.setContentSize(NSSize(width: parts[0], height: parts[1]))
             settle { reply(true, "window \(Int(parts[0]))×\(Int(parts[1]))") }
+        case "inspector":
+            switch rest {
+            case "team", "overview", "activity": UserDefaults.standard.set(rest, forKey: "inspectorTab")
+            case "hide", "show":
+                if UserDefaults.standard.bool(forKey: "inspectorCollapsed") != (rest == "hide") { window?.toggleInspectorAction(nil) }
+            default: return reply(false, "inspector team|overview|activity|hide|show")
+            }
+            settle { reply(true, "inspector: \(rest)") }
         case "chat": chat(rest, reply)
         case "terminal":
             model.showsChat = false
@@ -2237,7 +2279,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settle { reply(true, "scheduled rotation chat line shown in the fake session") }
         case "replaced":
             guard let row = model.selectedRow, let id = row.hostID, let tty = row.session?.tty else { return reply(false, "no window session selected") }
-            var replaced = ReplacedLead(root: row.cwd ?? home, project: "sandbox-lead", tty: tty, live: nil)
+            var replaced = ReplacedLead(root: row.cwd ?? home, project: "example-site", tty: tty, live: nil)
             replaced.draft = String(repeating: "split the layer out, then the next one\n", count: (Int(rest) ?? 200_000) / 39 + 1)
             model.replacedLeads[id] = replaced
             settle { reply(true, "\(row.title) shown replaced, \(replaced.draft.count) characters typed into it") }
@@ -3748,7 +3790,7 @@ extension Driver {
     /// finished task's ended workers (`forgetFinished`). Its footprint once it's gone goes in the log.
     func soakWorker(_ cycle: Int, _ done: @escaping (Bool, String) -> Void) {
         guard let run = soakRun else { return done(true, "") }
-        let lead = "sandbox-lead", slug = "soak-worker-\(cycle)", title = "Soak worker \(cycle)", label = "Worker: Soak worker \(cycle)"
+        let lead = "example-site", slug = "soak-worker-\(cycle)", title = "Soak worker \(cycle)", label = "Worker: Soak worker \(cycle)"
         let root = ((home as NSString).appendingPathComponent("projects/\(lead)") as NSString).standardizingPath
         let contract = LeadContract(goal: "The board's rows read the board once a refresh, and the Team tab keeps its rows.",
                                     acceptance: ["TeamRows reads the board once", "Focused tests pass", "The lint filter passes"],
@@ -3845,7 +3887,7 @@ extension Driver {
         for index in 0..<4_000 {
             text += "\u{1b}[1m[\(index)/4000]\u{1b}[0m Compiling VibeSwitcher MainWindow/Lead/TeamRows\(index % 97).swift\r\n"
             text += "Test Case '-[VibeSwitcherTests.TeamRowsTests testRow\(index)]' \u{1b}[32mpassed\u{1b}[0m (0.\(String(format: "%03d", index % 1000)) seconds).\r\n"
-            text += "    \u{1b}[2m/Users/sandbox/projects/sandbox-lead/Sources/VibeSwitcher/MainWindow/Lead/TeamRows.swift:\(index % 400): note: rows read once\u{1b}[0m\r\n"
+            text += "    \u{1b}[2m/Users/sandbox/projects/example-site/Sources/VibeSwitcher/MainWindow/Lead/TeamRows.swift:\(index % 400): note: rows read once\u{1b}[0m\r\n"
         }
         try? VibePaths.writePrivate(Data(text.utf8), to: file)
         return file
@@ -3878,7 +3920,7 @@ extension Driver {
             object["parentUuid"] = parent ?? NSNull()
             object["sessionId"] = session
             object["isSidechain"] = false
-            object["cwd"] = "/Users/sandbox/projects/sandbox-lead/.vibeswitcher/worktrees/soak-worker-\(cycle)"
+            object["cwd"] = "/Users/sandbox/projects/example-site/.vibeswitcher/worktrees/soak-worker-\(cycle)"
             object["timestamp"] = stamps.string(from: start.addingTimeInterval(Double(lines.count)))
             object["version"] = "2.1.312"
             parent = id
@@ -3901,10 +3943,10 @@ extension Driver {
                 input = ["command": "bash scripts/test.sh --filter TeamRowsTests", "description": "Run the focused tests"]
                 output = (0..<160).map { "Test Case '-[VibeSwitcherTests.TeamRowsTests testRow\($0)]' passed (0.0\($0 % 10)2 seconds)." }.joined(separator: "\n")
             case "Read":
-                input = ["file_path": "/Users/sandbox/projects/sandbox-lead/Sources/VibeSwitcher/MainWindow/Lead/TeamRows\(round % 9).swift"]
+                input = ["file_path": "/Users/sandbox/projects/example-site/Sources/VibeSwitcher/MainWindow/Lead/TeamRows\(round % 9).swift"]
                 output = (1...220).map { "\($0)\u{2192}        let rows = TeamRows.rows(board, seen: seen) // line \($0) of round \(round)" }.joined(separator: "\n")
             case "Edit":
-                input = ["file_path": "/Users/sandbox/projects/sandbox-lead/Sources/VibeSwitcher/MainWindow/Lead/TeamRows.swift",
+                input = ["file_path": "/Users/sandbox/projects/example-site/Sources/VibeSwitcher/MainWindow/Lead/TeamRows.swift",
                          "old_string": String(repeating: "let rows = TeamRows.rows(board, seen: seen)\n", count: 12),
                          "new_string": String(repeating: "let rows = cached ?? TeamRows.rows(board, seen: seen)\n", count: 12)]
                 output = "The file has been updated. Here's the result of running `cat -n` on a snippet:\n"
@@ -3961,6 +4003,8 @@ final class WalletPageLoad: NSObject, WKNavigationDelegate {
 private struct MenuBarStrip: View {
     let sessions: [Session]
     @ObservedObject var watch: BoostWatch
+    /// The tooltip's words under the strip (the `menu-bar` sheet's, for Boost).
+    var caption = true
 
     var body: some View {
         let boost = watch.state?.on == true ? watch.state : nil
@@ -3973,8 +4017,10 @@ private struct MenuBarStrip: View {
             }
             .padding(.horizontal, 10).frame(height: 24)
             .background(.bar)
-            Text(watch.menuText ?? (watch.state?.text ?? "boost not decided")).font(.caption).foregroundStyle(.secondary)
+            if caption {
+                Text(watch.menuText ?? (watch.state?.text ?? "boost not decided")).font(.caption).foregroundStyle(.secondary)
+            }
         }
-        .frame(width: 360).padding(12)
+        .frame(width: caption ? 360 : 300).padding(12)
     }
 }

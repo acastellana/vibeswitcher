@@ -297,3 +297,7 @@ The lead told the user "at least one merge really did hang" from the hung log, w
 
 The user asked to fetch the latest and install. The trial merge conflicts in WalletRobustnessTests and TerminalBridgeTests, which this Mac's handover-tests-stop and the other Mac's 204a442f both changed, so a hand merge by the user would need conflict resolution and testing. A rebase would rewrite 226 published commits.
 
+## 2026-11-09 09:14:34 The three 67js prototypes (prototypes/session-object, session-journey, session-team) are throwaways for the user to look at: never merge them. Each task has auto_advance false and goes to status kept once done; delete or keep is the user's call.
+
+The user asked to see what's possible and said they'll probably delete them. Local npm install with --ignore-scripts in the prototype or scratch folder only, by the user's request to use this library; its MCP server and Claude plugin stay out because they'd write agent config and trip the seal.
+

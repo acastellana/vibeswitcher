@@ -2056,3 +2056,42 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 08:17 Update: Today: everything queued is merged and installed — **Landed since the last summary:** a merge's tests no longer block audits and new starts (`auto-advance-keeps`); merge and test time limits count only the time the Mac is awake (`the-other-time-limits…
 - 2026-11-08 16:53 Planned merge-github-s-main: Merge GitHub's main (226 commits from the other Mac) into this Mac's main
 - 2026-11-08 16:53 Started a worker on merge-github-s-main
+- 2026-11-09 08:22 Fetched origin/main at 3b271e17: main is 112 commits ahead of origin/main and 0 commits behind it
+- 2026-11-09 08:22 Asked the user to push main at 28f6e0ac (112 commits) to origin/main
+- 2026-11-09 08:24 Pushed main at 28f6e0ac (112 commits) to origin/main, on the user's click
+- 2026-11-09 08:26 Planned readme-a-real-feature: README: a real feature list, and screenshots that show what their captions say
+- 2026-11-09 08:26 Automatically (auto_advance): Didn't start readme-a-real-feature: readme-a-real-feature's worker not started: ~/.vibeswitcher/bin changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made …
+- 2026-11-09 08:42 Started a worker on readme-a-real-feature (auto → Claude: Claude weekly 50%, 5 points behind pace, not tight; Codex 59%)
+- 2026-11-09 08:42 Automatically (auto_advance): Started a worker on readme-a-real-feature (README: a real feature list, and screenshots that show what their captions say); its agent is auto, so it went to Claude: Claude weekly 50%, 5 points behind pace, not tight; Codex 59%.
+- 2026-11-09 08:56 Planned ideas-review-mattpocock: Ideas review: mattpocock/skills
+- 2026-11-09 08:56 Started a worker on ideas-review-mattpocock
+- 2026-11-09 08:56 Automatically (auto_advance): Started a worker on ideas-review-mattpocock (Ideas review: mattpocock/skills).
+- 2026-11-09 08:56 Planned ideas-review-addyosmani: Ideas review: addyosmani/agent-skills
+- 2026-11-09 08:57 Started a worker on ideas-review-addyosmani
+- 2026-11-09 08:57 Automatically (auto_advance): Started a worker on ideas-review-addyosmani (Ideas review: addyosmani/agent-skills).
+- 2026-11-09 08:57 Planned ideas-review-cloudflare: Ideas review: cloudflare/security-audit-skill
+- 2026-11-09 08:57 Started a worker on ideas-review-cloudflare
+- 2026-11-09 08:57 Automatically (auto_advance): Started a worker on ideas-review-cloudflare (Ideas review: cloudflare/security-audit-skill).
+- 2026-11-09 08:57 Planned ideas-review-google: Ideas review: google/elephant-goldfish-model
+- 2026-11-09 08:57 Started a worker on ideas-review-google
+- 2026-11-09 08:57 Automatically (auto_advance): Started a worker on ideas-review-google (Ideas review: google/elephant-goldfish-model).
+- 2026-11-09 09:12 Released readme-a-real-feature's worker (idle since its done report on b3cd919b) while its audit runs
+- 2026-11-09 09:12 Automatically (auto_advance): Started the audit of readme-a-real-feature at b3cd919b (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 09:14 Planned prototype-67js-a-session: Prototype (67js): a session's state now, as one living object
+- 2026-11-09 09:14 Planned prototype-67js-a-session-2: Prototype (67js): a session's history, as a place you travel through
+- 2026-11-09 09:14 Planned prototype-67js-a-lead: Prototype (67js): a lead session and its team, as a working place
+- 2026-11-09 09:14 Started a worker on prototype-67js-a-session
+- 2026-11-09 09:14 Started a worker on prototype-67js-a-session-2
+- 2026-11-09 09:14 Started a worker on prototype-67js-a-lead
+- 2026-11-09 09:14 Sampled ideas-review-google for audit from review none (at 6955f0cf): draw 4.20 under audit_sample_percent 10 (seed 6672537619052495)
+- 2026-11-09 09:14 Released ideas-review-google's worker (idle since its done report on 6955f0cf) while its audit runs
+- 2026-11-09 09:14 Automatically (auto_advance): Started the audit of ideas-review-google at 6955f0cf (Sampled for audit: draw 4.20 under audit_sample_percent 10 (seed 6672537619052495)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 09:17 Sampled ideas-review-mattpocock for audit from review none (at eba49624): draw 1.84 under audit_sample_percent 10 (seed 8071201131550567)
+- 2026-11-09 09:17 Released ideas-review-mattpocock's worker (idle since its done report on eba49624) while its audit runs
+- 2026-11-09 09:17 Automatically (auto_advance): Started the audit of ideas-review-mattpocock at eba49624 (Sampled for audit: draw 1.84 under audit_sample_percent 10 (seed 8071201131550567)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 09:18 Audit of readme-a-real-feature: complete, clean, round 1: 5 Nit open
+- 2026-11-09 09:23 Audit of ideas-review-mattpocock: complete, clean, round 1: 1 Nit open
+- 2026-11-09 09:24 Audit of ideas-review-google: complete, clean, round 1: 2 Nit open
+- 2026-11-09 09:34 Merged readme-a-real-feature: README: a real feature list, and screenshots that show what their captions say (in a batch: readme-a-real-feature, ideas-review-addyosmani, ideas-review-cloudflare landed on one test run) (build 16ca360977ec)
+- 2026-11-09 09:34 Merged ideas-review-addyosmani: Ideas review: addyosmani/agent-skills (no audit: review none) (in a batch: readme-a-real-feature, ideas-review-addyosmani, ideas-review-cloudflare landed on one test run) (build 16ca360977ec)
+- 2026-11-09 09:34 Merged ideas-review-cloudflare: Ideas review: cloudflare/security-audit-skill (no audit: review none) (in a batch: readme-a-real-feature, ideas-review-addyosmani, ideas-review-cloudflare landed on one test run) (build 16ca360977ec)
