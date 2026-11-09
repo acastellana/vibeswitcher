@@ -287,10 +287,12 @@ extension LeadRemoteTests {
         let fixture = try prepare(.merge)
         let root = fixture.scene.root
         #expect(Git.run(["show", "\(Worktrees.branch("carrier")):docs/lead/progress.md"], in: root).output.contains("- first"))
+        let tip = fixture.tip
         fixture.lead.records.landingProbe = Worktrees.LandingProbe(candidate: { candidate in
-            self.tampered(root, tree: (try? self.tree(of: candidate, dropping: "- first", from: "docs/lead/progress.md", root)) ?? "", parents: [fixture.tip])
+            self.tampered(root, tree: (try? self.tree(of: candidate, dropping: "- first", from: "docs/lead/progress.md", root)) ?? "", parents: [tip])
         })
         let result = land(.merge, fixture)
+        fixture.lead.records.landingProbe = nil
         #expect(result.isError && head(root) == fixture.before && result.text.contains("- first"), "\(result.text)")
     }
 
@@ -355,10 +357,8 @@ extension LeadRemoteTests {
     /// `Worktrees.merge` (no route of the app's uses it, its tests do) goes through the same check.
     @Test func thePlainMergeDropsNoRecordLineEither() throws {
         let scene = try makeScene()
-        git(["branch", "agent/w"], in: scene.root)
-        let base = temp.url("remote").resolvingSymlinksInPath().appendingPathComponent("w").path
-        git(["worktree", "add", "-q", base, "agent/w"], in: scene.root)
-        try commit("docs/lead/progress.md", "# Progress\n", in: base, message: "Drop a line")
+        let worktree = try Worktrees.create(root: scene.root, slug: "w")
+        try commit("docs/lead/progress.md", "# Progress\n", in: worktree, message: "Drop a line")
         let before = head(scene.root)
         guard case .refused(let why) = try Worktrees.merge(root: scene.root, slug: "w") else { Issue.record("merged"); return }
         #expect(why.contains("merge of agent/w") && why.contains("docs/lead/progress.md") && why.contains("- first"), "\(why)")
