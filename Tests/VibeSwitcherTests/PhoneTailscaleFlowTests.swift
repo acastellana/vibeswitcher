@@ -183,18 +183,19 @@ extension TailscaleFakeTests { @MainActor @Suite struct PhoneTailscaleFlowTests 
 
     private let owner = TailscaleCLI.Status(dnsName: FakeTailscale.host, login: FakeTailscale.login, httpsAvailable: true)
 
-    private func request(_ method: String, _ path: String, body: String = "", token: String? = nil) throws -> HTTPRequest {
+    private func request(_ method: String, _ path: String, body: String = "", token: String? = nil, origin: String? = nil) throws -> HTTPRequest {
         var head = "\(method) \(path) HTTP/1.1\r\nHost: \(FakeTailscale.host):8443\r\nTailscale-User-Login: \(FakeTailscale.login)\r\n"
         if let token { head += "Authorization: Bearer \(token)\r\n" }
+        if let origin { head += "Origin: \(origin)\r\n" }
         head += "Content-Length: \(body.utf8.count)\r\n\r\n\(body)"
         guard case .complete(let parsed) = HTTPParser.parse(Data(head.utf8)) else { throw CancellationError() }
         return parsed
     }
 
     private func send(_ access: PhoneAccess, _ method: String, _ path: String, body: String = "",
-                      token: String? = nil) throws -> (status: Int, json: [String: Any]) {
+                      token: String? = nil, origin: String? = nil) throws -> (status: Int, json: [String: Any]) {
         var answer: HTTPResponse?
-        access.handleForTests(try request(method, path, body: body, token: token)) { answer = $0 }
+        access.handleForTests(try request(method, path, body: body, token: token, origin: origin)) { answer = $0 }
         let response = try #require(answer)
         return (response.status, (try? JSONSerialization.jsonObject(with: response.body)) as? [String: Any] ?? [:])
     }
@@ -207,6 +208,19 @@ extension TailscaleFakeTests { @MainActor @Suite struct PhoneTailscaleFlowTests 
         // The scratch home's devices.json is shared with the suites before this one.
         for device in access.devices { access.remove(device) }
         return access
+    }
+
+    @Test func pairingFromAnotherOriginIsRefusedAndCostsTheCodeNoTries() throws {
+        let access = try served()
+        access.setPairingForTests(PairingCode(code: "ABCDEFGH", expires: Date().addingTimeInterval(600)))
+        let elsewhere = ["https://\(FakeTailscale.host):8444", "https://\(FakeTailscale.host):8447", "https://example.test",
+                         "http://\(FakeTailscale.host):8443", "null"]
+        #expect(elsewhere.count >= PairingCode.maxAttempts)
+        for origin in elsewhere {
+            #expect(try send(access, "POST", "/api/pair", body: pairBody("WRONGCOD"), origin: origin).status == 403)
+        }
+        let own = try send(access, "POST", "/api/pair", body: pairBody("ABCDEFGH"), origin: "https://\(FakeTailscale.host):8443")
+        #expect(own.status == 200)
     }
 
     @Test func aTypedCodePairsOnceInAnyCaseOrGrouping() throws {

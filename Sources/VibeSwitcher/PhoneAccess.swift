@@ -457,7 +457,13 @@ final class PhoneAccess: ObservableObject {
         guard request.header("tailscale-user-login") == owner else { return respond(.error(403, "not your tailnet account")) }
         if request.method == "GET", let asset = WebAssets.response(for: request.path) { return respond(asset) }
         if request.path.hasPrefix("/api/"), !devicesReadable() { return respond(.error(503, Self.devicesUnreadableMessage)) }
-        if request.method == "POST", request.path == "/api/pair" { return respond(pair(request, owner: owner)) }
+        if request.method == "POST", request.path == "/api/pair" {
+            // The one POST with no token: only the page itself, so another origin can't use up the code's tries.
+            guard RemoteGate.originAllowed(request.header("origin"), host: host, port: Self.httpsPort) else {
+                return respond(.error(403, "Pairing only works from VibeSwitcher's own page."))
+            }
+            return respond(pair(request, owner: owner))
+        }
         guard request.path.hasPrefix("/api/") else { return respond(.error(404, "not found")) }
         // A valid token always gets in; only the source of failed attempts is slowed down (so nothing can
         // lock the paired phones out by sending bad tokens).
