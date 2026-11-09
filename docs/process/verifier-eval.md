@@ -139,3 +139,69 @@ Tokens 28.9 M in total, cost $49.81, 144 min. Against the last summary: no case 
 a-base-branch-the's F1 is still found as Important, now through the lints instead of a full run; its F2, matched
 only by place before and missed in substance, is missed; steadier-merge-gate 0 of 1 and the-phone-shows-needs clean,
 as before; a-fix-s-regression 3 of 3, as with the checklist before.
+
+### 2026-11-09, --all (verifier-eval-failed): 12 of 12 cases, checklist auto, model fable. The first baseline with REVIEW.md
+
+The first full run with today's REVIEW.md in every case's clone, read the way a real audit reads it, and the first
+that says which Claude Code ran and how many permissions were denied. Its summary, as the script printed it:
+
+```
+verifier eval, --all, checklist auto, Claude Code 2.1.319, REVIEW.md 5ba8d39b
+bugs found: 7 of 14 (4 as Important) in 9 bug cases
+false alarms: 0 Important finding(s) on 3 clean cases
+tokens: 33007719; cost: $53.34; 161 min
+per case:
+  a-fix-s-regression: 2 of 3 found (1 as Important), $3.58, 5 permission denial(s)
+  a-slash-command-that: 0 of 1 found (0 as Important), $3.81, 1 permission denial(s)
+  the-briefing-uses: 1 of 1 found (0 as Important), $3.40, 0 permission denial(s)
+  ending-a-session-ends: 1 of 3 found (0 as Important), $5.58, 3 permission denial(s)
+  memory-the-host-parser: 1 of 1 found (1 as Important), $6.50, 0 permission denial(s)
+  lead-record-commits: 0 of 1 found (0 as Important), $3.44, 0 permission denial(s)
+  a-base-branch-the: 1 of 2 found (1 as Important), $4.73, 4 permission denial(s)
+  finished-work-lands: 0 of 1 found (0 as Important), $5.61, 0 permission denial(s)
+  steadier-merge-gate: 1 of 1 found (1 as Important), $4.50, 0 permission denial(s)
+  the-lead-s-rules: clean, 0 Important finding(s), $4.14, 0 permission denial(s)
+  the-phone-shows-needs: clean, 0 Important finding(s), $2.36, 1 permission denial(s)
+  every-task-gets-a: clean, 0 Important finding(s), $5.68, 0 permission denial(s)
+```
+
+No case errored or was left unscored. An earlier attempt the same day stopped at 3 of 12 when its session went away,
+and none of it is counted here.
+
+| Case | Time | By place, 2026-11-01 → now | What the findings say |
+|---|---|---|---|
+| a-fix-s-regression | 9.7 min | 3 → 2, Important 1 → 1 | F1 (`--remote`/`--exec`) found in substance, as Important at :69, run in a scratch folder. F3 (the symlink) by a Nit at :69, its probe denied. F2 (`--add-file`) not reported. The places are crossed: :80 matched a Nit on abbreviated `--out=`. |
+| a-slash-command-that | 7.5 min | 0 → 0 | Missed. A Nit at ChatSync.swift:194 is about another value (`unreadFooter`), though REVIEW.md has the rule on state shared by sessions. |
+| the-briefing-uses | 9.3 min | 1 → 1, Important 0 → 0 | By place only: the Nit at :540 says each return to the General tab reads the key again; the bug is that reopening Settings never does. Missed in substance. |
+| ending-a-session-ends | 25.5 min | 2 → 1, Important 1 → 0 | By place only: the Nit at :64 is about a fixed sleep, not F2's `terminationReason`. F1 and F3 missed. Its two Important findings are elsewhere (the temporary-folder lint failing, `realpath` in SessionStrays.swift). |
+| memory-the-host-parser | 18.9 min | 1 → 1, Important 1 → 1 | Found as Important at HostedSession.swift:634, in substance. |
+| lead-record-commits | 10.3 min | 0 → 0 | Scored missed, found in substance: a Nit at Worktrees.swift:822 says a records change that merges cleanly is kept, and calls it not blocking. That's 33 lines from :789, outside the 3 the score allows. |
+| a-base-branch-the | 13.9 min | 1 → 1, Important 1 → 1 | F1 as Important at LeadBaseMoves.swift:353, from PrivateWriteLint. F2 missed, as before. |
+| finished-work-lands | 15.9 min | 0 → 0 | Scored missed, found in substance as Important: at LeadAdvance.swift:272 it says auto_advance and the hold are read once before the loop at :307, and quotes REVIEW.md's rule. That's 35 lines from :307. |
+| steadier-merge-gate | 11.4 min | 0 → 1, Important 0 → 1 | By place only: the Important at MergeRerun.swift:34 is about parameterized test names; nothing on a crashed or stopped run rerunning with --filter. Missed in substance, as before. |
+| the-lead-s-rules | 13.7 min | clean → clean | No false alarm: 5 findings, none Important. |
+| the-phone-shows-needs | 12.8 min | clean → clean | No false alarm: 3 findings, none Important. |
+| every-task-gets-a | 12.4 min | clean → clean | No false alarm: 6 Nits and 1 Pre-existing. |
+
+**Against 2026-11-01, by the script's score.** Bugs found 8 → 7 of 14, as Important 4 → 4, false alarms 0 → 0 on 3
+clean cases. Tokens 28.9 M → 33.0 M, cost $49.81 → $53.34, 144 → 161 min. Three cases moved by one bug each, two down
+and one up, and the up is the place-only match above. That's one sample of each case: it shows no gain from REVIEW.md
+and no regression. Claude Code's version wasn't recorded on 2026-11-01, so it may differ as well as REVIEW.md.
+
+**By substance.** Read finding by finding, this run found 6 of 14 known bugs, 4 of them as Important: a-fix-s-regression
+F1 and F3 (F3 a Nit), memory-the-host-parser, lead-record-commits (a Nit), a-base-branch-the F1, finished-work-lands.
+The count by place is 7, from three matches that aren't the bug (the-briefing-uses, ending-a-session-ends,
+steadier-merge-gate) and two real finds too far from their place to score (lead-record-commits, finished-work-lands).
+This is one reader's judgment and covers this run only: the 2026-11-01 findings weren't reread, so compare the two runs
+by place. When a prompt change is measured against this baseline, read the findings too.
+
+**What to keep in mind when using it.**
+- REVIEW.md has hindsight on some cases. Its rules came from real misses on the board, and some match these cases: the
+  allow-rule options (`--remote`, `--exec`, `--add-file`, a symlinked folder) are a-fix-s-regression's bugs, "read once,
+  then acted on" is finished-work-lands', and "one session's state kept in a value all sessions share" is
+  a-slash-command-that's. A score on those says less about a new bug of the same kind.
+- 14 permission denials in 5 cases, all of them Bash commands the verifier was refused. Only counted, but two of
+  a-fix-s-regression's Nits say "not run: my sandbox denied the probe", so a denial can weaken a finding's evidence.
+- 10 of 12 cases report the same Pre-existing finding: `scripts/test-under-load.sh` at the case's old commit looks for
+  one test bundle, and today's toolchain builds one per target. It comes from replaying old commits on a new toolchain,
+  and those verifiers couldn't do the under-load check.
