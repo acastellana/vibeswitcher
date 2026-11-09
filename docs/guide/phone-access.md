@@ -21,17 +21,26 @@ Remove a phone in Settings › Phone, or unpair it from the phone; its access st
 
 ## What the phone shows
 
-- **The list**, with each session's status, and Today.
+- **The list**, with each Claude Code or Codex session's status, and Today. A lead's workers and verifiers fold under
+  it and read as the Mac reads them (a worker waiting says "Waits on lead", never "Needs you"). A plain shell in the
+  window has no status and isn't listed.
 - **A session**, in two tabs. **Terminal** is the live screen; scroll up for earlier output (up to the last 5,000
   lines). **Conversation** is the session as a timeline from Claude Code's (or Codex's) transcript: your prompts, the
-  agent's replies and one row per tool call.
+  agent's replies and one row per tool call. A session without hooks is looked at every few seconds instead.
 - **Leads**: each lead's open questions (with a proposal's timer, or held), its all-done card, its tasks and its
-  scorecard. Paths and transcript text aren't shown, and credentials are masked.
+  scorecard. The card says **All tasks finished** only while nothing else is going on; with work on the board since, it
+  moves below the tasks as an earlier batch, with its day. A task past its time budget says so on its row; kept, folded,
+  abandoned and reverted tasks are under Finished, by their own names. Paths and transcript text aren't shown, and
+  credentials are masked.
 - **Brief me**: the Mac writes the same briefing as its own Brief me button and makes the audio; the phone plays it
   and shows its text. It works while the Mac is locked, since it types nothing. Each source (one phone, say) can start 6
   every 10 minutes.
 - **Notifications** (Web Push, encrypted end to end) when a session needs you or finishes. By default they come only
-  while you're away from the Mac.
+  while you're away from the Mac. If you turn them off on the phone, the bell stops saying they're on.
+
+An orange banner at the top says when what you see isn't current: the Mac can't be reached, Phone Access is restarting,
+or the app has just come back from the background. It goes by itself once the Mac answers. A phone the Mac removed goes
+back to the pairing screen and says why. Plain shells, wallet requests and the Mac's Run cards aren't on the phone.
 
 ## Replies, key presses and answers
 

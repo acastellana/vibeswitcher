@@ -135,7 +135,8 @@ enum PhoneLeads {
         if let summary = lead.summary { object["summary"] = summary }
         // The latest all-done card, as the lead's chat keeps it (read-only: opening the page doesn't mark it seen).
         if let mark = board.allDone?.last {
-            var card: [String: Any] = ["at": mark.at, "count": AllDoneCard.count(mark),
+            // `current`: nothing is going on since. Otherwise the card is an earlier batch's, and doesn't say all tasks are finished.
+            var card: [String: Any] = ["at": mark.at, "count": AllDoneCard.count(mark), "current": lead.rows.allSatisfy { $0.group == .finished },
                                        "tasks": mark.tasks.map { ["title": masked($0.title), "outcome": $0.outcome.rawValue] }]
             if let summary = mark.summary {
                 card["headline"] = masked(summary.headline)
@@ -163,6 +164,11 @@ enum PhoneLeads {
                                      "group": "\(row.group)", "mark": "\(row.mark)"]
         let line = row.state == "Needs audit" ? row.activity : row.line(summary: nil)
         if let line, !line.isEmpty { object["line"] = masked(clipped(line, 300)) }
+        // The witness told it to stop and the lead decides (`LeadBudget`): the row still reads Working, so it's said here.
+        if let over = row.task.overBudget, !LeadTeams.isFinished(row.task) {
+            let text = over.text(worked: row.task.worked)
+            object["overBudget"] = masked(clipped(text.prefix(1).uppercased() + text.dropFirst(), 300))
+        }
         return object
     }
 }

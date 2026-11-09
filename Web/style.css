@@ -266,7 +266,7 @@ select.chip-btn { appearance: none; -webkit-appearance: none; }
 .allDoneCost { margin: 4px 0; }
 .allDoneTasks summary { font-size: 13px; color: var(--muted); padding: 4px 0; }
 .outcome { padding: 2px 0 2px 14px; }
-.outcome.merged { color: var(--st-done); }
+.outcome.merged, .outcome.folded { color: var(--st-done); }
 .update .updateHead { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .updateBody { font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 6px; }
 .tasks { padding: 6px 12px; }
@@ -274,6 +274,7 @@ select.chip-btn { appearance: none; -webkit-appearance: none; }
 .taskRow { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; border-top: 1px solid var(--line); }
 .taskTitle { flex: 1; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
 .taskState { flex: none; font-size: 12px; font-weight: 600; color: var(--muted); }
+.overBudget { color: var(--warn); }
 .mark { flex: none; width: 16px; text-align: center; font-weight: 800; color: var(--muted); }
 .mark.failed, .mark.stalled, .mark.ended, .mark.reverted, .taskState.failed, .taskState.stalled, .taskState.ended, .taskState.reverted { color: var(--st-needsInput); }
 .mark.waits, .mark.working, .mark.rework, .taskState.waits, .taskState.working, .taskState.rework { color: var(--st-working); }

@@ -267,10 +267,11 @@ struct PhoneLeadsTests {
         #expect(Set(page.keys) == ["id", "project", "summary", "allDone", "updates", "tasks", "finished", "scorecard"])
         let card = try #require(page["allDone"] as? [String: Any])
         #expect(card["headline"] as? String == "The landing page is ready")
+        #expect(card["current"] as? Bool == false, "tasks are still going: this card is an earlier batch's")
         #expect(card["count"] as? String == "1 task · 1 merged")
         #expect((page["updates"] as? [[String: Any]])?.first?["title"] as? String == "Board done")
         let tasks = try #require(page["tasks"] as? [[String: Any]])
-        #expect(Set(tasks.flatMap(\.keys)).isSubset(of: ["title", "state", "stateText", "group", "mark", "line"]))
+        #expect(Set(tasks.flatMap(\.keys)).isSubset(of: ["title", "state", "stateText", "group", "mark", "line", "overBudget"]))
         func task(_ title: String) -> [String: Any]? { tasks.first { $0["title"] as? String == title } }
         #expect(task("Ledger reconciles")?["state"] as? String == "Working")
         #expect(task("Ledger reconciles")?["line"] as? String == "Tests written")
@@ -292,5 +293,36 @@ struct PhoneLeadsTests {
         }
         // An unknown lead: 404.
         #expect(try await call(world, "GET", "/api/lead?lead=nope", token: world.token).0 == 404)
+    }
+
+    /// The states the board grew: an all-done card that's still true says so, and a task past its time budget (still
+    /// "Working" in its row) says that on the phone; one finished since doesn't, whatever its record still holds.
+    @Test func theLatestAllDoneIsCurrentOnlyWithNothingGoingOnAndOverBudgetIsSaid() async throws {
+        let world = try world()
+        let contract = LeadContract(goal: "A goal", acceptance: ["It works"], boundaries: [], context: "")
+        try world.store.update { board in
+            var merged = LeadTask(slug: "copy", title: "Landing copy", contract: contract, status: .done)
+            merged.overBudget = LeadOverBudget(minutes: 60, at: 1_000)
+            board.tasks = [merged]
+            board.allDone = [LeadAllDone(at: 2_000, since: 1_000, tasks: [.init(slug: "copy", title: "Landing copy", outcome: .merged)])]
+        }
+        world.read()
+        var (_, page) = try await call(world, "GET", "/api/lead?lead=\(PhoneLeads.id(root: world.root))", token: world.token)
+        #expect((page["allDone"] as? [String: Any])?["current"] as? Bool == true)
+        #expect((page["tasks"] as? [[String: Any]])?.first?["overBudget"] == nil, "a finished task isn't over budget any more")
+
+        try world.store.update { board in
+            var late = LeadTask(slug: "ledger", title: "Ledger", contract: contract, status: .running)
+            late.overBudget = LeadOverBudget(minutes: 60, at: 3_000)
+            late.worked = 4_500
+            board.tasks.append(late)
+        }
+        world.read()
+        (_, page) = try await call(world, "GET", "/api/lead?lead=\(PhoneLeads.id(root: world.root))", token: world.token)
+        #expect((page["allDone"] as? [String: Any])?["current"] as? Bool == false, "work has begun since")
+        let tasks = try #require(page["tasks"] as? [[String: Any]])
+        let ledger = try #require(tasks.first { $0["title"] as? String == "Ledger" })
+        let over = try #require(ledger["overBudget"] as? String)
+        #expect(over.hasPrefix("Over its 60 min budget"), "as the Mac's status says it: \(over)")
     }
 }

@@ -32,6 +32,22 @@ let clockOffset = 0;          // Mac clock minus phone clock, seconds
 // ---------- API ----------
 
 const UNREACHABLE = "Can't reach your Mac. Is Tailscale on here, and is the Mac awake?";
+const SLOW_READ = 'This is taking a long time on this connection. Try again.';
+// The big reads (a transcript's tail, a page of scrollback): more than a poll's 10 s, and a slow answer isn't an offline Mac.
+const BIG_READ = { timeout: 30000, timeoutMessage: SLOW_READ };
+// Back after a while: what's on the screen is old until the Mac has answered.
+const CHECKING = 'Updating from your Mac…';
+const CHECK_AFTER = 5000;   // ms away before the screen is called old (no banner to flash for a blink)
+// Refusals that aren't an answer about what was asked: the Mac is restarting (503), or won't talk to this phone. Only the
+// next good answer takes the banner away.
+const REFUSED = new Set([403, 421, 429, 503]);
+
+/// An error from the connection, not from the Mac: the next poll may do better.
+function connectionError(message) {
+  const failure = new Error(message);
+  failure.connection = true;
+  return failure;
+}
 
 async function api(path, options = {}, authToken = token) {
   const headers = { 'Content-Type': options.contentType || 'application/json' };
@@ -46,7 +62,7 @@ async function api(path, options = {}, authToken = token) {
     // A slow answer the caller expected (reading Chrome's tabs) isn't the Mac being unreachable.
     if (controller.signal.aborted && options.timeoutMessage) throw new Error(options.timeoutMessage);
     setOnline(false);
-    throw new Error(UNREACHABLE);
+    throw connectionError(UNREACHABLE);
   } finally {
     clearTimeout(timer);
   }
@@ -61,15 +77,19 @@ async function api(path, options = {}, authToken = token) {
   if (!response.ok && !body.error) {
     const message = "VibeSwitcher isn't running on your Mac, or Phone Access is off.";
     setOnline(false, message);
-    throw new Error(message);
+    throw connectionError(message);
   }
-  setOnline(true);
+  if (!REFUSED.has(response.status)) setOnline(true);
   // Only a phone the Mac removed hears 401 (a restart answers 503): it forgets its token and says why.
   if (response.status === 401 && authToken === token) {
     forgetToken(body.error || "This phone isn't paired with the Mac any more.");
     throw new Error(body.error || 'Not paired');
   }
-  if (!response.ok) throw new Error(body.error || `Error ${response.status}`);
+  if (!response.ok) {
+    const failure = new Error(body.error || `Error ${response.status}`);
+    failure.status = response.status;
+    throw failure;
+  }
   return body;
 }
 
@@ -114,6 +134,7 @@ function show(view) {
   $('next').hidden = view !== 'session';
   document.body.classList.toggle('in-session', view === 'session');
   $('bell').hidden = view === 'pair';
+  if (view === 'pair') setOnline(true);
   clearInterval(listTimer);
   clearInterval(screenTimer);
   if (view !== 'lead') openLeadID = null;
@@ -163,26 +184,43 @@ function badge(session) {
 let listBusy = false;
 let screenBusy = false;
 
+/// A new `/api/state`: the state and the clock from it. False when the Mac now serves a newer app, which is being loaded
+/// (an old page would leave out what the Mac now expects).
+function applyState(fresh) {
+  state = fresh;
+  clockOffset = state.now - Date.now() / 1000;
+  if (state.web) {
+    if (webVersion && state.web !== webVersion) { location.reload(); return false; }
+    webVersion = state.web;
+  }
+  return true;
+}
+
+/// `/api/state` failed: what's on the screen is as of the last answer, and the banner says why. (A dropped connection
+/// or a bare error has set it already; a removed phone has gone to the pairing screen.)
+function stateFailed(error) {
+  if (token && !error.connection) setOnline(false, error.message);
+}
+
 async function refreshList(render = true) {
   if (listBusy || !token) return;   // one poll at a time: a slow network must not stack requests
   listBusy = true;
+  let fresh;
   try {
-    state = await api('/api/state');
+    fresh = await api('/api/state');
   } catch (error) {
+    stateFailed(error);
     return;
   } finally {
     listBusy = false;
   }
-  // The Mac now serves a newer app: load it (an old page would leave out what the Mac now expects).
-  if (state.web) {
-    if (webVersion && state.web !== webVersion) return location.reload();
-    webVersion = state.web;
-  }
+  if (!applyState(fresh)) return;
   if (!pushChecked) { pushChecked = true; syncPushSubscription(); }
-  clockOffset = state.now - Date.now() / 1000;
   $('subtitle').textContent = state.mac;
-  $('notifyCard').hidden = Boolean(state.device.push) || !('PushManager' in window);
-  $('bell').classList.toggle('on', Boolean(state.device.push));
+  // On for the Mac and off on the phone (the permission was taken back) is off: nothing would arrive.
+  const pushOn = Boolean(state.device.push) && (typeof Notification === 'undefined' || Notification.permission === 'granted');
+  $('notifyCard').hidden = pushOn || !('PushManager' in window);
+  $('bell').classList.toggle('on', pushOn);
   if (current) { refreshConversation(); return renderSessionMeta(); }
   if (openLeadID) return;
   renderBriefScope();
@@ -194,7 +232,8 @@ function renderList() {
   if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('qInput')) return;
   // The leads' workers and verifiers fold under their lead, as on the Mac: they aren't your own sessions (nor counted
   // as yours). A team whose lead isn't listed stays where it is.
-  const leadIDs = new Set(state.sessions.filter(s => s.role === 'lead').map(s => s.lead));
+  const boarded = new Set((state.leads || []).map(l => l.id));
+  const leadIDs = new Set(state.sessions.filter(s => s.role === 'lead' && boarded.has(s.lead)).map(s => s.lead));
   const isMember = s => (s.role === 'worker' || s.role === 'verifier') && leadIDs.has(s.lead);
   const sessions = state.sessions.filter(s => !isMember(s));
   const counts = $('counts');
@@ -277,6 +316,13 @@ const PRIORITY = { blocking: 'Blocking', important: 'Important', whenever: 'When
 function clockText(at) {
   const date = new Date((at - clockOffset) * 1000);
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+// A time on its day: the day only when it's another one than today.
+function whenText(at) {
+  const date = new Date((at - clockOffset) * 1000);
+  const today = new Date(Date.now()).toDateString() === date.toDateString();
+  return `${today ? '' : `${date.toDateString().slice(0, 3)} `}${clockText(at)}`;
 }
 
 function questionCount(count) { return `${count} question${count === 1 ? '' : 's'} for you`; }
@@ -454,10 +500,13 @@ async function refreshLead() {
     const [page, fresh] = await Promise.all([api(`/api/lead?lead=${encodeURIComponent(id)}`), api('/api/state')]);
     if (id !== openLeadID) return;
     leadPage = page;
-    state = fresh;
-    clockOffset = state.now - Date.now() / 1000;
+    if (!applyState(fresh)) return;
   } catch (error) {
-    if (id === openLeadID) $('leadPage').replaceChildren(el('p', 'error', error.message));
+    if (id !== openLeadID) return;
+    // The lead is gone: said in place of its page. Anything else keeps the page, under the banner.
+    if (error.status === 404) leadPage = null;
+    if (!leadPage) $('leadPage').replaceChildren(el('p', 'error', error.message));
+    if (error.status !== 404) stateFailed(error);
     return;
   } finally {
     leadBusy = false;
@@ -465,6 +514,7 @@ async function refreshLead() {
   renderLead();
 }
 
+const OUTCOME_MARKS = { merged: '✓', folded: '↳', reverted: '↶' };
 const MARKS = {
   waits: '…', failed: '✕', blocked: '⊘', stalled: '⏸', ended: '■', working: '●', rework: '↻', review: '◆', merge: '◈',
   queued: '○', merged: '✓', folded: '↳', kept: '▣', abandoned: '−', reverted: '↶',
@@ -482,13 +532,14 @@ function renderLead() {
   if (lead && lead.questions.length) {
     parts.push(el('h3', 'sectionTitle', lead.open ? questionCount(lead.open) : 'No questions waiting'), questionStack(lead));
   }
-  if (page.allDone) parts.push(allDoneCard(page.allDone));
+  const allDoneNow = page.allDone && page.allDone.current !== false;
+  if (allDoneNow) parts.push(allDoneCard(page.allDone));
   if (page.updates.length) {
     parts.push(el('h3', 'sectionTitle', 'Latest updates'));
     for (const update of page.updates) {
       const card = el('div', 'card update');
       const head = el('div', 'updateHead');
-      head.append(el('b', null, update.title), el('span', 'muted small', clockText(update.at)));
+      head.append(el('b', null, update.title), el('span', 'muted small', whenText(update.at)));
       card.append(head, el('div', 'updateBody', update.body));
       if (update.images) card.append(el('div', 'muted small', `${update.images} image${update.images === 1 ? '' : 's'} on the Mac`));
       parts.push(card);
@@ -508,6 +559,7 @@ function renderLead() {
       const first = el('div', 'line1');
       first.append(el('span', 'taskTitle', task.title), el('span', `taskState ${task.mark}`, task.stateText));
       text.append(first);
+      if (task.overBudget) text.append(el('div', 'detail overBudget', task.overBudget));
       if (task.line) text.append(el('div', 'detail', task.line));
       row.append(mark, text);
       tasks.append(row);
@@ -518,6 +570,8 @@ function renderLead() {
   }
   if (!page.tasks.length) tasks.append(el('div', 'muted small', 'No tasks on the board.'));
   parts.push(tasks);
+  // Work has started since that card: it's history, below what's going on, and doesn't say everything is finished.
+  if (page.allDone && !allDoneNow) parts.push(allDoneCard(page.allDone));
   if (page.scorecard || page.cost) {
     const score = el('div', 'card scorecard');
     if (page.scorecard) score.append(el('div', null, page.scorecard));
@@ -530,7 +584,7 @@ function renderLead() {
 function allDoneCard(mark) {
   const card = el('div', 'allDone');
   const head = el('div', 'allDoneHead');
-  head.append(el('b', null, '✓ All tasks finished'), el('span', 'muted small', clockText(mark.at)));
+  head.append(el('b', null, mark.current === false ? 'Earlier batch finished' : '✓ All tasks finished'), el('span', 'muted small', whenText(mark.at)));
   card.append(head);
   if (mark.headline) {
     card.append(el('div', 'allDoneHeadline', mark.headline));
@@ -543,7 +597,7 @@ function allDoneCard(mark) {
   if (mark.cost) card.append(el('div', 'muted small allDoneCost', mark.cost));
   const list = el('details', 'allDoneTasks');
   list.append(el('summary', null, mark.count));
-  list.append(...mark.tasks.map(t => el('div', `small outcome ${t.outcome}`, `${t.outcome === 'merged' ? '✓' : t.outcome === 'reverted' ? '↶' : '−'} ${t.title}`)));
+  list.append(...mark.tasks.map(t => el('div', `small outcome ${t.outcome}`, `${OUTCOME_MARKS[t.outcome] || '−'} ${t.title}`)));
   card.append(list);
   return card;
 }
@@ -642,6 +696,7 @@ const prefs = {
   wrap: localStorage.getItem('vs.wrap') !== 'off',
 };
 let lastScreenText = null;
+let hiddenAt = 0;             // when the app went to the background, 0 while it's on the screen
 
 function applyViewPrefs() {
   const screen = $('screen');
@@ -689,6 +744,10 @@ function renderSessionMeta() {
     $('sessionMeta').replaceChildren();
     $('composer').hidden = true;
     $('askCard').hidden = true;
+    $('inputOff').hidden = true;
+    $('pauseSelect').hidden = true;
+    $('resume').hidden = true;
+    $('pausedInfo').hidden = true;
     // Another session in the same tab: offer it, never carry on as if it were this one.
     const successor = state && state.sessions.find(s => s.tty === current);
     $('subtitle').textContent = successor ? 'Another session is running in this tab now.' : '';
@@ -916,7 +975,7 @@ async function loadEarlier() {
   const screen = $('screen');
   try {
     const before = fromTail ? '' : `&before=${older.start}`;
-    const page = await api(`/api/history?${sessionQuery(tty)}${before}`);
+    const page = await api(`/api/history?${sessionQuery(tty)}${before}`, BIG_READ);
     if (gen !== older.gen || tty !== current) return;
     // A cleared terminal is shorter than what we asked about: start over from its end.
     if (!fromTail && page.total < older.start) {
@@ -961,12 +1020,13 @@ async function checkCleared() {
 // ---------- Conversation ----------
 
 const conversation = { cursor: null, file: null, eventAt: null, status: null, hasTranscript: null, busy: false,
-                       loaded: false, retry: null, gen: 0, errorAt: 0 };
+                       loaded: false, retry: null, gen: 0, errorAt: 0, readAt: 0 };
 
 function resetConversation() {
   conversation.gen += 1;
   conversation.busy = false;
   conversation.errorAt = 0;
+  conversation.readAt = 0;
   conversation.hasTranscript = null;
   conversation.cursor = null;
   conversation.file = null;
@@ -1062,7 +1122,9 @@ async function refreshConversation(force = false) {
   // A transcript can appear without a new hook event (Claude creates the file a moment after the session starts).
   const unchanged = session && session.eventAt === conversation.eventAt && session.status === conversation.status &&
     session.hasTranscript === conversation.hasTranscript;
-  if (!force && conversation.loaded && unchanged) return;
+  // No hook events (a Codex session or one without hooks): nothing else says the transcript grew, so look every so often.
+  const noEvents = session && session.hasTranscript && !session.eventAt && Date.now() - conversation.readAt >= 5000;
+  if (!force && conversation.loaded && unchanged && !noEvents) return;
   if (!force && Date.now() - conversation.errorAt < 10000) return;   // after a failure, not on every poll
   // No transcript (no hooks, or an agent that doesn't write one): say so without asking the Mac.
   if (session && session.hasTranscript === false) {
@@ -1081,7 +1143,7 @@ async function refreshConversation(force = false) {
   const tty = current;
   try {
     const after = conversation.cursor === null ? '' : `&after=${conversation.cursor}&file=${encodeURIComponent(conversation.file)}`;
-    const result = await api(`/api/conversation?${sessionQuery(tty)}${after}`);
+    const result = await api(`/api/conversation?${sessionQuery(tty)}${after}`, BIG_READ);
     if (gen !== conversation.gen || tty !== current) return;
     // A fresh tail (first open, another transcript after /clear or /resume, or a big gap): start over.
     if (result.fresh) {
@@ -1097,6 +1159,7 @@ async function refreshConversation(force = false) {
     conversation.hasTranscript = session ? session.hasTranscript : null;
     conversation.loaded = true;
     conversation.errorAt = 0;
+    conversation.readAt = Date.now();
     // The agent is still writing a line: ask again shortly rather than waiting for the next hook event.
     clearTimeout(conversation.retry);
     if (result.pending) conversation.retry = setTimeout(() => refreshConversation(true), 1000);
@@ -1112,7 +1175,7 @@ async function refreshConversation(force = false) {
 async function showFullTool(id, row) {
   const gen = conversation.gen;
   try {
-    const result = await api(`/api/conversation/tool?${sessionQuery()}&id=${encodeURIComponent(id)}`);
+    const result = await api(`/api/conversation/tool?${sessionQuery()}&id=${encodeURIComponent(id)}`, BIG_READ);
     if (gen !== conversation.gen) return;
     const node = entryNode(result.entry, true);
     node.open = true;
@@ -1459,6 +1522,8 @@ const brief = { gen: 0, url: null, writing: false, ready: false, projects: '' };
 const BRIEF_PROJECT = 'vs.briefProject';   // the picker's choice on this phone: a led project's name, or '' for all
 const BRIEF_POLL = 1000;      // ms between asks
 const BRIEF_WAIT = 150;       // asks: Claude may take a minute, ElevenLabs half of one more
+// The audio comes with the answer, a few MB once base64: it gets longer than a poll, and a slow download isn't an offline Mac.
+const BRIEF_ASK = { timeout: 60000, timeoutMessage: 'The briefing is taking too long to reach this phone. Try again.' };
 
 function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
@@ -1551,7 +1616,12 @@ async function briefMe() {
     for (let asked = 0; result.writing && asked < BRIEF_WAIT; asked++) {
       await wait(BRIEF_POLL);
       if (gen !== brief.gen) return;
-      result = await api('/api/briefing');
+      try {
+        result = await api('/api/briefing', BRIEF_ASK);
+      } catch (error) {
+        // A connection that dropped meanwhile (the banner says so): the Mac is still writing it, so keep asking.
+        if (!error.connection) throw error;
+      }
     }
     if (gen !== brief.gen) return;
     if (result.writing) throw new Error('The Mac is taking too long to write it. Try again in a minute.');
@@ -1722,8 +1792,16 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('resize', layoutSession);
   applyViewPrefs();
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
-    if (current) refreshScreen(); else if (token) refreshList();
+    if (document.hidden) {
+      hiddenAt = Date.now();
+      // An answer box left focused would hold the list still when you come back; its text is kept in `drafts`.
+      if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('qInput')) document.activeElement.blur();
+      return;
+    }
+    if (!token) return;
+    if (hiddenAt && Date.now() - hiddenAt >= CHECK_AFTER) setOnline(false, CHECKING);
+    hiddenAt = 0;
+    if (current) { refreshScreen(); refreshList(false); } else if (openLeadID) refreshLead(); else refreshList();
   });
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
