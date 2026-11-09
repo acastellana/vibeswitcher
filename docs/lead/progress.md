@@ -2171,3 +2171,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 15:48 Released audit-exceptions-are-a's worker (idle since its done report on 24469dd6) while its audit runs
 - 2026-11-09 15:48 Automatically (auto_advance): Released audit-exceptions-are-a's worker, idle since its done report on 24469dd6, while its audit runs (ended pid 82883 (Worker: Audit exceptions are a structured record the verifier gets before it starts)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-09 15:48 Merged phone-day-to-day: Phone day to day: review and fix what it shows and how it recovers (build 16ca360977ec)
+- 2026-11-09 15:48 Automatically (auto_advance): Merged phone-day-to-day (Phone day to day: review and fix what it shows and how it recovers) into main at ec7054ba, on its passing audit and the full test run.
+- 2026-11-09 15:48 Automatically (auto_advance): Cleaned up phone-day-to-day (freed 2.4 GB of build output and temporary folders). It stays done.
