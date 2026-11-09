@@ -204,18 +204,19 @@ extension LeadStall {
             return .liveProcess(pid: shell.pid, command: String(shell.command.prefix(120)),
                                 startedAt: shell.startedAt.timeIntervalSince1970, quietSince: from)
         }
-        return .unknown(read: Self.read(seen, sleep: sleep, background: background, at: at))
+        return .unknown(read: Self.read(seen, sleep: sleep, background: background))
     }
 
     /// What the witness read, for a stall it can't explain.
-    static func read(_ seen: LeadWitness.Seen, sleep: MacSleepLog.Reading?, background: String?, at: Double) -> [String] {
+    static func read(_ seen: LeadWitness.Seen, sleep: MacSleepLog.Reading?, background: String?) -> [String] {
         var read = ["status \(seen.status?.rawValue ?? "unread")" + (seen.since.flatMap { LeadStall.known($0.timeIntervalSince1970) }.map { " since \(LeadBoard.clock($0))" } ?? "")]
         read.append("transcript last written " + (seen.lastActivity.map { LeadBoard.clock($0) } ?? "unread"))
         if let background { read.append("waiting on \(background), its process \(seen.shellsRead ? "not found" : "not read")") }
         read.append(seen.shells.isEmpty ? "no shells of its own in the process table" : "\(seen.shells.count) shell(s) of its own alive")
         if let pending = seen.pending { read.append("its last call has no result yet: \(Redaction.secrets(in: String(pending.text.prefix(120))))") }
         if let sleep {
-            read.append(sleep.slept > 0 ? sleep.text(now: Date(timeIntervalSince1970: at)) : "the Mac was awake the whole time, by its awake clock"
+            // No "of the N min": this text is kept on the board, and one that changes each minute would rewrite it each minute.
+            read.append(sleep.slept > 0 ? "the Mac slept \(Worktrees.duration(sleep.slept)) in this window, by its awake clock" : "the Mac was awake the whole time, by its awake clock"
                         + (sleep.unwatchedBefore.map { " from \(LeadBoard.clock($0)), when VibeSwitcher began watching it" } ?? ""))
         } else {
             read.append("how long the Mac slept wasn't watched")
@@ -248,6 +249,8 @@ extension MergeRerun {
     /// window by the same two clocks its limits count, and a slot queue if something in its folder sat in line.
     static func causeNote(stall: StallWatch.Stall?, quiet: TimeInterval?, slept: TimeInterval, window: TimeInterval, started: Date, stopped: Date,
                           queued: TestLock.Wait?, recorded: ([TestLock.Holder]) -> String = { TestLock.text($0) }) -> String {
+        // The two clocks are read a moment apart: a difference this small is that, not the Mac asleep.
+        let slept = slept < MacSleepLog.jitter ? 0 : slept
         let awake = max(0, window - slept)
         let times = "from \(LeadBoard.clock(started.timeIntervalSince1970)) to \(LeadBoard.clock(stopped.timeIntervalSince1970))"
         let sleep = slept > 0

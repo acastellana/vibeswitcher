@@ -114,8 +114,9 @@ struct LeadWitnessCauseTests {
         // Not on the Stalled lines before the mark.
         #expect(LeadWitness.stalls(board: Self.board(), seen: ["w1": seen], now: Self.at(14)).isEmpty)
         let now = Self.at(16)
-        let found = LeadWitness.stalls(board: Self.board(), seen: ["w1": seen], now: now)
-        let stall = try #require(found[Self.board().tasks[0].id])
+        let board = Self.board()
+        let found = LeadWitness.stalls(board: board, seen: ["w1": seen], now: now)
+        let stall = try #require(found[board.tasks[0].id])
         #expect(stall.reason == .prompt)
         let report = stall.report(now: now)
         #expect(report.contains("a permission prompt or question is on its screen since \(Self.clock(0)) (16 min): “Run: rm -rf x”"), "\(report)")
@@ -217,14 +218,17 @@ struct LeadWitnessCauseTests {
         var board = Self.board()
         let id = board.tasks[0].id
         let old = LeadStall(reason: .silent, lastActivity: Self.t0, at: Self.t0 + 900, cause: .unknown(read: ["x"]))
-        #expect(board.noteStalls([id: old]))
+        let first = board.noteStalls([id: old])
+        #expect(first)
         var fresh = old
         fresh.at = Self.t0 + 1800
         fresh.cause = .liveProcess(pid: 1, command: "c", startedAt: Self.t0, quietSince: Self.t0)
-        #expect(board.noteStalls([id: fresh]))
+        let changed = board.noteStalls([id: fresh])
+        #expect(changed)
         #expect(board.tasks[0].stall?.at == old.at, "first noticed stays")
         #expect(board.tasks[0].stall?.cause == fresh.cause)
-        #expect(!board.noteStalls([id: fresh]), "nothing changed: the board isn't written again")
+        let again = board.noteStalls([id: fresh])
+        #expect(!again, "nothing changed: the board isn't written again")
         let decoded = try JSONDecoder().decode(LeadStall.self, from: JSONEncoder().encode(board.tasks[0].stall!))
         #expect(decoded.cause == fresh.cause)
         // A board written before this has no cause, and reads as it did.
