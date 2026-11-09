@@ -249,7 +249,19 @@ extension LeadToolset {
                     return false
                 }
             }
-            switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tip, from: onto) }) {
+            // Every task's remote commits, read from its audited head: the stack's top is what's checked, and a task
+            // anywhere in it may be the one that carries them.
+            var carried: [String] = []
+            do {
+                for gate in prefix {
+                    for commit in try carriedRemote(fetched, branch: gate.commit, onto: onto) where !carried.contains(commit) { carried.append(commit) }
+                }
+            } catch {
+                stopped = (error as? Problem)?.text ?? "\(error)"
+                return false
+            }
+            let route = "batch (\(prefix.map(\.task.slug).joined(separator: ", ")))"
+            switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tip, from: onto, landing: landingCheck(route, carried: carried, workflow: workflow)) }) {
             case .refused(let reason):
                 stopped = reason
                 return false
@@ -264,8 +276,6 @@ extension LeadToolset {
                 try? store.appendProgress("Batch merge of \(order.joined(separator: ", ")) not recorded: \(text)")
                 return false
             }
-            // The records first: they don't depend on the vault, and a retry finds nothing left to fold.
-            foldRemoteRecords(landed: tip, from: onto, fetched: fetched)
             do { try vault.setHead(tip, root: root, branch: base) } catch {
                 records.landed.note(base: base, from: onto, to: tip)
                 return unrecorded("the vault couldn't record its head", error)

@@ -439,7 +439,7 @@ extension LeadToolset {
 
     /// Refuses a task whose branch holds commits of the remote's branch that fetch_remote didn't fetch (nothing fetched
     /// yet, or the remote-tracking ref moved past what it fetched): merge lands a branch that carries the remote's
-    /// commits as a true merge and takes the remote's records as fetch_remote fetched them (`foldRemoteRecords`), so
+    /// commits as a true merge, with the remote's records as fetch_remote fetched them in the commit itself, so
     /// records past that would be dropped for good (merge_remote then has nothing to merge).
     func checkRemoteCarried(_ slug: String, commit: String, fetched: String?) throws {
         let workflow = self.workflow
@@ -463,15 +463,28 @@ extension LeadToolset {
         }
     }
 
-    /// After a merge moved the base from `base` to `landed`: the lead's records the remote's commits it brought in have
-    /// (as fetch_remote fetched them: `fetched`, the merge's one read of `fetchedTip`), taken into the main checkout's
-    /// (`LeadRecords.takeRemote`), for the flush after the merge to commit. A failure is said in progress; the code has
-    /// landed either way.
-    func foldRemoteRecords(landed: String, from base: String, fetched: String?) {
-        guard let carried = Worktrees.carried(fetched, head: landed, onto: base, in: root) else { return }
-        if let failure = records.takeRemote(carried, since: base) {
-            try? store.appendProgress("The remote's lead records (\(carried.prefix(8))) weren't taken into ours after the merge: \(failure)")
-        }
+    /// What every route gives `Worktrees.fastForward`: who's landing, `carried` (the remote's commits the commit is
+    /// meant to hold), and the workflow's records with their lock.
+    func landingCheck(_ route: String, carried: [String] = [], workflow: LeadWorkflow) -> Worktrees.Landing {
+        Worktrees.Landing(route: route, records: workflow.recordsDir, carried: carried,
+                          lockRecords: { [store] body in try store.withRecordsLock(body) }, probe: records.landingProbe)
+    }
+
+    /// The commit of what fetch_remote fetched that `branch` (a task's audited head, read before it's made into anything
+    /// else) holds and `base` lacks, as a list for its landing's check; empty when it carries none. Throws when git can't
+    /// say: "no answer" isn't "carries none" (2026-11-07 19:46), and the check would then have nothing to ask of a
+    /// flattened commit.
+    func carriedRemote(_ fetched: String?, branch: String, onto base: String) throws -> [String] {
+        guard let fetched, !fetched.isEmpty else { return [] }
+        let git = { [root, probe = records.landingProbe] (args: [String]) in probe?.git?(args) ?? Git.run(args, in: root, timeout: Worktrees.landingCheckTimeout) }
+        let unsure = { (result: Git.Result) in Problem(text: "Not merged: couldn't tell whether \(branch.prefix(8)) carries the remote's commits (\(Worktrees.said(result))), so it doesn't land. \(base.prefix(8)) wasn't moved.") }
+        let found = git(["merge-base", branch, fetched])
+        if found.status == 1, !found.timedOut, !found.cancelled, !found.signaled { return [] }
+        guard found.ok, !found.output.isEmpty else { throw unsure(found) }
+        let held = git(["merge-base", "--is-ancestor", found.output, base])
+        if held.ok { return [] }
+        guard held.status == 1, !held.timedOut, !held.cancelled, !held.signaled else { throw unsure(held) }
+        return [found.output]
     }
 
     public static func commits(_ count: Int) -> String { "\(count) commit\(count == 1 ? "" : "s")" }
@@ -568,7 +581,8 @@ extension LeadToolset {
         if ShellCancel.current?.isCancelled == true {
             throw Problem(text: "merge_remote was cancelled after its tests passed; nothing was merged, and \(unmoved)")
         }
-        switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: made, from: current) }) {
+        switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: made, from: current,
+                                                            landing: landingCheck("merge_remote", carried: [tip], workflow: workflow)) }) {
         case .merged:
             // The remote's commits are the user's work, as the commits the user merges by hand: the base's head as the
             // vault knows it moves with them, so the next merge doesn't take them for a move nobody made.

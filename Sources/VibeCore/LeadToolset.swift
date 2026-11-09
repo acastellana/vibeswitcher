@@ -3294,10 +3294,10 @@ public final class LeadToolset: MCPToolset {
         if let changed = changedMeanwhile(slug, since: task, tests: "passed") { throw changed }
         if let amended = amendedMeanwhile(slug, since: task, tests: "passed") { throw amended }
         if let moved = movedMeanwhile(slug, since: task, tested: commit, tests: "passed") { throw moved }
-        switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tested, from: current) }) {
+        let carried = try carriedRemote(fetched, branch: commit, onto: current)
+        switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tested, from: current,
+                                                            landing: landingCheck("merge(\(slug))", carried: carried, workflow: workflow)) }) {
         case .merged:
-            // The records first: they don't depend on the vault, and a retry finds nothing left to fold.
-            foldRemoteRecords(landed: tested, from: current, fetched: fetched)
             // A head the vault didn't take doesn't stop the board's record: the merge has happened, and a merge run
             // again on a board that doesn't say so would record an empty one. Said when it's done, below.
             let unrecorded = recordLanding(base: base, from: current, to: tested, with: slug)
@@ -3620,7 +3620,8 @@ public final class LeadToolset: MCPToolset {
         if ShellCancel.current?.isCancelled == true {
             throw Problem(text: "The revert of \(slug) was cancelled after its checks passed; \(base) is as it was, and \(slug) stays merged.")
         }
-        switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: made, from: current) }) {
+        switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: made, from: current,
+                                                            landing: landingCheck("revert(\(slug))", workflow: workflow)) }) {
         case .merged:
             if let unrecorded = recordLanding(base: base, from: current, to: made, with: "the revert of \(slug)") { throw Problem(text: unrecorded) }
             let now = Date().timeIntervalSince1970
