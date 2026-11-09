@@ -2225,3 +2225,13 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 17:33 Merged verifier-eval-failed: Verifier eval: failed runs aren't scored, cases get REVIEW.md, and a true baseline (in a batch: verifier-eval-failed, phone-input-review-and, audit-exceptions-are-a landed on one test run) (build 16ca360977ec)
 - 2026-11-09 17:33 Merged phone-input-review-and: Phone input: review and fix replies, keys, lead answers and dictation (in a batch: verifier-eval-failed, phone-input-review-and, audit-exceptions-are-a landed on one test run) (build 16ca360977ec)
 - 2026-11-09 17:33 Merged audit-exceptions-are-a: Audit exceptions are a structured record the verifier gets before it starts (in a batch: verifier-eval-failed, phone-input-review-and, audit-exceptions-are-a landed on one test run) (build 16ca360977ec)
+- 2026-11-09 17:33 Automatically (auto_advance): Merged verifier-eval-failed at ae93a18c (its passing audit), phone-input-review-and at 23411571 (its passing audit), audit-exceptions-are-a at 0f72847d (its passing audit) into main as one batch, on 1 test run for 3 tasks.
+- 2026-11-09 17:33 Started a worker on security-review-of-the
+- 2026-11-09 17:33 Automatically (auto_advance): Started a worker on security-review-of-the (Security review of the phone, host authentication and tool boundaries (on Opus)), its after tasks done (phone-over-tailscale, phone-day-to-day, phone-input-review-and).
+- 2026-11-09 17:34 Started a worker on the-sandbox-s-phone
+- 2026-11-09 17:34 Automatically (auto_advance): Started a worker on the-sandbox-s-phone (The sandbox's phone keeps a session's identity, and iOS gets its home-screen icon), its after tasks done (phone-input-review-and).
+- 2026-11-09 17:34 Automatically (auto_advance): Cleaned up verifier-eval-failed (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-09 17:34 Automatically (auto_advance): Cleaned up phone-input-review-and (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-09 17:34 Automatically (auto_advance): Cleaned up audit-exceptions-are-a (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 17:34 Started a worker on audits-settle-their
+- 2026-11-09 17:34 Update: Phone and Tailscale review merged; needs an install and a real-phone try — The three phone reviews are merged, along with the merge-check and audit work. Each passed its audit and the full test run. **None of it has run on a real phone yet, and it won't reach your app until …
