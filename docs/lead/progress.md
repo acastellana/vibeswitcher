@@ -2236,3 +2236,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 17:34 Started a worker on audits-settle-their
 - 2026-11-09 17:34 Update: Phone and Tailscale review merged; needs an install and a real-phone try — The three phone reviews are merged, along with the merge-check and audit work. Each passed its audit and the full test run. **None of it has run on a real phone yet, and it won't reach your app until …
 - 2026-11-09 17:44 Automatically (auto_advance): Started the audit of the-sandbox-s-phone at e9d55bb2 (Its review is audit).
+- 2026-11-09 17:47 Released the-sandbox-s-phone's worker (idle since its done report on e9d55bb2) while its audit runs
+- 2026-11-09 17:47 Automatically (auto_advance): Released the-sandbox-s-phone's worker, idle since its done report on e9d55bb2, while its audit runs (ended pid 61370 (Worker: The sandbox's phone keeps a session's identity, and iOS gets its home-screen icon)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
