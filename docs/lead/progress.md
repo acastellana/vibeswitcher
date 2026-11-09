@@ -2239,3 +2239,9 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 17:47 Released the-sandbox-s-phone's worker (idle since its done report on e9d55bb2) while its audit runs
 - 2026-11-09 17:47 Automatically (auto_advance): Released the-sandbox-s-phone's worker, idle since its done report on e9d55bb2, while its audit runs (ended pid 61370 (Worker: The sandbox's phone keeps a session's identity, and iOS gets its home-screen icon)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-09 18:00 Audit of the-sandbox-s-phone: complete, clean, round 1: 1 Nit open
+- 2026-11-09 18:25 Started a worker on the-sandbox-s-phone
+- 2026-11-09 18:25 Automatically (auto_advance): Merge of the-sandbox-s-phone failed: Tests fail rebased onto main: web tests: 2 of 2 passed Sent its worker the output; it's back at work.
+- 2026-11-09 18:26 Incident: A merge's failure sends its worker a log path neither the worker nor the lead can read, with a summary naming no failing test, so the failure can't be diagnosed (in the-sandbox-s-phone); planned turn-this-incident-into-17 to turn it into a check
+- 2026-11-09 18:26 Started a worker on turn-this-incident-into-17
+- 2026-11-09 18:26 Automatically (auto_advance): Started a worker on turn-this-incident-into-17 (Turn this incident into a check: A merge's failure sends its worker a log path neither the wo…).
+- 2026-11-09 18:26 Review of turn-this-incident-into-17: audit
