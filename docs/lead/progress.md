@@ -2156,3 +2156,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 14:20 Started a worker on audit-exceptions-are-a
 - 2026-11-09 14:20 Automatically (auto_advance): Started a worker on audit-exceptions-are-a (Audit exceptions are a structured record the verifier gets before it starts).
 - 2026-11-09 14:20 Planned a-stalled-or-hung: A stalled or hung report says what it's really waiting on, with evidence (review audit)
+- 2026-11-09 14:20 Started a worker on a-stalled-or-hung
+- 2026-11-09 14:20 Automatically (auto_advance): Started a worker on a-stalled-or-hung (A stalled or hung report says what it's really waiting on, with evidence).
+- 2026-11-09 14:20 Planned start-worker-warns-when: start_worker warns when two tasks claim the same send path or file (review audit)
