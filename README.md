@@ -10,24 +10,48 @@ Code and Codex session on your Mac.
 
 ## What it does
 
-You tell a project lead what you want. It plans the work, starts workers in their own git worktrees, gets the risky
-work reviewed, merges what passes and reports back, and asks you only what's yours to decide. Underneath is the session
-switcher it started as: every Claude Code and Codex session on the Mac, with a live status and one click to reach it.
+You tell a project lead what you want. It plans the work, runs workers in their own git worktrees, gets the risky work
+reviewed, merges what passes and asks you only what's yours to decide. Underneath, every Claude Code and Codex session
+on the Mac has a live status and is one click away.
 
-- **Leads a project.** A project lead is one Claude session per repository. It keeps a board of tasks with contracts,
-  runs up to 3 workers at once (Claude or Codex), and records its decisions and progress in the repository.
-- **Checks work before it lands.** A read-only verifier audits risky changes, a risk check reads each branch's diff,
-  and once a project has a test command, nothing reaches your branch unless its tests pass on it.
-- **Stops when something looks wrong.** If the agents' own config changes while a team runs, or your branch moves under
-  a lead, work waits for your click.
-- **Shows every session at a glance.** One dot per session in the menu bar: red needs you, orange is working, blue
-  has background work, green is done and unread, grey is idle.
-- **Runs sessions itself.** New sessions run in VibeSwitcher's own window, in a background session host that keeps
-  them alive when the app quits, crashes or updates.
-- **Lets you answer from the chat.** Questions and permission prompts show as cards you answer with a click. While the
-  agent works, a message you send steers it at its next step.
-- **Works from your phone.** Over Tailscale, a paired phone sees the list, each screen, notifications and the leads'
+**A team on your repository**
+
+- [**Project lead**](#the-project-lead): one Claude session per repository keeps a board of tasks with contracts, runs
+  up to 3 workers at once (Claude or Codex) and records its decisions and progress in the repository.
+- [**Reviews and merge gates**](#merge-gates-and-reviews): a risk check reads each branch's diff, a read-only verifier
+  audits risky work, and once a project has a test command nothing reaches your branch unless its tests pass on it.
+- [**Config seal**](#the-config-seal-and-accept-cards): if the agents' config changes while a team runs, or your branch
+  moves under a lead, work waits for your click.
+- [**Boost and Mac-wide limits**](#boost-and-the-mac-wide-limits): every project shares one set of limits on sessions,
+  load and test slots. Boost raises them, always or only while you're away on AC power.
+- [**Statistics**](#the-scorecard-and-statistics): a scorecard per lead, and a window of quality, time and cost across
+  your projects.
+- [**Git provenance**](#git-provenance): each merge's top commit says which task, review, models and build it came from.
+
+**Every session on the Mac**
+
+- [**Menu bar**](#the-menu-bar): one dot per session. Red needs you, orange is working, blue has background work, green
+  is done and unread, grey is idle.
+- [**The window**](#the-window-and-the-sidebar): every session in one list, grouped by what needs you or by project. New
+  sessions run in a background session host that keeps them alive when the app quits, crashes or updates.
+- [**⌘K and launch presets**](#the-window-and-the-sidebar): jump to any session or command, or start your own named
+  commands for Claude Code, Codex or a shell.
+- [**The chat**](#the-chat): any session as a conversation. Questions and permission prompts are cards you answer with a
+  click, and a message you send while the agent works steers it at its next step.
+- [**Notifications**](#notifications): a banner when a session needs you or finishes, saying what's asked.
+- [**Health and freeze reports**](#health-and-freeze-reports): a stuck main thread writes a report, and a lead can get a
+  digest of new freezes and crashes to plan fixes.
+
+**Around the agents**
+
+- [**Wallet requests and shells**](#wallet-requests): an agent's blockchain transaction waits as a card until you send
+  it to a separate Wallet Manager to check and sign; VibeSwitcher never holds a key. An agent can also ask for a shell,
+  run when you press **Run** unless you've allowed it in Settings.
+- [**Phone**](#the-phone): over Tailscale, a paired phone sees the list, each screen, notifications and the leads'
   questions, and can answer them if you allow it.
+- [**Dictation and the spoken briefing**](#dictation-and-the-spoken-briefing): push to talk in the composer, and
+  **Brief me** for about 30 seconds of what happened across your leads.
+- [**Settings**](#settings): 12 categories, with a search that finds any option.
 
 It's for people who run several coding agents at once. Sessions and their transcripts stay on your Mac; see
 [Privacy](docs/guide/architecture.md#privacy) for what goes where.
@@ -174,7 +198,7 @@ while it's on.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/statistics-dark.png">
-  <img alt="The Statistics window: this week's scorecard against last week's, then quality figures" src="docs/images/statistics-light.png">
+  <img alt="The Statistics window: a scorecard of the last 7 days against the 7 before, then quality figures" src="docs/images/statistics-light.png">
 </picture>
 
 The Team tab's scorecard shows four numbers for the lead: audit rounds to pass, the share passing the first audit,
@@ -256,6 +280,8 @@ The middle shows the session's terminal or its chat; the right shows its Overvie
 Team.
 
 - ⌘K jumps to any session or command, ⌘J to the next session waiting on you, ⌘1–9 to a session.
+- **Launch presets** (Settings › Launch Presets) are named commands for Claude Code, Codex or a shell, for all projects
+  or one, with their own environment, run in the window or Terminal. ⌘K offers each in your recent projects.
 - ⌘N starts a session in the selected project; with nothing selected it asks for a folder, and picking a folder in a
   git repository starts that folder's project lead.
 - The start page (⇧⌘H) has **Choose Folder…** and **New Project…** (a new folder with a git repository and a first
@@ -265,6 +291,11 @@ Team.
   touches the middle of that edge.
 
 ### The menu bar
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/menu-bar-dark.png">
+  <img alt="The menu bar's dots, one per session: red needs you, orange working, blue background work, green done and unread, grey idle" src="docs/images/menu-bar-light.png">
+</picture>
 
 One dot per session, ordered by desktop, then by window and tab. Click a dot to go to that session; right-click (or
 ⌃⌥V anywhere) opens the list, where 1–9 or the arrow keys pick one. Hover a dot to see which session it is. The list
