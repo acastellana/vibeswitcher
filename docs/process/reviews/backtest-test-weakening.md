@@ -40,8 +40,8 @@ A scratch script, not in the repository, applied the rule with `git diff -U0 -M`
 
 These limit how much the count says about real weakening:
 
-- **24 tasks removed an assertion and raised nothing,** because the file's net count held or rose. I read the 3 of those that were review none (next section) and not the other 21, which were all audited. A rule on counts can't tell a rewrite from a swap of a strong assertion for a weak one, and `#expect(x == 1)` becoming `#expect(x > 0)` changes no count at all.
-- **It missed a real case in this very sample.** `correctness-tests-stop` also moved `aSnapshotIsQuickOnABusyMac` to `@Test(.tags(.perf), .enabled(if: perfRun, perfOnly))`, so it no longer runs in the normal suite, and dropped an assertion from `ProcessTableTests` whose file's net held. The census keeps the test because its name survives, and `.enabled(if: false)` doesn't match a variable condition. Here the task was audited and the move was the point, but on a review none task nothing would raise it.
+- **23 tasks removed an assertion and raised nothing,** because the file's net count held or rose. I read the 3 of those that were review none (next section) and not the other 20, which were all audited. A rule on counts can't tell a rewrite from a swap of a strong assertion for a weak one, and `#expect(x == 1)` becoming `#expect(x > 0)` changes no count at all.
+- **It missed a real case in this very sample.** `correctness-tests-stop` also moved `aSnapshotIsQuickOnABusyMac` to `@Test(.tags(.perf), .enabled(if: perfRun, perfOnly))`, so it no longer runs in the normal suite. Its limit assertion moved to the new always-run `aSnapshotIsWholeAndWithinItsLimit`, but no longer runs under the busy-Mac load. The census keeps the test because its name survives, and `.enabled(if: false)` doesn't match a variable condition. Here the task was audited and the move was the point, but on a review none task nothing would raise it.
 - **12 review none tasks is a small sample.** It can't show this never happens; it shows it didn't happen here.
 
 ## The review none test repairs
