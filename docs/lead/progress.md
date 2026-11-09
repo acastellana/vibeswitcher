@@ -2099,3 +2099,23 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 09:52 Automatically (auto_advance): Merged ideas-review-mattpocock at f8db093c (its passing audit), ideas-review-google at 65024866 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
 - 2026-11-09 09:52 Automatically (auto_advance): Cleaned up ideas-review-mattpocock (freed 1.5 GB of build output and temporary folders). It stays done.
 - 2026-11-09 09:52 Automatically (auto_advance): Cleaned up ideas-review-google (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 10:39 Planned verifier-eval-failed: Verifier eval: failed runs aren't scored, cases get REVIEW.md, and a true baseline (review audit)
+- 2026-11-09 10:39 Started a worker on verifier-eval-failed
+- 2026-11-09 10:39 Automatically (auto_advance): Started a worker on verifier-eval-failed (Verifier eval: failed runs aren't scored, cases get REVIEW.md, and a true baseline).
+- 2026-11-09 10:39 Planned dismissing-an-important: Dismissing an Important finding has to cite something checkable (review audit)
+- 2026-11-09 10:39 Started a worker on dismissing-an-important
+- 2026-11-09 10:39 Automatically (auto_advance): Started a worker on dismissing-an-important (Dismissing an Important finding has to cite something checkable).
+- 2026-11-09 10:39 Planned bug-tasks-start-from: Bug tasks start from a command that goes red on the reported symptom (review audit)
+- 2026-11-09 10:39 Started a worker on bug-tasks-start-from
+- 2026-11-09 10:39 Automatically (auto_advance): Started a worker on bug-tasks-start-from (Bug tasks start from a command that goes red on the reported symptom).
+- 2026-11-09 10:39 Planned each-merge-records-the: Each merge records the Claude Code version that made it
+- 2026-11-09 10:39 Started a worker on each-merge-records-the (auto → Claude: Claude weekly 53%, 3 points behind pace, not tight; Codex 59%)
+- 2026-11-09 10:39 Automatically (auto_advance): Started a worker on each-merge-records-the (Each merge records the Claude Code version that made it); its agent is auto, so it went to Claude: Claude weekly 53%, 3 points behind pace, not tight; Codex 59%.
+- 2026-11-09 10:39 Planned backtest-would-a-fresh: Backtest: would a fresh reader of contracts catch what later went wrong?
+- 2026-11-09 10:39 Started a worker on backtest-would-a-fresh (auto → Claude: Claude weekly 53%, 3 points behind pace, not tight; Codex 59%)
+- 2026-11-09 10:39 Automatically (auto_advance): Started a worker on backtest-would-a-fresh (Backtest: would a fresh reader of contracts catch what later went wrong?); its agent is auto, so it went to Claude: Claude weekly 53%, 3 points behind pace, not tight; Codex 59%.
+- 2026-11-09 10:39 Planned backtest-how-often-would: Backtest: how often would a 'tests got weaker' check have fired?
+- 2026-11-09 10:39 Started a worker on backtest-how-often-would (auto → Claude: Claude weekly 53%, 3 points behind pace, not tight; Codex 59%)
+- 2026-11-09 10:39 Automatically (auto_advance): Started a worker on backtest-how-often-would (Backtest: how often would a 'tests got weaker' check have fired?); its agent is auto, so it went to Claude: Claude weekly 53%, 3 points behind pace, not tight; Codex 59%.
+- 2026-11-09 10:40 Planned audits-settle-their: Audits settle their doubts, walk the skipped states, and flag what nobody asked for (review audit)
+- 2026-11-09 10:40 Planned a-size-ceiling-on: A size ceiling on each role's prompt

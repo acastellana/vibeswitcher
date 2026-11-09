@@ -306,3 +306,7 @@ It was a look at what's possible, not a direction, and the user didn't like the 
 
 The lead proposed it with a 15 min timer and the user didn't answer in time, so it went ahead (question AC8DD1C8). Why it was asked: All four reviews are merged, and nothing starts until this is chosen.
 
+## 2026-11-09 10:39:43 From the four repository reviews, build ideas 1-9 and backtest 10-11 before building them (the lead's proposal, taken by timer on 2026-11-09 after the user asked "what about the ideas?"). The audit-prompt change waits for the fixed eval's baseline, and has auto_advance off so the lead compares its eval summary before its audit and merge.
+
+The reviews found the eval scores errored runs and runs without REVIEW.md, so verifier prompt changes can't be measured until that's fixed. Real audit quality gains (4 of 8 found bugs were Nit-only; 5 of 6 misses were unwalked states) depend on that measurement. Items resting on hypotheses get backtested first, in line with incident-first (2026-11-06 22:35).
+
