@@ -39,6 +39,8 @@ denials: only counted, since a read-only verifier is denied edits by design.
 **REVIEW.md.** A real audit reads the project's REVIEW.md from the base branch (`LeadRisk.reviewGuide`). None of the
 cases' bases has one, so the script adds today's to the clone's base and under its branch, the same file on both, and
 checks the case's diff didn't change. Summaries before 2026-11-09 were run without it.
+A run measuring a change to REVIEW.md itself has to pass that branch's blob (`--guide $(git rev-parse HEAD:REVIEW.md)`), or
+it scores main's.
 
 ## The cases
 
@@ -207,3 +209,58 @@ by place. When a prompt change is measured against this baseline, read the findi
 - 10 of 12 cases report the same Pre-existing finding: `scripts/test-under-load.sh` at the case's old commit looks for
   one test bundle, and today's toolchain builds one per target. It comes from replaying old commits on a new toolchain,
   and those verifiers couldn't do the under-load check.
+
+### 2026-11-09, --all (audits-settle-their), partial: 6 of 12 cases scored, checklist auto, model fable. Not a comparable baseline
+
+The prompt with a doubt settled, the invariant named and walked, callers read before an Important finding and additions
+nobody asked for named, with the three new REVIEW.md lines (passed with `--guide`). The account hit its Fable usage limit
+(HTTP 429) 6 minutes into a-base-branch-the, and every later case failed in about a second. **All three clean cases are
+among the six, so this run says nothing about false alarms.** As the script printed it:
+
+```
+verifier eval, --all, checklist auto, Claude Code 2.1.319, REVIEW.md a1729417
+bugs found: 6 of 10 (3 as Important) in 6 bug cases
+false alarms: 0 Important finding(s) on 0 clean cases
+tokens: 13729584; cost: $25.64; 121 min
+not scored (claude ended with an error, in no total above): a-base-branch-the, finished-work-lands, steadier-merge-gate, the-lead-s-rules, the-phone-shows-needs, every-task-gets-a; they spent $2.91
+per case:
+  a-fix-s-regression: 2 of 3 found (1 as Important), $4.15, 2 permission denial(s)
+  a-slash-command-that: 0 of 1 found (0 as Important), $4.41, 0 permission denial(s)
+  the-briefing-uses: 1 of 1 found (0 as Important), $4.09, 1 permission denial(s)
+  ending-a-session-ends: 1 of 3 found (1 as Important), $5.93, 2 permission denial(s)
+  memory-the-host-parser: 1 of 1 found (1 as Important), $3.91, 2 permission denial(s)
+  lead-record-commits: 1 of 1 found (0 as Important), $3.15, 1 permission denial(s)
+```
+
+| Case | By place, baseline → now | What the findings say |
+|---|---|---|
+| a-fix-s-regression | 2 → 2, Important 1 → 1 | F1 and F2 both found as Important at :69, each run in a scratch folder (the baseline didn't report F2; 2026-11-01 had it). F3 by a Nit at :69, `Unresolved:` partway through its evidence, its probe refused by the verifier's own rules, and weighed down. The Nit matched by place at :76 is something else (the `..` denies being broad). |
+| a-slash-command-that | 0 → 0 | Missed. Its one Important (:191) and a Nit on `unreadFooter` are elsewhere. |
+| the-briefing-uses | 1 → 1, Important 0 → 0 | By place only, as before: the Nit at :540 says each return to General reads the key again. Missed in substance. |
+| ending-a-session-ends | 1 → 1, Important 0 → 1 | By place only: the Important at :65 is a fixed 6 s wait passing vacuously under load, not F2's `terminationReason`. F1 and F3 missed. |
+| memory-the-host-parser | 1 → 1, Important 1 → 1 | Found as Important at :634, naming the callers that reach it. |
+| lead-record-commits | 0 → 1, Important 0 → 0 | Found in substance at :788, within scoring distance now, but filed **Pre-existing** ("unchanged from main") though the branch adds that function and the verifier's own stated invariant is the one it breaks. |
+
+**By substance, the same six cases only.** Baseline 4 of 10 found, 2 as Important; this run 5 of 10, 3 as Important. The one
+difference is a-fix-s-regression F2, which 2026-11-01 had as Important too, so it may be the run's luck.
+
+**By class, the 14 known bugs.** Baseline: 4 found as Important (a-fix F1, memory, a-base F1, finished-work), 1 found with
+weak evidence (a-fix F3, its probe denied), 1 found and given too little weight (lead-record), 8 missed. This run, 10 bugs
+in six cases: 3 found as Important (a-fix F1 and F2, memory), 1 weak evidence (a-fix F3, unchanged), 1 too little weight
+(lead-record, unchanged and now labelled worse), 5 missed. The class that moved is missed → found, by one bug. Too little
+weight, the class the doubt rule aims at, didn't move: of the four bugs that rule was scored on, 1 is Important in
+substance (a-fix F1), as in the baseline, so +0 against a target of +2. Fairly non-blocking: a-fix F3 is arguable, as it
+needs a branch that tracks a symlink, and the board did fix it as Important. lead-record isn't: the contract says the base's
+records are kept exactly.
+
+**Whether the prompt's lines were followed.** Six of six summaries name an invariant. Four of the five Important findings
+that aren't lint output name the callers, guards or tests read. One Nit of 28 findings starts `Unresolved:`, in the form
+asked for, and one has it partway through. Three Nits quote the closest contract line and none of those was raised to
+Important. There is no eval case for unrequested additions, and no done report in the eval, so the routine-calls exception
+wasn't exercised.
+
+**What this can't say.** The state-bug target (2 of 3) has one of three scored: lead-record-commits found, the other two not
+run. The 0-Important target has no clean case. It's one partial sample. REVIEW.md's hindsight: a-fix-s-regression and
+a-slash-command-that as in the baseline's note, and lead-record-commits now as well, since this branch's "clean but not
+conflicted" line is that bug. The same goes for steadier-merge-gate and a-base-branch-the F2 once they run. A gap the run
+shows: the doubt rule closes Nit as a parking place but not Pre-existing, which never fails the task.
