@@ -2281,3 +2281,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 23:08 Automatically (auto_advance): Merged turn-this-incident-into-17 (A failed merge run tells its worker and the lead what failed, in a form they can read) into main at c3b1e92d, on its passing audit and the full test run.
 - 2026-11-09 23:08 Automatically (auto_advance): Cleaned up turn-this-incident-into-17 (freed 2.4 GB of build output and temporary folders). It stays done.
 - 2026-11-09 23:27 Merged a-test-run-s: A test run's leftover-preferences check blames it only for files it made (build 16ca360977ec)
+- 2026-11-09 23:27 Automatically (auto_advance): Merged a-test-run-s (A test run's leftover-preferences check blames it only for files it made) into main at ab1518aa, on its passing audit and the full test run.
+- 2026-11-09 23:28 Automatically (auto_advance): Cleaned up a-test-run-s; ended pid 19525 (Worker: A test run's leftover-preferences check blames it only for files it made) (freed 2.3 GB of build output and temporary folders). It stays done.
