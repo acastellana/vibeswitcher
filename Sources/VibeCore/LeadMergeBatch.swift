@@ -331,6 +331,7 @@ extension LeadToolset {
                 results[slug] = (flaked == nil ? "passed" : "passed_on_rerun", decided, passing.plan)
                 try? store.appendProgress("Merged \(slug): \(gate.task.title)\(gate.audited ? "" : " (no audit: review none)")"
                     + (gate.dismissed.isEmpty ? "" : " (its audit's Important findings dismissed by the lead: \(gate.dismissed.map(\.id).joined(separator: ", ")))")
+                    + (gate.accepted?.settles.map { " (its \($0.integrity.rawValue) audit accepted by the lead as an exception for \($0.files.joined(separator: ", ")))" } ?? "")
                     + together + buildNote)
             }
             landed += order

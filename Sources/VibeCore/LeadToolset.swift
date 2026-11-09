@@ -656,7 +656,8 @@ public final class LeadToolset: MCPToolset {
                                              "tests": P(type: "string", description: "How the tests went when you ran them: passed, failed, or not_run (you didn't run them)",
                                                         options: LeadVault.TestRun.allCases.map(\.rawValue)),
                                              "findings": P(type: "array", description: Self.findingsShape, items: "object"),
-                                             "contract_version": P(type: "integer", description: "The version of the task's contract you judged: your brief's, or the newest the lead sent you while you audited")],
+                                             "contract_version": P(type: "integer", description: "The version of the task's contract you judged: your brief's, or the newest the lead sent you while you audited"),
+                                             "outside_boundaries": P(type: "array", description: "Only with integrity suspect, when your sole integrity concern is edits outside the contract's boundaries that no lead's note accepts: those files, each its path from the repository's root, and nothing else. Leave it out for any other concern: then the verdict is handled as usual", items: "string")],
                                 required: ["completion", "integrity", "summary"])]
         case .lead?:
             return [
@@ -688,7 +689,10 @@ public final class LeadToolset: MCPToolset {
                                          "into": P(type: "string", description: "With status folded: the task (its slug) that carries this one's work"),
                                          "review": Self.reviewProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
                                          "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty,
-                                         "reroll": P(type: "boolean", description: "Re-roll it after audit rounds that didn't land: its worker and verifier stop, its branch is kept as archive/<slug>-<n>, its worktree goes, and a fresh worker starts from the base on a new agent/<slug>, its context given a summary of the findings and the worker's answers so far. Contract changes in the same call apply first; not with status")],
+                                         "reroll": P(type: "boolean", description: "Re-roll it after audit rounds that didn't land: its worker and verifier stop, its branch is kept as archive/<slug>-<n>, its worktree goes, and a fresh worker starts from the base on a new agent/<slug>, its context given a summary of the findings and the worker's answers so far. Contract changes in the same call apply first; not with status"),
+                                         "exception": P(type: "object", description: "A deviation from the contract you accept, recorded as your sealed note, an object of scope (files or a glob, as in .gitignore, from the repository's root; a string or a list), reason and evidence, each required. An audit's verifier sees the exceptions recorded before that audit started, in your notes; one recorded later isn't presented as covering an audit under way, and the result says so. It decides nothing about review: no floor, sensitive path or audit goes by it"),
+                                         "accept_verdict": P(type: "boolean", description: "With exception: settle the task's verdict on its head, when it's suspect with no Important finding and its only concern is an edit outside the boundaries: the task goes on to merge with no new audit, and the record shows the verdict and who accepted what. The exception's scope must cover every file the verdict names, and it covers only those; a sensitive path isn't accepted this way (audit again, with the exception recorded). Refused for any other verdict, which is handled as ever"),
+                                         "hold_audit": P(type: "boolean", description: "true: no audit of this task starts, by auto_advance or audit, and auto_advance doesn't merge it unaudited, until an exception is recorded (which lets go) or hold_audit: false. For a note that must be in before its audit: set it before the worker reports done")],
                             required: ["task"]),
                 MCPToolInfo(name: "start_worker", description: "Start a worker on a task: a fresh Claude session in its own worktree on branch agent/<slug>, given the contract. A worktree stopped partway through a rebase or merge is described, not started; recover aborts it first. One left on another branch or a detached HEAD is put back on agent/<slug>, its uncommitted files carried along.",
                             properties: ["task": task,
@@ -1334,7 +1338,7 @@ public final class LeadToolset: MCPToolset {
         + "by its id: fixed, open (still), or dismissed with a reason. id: leave it out for a new finding. Empty or left out: you found nothing."
 
     static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason", "into", "review", "reroll",
-                                          "after", "auto_advance", "budget_min", "model", "agent"]
+                                          "after", "auto_advance", "budget_min", "model", "agent", "exception", "accept_verdict", "hold_audit"]
 
     private func updateTask(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
@@ -1381,6 +1385,34 @@ public final class LeadToolset: MCPToolset {
         let budget = try budgetArgument(arguments)
         let model = try modelArgument(arguments)
         let agent = try agentArgument(arguments)
+        let given = try Self.exceptionArgument(arguments["exception"])
+        let acceptVerdict = try Self.flagArgument(arguments, "accept_verdict") ?? false
+        let holdAudit = try Self.flagArgument(arguments, "hold_audit")
+        if acceptVerdict, given == nil {
+            throw Problem(text: "accept_verdict goes with exception (scope, reason, evidence): that's what it accepts. Nothing was changed.")
+        }
+        if given != nil {
+            let others = ["status", "reason", "into", "reroll"].filter { arguments[$0] != nil }
+            guard others.isEmpty else {
+                throw Problem(text: "exception doesn't go with \(others.joined(separator: ", ")): record it in a call of its own. Nothing was changed.")
+            }
+            if holdAudit == true {
+                throw Problem(text: "hold_audit: true holds an audit until an exception is in, and this call brings one: give one or the other. Nothing was changed.")
+            }
+        }
+        // Sealed before the board's lock (the host may take a moment), and refused here when it can't be: an exception
+        // nobody can tell is the lead's would be no exception.
+        var exceptionNote: LeadNote?
+        if var exception = given {
+            if acceptVerdict { exception.settles = try settlement(of: slug, scope: exception.scope) }
+            var note = leadNote(.context, exception.text, on: slug)
+            guard note.seal != nil else {
+                throw Problem(text: "Not recorded: the session host didn't seal the exception as yours, and an unsealed one counts for nothing. Nothing was changed.")
+            }
+            note.exception = exception
+            exceptionNote = note
+        }
+        let branchAt = (given != nil || holdAudit != nil) ? branchHead(Worktrees.branch(slug)) : nil
         // Codex's work is always audited: review none isn't taken while its worker is Codex or once Codex worked on it.
         if givenReview == LeadTask.Review.none, let task = store.loadAll().task(slug),
            let why = (agent.map { changed -> LeadTask in var task = task; task.agent = changed; return task } ?? task).codexAudit {
@@ -1396,9 +1428,35 @@ public final class LeadToolset: MCPToolset {
         let usage = ending == nil ? nil : store.load().task(slug).map(receiptUsage)
         var changed: [String] = []
         var contractVersion: Int?
+        // The audit already started when this exception or hold arrived: as the board's lock has it.
+        var started: LeadAuditOpening?
         try boardChange { board in
             // A task in the board's archive comes back to be changed (reopened, renamed).
             guard let index = store.restore(slug, into: &board) else { return }
+            if let exceptionNote {
+                guard ![.done, .reverted, .folded, .abandoned].contains(board.tasks[index].status) else {
+                    throw BoardError(text: "\(slug) is \(board.tasks[index].status.rawValue): there's nothing left for an exception to cover. Nothing was changed.")
+                }
+                board.tasks[index].keep(exceptionNote)
+                // It's in: an audit held for it can start.
+                if board.tasks[index].auditHeld != nil {
+                    board.tasks[index].auditHeld = nil
+                    changed.append("audit no longer held")
+                }
+                let exception = exceptionNote.exception
+                changed.append("exception recorded (accepting edits to \(exception?.accepts.joined(separator: ", ") ?? ""))")
+                if exception?.settles != nil, board.tasks[index].status == .failed, board.tasks[index].setback?.stage == .review {
+                    board.tasks[index].status = .review
+                    board.tasks[index].setback = nil
+                    changed.append("verdict settled: it goes on to merge with no new audit")
+                }
+            }
+            if let holdAudit {
+                board.tasks[index].auditHeld = holdAudit ? Date().timeIntervalSince1970 : nil
+                changed.append(holdAudit ? "audit held" : "audit no longer held")
+            }
+            // Its audit has started on the branch as it is now, in the same lock as what was just kept.
+            if exceptionNote != nil || holdAudit == true, let opening = board.tasks[index].auditOpening, opening.commit == branchAt { started = opening }
             if let status, board.tasks[index].status == .reverted {
                 throw BoardError(text: "\(slug) was merged and reverted\(board.tasks[index].merged?.revertedBy.map { " (by \($0.prefix(8)))" } ?? ""); it stays reverted, not \(status.rawValue). To do its work again, add_task a new task. Nothing was changed.")
             }
@@ -1538,10 +1596,180 @@ public final class LeadToolset: MCPToolset {
             return MCPToolResult(text: (changed.isEmpty ? "" : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded) ") + (try rerollTask(slug)))
         }
         let goOn = budgetCleared && status == nil ? " If its worker stopped for the budget, message(\(slug), …) to tell it to go on." : ""
+        var heldSaid = ""
+        if let exceptionNote {
+            let exception = exceptionNote.recordedException
+            try? store.appendProgress("Exception on \(slug) by \(exceptionNote.by): edits to \(exception?.accepts.joined(separator: ", ") ?? "?") accepted. Reason: \(Self.clip(exception?.reason ?? "", 200))")
+            if let settles = exception?.settles {
+                try? store.appendProgress("\(exceptionNote.by) accepted the \(settles.integrity.rawValue) verdict on \(slug) at \(settles.commit.prefix(8)) "
+                                          + "as an exception: it named only \(settles.files.joined(separator: ", ")), outside the boundaries. It goes on to merge with no new audit")
+            }
+            heldSaid = " " + (started.map { opening in
+                "It isn't presented as covering the audit of \(slug) at \(opening.commit.prefix(8)) that started at \(LeadBoard.clock(opening.at)), before it was recorded: "
+                    + "that audit's verifiers have the notes as they stood then. Its next audit's verifier sees it."
+            } ?? "Its next audit's verifier sees it in the lead's notes.")
+            if let opening = started, let settles = exception?.settles {
+                heldSaid += " The verdict at \(settles.commit.prefix(8)) stands as what its verifier said; this is your acceptance on top of it (\(opening.commit.prefix(8))'s audit didn't weigh it)."
+            }
+        } else if holdAudit == true, let started {
+            heldSaid = " The audit at \(started.commit.prefix(8)) had started already (\(LeadBoard.clock(started.at))): it runs on; the hold is for the next one."
+        }
         // An audit under way judges the new version: its verifiers are sent what changed, at their next step. So is a
         // worker at work: its report answers to the new version.
         let heard = contractVersion == nil ? "" : [sendContractChange(slug), sendWorkerContractChange(slug)].compactMap { $0.map { " " + $0 } }.joined()
-        return MCPToolResult(text: changed.isEmpty ? "Nothing to change on \(slug)." : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded)\(goOn)\(heard)")
+        return MCPToolResult(text: changed.isEmpty ? "Nothing to change on \(slug)." : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded)\(goOn)\(heard)\(heldSaid)")
+    }
+
+    // MARK: Exceptions
+
+    /// update_task's `exception`: scope, reason and evidence, each required; nil when none was given.
+    static func exceptionArgument(_ value: Any?) throws -> LeadException? {
+        guard let value, !(value is NSNull) else { return nil }
+        var parsed = value as? [String: Any]
+        if parsed == nil, let text = value as? String, let data = text.data(using: .utf8) {
+            parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        }
+        guard let object = parsed else {
+            throw Problem(text: "exception is an object of scope, reason and evidence, not \(value). Nothing was changed.")
+        }
+        let unknown = Set(object.keys).subtracting(["scope", "reason", "evidence"])
+        guard unknown.isEmpty else {
+            throw Problem(text: "exception doesn't take \(unknown.sorted().joined(separator: ", ")); it takes scope, reason and evidence. Nothing was changed.")
+        }
+        let scope: [String]
+        switch object["scope"] {
+        case let one as String: scope = [one]
+        case let many as [String]: scope = many
+        case nil, is NSNull: scope = []
+        default: throw Problem(text: "An exception's scope is files or a glob: a string, or a list of strings. Nothing was changed.")
+        }
+        let cleaned = scope.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        let text = { (key: String) in (object[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+        var missing: [String] = []
+        if cleaned.isEmpty { missing.append("scope (files or a glob)") }
+        if text("reason").isEmpty { missing.append("reason") }
+        if text("evidence").isEmpty { missing.append("evidence") }
+        guard missing.isEmpty else {
+            throw Problem(text: "Not recorded: this exception is missing its \(missing.joined(separator: ", ")). An exception needs scope, reason and evidence, all three. Nothing was changed.")
+        }
+        for entry in cleaned {
+            if let problem = Self.scopeProblem(entry) { throw Problem(text: "Not recorded: \(problem) Nothing was changed.") }
+        }
+        return LeadException(scope: cleaned.map { $0.hasPrefix("./") ? String($0.dropFirst(2)) : $0 }, reason: text("reason"), evidence: text("evidence"))
+    }
+
+    /// Why `entry` can't be an exception's scope (nil: it can). Unusual input is refused, not guessed at.
+    static func scopeProblem(_ entry: String) -> String? {
+        if entry.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) { return "a scope is one path or glob on a line, not \(entry.debugDescription)." }
+        if entry.hasPrefix("/") || entry.hasPrefix("~") { return "a scope is relative to the repository's root, not \(entry)." }
+        if entry.split(separator: "/", omittingEmptySubsequences: false).contains("..") { return "a scope stays inside the repository; \(entry) climbs out of it." }
+        // A glob for every path accepts everything: that's no exception.
+        let bare = entry.hasPrefix("./") ? String(entry.dropFirst(2)) : entry
+        if LeadWorkflow.matches("zz-probe.x", glob: bare), LeadWorkflow.matches("qq-probe/zz-probe.x", glob: bare) {
+            return "\(entry) matches every path in the repository; name the files or the folder it covers."
+        }
+        return nil
+    }
+
+    /// `accept_verdict` or `hold_audit`: true or false; nil when none was given.
+    static func flagArgument(_ arguments: [String: Any], _ key: String) throws -> Bool? {
+        guard let given = arguments[key], !(given is NSNull), !((given as? String)?.isEmpty ?? false) else { return nil }
+        if let flag = given as? Bool { return flag }
+        guard let text = given as? String, let flag = LeadWorkflow.flag(text) else {
+            throw Problem(text: "\(key) is true or false, not \(given). Nothing was changed.")
+        }
+        return flag
+    }
+
+    /// A verdict held up only by edits outside the boundaries: the files, and those of them on sensitive paths.
+    struct BoundaryConcern: Equatable {
+        let files: [String]
+        let sensitive: [String]
+    }
+
+    /// `verdict` as one the lead settles, not the worker: suspect, complete, its tests passed, no Important finding live
+    /// (an unconfirmed one included) on its audit's ledger, and files outside the boundaries named by its verifier that
+    /// are all among the branch's changes. Nil for any other verdict (one that names a file the branch didn't change, or
+    /// a diff that can't be read, too), which is handled as ever.
+    func boundaryConcern(_ slug: String, _ verdict: LeadVault.Verdict) -> BoundaryConcern? {
+        guard verdict.integrity == .suspect, verdict.completion == .complete, verdict.tests == .passed,
+              let files = verdict.outsideBoundaries, !files.isEmpty,
+              let ledger = vault.audits(root: root, task: slug), ledger.commit == verdict.commit,
+              !ledger.findings.contains(where: { $0.severity == .important && $0.isLive }) else { return nil }
+        let workflow = self.workflow
+        let diff = Self.changedFiles("\(workflow.base)...\(verdict.commit)", root: root)
+        guard diff.ok else { return nil }
+        let changed = Set(diff.output.split(whereSeparator: \.isNewline).map(String.init))
+        guard files.allSatisfy(changed.contains) else { return nil }
+        return BoundaryConcern(files: files.sorted(), sensitive: files.filter { path in workflow.sensitiveGlobs.contains { LeadWorkflow.matches(path, glob: $0) } }.sorted())
+    }
+
+    /// What accept_verdict settles, for an exception of `scope`; throws why it can't be settled so.
+    private func settlement(of slug: String, scope: [String]) throws -> LeadException.Settled {
+        let head = branchHead(Worktrees.branch(slug))
+        guard let verdict = vault.verdict(root: root, task: slug), verdict.commit == head else {
+            throw Problem(text: "Not accepted: \(slug) has no verdict on its branch's head to accept. Record the exception without accept_verdict, and its next audit's verifier sees it. Nothing was changed.")
+        }
+        guard let concern = boundaryConcern(slug, verdict) else {
+            throw Problem(text: "Not accepted: \(slug)'s verdict at \(verdict.commit.prefix(8)) (\(verdict.completion.rawValue), \(verdict.integrity.rawValue)) isn't one accept_verdict settles: "
+                          + "that's a suspect, complete verdict with its tests passing, no Important finding live, and its only concern files outside the boundaries that its verifier named. "
+                          + "Handle this one as ever (message the worker, or re-plan). Nothing was changed.")
+        }
+        guard concern.sensitive.isEmpty else {
+            throw Problem(text: "Not accepted: \(concern.sensitive.joined(separator: ", ")) is on a sensitive path, and an exception doesn't skip the audit of one. "
+                          + "Record the exception without accept_verdict and audit(\(slug)) again, so its verifier weighs it; or send it back with message. Nothing was changed.")
+        }
+        let uncovered = concern.files.filter { file in !scope.contains { LeadWorkflow.matches(file, glob: $0) } }
+        guard uncovered.isEmpty else {
+            throw Problem(text: "Not accepted: the exception's scope doesn't cover \(uncovered.joined(separator: ", ")), which the verdict names. Widen the scope to name \(uncovered.count == 1 ? "it" : "them"), or send the work back with message. Nothing was changed.")
+        }
+        return LeadException.Settled(commit: verdict.commit, verifier: verdict.verifier, integrity: verdict.integrity,
+                                     summary: Self.clip(verdict.summary, 300), files: concern.files)
+    }
+
+    /// The lead's sealed acceptance of `verdict` as an exception, when there is one and the verdict still stands that
+    /// way: only for the very verdict it names (commit and verifier), only the files that verdict names, every one in the
+    /// exception's scope, none sensitive. Nil else; a note that isn't the lead's (`leadNotes`) never gets here.
+    func acceptedException(_ task: LeadTask, _ verdict: LeadVault.Verdict) -> LeadException? {
+        guard let concern = boundaryConcern(task.slug, verdict), concern.sensitive.isEmpty else { return nil }
+        return leadNotes(task).lead.reversed().lazy.compactMap(\.recordedException).first { exception in
+            guard let settles = exception.settles, settles.commit == verdict.commit, settles.verifier == verdict.verifier,
+                  settles.integrity == verdict.integrity, settles.files.sorted() == concern.files else { return false }
+            return concern.files.allSatisfy { file in exception.scope.contains { LeadWorkflow.matches(file, glob: $0) } }
+        }
+    }
+
+    /// The lead's report's closing for a verdict it settles (`BoundaryConcern`).
+    static func settleText(_ concern: BoundaryConcern, of slug: String) -> String {
+        let files = concern.files.joined(separator: ", ")
+        var text = "This verdict's only concern is an edit outside the boundaries (\(files)), with no Important finding and its tests passing: it's yours to settle, and it doesn't go back to the worker by itself. "
+        if concern.sensitive.isEmpty {
+            text += "Accept it: update_task(\(slug), exception: {scope, reason, evidence}, accept_verdict: true) and it goes on to merge with no new audit. Or send it back with message."
+        } else {
+            text += "\(concern.sensitive.joined(separator: ", ")) is on a sensitive path, so accepting it doesn't skip the audit: record the exception (update_task(\(slug), exception: {…})) and audit(\(slug)) again, or send it back with message."
+        }
+        return text
+    }
+
+    /// Takes the audit's start: its hold checked and its notes read in one step under the board's lock, so an exception
+    /// recorded before this is in the verifier's prompt and one recorded after is told it isn't (`LeadAuditOpening`). The
+    /// board's task, with the notes as they are now: the caller may have loaded it minutes ago, before the audit's test run.
+    private func openAudit(_ slug: String, head: String, not: String) throws -> LeadTask {
+        var opened: LeadTask?
+        var held = false
+        try store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            guard board.tasks[index].auditHeld == nil else { held = true; return }
+            board.tasks[index].auditOpening = LeadAuditOpening(commit: head, notes: (board.tasks[index].notes ?? []).map(\.id))
+            opened = board.tasks[index]
+        }
+        if held { throw Problem(text: Self.auditHeldRefusal(slug, not: not)) }
+        guard let opened else { throw Problem(text: "No task \(slug).") }
+        return opened
+    }
+
+    static func auditHeldRefusal(_ slug: String, not: String) -> String {
+        "\(not): the lead held \(slug)'s audit (update_task hold_audit). It starts once an exception is recorded (update_task(\(slug), exception: {scope, reason, evidence})), or with hold_audit: false."
     }
 
     /// `text` added to `task`'s contract context as a paragraph of its own; a contract it changed is a new version, as
@@ -2347,6 +2575,8 @@ public final class LeadToolset: MCPToolset {
         // A verifier already at work on the branch's head is left to it: another would end it and throw its work away
         // (2026-10-27: audit(land-pr-1-host) ended the one auto_advance had started on that very head).
         if !restart, let running = try runningAudit(slug) { return MCPToolResult(text: running) }
+        // Before anything is built or tested for it; `openAudit` looks again as the audit starts.
+        if store.load().task(slug)?.auditHeld != nil { throw Problem(text: Self.auditHeldRefusal(slug, not: "Not audited, no verifier started")) }
         try checkBattery(not: "Not audited, no verifier started")
         // A worktree that left its branch goes back on it first (see putBackForAudit).
         let putBack = try store.load().task(slug).map { try putBackForAudit(slug, $0) } ?? ""
@@ -2365,7 +2595,7 @@ public final class LeadToolset: MCPToolset {
         // Only a verdict that let it merge (passing, or failed only on findings the lead dismissed): one that failed
         // otherwise judged nothing to narrow a re-audit to, and this audit checks the whole branch as ever.
         let stale = verdict.flatMap { verdict in
-            verdict.commit == head && (verdict.passes || verdict.dismissed(in: vault.audits(root: root, task: slug)) != nil) ? Self.staleVerdict(task) : nil
+            verdict.commit == head && (verdict.passes || verdict.dismissed(in: vault.audits(root: root, task: slug)) != nil || acceptedException(task, verdict) != nil) ? Self.staleVerdict(task) : nil
         }
         if let verdict, verdict.passes, verdict.commit == head, stale == nil,
            hold(slug, vault.audits(root: root, task: slug), head: head).isEmpty {
@@ -2427,6 +2657,9 @@ public final class LeadToolset: MCPToolset {
         let earlier: String
         // The audit starts here (a merged result's test run is part of it): its wait ends, its time begins.
         let auditStart = Date().timeIntervalSince1970
+        // An audit that didn't start after all is no audit an exception came too late for.
+        var launched = false
+        defer { if !launched { closeOpening(slug, since: auditStart) } }
         if finders > 1 {
             let started = try startFinders(finders, task: task, head: head, merged: merged, workflow: workflow, recheck: recheck, amended: amendedScope,
                                            trust: config.isEmpty, expectedHead: expectedHead)
@@ -2443,11 +2676,13 @@ public final class LeadToolset: MCPToolset {
             if let expectedHead, branchHead(Worktrees.branch(slug)) != expectedHead {
                 throw Problem(text: "Not restarted: \(slug) moved since the interrupted audit at \(expectedHead.prefix(8)).")
             }
+            // Notes as they are now: a merged result's test run may have taken minutes since `task` was read.
+            let opened = try openAudit(slug, head: head, not: "Not audited, no verifier started")
             earlier = try endEarlierVerifiers(task, not: "Not audited, no verifier started")
             session = try launch(.verifier, task: slug, name: "verify-\(slug)", in: Worktrees.path(root: root, slug: slug),
                                  label: "Verifier: \(task.title)", trust: config.isEmpty,
                                  prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, amended: amendedScope, merged: merged,
-                                                              notes: leadNotes(task), report: doneReport(task, head: head),
+                                                              notes: leadNotes(opened), report: doneReport(task, head: head),
                                                               guide: LeadRisk.reviewGuide(root: root, base: workflow.base),
                                                               security: Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised)),
                                  start: "Verify the task now, then call submit_audit.", model: auditModel(workflow, task: task), auditing: head)
@@ -2464,6 +2699,7 @@ public final class LeadToolset: MCPToolset {
             if ![.kept, .folded, .abandoned, .reverted].contains(board.tasks[index].status) { board.tasks[index].status = .review }
             board.tasks[index].evidence = nil
         }
+        launched = true
         // An update_task while it started went to no verifier yet (the board named none, or the one before): sent now.
         let amended = sendContractChange(slug).map { " " + $0 } ?? ""
         // The verifier is up: its worker, idle since its done report, needn't hold a Mac slot through the audit.
@@ -2602,7 +2838,9 @@ public final class LeadToolset: MCPToolset {
         let focuses = LeadPrompts.Focus.panel(count, sensitive: !sensitive.isEmpty)
         let strict = workflow.strictGlobs == nil ? [] : workflow.strictTouched(
             Self.changedFiles("\(workflow.base)...\(head)", root: root).output.split(whereSeparator: \.isNewline).map(String.init))
-        let notes = leadNotes(task), report = doneReport(task, head: head), guide = LeadRisk.reviewGuide(root: root, base: workflow.base)
+        // Notes as they are now, after the shared run above.
+        let opened = try openAudit(slug, head: head, not: "Not audited, no finder started")
+        let notes = leadNotes(opened), report = doneReport(task, head: head), guide = LeadRisk.reviewGuide(root: root, base: workflow.base)
         let security = Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised, sensitive: sensitive)
         let earlier = try endEarlierVerifiers(task, not: "Not audited, no finder started")
         let id = UUID().uuidString
@@ -2814,6 +3052,14 @@ public final class LeadToolset: MCPToolset {
         return "\(slug)'s worktree was on \(was), not on \(branch); it's back on \(branch) (nothing there that \(branch) lacks). "
     }
 
+    /// Takes back the opening (`LeadAuditOpening`) of an audit that didn't start after all, if it's still this one's.
+    private func closeOpening(_ slug: String, since: Double) {
+        try? store.update { board in
+            guard let index = board.taskIndex(slug), let opening = board.tasks[index].auditOpening, opening.at >= since else { return }
+            board.tasks[index].auditOpening = nil
+        }
+    }
+
     /// The lead's note on `slug`, sealed by the session host as the lead's (unsealed when the host doesn't answer: the
     /// verifier is then told it isn't the lead's word, see `leadNotes`).
     private func leadNote(_ kind: LeadNote.Kind, _ text: String, on slug: String) -> LeadNote {
@@ -3012,6 +3258,8 @@ public final class LeadToolset: MCPToolset {
         let audited: Bool
         let dismissed: [LeadFinding]
         var staleAccepted: (stale: StaleVerdict, reason: String)? = nil
+        /// The lead's exception that settles a suspect verdict held up only by edits outside the boundaries.
+        var accepted: LeadException? = nil
     }
 
     /// A verdict that judged an older version of its task's contract than the task has now: the lead amended the
@@ -3072,13 +3320,16 @@ public final class LeadToolset: MCPToolset {
         // The Important findings the lead dismissed on a verdict that failed only on them (see `Verdict.dismissed`).
         var dismissed: [LeadFinding] = []
         var staleAccepted: (stale: StaleVerdict, reason: String)?
+        var accepted: LeadException?
         // The verdict as the verifier's own tool server recorded it in the vault (the board's copy is for showing):
         // from the verifier VibeSwitcher started last for this task, on the commit it was started on.
         if let verdict = vault.verdict(root: root, task: slug) {
             if !verdict.passes {
                 let ledger = vault.audits(root: root, task: slug)
-                if let accepted = verdict.dismissed(in: ledger) {
-                    dismissed = accepted
+                if let waived = verdict.dismissed(in: ledger) {
+                    dismissed = waived
+                } else if let exception = acceptedException(task, verdict) {
+                    accepted = exception
                 } else if !(verdict.completion == .complete && verdict.tests == .passed && ledger?.commit == verdict.commit && ledger?.blocking.isEmpty == false) {
                     throw Problem(text: vault.missingVerdictReason(root: root, task: slug)
                         ?? "\(slug) has no passing audit. Run audit: merge takes a complete, clean verdict" + Self.notDismissable(verdict) + ".")
@@ -3127,7 +3378,7 @@ public final class LeadToolset: MCPToolset {
         }
         try checkMergePolicy(task, commit: commit)
         try checkRemoteCarried(slug, commit: commit, fetched: fetched)
-        return MergeGate(task: task, commit: commit, audited: audited, dismissed: dismissed, staleAccepted: staleAccepted)
+        return MergeGate(task: task, commit: commit, audited: audited, dismissed: dismissed, staleAccepted: staleAccepted, accepted: accepted)
     }
 
     private func merge(_ slug: String, acceptStale: String? = nil, locked: (() -> Void)? = nil) throws -> MCPToolResult {
@@ -3338,6 +3589,7 @@ public final class LeadToolset: MCPToolset {
                 ? " (merged without tests: no test_command\(workflow.problem.map { "; \($0)" } ?? ""). Set one with configure.)" : ""
             try? store.appendProgress("Merged \(slug): \(task.title)\(untested.isEmpty ? "" : " (without tests: no test_command)")\(audited ? "" : " (no audit: review none)")"
                 + (dismissed.isEmpty ? "" : " (its audit's Important findings dismissed by the lead: \(dismissed.map(\.id).joined(separator: ", ")))")
+                + ((gate.accepted?.settles).map { " (its \($0.integrity.rawValue) audit accepted by the lead as an exception for \($0.files.joined(separator: ", ")))" } ?? "")
                 + (gate.staleAccepted.map { " (on a verdict that \($0.stale.text), accepted by the lead: \(Redaction.secrets(in: Self.clip($0.reason, 400))))" } ?? "")
                 + buildNote)
             let ran = workflow.regressionCommand == nil ? "" : " (regression_command passed too.)"
@@ -3348,6 +3600,7 @@ public final class LeadToolset: MCPToolset {
             let evidence = kept?.reported == commit ? kept?.evidence.map { " Its worker's evidence: \($0.brief())" } ?? "" : ""
             let overruled = dismissed.isEmpty ? "" : " (Its audit was complete with its tests passing, and \(dismissed.count == 1 ? "the one Important finding that failed it" : "the \(dismissed.count) Important findings that failed it") you dismissed: "
                 + dismissed.map { "\($0.id) \($0.place) (\(Self.clip($0.reason ?? "", 120)))" }.joined(separator: "; ") + ".)"
+            let excepted = (gate.accepted?.settles).map { " (Its audit was \($0.integrity.rawValue) only for \($0.files.joined(separator: ", ")), outside the boundaries, which you accepted as an exception.)" } ?? ""
             var flakeNote = ""
             if let flaked {
                 let names = flakes.joined(separator: ", ")
@@ -3371,7 +3624,7 @@ public final class LeadToolset: MCPToolset {
             let caughtUp = tellToCatchUp(merged: slug, from: current, to: tested, base: base)
             archiveFinished(force: false)
             let staleNote = gate.staleAccepted.map { " (Its passing audit \($0.stale.text): merged on it with your reason, in the progress log.)" } ?? ""
-            let reply = "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(overruled)\(staleNote)\(unaudited)\(ran)\(patience)\(evidence)\(flakeNote)\(caughtUp)"
+            let reply = "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(overruled)\(excepted)\(staleNote)\(unaudited)\(ran)\(patience)\(evidence)\(flakeNote)\(caughtUp)"
             // An error, so auto_advance tells the lead too; the board and the branch already say merged.
             if let unrecorded { throw Problem(text: "\(unrecorded) \(reply)") }
             return MCPToolResult(text: reply)
@@ -4807,11 +5060,13 @@ public final class LeadToolset: MCPToolset {
         let blocking = hold.findings
         // Why it's audited; with neither that nor a standing verdict, the merge's own test run is its check.
         let needed = standing == nil && done ? reviewNeeded(slug, commit: head) : nil
+        // A verdict the lead settled as an exception stands too: a repeated done doesn't undo that.
+        let settled = standing.flatMap { verdict in store.load().task(slug).flatMap { acceptedException($0, verdict) } } != nil
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             // Kept, folded, abandoned or reverted by the lead: a late report doesn't change that.
             if ![.kept, .folded, .abandoned, .reverted].contains(board.tasks[index].status) {
-                board.tasks[index].status = !done ? .blocked : standing.map { $0.passes && blocking.isEmpty ? .review : .failed } ?? .review
+                board.tasks[index].status = !done ? .blocked : standing.map { ($0.passes || settled) && blocking.isEmpty ? .review : .failed } ?? .review
             }
             if let standing {
                 if board.tasks[index].evidence?.commit != standing.commit {
@@ -5024,6 +5279,7 @@ public final class LeadToolset: MCPToolset {
             return tests
         }
         let stated = try Self.contractVersionArgument(arguments["contract_version"])
+        let outside = try Self.outsideBoundariesArgument(arguments["outside_boundaries"], integrity: integrity)
         let (reports, demoted) = try Self.parsedFindings(arguments["findings"])
         let demotedText = demoted.isEmpty ? "" : " Recorded as Nit\(demoted.count == 1 ? "" : "s"), having no failure_scenario: \(demoted.joined(separator: ", ")) (Important needs one)."
         // Checked here first against what a re-audit covers (the vault has no git; see reauditScope), then by the vault.
@@ -5049,7 +5305,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].auditBrief = brief
         }
         let submission: LeadVault.Submission
-        do { submission = try vault.submit(root: root, completion: completion, integrity: integrity, summary: summary, findings: reports, tests: tests) } catch {
+        do { submission = try vault.submit(root: root, completion: completion, integrity: integrity, summary: summary, findings: reports, tests: tests, outsideBoundaries: outside) } catch {
             throw Problem(text: "\(error)")
         }
         let finder = member.finder?.index
@@ -5119,6 +5375,8 @@ public final class LeadToolset: MCPToolset {
         } else if !blocking.isEmpty {
             text += (hold.held.isEmpty ? "" : "Held by strict_paths: \(hold.held.map { "\(slug):\($0.id)" }.joined(separator: ", ")). ")
                 + "merge refuses while an Important finding is open: send the worker the open ones (message, with their ids; it answers each with answer_findings, fixed or disagree with a reason, and the re-audit judges the answers), or dismiss_finding one with a reason, or add_task(from_finding: …) to move it to a task of its own."
+        } else if !evidence.passes, let concern = boundaryConcern(slug, verdict) {
+            text += Self.settleText(concern, of: slug)
         } else if !evidence.passes {
             text += "Send the worker the findings with message, or re-plan the task."
         } else if ledger?.open.isEmpty == false, stale == nil {
@@ -5135,6 +5393,19 @@ public final class LeadToolset: MCPToolset {
         let told = try tellLead(text.trimmingCharacters(in: .whitespacesAndNewlines), about: "verifier \(slug)")
         let recorded = submission.of > 1 ? "Your findings are in, the last of \(submission.of): the vote is done and its verdict recorded." : "Verdict recorded."
         return MCPToolResult(text: recorded + demotedText + " You're done; the lead takes it from here." + (told ? "" : Self.noLead))
+    }
+
+    /// submit_audit's `outside_boundaries`: the files as given; nil when none was. Refused when it can't be what it says.
+    static func outsideBoundariesArgument(_ value: Any?, integrity: LeadEvidence.Integrity) throws -> [String]? {
+        guard let value, !(value is NSNull) else { return nil }
+        guard let files = value as? [String], files.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && scopeProblem($0) == nil }) else {
+            throw Problem(text: "outside_boundaries is a list of file paths from the repository's root. Nothing was recorded; call submit_audit again.")
+        }
+        guard !files.isEmpty else { return nil }
+        guard integrity != .clean else {
+            throw Problem(text: "outside_boundaries goes with integrity suspect (edits outside the boundaries are its only concern), not clean. Nothing was recorded; call submit_audit again.")
+        }
+        return files
     }
 
     /// submit_audit's findings as the verifier passed them (a list of objects, or that list as JSON text).
@@ -6002,6 +6273,12 @@ public final class LeadToolset: MCPToolset {
                 }
                 if audits.reconsider, ![.done, .reverted].contains(task.status) { lines.append(Self.reconsiderText(audits, of: task.slug)) }
             }
+            if task.auditHeld != nil { lines.append("\nAudit held by the lead (hold_audit): no audit starts until an exception is recorded, or hold_audit: false.") }
+            let exceptions = leadNotes(task).lead.filter { $0.recordedException != nil }
+            if !exceptions.isEmpty {
+                lines.append("\nExceptions (oldest first):")
+                lines += exceptions.map { "- \(LeadBoard.clock($0.at)) by \($0.by): \($0.text)" }
+            }
             let reports = (board.reports ?? []).filter { $0.task == task.slug }
             lines.append(reports.isEmpty ? "\nNo reports about it on the board." : "\nReports about it (oldest first):")
             lines += reports.map { "- \(LeadBoard.clock($0.at)) \($0.about): \($0.text)" }
@@ -6147,9 +6424,11 @@ public enum LeadAuditVote {
         public var findings: [LeadFinding.Report]
         /// How its tests went, as it said (optional: ballots from before it was asked have none).
         public var tests: LeadVault.TestRun?
+        /// The files outside the boundaries that are its only integrity concern, when it named them.
+        public var outsideBoundaries: [String]?
 
         public init(finder: Int, focus: String, completion: LeadEvidence.Completion, integrity: LeadEvidence.Integrity,
-                    summary: String, findings: [LeadFinding.Report], tests: LeadVault.TestRun? = nil) {
+                    summary: String, findings: [LeadFinding.Report], tests: LeadVault.TestRun? = nil, outsideBoundaries: [String]? = nil) {
             self.finder = finder
             self.focus = focus
             self.completion = completion
@@ -6157,6 +6436,7 @@ public enum LeadAuditVote {
             self.summary = summary
             self.findings = findings
             self.tests = tests
+            self.outsideBoundaries = outsideBoundaries
         }
 
         public var passes: Bool { completion == .complete && integrity == .clean }
@@ -6203,6 +6483,9 @@ public enum LeadAuditVote {
         public var outcome: Outcome
         /// Failed when any finder's did; passed when one's did and none failed; nil when none said either.
         public var tests: LeadVault.TestRun? = nil
+        /// The files outside the boundaries that are the vote's only integrity concern: every finder that wasn't
+        /// clean said suspect and named its files. Nil else: any other concern, and the verdict is handled as ever.
+        public var outsideBoundaries: [String]? = nil
 
         public var passes: Bool { completion == .complete && integrity == .clean }
     }
@@ -6320,7 +6603,15 @@ public enum LeadAuditVote {
             .joined(separator: "\n") + "\n" + outcome.text + "."
         let said = ballots.compactMap(\.tests)
         let tests: LeadVault.TestRun? = said.contains(.failed) ? .failed : said.contains(.passed) ? .passed : said.first
-        return Result(reports: reports, unconfirmed: doubted, completion: completion, integrity: integrity, summary: summary, outcome: outcome, tests: tests)
+        return Result(reports: reports, unconfirmed: doubted, completion: completion, integrity: integrity, summary: summary, outcome: outcome, tests: tests,
+                      outsideBoundaries: onlyOutsideBoundaries(ballots))
+    }
+
+    /// The files of `ballots`' only integrity concern (see `Result.outsideBoundaries`).
+    static func onlyOutsideBoundaries(_ ballots: [Ballot]) -> [String]? {
+        let concerned = ballots.filter { $0.integrity != .clean }
+        guard !concerned.isEmpty, concerned.allSatisfy({ $0.integrity == .suspect && !($0.outsideBoundaries ?? []).isEmpty }) else { return nil }
+        return Array(Set(concerned.flatMap { $0.outsideBoundaries ?? [] })).sorted()
     }
 
     /// What most said; without a majority, the worst any said (`worse`: best first).

@@ -121,6 +121,7 @@ public struct LeadCheckpoint: Codable, Equatable, Sendable {
 /// the lead accepted here is in scope (twice on 2026-10-19 a branch was marked suspect for wiring the lead had approved
 /// by message, and audited again in full on the same commit). Sealed by the session host as the lead's when written
 /// (see `SteerInbox.seal`; the board is a file anyone's Bash can write): only a note whose seal holds is the lead's.
+/// `exception`: the note is an exception the lead recorded (`LeadException`), whose canonical text is the note's `text`.
 public struct LeadNote: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable {
         /// Appended to the task's context.
@@ -136,6 +137,8 @@ public struct LeadNote: Codable, Equatable, Sendable {
     public var by: String
     public var at: Double
     public var seal: String?
+    /// The exception this note records, when it is one; counts only with a seal that holds (see `recordedException`).
+    public var exception: LeadException?
 
     public init(id: String = UUID().uuidString, kind: Kind, text: String, by: String, at: Double = Date().timeIntervalSince1970) {
         self.id = id
@@ -145,12 +148,87 @@ public struct LeadNote: Codable, Equatable, Sendable {
         self.at = at
     }
 
+    /// The exception this note records, when its structured form is the very text its seal covers: an `exception`
+    /// written onto a sealed note by hand (the board is a file anyone's Bash can write) renders to other words and
+    /// counts for nothing.
+    public var recordedException: LeadException? {
+        guard let exception, exception.text == text else { return nil }
+        return exception
+    }
+
     /// The message its seal is made for: the task and the kind are in its id, so a note sealed for one task (or as a
     /// message) doesn't hold copied onto another (or as appended context).
     public func sealed(task: String) -> SteerMessage {
         var message = SteerMessage(id: "note \(task) \(kind.rawValue) \(id)", text: text, from: .lead(by), agentPid: 0, at: at)
         message.seal = seal
         return message
+    }
+}
+
+/// A deviation from a task's contract the lead accepted (update_task's `exception`): which paths, why, and what shows
+/// it's right. Recorded as a sealed note, so its verifier reads it in the lead's notes before the audit starts
+/// (2026-11-07: terminal-panes-text-can and chat-view-copying-text came back suspect only for a sandbox edit the lead's
+/// free-text note hadn't covered, the second because the note landed after auto_advance had started the verifier).
+/// It decides nothing about review: no floor, no sensitive path, no audit goes by it.
+public struct LeadException: Codable, Equatable, Sendable {
+    /// The verdict this exception settles: a suspect one whose only concern was these files (accept_verdict).
+    public struct Settled: Codable, Equatable, Sendable {
+        public var commit: String
+        public var verifier: String
+        public var integrity: LeadEvidence.Integrity
+        public var summary: String
+        /// The files the verifier named, and all it covers: a scope wider than them accepts nothing more.
+        public var files: [String]
+
+        public init(commit: String, verifier: String, integrity: LeadEvidence.Integrity, summary: String, files: [String]) {
+            self.commit = commit
+            self.verifier = verifier
+            self.integrity = integrity
+            self.summary = summary
+            self.files = files
+        }
+    }
+
+    /// Paths from the repository's root, or globs as in .gitignore.
+    public var scope: [String]
+    public var reason: String
+    public var evidence: String
+    public var settles: Settled?
+
+    public init(scope: [String], reason: String, evidence: String, settles: Settled? = nil) {
+        self.scope = scope
+        self.reason = reason
+        self.evidence = evidence
+        self.settles = settles
+    }
+
+    /// What it accepts: the verdict's own files when it settles one (a wider scope covers nothing beyond them, in a
+    /// later audit's notes too), else its scope.
+    public var accepts: [String] { settles?.files ?? scope }
+
+    /// Its words in the lead's notes, and what the note's seal covers: everything that counts is in them.
+    public var text: String {
+        var text = "Exception to the boundaries, accepted by the lead. It accepts edits to \(accepts.joined(separator: ", ")) and nothing else. "
+            + "Reason: \(reason) Evidence: \(evidence)"
+        if let settles {
+            text += " It settles the \(settles.integrity.rawValue) verdict at \(settles.commit) (verifier \(settles.verifier)), "
+                + "whose only concern was the edit to \(settles.files.joined(separator: ", ")): \(settles.summary)"
+        }
+        return text
+    }
+}
+
+/// An audit's start, taken in one step with the check of its hold (see `LeadToolset.openAudit`): the commit, when, and
+/// the notes its verifiers were given. A note that isn't among them isn't presented as covering that audit.
+public struct LeadAuditOpening: Codable, Equatable, Sendable {
+    public var commit: String
+    public var at: Double
+    public var notes: [String]
+
+    public init(commit: String, at: Double = Date().timeIntervalSince1970, notes: [String]) {
+        self.commit = commit
+        self.at = at
+        self.notes = notes
     }
 }
 
@@ -743,6 +821,10 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var contractVersion: Int?
     /// The contract its running (or last) audit's verifiers have, and the version they judged (see `LeadAuditBrief`).
     public var auditBrief: LeadAuditBrief?
+    /// When the lead held its audit (update_task's hold_audit): none starts until an exception is in, or the lead lets go.
+    public var auditHeld: Double?
+    /// Its running (or last) audit's start (see `LeadAuditOpening`).
+    public var auditOpening: LeadAuditOpening?
     /// The contract its worker has (see `LeadWorkerBrief`); nil: no worker started since this was kept.
     public var workerBrief: LeadWorkerBrief?
     /// record_incident planned it on its generic brief: it doesn't start by itself (see `waitsForContract`) until the

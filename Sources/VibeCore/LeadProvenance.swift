@@ -40,8 +40,9 @@ public enum LeadProvenance {
 
     /// The review it merged on: "none" (review none: its worker's done report and the merge's tests), or
     /// "audit (pass at <commit>)", with the Important findings the lead dismissed named when it passed on those.
-    public static func reviewText(audited: Bool, commit: String, dismissed: [String]) -> String {
+    public static func reviewText(audited: Bool, commit: String, dismissed: [String], accepted: Bool = false) -> String {
         guard audited else { return "none" }
+        if accepted { return "audit (suspect, accepted by the lead as an exception at \(commit.prefix(12)))" }
         let verdict = dismissed.isEmpty ? "pass" : "pass, dismissed " + dismissed.joined(separator: " ")
         return "audit (\(verdict) at \(commit.prefix(12)))"
     }
@@ -80,10 +81,10 @@ public enum LeadProvenance {
     }
 
     /// The trailers for `task`'s merge, in order.
-    public static func trailers(task: LeadTask, audited: Bool, commit: String, dismissed: [String], workerModel worker: String?,
+    public static func trailers(task: LeadTask, audited: Bool, commit: String, dismissed: [String], accepted: Bool = false, workerModel worker: String?,
                                 verifierModel verifier: String?, build: ServerBuild?, cliVersion: String?) -> [Worktrees.Trailer] {
         [Worktrees.Trailer(Self.task, clean(task.slug)),
-         Worktrees.Trailer(review, clean(reviewText(audited: audited, commit: commit, dismissed: dismissed))),
+         Worktrees.Trailer(review, clean(reviewText(audited: audited, commit: commit, dismissed: dismissed, accepted: accepted))),
          Worktrees.Trailer(workerModel, clean(worker)),
          Worktrees.Trailer(verifierModel, audited ? clean(verifier) : "none"),
          Worktrees.Trailer(Self.build, clean(buildText(build))),
@@ -113,7 +114,7 @@ extension LeadToolset {
             if worker == nil { worker = usage.worker?.models.first }
             if gate.audited, verifiers.isEmpty, let answered = usage.verifier?.models.first { verifiers = [answered] }
         }
-        return LeadProvenance.trailers(task: task, audited: gate.audited, commit: gate.commit, dismissed: gate.dismissed.map(\.id),
+        return LeadProvenance.trailers(task: task, audited: gate.audited, commit: gate.commit, dismissed: gate.dismissed.map(\.id), accepted: gate.accepted != nil,
                                        workerModel: worker, verifierModel: verifiers.isEmpty ? nil : verifiers.joined(separator: ", "),
                                        build: runningBuild(),
                                        cliVersion: LeadProvenance.cliVersion(root: root, slug: task.slug, since: task.createdAt, home: claudeHome))

@@ -506,7 +506,9 @@ public final class LeadAdvance: @unchecked Sendable {
             guard verdict.commit == head else { return }
             let ledger = vault.audits(root: root, task: slug)
             // Nothing Important open, nor an unconfirmed one held by strict_paths (`LeadToolset.hold`).
-            guard lead.hold(slug, ledger, head: head).isEmpty, verdict.passes || verdict.dismissed(in: ledger) != nil else { return }
+            // Or settled by the lead as an exception to the boundaries (`LeadToolset.acceptedException`).
+            let settled = !verdict.passes && lead.store.load().task(slug).flatMap { lead.acceptedException($0, verdict) } != nil
+            guard lead.hold(slug, ledger, head: head).isEmpty, verdict.passes || verdict.dismissed(in: ledger) != nil || settled else { return }
             // Judged an older version of the contract than it has now: not merged, audited again on what changed.
             if let task = lead.store.load().task(slug), let stale = LeadToolset.staleVerdict(task) {
                 return audit(slug, head: head, busy: busy, why: "not merged: its passing audit \(stale.text), so this re-audit judges "
@@ -530,11 +532,21 @@ public final class LeadAdvance: @unchecked Sendable {
         if let sample = sample(slug, head: head), sample.sampled {
             return audit(slug, head: head, busy: busy, why: "Sampled for audit: \(sample.text).")
         }
+        // Held for an exception: not merged past it, though a review none task has no audit to wait for.
+        if auditHeld(slug, head: head) { return }
         toMerge(Ready(slug: slug, head: head, audited: false), busy: busy, batching: batching)
+    }
+
+    /// The lead holds `slug` for an exception to come first (update_task hold_audit): said once; its recording lets go.
+    private func auditHeld(_ slug: String, head: String) -> Bool {
+        guard lead.store.load().task(slug)?.auditHeld != nil else { return false }
+        once("audit-hold|\(slug)|\(head)", "\(slug)'s audit at \(head.prefix(8)) is held (update_task hold_audit): nothing moves it on until an exception is recorded, or hold_audit: false.")
+        return true
     }
 
     /// Starts `slug`'s audit at `head` (`why`: what sends it there) once the Mac has room for its finders.
     private func audit(_ slug: String, head: String, busy: Bool, why needed: String, key: String? = nil) {
+        if auditHeld(slug, head: head) { return }
         let finders = lead.workflow.findersInForce
         guard !busy, hasRoom(slug, need: finders) else {
             // Raised: the lead hears why now, though its audit waits for the Mac's room.
