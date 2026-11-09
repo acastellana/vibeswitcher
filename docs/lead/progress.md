@@ -2119,3 +2119,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 10:39 Automatically (auto_advance): Started a worker on backtest-how-often-would (Backtest: how often would a 'tests got weaker' check have fired?); its agent is auto, so it went to Claude: Claude weekly 53%, 3 points behind pace, not tight; Codex 59%.
 - 2026-11-09 10:40 Planned audits-settle-their: Audits settle their doubts, walk the skipped states, and flag what nobody asked for (review audit)
 - 2026-11-09 10:40 Planned a-size-ceiling-on: A size ceiling on each role's prompt
+- 2026-11-09 10:59 Released bug-tasks-start-from's worker (idle since its done report on c8f6637f) while its audit runs
+- 2026-11-09 10:59 Automatically (auto_advance): Started the audit of bug-tasks-start-from at c8f6637f (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
