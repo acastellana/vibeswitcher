@@ -319,6 +319,7 @@ came from and it goes wherever the commit goes. A branch of several commits land
 | `VS-Worker-Model`, `VS-Verifier-Model` | The models that worked on and audited it. |
 | `VS-Build` | The commit of the tool server that merged it. |
 | `VS-Contract` | A hash of the task's contract, as its worker got it. |
+| `VS-CLI` | The Claude Code version its worker ran, from its transcripts; `unknown` when they don't say. |
 
 Only slugs, model names, verdict words and hashes go in: no email, path or newline. In a batch each task's commit has its
 own, and a merge carrying the remote keeps them. `scripts/merge-provenance.sh [-n N] [--build PREFIX] [--model TEXT]`

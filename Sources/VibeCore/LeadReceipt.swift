@@ -604,7 +604,7 @@ public enum LeadReceipts {
         return Usage(worker: tokens(.worker), verifier: tokens(.verifier))
     }
 
-    private static let iso: ISO8601DateFormatter = {
+    static let iso: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter

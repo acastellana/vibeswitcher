@@ -2,7 +2,8 @@ import Foundation
 
 /// Where a merged commit came from, as git trailers on the commit that lands on the base (`Worktrees.stamp`), so the
 /// history itself says it and it survives across Macs: the task, its review, the models that worked on and audited it,
-/// the build of the tool server that merged it (`ServerBuild`), and a hash of its contract's text.
+/// the build of the tool server that merged it (`ServerBuild`), a hash of its contract's text, and the Claude Code
+/// version its worker ran (Claude Code updates itself and changes behaviour, so a change in results needs its version).
 ///
 /// Backlog A2, 2026-11-08: the other Mac's records lived outside commits and were lost; a commit's trailers go
 /// wherever the commit goes. `scripts/merge-provenance.sh` lists them from `git log` alone.
@@ -16,6 +17,7 @@ public enum LeadProvenance {
     public static let verifierModel = "VS-Verifier-Model"
     public static let build = "VS-Build"
     public static let contract = "VS-Contract"
+    public static let cli = "VS-CLI"
 
     /// The characters a trailer's value may hold: letters, digits, and `. _ - : , ( ) [ ]` and the space.
     static let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-:,()[] ")
@@ -51,22 +53,50 @@ public enum LeadProvenance {
         return commit + (build.changed ? " (with changes not committed)" : "")
     }
 
+    /// The Claude Code version `slug`'s worker last ran, as its own transcripts say (each line's top-level `version`),
+    /// from `since` on (a folder a removed task of the same name used stays out): the newest across its sessions, so a
+    /// worker resumed on a newer Claude Code goes by that one. Nil when none says, a Codex worker's task included. Read
+    /// from the transcripts rather than by running `claude --version`, which says what's installed now and, as a
+    /// process, could hang the merge that asks; nothing here can fail or wait.
+    static func cliVersion(root: String, slug: String, since: Double, home: String = VibePaths.home) -> String? {
+        var newest: (at: Double, version: String)?
+        for file in LeadReceipts.transcripts(root: root, slug: slug, home: home) where file.role == .worker {
+            if let found = lastVersion(in: file.url, since: since), found.at >= newest?.at ?? -.infinity { newest = found }
+        }
+        return newest?.version
+    }
+
+    /// `url`'s last line saying a version and when, nil when that's before `since` (lines are in time order). A line
+    /// that doesn't parse, as one still being written, is passed over.
+    private static func lastVersion(in url: URL, since: Double) -> (at: Double, version: String)? {
+        guard let data = try? Data(contentsOf: url, options: .alwaysMapped) else { return nil }
+        for line in data.split(separator: UInt8(ascii: "\n")).reversed() {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  let version = object["version"] as? String, !version.isEmpty,
+                  let at = (object["timestamp"] as? String).flatMap({ LeadReceipts.iso.date(from: $0) })?.timeIntervalSince1970 else { continue }
+            return at < since ? nil : (at, version)
+        }
+        return nil
+    }
+
     /// The trailers for `task`'s merge, in order.
     public static func trailers(task: LeadTask, audited: Bool, commit: String, dismissed: [String], workerModel worker: String?,
-                                verifierModel verifier: String?, build: ServerBuild?) -> [Worktrees.Trailer] {
+                                verifierModel verifier: String?, build: ServerBuild?, cliVersion: String?) -> [Worktrees.Trailer] {
         [Worktrees.Trailer(Self.task, clean(task.slug)),
          Worktrees.Trailer(review, clean(reviewText(audited: audited, commit: commit, dismissed: dismissed))),
          Worktrees.Trailer(workerModel, clean(worker)),
          Worktrees.Trailer(verifierModel, audited ? clean(verifier) : "none"),
          Worktrees.Trailer(Self.build, clean(buildText(build))),
-         Worktrees.Trailer(contract, contractHash(task))]
+         Worktrees.Trailer(contract, contractHash(task)),
+         Worktrees.Trailer(cli, clean(cliVersion))]
     }
 }
 
 extension LeadToolset {
     /// The provenance trailers for the merge `gate` lets in (`LeadProvenance`): the models its sessions were started
     /// on (`LeadTask.launchedModels`), a session on Claude's default ("") or one not noted going by the model that
-    /// answered most in its role's transcripts (read only then), and the build of this tool server.
+    /// answered most in its role's transcripts (read only then), the build of this tool server, and the Claude Code
+    /// version its worker ran.
     func provenance(_ gate: MergeGate) -> [Worktrees.Trailer] {
         let task = gate.task
         let launched = task.launchedModels ?? [:]
@@ -85,6 +115,7 @@ extension LeadToolset {
         }
         return LeadProvenance.trailers(task: task, audited: gate.audited, commit: gate.commit, dismissed: gate.dismissed.map(\.id),
                                        workerModel: worker, verifierModel: verifiers.isEmpty ? nil : verifiers.joined(separator: ", "),
-                                       build: runningBuild())
+                                       build: runningBuild(),
+                                       cliVersion: LeadProvenance.cliVersion(root: root, slug: task.slug, since: task.createdAt, home: claudeHome))
     }
 }
