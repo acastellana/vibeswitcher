@@ -2235,3 +2235,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 17:34 Automatically (auto_advance): Cleaned up audit-exceptions-are-a (freed 1.5 GB of build output and temporary folders). It stays done.
 - 2026-11-09 17:34 Started a worker on audits-settle-their
 - 2026-11-09 17:34 Update: Phone and Tailscale review merged; needs an install and a real-phone try — The three phone reviews are merged, along with the merge-check and audit work. Each passed its audit and the full test run. **None of it has run on a real phone yet, and it won't reach your app until …
+- 2026-11-09 17:44 Automatically (auto_advance): Started the audit of the-sandbox-s-phone at e9d55bb2 (Its review is audit).
