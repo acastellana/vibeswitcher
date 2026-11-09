@@ -2149,3 +2149,10 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 13:43 Started a worker on phone-input-review-and
 - 2026-11-09 13:43 Automatically (auto_advance): Started a worker on phone-input-review-and (Phone input: review and fix replies, keys, lead answers and dictation).
 - 2026-11-09 13:45 Planned security-review-of-the: Security review of the phone, host authentication and tool boundaries (on Opus) (review audit)
+- 2026-11-09 14:20 Planned the-merge-checks-the: The merge checks the commit it's about to land before main moves (review audit)
+- 2026-11-09 14:20 Started a worker on the-merge-checks-the
+- 2026-11-09 14:20 Automatically (auto_advance): Started a worker on the-merge-checks-the (The merge checks the commit it's about to land before main moves).
+- 2026-11-09 14:20 Planned audit-exceptions-are-a: Audit exceptions are a structured record the verifier gets before it starts (review audit)
+- 2026-11-09 14:20 Started a worker on audit-exceptions-are-a
+- 2026-11-09 14:20 Automatically (auto_advance): Started a worker on audit-exceptions-are-a (Audit exceptions are a structured record the verifier gets before it starts).
+- 2026-11-09 14:20 Planned a-stalled-or-hung: A stalled or hung report says what it's really waiting on, with evidence (review audit)
