@@ -2173,3 +2173,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 15:48 Merged phone-day-to-day: Phone day to day: review and fix what it shows and how it recovers (build 16ca360977ec)
 - 2026-11-09 15:48 Automatically (auto_advance): Merged phone-day-to-day (Phone day to day: review and fix what it shows and how it recovers) into main at ec7054ba, on its passing audit and the full test run.
 - 2026-11-09 15:48 Automatically (auto_advance): Cleaned up phone-day-to-day (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-09 15:55 Audit of phone-input-review-and: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-11-09 15:58 Started a worker on phone-input-review-and
+- 2026-11-09 15:58 Automatically (auto_advance): Merge of phone-input-review-and failed: Conflicts with main: the branch needs bringing up to date. Sent its worker the output; it's back at work.
