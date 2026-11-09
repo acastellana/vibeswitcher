@@ -130,7 +130,9 @@ struct MergeRunMacSleepTests {
         let watch = StallWatch(after: 600, every: 0.05, loadLimit: 24, load: { 4.2 })
         let run = runChecks(command, timeout: 45 * 60, watch: watch, mac: mac)
         #expect(await eventually { exists(started) }, "the command never started")
-        for _ in 0..<4 {
+        // Awake in steps too short to count as late, until it's stopped: its start's own CPU may have counted as
+        // progress, so how many steps that takes isn't fixed.
+        for _ in 0..<12 where !mac.hasEnded {
             mac.stayAwake(170)
             #expect(await runHasLooked(mac))
         }
