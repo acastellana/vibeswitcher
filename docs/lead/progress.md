@@ -2260,3 +2260,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 19:19 Automatically (auto_advance): Merged security-review-of-the at b9eed611 (its passing audit), the-sandbox-s-phone at 23e6332a (its passing audit) into main as one batch, on 1 test run for 2 tasks.
 - 2026-11-09 19:19 Automatically (auto_advance): Cleaned up security-review-of-the (freed 2.3 GB of build output and temporary folders). It stays done.
 - 2026-11-09 19:19 Automatically (auto_advance): Cleaned up the-sandbox-s-phone (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-09 19:30 Released the-config-seal-s's worker (idle since its done report on 6090b38f) while its audit runs
+- 2026-11-09 19:30 Automatically (auto_advance): Started the audit of the-config-seal-s at 6090b38f (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 19:30 Sent the-config-seal-s's audit contract v2 (it had v1)
