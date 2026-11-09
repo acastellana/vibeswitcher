@@ -16,7 +16,8 @@
 # whatever the scratch home says, or change VibeSwitcher.plist there, the unbundled build's own defaults
 # (`check_preferences` below): the run fails, naming them. Only for a file this run made: that folder is every run's,
 # and up to 3 suites run at once, so a file counts when a test process of this run opened a suite of that name (its
-# ledger, Tests/VibeCoreTests/PreferenceLedger.swift). One that appeared and isn't in it is named, and doesn't fail the run.
+# ledger, Tests/VibeCoreTests/PreferenceLedger.swift). One that appeared or changed and isn't in it is named, and doesn't
+# fail the run.
 #
 # swift build and swift test, --perf's too, run under vs-heavy (Resources/bin/vs-heavy, the Mac-wide lock for heavy
 # work that every project's sessions have on PATH): while another run holds it (another worker's suite in any project,
@@ -233,9 +234,10 @@ build_defaults() {
     if [[ -f $file ]]; then shasum "$file" | awk '{print $1}'; else echo none; fi
 }
 # Names the files this run added there (its test processes opened suites of those names: the ledger) and says when
-# VibeSwitcher.plist changed ($2: its build_defaults before), and returns 1; nothing, 0. Files that appeared and that it
-# didn't open it names in a line and leaves as they are: another run's. On 2026-11-09 that folder gained 264 files
-# under test names, and an audit's run was failed twice for what a concurrent run had left there.
+# it changed VibeSwitcher.plist ($2: its build_defaults before; its domain in the ledger), and returns 1; nothing, 0.
+# Files that appeared or changed and that it didn't open it names in a line and leaves as they are: not this run's. On
+# 2026-11-09 that folder gained 264 files under test names, and an audit's run was failed twice for what a concurrent
+# run had left there; VibeSwitcher.plist was rewritten at 18:16:56, inside a merge's run.
 check_preferences() {
     local added own others status=0
     added=$(comm -13 <(echo "$1") <(test_preferences))
@@ -252,10 +254,14 @@ check_preferences() {
         echo "$others" | head -5 | sed 's/^/  /'
     fi
     if [[ $(build_defaults) != "$2" ]]; then
-        echo "PREFERENCES CHANGED: the run changed $real_preferences/VibeSwitcher.plist, the unbundled build's defaults:"
-        echo "  something ran .build/debug/VibeSwitcher on its real domain. A bench's go in scratch: BenchDefaults"
-        echo "  (Sources/VibeSwitcher/BenchDefaults.swift), a sandbox's in its state folder."
-        status=1
+        if grep -Fxq VibeSwitcher "$VIBESWITCHER_PREFERENCE_LEDGER"; then
+            echo "PREFERENCES CHANGED: the run changed $real_preferences/VibeSwitcher.plist, the unbundled build's defaults:"
+            echo "  something ran .build/debug/VibeSwitcher on its real domain. A bench's go in scratch: BenchDefaults"
+            echo "  (Sources/VibeSwitcher/BenchDefaults.swift), a sandbox's in its state folder."
+            status=1
+        else
+            echo "preference file that isn't this run's: $real_preferences/VibeSwitcher.plist changed, and no process of this run opened its domain"
+        fi
     fi
     return $status
 }

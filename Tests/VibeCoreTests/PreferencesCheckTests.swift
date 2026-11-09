@@ -9,6 +9,9 @@ struct PreferencesCheckTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     let temp = Scratch()
 
+    /// A process of this run opening the build's domain, as the bundle's hook records it (`PreferenceLedger`).
+    static let openBuildDomain = "echo VibeSwitcher >> \"$VIBESWITCHER_PREFERENCE_LEDGER\""
+
     /// A folder standing for ~/Library/Preferences, holding `files` (name to text).
     func preferences(_ files: [String: String]) throws -> URL {
         let folder = temp.url("preferences")
@@ -46,16 +49,27 @@ struct PreferencesCheckTests {
 
     @Test func aRunThatChangesTheBuildsDefaultsFailsNamingThem() async throws {
         let dir = try preferences(["VibeSwitcher.plist": "before"])
-        let (status, output) = try await run(dir, "echo after > VibeSwitcher.plist")
+        let (status, output) = try await run(dir, "\(Self.openBuildDomain); echo after > VibeSwitcher.plist")
         #expect(status == 1, "\(output)")
         #expect(output.contains("PREFERENCES CHANGED: the run changed \(dir.path)/VibeSwitcher.plist"), "\(output)")
         #expect(output.contains("BenchDefaults"), "\(output)")
     }
 
+    /// The build's defaults change for reasons outside this run (on 2026-11-09 at 18:16:56, inside a merge's run): unless
+    /// a process of this run opened that domain, the change is named in a line and the run stands.
+    @Test func aChangeToTheBuildsDefaultsThisRunDidntOpenIsNamedAndDoesntFail() async throws {
+        let dir = try preferences(["VibeSwitcher.plist": "before"])
+        let (status, output) = try await run(dir, "echo after > VibeSwitcher.plist")
+        #expect(status == 0, "\(output)")
+        #expect(!output.contains("PREFERENCES CHANGED"), "\(output)")
+        #expect(output.contains("\(dir.path)/VibeSwitcher.plist changed, and no process of this run opened its domain"), "\(output)")
+        #expect(try String(contentsOf: dir.appendingPathComponent("VibeSwitcher.plist"), encoding: .utf8) == "after\n")
+    }
+
     /// Made where there was none (a bench on a Mac that never had one) counts too.
     @Test func aRunThatMakesTheBuildsDefaultsFails() async throws {
         let dir = try preferences([:])
-        let (status, output) = try await run(dir, "echo new > VibeSwitcher.plist")
+        let (status, output) = try await run(dir, "\(Self.openBuildDomain); echo new > VibeSwitcher.plist")
         #expect(status == 1, "\(output)")
         #expect(output.contains("PREFERENCES CHANGED"), "\(output)")
     }
