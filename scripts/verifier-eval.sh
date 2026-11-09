@@ -80,6 +80,8 @@ patch=0
 name=""
 patch_head=""
 case_out=""
+summary_of=""
+score_of=""
 self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -89,6 +91,8 @@ while [[ $# -gt 0 ]]; do
         --all) all=1; shift ;;
         --patch) patch=1; name=${2:-}; patch_head=${3:-}; shift 3 ;;
         --out) case_out=${2:-}; shift 2 ;;
+        --summary) summary_of=${2:-}; shift 2 ;;
+        --score) score_of=${2:-}; name=${3:-}; shift 3 ;;
         -h|--help) sed -n '2,57p' "$0"; exit 0 ;;
         -*) echo "unknown option $1"; exit 2 ;;
         *) name=$1; shift ;;
@@ -123,19 +127,9 @@ if [[ $patch == 1 ]]; then
     exit 0
 fi
 
-# --all: each case by itself, then one summary.
-if [[ $all == 1 ]]; then
-    [[ -z $name ]] || { echo "--all runs every case: name none"; exit 2; }
-    run=".build/verifier-eval/all-$checklist-$(date +%Y%m%d-%H%M%S)"
-    mkdir -p "$run"
-    run=$(cd "$run" && pwd)
-    options=(--checklist "$checklist" --max-usd "$max_usd")
-    [[ $dry == 1 ]] && options+=(--dry-run)
-    for each in $(printf '%s\n' "$cases" | awk 'NF { print $1 }'); do
-        echo "=== $each"
-        "$self" "${options[@]}" --out "$run/$each" "$each" 2>&1 | tee "$run/$each.log"
-    done
-    python3 -I - "$run" "$dry" "$checklist" "$cases" <<'EOF'
+# The summary of a run's folder: RUN, 1 for a dry run or 0, the checklist. Its exit status is --all's.
+summarize() {
+    python3 -I - "$1" "$2" "$3" "$cases" <<'EOF'
 import json, os, sys
 run, dry, checklist, cases = sys.argv[1], sys.argv[2] == "1", sys.argv[3], sys.argv[4]
 names = [line.split()[0] for line in cases.splitlines() if line.strip()]
@@ -174,8 +168,121 @@ print("\n".join(report))
 print(f"kept in {run}")
 sys.exit(2 if failed else 0 if dry or (all(s["found"] == s["expected"] for s in bugs) and not any(s["important"] for s in clean)) else 1)
 EOF
+}
+
+# --summary: an --all run's folder summarized again, nothing run.
+if [[ -n $summary_of ]]; then
+    [[ -d $summary_of ]] || { echo "$summary_of isn't a folder"; exit 2; }
+    summarize "$summary_of" 0 "$checklist"
     exit $?
 fi
+
+# --all: each case by itself, then one summary.
+if [[ $all == 1 ]]; then
+    [[ -z $name ]] || { echo "--all runs every case: name none"; exit 2; }
+    run=".build/verifier-eval/all-$checklist-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$run"
+    run=$(cd "$run" && pwd)
+    options=(--checklist "$checklist" --max-usd "$max_usd")
+    [[ $dry == 1 ]] && options+=(--dry-run)
+    for each in $(printf '%s\n' "$cases" | awk 'NF { print $1 }'); do
+        echo "=== $each"
+        "$self" "${options[@]}" --out "$run/$each" "$each" 2>&1 | tee "$run/$each.log"
+    done
+    summarize "$run" "$dry" "$checklist"
+    exit $?
+fi
+
+# One case's score from its folder's stream.jsonl: FOLDER, NAME, PLACES, DESCRIPTION. Its exit status is the case's.
+score_case() {
+    python3 -I - "$1" "$2" "$3" "$4" <<'EOF'
+import json, re, sys
+out, name, places, description = sys.argv[1:5]
+try:
+    seconds = int(open(out + "/seconds.txt").read())
+except Exception:
+    seconds = 0
+tolerance = 3
+result, texts = None, []
+for raw in open(out + "/stream.jsonl", errors="replace"):
+    try:
+        event = json.loads(raw)
+    except Exception:
+        continue
+    if event.get("type") == "assistant":
+        texts += [part.get("text", "") for part in event.get("message", {}).get("content", []) if part.get("type") == "text"]
+    elif event.get("type") == "result":
+        result = event
+if result is None:
+    print(f"no answer from claude; see {out}/stderr.log")
+    sys.exit(2)
+text = "\n".join(texts)
+findings = None
+for block in reversed(re.findall(r"```json\s*(\{.*?\})\s*```", text, re.S)):
+    try:
+        findings = json.loads(block).get("findings") or []
+        break
+    except Exception:
+        continue
+how = "the JSON block"
+if findings is None:
+    # No JSON: every file:line the answer names.
+    how = "file:line in its text (no JSON block)"
+    findings = [{"file": f, "line": int(l), "severity": "?", "evidence": ""} for f, l in re.findall(r"([\w./+-]+\.\w+):(\d+)", text)]
+
+def line_of(finding):
+    # "35", 35 or "35-41": its first number.
+    match = re.match(r"\s*(\d+)", str(finding.get("line") or 0))
+    return int(match.group(1)) if match else 0
+
+def important(finding):
+    return str(finding.get("severity", "")).strip().lower() == "important"
+
+clean = places == "expect-no-Important"
+# Each bug: its places, any one of which a finding may name.
+expected = [] if clean else [[(p.rsplit(":", 1)[0], int(p.rsplit(":", 1)[1])) for p in bug.split("|")] for bug in places.split(",")]
+used, lines, found, found_important = set(), [], 0, 0
+for bug in expected:
+    near = [(abs(line_of(f) - line), i) for i, f in enumerate(findings) for file, line in bug
+            if i not in used and str(f.get("file", "")).lstrip("./") == file and abs(line_of(f) - line) <= tolerance]
+    named = " or ".join(f"{file}:{line}" for file, line in bug)
+    if near:
+        i = min(near)[1]
+        used.add(i)
+        found += 1
+        found_important += important(findings[i])
+        lines.append(f"  found  {named}  by {findings[i].get('severity')} at {findings[i].get('file')}:{findings[i].get('line')}")
+    else:
+        lines.append(f"  missed {named}")
+importants = sum(important(f) for f in findings)
+usage = result.get("modelUsage") or {}
+tokens = {key: sum(int(m.get(key) or 0) for m in usage.values())
+          for key in ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens")}
+cost = result.get("total_cost_usd")
+if clean:
+    report = [f"{description}", f"clean case: {importants} Important finding(s)" + (", each a false alarm" if importants else ", no false alarm")
+              + f" (findings read from {how})"]
+else:
+    report = [f"{description}", f"known bugs found: {found} of {len(expected)}, {found_important} of them by an Important finding (findings read from {how})"] + lines
+report.append(f"findings: {len(findings)}")
+for f in findings:
+    evidence = re.sub(r"\s+", " ", str(f.get("evidence", "")))[:160]
+    report.append(f"  {f.get('severity')} {f.get('file')}:{f.get('line')}  {evidence}")
+report.append("tokens: " + ", ".join(f"{k} {v}" for k, v in tokens.items()) + f"; total {sum(tokens.values())}")
+report.append((f"cost: ${cost:.2f} (Claude's total_cost_usd)" if isinstance(cost, (int, float)) else "cost: not given")
+              + f", {len(texts)} messages, {seconds / 60:.1f} min")
+if result.get("is_error"):
+    report.append(f"claude ended with an error: {result.get('subtype')} {result.get('terminal_reason') or ''}")
+open(out + "/score.txt", "w").write("\n".join(report) + "\n")
+json.dump({"name": name, "kind": "clean" if clean else "bug", "expected": len(expected), "found": found,
+           "found_important": found_important, "important": importants, "findings": len(findings),
+           "tokens": sum(tokens.values()), "cost": cost if isinstance(cost, (int, float)) else 0.0,
+           "minutes": seconds / 60, "error": bool(result.get("is_error"))}, open(out + "/score.json", "w"))
+print("\n".join(report))
+print(f"kept in {out}")
+sys.exit((1 if importants else 0) if clean else (0 if found == len(expected) else 1))
+EOF
+}
 
 line=$(printf '%s\n' "$cases" | awk -v n="$name" '$1 == n')
 if [[ -z $name || -z $line ]]; then
@@ -184,6 +291,13 @@ if [[ -z $name || -z $line ]]; then
     exit 2
 fi
 read -r _ commit places description <<< "$line"
+
+# --score: a kept case folder's stream.jsonl scored again, nothing run.
+if [[ -n $score_of ]]; then
+    [[ -f $score_of/stream.jsonl ]] || { echo "$score_of has no stream.jsonl"; exit 2; }
+    score_case "$score_of" "$name" "$places" "$description"
+    exit $?
+fi
 patch_file=$data/$name.patch.gz
 
 source scripts/lib/scratch.sh
@@ -302,86 +416,6 @@ started=$(date +%s)
 (cd "$clone" && export HOME=$home CFFIXED_USER_HOME=$home && with_tmpdir "$tool_scratch/verifier-tmp/" "${command[@]}" < /dev/null) \
     > "$out/stream.jsonl" 2> "$out/stderr.log"
 
-python3 -I - "$out" "$name" "$places" "$description" "$(( $(date +%s) - started ))" <<'EOF'
-import json, re, sys
-out, name, places, description, seconds = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], int(sys.argv[5])
-tolerance = 3
-result, texts = None, []
-for raw in open(out + "/stream.jsonl", errors="replace"):
-    try:
-        event = json.loads(raw)
-    except Exception:
-        continue
-    if event.get("type") == "assistant":
-        texts += [part.get("text", "") for part in event.get("message", {}).get("content", []) if part.get("type") == "text"]
-    elif event.get("type") == "result":
-        result = event
-if result is None:
-    print(f"no answer from claude; see {out}/stderr.log")
-    sys.exit(2)
-text = "\n".join(texts)
-findings = None
-for block in reversed(re.findall(r"```json\s*(\{.*?\})\s*```", text, re.S)):
-    try:
-        findings = json.loads(block).get("findings") or []
-        break
-    except Exception:
-        continue
-how = "the JSON block"
-if findings is None:
-    # No JSON: every file:line the answer names.
-    how = "file:line in its text (no JSON block)"
-    findings = [{"file": f, "line": int(l), "severity": "?", "evidence": ""} for f, l in re.findall(r"([\w./+-]+\.\w+):(\d+)", text)]
-
-def line_of(finding):
-    # "35", 35 or "35-41": its first number.
-    match = re.match(r"\s*(\d+)", str(finding.get("line") or 0))
-    return int(match.group(1)) if match else 0
-
-def important(finding):
-    return str(finding.get("severity", "")).strip().lower() == "important"
-
-clean = places == "expect-no-Important"
-# Each bug: its places, any one of which a finding may name.
-expected = [] if clean else [[(p.rsplit(":", 1)[0], int(p.rsplit(":", 1)[1])) for p in bug.split("|")] for bug in places.split(",")]
-used, lines, found, found_important = set(), [], 0, 0
-for bug in expected:
-    near = [(abs(line_of(f) - line), i) for i, f in enumerate(findings) for file, line in bug
-            if i not in used and str(f.get("file", "")).lstrip("./") == file and abs(line_of(f) - line) <= tolerance]
-    named = " or ".join(f"{file}:{line}" for file, line in bug)
-    if near:
-        i = min(near)[1]
-        used.add(i)
-        found += 1
-        found_important += important(findings[i])
-        lines.append(f"  found  {named}  by {findings[i].get('severity')} at {findings[i].get('file')}:{findings[i].get('line')}")
-    else:
-        lines.append(f"  missed {named}")
-importants = sum(important(f) for f in findings)
-usage = result.get("modelUsage") or {}
-tokens = {key: sum(int(m.get(key) or 0) for m in usage.values())
-          for key in ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens")}
-cost = result.get("total_cost_usd")
-if clean:
-    report = [f"{description}", f"clean case: {importants} Important finding(s)" + (", each a false alarm" if importants else ", no false alarm")
-              + f" (findings read from {how})"]
-else:
-    report = [f"{description}", f"known bugs found: {found} of {len(expected)}, {found_important} of them by an Important finding (findings read from {how})"] + lines
-report.append(f"findings: {len(findings)}")
-for f in findings:
-    evidence = re.sub(r"\s+", " ", str(f.get("evidence", "")))[:160]
-    report.append(f"  {f.get('severity')} {f.get('file')}:{f.get('line')}  {evidence}")
-report.append("tokens: " + ", ".join(f"{k} {v}" for k, v in tokens.items()) + f"; total {sum(tokens.values())}")
-report.append((f"cost: ${cost:.2f} (Claude's total_cost_usd)" if isinstance(cost, (int, float)) else "cost: not given")
-              + f", {len(texts)} messages, {seconds / 60:.1f} min")
-if result.get("is_error"):
-    report.append(f"claude ended with an error: {result.get('subtype')} {result.get('terminal_reason') or ''}")
-open(out + "/score.txt", "w").write("\n".join(report) + "\n")
-json.dump({"name": name, "kind": "clean" if clean else "bug", "expected": len(expected), "found": found,
-           "found_important": found_important, "important": importants, "findings": len(findings),
-           "tokens": sum(tokens.values()), "cost": cost if isinstance(cost, (int, float)) else 0.0,
-           "minutes": seconds / 60, "error": bool(result.get("is_error"))}, open(out + "/score.json", "w"))
-print("\n".join(report))
-print(f"kept in {out}")
-sys.exit((1 if importants else 0) if clean else (0 if found == len(expected) else 1))
-EOF
+echo $(( $(date +%s) - started )) > "$out/seconds.txt"
+score_case "$out" "$name" "$places" "$description"
+exit $?
