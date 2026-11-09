@@ -2138,3 +2138,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 12:00 Automatically (auto_advance): Cleaned up dismissing-an-important (freed 2.3 GB of build output and temporary folders). It stays done.
 - 2026-11-09 12:00 Automatically (auto_advance): Cleaned up bug-tasks-start-from (freed 2.3 GB of build output and temporary folders). It stays done.
 - 2026-11-09 12:00 Automatically (auto_advance): Cleaned up backtest-would-a-fresh (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 13:32 Started a worker on verifier-eval-failed
