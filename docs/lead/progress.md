@@ -2059,3 +2059,14 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 08:57 Planned ideas-review-google: Ideas review: google/elephant-goldfish-model
 - 2026-11-09 08:57 Started a worker on ideas-review-google
 - 2026-11-09 08:57 Automatically (auto_advance): Started a worker on ideas-review-google (Ideas review: google/elephant-goldfish-model).
+- 2026-11-09 09:12 Released readme-a-real-feature's worker (idle since its done report on b3cd919b) while its audit runs
+- 2026-11-09 09:12 Automatically (auto_advance): Started the audit of readme-a-real-feature at b3cd919b (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 09:14 Planned prototype-67js-a-session: Prototype (67js): a session's state now, as one living object
+- 2026-11-09 09:14 Planned prototype-67js-a-session-2: Prototype (67js): a session's history, as a place you travel through
+- 2026-11-09 09:14 Planned prototype-67js-a-lead: Prototype (67js): a lead session and its team, as a working place
+- 2026-11-09 09:14 Started a worker on prototype-67js-a-session
+- 2026-11-09 09:14 Started a worker on prototype-67js-a-session-2
+- 2026-11-09 09:14 Started a worker on prototype-67js-a-lead
+- 2026-11-09 09:14 Sampled ideas-review-google for audit from review none (at 6955f0cf): draw 4.20 under audit_sample_percent 10 (seed 6672537619052495)
+- 2026-11-09 09:14 Released ideas-review-google's worker (idle since its done report on 6955f0cf) while its audit runs
+- 2026-11-09 09:14 Automatically (auto_advance): Started the audit of ideas-review-google at 6955f0cf (Sampled for audit: draw 4.20 under audit_sample_percent 10 (seed 6672537619052495)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.

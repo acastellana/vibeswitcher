@@ -294,3 +294,7 @@ The lead told the user "at least one merge really did hang" from the hung log, w
 
 (1) The lead told the user a merge "really did hang" from a log that can't show sleep; the Mac had slept 41 times. (2) The 2026-11-05 decision said to make a product task if an incident task auto-started again on its generic brief. turn-this-incident-into-16 did, and its worker reported that v2 never reached it, which cost a round trip.
 
+## 2026-11-09 09:14:34 The three 67js prototypes (prototypes/session-object, session-journey, session-team) are throwaways for the user to look at: never merge them. Each task has auto_advance false and goes to status kept once done; delete or keep is the user's call.
+
+The user asked to see what's possible and said they'll probably delete them. Local npm install with --ignore-scripts in the prototype or scratch folder only, by the user's request to use this library; its MCP server and Claude plugin stay out because they'd write agent config and trip the seal.
+
