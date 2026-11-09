@@ -76,7 +76,8 @@ struct LeadWitnessCauseTests {
     @Test func theSleepLogCountsOnlyTheWindowAndSaysWhatItDidntWatch() {
         let log = Self.log([0, 10, 20, 40], sleeps: [(10, 20), (20, 40)])
         // A window from 15: half of the first sleep, all of the second.
-        #expect(log.reading(from: Self.t0 + 15 * 60, to: Self.t0 + 40 * 60)?.slept == 25 * 60)
+        let window: TimeInterval? = log.reading(from: Self.t0 + 15 * 60, to: Self.t0 + 40 * 60)?.slept
+        #expect(window == 1500.0)
         // Before the first look, nothing is known: it says so.
         let late = Self.log([100, 110])
         #expect(late.reading(from: Self.t0, to: Self.t0 + 110 * 60)?.unwatchedBefore == Self.t0 + 100 * 60)
