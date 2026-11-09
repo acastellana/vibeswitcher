@@ -188,7 +188,9 @@ public enum ReadOnlyCommand {
         var parts: [[String]] = []
         var words: [String] = []
         var word: String?
-        let chars = Array(line)
+        // One Character per code point, as the shell reads the line: a mark after a quote or an operator would otherwise
+        // join it in one grapheme, a word character here and the same quote or operator to the shell.
+        let chars = line.unicodeScalars.map(Character.init)
         var i = 0
         func endWord() {
             if let current = word { words.append(current) }
