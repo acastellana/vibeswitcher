@@ -6,8 +6,8 @@ import ObjectiveC
 // suites run at once: a run judged by what appeared there was charged with what the others left. So the test processes
 // say what they open: as the bundle loads, the initializer below (SwiftPM links every test target into one bundle, so
 // this one covers them all) wraps NSUserDefaults' suite initializer to append each suite's name to
-// $VIBESWITCHER_PREFERENCE_LEDGER, a file in the run's own scratch folder. Without that variable (a run not started by
-// scripts/test.sh, which refuses to start anyway) nothing is wrapped.
+// $VIBESWITCHER_PREFERENCE_LEDGER, a file in the run's own scratch folder (scripts/test.sh and scripts/test-under-load.sh
+// each give a run one). Without that variable nothing is wrapped.
 //
 // A suite opened another way, or in a program a test starts (it isn't this bundle), isn't in the ledger: the check names
 // such a file and doesn't fail the run. PreferencesLintTests is what stops a test making a domain-named suite at all.
