@@ -2278,3 +2278,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 22:48 Audit of turn-this-incident-into-17: complete, clean, round 1: 1 Pre-existing open
 - 2026-11-09 22:56 Audit of a-test-run-s: complete, clean, round 1: 2 Nit open
 - 2026-11-09 23:08 Merged turn-this-incident-into-17: A failed merge run tells its worker and the lead what failed, in a form they can read (build 16ca360977ec)
+- 2026-11-09 23:08 Automatically (auto_advance): Merged turn-this-incident-into-17 (A failed merge run tells its worker and the lead what failed, in a form they can read) into main at c3b1e92d, on its passing audit and the full test run.
+- 2026-11-09 23:08 Automatically (auto_advance): Cleaned up turn-this-incident-into-17 (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-09 23:27 Merged a-test-run-s: A test run's leftover-preferences check blames it only for files it made (build 16ca360977ec)
