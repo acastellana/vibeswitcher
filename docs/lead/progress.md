@@ -2176,3 +2176,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 15:55 Audit of phone-input-review-and: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
 - 2026-11-09 15:58 Started a worker on phone-input-review-and
 - 2026-11-09 15:58 Automatically (auto_advance): Merge of phone-input-review-and failed: Conflicts with main: the branch needs bringing up to date. Sent its worker the output; it's back at work.
+- 2026-11-09 16:03 Released start-worker-warns-when's worker (idle since its done report on 9f51c5d3) while its audit runs
+- 2026-11-09 16:03 Automatically (auto_advance): Started the audit of start-worker-warns-when at 9f51c5d3 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
