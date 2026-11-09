@@ -304,8 +304,10 @@ struct PhoneLeadsTests {
             var merged = LeadTask(slug: "copy", title: "Landing copy", contract: contract, status: .done)
             merged.overBudget = LeadOverBudget(minutes: 60, at: 1_000)
             board.tasks = [merged]
-            // Since the task merged (the board stamps it, and a test's task reads as made just now).
-            board.allDone = [LeadAllDone(at: Date().timeIntervalSince1970 + 60, since: 1_000, tasks: [.init(slug: "copy", title: "Landing copy", outcome: .merged)])]
+        }
+        // After the board has stamped the task closed, as a real card comes after its last task.
+        try world.store.update { board in
+            board.allDone = [LeadAllDone(at: Date().timeIntervalSince1970, since: 1_000, tasks: [.init(slug: "copy", title: "Landing copy", outcome: .merged)])]
         }
         world.read()
         var (_, page) = try await call(world, "GET", "/api/lead?lead=\(PhoneLeads.id(root: world.root))", token: world.token)
@@ -314,9 +316,7 @@ struct PhoneLeadsTests {
 
         // Closed after the card, with no new one (a task that ended without a merge never makes one): the card is old.
         try world.store.update { board in
-            var dropped = LeadTask(slug: "widget", title: "Old widget", contract: contract, status: .abandoned)
-            dropped.since = (board.allDone?.last?.at ?? 0) + 1
-            board.tasks.append(dropped)
+            board.tasks.append(LeadTask(slug: "widget", title: "Old widget", contract: contract, status: .abandoned))
         }
         world.read()
         (_, page) = try await call(world, "GET", "/api/lead?lead=\(PhoneLeads.id(root: world.root))", token: world.token)
