@@ -2200,3 +2200,18 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 16:54 Released phone-input-review-and's worker (idle since its done report on f3e263b2) while its audit runs
 - 2026-11-09 16:54 Automatically (auto_advance): Started the audit of phone-input-review-and at f3e263b2 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-09 16:54 Merged start-worker-warns-when: start_worker warns when two tasks claim the same send path or file (build 16ca360977ec)
+- 2026-11-09 16:54 Automatically (auto_advance): Merged start-worker-warns-when (start_worker warns when two tasks claim the same send path or file) into main at 7e6636e1, on its passing audit and the full test run.
+- 2026-11-09 16:54 Automatically (auto_advance): Cleaned up start-worker-warns-when (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-09 16:54 Audit of a-stalled-or-hung: complete, clean, round 1: 5 Nit open
+- 2026-11-09 16:56 The worker on verifier-eval-failed answered findings: verifier-eval-failed:F1 fixed at 23a7fe0b: 3d2a4b19: score_case adds up len(permission_denials) over every result event in the stream instead of reading only the last one; cost and usage still come from the last event, which is the running total. New test aCaseAddsUpTheDenialsOfEveryResultInItsStream uses a 4-result stream (3, 0, 1, absent) and expects 4 denials and the last cost; with the script fix reverted it fails on exactly the denial expectations (2 issues), with it all 10 tests pass. Offl…
+- 2026-11-09 17:06 Released audit-exceptions-are-a's worker (idle since its done report on 00666440) while its audit runs
+- 2026-11-09 17:06 Automatically (auto_advance): Started the audit of audit-exceptions-are-a at 00666440 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 17:08 Automatically (auto_advance): Started the audit of verifier-eval-failed at 2fb6a7e3 (Its review is audit).
+- 2026-11-09 17:08 Audit of phone-input-review-and: complete, clean, round 2: 2 Nit open, 1 Pre-existing open
+- 2026-11-09 17:08 Released verifier-eval-failed's worker (idle since its done report on 2fb6a7e3) while its audit runs
+- 2026-11-09 17:08 Automatically (auto_advance): Released verifier-eval-failed's worker, idle since its done report on 2fb6a7e3, while its audit runs (ended pid 86620 (Worker: Verifier eval: failed runs aren't scored, cases get REVIEW.md, and a true baseline)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-09 17:10 Audit of audit-exceptions-are-a: complete, clean, round 2: 1 Nit open
+- 2026-11-09 17:13 Audit of verifier-eval-failed: complete, clean, round 2: 1 Important closed, 2 Nit open
+- 2026-11-09 17:14 Merged phone-over-tailscale: Phone over Tailscale: review and fix setup, pairing and staying connected (in a batch: phone-over-tailscale, the-merge-checks-the, a-stalled-or-hung landed on one test run) (build 16ca360977ec)
+- 2026-11-09 17:14 Merged the-merge-checks-the: The merge checks the commit it's about to land before main moves (in a batch: phone-over-tailscale, the-merge-checks-the, a-stalled-or-hung landed on one test run) (build 16ca360977ec)
+- 2026-11-09 17:14 Merged a-stalled-or-hung: A stalled or hung report says what it's really waiting on, with evidence (in a batch: phone-over-tailscale, the-merge-checks-the, a-stalled-or-hung landed on one test run) (build 16ca360977ec)
