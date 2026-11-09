@@ -1652,7 +1652,27 @@ public enum Worktrees {
 
     /// At `path`, whose records are the base's (`baseRecords`): the lines `carrying` has in them that the base lacks,
     /// staged, by union from their merge base. Nil when that's done, else what failed.
-    static func takeRecords(_ records: String, of carrying: String, onto base: String, in path: String) -> String? { nil }
+    static func takeRecords(_ records: String, of carrying: String, onto base: String, in path: String) -> String? {
+        let paths = LeadRecords.paths(records)
+        let ancestor = Git.run(["merge-base", base, carrying], in: path).output
+        let ours = paths.reduce(into: [String: Data]()) { taken, file in
+            taken[file] = FileManager.default.contents(atPath: (path as NSString).appendingPathComponent(file))
+        }
+        switch unionRecords(root: path, paths: paths, ours: ours, ancestor: ancestor, theirs: carrying) {
+        case .failure(let failure): return failure.description
+        case .success(let changed):
+            for (file, data) in changed {
+                let target = URL(fileURLWithPath: (path as NSString).appendingPathComponent(file))
+                do {
+                    try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try data.write(to: target)
+                } catch { return "\(error)" }
+                let added = Git.run(["add", "--", file], in: path)
+                guard added.ok else { return said(added) }
+            }
+            return nil
+        }
+    }
 
     /// The records at `paths` (relative to `root`) as `ours` has them (the main checkout's, committed or not) with
     /// `theirs`' lines taken in, by union from `ancestor` (as merge_remote merges them: both sides' lines kept, ours
