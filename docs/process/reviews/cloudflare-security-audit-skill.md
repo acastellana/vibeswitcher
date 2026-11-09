@@ -32,11 +32,20 @@ From the 2026-11-01 `--all` run in `docs/process/verifier-eval.md` (14 known bug
 The eval scores by place, and its own notes show a place match can miss the substance. Each measurement below should
 also read the findings' text.
 
+**This baseline runs without `REVIEW.md`, and real audits don't.** The verifier gets the file from the base branch
+(`LeadRisk.reviewGuide`, `LeadWorkflow.swift:1528`), and the eval's clones have it only if the case's base does. None
+of the 12 bases holds it (I checked each with `git cat-file`), because it arrived on 2026-10-26, after those commits.
+Its lines already name two of the misses (`REVIEW.md:6` a-slash-command-that, `:16` finished-work-lands) and make
+a-fix-s-regression's escapes Important (`:13`). So the eval understates real audits on exactly those bugs.
+
+**Before ideas 1 and 2:** have the eval give each case today's `REVIEW.md` (a small script change), and run `--all` once
+for a true baseline (about $50). Otherwise a change can win on bugs real audits are already told about.
+
 ## Ideas, ranked
 
-Ideas 1 and 2 are prompt edits to the same text and can share one `scripts/verifier-eval.sh --all` (about $50, which
-`docs/process/verifier-eval.md:8` requires before a verifier prompt change merges anyway). They stay attributable,
-because idea 1 acts on bugs already seen and idea 2 on bugs missed.
+Ideas 1 and 2 can then share one `scripts/verifier-eval.sh --all` (about $50, which
+`docs/process/verifier-eval.md:8` requires before a verifier prompt change merges anyway). They stay attributable
+because each is scored only on its own bugs: idea 1 on the four that were Nits, idea 2 on three that were missed.
 
 ### 1. A doubt about behaviour gets settled, not filed as a Nit
 
@@ -52,8 +61,9 @@ because idea 1 acts on bugs already seen and idea 2 on bugs missed.
 - **Goal:** fewer issues. **Size:** S. **Verdict:** adapt.
 - **Risk:** more Importants mean more rounds and false alarms. The two-round `reconsider` cap (`lead-rules.md` #11)
   bounds the rounds.
-- **Measure:** eval's "found by an Important finding", baseline 4 of 14, target at least 6, with 0 Important on the
-  clean cases. Watch cost per case.
+- **Measure:** how many of the four Nit-only bugs (a-fix-s-regression F1 and F3, the-briefing-uses F1,
+  ending-a-session-ends F2) come back as Important, against the baseline run with `REVIEW.md`; target 2 more than that
+  run, with 0 Important on the clean cases. Watch cost per case.
 
 ### 2. Give the single verifier a bug walk, from the contract's invariant
 
@@ -62,17 +72,20 @@ because idea 1 acts on bugs already seen and idea 2 on bugs missed.
 - **VibeSwitcher today:** the default audit is one verifier (`auditFinders = 1`, `LeadWorkflow.swift:49`), and its
   check step is acceptance checks, reading the diff, and looking for integrity problems (`LeadWorkflow.swift:1495`).
   Reading "the code around it and its callers" exists only in the `bugs` finder's brief (`LeadWorkflow.swift:1307`),
-  which a single verifier never gets. The security-contract rule of 2026-11-05 00:30:32 works at contract time and
-  only for security.
-- **Change:** a few lines added to the first-audit check: name the invariant the contract implies, then walk the
-  change through these states, each tied to the case it comes from, as the security checklist's lines are: a run that
-  crashed or was stopped; an operation still in flight; a value read once before a long operation; state shared across
-  sessions or not reset on a switch; the other branch of the path (clean versus conflicted, first run versus repeat).
-  Keep it to specific lines: the checklist's own comment says general text only adds cost (`LeadWorkflow.swift:1607`).
+  which a single verifier never gets. `REVIEW.md` already covers two states, shared per-session state (`:6`) and a
+  setting read once before a long step (`:16`). The security-contract rule of 2026-11-05 00:30:32 works at contract
+  time and only for security.
+- **Change:** add the three states `REVIEW.md` lacks, in its own form and each from its case: a run that crashed or was
+  stopped (steadier-merge-gate); an operation still in flight (a-base-branch-the F2); the other branch of the path,
+  such as clean versus conflicted (lead-record-commits). They must fit the 349 bytes left under its 2,048-byte clip
+  (`LeadRisk.swift:314`). In the first-audit check, add one sentence: name the invariant the contract implies and read
+  the callers. Keep it specific: the checklist's own comment says general text only adds cost (`LeadWorkflow.swift:1607`).
 - **Goal:** fewer issues. **Size:** S. **Verdict:** adapt.
-- **Risk:** a longer prompt and longer audits. Overfitting too: these five misses both motivate the list and score it,
+- **Risk:** a longer prompt and longer audits. Overfitting too: these misses both motivate the lines and score them,
   so a gain needs confirming on cases added later (backlog C3).
-- **Measure:** the five missed bugs, baseline 0 of 5, read for substance; target at least 2; 0 Important on clean cases.
+- **Measure:** those three bugs, 0 of 3 today, read for substance; target at least 2; 0 Important on clean cases. The
+  baseline run also shows, for free, whether `REVIEW.md:6` and `:16` catch their two misses. If they don't, more lines
+  of that kind won't help either, and this idea should stop.
 
 ### 3. A verifier says what it checked, file by file
 
@@ -137,9 +150,10 @@ because idea 1 acts on bugs already seen and idea 2 on bugs missed.
   specialist's finding, as decision 2026-10-26 11:01:23 noted.
 - **Change:** send an unconfirmed Important to one fresh verifier that tries to refute it.
 - **Goal:** safer. **Size:** M. **Risk:** one more agent per such finding. **Verdict:** skip.
-- **Why skip:** `audit_finders` defaults to 1 and I found no record of an audit run with more than one finder. The eval
-  replays a single verifier, so it can't measure this, and strict_paths has its own check due on 2026-11-15 (IM-3 in
-  `docs/process/impact.md`). Revisit only if finders come into regular use.
+- **Why skip:** `audit_finders` defaults to 1 and I found no record of an audit of this project run with more than one
+  finder (the one trace, in `docs/lead/incidents.md`, is another project's). The eval replays a single verifier, so it
+  can't measure this, and strict_paths has its own check due on 2026-11-15 (IM-3 in `docs/process/impact.md`). Revisit
+  only if finders come into regular use.
 
 ## Looked good, but already here or already rejected
 
