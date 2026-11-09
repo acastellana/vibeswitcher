@@ -333,7 +333,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `tell JSON` — hands a fake Claude (the selected one, or the one labelled "to") a FakeClaude op, e.g. '{"op": "permission"… — `Sources/VibeSwitcher/Sandbox.swift`
 - `notify prepare|allow|deny` — a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare… — `Sources/VibeSwitcher/Sandbox.swift`
 - `new [codex|shell|zsh] [LABEL]` — starts another fake session: a Claude, or a Codex or a plain shell (cat), or an interactive zsh on the… — `Sources/VibeSwitcher/Sandbox.swift`
-- `confighold [outside|accept]` — the agents' config held for the fake lead (ConfigSeal): its team's worker bound (outside: none, so it's held… — `Sources/VibeSwitcher/Sandbox.swift`
+- `confighold [outside|sync|diff|all|accept]` — the agents' config held for the fake lead (ConfigSeal): its team's worker bound (outside: none, so it's held… — `Sources/VibeSwitcher/Sandbox.swift`
 - `push [click|decline]` — the fake lead asks to push (push_remote): its folder a scratch repository and a scratch bare remote as origin… — `Sources/VibeSwitcher/Sandbox.swift`
 - `clear` — ends and removes every fake session: the sidebar is empty, with its New Session menu — `Sources/VibeSwitcher/Sandbox.swift`
 - `views` — the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls… — `Sources/VibeSwitcher/Sandbox.swift`
