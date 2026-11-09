@@ -121,7 +121,7 @@ struct WorktreesTests {
         let scratch = scratch()
         let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f b.txt && test -f c.txt", scratch: scratch, lock: lock)
         guard case .passed(let tested) = checked else { Issue.record("\(checked)"); return }
-        #expect(Worktrees.fastForward(root: root, base: "main", to: tested, from: main) == .merged)
+        #expect(Worktrees.fastForward(root: root, base: "main", to: tested, from: main, landing: .unchecked("test")) == .merged)
         #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
         // The scratch worktree the checks ran in is gone, from the disk and from git's list.
         #expect(!FileManager.default.fileExists(atPath: scratch.path))
@@ -277,7 +277,7 @@ struct WorktreesTests {
         // The records-only commit left nothing and is dropped; the work keeps its own commit.
         #expect(Git.run(["log", "--format=%s", "\(main)..\(tested)"], in: root).output == "add w")
         #expect(Git.run(["show", "\(tested):w.txt"], in: root).output == "w")
-        #expect(Worktrees.fastForward(root: root, base: "main", to: tested, from: main) == .merged)
+        #expect(Worktrees.fastForward(root: root, base: "main", to: tested, from: main, landing: .unchecked("test")) == .merged)
         #expect(listed(root).count == 2)
         #expect(heads(root, "r").tip == tip)
 
@@ -403,8 +403,8 @@ struct WorktreesTests {
 
     /// merge-github-s-main: a branch that carries commits of the remote's fetched tip the base lacks lands as a true
     /// merge, whether it merged them in or fast-forwarded onto them (no merge commit, so it would otherwise be rebased
-    /// as copies), through `rebaseAndTest` and a batch's stack alike. The records land as the base has them, their
-    /// conflicts don't stop it; a conflict outside them still does.
+    /// as copies), through `rebaseAndTest` and a batch's stack alike. The records land as the base's with the remote's
+    /// lines, their conflicts don't stop it; a conflict outside them still does.
     @Test func aBranchCarryingTheRemotesCommitsLandsAsATrueMerge() throws {
         let root = try repo()
         try records(["progress.md": "# Progress\n\n- one\n"], in: root)
@@ -433,8 +433,9 @@ struct WorktreesTests {
         guard case .passed(let tested) = checked else { Issue.record("\(checked)"); return }
         #expect(Git.run(["rev-list", "--parents", "-n", "1", tested], in: root).output == "\(tested) \(main) \(tip)")
         #expect(Git.run(["merge-base", "--is-ancestor", remote, tested], in: root).ok)
-        // The records as the base has them (merge takes the remote's into the main checkout's after the fast-forward).
-        #expect(recordsTree(tested, root) == recordsTree(main, root))
+        // The records are the base's with the remote's lines, in the commit itself: nothing after the fast-forward adds them.
+        let records = Git.run(["show", "\(tested):docs/lead/progress.md"], in: root).output
+        for line in ["- one", "- the base's", "- the other Mac's"] { #expect(records.contains(line), "\(records)") }
         #expect(heads(root, "w").tip == tip)
 
         // A batch's stack lands it the same way.
@@ -589,7 +590,7 @@ struct WorktreesTests {
         else { Issue.record("not passed"); return }
         // The worker commits again while the tests run: that commit was never tested.
         try commit("late.txt", "late\n", in: worktree)
-        #expect(Worktrees.fastForward(root: root, base: "main", to: tested, from: main) == .merged)
+        #expect(Worktrees.fastForward(root: root, base: "main", to: tested, from: main, landing: .unchecked("test")) == .merged)
         #expect(Git.run(["rev-parse", "main"], in: root).output == tested)
         #expect(!FileManager.default.fileExists(atPath: root + "/late.txt"))
     }
