@@ -314,3 +314,11 @@ The reviews found the eval scores errored runs and runs without REVIEW.md, so ve
 
 Backtests in docs/process/reviews/: the cheap reader flagged 97% of both failed and clean contracts (AUC 0.57), so it gives no signal; the tests check would have raised 4 of the last 100 merges, 1 of them new, and that one was a correct refactor.
 
+## 2026-11-09 13:43:32 The phone and Tailscale review and fix (the user's request, 2026-11-09) runs as three audited Claude tasks side by side: setup and pairing, day-to-day views and recovery, and input. They share PhoneAccess.swift in different functions, and only the input task changes the input path. Each fixes material bugs, and lists missing features rather than building them. No worker touches real Tailscale settings, a real phone or a real session. The dedicated security review of the phone stays out of these tasks, pending the user's answer on how to run it after Fable's filter stopped it on 2026-11-08.
+
+The three areas are independent enough to parallelize under the 2026-11-08 17:52 rule and the 2026-10-23 input-path rule. Tailscale serve and pairing are the user's real setup, so workers test through a fake CLI and the sandbox, and a real-phone pass stays with the user. The 2026-11-08 decision left routing around the filter to the user.
+
+## 2026-11-09 13:45:12 The security review of the phone, host authentication and tool boundaries, stopped by Fable's filter on 2026-11-08, runs on Opus after the three phone tasks (the user's answer to 0C15FEF1, 2026-11-09). Findings left unfixed stay out of the public repository, in the done report only.
+
+The 2026-11-08 decision left how to run it to the user, and they chose Opus. The repository is public, so committing an open weakness would publish it before the fix.
+

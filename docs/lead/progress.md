@@ -2139,3 +2139,13 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 12:00 Automatically (auto_advance): Cleaned up bug-tasks-start-from (freed 2.3 GB of build output and temporary folders). It stays done.
 - 2026-11-09 12:00 Automatically (auto_advance): Cleaned up backtest-would-a-fresh (freed 1.5 GB of build output and temporary folders). It stays done.
 - 2026-11-09 13:32 Started a worker on verifier-eval-failed
+- 2026-11-09 13:43 Planned phone-over-tailscale: Phone over Tailscale: review and fix setup, pairing and staying connected (review audit)
+- 2026-11-09 13:43 Started a worker on phone-over-tailscale
+- 2026-11-09 13:43 Automatically (auto_advance): Started a worker on phone-over-tailscale (Phone over Tailscale: review and fix setup, pairing and staying connected).
+- 2026-11-09 13:43 Planned phone-day-to-day: Phone day to day: review and fix what it shows and how it recovers (review audit)
+- 2026-11-09 13:43 Started a worker on phone-day-to-day
+- 2026-11-09 13:43 Automatically (auto_advance): Started a worker on phone-day-to-day (Phone day to day: review and fix what it shows and how it recovers).
+- 2026-11-09 13:43 Planned phone-input-review-and: Phone input: review and fix replies, keys, lead answers and dictation (review audit)
+- 2026-11-09 13:43 Started a worker on phone-input-review-and
+- 2026-11-09 13:43 Automatically (auto_advance): Started a worker on phone-input-review-and (Phone input: review and fix replies, keys, lead answers and dictation).
+- 2026-11-09 13:45 Planned security-review-of-the: Security review of the phone, host authentication and tool boundaries (on Opus) (review audit)
