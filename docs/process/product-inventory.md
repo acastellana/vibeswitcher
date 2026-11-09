@@ -340,6 +340,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `scroll top|middle|bottom` — scrolls the shown chat — `Sources/VibeSwitcher/Sandbox.swift`
 - `scroll settings top|middle|bottom|FRACTION` — scrolls the shown Settings tab (FRACTION: that far down, e.g. 0.4) — `Sources/VibeSwitcher/Sandbox.swift`
 - `size WxH` — resizes the main window's content (e.g. 1728x1015) — `Sources/VibeSwitcher/Sandbox.swift`
+- `inspector team|overview|activity|hide|show` — the inspector on that tab, or collapsed or shown, as its segmented control and Toggle Inspector do — `Sources/VibeSwitcher/Sandbox.swift`
 - `board [N]` — adds N finished tasks (default 250) to the fake lead's board (start the lead first) — `Sources/VibeSwitcher/Sandbox.swift`
 - `churn [N]` — changes the fake lead's board N times (default 40), 0.15 s apart, each read and shown as a real change is — `Sources/VibeSwitcher/Sandbox.swift`
 - `publish [N]` — has the lead controller publish N times (default 50), each laid out and drawn, and times them — `Sources/VibeSwitcher/Sandbox.swift`
@@ -394,6 +395,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `toolchain-note` — ToolchainNoteView — `Sources/VibeSwitcher/MainWindow/SessionListView.swift`
 - `new-project` — NewProjectSheet — `Sources/VibeSwitcher/MainWindow/NewProject/NewProjectSheet.swift`
 - `menu-bar` — MenuBarStrip — `Sources/VibeSwitcher/Sandbox.swift`
+- `menu-bar-dots` — MenuBarStrip — `Sources/VibeSwitcher/Sandbox.swift`
 - `results` — ResultsList — `Sources/VibeSwitcher/MainWindow/Lead/LeadViews.swift`
 - `all-done` — AllDoneCard — `Sources/VibeSwitcher/MainWindow/Chat/AllDoneCard.swift`
 - `statistics` — StatisticsView — `Sources/VibeSwitcher/Statistics/StatisticsView.swift`

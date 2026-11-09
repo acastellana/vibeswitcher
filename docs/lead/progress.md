@@ -2070,3 +2070,12 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 09:14 Sampled ideas-review-google for audit from review none (at 6955f0cf): draw 4.20 under audit_sample_percent 10 (seed 6672537619052495)
 - 2026-11-09 09:14 Released ideas-review-google's worker (idle since its done report on 6955f0cf) while its audit runs
 - 2026-11-09 09:14 Automatically (auto_advance): Started the audit of ideas-review-google at 6955f0cf (Sampled for audit: draw 4.20 under audit_sample_percent 10 (seed 6672537619052495)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 09:17 Sampled ideas-review-mattpocock for audit from review none (at eba49624): draw 1.84 under audit_sample_percent 10 (seed 8071201131550567)
+- 2026-11-09 09:17 Released ideas-review-mattpocock's worker (idle since its done report on eba49624) while its audit runs
+- 2026-11-09 09:17 Automatically (auto_advance): Started the audit of ideas-review-mattpocock at eba49624 (Sampled for audit: draw 1.84 under audit_sample_percent 10 (seed 8071201131550567)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 09:18 Audit of readme-a-real-feature: complete, clean, round 1: 5 Nit open
+- 2026-11-09 09:23 Audit of ideas-review-mattpocock: complete, clean, round 1: 1 Nit open
+- 2026-11-09 09:24 Audit of ideas-review-google: complete, clean, round 1: 2 Nit open
+- 2026-11-09 09:34 Merged readme-a-real-feature: README: a real feature list, and screenshots that show what their captions say (in a batch: readme-a-real-feature, ideas-review-addyosmani, ideas-review-cloudflare landed on one test run) (build 16ca360977ec)
+- 2026-11-09 09:34 Merged ideas-review-addyosmani: Ideas review: addyosmani/agent-skills (no audit: review none) (in a batch: readme-a-real-feature, ideas-review-addyosmani, ideas-review-cloudflare landed on one test run) (build 16ca360977ec)
+- 2026-11-09 09:34 Merged ideas-review-cloudflare: Ideas review: cloudflare/security-audit-skill (no audit: review none) (in a batch: readme-a-real-feature, ideas-review-addyosmani, ideas-review-cloudflare landed on one test run) (build 16ca360977ec)
