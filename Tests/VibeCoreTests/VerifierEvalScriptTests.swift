@@ -76,6 +76,14 @@ struct VerifierEvalScriptTests {
         #expect(output.contains("tokens: \(counted * 1000); cost: $\(counted).00; \(counted) min"), "\(output)")
     }
 
+    @Test func aScoreHoldingOnlyTheErrorIsNotScored() async throws {
+        let run = try runFolder { name, score in if name == "the-phone-shows-needs" { score = ["error": true] } }
+        let (status, output) = try await eval(["--summary", run.path])
+        #expect(status == 2, "\(output)")
+        #expect(output.contains("the-phone-shows-needs: not scored"), "\(output)")
+        #expect(output.contains("in no total above): the-phone-shows-needs"), "\(output)")
+    }
+
     @Test func aRunWithoutErrorsStillExitsZero() async throws {
         let (status, output) = try await eval(["--summary", try runFolder().path])
         #expect(status == 0, "\(output)")

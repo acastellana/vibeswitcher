@@ -12,7 +12,7 @@ one below and add the new one. The lead's brief says so where a project has the 
 ```sh
 scripts/verifier-eval.sh --all --dry-run        # free: every case builds its clone and prompt, no model call
 scripts/verifier-eval.sh --all                  # every case, one summary (about $45–60, two hours)
-scripts/verifier-eval.sh --all --total-usd 80   # the same, stopped before it can pass $80
+scripts/verifier-eval.sh --all --total-usd 80   # the same, stopped at about $80 (a case can run a little past its cap)
 scripts/verifier-eval.sh steadier-merge-gate    # one case
 scripts/verifier-eval.sh --summary RUN_FOLDER   # an --all run's summary again, from its kept score.json files
 scripts/verifier-eval.sh --patch NAME HEAD      # store a new case's audited commit as a patch (below)

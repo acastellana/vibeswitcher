@@ -161,7 +161,7 @@ for name in names:
     denials = f", {score.get('denials', 0)} permission denial(s)"
     if score.get("error"):
         # An errored run gets no score: in no total, and the summary exits 2.
-        unscored.append(score)
+        unscored.append({**score, "name": name})
         rows.append(f"  {name}: not scored ({score.get('error_reason') or 'claude ended with an error'}), ${score.get('cost', 0.0):.2f}{denials}")
         continue
     scores.append(score)
@@ -216,7 +216,7 @@ if [[ $all == 1 ]]; then
     options=(--checklist "$checklist" --guide "$guide")
     [[ $dry == 1 ]] && options+=(--dry-run)
     for each in $(printf '%s\n' "$cases" | awk 'NF { print $1 }'); do
-        # What's left of --total-usd caps this case: stops before the run can pass it.
+        # What's left of --total-usd caps this case, so the run stops at about it: a case can run a little past its cap.
         cap=$(python3 -I - "$run" "$max_usd" "$total_usd" <<'EOF'
 import glob, json, sys
 run, max_usd, total = sys.argv[1], float(sys.argv[2]), sys.argv[3]
