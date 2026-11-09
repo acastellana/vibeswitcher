@@ -133,7 +133,7 @@ summarize() {
 import json, os, sys
 run, dry, checklist, cases = sys.argv[1], sys.argv[2] == "1", sys.argv[3], sys.argv[4]
 names = [line.split()[0] for line in cases.splitlines() if line.strip()]
-rows, scores, failed = [], [], []
+rows, scores, failed, unscored = [], [], [], []
 for name in names:
     try:
         score = json.load(open(f"{run}/{name}/score.json"))
@@ -141,16 +141,23 @@ for name in names:
         failed.append(name)
         rows.append(f"  {name}: couldn't run (see {name}.log)")
         continue
+    denials = f", {score.get('denials', 0)} permission denial(s)"
+    if score.get("error"):
+        # An errored run gets no score: in no total, and the summary exits 2.
+        unscored.append(score)
+        rows.append(f"  {name}: not scored ({score.get('error_reason') or 'claude ended with an error'}), ${score.get('cost', 0.0):.2f}{denials}")
+        continue
     scores.append(score)
     if score.get("dry"):
         rows.append(f"  {name}: resolves ({score['kind']}, {score['base'][:8]}..{score['commit'][:8]}, checklist {score['security'] or 'not in the prompt'})")
     elif score["kind"] == "clean":
-        rows.append(f"  {name}: clean, {score['important']} Important finding(s){' (false alarm)' if score['important'] else ''}, ${score['cost']:.2f}")
+        rows.append(f"  {name}: clean, {score['important']} Important finding(s){' (false alarm)' if score['important'] else ''}, ${score['cost']:.2f}{denials}")
     else:
-        rows.append(f"  {name}: {score['found']} of {score['expected']} found ({score['found_important']} as Important), ${score['cost']:.2f}")
+        rows.append(f"  {name}: {score['found']} of {score['expected']} found ({score['found_important']} as Important), ${score['cost']:.2f}{denials}")
 bugs = [s for s in scores if s["kind"] == "bug" and not s.get("dry")]
 clean = [s for s in scores if s["kind"] == "clean" and not s.get("dry")]
-report = [f"verifier eval, --all, checklist {checklist}" + (", dry run: nothing sent" if dry else "")]
+versions = sorted({str(s.get("claude_version") or "unknown") for s in scores + unscored}) or ["unknown"]
+report = [f"verifier eval, --all, checklist {checklist}, Claude Code {', '.join(versions)}" + (", dry run: nothing sent" if dry else "")]
 if dry:
     report.append(f"cases that resolve: {len(scores)} of {len(names)}")
 else:
@@ -162,11 +169,14 @@ else:
                   f"{sum(s['minutes'] for s in bugs + clean):.0f} min")
 if failed:
     report.append(f"couldn't run: {', '.join(failed)}")
+if unscored:
+    report.append(f"not scored (claude ended with an error, in no total above): {', '.join(s['name'] for s in unscored)}; "
+                  f"they spent ${sum(s.get('cost', 0.0) for s in unscored):.2f}")
 report += ["per case:"] + rows
 open(run + "/summary.txt", "w").write("\n".join(report) + "\n")
 print("\n".join(report))
 print(f"kept in {run}")
-sys.exit(2 if failed else 0 if dry or (all(s["found"] == s["expected"] for s in bugs) and not any(s["important"] for s in clean)) else 1)
+sys.exit(2 if failed or unscored else 0 if dry or (all(s["found"] == s["expected"] for s in bugs) and not any(s["important"] for s in clean)) else 1)
 EOF
 }
 
@@ -203,7 +213,7 @@ try:
 except Exception:
     seconds = 0
 tolerance = 3
-result, texts = None, []
+result, texts, version = None, [], None
 for raw in open(out + "/stream.jsonl", errors="replace"):
     try:
         event = json.loads(raw)
@@ -211,6 +221,8 @@ for raw in open(out + "/stream.jsonl", errors="replace"):
         continue
     if event.get("type") == "assistant":
         texts += [part.get("text", "") for part in event.get("message", {}).get("content", []) if part.get("type") == "text"]
+    elif event.get("type") == "system" and event.get("subtype") == "init":
+        version = event.get("claude_code_version") or version
     elif event.get("type") == "result":
         result = event
 if result is None:
@@ -259,7 +271,12 @@ usage = result.get("modelUsage") or {}
 tokens = {key: sum(int(m.get(key) or 0) for m in usage.values())
           for key in ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens")}
 cost = result.get("total_cost_usd")
-if clean:
+# A run that ended with an error is no measure of the verifier: is_error, or an error_ result that doesn't set it.
+errored = bool(result.get("is_error")) or str(result.get("subtype") or "").startswith("error")
+error_reason = " ".join(str(part) for part in (result.get("subtype"), result.get("terminal_reason")) if part)
+if errored:
+    report = [f"{description}", f"not scored: claude ended with an error ({error_reason})"]
+elif clean:
     report = [f"{description}", f"clean case: {importants} Important finding(s)" + (", each a false alarm" if importants else ", no false alarm")
               + f" (findings read from {how})"]
 else:
@@ -271,16 +288,19 @@ for f in findings:
 report.append("tokens: " + ", ".join(f"{k} {v}" for k, v in tokens.items()) + f"; total {sum(tokens.values())}")
 report.append((f"cost: ${cost:.2f} (Claude's total_cost_usd)" if isinstance(cost, (int, float)) else "cost: not given")
               + f", {len(texts)} messages, {seconds / 60:.1f} min")
-if result.get("is_error"):
-    report.append(f"claude ended with an error: {result.get('subtype')} {result.get('terminal_reason') or ''}")
+denials = len(result.get("permission_denials") or [])
+# Only counted: a read-only verifier is denied edits by design.
+report.append(f"permission denials: {denials}")
+report.append(f"Claude Code: {version or 'unknown'}")
 open(out + "/score.txt", "w").write("\n".join(report) + "\n")
 json.dump({"name": name, "kind": "clean" if clean else "bug", "expected": len(expected), "found": found,
            "found_important": found_important, "important": importants, "findings": len(findings),
            "tokens": sum(tokens.values()), "cost": cost if isinstance(cost, (int, float)) else 0.0,
-           "minutes": seconds / 60, "error": bool(result.get("is_error"))}, open(out + "/score.json", "w"))
+           "minutes": seconds / 60, "error": errored, "error_reason": error_reason if errored else None, "denials": denials,
+           "claude_version": version or "unknown"}, open(out + "/score.json", "w"))
 print("\n".join(report))
 print(f"kept in {out}")
-sys.exit((1 if importants else 0) if clean else (0 if found == len(expected) else 1))
+sys.exit(2 if errored else (1 if importants else 0) if clean else (0 if found == len(expected) else 1))
 EOF
 }
 
