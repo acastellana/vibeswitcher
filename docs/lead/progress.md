@@ -2167,3 +2167,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 15:27 Automatically (auto_advance): Started the audit of phone-input-review-and at d8b86dae (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-09 15:27 Audit of phone-day-to-day: complete, clean, round 1: 2 Nit open, 2 Pre-existing open
 - 2026-11-09 15:28 Planned the-sandbox-s-phone: The sandbox's phone keeps a session's identity, and iOS gets its home-screen icon (review audit)
+- 2026-11-09 15:48 Automatically (auto_advance): Started the audit of audit-exceptions-are-a at 24469dd6 (Its review is audit).
+- 2026-11-09 15:48 Released audit-exceptions-are-a's worker (idle since its done report on 24469dd6) while its audit runs
+- 2026-11-09 15:48 Automatically (auto_advance): Released audit-exceptions-are-a's worker, idle since its done report on 24469dd6, while its audit runs (ended pid 82883 (Worker: Audit exceptions are a structured record the verifier gets before it starts)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-09 15:48 Merged phone-day-to-day: Phone day to day: review and fix what it shows and how it recovers (build 16ca360977ec)
