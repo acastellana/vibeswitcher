@@ -2271,3 +2271,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 20:06 Merged the-config-seal-s: The config seal's card says exactly what changed and what most likely changed it (build 16ca360977ec)
 - 2026-11-09 20:06 Automatically (auto_advance): Merged the-config-seal-s (The config seal's card says exactly what changed and what most likely changed it) into main at 74a97353, on its passing audit and the full test run.
 - 2026-11-09 20:06 Automatically (auto_advance): Cleaned up the-config-seal-s (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-09 20:24 Planned the-worker-brief-stops: The worker brief stops offering vs-shell, which the host refuses from a worker (review audit)
+- 2026-11-09 20:25 Update: Today: phone review and security fixes landed; audits pause until Nov 12 — **Landed**

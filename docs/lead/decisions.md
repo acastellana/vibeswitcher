@@ -330,3 +330,11 @@ The incidents point to handoffs the system controls, not to too few reviewers. T
 
 A skill runs in every Claude session, and a forged sync update can't be told from a real one on disk, the same reasoning as the 2026-11-08 06:33 plugin decision. The user's complaint was not knowing what changed or why, and real skill-content changes are rare.
 
+## 2026-11-09 20:24:31 This account has hit its Fable limit until Nov 12, 12:00, and Fable runs the audits. Three tasks still need one: the merge failure message, the test run's false blame, and the audit prompt changes. None of them is urgent, and all the phone and security work is already merged. What should I do with those audits? → Wait for the reset on Nov 12
+
+The lead proposed it with a 30 min timer and the user didn't answer in time, so it went ahead (question E8B48BFD). Why it was asked: An audit has already stopped at the limit, and two more tasks are about to need one.
+
+## 2026-11-09 20:25:00 From the 2026-11-09 retrospective. (1) Audits and paid evals wait for the Fable limit's reset on Nov 12, 12:00 (the proposal on E8B48BFD, by timer); audit prompt changes then finish six unscored cases only. (2) Before a paid eval, the lead checks in status that the Fable limit has headroom for its full run and that the Mac is on AC or has enough battery; otherwise it waits. (3) What the lead tells the user about a cause carries its evidence, or says it's a guess: on 2026-11-09 three such statements needed correcting.
+
+Two paid evals were lost in part on 2026-11-09: about $12 when a session ended mid-run on battery, and six of twelve cases when the Fable limit ran out, with about $29 of that still usable. The lead also told the user the second merge flattening came from batching, that the size cap could run early, and that the user's app caused a merge failure, each without checking; the records said otherwise or couldn't confirm it.
+
