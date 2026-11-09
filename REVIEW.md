@@ -14,6 +14,9 @@
   (--remote, --exec, --add-file, -o, a symlinked folder). One escape is Important.
 - Branch code that merge runs (test scripts, the harness) able to reach host.sock, the vault or the lead's files.
 - A setting or hold read once, then acted on after a step that takes minutes (a merge, a test run).
+- A run that crashed or was stopped, treated as one that finished: what does the next step do with its partial result?
+- An operation still running when the code decides (a command in flight, a merge mid-way): who counts it, and as what?
+- One branch of a path handled (clean but not conflicted, found but not missing): walk the other.
 
 ## Nit, never more
 - Copy, naming, comments, blank lines, a doc comment that slid off its function, line length.

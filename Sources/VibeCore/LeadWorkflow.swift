@@ -1359,7 +1359,7 @@ public enum LeadPrompts {
             let touched = sensitive.prefix(8).joined(separator: ", ") + (sensitive.count > 8 ? ", …" : "")
             switch self {
             case .contract:
-                return "the contract. Run each acceptance check (a focused test for each, not the whole suite again), compare what the branch does with its goal, and look for edits outside the boundaries, weakened or deleted tests, hard-coded results, leftovers and anything that only looks done."
+                return "the contract. Run each acceptance check (a focused test for each, not the whole suite again), compare what the branch does with its goal, and look for edits outside the boundaries, weakened or deleted tests, hard-coded results, leftovers and anything that only looks done. " + unrequested
             case .bugs:
                 return "bugs and regressions. Read the change line by line with the code around it and its callers: wrong conditions, cases it misses, errors it swallows, races, state it leaves behind, and what it breaks that worked before (the test log shows any failure)."
             case .bugsAndSecurity:
@@ -1523,6 +1523,33 @@ public enum LeadPrompts {
         + "security-sensitive (permissions, secrets or credentials, commands built from input, hooks or settings that run in "
         + "other sessions, sensitive paths) or isn't tied to the task's goal: report those as before."
 
+    /// The first audit's walk from the contract's invariant: a single verifier has no finder's focus to send it past
+    /// the acceptance checks, and most of the eval's misses were a state or a sibling path the happy path skips.
+    static let invariantWalk = "Name the invariant the contract implies, in one sentence of your own in your summary: what has to "
+        + "stay true for its goal to hold. Then test the change against it past the path the acceptance checks take: read the "
+        + "callers of what changed, and walk the states they skip (a run that failed or was stopped, work still in flight, "
+        + "the other branch of each condition it adds)."
+
+    /// Behaviour nobody asked for: boundaries list only what a task mustn't touch, so an extra the contract never
+    /// thought to forbid went unasked. Routine calls are the worker's to make (`routineCallsRule`).
+    static let unrequested = "Ask too what the diff does that the contract doesn't ask for: a behaviour, an option or visible text "
+        + "that no line of it calls for. Such a finding's evidence quotes the contract line it comes closest to, or says none "
+        + "does. It is a Nit unless it does harm or the user would see it; then it is Important, with the harm or what the user "
+        + "sees as its failure_scenario. Never raise one for a routine call listed in the worker's done report."
+
+    /// A doubt about behaviour once could be filed as a Nit, where it can't hold the merge: four of the eval's bugs
+    /// were found and left there. Style Nits aren't doubts.
+    static let settleDoubts = "A doubt about what the code does has to be settled before submit_audit, not filed: reading the "
+        + "path is enough to write a failure_scenario, and where it's cheap run a focused test or a probe under your TMPDIR. It "
+        + "ends one of three ways: Important with its failure_scenario; dropped, because the code refutes it; or, only if you "
+        + "couldn't settle it, a Nit whose evidence starts \"Unresolved:\" and gives the one fact that decides it and the "
+        + "command that would settle it. Style and naming Nits aren't doubts: this changes nothing for them."
+
+    /// Important findings hold the merge, so each is checked against what reaches its line first; a finding that
+    /// survives that is stronger evidence, and one a guard already stops never reaches the worker.
+    static let readWhatReaches = "Before you raise an Important finding, read the callers, guards and tests that reach that line "
+        + "and name them in its evidence. One of them already stopping the failure drops the finding; if none does, it stands."
+
     static let reportHeading = "## The worker's done report"
 
     /// The verifier's section of the worker's done report on the audited commit (nil: there's none on it).
@@ -1551,7 +1578,7 @@ public enum LeadPrompts {
         \(reaudit.map { recheck($0, amended: amended != nil) } ?? """
         Check: run every acceptance check\(sharedRun ? "" : ", " + Policy.verifierTests(Policy.lintTests(in: root), test: workflow.testCommand)); read the whole change \
         (`git diff \(workflow.base)...HEAD`, `git log \(workflow.base)..HEAD`); look for edits outside the boundaries, weakened or deleted \
-        tests, hard-coded results, leftovers and anything that only looks done.\(sharedRun ? "" : " " + Policy.verifierSuite(test: workflow.testCommand))
+        tests, hard-coded results, leftovers and anything that only looks done. \(invariantWalk) \(unrequested)\(sharedRun ? "" : " " + Policy.verifierSuite(test: workflow.testCommand))
         """)
         \(amended.map { "\n" + contractReaudit($0) + "\n" } ?? "")
         \(notesRule)
@@ -1570,9 +1597,10 @@ public enum LeadPrompts {
         outside the boundaries that neither a note of the lead's nor the worker's listed routine calls accept, and \
         that does harm), and every Important finding gives its failure_scenario: these inputs or this state give \
         this wrong result or crash. One you can't give a failure for isn't Important: an Important finding without \
-        failure_scenario is recorded as a Nit. Nit: everything else, style, naming, a doubt, an edit outside the \
-        boundaries that is correct (worth fixing, never holds the merge back). Pre-existing: already wrong before \
-        this branch; never fails the task. \
+        failure_scenario is recorded as a Nit. Nit: everything else, style, naming, a doubt left Unresolved as below, an \
+        edit outside the boundaries that is correct (worth fixing, never holds the merge back). Pre-existing: already \
+        wrong before this branch; never fails the task. \
+        \(settleDoubts) \(readWhatReaches) \
         The evidence rule: each finding names the file and line where it is (path from the repository's root) and \
         what shows it: the command you ran and what it gave, or what the code at that line does. No finding without \
         it; a hunch is not a finding. Nothing found: leave findings out. Whatever stays open as Important holds the \
