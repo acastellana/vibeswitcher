@@ -474,6 +474,7 @@ FEATURES = {
         ("All-done card: a batch's summary and receipts", "MainWindow/Chat/AllDoneCard.swift", r"struct AllDoneCard\b"),
         ("Shell request cards: an agent asks for a shell; Run or Decline", "Shell/ShellCard.swift", r"struct ShellCard\b"),
         ("Wallet request cards: an agent's transaction request; Send to Wallet Manager or sign in a browser wallet", "Wallet/WalletCard.swift", r"struct WalletCard\b"),
+        ("Wallet request cards: Send all N to Wallet Manager… lists a session's 2 or more waiting requests, then sends the ones listed", "Wallet/WalletSendAll.swift", r"struct WalletSendAllView\b"),
     ],
     "Terminal": [
         ("Selection survives output: select and copy while a build or server prints", "MainWindow/TerminalPane.swift", r"func feedOutput\b"),

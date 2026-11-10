@@ -457,6 +457,11 @@ are updated together.
 
 ### History
 
+- 2026-11-10: still version 1. The user's Send may cover several shown requests at once: with 2 or more of a
+  session's requests waiting, VibeSwitcher offers Send all, which lists exactly those requests and, once the user
+  confirms the list, sends each listed one as its own `wallet-request-<id>.json`, one at a time, as a single Send
+  does. A request not in the list the user confirmed is never sent by it. No format, field, rule or vector changes,
+  and nothing the Wallet Manager reads changes: it receives the same separate requests.
 - 2026-11-08: still version 1. `requestedBy.project`, `requestedBy.session` and `requestedBy.label` take the limits
   `reason` has on what it can draw: no more than 2 combining marks on one base character, and none of the blank
   lookalikes. A requester's words sit beside the rows the signer reads, so they can't stack into or blank out those

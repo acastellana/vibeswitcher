@@ -127,6 +127,26 @@ cost, the receipts of the 2026-10-31 batch give 8 tasks, 2.9 h and ~$86.
 
 ## Entries
 
+### IM-20: Send all waiting wallet requests with one reviewed action (wallet-cards-send-all, planned)
+
+- **Change:** with 2 or more of a session's wallet requests waiting, their cards offer Send all N to Wallet Manager…:
+  a list of exactly those requests, sent one at a time through each card's Send once the user confirms it. Planned
+  2026-11-10.
+- **Hypothesis:** if a session's waiting requests can be confirmed as one list, then a batch of N requests takes 1
+  reviewed action in place of N Send clicks (36 in the rollout that prompted it), because the list shows what the
+  requests share once and each one's differences; no wrong or unseen request is sent, since only the listed ones go
+  and a changed list sends nothing.
+- **Metric:** clicks per batch (Send actions the user takes for a batch of N), as the user or the other project's
+  lead reports them. Guard: requests sent that weren't in the confirmed list stays 0; no wallet incident in
+  [incidents.md](../lead/incidents.md).
+- **Baseline:** N clicks for N requests (36 for the 36-request rollout); 0 unseen requests sent. The script has no
+  source for this; the numbers are reports.
+- **Check:** 2026-12-10, the batches sent since the build is installed.
+- **Status:** measuring
+- **Result:** (pending)
+- **Verdict:** (pending)
+- **Why:** (pending)
+
 ### IM-19: The Passage contract check (passage-contract-check, planned)
 
 - **Change:** `scripts/e2e/passage-contract.sh`, run on demand, compares the installed Passage's `help` and `version`

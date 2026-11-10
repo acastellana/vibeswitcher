@@ -103,7 +103,10 @@ Agents can ask you for two things as cards in the chat:
   Manager, a separate app, over Passage to another Mac or in a folder on this one. It checks the request and you sign
   there. The card can also offer **Sign in browser wallet**, for a plain address on a request not marked for a local
   fork only; that skips the Wallet Manager's checks. VibeSwitcher never signs or holds a key. For a session with no chat, the
-  card sits along the terminal. The format is [wallet-request.md](../protocol/wallet-request.md).
+  card sits along the terminal. When 2 or more of a session's requests wait, **Send all N to Wallet Manager…** above
+  the cards lists exactly those requests (what they share once, then each one's differences) and sends the listed
+  ones, one at a time, only after you confirm there. It stops at the first that doesn't go, and the rest keep waiting;
+  if a listed request changed meanwhile, nothing is sent and you open the list again. The format is [wallet-request.md](../protocol/wallet-request.md).
 
 Claude Code may show `Ran 1 stop hook` / `Stop hook feedback: [VibeSwitcher · messages, v2] …` when a message arrives
 as a turn ends. That is the message being delivered, not an error ([docs/eval/stop-hook-shapes](../eval/stop-hook-shapes/README.md)).
