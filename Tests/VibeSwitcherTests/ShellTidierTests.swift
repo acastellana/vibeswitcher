@@ -74,7 +74,7 @@ struct ShellTidierTests {
             // Held until the test lets it go; given up on after the guard so a read on the main thread fails the test
             // instead of hanging it.
             // A turnstile: once let go, every later read passes (the timer looks again while the test ends).
-            if release.wait(timeout: .now() + hangGuard) == .success { release.signal() }
+            if release.wait(timeout: .now() + 20) == .success { release.signal() }
             return false
         }
         tidier.start(interval: 0.02)
@@ -98,7 +98,7 @@ struct ShellTidierTests {
         tidier.leftRunning = { _, _ in
             flags.enter()
             // A turnstile: once let go, every later read passes (the timer looks again while the test ends).
-            if release.wait(timeout: .now() + hangGuard) == .success { release.signal() }
+            if release.wait(timeout: .now() + 20) == .success { release.signal() }
             return false
         }
         var done: [UUID]?
