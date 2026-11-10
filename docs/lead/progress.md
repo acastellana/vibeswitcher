@@ -2369,3 +2369,9 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 23:08 Automatically (auto_advance): Merged ended-sessions-output-is (Ended sessions' output is readable in dark mode, and the shell tidier scans off the main thread) into main at ba7cbf06, on its passing audit and the full test run.
 - 2026-11-10 23:08 Automatically (auto_advance): Cleaned up ended-sessions-output-is (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-10 23:14 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-11 00:10 App health: VibeSwitcher's own logs show a cause that keeps coming back, grouped by cause and counted by VibeSwitcher itself (no model; lines masked and redacted). One proposed task each; one already on the board needs nothing:
+Proposed task 1: Find why requests to the session host aren't sent
+  Cause: the notice "Not sent to the session host" (doubled day over day (2 → 9)).
+  Counts by day, 2026-11-04 to 2026-11-10: 11-04 ×0, 11-05 ×0, 11-06 ×0, 11-07 ×0, 11-08 ×10, 11-09 ×2, 11-10 ×9.
+  Lines: first at 2026-11-08 08:06:58, last at 2026-11-10 23:13:55 in ~/.vibeswitcher/debug/app.log (app.log.1 once it rotated).
+  Line, masked: host: not sent: …
