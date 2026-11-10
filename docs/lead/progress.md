@@ -2351,3 +2351,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 21:42 Automatically (auto_advance): Cleaned up shells-that-agents (freed 2.4 GB of build output and temporary folders). It stays done.
 - 2026-11-10 22:01 Started a worker on ended-sessions-output-is
 - 2026-11-10 22:01 Automatically (auto_advance): Started a worker on ended-sessions-output-is (Ended sessions' output is readable in dark mode, and the shell tidier scans off the main thread), its after tasks done (shells-that-agents).
+- 2026-11-10 22:09 Planned ending-a-shell-session: Ending a shell session makes VibeSwitcher quit (review audit)
+- 2026-11-10 22:09 Started a worker on ending-a-shell-session
+- 2026-11-10 22:09 Automatically (auto_advance): Started a worker on ending-a-shell-session (Ending a shell session makes VibeSwitcher quit).
+- 2026-11-10 22:09 Automatically (auto_advance): Overlap for ending-a-shell-session's start (a warning only: nothing was refused or reordered). Sources/VibeSwitcher/Sandbox.swift: ended-sessions-output-is (running: its boundaries name it).
