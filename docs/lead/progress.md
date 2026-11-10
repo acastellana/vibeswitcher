@@ -2118,3 +2118,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 17:40 Automatically (auto_advance): Started the audit of passage-contract-check at 09b3864e (An audit was started on it: its verdict decides). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-10 17:45 Audit of passage-contract-check: complete, clean, round 2: 1 Nit open
 - 2026-11-10 18:04 Merged passage-contract-check: Passage contract check: the real passage CLI still matches what VibeSwitcher assumes (build b87922e039e8 with changes not committed)
+- 2026-11-10 18:04 Automatically (auto_advance): Merged passage-contract-check (Passage contract check: the real passage CLI still matches what VibeSwitcher assumes) into main at 3d92996e, on its passing audit and the full test run.
+- 2026-11-10 18:04 Automatically (auto_advance): Cleaned up passage-contract-check (freed 1.5 GB of build output and temporary folders). It stays done.
