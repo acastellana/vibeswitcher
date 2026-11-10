@@ -173,8 +173,10 @@ public final class LeadToolset: MCPToolset {
     /// after 5 s).
     var stopWait: TimeInterval = 10
     /// A session's processes cleanup may end itself when the host didn't: the user's carrying its
-    /// `VIBESWITCHER_SESSION` id (decision 2026-10-23 02:44; see `SessionStrays.carrying`). Faked in tests.
-    var sessionProcesses: (String) -> [SessionStrays.Found] = { id in UUID(uuidString: id).map { SessionStrays.carrying(session: $0) } ?? [] }
+    /// `VIBESWITCHER_SESSION` id (decision 2026-10-23 02:44; see `SessionStrays.carrying`), never the app. Faked in tests.
+    var sessionProcesses: (String) -> [SessionStrays.Found] = { id in
+        UUID(uuidString: id).map { SessionStrays.carrying(session: $0, keeping: SessionStrays.appBesideThisProgram) } ?? []
+    }
     /// The bytes free on the volume holding a path (see `DiskSpace.free`), and where Claude Code keeps its sessions'
     /// temporary folders (see `ClaudeScratch`). Faked in tests.
     var freeSpace: (String) -> Int64? = DiskSpace.free(at:)

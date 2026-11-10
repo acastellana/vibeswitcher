@@ -22,6 +22,20 @@ public enum SessionStrays {
         return processes(user: user) { ProcessTable.environment(pid: $0)?.contains(entry) == true }
     }
 
+    /// `carrying(session:)` without the processes running `app` (VibeSwitcher itself, which carries a session's id
+    /// when something run in that session launched it, see `endNow`): what a lead ends itself when the host didn't.
+    public static func carrying(session id: UUID, keeping app: String?) -> [Found] {
+        carrying(session: id)
+    }
+
+    /// VibeSwitcher's executable for one of its tools (the tool server, the session host): the one beside this
+    /// process's own, as the app's bundle holds them.
+    public static var appBesideThisProgram: String? {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(getpid(), &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        return URL(fileURLWithPath: String(cString: buffer)).deletingLastPathComponent().appendingPathComponent("VibeSwitcher").path
+    }
+
     /// The session's processes: those carrying its id, and those of `started` (what its program started, see
     /// `descendants`) still running whose environment can't be read. One whose environment names another session, or
     /// none, isn't.
