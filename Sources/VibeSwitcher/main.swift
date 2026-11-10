@@ -181,6 +181,11 @@ if let index = arguments.firstIndex(of: "--snapshot") {
     exit(0)
 }
 
+// Launched by something run in a session (`open` from a shell hands that shell's environment on, as an install run
+// there does), the app carries that session's id. Nothing it starts (the session host, its helpers) should: a
+// session's end ends what carries its id (`SessionStrays`). The sandbox and the benches left above, as they are.
+unsetenv("VIBESWITCHER_SESSION")
+
 // One copy at a time. Two would show two icons, double every notification, and fight over the
 // Phone Access port and Tailscale mapping (one quitting removes the other's). A copy that is still
 // quitting (e.g. during an update) gets a few seconds; a live one is shown instead and we leave.
