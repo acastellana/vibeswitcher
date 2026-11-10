@@ -39,6 +39,9 @@ final class ShellTidier {
     /// The Run-card shells typed into since their command ended.
     private(set) var used: Set<UUID>
     private var timer: DispatchSourceTimer?
+    /// A look from the timer is going on off the main thread (main thread): the next tick waits for it.
+    private var looking = false
+    private static let lookQueue = DispatchQueue(label: "vibeswitcher.shell-tidier.look", qos: .utility)
 
     init(file: URL = VibePaths.root.appendingPathComponent("shell-requests/used.json"), now: @escaping () -> Date = { Date() },
          log: @escaping (String) -> Void = { Breadcrumbs.shared.note("shell: " + $0) }) {
@@ -53,7 +56,7 @@ final class ShellTidier {
         guard timer == nil else { return }
         let ticks = DispatchSource.makeTimerSource(queue: .main)
         ticks.schedule(deadline: .now() + interval, repeating: interval, leeway: .seconds(5))
-        ticks.setEventHandler { [weak self] in self?.look() }
+        ticks.setEventHandler { [weak self] in self?.lookOffMain() }
         ticks.resume()
         timer = ticks
     }
@@ -72,9 +75,8 @@ final class ShellTidier {
         save()
     }
 
-    /// Ends what's due now (main thread); the sessions it ended.
-    @discardableResult
-    func look() -> [UUID] {
+    /// What a look needs of the main thread's state: the sessions, as they were then.
+    private func snapshot() -> (sessions: [HostSession], used: Set<UUID>, now: Date) {
         let all = sessions()
         // A record of a session that has ended, or that the host no longer has, is dropped (not while the host's
         // sessions aren't known: none listed).
@@ -83,13 +85,48 @@ final class ShellTidier {
             used.formIntersection(live)
             save()
         }
-        let due = ShellTidy.due(all, used: used, now: now(), after: endAfter, idle: idle, leftRunning: leftRunning)
+        return (all, used, now())
+    }
+
+    /// Ends `due` (main thread), as End Session does.
+    private func endDue(_ due: [HostSession], at now: Date) {
         for session in due {
             log("\(session.id.uuidString.prefix(8)) (\(session.label)) ended by itself: its command went well "
-                + "\(Durations.short(now().timeIntervalSince(ShellTidy.ending(of: session)?.at ?? now()))) ago and nobody used it since")
+                + "\(Durations.short(now.timeIntervalSince(ShellTidy.ending(of: session)?.at ?? now))) ago and nobody used it since")
             end(session.id)
         }
+    }
+
+    /// Ends what's due now, the look on the calling thread (main thread); the sessions it ended. The timer's looks go
+    /// through `lookOffMain` instead: reading the process table is not for the main thread.
+    @discardableResult
+    func look() -> [UUID] {
+        let seen = snapshot()
+        let due = ShellTidy.due(seen.sessions, used: seen.used, now: seen.now, after: endAfter, idle: idle, leftRunning: leftRunning)
+        endDue(due, at: seen.now)
         return due.map(\.id)
+    }
+
+    /// `look`, its process-table reads (`idle`, `leftRunning`: each walks the table) on a queue of their own; only the
+    /// sessions' list and the ending come back to the main thread (main thread). Calls `done` there with the sessions
+    /// it ended. A look still going on isn't started again.
+    func lookOffMain(done: @escaping ([UUID]) -> Void = { _ in }) {
+        guard !looking else { return done([]) }
+        looking = true
+        let seen = snapshot()
+        let after = endAfter, idle = idle, leftRunning = leftRunning
+        Self.lookQueue.async { [weak self] in
+            let due = ShellTidy.due(seen.sessions, used: seen.used, now: seen.now, after: after, idle: idle, leftRunning: leftRunning)
+            DispatchQueue.main.async {
+                guard let self else { return done([]) }
+                self.looking = false
+                // Typed into, or ended some other way, while the table was read: not ended now.
+                let current = self.sessions()
+                let still = due.filter { session in !self.used.contains(session.id) && current.contains { $0.id == session.id && $0.isLive } }
+                self.endDue(still, at: self.now())
+                done(still.map(\.id))
+            }
+        }
     }
 
     /// The Run-card shells among `rows` that Close Finished Shells… would end now.

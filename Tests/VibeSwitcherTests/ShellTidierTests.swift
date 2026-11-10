@@ -52,6 +52,64 @@ struct ShellTidierTests {
         sessions.map { WindowRow(content: .hosted($0), project: project) }
     }
 
+    private final class Flags: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entered = false, onMain = false
+        var enteredLook: Bool { lock.lock(); defer { lock.unlock() }; return entered }
+        var lookedOnMain: Bool { lock.lock(); defer { lock.unlock() }; return onMain }
+        func enter() { lock.lock(); entered = true; onMain = onMain || Thread.isMainThread; lock.unlock() }
+    }
+
+    /// The timer's look reads the process table (`leftRunning`) off the main thread: while a stand-in read is stuck, the
+    /// main queue runs, and the shell is ended on it when the read returns.
+    @Test func theTimersLookReadsTheProcessTableOffTheMainThread() async {
+        let seen = Seen()
+        let shell = Self.session("Shell: Install")
+        seen.sessions = [shell]
+        seen.now = Self.start.addingTimeInterval(700)
+        let tidier = tidier(seen)
+        let flags = Flags(), release = DispatchSemaphore(value: 0)
+        tidier.leftRunning = { _, _ in
+            flags.enter()
+            // Held until the test lets it go; given up on after the guard so a read on the main thread fails the test
+            // instead of hanging it.
+            // A turnstile: once let go, every later read passes (the timer looks again while the test ends).
+            if release.wait(timeout: .now() + hangGuard) == .success { release.signal() }
+            return false
+        }
+        tidier.start(interval: 0.02)
+        defer { tidier.close() }
+        #expect(await until { flags.enteredLook })
+        var mainRan = false
+        DispatchQueue.main.async { mainRan = true }
+        #expect(await until(timeout: 5) { mainRan }, "the main queue was held by the look")
+        release.signal()
+        #expect(await until { seen.ended.contains(shell.id) })
+        #expect(!flags.lookedOnMain)
+    }
+
+    @Test func aShellTypedIntoWhileTheTableWasReadIsNotEnded() async {
+        let seen = Seen()
+        let shell = Self.session("Shell: Install")
+        seen.sessions = [shell]
+        seen.now = Self.start.addingTimeInterval(700)
+        let tidier = tidier(seen)
+        let flags = Flags(), release = DispatchSemaphore(value: 0)
+        tidier.leftRunning = { _, _ in
+            flags.enter()
+            // A turnstile: once let go, every later read passes (the timer looks again while the test ends).
+            if release.wait(timeout: .now() + hangGuard) == .success { release.signal() }
+            return false
+        }
+        var done: [UUID]?
+        tidier.lookOffMain { done = $0 }
+        #expect(await until { flags.enteredLook })
+        tidier.typed(shell.id)
+        release.signal()
+        #expect(await until { done != nil })
+        #expect(done == [] && seen.ended.isEmpty)
+    }
+
     @Test func aFinishedShellNobodyTouchedEndsTenMinutesAfterItsCommandWentWell() {
         let seen = Seen()
         let shell = Self.session("Shell: Install")
