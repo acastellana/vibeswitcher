@@ -1,3 +1,4 @@
+import Combine
 import CryptoKit
 import Foundation
 import Testing
@@ -400,6 +401,24 @@ struct WalletSendAllTests {
         for request in theirs { #expect(s.desk.uncut.cards.first { $0.id == request.id }?.state == .waiting) }
     }
 
+    /// A request over the cap has no card in chat; when it goes, the cards shown stay the same, and the desk still
+    /// says it changed, so the offer's count is drawn again.
+    @Test func theOfferCountFollowsARequestOverTheCap() async throws {
+        let s = try setup()
+        defer { s.desk.close() }
+        let requests = try await filed(s, 36)
+        let shown = s.desk.cards
+        #expect(shown.map(\.id) == requests.suffix(30).map(\.id) && s.desk.sendAllCount(for: Self.session) == 36)
+        var changes = 0
+        let watch = s.desk.objectWillChange.sink { changes += 1 }
+        defer { watch.cancel() }
+        await s.desks.acted(s.desk, .send, requests[0].id)
+        #expect(Self.sentIDs(s.fake) == [requests[0].id])
+        #expect(s.desk.cards == shown)
+        #expect(changes > 0)
+        #expect(s.desk.sendAllCount(for: Self.session) == 35)
+    }
+
     /// A capped list that stops midway: what it didn't send, and what it didn't hold, all still wait and are offered.
     @Test func aCappedListThatStopsLeavesEveryOtherRequestWaiting() async throws {
         let s = try setup()
@@ -411,6 +430,12 @@ struct WalletSendAllTests {
         await confirmed(review)
         #expect(Self.sentIDs(s.fake) == [requests[0].id, requests[1].id])
         #expect(s.desk.sendAllCount(for: Self.session) == 31)
+        // The one it stopped at is over the cap's oldest 30, and still has its card, with Retry: the summary points at it.
+        let shown = s.desk.cards(for: Self.session)
+        #expect(shown.count == 30)
+        let stopped = try #require(shown.first { $0.id == requests[1].id })
+        #expect(stopped.actions == [.retry, .discard])
+        #expect(try summary(review).text.contains("Stopped at request 2"))
         let again = try #require(s.desk.sendAll(for: Self.session))
         #expect(again.items.map(\.id) == requests[2..<32].map(\.id))
         #expect(again.cappedNote == "30 of 31 waiting requests; the other 1 stays waiting: open Send all again after these")

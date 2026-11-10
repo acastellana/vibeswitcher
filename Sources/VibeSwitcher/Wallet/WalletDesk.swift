@@ -47,7 +47,8 @@ final class WalletDesk: ObservableObject {
         var sessions: [String: String] = [:]
         var drawn: [String: WalletRequest] = [:]
     }
-    private(set) var uncut = Uncut()
+    /// Published: the count Send all offers is read from it, and changes while the cards shown stay the same.
+    @Published private(set) var uncut = Uncut()
     /// The cards the user took off the strip with Dismiss, by request id (`dismissedFile`, kept across launches).
     @Published private(set) var dismissed: Set<String> = []
 
@@ -944,7 +945,7 @@ final class WalletDesk: ObservableObject {
             if self?.sessions != sessions { self?.sessions = sessions }
             if self?.dismissed != dismissed { self?.dismissed = dismissed }
             self?.drawn = drawn
-            self?.uncut = uncut
+            if self?.uncut != uncut { self?.uncut = uncut }
             then()
         }
     }
@@ -953,7 +954,9 @@ final class WalletDesk: ObservableObject {
     static let maxCards = 30
 
     /// `cards` (oldest first) cut to `limit`: the oldest of those the strip doesn't show (`hidden`) go first, then the
-    /// oldest finished ones, then the oldest; the order kept.
+    /// oldest finished ones, then the oldest still waiting for Send, then the oldest; the order kept. A waiting one
+    /// over the cap is still in Send all's count and list (`uncut`), oldest first; one a send stopped at (not
+    /// reachable, unsure, not sent) has only its card to say so and to retry from, so it outlasts the waiting ones.
     static func capped(_ cards: [WalletCardModel], limit: Int = maxCards, hidden: Set<String> = []) -> [WalletCardModel] {
         guard cards.count > limit else { return cards }
         var excess = cards.count - limit
@@ -963,6 +966,10 @@ final class WalletDesk: ObservableObject {
             excess -= 1
         }
         for card in cards where excess > 0 && !dropped.contains(card.id) && card.state.isFinished {
+            dropped.insert(card.id)
+            excess -= 1
+        }
+        for card in cards where excess > 0 && !dropped.contains(card.id) && card.state == .waiting {
             dropped.insert(card.id)
             excess -= 1
         }
