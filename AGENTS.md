@@ -24,7 +24,6 @@ bash scripts/test.sh --filter 'AccessibilityLint|DebugAidsLint|HomePathLint|Keyc
 scripts/test-under-load.sh --load 24 -r 3 -f 'NewTests'   # new or changed tests, under load, before reporting done
 bash scripts/test.sh --perf                         # benches, only on a calm Mac
 bash scripts/e2e/wallet-e2e.sh                      # on demand: sandbox → loop passage → ~/dev/wallet-manager and back, 5 cases
-bash scripts/e2e/passage-contract.sh                # on demand: the installed passage's help and version still match what's called
 ```
 
 UI changes: show them in the sandbox, each step its own command: `bash scripts/sandbox-app.sh run`, then
