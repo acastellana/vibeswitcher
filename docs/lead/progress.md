@@ -2363,3 +2363,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 22:46 Automatically (auto_advance): Started the audit of ended-sessions-output-is at 10d7f6bf (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-10 22:50 Audit of ended-sessions-output-is: complete, clean, round 1: 2 Nit open
 - 2026-11-10 22:53 Merged ending-a-shell-session: Ending a shell session makes VibeSwitcher quit (build 1810015b999d)
+- 2026-11-10 22:53 Automatically (auto_advance): Merged ending-a-shell-session (Ending a shell session makes VibeSwitcher quit) into main at 7533d160, on its passing audit and the full test run.
+- 2026-11-10 22:53 Automatically (auto_advance): Cleaned up ending-a-shell-session (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-10 23:08 Merged ended-sessions-output-is: Ended sessions' output is readable in dark mode, and the shell tidier scans off the main thread (build 1810015b999d)
