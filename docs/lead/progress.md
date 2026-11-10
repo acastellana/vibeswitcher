@@ -2114,3 +2114,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 17:36 Started a worker on passage-contract-check
 - 2026-11-10 17:36 Automatically (auto_advance): Merge of passage-contract-check failed: Tests fail rebased onto main: agentsStaysShort() Sent its worker the output; it's back at work.
 - 2026-11-10 17:36 Sent passage-contract-check's worker contract v3 (it had v2)
+- 2026-11-10 17:40 Released passage-contract-check's worker (idle since its done report on 09b3864e) while its audit runs
+- 2026-11-10 17:40 Automatically (auto_advance): Started the audit of passage-contract-check at 09b3864e (An audit was started on it: its verdict decides). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
