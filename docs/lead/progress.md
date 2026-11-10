@@ -2347,3 +2347,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 21:27 Planned ended-sessions-output-is: Ended sessions' output is readable in dark mode, and the shell tidier scans off the main thread (review audit)
 - 2026-11-10 21:32 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-11-10 21:42 Merged shells-that-agents: Shells that agents opened tidy themselves away when their command is done (build 1810015b999d)
+- 2026-11-10 21:42 Automatically (auto_advance): Merged shells-that-agents (Shells that agents opened tidy themselves away when their command is done) into main at 832a2ae0, on its passing audit and the full test run.
+- 2026-11-10 21:42 Automatically (auto_advance): Cleaned up shells-that-agents (freed 2.4 GB of build output and temporary folders). It stays done.
