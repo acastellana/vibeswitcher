@@ -2355,3 +2355,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 22:09 Started a worker on ending-a-shell-session
 - 2026-11-10 22:09 Automatically (auto_advance): Started a worker on ending-a-shell-session (Ending a shell session makes VibeSwitcher quit).
 - 2026-11-10 22:09 Automatically (auto_advance): Overlap for ending-a-shell-session's start (a warning only: nothing was refused or reordered). Sources/VibeSwitcher/Sandbox.swift: ended-sessions-output-is (running: its boundaries name it).
+- 2026-11-10 22:31 Automatically (auto_advance): Started the audit of ending-a-shell-session at 2d2de6f9 (Its review is audit).
+- 2026-11-10 22:31 Released ending-a-shell-session's worker (idle since its done report on 2d2de6f9) while its audit runs
+- 2026-11-10 22:31 Automatically (auto_advance): Released ending-a-shell-session's worker, idle since its done report on 2d2de6f9, while its audit runs (ended pid 41412 (Worker: Ending a shell session makes VibeSwitcher quit)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
