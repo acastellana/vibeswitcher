@@ -2334,3 +2334,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 18:58 Asked the user to push main at 55fce1fb (107 commits) to origin/main
 - 2026-11-10 19:01 Pushed main at 55fce1fb (107 commits) to origin/main, on the user's click
 - 2026-11-10 19:15 Merged a-shell-run-card: A shell Run card goes away by itself a few seconds after it's handled (build 1810015b999d)
+- 2026-11-10 19:15 Automatically (auto_advance): Merged a-shell-run-card (A shell Run card goes away by itself a few seconds after it's handled) into main at 0592e7c3, on its passing audit and the full test run.
+- 2026-11-10 19:15 Automatically (auto_advance): Cleaned up a-shell-run-card (freed 1.6 GB of build output and temporary folders). It stays done.
