@@ -6,7 +6,7 @@ import VibeCore
 @testable import VibeSwitcher
 
 /// A fake `passage` in a scratch folder (never the real one, its Keychain, pairings or inbox): `calls` holds one line
-/// of arguments per run; `send-exit` sets send's exit code; `inbox.jsonl` is what `inbox` prints, `peers.jsonl` what
+/// of arguments per run; `send-exit` sets send's exit code (`send-exit-<name>` one file's); `inbox.jsonl` is what `inbox` prints, `peers.jsonl` what
 /// `peers` prints; `listen` sleeps until it's stopped.
 struct WalletFakePassage {
     static let peer = "0a1b2c3d"
@@ -32,7 +32,7 @@ struct WalletFakePassage {
             \(cli)
             case "$1" in
             send)
-                code=$(cat "$here/send-exit" 2>/dev/null || echo 0)
+                code=$(cat "$here/send-exit-$5" 2>/dev/null || cat "$here/send-exit" 2>/dev/null || echo 0)
                 cp "$3" "$here/sent-$5"
                 if [ "$code" = 0 ]; then printf 'sent\\t%s\\t%s\\t%s\\n' "$2" "$5" "$(wc -c < "$3" | tr -d ' ')"; else echo "passage: fake exit $code" >&2; fi
                 exit "$code" ;;
@@ -54,6 +54,10 @@ struct WalletFakePassage {
     var calls: [String] { ((try? String(contentsOf: file("calls"), encoding: .utf8)) ?? "").split(separator: "\n").map(String.init) }
     var sends: [String] { calls.filter { $0.hasPrefix("send ") } }
     func setSendExit(_ code: Int32) throws { try "\(code)\n".write(to: file("send-exit"), atomically: true, encoding: .utf8) }
+    /// `send`'s exit code for one request only, whatever `setSendExit` says for the others.
+    func setSendExit(_ code: Int32, for id: String) throws {
+        try "\(code)\n".write(to: file("send-exit-\(WalletRequest.fileName(id))"), atomically: true, encoding: .utf8)
+    }
 
     /// Puts `result` in the inbox from the Wallet Manager peer, as passage would, and lists it in `inbox.jsonl`.
     func receive(_ result: WalletResult, second: Int) throws {

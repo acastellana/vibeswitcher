@@ -425,6 +425,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         func now() -> Date { lock.withLock { Date().addingTimeInterval(ahead) } }
         func advance(_ seconds: TimeInterval) { lock.withLock { ahead += seconds } }
     }
+    /// The Send all list `wallet-send-all open` made, until its cancel.
+    var walletSendAll: WalletSendAll?
     /// The local page Sign in browser wallet opened last (`wallet-click browser`), for `wallet-page`.
     var walletPageURL: URL?
     /// `wallet-page`'s web view and the made-up request's server, while it draws.
@@ -1259,6 +1261,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint, transaction (tx HASH [EXPLORER URL], once signed and submitted) and the Wallet Manager's checks"),
         ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
         ("wallet-click send|retry|discard|browser|settings|dismiss", "presses that button on the newest wallet request card of the selected session, on its strip or not (dismiss takes a finished one off the strip; send goes to the sandbox's fake passage, never the real one; browser serves the local page but never opens a browser: wallet-page shows it; settings opens Settings › Wallet)"),
+        ("wallet-send-all open|rows|confirm|stop|cancel", "the selected session's Send all list, as Send all N to Wallet Manager… on its cards opens it (offered with 2 or more requests waiting and a Wallet Manager chosen): open shows it as the sheet (sheet-wallet-send-all in a shot) and prints it; rows prints it as it is now (what is the same in all, each request's differences and state, the buttons or the summary); confirm presses its Send (each listed request through its card's Send, to the sandbox's fake passage or stand-in, never the real one) and prints how it ended; stop is Stop After This One; cancel closes it, sending nothing"),
         ("wallet-peer none|chosen|this-mac|this-mac-stopped", "no Wallet Manager peer chosen for the wallet desk (as with None in Settings › Wallet: cards offer the browser wallet and Open Settings instead of Send), or the made-up one again; this-mac: the Wallet Manager on this Mac chosen (in Settings › Wallet too), and a stand-in for it started with its local transport in the sandbox's own home, taking requests: Send writes into its folder and wallet-answer answers from it; this-mac-stopped: chosen, and the stand-in no longer taking requests (Send reads not reachable); the cards redraw"),
         ("wallet-page [NAME]", "draws the local Sign in browser wallet page as served (the one wallet-click browser opened, else one for a made-up request), in a web view of the sandbox's own with no wallet extension, light and dark: NAME-light.png, NAME-dark.png (default wallet-page)"),
         ("wallet-answer received|proposed|signed|submitted|rejected|failed", "the fake Wallet Manager's Mac answers the newest card's request: the card shows it, and the asking fake session gets it as a message"),
@@ -1561,6 +1564,37 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
         walletDesk.act(action, on: card.id) { [weak self] in
             self?.settle { reply(true, "\(action.title): the card is now \(self?.walletCard.map { WalletCardModel.title($0.state) } ?? "gone")") }
+        }
+    }
+
+    /// `wallet-send-all open|rows|confirm|stop|cancel`: the selected session's Send all list (`WalletSendAll`), as its
+    /// button on the cards opens it, shown as the sheet; its rows as text; its Send, Stop and Cancel. It sends only
+    /// through the sandbox's desk (its fake passage or stand-in Wallet Manager).
+    private func walletSendAllCommand(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
+        if what == "open" {
+            guard let session = model.selectedRow?.hostID else { return reply(false, "no fake session selected: chat NAME first") }
+            walletSendAll?.cancel()
+            guard let review = walletDesk.sendAll(for: session) else {
+                walletSendAll = nil
+                return reply(false, "Send all isn't offered: it needs 2 or more requests waiting in this chat and a Wallet Manager chosen")
+            }
+            walletSendAll = review
+            return showSheet("wallet-send-all", { AnyView(WalletSendAllView(review: review, desk: review.desk)) }) { ok, _ in reply(ok, review.text) }
+        }
+        guard let review = walletSendAll else { return reply(false, "no Send all list open: wallet-send-all open first") }
+        switch what {
+        case "rows": reply(true, review.text)
+        case "confirm":
+            guard review.phase == .review else { return reply(false, "the list can't send (it sent, or was cancelled): wallet-send-all open again") }
+            review.confirm { [weak self] in self?.settle { reply(true, review.text) } }
+        case "stop", "cancel":
+            review.cancel()
+            if what == "cancel" {
+                if sheetName == "wallet-send-all" { closeSheet() }
+                walletSendAll = nil
+            }
+            reply(true, what == "cancel" ? "closed: \(review.text.split(separator: "\n").last ?? "")" : "no further request is started")
+        default: reply(false, "wallet-send-all open|rows|confirm|stop|cancel")
         }
     }
 
@@ -2380,6 +2414,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
         case "wallet-page": walletPage(rest.isEmpty ? "wallet-page" : rest, reply)
         case "wallet-click": walletClick(rest, reply)
+        case "wallet-send-all": walletSendAllCommand(rest, reply)
         case "wallet-peer":
             guard ["none", "chosen", "this-mac", "this-mac-stopped"].contains(rest) else { return reply(false, "wallet-peer none|chosen|this-mac|this-mac-stopped") }
             if rest.hasPrefix("this-mac") {
@@ -2906,13 +2941,18 @@ private final class Driver: NSObject, NSApplicationDelegate {
         guard let entry = (Self.sheets + Self.walletSheets).first(where: { $0.name == name }) else {
             return reply(false, "no sheet \(name): " + (Self.sheets.map(\.name) + Self.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", "))
         }
+        showSheet(name, { entry.make(self) }, reply)
+    }
+
+    /// `make`'s view as the sheet named `name`, in the sheet's own window.
+    private func showSheet(_ name: String, _ make: () -> AnyView, _ reply: @escaping (Bool, String) -> Void) {
         guard let parent = window?.window else { return reply(false, "no window") }
         closeSheet()
-        let content = NSHostingController(rootView: entry.make(self))
+        let content = NSHostingController(rootView: make())
         let sheet = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
         sheet.contentViewController = content
         // As tall as its content (a Form's own height is whatever it's given), at most as tall as the window.
-        let measure = NSHostingView(rootView: entry.make(self).fixedSize(horizontal: false, vertical: true))
+        let measure = NSHostingView(rootView: make().fixedSize(horizontal: false, vertical: true))
         let fitting = measure.fittingSize
         if fitting.width > 0, fitting.height > 0 {
             sheet.setContentSize(NSSize(width: fitting.width, height: min(fitting.height, parent.frame.height - 60)))

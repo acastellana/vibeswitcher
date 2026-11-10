@@ -360,6 +360,7 @@ struct WalletCard: View {
 /// The wallet requests the selected session's agent filed, pinned under its conversation: each a `WalletCard` whose
 /// buttons go to the desk (nothing is sent until Send to Wallet Manager is pressed). Empty: nothing shown. Lazy: only
 /// the cards scrolled into its 380 points are drawn (each costs its views and their memory), however many are live.
+/// Over them, while 2 or more wait for Send, Send all N to Wallet Manager… opens the list of them (`WalletSendAll`).
 struct WalletRequestStrip: View {
     @ObservedObject var desk: WalletDesk
     let session: UUID
@@ -371,6 +372,7 @@ struct WalletRequestStrip: View {
         if !cards.isEmpty {
             ScrollView {
                 LazyVStack(spacing: 10) {
+                    if let count = desk.sendAllCount(for: session) { sendAll(count) }
                     ForEach(cards) { card in
                         WalletCard(card: card) { action in
                             desk.act(action, on: card.id)
@@ -384,6 +386,20 @@ struct WalletRequestStrip: View {
             .fixedSize(horizontal: false, vertical: cards.count == 1)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Transaction requests")
+        }
+    }
+
+    /// With 2 or more waiting for Send: one button that lists them all first (`WalletSendAll`); nothing goes on this click.
+    private func sendAll(_ count: Int) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(count) requests wait for you").font(.system(size: 12)).foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Button(WalletSendAll.offerTitle(count)) {
+                guard let review = desk.sendAll(for: session) else { return }
+                WalletSendAllSheet.present(review, over: NSApp.keyWindow ?? NSApp.mainWindow, closed: acted)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityHint("Lists the \(count) requests first: nothing is sent until you confirm there")
         }
     }
 }
