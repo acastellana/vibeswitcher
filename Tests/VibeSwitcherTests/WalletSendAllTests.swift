@@ -229,7 +229,7 @@ struct WalletSendAllTests {
         #expect(Set(shown.map(\.value)).count == 3)
         for (request, field) in zip(calls, shown) {
             let digest = Self.sha256(String(try #require(request.data).dropFirst(2)))
-            #expect(field.value.contains("Fingerprint \(digest.prefix(8)) (the first 8 hex digits of the calldata's SHA-256)"))
+            #expect(field.value.contains("Fingerprint \(digest.prefix(8)) (calldata SHA-256, first 8 hex digits)"))
             #expect(field.value.hasSuffix("100 bytes"))
             // The one word that differs, whole, as hex; the words alike aren't listed.
             #expect(field.differing == 1 && field.words.count == 1)
@@ -295,7 +295,7 @@ struct WalletSendAllTests {
         let prints = fields.map(fingerprint)
         #expect(prints[0].count > 8 && prints[0].prefix(8) == prints[1].prefix(8))
         #expect(prints[0] != prints[1] && prints[0] == prints[2])
-        #expect(fields[0].value.contains("the first \(prints[0].count) hex digits"))
+        #expect(fields[0].value.contains("first \(prints[0].count) hex digits"))
         #expect(fields[0] != fields[1] && fields[0] == fields[2])
         #expect(fields[0].words == ["Word 2: 0x" + first] && fields[1].words == ["Word 2: 0x" + second])
         #expect(!WalletSendAll.split(WalletSendAll.fields(of: Array(items.prefix(2)))).common.contains { $0.key == "calldata" })

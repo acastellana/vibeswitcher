@@ -276,7 +276,7 @@ final class WalletSendAll: ObservableObject, Identifiable {
             guard let at = all[call.item].firstIndex(where: { $0.key == "calldata" }) else { continue }
             var lines = all[call.item][at].value.components(separatedBy: "\n")
             // Before the size, the card's last line.
-            lines.insert("Fingerprint \(print) (the first \(print.count) hex digits of the calldata's SHA-256)", at: max(lines.count - 1, 1))
+            lines.insert("Fingerprint \(print) (calldata SHA-256, first \(print.count) hex digits)", at: max(lines.count - 1, 1))
             all[call.item][at].value = lines.joined(separator: "\n")
             all[call.item][at].bytes = hex(call.bytes)
         }
