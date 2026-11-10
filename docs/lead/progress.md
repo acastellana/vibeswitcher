@@ -2100,3 +2100,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 08:53 Fetched origin/main at b87922e0: main is 2 commits ahead of origin/main and 0 commits behind it
 - 2026-11-10 08:53 Automatically fetched origin/main at b87922e0: 0 commits from the other Mac at origin/main (b87922e039e8c5acfc813dadf57b20a7c12419b6): merge_remote would do nothing: main has everything origin/main has.
 - 2026-11-10 10:56 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-10 16:46 Planned passage-contract-check: Passage contract check: the real passage CLI still matches what VibeSwitcher assumes
+- 2026-11-10 16:46 Started a worker on passage-contract-check
+- 2026-11-10 16:46 Automatically (auto_advance): Started a worker on passage-contract-check (Passage contract check: the real passage CLI still matches what VibeSwitcher assumes).
