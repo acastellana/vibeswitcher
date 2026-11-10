@@ -106,7 +106,10 @@ Agents can ask you for two things as cards in the chat:
   card sits along the terminal. When 2 or more of a session's requests wait, **Send all N to Wallet Manager…** above
   the cards lists exactly those requests (what they share once, then each one's differences) and sends the listed
   ones, one at a time, only after you confirm there. It stops at the first that doesn't go, and the rest keep waiting;
-  if a listed request changed meanwhile, nothing is sent and you open the list again. The format is [wallet-request.md](../protocol/wallet-request.md).
+  if a listed request changed meanwhile, nothing is sent and you open the list again. Each contract call in the list
+  has a fingerprint of its calldata and the argument words that differ from the other calls like it, so two calls
+  that differ only in arguments never read the same. The list holds the oldest 30; with more waiting it says how many
+  stay, and Send all offers them after these. The format is [wallet-request.md](../protocol/wallet-request.md).
 
 Claude Code may show `Ran 1 stop hook` / `Stop hook feedback: [VibeSwitcher · messages, v2] …` when a message arrives
 as a turn ends. That is the message being delivered, not an error ([docs/eval/stop-hook-shapes](../eval/stop-hook-shapes/README.md)).

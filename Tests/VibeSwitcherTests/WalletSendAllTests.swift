@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 import VibeCore
@@ -186,6 +187,233 @@ struct WalletSendAllTests {
         b.id = "b"
         let split = WalletSendAll.split([a, b])
         #expect(split.common.count == 8 && split.rows == [[], []])
+    }
+
+    // MARK: Calls told apart by their bytes
+
+    /// An undecoded call (a function not known here) with three argument words, the second `argument`.
+    static func call(_ number: Int, argument: String, session: UUID = WalletDeskTests.session) -> WalletRequest {
+        var request = Self.request(number, session: session)
+        request.action = .call
+        request.amount = "0"
+        request.data = "0xdeadbeef" + String(repeating: "0", count: 63) + "1" + argument + String(repeating: "0", count: 62) + "ff"
+        return request
+    }
+
+    static func word(_ digit: Character) -> String { String(repeating: "0", count: 63) + String(digit) }
+
+    static func sha256(_ hex: String) -> String {
+        let digits = Array(hex.utf8).map { UInt8(Character(UnicodeScalar($0)).hexDigitValue!) }
+        let bytes = stride(from: 0, to: digits.count, by: 2).map { digits[$0] << 4 | digits[$0 + 1] }
+        return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func item(_ request: WalletRequest) -> WalletSendAll.Item {
+        WalletSendAll.Item(request: request, card: WalletCardModel(request: request, requestedBy: "s", state: .waiting))
+    }
+
+    @Test func callsThatDifferOnlyInAnArgumentReadDifferently() async throws {
+        let s = try setup()
+        defer { s.desk.close() }
+        let calls = [Self.call(1, argument: Self.word("a")), Self.call(2, argument: Self.word("b")), Self.call(3, argument: Self.word("c"))]
+        for request in calls { try WalletAsk.file(request, in: s.asked) }
+        await s.desks.refreshed(s.desk)
+        // On their cards they read the same: the same contract, function and size.
+        let cards = s.desk.cards(for: Self.session)
+        #expect(cards.count == 3 && cards.allSatisfy { $0.call == cards[0].call && $0.calldataBytes == 100 && $0.to == cards[0].to })
+        let review = try #require(s.desk.sendAll(for: Self.session))
+        // Not alike: the calldata is in each row, never in what is the same in all.
+        #expect(!review.common.contains { $0.key == "calldata" })
+        #expect(review.rows.map { $0.map(\.key) } == [["calldata"], ["calldata"], ["calldata"]])
+        let shown = review.rows.map { $0[0] }
+        #expect(Set(shown.map(\.value)).count == 3)
+        for (request, field) in zip(calls, shown) {
+            let digest = Self.sha256(String(try #require(request.data).dropFirst(2)))
+            #expect(field.value.contains("Fingerprint \(digest.prefix(8)) (the first 8 hex digits of the calldata's SHA-256)"))
+            #expect(field.value.hasSuffix("100 bytes"))
+            // The one word that differs, whole, as hex; the words alike aren't listed.
+            #expect(field.differing == 1 && field.words.count == 1)
+            #expect(field.alarming)
+        }
+        #expect(shown.map(\.words) == ["a", "b", "c"].map { ["Word 2: 0x" + Self.word($0)] })
+        // The list as text has both for each row.
+        let text = review.text
+        for field in shown {
+            #expect(text.contains(field.words[0]))
+            #expect(text.contains(field.value.components(separatedBy: "\n").first { $0.hasPrefix("Fingerprint") }!))
+        }
+        #expect(text.contains(WalletSendAll.wordsTitle(1)) && WalletSendAll.wordsTitle(2).hasPrefix("2 argument words differ"))
+        #expect(s.fake.sends.isEmpty)
+    }
+
+    @Test func identicalCalldataHasTheSameFingerprintAndIsStatedOnce() async throws {
+        let s = try setup()
+        defer { s.desk.close() }
+        // Two calls with the same bytes (their value differs), and all three with the same.
+        var calls = [Self.call(1, argument: Self.word("a")), Self.call(2, argument: Self.word("a")), Self.call(3, argument: Self.word("a"))]
+        for index in calls.indices { calls[index].amount = "\(index + 1)000000000000000000" }
+        for request in calls { try WalletAsk.file(request, in: s.asked) }
+        await s.desks.refreshed(s.desk)
+        let review = try #require(s.desk.sendAll(for: Self.session))
+        let calldata = try #require(review.common.first { $0.key == "calldata" })
+        let digest = Self.sha256(String(try #require(calls[0].data).dropFirst(2)))
+        #expect(calldata.value.contains("Fingerprint \(digest.prefix(8)) "))
+        #expect(calldata.words.isEmpty && calldata.differing == 0)
+        #expect(review.rows.map { $0.map(\.key) } == [["amount"], ["amount"], ["amount"]])
+        // Two alike and one not: each row has its own, the two alike the same fingerprint and the same words.
+        let mixed = WalletSendAll.fields(of: [calls[0], calls[1], Self.call(4, argument: Self.word("b"))].map(Self.item))
+        let fields = try mixed.map { try #require($0.first { $0.key == "calldata" }) }
+        #expect(fields[0] == fields[1] && fields[0].value != fields[2].value)
+        #expect(!WalletSendAll.split(mixed).common.contains { $0.key == "calldata" })
+        // Hex in another case is the same bytes: the same fingerprint, alike.
+        var upper = calls[1]
+        upper.data = "0x" + String(try #require(calls[1].data).dropFirst(2)).uppercased()
+        let cased = WalletSendAll.fields(of: [calls[0], upper].map(Self.item))
+        #expect(cased[0].first { $0.key == "calldata" } == cased[1].first { $0.key == "calldata" })
+    }
+
+    /// Calldata an agent chose so that the fingerprints' first 8 digits collide: the fingerprints grow until they
+    /// differ, and what is the same in all never has the calldata.
+    @Test func differentBytesAreNeverCalledAlikeWhateverTheirFingerprints() throws {
+        var seen: [String: String] = [:]
+        var pair: (String, String)?
+        var counter = 0
+        while pair == nil {
+            let argument = String(format: "%064x", counter)
+            let data = String(Self.call(1, argument: argument).data!.dropFirst(2))
+            let short = String(Self.sha256(data).prefix(8))
+            if let other = seen[short] { pair = (other, argument) }
+            seen[short] = argument
+            counter += 1
+        }
+        let (first, second) = try #require(pair)
+        let items = [Self.call(1, argument: first), Self.call(2, argument: second), Self.call(3, argument: first)].map(Self.item)
+        let fields = try WalletSendAll.fields(of: items).map { try #require($0.first { $0.key == "calldata" }) }
+        func fingerprint(_ field: WalletSendAll.Field) -> String {
+            field.value.components(separatedBy: "\n").first { $0.hasPrefix("Fingerprint ") }!.components(separatedBy: " ")[1]
+        }
+        let prints = fields.map(fingerprint)
+        #expect(prints[0].count > 8 && prints[0].prefix(8) == prints[1].prefix(8))
+        #expect(prints[0] != prints[1] && prints[0] == prints[2])
+        #expect(fields[0].value.contains("the first \(prints[0].count) hex digits"))
+        #expect(fields[0] != fields[1] && fields[0] == fields[2])
+        #expect(fields[0].words == ["Word 2: 0x" + first] && fields[1].words == ["Word 2: 0x" + second])
+        #expect(!WalletSendAll.split(WalletSendAll.fields(of: Array(items.prefix(2)))).common.contains { $0.key == "calldata" })
+        // Even fields that read the same aren't alike unless their bytes are.
+        var same = fields[0], other = fields[0]
+        other.bytes = fields[1].bytes
+        same.words = []
+        other.words = []
+        #expect(same.value == other.value)
+        #expect(!WalletSendAll.split([[same], [other]]).common.contains { $0.key == "calldata" })
+    }
+
+    @Test func theDifferingWordsOfCallsLikeEachOther() {
+        func bytes(_ hex: String) -> [UInt8] {
+            guard case .bytes(let bytes) = WalletSendAll.calldata(of: Self.call(1, argument: hex)) else { return [] }
+            return bytes
+        }
+        let a = bytes(Self.word("a")), b = bytes(Self.word("b"))
+        // Another function, another size, or only itself: nothing to compare with.
+        var other = a
+        other[0] = 0x11
+        let words = WalletSendAll.differingWords([a, b, other, a + [1, 2], a])
+        #expect(words.map(\.count) == [1, 1, 0, 0, 1])
+        #expect(words[0].lines == words[4].lines && words[0].lines != words[1].lines)
+        // A last word shorter than 32 bytes, and more words than a row lists.
+        let selector: [UInt8] = [1, 2, 3, 4]
+        let long: [UInt8] = selector + [UInt8](repeating: 0, count: 640) + [7]
+        let unlike: [UInt8] = selector + [UInt8](repeating: 1, count: 640) + [8]
+        let many = WalletSendAll.differingWords([long, unlike])
+        #expect(many[0].count == 21 && many[0].lines.count == WalletSendAll.maxWords + 1)
+        #expect(many[0].lines.last == "and 9 more words differ")
+        let short = WalletSendAll.differingWords([selector + [UInt8](repeating: 0, count: 32) + [7], selector + [UInt8](repeating: 0, count: 32) + [8]])
+        #expect(short[0].lines == ["Word 2: 0x07"] && short[1].lines == ["Word 2: 0x08"])
+    }
+
+    /// A request whose calldata can't be read is not listed, so not sent from the list, and the list says why.
+    @Test(arguments: [("0xzz000000", "not 0x and whole bytes of hex"), ("0x12345", "not 0x and whole bytes of hex"), ("deadbeef00", "not 0x and whole bytes of hex"),
+                      ("0x1234", "shorter than a function's 4 bytes"), ("", "not 0x and whole bytes of hex")])
+    func calldataThatCantBeReadIsNotListed(_ data: String, _ why: String) async throws {
+        var bad = Self.call(2, argument: Self.word("a"))
+        bad.data = data
+        #expect(WalletSendAll.calldata(of: bad) == .unreadable(why))
+        let waiting = [Self.call(1, argument: Self.word("a")), bad, Self.request(3)].map(Self.item)
+        let listed = WalletSendAll.listed(waiting)
+        #expect(listed.items.map(\.id) == [waiting[0].id, waiting[2].id])
+        #expect(listed.unreadable == [WalletSendAll.Unreadable(id: bad.id, why: why)])
+        // A call with no calldata, and calldata on a transfer, neither.
+        var none = Self.call(4, argument: Self.word("a"))
+        none.data = nil
+        var transfer = Self.request(5)
+        transfer.data = "0xdeadbeef"
+        #expect(WalletSendAll.listed([none, transfer].map(Self.item)).items.isEmpty)
+        #expect(WalletSendAll.calldata(of: Self.request(1)) == .none)
+    }
+
+    // MARK: More waiting than the list holds
+
+    @Test func withMoreWaitingThanTheListHoldsItHoldsTheOldestAndTheRestAreOfferedAfter() async throws {
+        let s = try setup()
+        defer { s.desk.close() }
+        #expect(WalletSendAll.maxListed == WalletDesk.maxCards && WalletDesk.maxCards == 30)
+        // 36 calls of one function that differ in one argument, and another session's 2, the oldest of all.
+        let theirs = [Self.request(1, session: Self.other), Self.request(2, session: Self.other)]
+        let requests = (3...38).map { Self.call($0, argument: String(format: "%064x", $0)) }
+        for request in theirs + requests { try WalletAsk.file(request, in: s.asked) }
+        await s.desks.refreshed(s.desk)
+        // The cards in chat are capped as ever (the newest), and the offer names all 36.
+        #expect(s.desk.cards.count == 30)
+        #expect(s.desk.cards(for: Self.session).map(\.id) == requests.suffix(30).map(\.id))
+        #expect(s.desk.sendAllCount(for: Self.session) == 36)
+        #expect(WalletSendAll.offerTitle(36) == "Send all 36 to Wallet Manager…")
+        let review = try #require(s.desk.sendAll(for: Self.session))
+        // The oldest 30, in filing order.
+        #expect(review.items.map(\.request) == Array(requests.prefix(30)))
+        #expect(review.waiting == 36 && review.unreadable.isEmpty && review.unreadableNote == nil)
+        let note = "30 of 36 waiting requests; the other 6 stay waiting: open Send all again after these"
+        #expect(review.cappedNote == note)
+        #expect(review.title == "Send 30 requests to the Wallet Manager" && review.confirmTitle == "Send 30 to Wallet Manager")
+        // Above the rows.
+        let lines = review.text.components(separatedBy: "\n")
+        let at = try #require(lines.firstIndex(of: note))
+        #expect(at < (try #require(lines.firstIndex(of: "Request 1"))))
+        #expect(Set(review.rows.map { $0.first { $0.key == "calldata" }?.value }).count == 30)
+        await confirmed(review)
+        #expect(Self.sentIDs(s.fake) == requests.prefix(30).map(\.id))
+        let summary = try summary(review)
+        #expect(summary.sent == 30 && summary.notSent == 0)
+        #expect(summary.text == "All 30 sent to the Wallet Manager. Each card shows its own answer. 6 more requests still wait: open Send all again for them.")
+        for request in requests.prefix(30) { #expect(review.status(of: Self.item(request)) == "Sent" || state(s, request) == nil) }
+        #expect(review.outcomes.count == 30 && review.outcomes.values.allSatisfy { $0 == .some(.sent) })
+        // The 6 left: all on their cards, all offered, none dropped or hidden; the other session's untouched.
+        let rest = Array(requests.suffix(6))
+        #expect(s.desk.cards(for: Self.session).map(\.id) == rest.map(\.id))
+        #expect(s.desk.sendAllCount(for: Self.session) == 6)
+        #expect(s.desk.sendAllCount(for: Self.other) == 2)
+        let second = try #require(s.desk.sendAll(for: Self.session))
+        #expect(second.items.map(\.request) == rest && second.cappedNote == nil)
+        await confirmed(second)
+        #expect(Self.sentIDs(s.fake) == requests.map(\.id))
+        #expect(try self.summary(second).text == "All 6 sent to the Wallet Manager. Each card shows its own answer.")
+        #expect(s.desk.sendAllCount(for: Self.session) == nil)
+        for request in theirs { #expect(s.desk.uncut.cards.first { $0.id == request.id }?.state == .waiting) }
+    }
+
+    /// A capped list that stops midway: what it didn't send, and what it didn't hold, all still wait and are offered.
+    @Test func aCappedListThatStopsLeavesEveryOtherRequestWaiting() async throws {
+        let s = try setup()
+        defer { s.desk.close() }
+        let requests = try await filed(s, 33)
+        try s.fake.setSendExit(4, for: requests[1].id)
+        let review = try #require(s.desk.sendAll(for: Self.session))
+        #expect(review.cappedNote == "30 of 33 waiting requests; the other 3 stay waiting: open Send all again after these")
+        await confirmed(review)
+        #expect(Self.sentIDs(s.fake) == [requests[0].id, requests[1].id])
+        #expect(s.desk.sendAllCount(for: Self.session) == 31)
+        let again = try #require(s.desk.sendAll(for: Self.session))
+        #expect(again.items.map(\.id) == requests[2..<32].map(\.id))
+        #expect(again.cappedNote == "30 of 31 waiting requests; the other 1 stays waiting: open Send all again after these")
     }
 
     // MARK: The snapshot, failing closed

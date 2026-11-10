@@ -1,11 +1,17 @@
 import AppKit
+import CryptoKit
 import SwiftUI
 import VibeCore
 
 /// Send all: one session's waiting wallet requests, sent to the Wallet Manager by one action that first lists exactly
 /// what will go (`WalletSendAllView`). Nothing leaves the Mac that the list didn't show.
 ///
-/// It is a snapshot: the requests and cards as they were when the list opened (`items`, in filing order). Confirming
+/// It is a snapshot: the requests and cards as they were when the list opened (`items`, in filing order: the oldest
+/// `maxListed` of the session's waiting ones, whatever the desk's cap on cards shows; with more waiting, the list
+/// says how many stay, and they are offered again after these). A call's calldata is told apart by its bytes: each
+/// row has its fingerprint and the argument words that differ from the other calls like it (`CalldataShown`), so two
+/// calls that differ only in arguments never read the same. A request whose calldata can't be read isn't listed, and
+/// the list says so. Confirming
 /// sends those and no other: a request filed since isn't in it. Before anything goes, and again before each request,
 /// every one listed must still be as listed (the same request, the same card, still waiting with Send); if not,
 /// nothing more is sent and the list says to open it again. Fail closed.
@@ -38,6 +44,19 @@ final class WalletSendAll: ObservableObject, Identifiable {
         var agents = false
         /// A call that isn't decoded or grants too much, as its card marks it.
         var alarming = false
+        /// The calldata's bytes as hex, not shown: two calldata fields are alike only when their bytes are.
+        var bytes = ""
+        /// The calldata's argument words that differ from the other listed calls of its function and size, as lines
+        /// ("Word 2: 0x…"): shown when the row's words are opened.
+        var words: [String] = []
+        /// How many of its argument words differ (`words` lists the first `maxWords`).
+        var differing = 0
+    }
+
+    /// A waiting request the list leaves out, with why: it can't show what it would send.
+    struct Unreadable: Equatable {
+        var id: String
+        var why: String
     }
 
     enum Phase: Equatable {
@@ -65,6 +84,16 @@ final class WalletSendAll: ObservableObject, Identifiable {
     /// The session's name, as its cards have it.
     let requestedBy: String
     let items: [Item]
+    /// How many requests waited for Send in the session when the list opened: `items`, those over `maxListed`, and `unreadable`.
+    let waiting: Int
+    /// The waiting requests left out because their calldata can't be read.
+    let unreadable: [Unreadable]
+    /// The fields every listed request has alike (stated once above the list).
+    let common: [Field]
+    /// Each listed request's fields that differ, in `items`' order.
+    let rows: [[Field]]
+    /// The rows (request ids) whose differing argument words are opened.
+    @Published var wordsShown: Set<String> = []
     @Published private(set) var phase: Phase = .review
     /// The request being sent now.
     @Published private(set) var sending: String?
@@ -78,20 +107,55 @@ final class WalletSendAll: ObservableObject, Identifiable {
     fileprivate init?(desk: WalletDesk, session: UUID) {
         guard desk.sendAllCount(for: session) != nil else { return nil }
         let cards = desk.waitingToSend(for: session)
-        var items: [Item] = []
+        var waiting: [Item] = []
         for card in cards {
-            guard let request = desk.drawn[card.id] else { return nil }
-            items.append(Item(request: request, card: card))
+            guard let request = desk.uncut.drawn[card.id] else { return nil }
+            waiting.append(Item(request: request, card: card))
         }
+        let listed = Self.listed(waiting)
         self.desk = desk
         self.session = session
         self.requestedBy = cards[0].requestedBy
-        self.items = items
+        self.items = listed.items
+        self.waiting = waiting.count
+        self.unreadable = listed.unreadable
+        (common, rows) = Self.split(Self.fields(of: listed.items))
+    }
+
+    /// The most requests one list holds: the desk's cap on cards.
+    static let maxListed = WalletDesk.maxCards
+
+    /// Of a session's `waiting` requests (in filing order), those a list holds: the oldest `limit` whose calldata can
+    /// be read, in that order; and those left out because it can't be.
+    static func listed(_ waiting: [Item], limit: Int = maxListed) -> (items: [Item], unreadable: [Unreadable]) {
+        var items: [Item] = []
+        var unreadable: [Unreadable] = []
+        for item in waiting {
+            switch calldata(of: item.request) {
+            case .unreadable(let why): unreadable.append(Unreadable(id: item.id, why: why))
+            case .none, .bytes: if items.count < limit { items.append(item) }
+            }
+        }
+        return (items, unreadable)
     }
 
     static func offerTitle(_ count: Int) -> String { "Send all \(count) to Wallet Manager…" }
-    var title: String { "Send \(items.count) requests to the Wallet Manager" }
+    var title: String { "Send \(items.count) \(items.count == 1 ? "request" : "requests") to the Wallet Manager" }
     var confirmTitle: String { "Send \(items.count) to Wallet Manager" }
+    /// With more waiting than the list holds: how many it holds of how many, above the rows.
+    var cappedNote: String? {
+        let more = waiting - unreadable.count - items.count
+        guard more > 0 else { return nil }
+        let others = waiting - items.count
+        return "\(items.count) of \(waiting) waiting requests; the other \(others) \(others == 1 ? "stays" : "stay") waiting: open Send all again after these"
+    }
+    /// The waiting requests left out because their calldata can't be read, and why, above the rows.
+    var unreadableNote: String? {
+        guard !unreadable.isEmpty else { return nil }
+        let which = unreadable.map { "\($0.id) (\($0.why))" }.joined(separator: "; ")
+        let subject = unreadable.count == 1 ? "1 waiting request isn't listed and won't be sent from here: its" : "\(unreadable.count) waiting requests aren't listed and won't be sent from here: their"
+        return "\(subject) calldata can't be read, so this list can't show what would be sent. \(which)"
+    }
     static let note = "Nothing has left this Mac. Each request below goes as its own request, in this order, and keeps its own card. "
         + "One filed after this list opened isn't in it."
 
@@ -120,16 +184,125 @@ final class WalletSendAll: ObservableObject, Identifiable {
         ]
     }
 
+    // MARK: Calldata, by its bytes
+
+    /// A request's calldata as the list reads it.
+    enum Calldata: Equatable {
+        /// A transfer: none.
+        case none
+        case bytes([UInt8])
+        /// Not shown and not sent from the list: why.
+        case unreadable(String)
+    }
+
+    static func calldata(of request: WalletRequest) -> Calldata {
+        guard let data = request.data else { return request.action == .call ? .unreadable("a contract call with no calldata") : .none }
+        guard request.action == .call else { return .unreadable("calldata on a request that isn't a contract call") }
+        let hex = Array(data.utf8)
+        guard hex.count >= 2, hex[0] == UInt8(ascii: "0"), hex[1] == UInt8(ascii: "x"), hex.count % 2 == 0 else {
+            return .unreadable("not 0x and whole bytes of hex")
+        }
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(hex.count / 2 - 1)
+        for index in stride(from: 2, to: hex.count, by: 2) {
+            guard let high = Character(UnicodeScalar(hex[index])).hexDigitValue, let low = Character(UnicodeScalar(hex[index + 1])).hexDigitValue else {
+                return .unreadable("not 0x and whole bytes of hex")
+            }
+            bytes.append(UInt8(high << 4 | low))
+        }
+        guard bytes.count >= 4 else { return .unreadable("shorter than a function's 4 bytes") }
+        return .bytes(bytes)
+    }
+
+    static func hex<Bytes: Sequence>(_ bytes: Bytes) -> String where Bytes.Element == UInt8 {
+        let digits = Array("0123456789abcdef".utf8)
+        var text: [UInt8] = []
+        for byte in bytes {
+            text.append(digits[Int(byte >> 4)])
+            text.append(digits[Int(byte & 15)])
+        }
+        return String(decoding: text, as: UTF8.self)
+    }
+
+    /// The least hex digits a fingerprint shows.
+    static let fingerprintDigits = 8
+
+    /// A fingerprint for each calldata: the first hex digits of its SHA-256, `fingerprintDigits` of them, or as many
+    /// more as it takes for different bytes among these to have different fingerprints. The same bytes, the same one.
+    static func fingerprints(_ calldata: [[UInt8]]) -> [String] {
+        let digests = calldata.map { hex(SHA256.hash(data: $0)) }
+        let different = Set(calldata).count
+        var digits = fingerprintDigits
+        while digits < 64, Set(digests.map { $0.prefix(digits) }).count < different { digits += 2 }
+        return digests.map { String($0.prefix(digits)) }
+    }
+
+    /// The most differing words a row lists.
+    static let maxWords = 12
+
+    /// For each calldata, its argument words (the 32 bytes each after the function's 4, the last one what is left)
+    /// that aren't the same in every one of these with its function and size: "Word 2: 0x…", numbered from 1.
+    static func differingWords(_ calldata: [[UInt8]]) -> [(count: Int, lines: [String])] {
+        var groups: [String: [Int]] = [:]
+        for (index, bytes) in calldata.enumerated() { groups["\(hex(bytes.prefix(4))) \(bytes.count)", default: []].append(index) }
+        var words = [(count: Int, lines: [String])](repeating: (0, []), count: calldata.count)
+        for members in groups.values where members.count > 1 {
+            let size = calldata[members[0]].count
+            var differing: [Range<Int>] = []
+            for start in stride(from: 4, to: size, by: 32) {
+                let range = start..<min(start + 32, size)
+                if Set(members.map { calldata[$0][range] }).count > 1 { differing.append(range) }
+            }
+            for member in members {
+                words[member].count = differing.count
+                words[member].lines = differing.prefix(maxWords).map { "Word \(($0.lowerBound - 4) / 32 + 1): 0x\(hex(calldata[member][$0]))" }
+                if differing.count > maxWords { words[member].lines.append("and \(differing.count - maxWords) more words differ") }
+            }
+        }
+        return words
+    }
+
+    /// The listed requests' facts: each card's (`fields(of:)`), its calldata told by its bytes: their fingerprint,
+    /// and the argument words that differ among these.
+    static func fields(of items: [Item]) -> [[Field]] {
+        var calls: [(item: Int, bytes: [UInt8])] = []
+        for (index, item) in items.enumerated() {
+            if case .bytes(let bytes) = calldata(of: item.request) { calls.append((index, bytes)) }
+        }
+        let prints = fingerprints(calls.map(\.bytes))
+        let words = differingWords(calls.map(\.bytes))
+        var all = items.map { fields(of: $0.card) }
+        for (call, print) in zip(calls, prints) {
+            guard let at = all[call.item].firstIndex(where: { $0.key == "calldata" }) else { continue }
+            var lines = all[call.item][at].value.components(separatedBy: "\n")
+            // Before the size, the card's last line.
+            lines.insert("Fingerprint \(print) (the first \(print.count) hex digits of the calldata's SHA-256)", at: max(lines.count - 1, 1))
+            all[call.item][at].value = lines.joined(separator: "\n")
+            all[call.item][at].bytes = hex(call.bytes)
+        }
+        for (call, words) in zip(calls, words) {
+            guard let at = all[call.item].firstIndex(where: { $0.key == "calldata" }) else { continue }
+            all[call.item][at].words = words.lines
+            all[call.item][at].differing = words.count
+        }
+        return all
+    }
+
+    static func wordsTitle(_ count: Int) -> String {
+        count == 1 ? "1 argument word differs from the other calls like it here" : "\(count) argument words differ from the other calls like it here"
+    }
+
     /// The fields every card has alike (stated once above the list), and each card's that differ, in the cards' order.
-    static func split(_ cards: [WalletCardModel]) -> (common: [Field], rows: [[Field]]) {
-        let all = cards.map(fields(of:))
+    static func split(_ cards: [WalletCardModel]) -> (common: [Field], rows: [[Field]]) { split(cards.map(fields(of:))) }
+
+    /// The same of the requests' fields, as `fields(of:)` gives them: a field is alike only when all of it is, a
+    /// calldata's bytes included.
+    static func split(_ all: [[Field]]) -> (common: [Field], rows: [[Field]]) {
         guard let first = all.first else { return ([], []) }
         let alike = Set(first.filter { field in all.allSatisfy { $0.contains(field) } }.map(\.key))
         return (first.filter { alike.contains($0.key) }, all.map { $0.filter { !alike.contains($0.key) } })
     }
 
-    var common: [Field] { Self.split(items.map(\.card)).common }
-    var rows: [[Field]] { Self.split(items.map(\.card)).rows }
     static let sameRow = "The same as above in everything shown"
 
     /// A row's state beside it, once the run started: its card's, as the desk has it now.
@@ -138,22 +311,30 @@ final class WalletSendAll: ObservableObject, Identifiable {
         case .review, .cancelled: return nil
         case .sending, .done:
             if sending == item.id { return "Sending…" }
-            guard let card = desk.cards.first(where: { $0.id == item.id }) else { return "Gone" }
-            return WalletCardModel.title(card.state)
+            guard let state = state(of: item) else { return "Gone" }
+            return WalletCardModel.title(state)
         }
     }
 
+    /// The request's card state as the desk has it now, shown or over its cap; nil with no card.
+    func state(of item: Item) -> WalletCardModel.State? { desk.uncut.cards.first { $0.id == item.id }?.state }
+
     /// The list as text (the sandbox prints it).
     var text: String {
-        var lines = [title, "Requested by: \(requestedBy)", Self.note, "The same in all \(items.count):"]
-        func line(_ field: Field) -> String { "  \(field.name): \(field.value.replacingOccurrences(of: "\n", with: "; "))" }
-        lines += common.map(line)
+        var lines = [title, "Requested by: \(requestedBy)", Self.note]
+        lines += [cappedNote, unreadableNote].compactMap { $0 }
+        lines.append("The same in all \(items.count):")
+        func line(_ field: Field) -> [String] {
+            ["  \(field.name): \(field.value.replacingOccurrences(of: "\n", with: "; "))"]
+                + (field.words.isEmpty ? [] : ["    \(Self.wordsTitle(field.differing)):"] + field.words.map { "      \($0)" })
+        }
+        lines += common.flatMap(line)
         for (index, row) in rows.enumerated() {
             lines.append("Request \(index + 1)" + (status(of: items[index]).map { " [\($0)]" } ?? ""))
-            lines += row.isEmpty ? ["  " + Self.sameRow] : row.map(line)
+            lines += row.isEmpty ? ["  " + Self.sameRow] : row.flatMap(line)
         }
         switch phase {
-        case .review: lines.append("Buttons: Cancel, \(confirmTitle)")
+        case .review: lines.append(items.isEmpty ? "Buttons: Cancel" : "Buttons: Cancel, \(confirmTitle)")
         case .sending: lines.append("Sending")
         case .done(let summary): lines.append(summary.text)
         case .cancelled: lines.append("Cancelled: nothing was sent")
@@ -174,15 +355,15 @@ final class WalletSendAll: ObservableObject, Identifiable {
     /// Whether `item` is still what the list showed: the same request, drawn as the same card, of this session, waiting
     /// with Send.
     private func asListed(_ item: Item) -> Bool {
-        guard desk.sessions[item.id] == session.uuidString.lowercased(), desk.drawn[item.id] == item.request,
-              let card = desk.cards.first(where: { $0.id == item.id }) else { return false }
+        guard desk.uncut.sessions[item.id] == session.uuidString.lowercased(), desk.uncut.drawn[item.id] == item.request,
+              let card = desk.uncut.cards.first(where: { $0.id == item.id }) else { return false }
         return card == item.card && card.state == .waiting && card.actions.contains(.send)
     }
 
     /// The list's Send: the listed requests, each through its card's Send, in order. Only from `.review`, once.
     /// `then` runs when it's over (see `phase`).
     func confirm(then: @escaping () -> Void = {}) {
-        guard phase == .review else { return then() }
+        guard phase == .review, !items.isEmpty else { return then() }
         phase = .sending
         finished = then
         // The desk looks at the filed requests again first, so a listed one that changed on disk since is seen as changed.
@@ -197,7 +378,12 @@ final class WalletSendAll: ObservableObject, Identifiable {
 
     private func send(_ index: Int) {
         let count = items.count
-        guard index < count else { return finish("All \(count) sent to the Wallet Manager. Each card shows its own answer.") }
+        guard index < count else {
+            // What the list didn't hold (over `maxListed`, or filed since): still waiting, offered again.
+            let more = desk.waitingToSend(for: session).count
+            let rest = more == 0 ? "" : more == 1 ? " 1 more request still waits on its card." : " \(more) more requests still wait: open Send all again for them."
+            return finish("All \(count) sent to the Wallet Manager. Each card shows its own answer." + rest)
+        }
         let left = count - index
         if stopAsked { return finish("\(sent) of \(count) sent. You stopped it: the other \(left) still wait on their cards.") }
         let item = items[index]
@@ -208,7 +394,7 @@ final class WalletSendAll: ObservableObject, Identifiable {
         sending = item.id
         desk.act(.send, on: item.id) { [self] in
             sending = nil
-            let state = desk.cards.first { $0.id == item.id }?.state
+            let state = state(of: item)
             outcomes[item.id] = .some(state)
             if let state, Self.went(state) {
                 sent += 1
@@ -241,16 +427,20 @@ final class WalletSendAll: ObservableObject, Identifiable {
 }
 
 extension WalletDesk {
-    /// The session's cards that wait for Send to Wallet Manager and offer it (so one is chosen and can be run), oldest first.
+    /// The session's cards that wait for Send to Wallet Manager and offer it (so one is chosen and can be run), oldest
+    /// first: all of them, those the desk's cap on cards doesn't show too (`uncut`).
     func waitingToSend(for session: UUID) -> [WalletCardModel] {
-        cards(for: session).filter { $0.state == .waiting && $0.actions.contains(.send) }
+        let id = session.uuidString.lowercased()
+        return uncut.cards.filter {
+            uncut.sessions[$0.id] == id && Self.shows($0, dismissed: dismissed) && $0.state == .waiting && $0.actions.contains(.send)
+        }
     }
 
-    /// How many requests Send all would list for `session`: 2 or more, each with the request its card was drawn from;
-    /// nil when it isn't offered (fewer, or no Wallet Manager to send to).
+    /// How many requests wait for Send all in `session` (it lists the oldest `WalletSendAll.maxListed` of them): 2 or
+    /// more, each with the request its card was drawn from; nil when it isn't offered (fewer, or no Wallet Manager to send to).
     func sendAllCount(for session: UUID) -> Int? {
         let waiting = waitingToSend(for: session)
-        guard waiting.count >= 2, waiting.allSatisfy({ drawn[$0.id] != nil }) else { return nil }
+        guard waiting.count >= 2, waiting.allSatisfy({ uncut.drawn[$0.id] != nil }) else { return nil }
         return waiting.count
     }
 
@@ -273,6 +463,17 @@ struct WalletSendAllView: View {
                 Text(review.title).font(.system(size: 15, weight: .bold)).accessibilityAddTraits(.isHeader)
                 Text("Requested by \(review.requestedBy)").font(.system(size: 12.5, weight: .medium))
                 Text(WalletSendAll.note).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach([review.cappedNote, review.unreadableNote].compactMap { $0 }, id: \.self) { note in
+                Label {
+                    Text(note)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill").accessibilityHidden(true)
+                }
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(SessionStatus.needsInput.color)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
             }
             if !review.common.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
@@ -325,7 +526,7 @@ struct WalletSendAllView: View {
                 // No default key: Return alone doesn't send them.
                 Button(review.confirmTitle) { review.confirm() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(review.phase != .review)
+                    .disabled(review.phase != .review || review.items.isEmpty)
                     .accessibilityHint("Sends the \(review.items.count) requests listed, one at a time")
             case .sending:
                 ProgressView().controlSize(.small).accessibilityLabel("Sending")
@@ -345,10 +546,10 @@ struct WalletSendAllView: View {
             if fields.isEmpty {
                 Text(WalletSendAll.sameRow).font(.system(size: 12.5)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                grid(fields)
+                grid(fields, row: item.id)
             }
             if let status = review.status(of: item) {
-                let state = desk.cards.first { $0.id == item.id }?.state
+                let state = review.state(of: item)
                 Text(status).font(.system(size: 11.5, weight: .semibold))
                     .foregroundStyle(review.sending == item.id ? Color.secondary : state.map(WalletCard.tint) ?? .secondary)
                     .fixedSize()
@@ -359,7 +560,8 @@ struct WalletSendAllView: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func grid(_ fields: [WalletSendAll.Field]) -> some View {
+    /// `row`: the request whose row this is (its differing words open and close under it).
+    private func grid(_ fields: [WalletSendAll.Field], row: String? = nil) -> some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
             ForEach(fields, id: \.key) { field in
                 GridRow {
@@ -374,9 +576,32 @@ struct WalletSendAllView: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(field.name): \(field.alarming ? "warning, " : "")\(field.value)")
+                if let row, !field.words.isEmpty {
+                    GridRow { words(field, row: row).gridCellColumns(2) }
+                }
             }
         }
         .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension WalletSendAllView {
+    /// A call's argument words that differ from the other calls like it, as hex, opened from its row.
+    func words(_ field: WalletSendAll.Field, row: String) -> some View {
+        DisclosureGroup(isExpanded: Binding(get: { review.wordsShown.contains(row) },
+                                            set: { if $0 { review.wordsShown.insert(row) } else { review.wordsShown.remove(row) } })) {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(field.words, id: \.self) { word in
+                    Text(word).font(.system(size: 10.5, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .textSelection(.enabled)
+            .padding(.top, 2)
+        } label: {
+            Text(WalletSendAll.wordsTitle(field.differing)).font(.system(size: 11.5)).foregroundStyle(.secondary)
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

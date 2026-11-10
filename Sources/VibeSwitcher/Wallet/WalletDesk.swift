@@ -39,6 +39,15 @@ final class WalletDesk: ObservableObject {
     @Published private(set) var sessions: [String: String] = [:]
     /// The request each card was drawn from: a button sends only that one (a file rewritten since isn't sent unseen).
     private(set) var drawn: [String: WalletRequest] = [:]
+    /// Every card drawn at the last look with its session and request, before `maxCards` cut them (oldest first, in
+    /// filing order). Send all lists from these, so the cap on the cards shown never drops a waiting request from its
+    /// list or reorders it; a card's buttons act through it too (`act`).
+    struct Uncut: Equatable {
+        var cards: [WalletCardModel] = []
+        var sessions: [String: String] = [:]
+        var drawn: [String: WalletRequest] = [:]
+    }
+    private(set) var uncut = Uncut()
     /// The cards the user took off the strip with Dismiss, by request id (`dismissedFile`, kept across launches).
     @Published private(set) var dismissed: Set<String> = []
 
@@ -238,7 +247,8 @@ final class WalletDesk: ObservableObject {
     /// A button on a card: Send to Wallet Manager (only while it waits), Retry (after Passage couldn't reach the Wallet Manager or
     /// stopped unsure), Discard. `then` runs on the main thread once it's done and the cards are redrawn.
     func act(_ action: WalletCardModel.Action, on id: String, then: @escaping () -> Void = {}) {
-        guard let card = cards.first(where: { $0.id == id }), let shown = drawn[id] else { return then() }
+        // As drawn, shown or over `maxCards` (Send all sends the oldest first, which the cap may not show).
+        guard let card = uncut.cards.first(where: { $0.id == id }), let shown = uncut.drawn[id] else { return then() }
         guard card.actions.contains(action) else {
             // Sign in browser wallet on a request the browser wallet can't sign (one marked LOCAL FORK ONLY, a wallet id):
             // its card never offers it, and a press that comes all the same does nothing, and says why.
@@ -917,6 +927,7 @@ final class WalletDesk: ObservableObject {
         }
         // At most `maxCards`: past that the oldest finished ones give way first, then the oldest. Their files stay; a
         // card shows again once others go.
+        let uncut = Uncut(cards: cards, sessions: sessions, drawn: drawn)
         let shown = Self.capped(cards, hidden: Set(cards.filter { !Self.shows($0, dismissed: dismissed) }.map(\.id)))
         if shown.count < cards.count {
             let hidden = Set(cards.map(\.id)).subtracting(shown.map(\.id))
@@ -933,6 +944,7 @@ final class WalletDesk: ObservableObject {
             if self?.sessions != sessions { self?.sessions = sessions }
             if self?.dismissed != dismissed { self?.dismissed = dismissed }
             self?.drawn = drawn
+            self?.uncut = uncut
             then()
         }
     }
