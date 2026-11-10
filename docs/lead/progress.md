@@ -2340,3 +2340,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 20:39 Planned shells-that-agents: Shells that agents opened tidy themselves away when their command is done (review audit)
 - 2026-11-10 20:39 Started a worker on shells-that-agents
 - 2026-11-10 20:39 Automatically (auto_advance): Started a worker on shells-that-agents (Shells that agents opened tidy themselves away when their command is done).
+- 2026-11-10 21:22 Automatically (auto_advance): Started the audit of shells-that-agents at f42b62ce (Its review is audit).
+- 2026-11-10 21:22 Released shells-that-agents's worker (idle since its done report on f42b62ce) while its audit runs
+- 2026-11-10 21:22 Automatically (auto_advance): Released shells-that-agents's worker, idle since its done report on f42b62ce, while its audit runs (ended pid 22017 (Worker: Shells that agents opened tidy themselves away when their command is done)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
