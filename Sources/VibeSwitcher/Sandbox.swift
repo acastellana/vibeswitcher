@@ -1325,6 +1325,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("shell-click run|decline|dismiss", "presses that button on the newest shell request card in the selected chat (run starts the shell session in the sandbox's own host and selects it, and prints ran or the card's \"Not run: …\" line)"),
         ("shell-tidy SECONDS", "how long a handled shell card (started, declined, expired) shows before it leaves by itself, for cards handled from now on (4 by default); a long time keeps one on screen for a shot"),
         ("shell-idle SECONDS", "how long after its command went well an untouched Run-card shell is ended by itself (600 by default), and looks now: a shell finished that long ago, back at its prompt and not typed into, moves under Ended"),
+        ("end row|key|window", "ends the selected session as the window does: row is its End Session… in the sidebar's menu, key is the File menu's End Session… (⇧⌘⌫), window closes the window (⌘W); the sandbox asks nothing first"),
         ("shell-close [PROJECT]", "the sidebar's Close Finished Shells… for PROJECT (the selected session's unless given), its confirmation taken as given: prints what it asked and ends the Run-card shells of that project that are back at their prompt"),
         ("sidebar attention|projects [ended]", "groups the sidebar by attention or by project (a project's header has its menu), with the Ended fold open when ended is given, closed otherwise"),
         ("shell-fail on|off", "on: the sandbox's own host refuses to start the shells a card's Run asks for, so the Run says why it didn't go; off: they start again"),
@@ -2459,6 +2460,17 @@ private final class Driver: NSObject, NSApplicationDelegate {
             shellTidier.endAfter = seconds
             let ended = shellTidier.look()
             settle { reply(true, "an untouched finished shell is ended \(Int(seconds)) s after its command went well; ended now: \(ended.count)") }
+        case "end":
+            // Ending the selected session as the window does: its row's End Session… (the context menu's action), the
+            // File menu's End Session… (⇧⌘⌫, through the window controller, as the key does), or closing the window.
+            guard let controller = window, let row = model.selectedRow else { return reply(false, "no session is selected") }
+            switch rest {
+            case "row": windowActions?.endSession(row)
+            case "key": controller.endSessionAction(nil)
+            case "window": controller.window?.performClose(nil)
+            default: return reply(false, "end row|key|window")
+            }
+            settle { reply(true, "\(rest == "window" ? "closed the window showing" : "asked to end") \(row.title); the sandbox still runs (pid \(getpid()))") }
         case "shell-close":
             guard let project = rest.isEmpty ? model.selectedRow?.project : rest else { return reply(false, "shell-close PROJECT (no session is selected)") }
             let closed = closeFinishedShells(project)
