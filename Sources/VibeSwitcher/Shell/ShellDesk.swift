@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import VibeCore
@@ -33,6 +34,17 @@ final class ShellDesk: ObservableObject {
         /// The asking session, as the window names it.
         let asker: String
         let state: State
+        /// The asking session has been told what became of it (so the card may leave without the agent missing it).
+        var told = true
+
+        /// Settled for good and told: the card shows its outcome briefly, then leaves by itself (`ShellDesk.tidy`).
+        /// Waiting and starting cards never do, nor a failure to start, which stays until dismissed.
+        var leavesByItself: Bool {
+            switch state {
+            case .started, .declined, .expired: return told
+            case .waiting, .starting, .failed: return false
+            }
+        }
 
         var isOpen: Bool { if case .waiting = state { return true } else { return false } }
     }
@@ -43,6 +55,18 @@ final class ShellDesk: ObservableObject {
     /// Why a card's last Run didn't go, by request id ("Not run: …", `RunRefusal`), shown on the card for a while
     /// (`RunShown.lasts`).
     @Published private(set) var refused: [String: String] = [:]
+
+    /// Cards on their way out: faded, about to be removed (`tidy`).
+    @Published private(set) var leaving: Set<String> = []
+
+    /// How long a handled card (started, declined, expired) shows its outcome before it leaves by itself.
+    var tidyAfter: TimeInterval = 4
+    /// How long its fade takes; none with Reduce Motion on (the card is only removed).
+    var fadeFor: () -> TimeInterval = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.3 }
+    /// Cards whose leaving is scheduled, held (pointer over or focused) and due while held.
+    private var tidying: Set<String> = []
+    private var held: Set<String> = []
+    private var due: Set<String> = []
 
     let folder: URL
     /// The sessions the host runs, by lower-case id: the window's name for each (main thread).
@@ -243,9 +267,36 @@ final class ShellDesk: ObservableObject {
             case .expired?: state = .expired
             case .failed?: state = .failed(answer?.why ?? "it didn't start")
             }
-            drawn.append(Card(request: request, asker: asker, state: state))
+            drawn.append(Card(request: request, asker: asker, state: state, told: answer?.told ?? false))
         }
         if drawn != cards { cards = drawn }
+        for card in drawn where card.leavesByItself && tidying.insert(card.id).inserted {
+            later(tidyAfter) { [weak self] in self?.tidy(card.id) }
+        }
+        tidying.formIntersection(drawn.map(\.id))
+        leaving.formIntersection(drawn.map(\.id))
+    }
+
+    /// The card's time is up (main thread): it leaves now, or once the pointer and focus let go of it.
+    private func tidy(_ id: String) {
+        guard cards.contains(where: { $0.id == id && $0.leavesByItself }) else { tidying.remove(id); return }
+        guard !held.contains(id) else { due.insert(id); return }
+        leave(id)
+    }
+
+    /// The pointer is over the card, or focus is in it (`held`): it stays; let go, it leaves if its time came.
+    func hold(_ id: String, _ holding: Bool) {
+        if holding { held.insert(id); return }
+        held.remove(id)
+        if due.remove(id) != nil { tidy(id) }
+    }
+
+    /// Fades the card out, then removes it as Dismiss does.
+    private func leave(_ id: String) {
+        let fade = fadeFor()
+        guard fade > 0 else { return act(.dismiss, on: id) }
+        leaving.insert(id)
+        later(fade) { [weak self] in self?.act(.dismiss, on: id) { self?.leaving.remove(id) } }
     }
 
     /// Writes that it's starting (so it never starts twice), then starts it; the outcome is written and told. `done`
@@ -304,6 +355,8 @@ final class ShellDesk: ObservableObject {
                 guard var now = ShellAsk.answer(request.id, in: folder), now.state == answer.state else { return }
                 now.told = true
                 try? ShellAsk.record(now, for: request.id, in: folder)
+                // Told: the card may now leave by itself.
+                DispatchQueue.main.async { [self] in refresh() }
             }
         }
     }
