@@ -2359,3 +2359,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 22:31 Released ending-a-shell-session's worker (idle since its done report on 2d2de6f9) while its audit runs
 - 2026-11-10 22:31 Automatically (auto_advance): Released ending-a-shell-session's worker, idle since its done report on 2d2de6f9, while its audit runs (ended pid 41412 (Worker: Ending a shell session makes VibeSwitcher quit)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-10 22:37 Audit of ending-a-shell-session: complete, clean, round 1: 2 Nit open
+- 2026-11-10 22:46 Released ended-sessions-output-is's worker (idle since its done report on 10d7f6bf) while its audit runs
+- 2026-11-10 22:46 Automatically (auto_advance): Started the audit of ended-sessions-output-is at 10d7f6bf (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-10 22:50 Audit of ended-sessions-output-is: complete, clean, round 1: 2 Nit open
+- 2026-11-10 22:53 Merged ending-a-shell-session: Ending a shell session makes VibeSwitcher quit (build 1810015b999d)
