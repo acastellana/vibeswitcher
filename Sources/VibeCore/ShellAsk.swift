@@ -303,8 +303,11 @@ public enum ShellAsk {
     /// PATH, as the host gives every session) in its folder, whose shell gets the command in `commandVariable` and
     /// runs it, then stays open as an interactive shell (`keepShell`). The command is never typed into the terminal,
     /// nor pasted into the shell's line: `eval` of the variable runs it as one whole line, whatever it ends with.
+    ///
+    /// After it the line tells the terminal how the command ended (`ShellTidy.report`): the host keeps that with the
+    /// session, and a shell whose command went well and that nobody uses leaves by itself (`ShellTidy`).
     public static func spawnRequest(_ request: ShellRequest, cols: Int = 120, rows: Int = 36) -> SpawnRequest {
-        SpawnRequest(cwd: request.cwd, command: "eval \"$\(commandVariable)\"", env: [commandVariable: request.command],
+        SpawnRequest(cwd: request.cwd, command: "\(ShellTidy.launchLine) \(ShellTidy.report)", env: [commandVariable: request.command],
                      cols: cols, rows: rows, keepShell: true, label: sessionLabel(request), agent: nil)
     }
 

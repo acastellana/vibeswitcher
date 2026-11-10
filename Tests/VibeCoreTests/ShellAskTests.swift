@@ -142,7 +142,9 @@ struct ShellAskTests {
         let request = ShellRequest(session: Self.session, cwd: "/work/example", command: "npm test # and a comment", label: "Tests", createdAt: Self.now)
         let spawn = ShellAsk.spawnRequest(request)
         #expect(spawn.cwd == "/work/example" && spawn.keepShell && spawn.agent == nil && spawn.label == "Shell: Tests")
-        #expect(spawn.command == "eval \"$VIBESWITCHER_SHELL_COMMAND\"")
+        // The command, then how it ended, told to the terminal (`ShellTidy`): never `$?`, which fish hasn't.
+        #expect(spawn.command == "eval \"$VIBESWITCHER_SHELL_COMMAND\" && printf '\\033]7501;state=done:app=vs-shell\\007' "
+                + "|| printf '\\033]7501;state=error:app=vs-shell\\007'")
         #expect(spawn.env == ["VIBESWITCHER_SHELL_COMMAND": "npm test # and a comment"])
         #expect(ShellAsk.sessionLabel(ShellRequest(session: Self.session, cwd: "/", command: "x", label: "", createdAt: Self.now)) == "Shell")
     }

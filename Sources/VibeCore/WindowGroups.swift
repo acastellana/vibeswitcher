@@ -112,7 +112,10 @@ extension WindowRow {
         switch StatusRules.status(for: program) {
         case .needsInput: return RowState(text: StateWord.needsYou.text, since: since, group: .needsYou)
         case .working, .background: return RowState(text: program.title ?? StateWord.working.text, since: since, group: .working)
-        case .done: return RowState(text: program.state == .error ? "error" : StateWord.done.text, since: since, group: .ready)
+        case .done:
+            // A Run-card shell says how its command ended (`ShellTidy`), not that a turn did.
+            let text = ShellTidy.words(for: program) ?? (program.state == .error ? "error" : StateWord.done.text)
+            return RowState(text: text, since: since, group: .ready)
         case .idle, .unknown: return RowState(text: StateWord.idle.text, since: since, group: .idle)
         }
     }
