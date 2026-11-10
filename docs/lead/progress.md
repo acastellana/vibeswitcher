@@ -2336,3 +2336,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 19:15 Merged a-shell-run-card: A shell Run card goes away by itself a few seconds after it's handled (build 1810015b999d)
 - 2026-11-10 19:15 Automatically (auto_advance): Merged a-shell-run-card (A shell Run card goes away by itself a few seconds after it's handled) into main at 0592e7c3, on its passing audit and the full test run.
 - 2026-11-10 19:15 Automatically (auto_advance): Cleaned up a-shell-run-card (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-10 20:38 Automatically fetched origin/main at 55fce1fb: 0 commits from the other Mac at origin/main (55fce1fb540cee63c7ce0183c895d2348eff2035): merge_remote would do nothing: main has everything origin/main has.
+- 2026-11-10 20:39 Planned shells-that-agents: Shells that agents opened tidy themselves away when their command is done (review audit)
+- 2026-11-10 20:39 Started a worker on shells-that-agents
+- 2026-11-10 20:39 Automatically (auto_advance): Started a worker on shells-that-agents (Shells that agents opened tidy themselves away when their command is done).
