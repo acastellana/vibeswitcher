@@ -2289,3 +2289,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 12:37 Automatically fetched origin/main at b87922e0: 12 commits from the other Mac at origin/main (b87922e039e8c5acfc813dadf57b20a7c12419b6): merge_remote would stop: merging origin/main into main conflicts in Sources/VibeSwitcher/PhoneAccess.swift. It never picks a side for code: ask the user to resolve it (or plan a task that does).
 - 2026-11-10 16:42 Started a worker on merge-github-s-main-2
 - 2026-11-10 16:42 Automatically (auto_advance): Started a worker on merge-github-s-main-2 (Merge GitHub's main (b87922e0) from the other Mac, resolving PhoneAccess.swift).
+- 2026-11-10 17:04 Released merge-github-s-main-2's worker (idle since its done report on d1a4855b) while its audit runs
+- 2026-11-10 17:04 Automatically (auto_advance): Started the audit of merge-github-s-main-2 at d1a4855b (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
