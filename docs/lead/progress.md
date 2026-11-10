@@ -2124,3 +2124,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 18:41 Started a worker on wallet-cards-send-all
 - 2026-11-10 18:41 Automatically (auto_advance): Started a worker on wallet-cards-send-all (Wallet cards: Send all waiting requests of a session with one reviewed action).
 - 2026-11-10 18:54 Automatically fetched origin/main at 4fb46b33: 0 commits from the other Mac at origin/main (4fb46b33f6844a4e08648971d045ff4491971950): merge_remote would do nothing: main has everything origin/main has.
+- 2026-11-10 19:32 Automatically (auto_advance): Started the audit of wallet-cards-send-all at 5c4ca69d (Its review is audit).
+- 2026-11-10 19:32 Released wallet-cards-send-all's worker (idle since its done report on 5c4ca69d) while its audit runs
+- 2026-11-10 19:32 Automatically (auto_advance): Released wallet-cards-send-all's worker, idle since its done report on 5c4ca69d, while its audit runs (ended pid 16920 (Worker: Wallet cards: Send all waiting requests of a session with one reviewed action)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-10 19:32 Sent wallet-cards-send-all's audit contract v2 (it had v1)
+- 2026-11-10 19:32 Planned send-all-rows-tell: Send all: rows tell apart calls that differ only in arguments, and a batch over 30 says what's left (review audit)
