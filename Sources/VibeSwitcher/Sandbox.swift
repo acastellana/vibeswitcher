@@ -1326,6 +1326,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("shell-tidy SECONDS", "how long a handled shell card (started, declined, expired) shows before it leaves by itself, for cards handled from now on (4 by default); a long time keeps one on screen for a shot"),
         ("shell-idle SECONDS", "how long after its command went well an untouched Run-card shell is ended by itself (600 by default), and looks now: a shell finished that long ago, back at its prompt and not typed into, moves under Ended"),
         ("shell-close [PROJECT]", "the sidebar's Close Finished Shells… for PROJECT (the selected session's unless given), its confirmation taken as given: prints what it asked and ends the Run-card shells of that project that are back at their prompt"),
+        ("sidebar attention|projects [ended]", "groups the sidebar by attention or by project (a project's header has its menu), with the Ended fold open when ended is given, closed otherwise"),
         ("shell-fail on|off", "on: the sandbox's own host refuses to start the shells a card's Run asks for, so the Run says why it didn't go; off: they start again"),
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint, transaction (tx HASH [EXPLORER URL], once signed and submitted) and the Wallet Manager's checks"),
         ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
@@ -2445,6 +2446,14 @@ private final class Driver: NSObject, NSApplicationDelegate {
             guard rest == "on" || rest == "off" else { return reply(false, "shell-fail on|off") }
             shellLaunchFails = rest == "on"
             reply(true, "shell requests' Runs \(shellLaunchFails ? "fail to start" : "start")")
+        case "sidebar":
+            let words = rest.split(separator: " ").map(String.init)
+            guard let grouping = words.first.flatMap(WindowGrouping.init(rawValue:)), words.dropFirst().allSatisfy({ $0 == "ended" }) else {
+                return reply(false, "sidebar attention|projects [ended]")
+            }
+            model.grouping = grouping
+            model.endedOpen = words.count > 1
+            settle { reply(true, "sidebar grouped by \(grouping.rawValue), Ended \(words.count > 1 ? "open" : "closed")") }
         case "shell-idle":
             guard let seconds = Double(rest), seconds > 0 else { return reply(false, "shell-idle SECONDS (more than 0)") }
             shellTidier.endAfter = seconds

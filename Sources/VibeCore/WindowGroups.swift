@@ -40,6 +40,10 @@ public struct SessionEnd: Equatable, Sendable {
 
     public init(status: Int32) { self.status = status }
 
+    /// A session a client was asked to end (End Session, or a finished shell tidied away: `ShellTidy`) ended, whatever
+    /// its shell made of the hangup: an interactive zsh at its prompt exits 1 on it, which is no failure of anyone's.
+    public init(exit: HostSession.Exit) { status = exit.killedBy != nil && exit.status != 0 ? 129 : exit.status }
+
     /// Ended by VibeSwitcher or a signal, or with no exit status of its own.
     var isEnded: Bool { status < 0 || status == 129 || status == 143 }
 
@@ -59,7 +63,7 @@ public struct SessionEnd: Equatable, Sendable {
 
 extension WindowRow {
     /// How its session ended; nil while it runs, and for scanned sessions (they leave the list when they end).
-    public var end: SessionEnd? { hosted?.exit.map { SessionEnd(status: $0.status) } }
+    public var end: SessionEnd? { hosted?.exit.map(SessionEnd.init(exit:)) }
 
     /// Headline: your name for it, else what it's working on, else the program's own title, else the project.
     public var title: String {
@@ -72,7 +76,7 @@ extension WindowRow {
     public func state(now: Date) -> RowState {
         switch content {
         case .hosted(let info):
-            if let exit = info.exit { return RowState(text: SessionEnd(status: exit.status).text, since: exit.at, group: .idle) }
+            if let exit = info.exit { return RowState(text: SessionEnd(exit: exit).text, since: exit.at, group: .idle) }
             // No agent the scan knows, but a program that says what it's doing (OSC 7501): that, over its preset.
             if let program = info.liveProgramStatus { return Self.state(of: program) }
             if info.agent != nil {
@@ -119,6 +123,9 @@ extension WindowRow {
         case .idle, .unknown: return RowState(text: StateWord.idle.text, since: since, group: .idle)
         }
     }
+
+    /// A live shell an agent's Run card opened whose command failed (`ShellTidy`): its row says so as a failed end does.
+    public var commandFailed: Bool { hosted.flatMap(ShellTidy.ending(of:))?.ok == false }
 
     /// When this row's session started (window sessions: when the host started it).
     var startedAt: Date {

@@ -272,10 +272,11 @@ struct WindowRowView: View {
                             // A shape as well as the colour; the words beside it say "replaced".
                             Image(systemName: "arrow.turn.up.right").foregroundStyle(ReplacedLead.color).accessibilityHidden(true)
                         }
-                        let failed = replaced == nil && row.end?.isFailure == true
-                        if failed, let end = row.end {
-                            // A shape as well as the colour; the words beside it say the exit code.
-                            Image(systemName: end.symbol).foregroundStyle(SessionEnd.failureColor).accessibilityHidden(true)
+                        // A failed end, or a Run-card shell whose command failed (it stays until closed).
+                        let failed = replaced == nil && (row.end?.isFailure == true || row.commandFailed)
+                        if failed {
+                            // A shape as well as the colour; the words beside it say the exit code, or "command failed".
+                            Image(systemName: row.end?.symbol ?? "exclamationmark.circle").foregroundStyle(SessionEnd.failureColor).accessibilityHidden(true)
                         }
                         Text(state.text).foregroundStyle(replaced != nil ? AnyShapeStyle(ReplacedLead.color)
                             : failed ? AnyShapeStyle(SessionEnd.failureColor)

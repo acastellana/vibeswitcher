@@ -82,9 +82,21 @@ struct ShellTidierTests {
         #expect(tidier.look().isEmpty && seen.ended.isEmpty)
         // The row of the failed one says so, and the finished one's that it finished.
         #expect(Self.rows([failed, typedInto]).map { $0.state(now: seen.now).text } == ["command failed", "command finished"])
+        #expect(Self.rows([failed, typedInto, running, byHand]).map(\.commandFailed) == [true, false, false, false])
         // Back at its prompt, the busy one goes.
         seen.busy = []
         #expect(tidier.look() == [busy.id])
+    }
+
+    /// A shell that was ended for the user (tidied away, or End Session) reads "ended" under Ended, not as a failure,
+    /// though an interactive zsh at its prompt exits 1 on the hangup; one that exited 1 by itself still reads so.
+    @Test func aTidiedShellReadsEndedNotFailed() {
+        let tidied = Self.session("Shell: Install", exit: .init(status: 1, at: Self.start, killedBy: 4242, killedByName: "VibeSwitcher"))
+        let failed = Self.session("Shell: Backup", exit: .init(status: 1, at: Self.start))
+        let rows = Self.rows([tidied, failed])
+        #expect(rows.map { $0.state(now: Self.start).text } == ["ended", "exit 1"])
+        #expect(rows.map { $0.end?.isFailure } == [false, true])
+        #expect(SessionEnd(exit: .init(status: 0, at: Self.start, killedBy: 4242)).text == "finished")
     }
 
     /// Typing counts from the command's end (what's typed before is the command's: a password, an answer), is kept
