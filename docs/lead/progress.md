@@ -2129,3 +2129,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 19:32 Automatically (auto_advance): Released wallet-cards-send-all's worker, idle since its done report on 5c4ca69d, while its audit runs (ended pid 16920 (Worker: Wallet cards: Send all waiting requests of a session with one reviewed action)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-10 19:32 Sent wallet-cards-send-all's audit contract v2 (it had v1)
 - 2026-11-10 19:32 Planned send-all-rows-tell: Send all: rows tell apart calls that differ only in arguments, and a batch over 30 says what's left (review audit)
+- 2026-11-10 19:35 Audit of wallet-cards-send-all: complete, clean
+- 2026-11-10 20:14 Merged wallet-cards-send-all: Wallet cards: Send all waiting requests of a session with one reviewed action (build b87922e039e8 with changes not committed)
+- 2026-11-10 20:14 Flaky in wallet-cards-send-all's merge: sleepRecoveryRetriesAfterLoadDropsWithoutANewInterruption(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
