@@ -2106,3 +2106,11 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 16:54 Fetched origin/main at b87922e0: main is 5 commits ahead of origin/main and 0 commits behind it
 - 2026-11-10 16:54 Asked the user to push main at 4fb46b33 (5 commits) to origin/main
 - 2026-11-10 16:54 Pushed main at 4fb46b33 (5 commits) to origin/main, on the user's click
+- 2026-11-10 17:00 Automatically (auto_advance): Started the audit of passage-contract-check at 49258aef (It touches sensitive_paths (AGENTS.md), so it's treated as audit whatever its review says).
+- 2026-11-10 17:01 Released passage-contract-check's worker (idle since its done report on 49258aef) while its audit runs
+- 2026-11-10 17:01 Automatically (auto_advance): Released passage-contract-check's worker, idle since its done report on 49258aef, while its audit runs (ended pid 11402 (Worker: Passage contract check: the real passage CLI still matches what VibeSwitcher assumes)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-10 17:01 Sent passage-contract-check's audit contract v2 (it had v1)
+- 2026-11-10 17:03 Audit of passage-contract-check: complete, clean, round 1: 1 Nit open
+- 2026-11-10 17:36 Started a worker on passage-contract-check
+- 2026-11-10 17:36 Automatically (auto_advance): Merge of passage-contract-check failed: Tests fail rebased onto main: agentsStaysShort() Sent its worker the output; it's back at work.
+- 2026-11-10 17:36 Sent passage-contract-check's worker contract v3 (it had v2)
