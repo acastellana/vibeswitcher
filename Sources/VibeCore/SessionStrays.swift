@@ -25,7 +25,8 @@ public enum SessionStrays {
     /// `carrying(session:)` without the processes running `app` (VibeSwitcher itself, which carries a session's id
     /// when something run in that session launched it, see `endNow`): what a lead ends itself when the host didn't.
     public static func carrying(session id: UUID, keeping app: String?) -> [Found] {
-        carrying(session: id)
+        guard let app = app.map(resolved) else { return carrying(session: id) }
+        return carrying(session: id).filter { !runs($0.pid, executable: app) }
     }
 
     /// VibeSwitcher's executable for one of its tools (the tool server, the session host): the one beside this

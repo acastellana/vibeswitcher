@@ -110,4 +110,28 @@ struct EndingASessionTests {
         // Without an app to keep, it's a stray like any other.
         #expect(SessionStrays.carrying(session: id).map(\.pid) == [app.processIdentifier])
     }
+
+    /// A lead that ends a session itself (the host didn't, see `LeadToolset.endItself`) ends what carries its id, and
+    /// never the app that does (see above): the tool server knows the app as the program beside its own.
+    @Test func whatALeadEndsItselfLeavesOutTheAppCarryingTheSessionsId() async throws {
+        let scratch = Scratch()
+        let folder = scratch.url("app-carrying-a-session")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let appPath = folder.appendingPathComponent("VibeSwitcher").path
+        try FileManager.default.copyItem(atPath: OrphanSweepTests.built, toPath: appPath)
+        let id = UUID()
+        let (app, appInput) = try Self.waiter(appPath, environment: ["VIBESWITCHER_SESSION": id.uuidString])
+        let (stray, strayInput) = try Self.waiter(environment: ["VIBESWITCHER_SESSION": id.uuidString])
+        defer {
+            [app, stray].forEach { $0.terminate() }
+            [appInput, strayInput].forEach { try? $0.fileHandleForWriting.close() }
+        }
+        #expect(await eventually { SessionStrays.carrying(session: id).count == 2 })
+        #expect(SessionStrays.carrying(session: id, keeping: appPath).map(\.pid) == [stray.processIdentifier])
+        #expect(Set(SessionStrays.carrying(session: id, keeping: nil).map(\.pid)) == [app.processIdentifier, stray.processIdentifier])
+        // The built tool server's own app: the VibeSwitcher beside the program asking (here the test runner's).
+        let beside = try #require(SessionStrays.appBesideThisProgram)
+        let runner = try #require(HostServer.executable(of: getpid()))
+        #expect(beside == ((runner as NSString).deletingLastPathComponent as NSString).appendingPathComponent("VibeSwitcher"))
+    }
 }
