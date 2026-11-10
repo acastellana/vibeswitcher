@@ -1257,6 +1257,20 @@
 - 2026-11-07 20:07 Automatically (auto_advance): Merge of sweep-the-repository-and failed: Tests fail rebased onto main: aProbePastFifteenSecondsIsWaitedFor(), otherRequestsKeepTheirFifteenSecondsDuringAHandover(), listenLinesDuringAPollAskForOneMoreRunNotAnotherProcess() Sent its worker the output; it's back at work.
 - 2026-11-07 20:09 Planned handover-tests-stop: Handover tests stop timing out on a loaded Mac
 - 2026-11-07 20:18 Merged sweep-the-repository-and: Sweep the repository and its history for secrets
+- 2026-11-07 20:18 Automatically (auto_advance): Merged sweep-the-repository-and (Sweep the repository and its history for secrets) into main at 70883c24, on its passing audit and the full test run.
+- 2026-11-07 20:18 Automatically (auto_advance): Cleaned up sweep-the-repository-and; ended pid 96091 (Worker: Sweep the repository and its history for secrets) (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-07 20:18 Started a worker on handover-tests-stop
+- 2026-11-07 20:18 Automatically (auto_advance): Started a worker on handover-tests-stop (Handover tests stop timing out on a loaded Mac), its after tasks done (sweep-the-repository-and).
+- 2026-11-07 21:33 Automatically (auto_advance): Merge of handover-tests-stop failed: Tests fail rebased onto main: aReadBehindAHungOneWaitsNoLongerThanItsTimeout() Sent its worker the output; it's back at work.
+- 2026-11-07 22:15 Automatically (auto_advance): Started the audit of handover-tests-stop at 88806f87 (It touches sensitive_paths (Sources/VibeSwitcher/PhoneAccess.swift), so it's treated as audit whatever its review says).
+- 2026-11-07 22:15 Released handover-tests-stop's worker (idle since its done report on 88806f87) while its audit runs
+- 2026-11-07 22:15 Automatically (auto_advance): Released handover-tests-stop's worker, idle since its done report on 88806f87, while its audit runs (ended pid 60451 (Worker: Handover tests stop timing out on a loaded Mac)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-07 22:19 Audit of handover-tests-stop: complete, suspect, round 1: 3 Nit open
+- 2026-11-07 22:20 Audit of handover-tests-stop: complete, clean, round 2: 3 Nit closed
+- 2026-11-07 22:29 Merged handover-tests-stop: Handover tests stop timing out on a loaded Mac
+- 2026-11-07 22:29 Automatically (auto_advance): Merged handover-tests-stop (Handover tests stop timing out on a loaded Mac) into main at d5d3617e, on its passing audit and the full test run.
+- 2026-11-07 22:29 Automatically (auto_advance): Cleaned up handover-tests-stop (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-11-07 22:29 Update: Today: banner Allow/Deny, Ignore usage limits, safer installs, secrets sweep — **Landed (all audited, full suite at merge):**
 - 2026-11-07 23:25 Merged github-merge-third-try: GitHub merge, third try: land af82338b as an ancestor of main through the now-installed gate
 - 2026-11-07 23:25 Flaky in github-merge-third-try's merge: releasedWhenItGoes(), aPlainShellTakesARunOnlyAtItsPrompt(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
 - 2026-11-07 23:25 Fetched origin/main at af82338b: main is 140 commits ahead of origin/main and 0 commits behind it
@@ -2040,6 +2054,8 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 Error lines in app.log within 10 min, by kind: host: couldn't ×1
 Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
 - 2026-11-09 08:17 Update: Today: everything queued is merged and installed — **Landed since the last summary:** a merge's tests no longer block audits and new starts (`auto-advance-keeps`); merge and test time limits count only the time the Mac is awake (`the-other-time-limits…
+- 2026-11-08 16:53 Planned merge-github-s-main: Merge GitHub's main (226 commits from the other Mac) into this Mac's main
+- 2026-11-08 16:53 Started a worker on merge-github-s-main
 - 2026-11-09 08:22 Fetched origin/main at 3b271e17: main is 112 commits ahead of origin/main and 0 commits behind it
 - 2026-11-09 08:22 Asked the user to push main at 28f6e0ac (112 commits) to origin/main
 - 2026-11-09 08:24 Pushed main at 28f6e0ac (112 commits) to origin/main, on the user's click
