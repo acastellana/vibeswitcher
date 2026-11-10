@@ -2368,3 +2368,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 23:08 Merged ended-sessions-output-is: Ended sessions' output is readable in dark mode, and the shell tidier scans off the main thread (build 1810015b999d)
 - 2026-11-10 23:08 Automatically (auto_advance): Merged ended-sessions-output-is (Ended sessions' output is readable in dark mode, and the shell tidier scans off the main thread) into main at ba7cbf06, on its passing audit and the full test run.
 - 2026-11-10 23:08 Automatically (auto_advance): Cleaned up ended-sessions-output-is (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-10 23:14 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
