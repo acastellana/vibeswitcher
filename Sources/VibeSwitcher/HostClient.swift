@@ -765,6 +765,7 @@ final class HostClient: ObservableObject {
             done?(true)
             return
         }
+        onInput?(id)
         if done == nil, pacedInput[id] == nil, bytes.count <= Self.inputPiece {
             guard let connection else {
                 inputCut(id, 0, bytes.count, "VibeSwitcher isn't connected to the session host.")
@@ -782,6 +783,10 @@ final class HostClient: ObservableObject {
         pumpInput(id)
     }
 
+    /// Told of everything sent to a session's program from here (keys, pastes, messages; not the terminal's own answers
+    /// to queries, nor what `inputGate` took): a Run-card shell typed into is the user's from then on (`ShellTidier`).
+    /// Main thread.
+    var onInput: ((UUID) -> Void)?
     /// Looks at input for a session before it's sent (not the terminal's answers to queries): true when it took it.
     var inputGate: ((UUID, Data) -> Bool)?
     /// Whether `inputGate` takes a session's input now, asked without handing it any: no `DirectKeys` for it then.
@@ -796,6 +801,8 @@ final class HostClient: ObservableObject {
     func directKeys(_ id: UUID) -> DirectKeys? {
         guard isUsable, let connection, inputTaken?(id) != true else { return nil }
         directKeys[id]?.revoke()
+        // Handed out for a key being held: typing (the keys themselves go from another thread).
+        onInput?(id)
         let keys = DirectKeys(id: id, connection: connection)
         directKeys[id] = keys
         return keys
@@ -980,6 +987,7 @@ final class HostClient: ObservableObject {
     func send(_ id: UUID, writes: [HostInput.Write], gate: ((Int, @escaping (Bool) -> Void) -> Void)?,
               confirmed: @escaping (Bool) -> Void = { _ in }) {
         guard !writes.isEmpty else { return confirmed(true) }
+        onInput?(id)
         units[id, default: []].append(InputUnit(writes: writes, gate: gate, confirmed: confirmed))
         if units[id]?.count == 1 { runUnit(id, at: 0) }
     }

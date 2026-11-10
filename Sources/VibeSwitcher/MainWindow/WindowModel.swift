@@ -270,6 +270,13 @@ struct WindowActions {
     /// A project New Project… just made: listed on Home, then the project lead started in it with the first goal, if any.
     var projectCreated: (_ folder: String, _ goal: String?) -> Void = { _, _ in }
 
+    /// The project's live shells that agents' Run cards opened, among its `rows`: the sidebar offers Close Finished
+    /// Shells… when there's one.
+    var agentShells: (_ rows: [WindowRow]) -> Int = { rows in rows.filter { $0.hosted.map { $0.isLive && ShellTidy.opened($0) } == true }.count }
+    /// Close Finished Shells…: ends, after one confirmation listing them, every shell of the project named `project`
+    /// that an agent's Run card opened and that is back at its prompt (`ShellTidier.close`).
+    var closeFinishedShells: (_ project: String) -> Void = { _ in }
+
     /// You pick a project's folder and its lead starts there (`ProjectFolderStart`): Home's Choose Folder…, the empty
     /// sidebar's Project Lead….
     func chooseFolderForLead() { newSession(nil, nil) }

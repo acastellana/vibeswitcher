@@ -422,6 +422,29 @@ private final class Driver: NSObject, NSApplicationDelegate {
     }()
     /// `shell-fail on`: the sandbox's shell launches fail, as a refusing session host's would.
     var shellLaunchFails = false
+    /// Ends the sandbox's own finished Run-card shells (`ShellTidier`), in its own host: by themselves (`shell-idle`
+    /// shortens the 10 minutes) and from the sidebar's Close Finished Shells… (`shell-close`). What it would ask is
+    /// kept in `shellQuestion` and taken as confirmed: an alert can't be answered off screen.
+    lazy var shellTidier: ShellTidier = {
+        let tidier = ShellTidier(file: state.appendingPathComponent("shell/used.json"))
+        tidier.sessions = { [weak self] in self?.host.sessions ?? [] }
+        tidier.end = { [weak self] id in self?.host.kill(id) }
+        tidier.ask = { [weak self] question in
+            self?.shellQuestion = question
+            return true
+        }
+        host.onInput = { [weak tidier] id in tidier?.typed(id) }
+        return tidier
+    }()
+    var shellQuestion: ShellTidier.Question?
+
+    /// The sidebar's Close Finished Shells… for `project`; what it asked, and how many it ended.
+    @discardableResult
+    func closeFinishedShells(_ project: String) -> (asked: ShellTidier.Question?, ended: Int) {
+        shellQuestion = nil
+        let ended = shellTidier.close(project: project, rows: model.allRows.filter { $0.project == project })
+        return (shellQuestion, ended.count)
+    }
     /// The Wallet Manager peer the wallet desk sends to: the first made-up one, or none after `wallet-peer none`, or
     /// the Wallet Manager on this Mac after `wallet-peer this-mac`.
     var walletPeer = Driver.walletPeers[0].peerID
@@ -560,6 +583,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         // Its fake `passage listen`, ended by its pid.
         walletDesk.close()
         shellDesk.close()
+        shellTidier.close()
         Breadcrumbs.shared.flush()
         RunnableCommand.Script.removeAll()
     }
@@ -1200,8 +1224,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
             moveToWindow: { [weak self] _ in self?.refuse("moving a Terminal session") },
             startLead: { [weak self] _ in self?.refuse("starting a project lead (a real agent)") },
             projectsFolder: { [weak self] in (self?.home ?? "") + "/projects" },
-            projectCreated: { [weak self] folder, _ in self?.refuse("starting a lead in the new project \(folder)") })
+            projectCreated: { [weak self] folder, _ in self?.refuse("starting a lead in the new project \(folder)") },
+            closeFinishedShells: { [weak self] project in self?.closeFinishedShells(project) })
         windowActions = actions
+        // The sandbox's finished Run-card shells leave as the app's do (and typing into one is recorded from now on).
+        shellTidier.start(interval: 5)
         let controller = MainWindowController(store: store, host: host, model: model, actions: actions, leads: leads, briefing: briefing,
                                               dictation: dictation, wallet: walletDesk, boost: boostWatch, shells: shellDesk)
         controller.onBoostMark = { [weak self] in self?.showSettings(.performance, reveal: .boost) }
@@ -1297,6 +1324,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("shell-ask [COMMAND]", "the selected fake session's agent asks for a new shell running COMMAND (a made-up program unless given) in its folder, as vs-shell run does: its card shows in that chat, waiting for Run"),
         ("shell-click run|decline|dismiss", "presses that button on the newest shell request card in the selected chat (run starts the shell session in the sandbox's own host and selects it, and prints ran or the card's \"Not run: …\" line)"),
         ("shell-tidy SECONDS", "how long a handled shell card (started, declined, expired) shows before it leaves by itself, for cards handled from now on (4 by default); a long time keeps one on screen for a shot"),
+        ("shell-idle SECONDS", "how long after its command went well an untouched Run-card shell is ended by itself (600 by default), and looks now: a shell finished that long ago, back at its prompt and not typed into, moves under Ended"),
+        ("shell-close [PROJECT]", "the sidebar's Close Finished Shells… for PROJECT (the selected session's unless given), its confirmation taken as given: prints what it asked and ends the Run-card shells of that project that are back at their prompt"),
         ("shell-fail on|off", "on: the sandbox's own host refuses to start the shells a card's Run asks for, so the Run says why it didn't go; off: they start again"),
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint, transaction (tx HASH [EXPLORER URL], once signed and submitted) and the Wallet Manager's checks"),
         ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
@@ -2416,6 +2445,16 @@ private final class Driver: NSObject, NSApplicationDelegate {
             guard rest == "on" || rest == "off" else { return reply(false, "shell-fail on|off") }
             shellLaunchFails = rest == "on"
             reply(true, "shell requests' Runs \(shellLaunchFails ? "fail to start" : "start")")
+        case "shell-idle":
+            guard let seconds = Double(rest), seconds > 0 else { return reply(false, "shell-idle SECONDS (more than 0)") }
+            shellTidier.endAfter = seconds
+            let ended = shellTidier.look()
+            settle { reply(true, "an untouched finished shell is ended \(Int(seconds)) s after its command went well; ended now: \(ended.count)") }
+        case "shell-close":
+            guard let project = rest.isEmpty ? model.selectedRow?.project : rest else { return reply(false, "shell-close PROJECT (no session is selected)") }
+            let closed = closeFinishedShells(project)
+            let asked = closed.asked.map { "\($0.message)\n\($0.detail)\n[\($0.button ?? "OK")]" } ?? "nothing was asked"
+            settle { reply(true, "\(asked)\nended: \(closed.ended)") }
         case "shell-tidy":
             guard let seconds = Double(rest), seconds > 0 else { return reply(false, "shell-tidy SECONDS (more than 0)") }
             shellDesk.tidyAfter = seconds

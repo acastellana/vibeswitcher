@@ -72,6 +72,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         }
         return desk
     }()
+    /// Ends the shells Run cards opened once their command went well and nobody uses them, and the sidebar's Close
+    /// Finished Shells… (`ShellTidier`).
+    private lazy var shellTidier: ShellTidier = {
+        let tidier = ShellTidier()
+        tidier.sessions = { [weak self] in self?.hostClient.sessions ?? [] }
+        tidier.end = { [weak self] id in self?.hostClient.kill(id) }
+        hostClient.onInput = { [weak tidier] id in tidier?.typed(id) }
+        return tidier
+    }()
     /// Settings › Wallet's peers: `passage peers --no-discovery --json`, read off the main thread each time the tab shows
     /// and when the passage path changes.
     /// Settings › Wallet's peers, and its passage path once typing paused (`settledPath`): what the wallet desk runs.
@@ -115,7 +124,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         projectsFolder: { [weak self] in
             ProjectCreation.tildePath(self?.preferences.projectsFolderPath ?? ProjectCreation.expand(ProjectCreation.defaultLocation))
         },
-        projectCreated: { [weak self] folder, goal in self?.projectCreated(folder, goal: goal) })
+        projectCreated: { [weak self] folder, goal in self?.projectCreated(folder, goal: goal) },
+        closeFinishedShells: { [weak self] project in
+            guard let self else { return }
+            shellTidier.close(project: project, rows: windowModel.allRows.filter { $0.project == project })
+        })
     private(set) lazy var leadController: LeadController = {
         let controller = LeadController(host: hostClient, store: store, sweepsRoles: true) { [weak self] root in
             let presets = self?.presets(for: root) ?? []
@@ -226,6 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         do { try WalletRequestStore.carryOver() } catch { Breadcrumbs.shared.note("wallet: couldn't carry over vault-requests: \(error)") }
         walletDesk.start()
         shellDesk.start()
+        shellTidier.start()
         // A peer or Passage path chosen in Settings › Wallet: the cards redraw now (Send comes back on waiting ones),
         // not at the next look. After the change lands (@Published sends before it does). The path only once typing
         // paused (`WalletPeerList.typed`): a half-typed one is never run.
@@ -984,6 +998,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         phoneAccess.shutdown()
         walletDesk.close()
         shellDesk.close()
+        shellTidier.close()
         // Script blocks written for Run and not run yet.
         RunnableCommand.Script.removeAll()
     }
