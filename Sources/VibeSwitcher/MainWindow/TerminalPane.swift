@@ -38,9 +38,8 @@ final class HostTerminalView: TerminalView {
         super.displayIgnoringOpacity(rect, in: context)
         context.saveGraphicsState()
         NSGraphicsContext.current = context
-        context.compositingOperation = .destinationOver
         nativeBackgroundColor.setFill()
-        rect.fill()
+        rect.fill(using: .destinationOver)
         context.restoreGraphicsState()
     }
 

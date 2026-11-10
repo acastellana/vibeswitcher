@@ -216,10 +216,9 @@ enum Sandbox {
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         NSGraphicsContext.current = context
-        context.compositingOperation = .destinationOver
         for terminal in terminals {
             terminal.nativeBackgroundColor.setFill()
-            terminal.convert(terminal.bounds, to: root).fill()
+            terminal.convert(terminal.bounds, to: root).fill(using: .destinationOver)
         }
     }
 

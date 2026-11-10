@@ -12,6 +12,11 @@ import VibeCore
 struct EndedTerminalThemeTests {
     /// The colour drawn at the far corner of a terminal in `darkMode` whose screen holds some output.
     private func corner(darkMode: Bool) throws -> NSColor {
+        try drawn(darkMode: darkMode).corner
+    }
+
+    /// The far corner's colour, and whether any pixel differs clearly from it (the text is still there).
+    private func drawn(darkMode: Bool) throws -> (corner: NSColor, hasText: Bool) {
         let window = NSWindow(contentRect: NSRect(x: -30_000, y: -30_000, width: 640, height: 320), styleMask: [.borderless],
                               backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -23,7 +28,15 @@ struct EndedTerminalThemeTests {
         terminal.feed(text: "albert@mac % echo hello\r\nhello\r\n")
         let rep = try #require(terminal.bitmapImageRepForCachingDisplay(in: terminal.bounds))
         terminal.cacheDisplay(in: terminal.bounds, to: rep)
-        return try #require(rep.colorAt(x: rep.pixelsWide - 20, y: rep.pixelsHigh - 20)?.usingColorSpace(.sRGB))
+        let corner = try #require(rep.colorAt(x: rep.pixelsWide - 20, y: rep.pixelsHigh - 20)?.usingColorSpace(.sRGB))
+        var text = false
+        for y in 0..<min(rep.pixelsHigh, 60) where !text {
+            for x in 0..<min(rep.pixelsWide, 400) {
+                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                if abs(color.redComponent - corner.redComponent) > 0.4 { text = true; break }
+            }
+        }
+        return (corner, text)
     }
 
     private func expected(darkMode: Bool) throws -> NSColor {
@@ -41,6 +54,11 @@ struct EndedTerminalThemeTests {
     @Test func inDarkModeTheTerminalIsDrawnOnTheDarkBackground() throws {
         let drawn = try corner(darkMode: true), want = try expected(darkMode: true)
         #expect(near(drawn, want), "drawn \(drawn), want \(want)")
+    }
+
+    @Test func theTextIsStillDrawnOverTheBackground() throws {
+        #expect(try drawn(darkMode: true).hasText)
+        #expect(try drawn(darkMode: false).hasText)
     }
 
     @Test func inLightModeTheTerminalIsDrawnOnTheLightBackground() throws {
