@@ -122,6 +122,8 @@ final class PhoneAccess: ObservableObject {
     /// read (nil: read, none there): from the phone's screen reads and, while a session waits on you, a read of its
     /// own every few seconds while a phone asks for the state.
     private var menus: [String: (at: Date, menu: PhoneMenu.Shown?)] = [:]
+    /// What a menu read is stamped with and how fresh it is judged (`menuFresh`, `menuReadEvery`); a test's clock instead.
+    var menuClock: () -> Date = Date.init
     private var menuReads: Set<String> = []
     /// An answer typed in from the phone, per session: until its keys show on the screen, the menu it answered is
     /// neither offered nor answered again (a second tap would land on whatever comes next with this one's keys).
@@ -771,7 +773,7 @@ final class PhoneAccess: ObservableObject {
     private func offeredMenu(_ session: Session) -> PhoneMenu.Shown? {
         let key = session.identity
         guard !session.isTeamMember else { return nil }
-        guard let entry = menus[key], entry.at.timeIntervalSinceNow > -Self.menuFresh, let menu = entry.menu else { return nil }
+        guard let entry = menus[key], entry.at.timeIntervalSince(menuClock()) > -Self.menuFresh, let menu = entry.menu else { return nil }
         if let answer = answered[key], answer.until > Date(), answer.fingerprint == PhoneMenu.fingerprint(menu, sid: key) { return nil }
         return menu
     }
@@ -787,7 +789,7 @@ final class PhoneAccess: ObservableObject {
             && (session.inTerminalApp || session.inWindow) {
             let key = session.identity, tty = session.tty
             if menuReads.contains(key) { continue }
-            if let entry = menus[key], entry.at.timeIntervalSinceNow > -Self.menuReadEvery { continue }
+            if let entry = menus[key], entry.at.timeIntervalSince(menuClock()) > -Self.menuReadEvery { continue }
             menuReads.insert(key)
             readScreen(session) { raw in
                 let menu = raw.flatMap { PhoneMenu.read(screen: $0, needsInput: true) }
@@ -795,7 +797,7 @@ final class PhoneAccess: ObservableObject {
                     self.menuReads.remove(key)
                     // The tab may have changed hands during the read: then it's not this session's menu.
                     guard raw != nil, self.store.sessions.first(where: { $0.tty == tty })?.identity == key else { return }
-                    self.menus[key] = (Date(), menu)
+                    self.menus[key] = (self.menuClock(), menu)
                 }
             }
         }
@@ -840,7 +842,7 @@ final class PhoneAccess: ObservableObject {
             let menu = raw.flatMap { PhoneMenu.read(screen: $0, needsInput: needsInput) }
             DispatchQueue.main.async {
                 if raw != nil, self.store.sessions.first(where: { $0.tty == tty })?.identity == key {
-                    self.menus[key] = (Date(), menu)
+                    self.menus[key] = (self.menuClock(), menu)
                 }
                 let waiters = self.screenWaiters.removeValue(forKey: key) ?? []
                 // Forget screens of sessions that are gone.
@@ -1329,7 +1331,7 @@ final class PhoneAccess: ObservableObject {
             guard let raw else { return .refuse(.error(503, "Couldn't read that tab right now.")) }
             let needsInput = self.store.sessions.first { $0.identity == sid }?.status == .needsInput
             let shown = PhoneMenu.read(screen: raw, needsInput: needsInput)
-            self.menus[sid] = (Date(), shown)
+            self.menus[sid] = (self.menuClock(), shown)
             let index = requested ?? shown?.menu.selected ?? 0
             switch PhoneMenu.answer(choose: index, fingerprint: fingerprint, screen: raw, needsInput: needsInput, sid: sid) {
             case .stale: return .refuse(.error(409, Self.menuChanged))

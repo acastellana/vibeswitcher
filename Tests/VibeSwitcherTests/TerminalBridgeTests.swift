@@ -109,7 +109,8 @@ struct AppleScriptRunnerTests {
         let ranBehind = folder.appendingPathComponent("ran-behind")
         // Each run on a thread of its own (`offPool`), not the cooperative pool: a starved pool started the read behind
         // past the hung one's own timeout, which then let it run ("marked" instead of .timedOut, 2026-11-05 at load
-        // 150). The hung one's timeout is the hang guard, so only the test's release ends it.
+        // 150). Held until the test releases it: its timeout is only the hang guard. A real 30 s ran out while a loaded
+        // suite held this test up, and the read behind then ran on the freed queue.
         let hung = Task { await offPool { runner.run("holdUntil", [.string(held.path), .string(release.path)], timeout: hangGuard) } }
         #expect(await until { FileManager.default.fileExists(atPath: held.path) })
         let behind = await offPool { runner.run("mark", [.string(ranBehind.path)], timeout: 0.5) }
