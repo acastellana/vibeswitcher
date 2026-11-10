@@ -801,8 +801,9 @@ public final class HostedSession {
     /// id): a Bash-tool command in a group of its own, a server run in the background, a setsid'd child launchd took
     /// over. Then SIGKILL after 5 s to whichever of those groups still exists and to whatever of the session's still
     /// runs: a program that ignores SIGHUP would otherwise outlive the session, detached, once the shell exits.
-    /// `by`: the client that asked (its process id), which its exit names.
-    public func terminate(by client: pid_t? = nil) {
+    /// `by`: the client that asked (its process id), which its exit names. `app`: VibeSwitcher's executable; a process
+    /// running it is never signalled, though it carries the session's id (see `SessionStrays.endNow`).
+    public func terminate(by client: pid_t? = nil, keeping app: String? = nil) {
         guard info.isLive || readSource != nil else { return }
         ending = true
         if let client, info.isLive, killer == nil { killer = (client, ProcessTable.info(pid: client)?.comm) }
@@ -810,7 +811,7 @@ public final class HostedSession {
         // Before the shell is asked to end: once it has, what it started is launchd's.
         let started = info.isLive ? SessionStrays.descendants(of: info.childPID) : []
         groups.forEach { Darwin.kill(-$0, SIGHUP) }
-        SessionStrays.end(session: id, started: started, sparing: groups)
+        SessionStrays.end(session: id, started: started, sparing: groups, keeping: app)
         queue.asyncAfter(deadline: .now() + 5) {
             for group in groups where Darwin.kill(-group, 0) == 0 { Darwin.kill(-group, SIGKILL) }
         }
