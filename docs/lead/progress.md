@@ -2136,3 +2136,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 20:14 Started a worker on send-all-rows-tell
 - 2026-11-10 20:14 Automatically (auto_advance): Started a worker on send-all-rows-tell (Send all: rows tell apart calls that differ only in arguments, and a batch over 30 says what's left), its after tasks done (wallet-cards-send-all).
 - 2026-11-10 20:14 Automatically (auto_advance): Cleaned up wallet-cards-send-all (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-10 20:40 Released send-all-rows-tell's worker (idle since its done report on a49e738d) while its audit runs
+- 2026-11-10 20:40 Automatically (auto_advance): Started the audit of send-all-rows-tell at a49e738d (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-10 20:40 Sent send-all-rows-tell's audit contract v2 (it had v1)
