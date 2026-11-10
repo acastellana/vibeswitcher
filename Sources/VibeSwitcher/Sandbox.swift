@@ -1296,6 +1296,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m] [--data 0x…] [--reason TEXT]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh); --data makes it a contract call (an approve's calldata, say)"),
         ("shell-ask [COMMAND]", "the selected fake session's agent asks for a new shell running COMMAND (a made-up program unless given) in its folder, as vs-shell run does: its card shows in that chat, waiting for Run"),
         ("shell-click run|decline|dismiss", "presses that button on the newest shell request card in the selected chat (run starts the shell session in the sandbox's own host and selects it, and prints ran or the card's \"Not run: …\" line)"),
+        ("shell-tidy SECONDS", "how long a handled shell card (started, declined, expired) shows before it leaves by itself, for cards handled from now on (4 by default); a long time keeps one on screen for a shot"),
         ("shell-fail on|off", "on: the sandbox's own host refuses to start the shells a card's Run asks for, so the Run says why it didn't go; off: they start again"),
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint, transaction (tx HASH [EXPLORER URL], once signed and submitted) and the Wallet Manager's checks"),
         ("wallet-later MINUTES", "moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up hint"),
@@ -2415,6 +2416,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
             guard rest == "on" || rest == "off" else { return reply(false, "shell-fail on|off") }
             shellLaunchFails = rest == "on"
             reply(true, "shell requests' Runs \(shellLaunchFails ? "fail to start" : "start")")
+        case "shell-tidy":
+            guard let seconds = Double(rest), seconds > 0 else { return reply(false, "shell-tidy SECONDS (more than 0)") }
+            shellDesk.tidyAfter = seconds
+            reply(true, "a handled shell card now leaves after \(seconds) s (affects cards handled from now on)")
         case "wallet-ask": walletAsk(Array(words.dropFirst()), reply)
         case "wallet-card": let (ok, text) = walletCardText(); reply(ok, text)
         case "wallet-later":
