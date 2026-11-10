@@ -2331,3 +2331,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 16:46 Started a worker on passage-contract-check
 - 2026-11-10 16:46 Automatically (auto_advance): Started a worker on passage-contract-check (Passage contract check: the real passage CLI still matches what VibeSwitcher assumes).
 - 2026-11-10 18:58 Merged origin/main into main: 5 commits from the remote, as a merge commit, ab1b80a3; the tests passed on it (build 1810015b999d)
+- 2026-11-10 18:58 Asked the user to push main at 55fce1fb (107 commits) to origin/main
+- 2026-11-10 19:01 Pushed main at 55fce1fb (107 commits) to origin/main, on the user's click
+- 2026-11-10 19:15 Merged a-shell-run-card: A shell Run card goes away by itself a few seconds after it's handled (build 1810015b999d)
