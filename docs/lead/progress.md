@@ -2343,3 +2343,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 21:22 Automatically (auto_advance): Started the audit of shells-that-agents at f42b62ce (Its review is audit).
 - 2026-11-10 21:22 Released shells-that-agents's worker (idle since its done report on f42b62ce) while its audit runs
 - 2026-11-10 21:22 Automatically (auto_advance): Released shells-that-agents's worker, idle since its done report on f42b62ce, while its audit runs (ended pid 22017 (Worker: Shells that agents opened tidy themselves away when their command is done)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-10 21:27 Audit of shells-that-agents: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
+- 2026-11-10 21:27 Planned ended-sessions-output-is: Ended sessions' output is readable in dark mode, and the shell tidier scans off the main thread (review audit)
+- 2026-11-10 21:32 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-10 21:42 Merged shells-that-agents: Shells that agents opened tidy themselves away when their command is done (build 1810015b999d)
