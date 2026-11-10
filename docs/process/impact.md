@@ -127,6 +127,27 @@ cost, the receipts of the 2026-10-31 batch give 8 tasks, 2.9 h and ~$86.
 
 ## Entries
 
+### IM-19: The Passage contract check (passage-contract-check, planned)
+
+- **Change:** `scripts/e2e/passage-contract.sh`, run on demand, compares the installed Passage's `help` and `version`
+  with the commands, flags and exit codes PassageLink, PassageCommand and `scripts/e2e/loop-passage` assume, and names
+  each difference (exit 1); it can't see the `sent` line or the JSON shapes, which help doesn't show. Planned
+  2026-11-10.
+- **Hypothesis:** if the check is run after each Passage update, then a Passage CLI change is caught by this check
+  before it reaches a card: every drift in what help shows is found by the check, none first in use, because until now
+  nothing compared the hand-copied contract with the real binary.
+- **Metric:** drifts caught by the check vs. drifts found in use (a card that fails or misreads a send because
+  Passage's command line changed), counted by hand from the check's runs and
+  [incidents.md](../lead/incidents.md). Guard: the check never runs anything of the real binary but `help` and
+  `version` (`PassageContractTests`).
+- **Baseline:** 0 caught by the check / 0 found in use: no Passage CLI change has happened since VibeSwitcher began
+  calling it (Passage 1.0, 2026-11-10, where the check passes). The script has no source for this.
+- **Check:** 2026-12-10, window 2026-11-10..2026-12-10.
+- **Status:** measuring
+- **Result:** (pending)
+- **Verdict:** (pending)
+- **Why:** (pending)
+
 ### IM-18: The session header and Team rows stop redrawing for nothing (freezes-remove-the-top, planned)
 
 - **Change:** the session header reads the window's model and the session host into the values it shows and draws its
