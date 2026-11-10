@@ -513,6 +513,33 @@ struct LeadRemoteTests: LeadTeamFixture {
         #expect(!FileManager.default.fileExists(atPath: scene.root + "/bad.txt"))
     }
 
+    /// The 2026-11-09 incident on this route: no failing test named, a passing line last, a secret in the output.
+    @Test func aRemotesFailedRunIsToldWithNoVaultPathOrPassingLineAsItsCause() throws {
+        let scene = try makeScene(workflow: ["test_command: bash check.sh"])
+        let lead = try lead(scene.root, FakeRuntime())
+        _ = try pushed(scene, "check.sh", """
+            #!/bin/bash
+            [[ -e bad.txt ]] || exit 0
+            echo "◇ Test one() started."
+            echo "◇ Test two() started."
+            echo "X-Auth: Bearer abc123def456"
+            echo "web tests: 2 of 2 passed"
+            exit 1
+            """, message: "A check")
+        _ = try pushed(scene, "bad.txt", "bad\n", message: "Remote breaks it")
+        #expect(!lead.call("fetch_remote", [:]).isError)
+
+        let merged = lead.call("merge_remote", [:])
+        #expect(merged.isError)
+        #expect(!merged.text.contains(vault.folder.path), "\(merged.text)")
+        #expect(merged.text.contains("The run stopped partway"), "\(merged.text)")
+        #expect(merged.text.contains("X-Auth: Bearer •••") && !merged.text.contains("abc123def456"), "\(merged.text)")
+        let flakes = scene.root + "/.vibeswitcher/flakes"
+        let file = try #require(try FileManager.default.contentsOfDirectory(atPath: flakes).first { $0.hasSuffix("-merge-test.log") })
+        #expect(merged.text.contains("Their output: \(flakes)/\(file)"), "\(merged.text)")
+        #expect(!LeadGuardRailsTests.denied("cat \(flakes)/\(file)", by: LeadLaunch.deny(.lead)))
+    }
+
     /// The remote changed the lead's records while the main checkout holds lines of them not committed yet: they're
     /// committed first, and the merge keeps them and the remote's.
     @Test func uncommittedRecordsSurviveAMergeThatChangesThem() throws {

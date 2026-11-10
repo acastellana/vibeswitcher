@@ -185,10 +185,17 @@ public enum ReadOnlyCommand {
     /// The line's commands, each as its words (quotes taken off), split at `;`, `&&`, `||`, `|` and newlines; nil
     /// when it holds anything else the shell would act on.
     static func parts(of line: String) -> [[String]]? {
+        // `Character` compares canonically: U+037E is `;` here and a word character to the shell. Nothing legitimate
+        // holds one of these, so the line prompts.
+        guard !line.unicodeScalars.contains(where: { !$0.isASCII && String($0).decomposedStringWithCanonicalMapping.utf8.allSatisfy { $0 < 0x80 } }) else {
+            return nil
+        }
         var parts: [[String]] = []
         var words: [String] = []
         var word: String?
-        let chars = Array(line)
+        // One Character per code point, as the shell reads the line: a mark after a quote or an operator would otherwise
+        // join it in one grapheme, a word character here and the same quote or operator to the shell.
+        let chars = line.unicodeScalars.map(Character.init)
         var i = 0
         func endWord() {
             if let current = word { words.append(current) }

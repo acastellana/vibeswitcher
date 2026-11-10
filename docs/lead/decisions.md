@@ -304,4 +304,47 @@ The user asked to see what's possible and said they'll probably delete them. Loc
 ## 2026-11-10 18:41:18 Wallet cards get "Send all N to Wallet Manager…" for one session's waiting requests (task wallet-cards-send-all, audited): one action opens a list of exactly those requests, and confirming sends that snapshot one at a time through the existing single-card send, each with its own outcome, stopping at the first failure. No pre-authorisation of future requests by pattern, timer or setting: VibeSwitcher sends only what the user was shown in the list they confirmed. Never for Sign in browser wallet. The wallet-request format stays version 1, unchanged.
 
 The user said yes on 2026-11-10 after another project's lead asked for fewer clicks: its rollout files 36 near-identical requests, each needing its own Send. The lead advised against pattern pre-authorisation because VibeSwitcher never judges a transaction and the Send click exists to check the agent that files the requests; exact matching belongs with the Wallet Manager's checks.
+## 2026-11-09 09:50:05 3D representations of a session (67js seed head, river, railway yard) were built on 2026-11-09, the user looked and said "meh - remove them"; all three are deleted. Don't propose 3D session views again unless the user brings it up.
+
+It was a look at what's possible, not a direction, and the user didn't like the result. This supersedes the earlier decision to hold those three prototypes as kept.
+
+## 2026-11-09 10:29:38 Which ideas from the four repository reviews should the team build? 1–6 are cheap fixes: don't score failed eval runs, give the eval REVIEW.md, make dismissing an Important finding cite evidence, start bug tasks by reproducing the symptom, record the Claude Code version on merges, and cap prompt size. 7–9 change the audit prompt and share one eval run of about $50: settle doubts instead of filing them as Nits, check crashed and in-flight states, and flag what a diff added that nobody asked for. 10–11 get tested on past data first. → Build 1–9, and test 10–11 on past data
+
+The lead proposed it with a 15 min timer and the user didn't answer in time, so it went ahead (question AC8DD1C8). Why it was asked: All four reviews are merged, and nothing starts until this is chosen.
+
+## 2026-11-09 10:39:43 From the four repository reviews, build ideas 1-9 and backtest 10-11 before building them (the lead's proposal, taken by timer on 2026-11-09 after the user asked "what about the ideas?"). The audit-prompt change waits for the fixed eval's baseline, and has auto_advance off so the lead compares its eval summary before its audit and merge.
+
+The reviews found the eval scores errored runs and runs without REVIEW.md, so verifier prompt changes can't be measured until that's fixed. Real audit quality gains (4 of 8 found bugs were Nit-only; 5 of 6 misses were unwalked states) depend on that measurement. Items resting on hypotheses get backtested first, in line with incident-first (2026-11-06 22:35).
+
+## 2026-11-09 11:14:36 Not building the fresh-reader contract check or the tests-got-weaker check (2026-11-09). Reopen the first only with a reader that separates good contracts from bad; reopen the second on an incident where a weakened test let a bug through.
+
+Backtests in docs/process/reviews/: the cheap reader flagged 97% of both failed and clean contracts (AUC 0.57), so it gives no signal; the tests check would have raised 4 of the last 100 merges, 1 of them new, and that one was a correct refactor.
+
+## 2026-11-09 13:43:32 The phone and Tailscale review and fix (the user's request, 2026-11-09) runs as three audited Claude tasks side by side: setup and pairing, day-to-day views and recovery, and input. They share PhoneAccess.swift in different functions, and only the input task changes the input path. Each fixes material bugs, and lists missing features rather than building them. No worker touches real Tailscale settings, a real phone or a real session. The dedicated security review of the phone stays out of these tasks, pending the user's answer on how to run it after Fable's filter stopped it on 2026-11-08.
+
+The three areas are independent enough to parallelize under the 2026-11-08 17:52 rule and the 2026-10-23 input-path rule. Tailscale serve and pairing are the user's real setup, so workers test through a fake CLI and the sandbox, and a real-phone pass stays with the user. The 2026-11-08 decision left routing around the filter to the user.
+
+## 2026-11-09 13:45:12 The security review of the phone, host authentication and tool boundaries, stopped by Fable's filter on 2026-11-08, runs on Opus after the three phone tasks (the user's answer to 0C15FEF1, 2026-11-09). Findings left unfixed stay out of the public repository, in the done report only.
+
+The 2026-11-08 decision left how to run it to the user, and they chose Opus. The repository is public, so committing an open weakness would publish it before the fix.
+
+## 2026-11-09 14:20:42 From the user's review of where work goes wrong (2026-11-09). (1) Four tasks: the merge checks the commit it's about to land across every route, audit exceptions become a structured record before the audit, stall reports name their cause with evidence, and start_worker warns on overlapping write boundaries (warning only). (2) The impact ledger is paused: no new entries, and the routine in the 2026-11-01 08:54 decision is suspended. The history stays. Reopen it if an entry shows a measurement changed or reversed a decision. (3) Pilot, by hand and only on high-risk contracts (a security boundary, or what moves main): the lead writes one concrete way the acceptance checks could pass while the guarantee fails, and makes it a test. No tool is built for this, and the 2026-11-09 11:14 decision against a fresh-reader check stands. (4) From the next batch, each retrospective counts merged tasks that needed a corrective follow-up and where the defect first became detectable, from the receipts. (5) Kept: your click on outward actions, the adversarial audit of permission changes, and the default finder count. Correction: the second GitHub merge flattening (2026-11-07) came from a stale installed gate, not the batch path.
+
+The incidents point to handoffs the system controls, not to too few reviewers. The verifier passed a correct branch and the merge step changed the result; two 2026-11-07 send-backs were the lead failing to pass on an acceptance; and a five-hour misdiagnosis came from a report that couldn't show Mac sleep. The 15 oldest impact entries are all still pending. The hand pilot is narrower than the backtested contract reader, which gave no signal across all contracts. 14 user-found and 14 system-found bugs count discoveries, not escapes, so the follow-up measure is needed.
+
+## 2026-11-09 17:30:54 Updates to Claude's own synced skills keep needing the user's Accept (their answer to A200C514, 2026-11-09). The card gets clearer instead (task the-config-seal-s): which skill and files, the text difference, when, and the likely source and how sure that is.
+
+A skill runs in every Claude session, and a forged sync update can't be told from a real one on disk, the same reasoning as the 2026-11-08 06:33 plugin decision. The user's complaint was not knowing what changed or why, and real skill-content changes are rare.
+
+## 2026-11-09 20:24:31 This account has hit its Fable limit until Nov 12, 12:00, and Fable runs the audits. Three tasks still need one: the merge failure message, the test run's false blame, and the audit prompt changes. None of them is urgent, and all the phone and security work is already merged. What should I do with those audits? → Wait for the reset on Nov 12
+
+The lead proposed it with a 30 min timer and the user didn't answer in time, so it went ahead (question E8B48BFD). Why it was asked: An audit has already stopped at the limit, and two more tasks are about to need one.
+
+## 2026-11-09 20:25:00 From the 2026-11-09 retrospective. (1) Audits and paid evals wait for the Fable limit's reset on Nov 12, 12:00 (the proposal on E8B48BFD, by timer); audit prompt changes then finish six unscored cases only. (2) Before a paid eval, the lead checks in status that the Fable limit has headroom for its full run and that the Mac is on AC or has enough battery; otherwise it waits. (3) What the lead tells the user about a cause carries its evidence, or says it's a guess: on 2026-11-09 three such statements needed correcting.
+
+Two paid evals were lost in part on 2026-11-09: about $12 when a session ended mid-run on battery, and six of twelve cases when the Fable limit ran out, with about $29 of that still usable. The lead also told the user the second merge flattening came from batching, that the size cap could run early, and that the user's app caused a merge failure, each without checking; the records said otherwise or couldn't confirm it.
+
+## 2026-11-09 21:46:02 Audits run on Opus until the Fable limit resets on Nov 12, 12:00 (the user's late answer to E8B48BFD, and they lowered the review floor in Settings to allow it). This replaces the wait for those audits. After the reset, the lead clears verifier_model so audits run on Fable again, and tells the user they can restore the floor. The audit prompt eval still waits for Fable, so it stays comparable with the baseline.
+
+The user preferred same-model audits to waiting. Two infrastructure audits can go ahead now, and the eval must keep the baseline's model to mean anything.
 

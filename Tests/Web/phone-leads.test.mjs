@@ -104,6 +104,7 @@ const posts = [];
 let macState = null;
 let answerReply = { status: 200, body: { ok: true, saw: 2 } };
 let hold = null;   // an answer the Mac hasn't answered yet: resolved by the test
+let dropHold = null;   // the same answer's connection dropping instead
 
 async function fakeFetch(path, options = {}) {
   const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
@@ -111,7 +112,7 @@ async function fakeFetch(path, options = {}) {
   if (path.startsWith('/api/lead?')) return reply(200, leadPage);
   if (path === '/api/lead/answer') {
     posts.push(JSON.parse(options.body));
-    await new Promise(resolve => { hold = resolve; });
+    await new Promise((resolve, reject) => { hold = resolve; dropHold = reject; });
     return reply(answerReply.status, answerReply.body);
   }
   return reply(404, { error: 'not found' });
@@ -251,6 +252,61 @@ hold();
 await flush();
 assert.equal(one(all($('sessions'), 'qCard')[1], 'qNote').textContent, answerReply.body.error);
 assert.ok(one(all($('sessions'), 'qCard')[1], 'qNote').classList.contains('error'));
+
+// 4a. It was answered on the Mac meanwhile, in other words: refused, and the next state takes its card away. The phone
+// still says this answer didn't go, for a minute; a withdrawn one's dim line says so too.
+const closedCard = all($('sessions'), 'qCard')[1];
+one(closedCard, 'qInput').value = 'Ship AVIF';
+for (const handler of one(closedCard, 'qAnswer').listeners.submit) handler({ preventDefault() {} });
+await flush();
+answerReply = { status: 409, body: { error: "That question isn't open any more, so your answer wasn't sent. Here it is now.", question: { id: 'q-timer' } } };
+hold();
+await flush();
+const goneState = stateWith();
+goneState.leads[0] = { ...lead, questions: questions.slice(0, 1), open: 1 };
+list(goneState);
+const refused = all($('sessions'), 'qClosed').find(line => line.classList.contains('refused'));
+assert.ok(refused, 'a line stays once the card has gone');
+assert.equal(refused.children[0].textContent, answerReply.body.error);
+assert.ok(refused.children[0].classList.contains('error'));
+assert.ok(!all($('sessions'), 'qClosed').some(line => line.classList.contains('answered') && line.textContent.includes('Ship AVIF')),
+          'never said as answered');
+const withdrawnState = stateWith();
+withdrawnState.leads[0] = { ...lead, questions: [questions[0], { ...questions[1], state: 'withdrawn', withdrawReason: 'moot' }], open: 1 };
+list(withdrawnState);
+assert.equal(one(all($('sessions'), 'qClosed').find(line => line.classList.contains('withdrawn')), 'qNote').textContent, answerReply.body.error);
+list(stateWith());
+run(`answeredHere.delete('q-timer'); answerNotes.delete('q-timer');`);
+answerReply = { status: 200, body: { ok: true, saw: 2 } };
+
+// 4b. The connection drops while the answer is on its way: the Mac may have it, so the card can't say the Mac is
+// unreachable as if it hadn't gone.
+const droppedCard = all($('sessions'), 'qCard')[1];
+one(droppedCard, 'qInput').value = 'Ship WebP';
+for (const handler of one(droppedCard, 'qAnswer').listeners.submit) handler({ preventDefault() {} });
+await flush();
+dropHold(new TypeError('Load failed'));
+await flush();
+assert.equal(one(all($('sessions'), 'qCard')[1], 'qNote').textContent,
+             "Couldn't tell whether the Mac got your answer. Check the lead before answering again.");
+// Sent again, the Mac finds it answered with those words: not a failure, and it stays said once the card has gone.
+const retriedCard = all($('sessions'), 'qCard')[1];
+one(retriedCard, 'qInput').value = 'Ship WebP';
+for (const handler of one(retriedCard, 'qAnswer').listeners.submit) handler({ preventDefault() {} });
+await flush();
+answerReply = { status: 409, body: { error: 'You answered this already: your answer went in.', wentIn: true } };
+hold();
+await flush();
+const retriedNote = one(all($('sessions'), 'qCard')[1], 'qNote');
+assert.equal(retriedNote.textContent, 'You answered this already: your answer went in.');
+assert.ok(!retriedNote.classList.contains('error'), 'it went in: not shown as a failure');
+const afterRetry = stateWith();
+afterRetry.leads[0] = { ...lead, questions: questions.slice(0, 1), open: 1 };
+list(afterRetry);
+assert.ok(all($('sessions'), 'qClosed').some(line => line.classList.contains('answered') && line.children[0].textContent === '✓ Answered: Ship WebP'),
+          'the card is gone, and a line says it went');
+list(stateWith());
+answerReply = { status: 200, body: { ok: true, saw: 2 } };
 
 // 5. Replies off on the Mac: the cards show, but can't be answered.
 list(stateWith(false));

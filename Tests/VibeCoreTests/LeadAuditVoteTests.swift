@@ -385,7 +385,7 @@ struct LeadAuditFindersTests: LeadTeamFixture {
         #expect(told.contains("[unconfirmed: 1 of 3 finders saw it: finder 3 (tests and edge cases)]"), "\(told)")
         let refused = call(lead, "merge", ["task": "add-b"])
         #expect(refused.isError && refused.text.contains("add-b:F1 b.txt:1"), "\(refused.text)")
-        #expect(!call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the contract allows bee"]).isError)
+        #expect(!call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the contract allows bee: b.txt:1"]).isError)
         #expect(!call(lead, "merge", ["task": "add-b"]).isError, "the unconfirmed one doesn't hold it back")
     }
 

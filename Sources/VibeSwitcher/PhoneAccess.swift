@@ -17,7 +17,9 @@ import VibeCore
 final class PhoneAccess: ObservableObject {
     static let port = PhonePorts.server
     static let httpsPort = PhonePorts.https
-    static let localTarget = "http://127.0.0.1:\(port)"
+    /// The loopback server's port; tests use one of their own (the real app may hold `port`).
+    var listenPort = PhoneAccess.port
+    private var localTarget: String { "http://127.0.0.1:\(listenPort)" }
 
     enum State: Equatable {
         case off, starting, on
@@ -32,6 +34,10 @@ final class PhoneAccess: ObservableObject {
     /// `devices`, for the server's queue: whether a request may send a recording is decided there, before its body.
     private let pairedNow = PairedDevices()
     @Published private(set) var pairing: PairingCode?
+    /// The devices file is there but can't be read: who's paired isn't known, which isn't the same as nobody. Nothing
+    /// under /api/ is served meanwhile (503, so no phone forgets its token) and the file is never overwritten.
+    @Published private(set) var devicesUnreadable = false
+    var devicesFilePath: String { devicesFile.path }
     @Published private(set) var recentActivity: [String] = []
     @Published var enabled: Bool {
         didSet {
@@ -65,7 +71,9 @@ final class PhoneAccess: ObservableObject {
     /// Announces pairings and remote input on the Mac (title, body).
     var onEvent: ((String, String) -> Void)?
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+    /// Where the paired phones are kept (`devicesURL`, a test's own otherwise).
+    private let devicesFile: URL
     private let store: SessionStore
     /// Screens, scrollback and replies of sessions in the window go through the session host.
     weak var hostClient: HostClient?
@@ -127,6 +135,15 @@ final class PhoneAccess: ObservableObject {
     private static let answerWait: TimeInterval = 2.5
     static let menuChanged = "That question changed or is gone, so nothing was typed. Here it is now."
     static let menuMoved = "That question changed while choosing, so Enter wasn't pressed. Check the screen."
+    static let menuOpen = "Not sent: a question is open in that session, and this would go into it as keys. Use its options, or close it with Esc."
+    /// The refusal for input that would land on `session`'s menu, naming a way out it has: the phone draws no options for
+    /// a paused session or a lead's team member.
+    static func menuOpen(in session: Session) -> String {
+        let start = "Not sent: a question is open in that session, and this would go into it as keys. "
+        if session.isTeamMember { return start + "Its lead answers it, or close it with Esc." }
+        if session.pausedUntil != nil { return start + "Tap Resume to see its options, or close it with Esc." }
+        return menuOpen
+    }
     /// Brief me from the phone: writes one briefing with its audio (`PhoneBriefer`) and calls back on the main thread;
     /// nil, the route answers 503.
     var brief: ((@escaping (PhoneBriefing) -> Void) -> Void)?
@@ -164,14 +181,18 @@ final class PhoneAccess: ObservableObject {
     /// What the phone may post: what MediaRecorder makes in Safari and Chrome, and what OpenAI reads.
     static let dictationTypes: Set<String> = ["audio/webm", "audio/mp4", "audio/ogg", "audio/mpeg", "audio/wav", "audio/x-m4a", "audio/aac"]
 
-    init(store: SessionStore) {
+    init(store: SessionStore, defaults: UserDefaults = .standard, devicesFile: URL? = nil) {
         self.store = store
+        self.defaults = defaults
+        self.devicesFile = devicesFile ?? Self.devicesURL
         defaults.register(defaults: ["phonePushOnlyWhenAway": true])
         enabled = defaults.bool(forKey: "phoneAccessEnabled")
         inputAllowed = defaults.bool(forKey: "phoneInputAllowed")
         devPagesAllowed = defaults.bool(forKey: "phoneDevPagesAllowed")
         pushOnlyWhenAway = defaults.bool(forKey: "phonePushOnlyWhenAway")
-        devices = Self.loadDevices()
+        let loaded = Self.loadDevices(self.devicesFile)
+        devices = loaded ?? []
+        devicesUnreadable = loaded == nil
         pairedNow.value = devices   // an initializer's assignment runs no didSet
         recentActivity = Self.tailOfAuditLog()
         // Network and Tailscale come back a few seconds after wake.
@@ -248,7 +269,7 @@ final class PhoneAccess: ObservableObject {
         }
         server.paired = { [pairedNow] in pairedNow.value }
         self.server = server
-        server.start(port: Self.port, onReady: { [weak self] in
+        server.start(port: listenPort, onReady: { [weak self] in
             guard let self, self.isCurrent(run) else { return server.stop() }
             self.startServing(run: run, host: host)
         }, onFailure: { [weak self] message in
@@ -264,13 +285,14 @@ final class PhoneAccess: ObservableObject {
 
     /// "On" only once both halves exist: the listener is ready and Tailscale points at it.
     private func startServing(run: Int, host: String) {
+        let localTarget = self.localTarget
         control.async {
-            let failure = TailscaleCLI.startServing(host: host, localTarget: Self.localTarget)
+            let failure = TailscaleCLI.startServing(host: host, localTarget: localTarget)
             DispatchQueue.main.async {
                 guard self.isCurrent(run) else {
                     // Turned off while this was in flight: take the mapping back down.
                     if failure == nil, !self.enabled {
-                        self.control.async { TailscaleCLI.stopServing(host: host, localTarget: Self.localTarget) }
+                        self.control.async { TailscaleCLI.stopServing(host: host, localTarget: localTarget) }
                     }
                     return
                 }
@@ -325,7 +347,8 @@ final class PhoneAccess: ObservableObject {
         state = .off
         url = nil
         if let host = tailscale?.dnsName {
-            control.async { TailscaleCLI.stopServing(host: host, localTarget: Self.localTarget) }
+            let localTarget = self.localTarget
+            control.async { TailscaleCLI.stopServing(host: host, localTarget: localTarget) }
         }
         audit("phone access off")
     }
@@ -344,7 +367,7 @@ final class PhoneAccess: ObservableObject {
         }
         if enabled, let dnsName = tailscale?.dnsName {
             host = dnsName
-            mappings[Self.httpsPort] = Self.localTarget
+            mappings[Self.httpsPort] = localTarget
         }
         guard let host, !mappings.isEmpty else { return }
         TailscaleCLI.stopServing(host: host, mappings: mappings, timeout: 4)
@@ -372,7 +395,8 @@ final class PhoneAccess: ObservableObject {
         let previewsWanted = devPagesAllowed
         control.async {
             let status = TailscaleCLI.status()
-            let served = (try? status.get()).flatMap { TailscaleCLI.servedTarget(host: $0.dnsName) }
+            // nil: couldn't be read this time, which says nothing about the mapping.
+            let served = (try? status.get()).flatMap { TailscaleCLI.servedTargets(host: $0.dnsName) }
             if previewsWanted { self.previews.repairMappings() }
             DispatchQueue.main.async {
                 self.healthCheckRunning = false
@@ -390,7 +414,7 @@ final class PhoneAccess: ObservableObject {
                     self.previews.stop()
                     self.syncPreviews()
                 }
-                if served != Self.localTarget {
+                if let served, served[Self.httpsPort] != self.localTarget {
                     self.audit("tailscale serve mapping was missing; restored")
                     self.startServing(run: run, host: current.dnsName)
                 }
@@ -434,7 +458,14 @@ final class PhoneAccess: ObservableObject {
         // Only requests relayed by `tailscale serve` for this Mac's own account.
         guard request.header("tailscale-user-login") == owner else { return respond(.error(403, "not your tailnet account")) }
         if request.method == "GET", let asset = WebAssets.response(for: request.path) { return respond(asset) }
-        if request.method == "POST", request.path == "/api/pair" { return respond(pair(request, owner: owner)) }
+        if request.path.hasPrefix("/api/"), !devicesReadable() { return respond(.error(503, Self.devicesUnreadableMessage)) }
+        if request.method == "POST", request.path == "/api/pair" {
+            // The one POST with no token: only the page itself, so another origin can't use up the code's tries.
+            guard RemoteGate.originAllowed(request.header("origin"), host: host, port: Self.httpsPort) else {
+                return respond(.error(403, "Pairing only works from VibeSwitcher's own page."))
+            }
+            return respond(pair(request, owner: owner))
+        }
         guard request.path.hasPrefix("/api/") else { return respond(.error(404, "not found")) }
         // A valid token always gets in; only the source of failed attempts is slowed down (so nothing can
         // lock the paired phones out by sending bad tokens).
@@ -495,6 +526,8 @@ final class PhoneAccess: ObservableObject {
 
     static let noLead = "That lead isn't running any more. Go back to the list."
     static let questionClosed = "That question isn't open any more, so your answer wasn't sent. Here it is now."
+    /// The same words again on a question they already answered: a retry after a dropped connection, say.
+    static let answerWentIn = "You answered this already: your answer went in."
 
     /// Your answer to a lead's question from the phone (`{"lead", "question", "version", "text"}`): through the Mac's
     /// own path (`answerLead`, `LeadController.answer`), as yours, from the phone, tied to the version the phone showed.
@@ -521,7 +554,12 @@ final class PhoneAccess: ObservableObject {
         }
         let project = (lead.root as NSString).lastPathComponent
         let closed: (LeadQuestion) -> HTTPResponse = { now in
-            .json(["error": Self.questionClosed, "question": PhoneLeads.question(now)], status: 409)
+            var refusal: [String: Any] = ["error": Self.questionClosed, "question": PhoneLeads.question(now)]
+            if now.answer == text {
+                refusal["error"] = Self.answerWentIn
+                refusal["wentIn"] = true
+            }
+            return .json(refusal, status: 409)
         }
         // As last read: the board's own check, under its lock, is the one that counts (see `LeadBoard.answer`).
         guard question.isOpen else { return respond(closed(question)) }
@@ -545,6 +583,8 @@ final class PhoneAccess: ObservableObject {
     /// What a phone hears for a token the Mac doesn't know (it was removed, or never paired): it forgets it, and the
     /// pairing screen says how to pair again.
     static let unpaired = "This phone isn't paired with the Mac any more."
+    static let devicesUnreadableMessage = "The Mac couldn't read its list of paired phones. This phone stays paired; look at VibeSwitcher › Settings… › Phone on the Mac."
+
     /// Why nothing is served while Phone Access isn't on: the phone keeps its token either way.
     private var notServing: String {
         state == .off ? "Phone Access is off on the Mac." : "Phone Access is restarting on the Mac. Try again in a moment."
@@ -580,6 +620,30 @@ final class PhoneAccess: ObservableObject {
         })
     }
 
+    /// The sandbox's `phone-show`: Settings › Phone as in one setup state, nothing started. False: no such state.
+    func showInSandbox(_ name: String) -> Bool {
+        guard Sandbox.isOn else { return false }
+        let failure: TailscaleCLI.Failure?
+        switch name {
+        case "off", "expired", "unreadable": failure = nil
+        case "notinstalled": failure = .notInstalled
+        case "notrunning": failure = .notRunning
+        case "https": failure = .httpsDisabled
+        case "portinuse": failure = .portInUse(port: Self.httpsPort, target: "http://127.0.0.1:3000")
+        default: return false
+        }
+        pairing = nil
+        url = nil
+        devicesUnreadable = name == "unreadable"
+        state = failure.map { .failed($0.description) } ?? .off
+        if name == "expired" {
+            state = .on
+            url = URL(string: "https://sandbox-mac.tail0000.ts.net:\(Self.httpsPort)/")
+            pairing = PairingCode(code: "ABCDEFGH", expires: Date().addingTimeInterval(-1))
+        }
+        return true
+    }
+
     #if DEBUG
     /// Tests: requests answered as once `tailscale serve` is up for `status`, with nothing listening or started.
     func serveForTests(_ status: TailscaleCLI.Status) {
@@ -591,6 +655,17 @@ final class PhoneAccess: ObservableObject {
     func restartForTests() { state = .starting }
 
     func handleForTests(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) { route(request, respond: respond) }
+
+    /// Tests: a pairing code of their own (one that has already expired, say).
+    func setPairingForTests(_ code: PairingCode?) { pairing = code }
+
+    func setURLForTests(_ value: URL?) { url = value }
+
+    /// Tests: `done` runs once what's already queued for the CLI has run and answered on the main thread.
+    func afterControlForTests(_ done: @escaping () -> Void) { control.async { DispatchQueue.main.async(execute: done) } }
+
+    /// Tests: whether a `checkHealth` is still under way (it answers on the main thread once the CLI has).
+    var healthCheckRunningForTests: Bool { healthCheckRunning }
     #endif
 
     private func body(_ request: HTTPRequest) -> [String: Any]? {
@@ -600,11 +675,13 @@ final class PhoneAccess: ObservableObject {
     private func pair(_ request: HTTPRequest, owner: String) -> HTTPResponse {
         guard var code = pairing else { return .error(403, "No pairing code is active. Start pairing on the Mac.") }
         let candidate = body(request)?["code"] as? String ?? ""
+        let expired = Date() >= code.expires
         let matched = code.check(candidate)
         pairing = matched || !code.isUsable ? nil : code
         guard matched else {
             audit("pairing attempt failed")
-            return .error(403, code.isUsable ? "Wrong or expired code." : "Too many wrong codes. Start pairing again on the Mac.")
+            if expired { return .error(403, "This code has expired. Start pairing again on the Mac.") }
+            return .error(403, code.isUsable ? "Wrong code. Check it and try again." : "Too many wrong codes. Start pairing again on the Mac.")
         }
         let rawName = (body(request)?["name"] as? String) ?? "Phone"
         let name = String(rawName.filter { !$0.isNewline }.prefix(40)).trimmingCharacters(in: .whitespaces)
@@ -1014,12 +1091,17 @@ final class PhoneAccess: ObservableObject {
         }
         guard text != nil || key != nil else { return respond(.error(400, "nothing to send")) }
         // An arrow pressed while the phone showed a menu: sent only while that menu is still the one on the screen.
-        var menuFingerprint: String?
+        // Text or a bare Enter, meant for no menu: not while one is up (its Enter would pick what's highlighted, a digit
+        // that option), except text with the cursor on a question's free-text row. Other keys go as they are: Esc and ⌃C
+        // are how you get out of one.
+        var menuCheck = MenuCheck.none
         if let fingerprint = object["fingerprint"] as? String {
             guard (1...64).contains(fingerprint.count), text == nil, key == .up || key == .down else {
                 return respond(.error(400, "bad fingerprint"))
             }
-            menuFingerprint = fingerprint
+            menuCheck = .stillUp(fingerprint)
+        } else if text != nil || key == .enter {
+            menuCheck = .noneUp(text: text != nil)
         }
         let summary = text.map { "“\(Redaction.secrets(in: String($0.prefix(60))))”" + (submit ? " ⏎" : "") } ?? key!.rawValue
         let sid = session.identity
@@ -1052,10 +1134,32 @@ final class PhoneAccess: ObservableObject {
         }
         if let hostID = session.hostID {
             windowInput(hostID: hostID, session: session, device: device, text: text, submit: submit, key: key,
-                        fingerprint: menuFingerprint, summary: summary, respond: finish)
+                        menuCheck: menuCheck, summary: summary, respond: finish)
         } else {
             terminalInput(session: session, device: device, text: text, submit: submit, key: key,
-                          fingerprint: menuFingerprint, summary: summary, respond: finish)
+                          menuCheck: menuCheck, summary: summary, respond: finish)
+        }
+    }
+
+    /// What the screen must show for an input to go in, looked at when its turn comes.
+    private enum MenuCheck: Equatable {
+        case none
+        /// An arrow for the menu with this fingerprint: that menu is still up.
+        case stillUp(String)
+        /// Text or a bare Enter: no menu is up for it to answer (`text`: one whose free-text row has the cursor may take it).
+        case noneUp(text: Bool)
+    }
+
+    /// The refusal for an input whose `check` the screen (raw) doesn't pass; nil when it may go. On the main thread.
+    private func menuRefusal(_ check: MenuCheck, screen raw: String?, sid: String) -> HTTPResponse? {
+        switch check {
+        case .none: return nil
+        case .stillUp(let fingerprint): return menuStillUp(fingerprint, screen: raw, sid: sid)
+        case .noneUp(let isText):
+            guard let session = store.sessions.first(where: { $0.identity == sid }) else { return .error(409, Self.sessionChanged) }
+            guard let raw else { return .error(503, "Couldn't read that tab right now.") }
+            guard let shown = PhoneMenu.read(screen: raw, needsInput: session.status == .needsInput) else { return nil }
+            return isText && PhoneMenu.takesText(shown) ? nil : .error(409, Self.menuOpen(in: session))
         }
     }
 
@@ -1076,7 +1180,7 @@ final class PhoneAccess: ObservableObject {
     /// Straight into the session's terminal: no focus changes, no Accessibility, nothing typed elsewhere. The same rules
     /// as the Terminal path (the lock included), before each write; answered ok only once every write went in.
     private func windowInput(hostID: UUID, session: Session, device: PairedDevice, text: String?, submit: Bool,
-                             key: RemoteInput.Key?, fingerprint: String?, summary: String,
+                             key: RemoteInput.Key?, menuCheck: MenuCheck, summary: String,
                              respond: @escaping (HTTPResponse, _ some: Bool) -> Void) {
         let tty = session.tty, sid = session.identity
         let check = { [weak self] () -> RemoteInputGate.Verdict in
@@ -1102,11 +1206,11 @@ final class PhoneAccess: ObservableObject {
             clean = sanitized
         }
         let writes = HostInput.writes(text: clean, submit: submit, key: key?.rawValue)
-        // Asked before each write, in turn with the session's other input. An arrow for a menu, before its one write:
-        // that menu still up, read when its turn comes.
+        // Asked before each write, in turn with the session's other input. Before the first, what the screen must show
+        // (`MenuCheck`), read when its turn comes.
         var allowed = -1
         var stopped: (verdict: RemoteInputGate.Verdict, sent: Int)?
-        var menuRefusal: HTTPResponse?
+        var refusedByMenu: HTTPResponse?
         let gate = { [weak self] (index: Int, go: @escaping (Bool) -> Void) in
             let pass = {
                 let verdict = check()
@@ -1117,12 +1221,12 @@ final class PhoneAccess: ObservableObject {
                 allowed = index
                 go(true)
             }
-            guard index == 0, let fingerprint, let self else { return pass() }
+            guard index == 0, menuCheck != .none, let self else { return pass() }
             self.readScreen(session) { raw in
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return go(false) }
-                    if let refused = self.menuStillUp(fingerprint, screen: raw, sid: sid) {
-                        menuRefusal = refused
+                    if let refused = self.menuRefusal(menuCheck, screen: raw, sid: sid) {
+                        refusedByMenu = refused
                         return go(false)
                     }
                     pass()
@@ -1138,7 +1242,7 @@ final class PhoneAccess: ObservableObject {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.store.refresh() }
                 return respond(.json(["ok": true]), true)
             }
-            if let menuRefusal { return respond(menuRefusal, false) }
+            if let refusedByMenu { return respond(refusedByMenu, false) }
             // Stopped by the gate before write `sent`, or write `allowed` didn't go in: the ones before it did.
             let sent = stopped?.sent ?? max(allowed, 0)
             self.audit("input to \(session.displayName) from \(device.name) stopped after \(sent) of \(writes.count) writes: "
@@ -1150,7 +1254,7 @@ final class PhoneAccess: ObservableObject {
 
     /// Typed into the session's Terminal tab, one input at a time; answered once it was typed.
     private func terminalInput(session: Session, device: PairedDevice, text: String?, submit: Bool,
-                               key: RemoteInput.Key?, fingerprint: String?, summary: String,
+                               key: RemoteInput.Key?, menuCheck: MenuCheck, summary: String,
                                respond: @escaping (HTTPResponse, _ some: Bool) -> Void) {
         let tty = session.tty, sid = session.identity
         let type = typeInTerminal, readTab = readTerminalScreen
@@ -1164,10 +1268,10 @@ final class PhoneAccess: ObservableObject {
                         && self.store.sessions.first(where: { $0.tty == tty })?.identity == sid
                 }
             }
-            // An arrow for a menu: the screen read here, not on the main thread (a slow Terminal holds up this key only).
-            if let fingerprint {
+            // What the screen must show: read here, not on the main thread (a slow Terminal holds up this input only).
+            if menuCheck != .none {
                 let raw = readTab(tty)
-                if let refused = DispatchQueue.main.sync(execute: { self.menuStillUp(fingerprint, screen: raw, sid: sid) }) {
+                if let refused = DispatchQueue.main.sync(execute: { self.menuRefusal(menuCheck, screen: raw, sid: sid) }) {
                     return DispatchQueue.main.async { respond(refused, false) }
                 }
             }
@@ -1187,19 +1291,28 @@ final class PhoneAccess: ObservableObject {
 
     /// What a tap on a menu's option comes to, decided against the screen as it is now.
     private enum MenuTap {
-        case type([HostInput.Write], label: String)
+        case type([HostInput.Write], label: String, option: Int)
         case refuse(HTTPResponse)
     }
 
-    /// Answers the menu the phone drew (`choose`: the option's index, `fingerprint`: the menu's) with the keys a person
-    /// would press, arrows from where the cursor is now and Enter. The screen is read again first: a menu that changed
-    /// or went away is refused (409) and nothing is typed. The rules of any reply hold: replies on, this phone paired,
-    /// the same session and the Mac unlocked, checked before every key.
+    /// Answers the menu the phone drew (`choose`: the option's index, or "highlighted" for ⏎, whatever the cursor is on
+    /// when its turn comes; `fingerprint`: the menu's) with the keys a person would press, arrows from where the cursor
+    /// is now and Enter. ⏎ can't carry an index: the phone's copy of the cursor lags seconds behind an arrow just
+    /// pressed, and that index would move the cursor back and pick the option it just left. The screen is read again
+    /// first: a menu that changed or went away is refused (409) and nothing is typed. The rules of any reply hold:
+    /// replies on, this phone paired, the same session and the Mac unlocked, checked before every key.
     private func choose(_ object: [String: Any], session: Session, device: PairedDevice,
                         respond: @escaping (HTTPResponse) -> Void) {
-        guard let number = object["choose"] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
-              let index = object["choose"] as? Int,
-              let fingerprint = object["fingerprint"] as? String, (1...64).contains(fingerprint.count) else {
+        // nil: the option highlighted on the screen when its turn comes.
+        let requested: Int?
+        if object["choose"] as? String == "highlighted" {
+            requested = nil
+        } else {
+            guard let number = object["choose"] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                  let index = object["choose"] as? Int else { return respond(.error(400, "missing option")) }
+            requested = index
+        }
+        guard let fingerprint = object["fingerprint"] as? String, (1...64).contains(fingerprint.count) else {
             return respond(.error(400, "missing option"))
         }
         let sid = session.identity, tty = session.tty
@@ -1217,13 +1330,15 @@ final class PhoneAccess: ObservableObject {
             if busy() { return .refuse(stillAnswering) }
             guard let raw else { return .refuse(.error(503, "Couldn't read that tab right now.")) }
             let needsInput = self.store.sessions.first { $0.identity == sid }?.status == .needsInput
-            self.menus[sid] = (self.menuClock(), PhoneMenu.read(screen: raw, needsInput: needsInput))
+            let shown = PhoneMenu.read(screen: raw, needsInput: needsInput)
+            self.menus[sid] = (self.menuClock(), shown)
+            let index = requested ?? shown?.menu.selected ?? 0
             switch PhoneMenu.answer(choose: index, fingerprint: fingerprint, screen: raw, needsInput: needsInput, sid: sid) {
             case .stale: return .refuse(.error(409, Self.menuChanged))
             case .invalid: return .refuse(.error(400, "No such option."))
             case .keys(let writes, let label):
                 self.answered[sid] = (fingerprint, Date().addingTimeInterval(ScreenMenu.duration(writes) + Self.answerWait))
-                return .type(writes, label: label)
+                return .type(writes, label: label, option: index)
             }
         }
         let summary = { (label: String) in "chose “\(label.prefix(60))”" }
@@ -1246,10 +1361,10 @@ final class PhoneAccess: ObservableObject {
             hostClient.screen(hostID) { raw in
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    let writes: [HostInput.Write], label: String
+                    let writes: [HostInput.Write], label: String, index: Int
                     switch decide(raw) {
                     case .refuse(let refusal): return respond(refusal)
-                    case .type(let keys, let chosen): (writes, label) = (keys, chosen)
+                    case .type(let keys, let chosen, let option): (writes, label, index) = (keys, chosen, option)
                     }
                     let stop = { [weak self] (why: String, sent: Int) in
                         self?.answered[sid] = nil
@@ -1296,7 +1411,7 @@ final class PhoneAccess: ObservableObject {
                         self.audit("\(device.name) \(summary(label)) in \(session.displayName)")
                         self.onEvent?("\(device.name) answered \(session.displayName)", summary(label))
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.store.refresh() }
-                        respond(.json(["ok": true]))
+                        respond(.json(["ok": true, "chose": label]))
                     }
                 }
             }
@@ -1316,10 +1431,10 @@ final class PhoneAccess: ObservableObject {
             // The main thread is asked only for the store's state, with the screen already read.
             let raw = readTab(tty)
             let tap = DispatchQueue.main.sync { decide(raw) }
-            let writes: [HostInput.Write], label: String
+            let writes: [HostInput.Write], label: String, index: Int
             switch tap {
             case .refuse(let refusal): return DispatchQueue.main.async { respond(refusal) }
-            case .type(let keys, let chosen): (writes, label) = (keys, chosen)
+            case .type(let keys, let chosen, let option): (writes, label, index) = (keys, chosen, option)
             }
             var failure: RemoteInput.Failure?
             var moved = false
@@ -1348,7 +1463,7 @@ final class PhoneAccess: ObservableObject {
                 self.audit("\(device.name) \(summary(label)) in \(session.displayName)")
                 self.onEvent?("\(device.name) answered \(session.displayName)", summary(label))
                 self.store.refresh(forceTerminal: true)
-                respond(.json(["ok": true]))
+                respond(.json(["ok": true, "chose": label]))
             }
         }
     }
@@ -1559,18 +1674,37 @@ final class PhoneAccess: ObservableObject {
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
-    private static func loadDevices() -> [PairedDevice] {
-        guard let data = try? Data(contentsOf: devicesURL) else { return [] }
+    /// The phones in `url`: none if there's no file; nil if there is one that can't be read or decoded.
+    private static func loadDevices(_ url: URL) -> [PairedDevice]? {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            // A link to nowhere says "no such file" too, and doesn't mean no phones.
+            return (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil ? [] : nil
+        } catch {
+            return nil
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([PairedDevice].self, from: data)) ?? []
+        return try? decoder.decode([PairedDevice].self, from: data)
+    }
+
+    /// Whether the phones are known; a file that couldn't be read is read again, so restoring it needs no restart.
+    private func devicesReadable() -> Bool {
+        guard devicesUnreadable else { return true }
+        guard let loaded = Self.loadDevices(devicesFile) else { return false }
+        devices = loaded
+        devicesUnreadable = false
+        return true
     }
 
     private func saveDevices() {
+        guard !devicesUnreadable else { return }   // never over the phones it couldn't read
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(devices) { Self.writePrivate(data, to: Self.devicesURL) }
+        if let data = try? encoder.encode(devices) { Self.writePrivate(data, to: devicesFile) }
     }
 
     private static func loadOrCreateVapidKey() -> P256.Signing.PrivateKey {

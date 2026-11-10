@@ -105,9 +105,10 @@ for (const id of ['askCard', 'askText', 'askOptions', 'quickReplies', 'quickEdit
 
 const requests = [];   // { path, body, answer(status, body) }
 async function fakeFetch(path, options = {}) {
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     requests.push({
       path, body: options.body ? JSON.parse(options.body) : null,
+      drop() { reject(new TypeError('Load failed')); },
       answer(status, body) {
         resolve({ ok: status >= 200 && status < 300, status,
                   json: async () => { if (body === undefined) throw new SyntaxError('not JSON'); return body; } });
@@ -223,6 +224,51 @@ answer('/api/state', 503, { error: 'Phone Access is restarting on the Mac. Try a
 await flush();
 assert.equal(storage.get('vs.token'), 'test-token');
 assert.equal(run('token'), 'test-token');
+
+// 3b. The connection drops with a key press on its way: the Mac may have typed it, so the phone can't say it couldn't
+// reach the Mac (⌃C pressed again ends the session). Nothing else going on the wire is affected.
+const UNKNOWN = "The Mac didn't confirm in time. Check the screen before sending again.";
+const drop = path => { const r = pending(path)[0]; assert.ok(r, `a request to ${path} is waiting`); r.answered = true; r.drop(); };
+run("send({ key: 'interrupt' }, null)");
+await flush();
+drop('/api/input');
+await flush();
+assert.equal($('inputStatus').textContent, UNKNOWN, 'a dropped connection is an unknown outcome, not "can\'t reach"');
+assert.ok($('inputStatus').classList.contains('error'));
+// A reply likewise, and sent again it keeps its id.
+reply.value = 'one more';
+submit();
+await flush();
+const dropped = pending('/api/input')[0].body.request;
+drop('/api/input');
+await flush();
+assert.equal($('inputStatus').textContent, UNKNOWN);
+assert.equal(reply.value, 'one more', 'the text stays in the box');
+submit();
+await flush();
+assert.equal(pending('/api/input')[0].body.request, dropped);
+answer('/api/input', 200, { ok: true, duplicate: true });
+await flush();
+assert.equal($('inputStatus').textContent, 'Sent ✓');
+reply.value = '';
+
+// 3b. Pausing works with replies off, when the composer is hidden: a pause that fails still says so where it can be seen.
+run(`state = ${JSON.stringify({ ...macState, inputAllowed: false })}; renderSessionMeta();`);
+assert.equal($('composer').hidden, true);
+assert.equal($('pauseStatus').hidden, true);
+run(`setPause('hour', $('pauseSelect'))`);
+await flush();
+assert.deepEqual(pending('/api/pause')[0].body, { tty: 'ttys001', sid: 's1', duration: 'hour' });
+answer('/api/pause', 409, { error: 'That session ended or another one took its tab.' });
+await flush();
+assert.equal($('pauseStatus').hidden, false, 'said outside the hidden composer');
+assert.equal($('pauseStatus').textContent, 'That session ended or another one took its tab.');
+run(`setPause('hour', $('pauseSelect'))`);
+assert.equal($('pauseStatus').hidden, true, 'cleared when it tries again');
+await flush();
+answer('/api/pause', 200, { ok: true });
+await flush();
+run(`state = ${JSON.stringify(macState)}; renderSessionMeta();`);
 
 // 4. Unpaired on the Mac, opened from a notification: the pairing screen with the reason, never an empty list over it.
 location.hash = '#s=ttys001';

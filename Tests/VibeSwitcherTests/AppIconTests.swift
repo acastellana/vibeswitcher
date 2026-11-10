@@ -31,6 +31,16 @@ struct AppIconTests {
         #expect([.none, .noneSkipLast, .noneSkipFirst].contains(image.alphaInfo))
     }
 
+    /// iOS takes its home-screen icon from the page's apple-touch-icon link, not the manifest: the page links it, and the
+    /// server serves it as the 512 logo, a PNG.
+    @Test func thePageLinksAnAppleTouchIconTheServerServes() throws {
+        let page = try String(contentsOf: Self.repo.appendingPathComponent("Web/index.html"), encoding: .utf8)
+        #expect(page.contains(#"<link rel="apple-touch-icon" href="/apple-touch-icon.png">"#))
+        let (response, image, _) = try served("/apple-touch-icon.png")
+        #expect(response.status == 200 && response.contentType == "image/png")
+        #expect(image.width == 512)
+    }
+
     /// A maskable icon keeps what matters in the central circle, 80 % of the side across: a phone may cut away all the
     /// rest. Outside it, each row is the background's gradient alone (one colour across the row), with no part of the
     /// cards or their shadows; inside it, the logo covers a good share of the circle.

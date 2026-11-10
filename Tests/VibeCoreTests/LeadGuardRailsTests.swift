@@ -245,8 +245,8 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         try commit("y.txt", "y\n", in: root)
         let second = head("HEAD", root)
         Git.run(["checkout", "-q", "--detach"], in: root)
-        #expect(Worktrees.fastForward(root: root, base: "main", to: second, from: start) == .merged)
-        if case .refused = Worktrees.fastForward(root: root, base: "main", to: first, from: start) {} else { Issue.record("moved main back") }
+        #expect(Worktrees.fastForward(root: root, base: "main", to: second, from: start, landing: .unchecked("test")) == .merged)
+        if case .refused = Worktrees.fastForward(root: root, base: "main", to: first, from: start, landing: .unchecked("test")) {} else { Issue.record("moved main back") }
         #expect(head("main", root) == second)
     }
 

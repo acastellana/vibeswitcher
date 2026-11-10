@@ -144,3 +144,10 @@ Evidence: .vibeswitcher/flakes/2026-11-08-an-app-wide-appearance-2aa1e894-hung.l
 Task: an-app-wide-appearance
 Check: task turn-this-incident-into-16 turns it into a check that runs before merge.
 
+## 2026-11-09 18:26:36 A merge's failure sends its worker a log path neither the worker nor the lead can read, with a summary naming no failing test, so the failure can't be diagnosed
+
+Evidence: 2026-11-09, twice. audit-exceptions-are-a (16:33) and the-sandbox-s-phone (18:25) were both told "Tests fail rebased onto main: web tests: 2 of 2 passed" and pointed at ~/.vibeswitcher/lead/scratch/<id>/<task>/merge-test.log. That folder is denied to the worker's session (Read and Bash) and to the lead's. the-sandbox-s-phone's message said 619 tests printed their start and never finished, without saying which were running. The first case was never explained; the worker's own full suite then passed (3765 tests). status's flake list shows 11 failures in 7 days as "the test command, naming no test".
+
+Task: the-sandbox-s-phone
+Check: task turn-this-incident-into-17 turns it into a check that runs before merge.
+

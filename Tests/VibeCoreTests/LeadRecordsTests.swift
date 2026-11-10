@@ -440,19 +440,19 @@ struct LeadRecordsTests: LeadTeamFixture {
         Git.run(["add", "a.txt"], in: root)
         let parent = head("main", root)
         // Not on top of a head it wasn't given.
-        #expect(Worktrees.commitFiles(root: root, branch: "main", paths: Self.logs, message: "m", from: "0000") != .unchanged)
+        #expect(Worktrees.commitFiles(root: root, branch: "main", paths: Self.logs, message: "m", from: "0000", landing: .unchecked("test")) != .unchanged)
         #expect(head("main", root) == parent)
-        guard case .committed(let commit, let from) = Worktrees.commitFiles(root: root, branch: "main", paths: Self.logs, message: "m") else {
+        guard case .committed(let commit, let from) = Worktrees.commitFiles(root: root, branch: "main", paths: Self.logs, message: "m", landing: .unchecked("test")) else {
             Issue.record("not committed"); return
         }
         #expect(from == parent)
         #expect(files(of: commit, root) == ["docs/lead/decisions.md"])
         #expect(Git.run(["diff", "--cached", "--name-only"], in: root).output == "a.txt")
-        #expect(Worktrees.commitFiles(root: root, branch: "main", paths: Self.logs, message: "m") == .unchanged)
+        #expect(Worktrees.commitFiles(root: root, branch: "main", paths: Self.logs, message: "m", landing: .unchecked("test")) == .unchanged)
         // A branch not checked out: only the ref moves.
         Git.run(["branch", "other"], in: root)
         try "# Decisions\n\nmore\n".write(toFile: root + "/docs/lead/decisions.md", atomically: true, encoding: .utf8)
-        guard case .committed(let onOther, _) = Worktrees.commitFiles(root: root, branch: "other", paths: Self.logs, message: "m") else {
+        guard case .committed(let onOther, _) = Worktrees.commitFiles(root: root, branch: "other", paths: Self.logs, message: "m", landing: .unchecked("test")) else {
             Issue.record("not committed"); return
         }
         #expect(head("other", root) == onOther)

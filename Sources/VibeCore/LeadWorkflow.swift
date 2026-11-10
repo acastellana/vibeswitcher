@@ -806,6 +806,14 @@ public enum LeadPrompts {
                 + "did: fixed (in which commit) or why not (\"nothing blocking\" when it found nothing)."
         }
 
+        /// A bug task starts from a red run on the symptom its contract quotes (misread symptoms cost three freeze or hang
+        /// misdiagnoses, and 25% of flaky fixes flaked again: docs/process/reviews/mattpocock-skills.md, idea 1). A bug
+        /// the sandbox can't reproduce ends up blocked: that's intended.
+        public static let bugTasks = "Bug tasks: before changing code, run one command that goes red on the symptom the "
+            + "contract quotes. A flake: record its failure rate over N runs under load (the Load tests rule above), and "
+            + "show that rate over N runs after the fix. With no such command, report blocked with what was tried. If no "
+            + "test can reach the real bug path, say so in your report instead of adding a shallow test."
+
         /// A fix's regression test shown to fail without the fix (2026-10-25: finished-work-lands' two tests for its F1
         /// fix never reached the race F1 described, so they'd have passed on the old code too). The fix comes out by a
         /// reverse patch in the worktree (warm build): a `git checkout <commit> -- <files>` is refused by the user's
@@ -863,6 +871,10 @@ public enum LeadPrompts {
             + "a full suite run by the worker: merge(task) runs test_command, and that run is the one full suite. A worker runs "
             + "the full suite itself only when its change touches shared test or build infrastructure (test scripts, the test "
             + "harness, build settings); its brief already says so."
+
+        /// What a bug task's contract holds, for the worker's `bugTasks` rule to start from.
+        public static let leadBugContracts = "For a bug task, quote the reported symptom in the contract: its worker runs "
+            + "one command that goes red on that symptom before changing code, and reports blocked when it can't."
 
         /// When the lead chooses an audit (add_task's review).
         public static let leadReview = "Give each task a review level (add_task or update_task, review): none, the default, "
@@ -960,7 +972,7 @@ public enum LeadPrompts {
         they wait for the user's say.
         2. Break the work into tasks on the board (add_task), each with a contract: a goal, acceptance checks that can \
         be run or seen, boundaries (which files or areas, what not to touch) and the context a fresh worker needs. \
-        \(Policy.leadContracts) Workers are refused these git commands, so no brief may need one: \(deniedGit(workflow)).
+        \(Policy.leadContracts) \(Policy.leadBugContracts) Workers are refused these git commands, so no brief may need one: \(deniedGit(workflow)).
         \(Policy.leadReview)
         3. Start workers (start_worker) only for tasks that don't depend on each other, at most \(workflow.maxWorkers) \
         workers at once. Each works alone in its own worktree on its own branch. Fewer, sharper tasks beat many vague ones.
@@ -996,7 +1008,9 @@ public enum LeadPrompts {
         Resolve each Important one: message the worker the open ids; it answers each with answer_findings, fixed (in \
         a commit) or disagree with a reason, and board(task) shows the answers; then audit again (a re-audit checks \
         only those findings' concerns and judges the answers: it closes a finding whose disagreement it accepts, \
-        and a closed finding isn't raised again); or dismiss_finding with a reason when it isn't a real problem; or \
+        and a closed finding isn't raised again); or dismiss_finding with a reason when it isn't a real problem (for \
+        an Important one the reason must cite a file and line, a decision's timestamp from decisions.md, or the \
+        question id of the user's answer; if the only evidence is your memory, record_decision first or ask_user); or \
         add_task(from_finding: <task>:<id>) to make it a task of its own (good for Pre-existing ones that matter). \
         \(Policy.nits) After \(LeadAuditLedger.roundCap) audits in a row that left Important findings open, the task's \
         status line says "reconsider the approach": don't send the worker back for a third round; re-roll it \
@@ -1188,6 +1202,7 @@ public enum LeadPrompts {
         report, not through rm). Then reply with a short report: what changed, how you checked it, the routine calls you made, anything left or doubtful. \
         \(Policy.workerCheck(task.reviewLevel))
         \(Policy.workerEvidence(base: workflow.base))
+        \(Policy.bugTasks)
         \(Policy.regressionTest(base: workflow.base))
         \(Policy.workerFindings)
         \(Policy.workerBudget(LeadBudget.minutes(task, default: workflow.taskBudgetMinutes)))

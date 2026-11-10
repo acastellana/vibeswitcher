@@ -167,7 +167,7 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         try commit("b.txt", "bee\n", in: root)
         let commit = head("work", root)
 
-        guard case .refused(let clean) = Worktrees.fastForward(root: root, base: "main", to: commit, from: from) else {
+        guard case .refused(let clean) = Worktrees.fastForward(root: root, base: "main", to: commit, from: from, landing: .unchecked("test")) else {
             Issue.record("merged under the worktree")
             return
         }
@@ -177,7 +177,7 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         #expect(clean.contains("`! cd /") && clean.contains("/.claude/worktrees/main && git switch --detach` in your chat"), "\(clean)")
 
         try "changed\n".write(toFile: worktree + "/a.txt", atomically: true, encoding: .utf8)
-        guard case .refused(let dirty) = Worktrees.fastForward(root: root, base: "main", to: commit, from: from) else {
+        guard case .refused(let dirty) = Worktrees.fastForward(root: root, base: "main", to: commit, from: from, landing: .unchecked("test")) else {
             Issue.record("merged under the worktree")
             return
         }
@@ -186,7 +186,7 @@ struct LeadBaseMovesTests: LeadTeamFixture {
 
         // The one command: the merge goes through, and the worktree keeps its files.
         #expect(Git.run(["switch", "-q", "--detach"], in: worktree).ok)
-        #expect(Worktrees.fastForward(root: root, base: "main", to: commit, from: from) == .merged)
+        #expect(Worktrees.fastForward(root: root, base: "main", to: commit, from: from, landing: .unchecked("test")) == .merged)
         #expect(head("main", root) == commit)
         #expect((try? String(contentsOfFile: worktree + "/a.txt", encoding: .utf8)) == "changed\n")
     }

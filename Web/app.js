@@ -31,7 +31,23 @@ let clockOffset = 0;          // Mac clock minus phone clock, seconds
 
 // ---------- API ----------
 
-const UNREACHABLE = "Can't reach your Mac. Is Tailscale on here, and is the Mac awake?";
+const UNREACHABLE = "Can't reach your Mac. Is Tailscale on here, is the Mac awake, and is Phone Access on in VibeSwitcher?";
+const SLOW_READ = 'This is taking a long time on this connection. Try again.';
+// The big reads (a transcript's tail, a page of scrollback): more than a poll's 10 s, and a slow answer isn't an offline Mac.
+const BIG_READ = { timeout: 30000, timeoutMessage: SLOW_READ };
+// Back after a while: what's on the screen is old until the Mac has answered.
+const CHECKING = 'Updating from your Mac…';
+const CHECK_AFTER = 5000;   // ms away before the screen is called old (no banner to flash for a blink)
+// Refusals that aren't an answer about what was asked: the Mac is restarting (503), or won't talk to this phone. Only the
+// next good answer takes the banner away.
+const REFUSED = new Set([403, 421, 429, 503]);
+
+/// An error from the connection, not from the Mac: the next poll may do better.
+function connectionError(message) {
+  const failure = new Error(message);
+  failure.connection = true;
+  return failure;
+}
 
 async function api(path, options = {}, authToken = token) {
   const headers = { 'Content-Type': options.contentType || 'application/json' };
@@ -40,18 +56,31 @@ async function api(path, options = {}, authToken = token) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeout || 10000);
   let response;
+  let body = {};
   try {
+    // The timer runs through the body too: a connection that dies halfway through one mustn't hold a poll for minutes.
     response = await fetch(path, { ...options, headers, cache: 'no-store', credentials: 'omit', signal: controller.signal });
+    try {
+      body = await response.json();
+    } catch (error) {
+      // An empty or non-JSON error (Tailscale's 502) is read below. A 200 whose JSON broke off isn't an answer.
+      if (response.ok) throw error;
+    }
   } catch (error) {
     // A slow answer the caller expected (reading Chrome's tabs) isn't the Mac being unreachable.
-    if (controller.signal.aborted && options.timeoutMessage) throw new Error(options.timeoutMessage);
-    setOnline(false);
-    throw new Error(UNREACHABLE);
+    if (controller.signal.aborted && options.timeoutMessage) {
+      const slow = connectionError(options.timeoutMessage);
+      slow.timedOut = true;
+      throw slow;
+    }
+    // Not for a phone that has been unpaired since this was sent: nothing would take the banner away.
+    if (!authToken || authToken === token) setOnline(false);
+    // A request that types something: a dropped connection doesn't say whether the Mac took it, so "unreachable" would
+    // read as "press it again" (a ⌃C pressed twice ends the session).
+    throw connectionError(options.unknownOutcome || UNREACHABLE);
   } finally {
     clearTimeout(timer);
   }
-  let body = {};
-  try { body = await response.json(); } catch (e) { /* empty or non-JSON body (e.g. Tailscale's 502) */ }
   // A bare 502 or 504 to a request that types something: the Mac may still be typing it, so it's unknown, not off.
   if (!response.ok && !body.error && (response.status === 502 || response.status === 504) && options.unknownOutcome) {
     throw new Error(options.unknownOutcome);
@@ -61,15 +90,21 @@ async function api(path, options = {}, authToken = token) {
   if (!response.ok && !body.error) {
     const message = "VibeSwitcher isn't running on your Mac, or Phone Access is off.";
     setOnline(false, message);
-    throw new Error(message);
+    throw connectionError(message);
   }
-  setOnline(true);
+  // Pairing has no token: a wrong code is an answer, and no poll would follow to clear it.
+  if (!REFUSED.has(response.status) || !authToken) setOnline(true);
   // Only a phone the Mac removed hears 401 (a restart answers 503): it forgets its token and says why.
   if (response.status === 401 && authToken === token) {
     forgetToken(body.error || "This phone isn't paired with the Mac any more.");
     throw new Error(body.error || 'Not paired');
   }
-  if (!response.ok) throw new Error(body.error || `Error ${response.status}`);
+  if (!response.ok) {
+    const failure = new Error(body.error || `Error ${response.status}`);
+    failure.reply = body;
+    failure.status = response.status;
+    throw failure;
+  }
   return body;
 }
 
@@ -114,6 +149,7 @@ function show(view) {
   $('next').hidden = view !== 'session';
   document.body.classList.toggle('in-session', view === 'session');
   $('bell').hidden = view === 'pair';
+  if (view === 'pair') setOnline(true);
   clearInterval(listTimer);
   clearInterval(screenTimer);
   if (view !== 'lead') openLeadID = null;
@@ -163,26 +199,43 @@ function badge(session) {
 let listBusy = false;
 let screenBusy = false;
 
+/// A new `/api/state`: the state and the clock from it. False when the Mac now serves a newer app, which is being loaded
+/// (an old page would leave out what the Mac now expects).
+function applyState(fresh) {
+  state = fresh;
+  clockOffset = state.now - Date.now() / 1000;
+  if (state.web) {
+    if (webVersion && state.web !== webVersion) { location.reload(); return false; }
+    webVersion = state.web;
+  }
+  return true;
+}
+
+/// `/api/state` failed: what's on the screen is as of the last answer, and the banner says why. (A dropped connection
+/// or a bare error has set it already; a removed phone has gone to the pairing screen.)
+function stateFailed(error) {
+  if (token && !error.connection) setOnline(false, error.message);
+}
+
 async function refreshList(render = true) {
   if (listBusy || !token) return;   // one poll at a time: a slow network must not stack requests
   listBusy = true;
+  let fresh;
   try {
-    state = await api('/api/state');
+    fresh = await api('/api/state');
   } catch (error) {
+    stateFailed(error);
     return;
   } finally {
     listBusy = false;
   }
-  // The Mac now serves a newer app: load it (an old page would leave out what the Mac now expects).
-  if (state.web) {
-    if (webVersion && state.web !== webVersion) return location.reload();
-    webVersion = state.web;
-  }
+  if (!applyState(fresh)) return;
   if (!pushChecked) { pushChecked = true; syncPushSubscription(); }
-  clockOffset = state.now - Date.now() / 1000;
   $('subtitle').textContent = state.mac;
-  $('notifyCard').hidden = Boolean(state.device.push) || !('PushManager' in window);
-  $('bell').classList.toggle('on', Boolean(state.device.push));
+  // On for the Mac and off on the phone (the permission was taken back) is off: nothing would arrive.
+  const pushOn = Boolean(state.device.push) && (typeof Notification === 'undefined' || Notification.permission === 'granted');
+  $('notifyCard').hidden = pushOn || !('PushManager' in window);
+  $('bell').classList.toggle('on', pushOn);
   if (current) { refreshConversation(); return renderSessionMeta(); }
   if (openLeadID) return;
   renderBriefScope();
@@ -194,7 +247,8 @@ function renderList() {
   if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('qInput')) return;
   // The leads' workers and verifiers fold under their lead, as on the Mac: they aren't your own sessions (nor counted
   // as yours). A team whose lead isn't listed stays where it is.
-  const leadIDs = new Set(state.sessions.filter(s => s.role === 'lead').map(s => s.lead));
+  const boarded = new Set((state.leads || []).map(l => l.id));
+  const leadIDs = new Set(state.sessions.filter(s => s.role === 'lead' && boarded.has(s.lead)).map(s => s.lead));
   const isMember = s => (s.role === 'worker' || s.role === 'verifier') && leadIDs.has(s.lead);
   const sessions = state.sessions.filter(s => !isMember(s));
   const counts = $('counts');
@@ -279,6 +333,13 @@ function clockText(at) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
+// A time on its day: the day only when it's another one than today.
+function whenText(at) {
+  const date = new Date((at - clockOffset) * 1000);
+  const today = new Date(Date.now()).toDateString() === date.toDateString();
+  return `${today ? '' : `${date.toDateString().slice(0, 3)} `}${clockText(at)}`;
+}
+
 function questionCount(count) { return `${count} question${count === 1 ? '' : 's'} for you`; }
 
 function leadBlock(lead, row, members) {
@@ -322,8 +383,9 @@ function questionStack(lead) {
   for (const [id, done] of answeredHere) {
     if (Date.now() - done.at > 60000) { answeredHere.delete(id); continue; }
     if (done.lead !== lead.id || shown.has(id)) continue;
-    const line = el('div', 'qClosed answered');
-    line.append(el('div', 'status', `✓ Answered: ${done.answer}`), el('div', 'qClosedText', done.text));
+    const line = el('div', done.refused ? 'qClosed refused' : 'qClosed answered');
+    line.append(done.refused ? el('div', 'error', done.refused) : el('div', 'status', `✓ Answered: ${done.answer}`),
+                el('div', 'qClosedText', done.text));
     stack.append(line);
   }
   return stack;
@@ -336,6 +398,9 @@ function questionCard(lead, q) {
       ? el('div', 'qClosedWhy', `✕ Withdrawn: ${q.withdrawReason || 'no reason given'}`)
       : el('div', 'qClosedWhy', `✓ Went ahead with ${q.proposal || ''}: no answer in ${q.decideIn} min`));
     line.append(el('div', 'qClosedText', q.text));
+    // An answer sent as it closed: the card it was typed on is this line now, so what became of it goes here.
+    const note = answerNotes.get(q.id);
+    if (note) line.append(el('div', note.error ? 'error qNote' : 'status qNote', note.text));
     return line;
   }
   const card = el('div', `qCard ${q.priority}`);
@@ -424,7 +489,17 @@ async function answerQuestion(lead, q, text) {
     answerNotes.set(q.id, { text: reply.notice || `Answered: ${text} ✓`, error: Boolean(reply.notice) });
     answeredHere.set(q.id, { lead: lead.id, text: q.text, answer: text, at: Date.now() });
   } catch (error) {
-    answerNotes.set(q.id, { text: error.message, error: true });
+    // Sent again after a dropped connection, and it had gone in: answered, not failed, and said once the card is gone.
+    const wentIn = Boolean(error.reply && error.reply.wentIn);
+    if (wentIn) {
+      drafts.delete(q.id);
+      answeredHere.set(q.id, { lead: lead.id, text: q.text, answer: text, at: Date.now() });
+    } else if (error.reply && (error.reply.question || error.status === 404)) {
+      // It closed under this answer (someone else's answer, or it's gone): its card leaves the stack with the next
+      // state and takes the note with it, so "not sent" stays said for a minute, as an answer that went in does.
+      answeredHere.set(q.id, { lead: lead.id, text: q.text, answer: text, at: Date.now(), refused: error.message });
+    }
+    answerNotes.set(q.id, { text: error.message, error: !wentIn });
   } finally {
     answering.delete(q.id);
   }
@@ -454,10 +529,13 @@ async function refreshLead() {
     const [page, fresh] = await Promise.all([api(`/api/lead?lead=${encodeURIComponent(id)}`), api('/api/state')]);
     if (id !== openLeadID) return;
     leadPage = page;
-    state = fresh;
-    clockOffset = state.now - Date.now() / 1000;
+    if (!applyState(fresh)) return;
   } catch (error) {
-    if (id === openLeadID) $('leadPage').replaceChildren(el('p', 'error', error.message));
+    if (id !== openLeadID) return;
+    // The lead is gone: said in place of its page. Anything else keeps the page, under the banner.
+    if (error.status === 404) leadPage = null;
+    if (!leadPage) $('leadPage').replaceChildren(el('p', 'error', error.message));
+    if (error.status !== 404) stateFailed(error);
     return;
   } finally {
     leadBusy = false;
@@ -465,6 +543,7 @@ async function refreshLead() {
   renderLead();
 }
 
+const OUTCOME_MARKS = { merged: '✓', folded: '↳', reverted: '↶' };
 const MARKS = {
   waits: '…', failed: '✕', blocked: '⊘', stalled: '⏸', ended: '■', working: '●', rework: '↻', review: '◆', merge: '◈',
   queued: '○', merged: '✓', folded: '↳', kept: '▣', abandoned: '−', reverted: '↶',
@@ -482,13 +561,14 @@ function renderLead() {
   if (lead && lead.questions.length) {
     parts.push(el('h3', 'sectionTitle', lead.open ? questionCount(lead.open) : 'No questions waiting'), questionStack(lead));
   }
-  if (page.allDone) parts.push(allDoneCard(page.allDone));
+  const allDoneNow = page.allDone && page.allDone.current !== false;
+  if (allDoneNow) parts.push(allDoneCard(page.allDone));
   if (page.updates.length) {
     parts.push(el('h3', 'sectionTitle', 'Latest updates'));
     for (const update of page.updates) {
       const card = el('div', 'card update');
       const head = el('div', 'updateHead');
-      head.append(el('b', null, update.title), el('span', 'muted small', clockText(update.at)));
+      head.append(el('b', null, update.title), el('span', 'muted small', whenText(update.at)));
       card.append(head, el('div', 'updateBody', update.body));
       if (update.images) card.append(el('div', 'muted small', `${update.images} image${update.images === 1 ? '' : 's'} on the Mac`));
       parts.push(card);
@@ -508,6 +588,7 @@ function renderLead() {
       const first = el('div', 'line1');
       first.append(el('span', 'taskTitle', task.title), el('span', `taskState ${task.mark}`, task.stateText));
       text.append(first);
+      if (task.overBudget) text.append(el('div', 'detail overBudget', task.overBudget));
       if (task.line) text.append(el('div', 'detail', task.line));
       row.append(mark, text);
       tasks.append(row);
@@ -518,6 +599,8 @@ function renderLead() {
   }
   if (!page.tasks.length) tasks.append(el('div', 'muted small', 'No tasks on the board.'));
   parts.push(tasks);
+  // Work has started since that card: it's history, below what's going on, and doesn't say everything is finished.
+  if (page.allDone && !allDoneNow) parts.push(allDoneCard(page.allDone));
   if (page.scorecard || page.cost) {
     const score = el('div', 'card scorecard');
     if (page.scorecard) score.append(el('div', null, page.scorecard));
@@ -530,7 +613,7 @@ function renderLead() {
 function allDoneCard(mark) {
   const card = el('div', 'allDone');
   const head = el('div', 'allDoneHead');
-  head.append(el('b', null, '✓ All tasks finished'), el('span', 'muted small', clockText(mark.at)));
+  head.append(el('b', null, mark.current === false ? 'Earlier batch finished' : '✓ All tasks finished'), el('span', 'muted small', whenText(mark.at)));
   card.append(head);
   if (mark.headline) {
     card.append(el('div', 'allDoneHeadline', mark.headline));
@@ -543,7 +626,7 @@ function allDoneCard(mark) {
   if (mark.cost) card.append(el('div', 'muted small allDoneCost', mark.cost));
   const list = el('details', 'allDoneTasks');
   list.append(el('summary', null, mark.count));
-  list.append(...mark.tasks.map(t => el('div', `small outcome ${t.outcome}`, `${t.outcome === 'merged' ? '✓' : t.outcome === 'reverted' ? '↶' : '−'} ${t.title}`)));
+  list.append(...mark.tasks.map(t => el('div', `small outcome ${t.outcome}`, `${OUTCOME_MARKS[t.outcome] || '−'} ${t.title}`)));
   card.append(list);
   return card;
 }
@@ -642,6 +725,7 @@ const prefs = {
   wrap: localStorage.getItem('vs.wrap') !== 'off',
 };
 let lastScreenText = null;
+let hiddenAt = 0;             // when the app went to the background, 0 while it's on the screen
 
 function applyViewPrefs() {
   const screen = $('screen');
@@ -663,6 +747,7 @@ function openSession(tty) {
   resetConversation();
   showTab('terminal');
   $('screenError').hidden = true;
+  $('pauseStatus').hidden = true;
   setInputStatus('');
   $('reply').value = '';
   growReply();
@@ -689,6 +774,10 @@ function renderSessionMeta() {
     $('sessionMeta').replaceChildren();
     $('composer').hidden = true;
     $('askCard').hidden = true;
+    $('inputOff').hidden = true;
+    $('pauseSelect').hidden = true;
+    $('resume').hidden = true;
+    $('pausedInfo').hidden = true;
     // Another session in the same tab: offer it, never carry on as if it were this one.
     const successor = state && state.sessions.find(s => s.tty === current);
     $('subtitle').textContent = successor ? 'Another session is running in this tab now.' : '';
@@ -755,24 +844,20 @@ function optionButton(menu, index, label, description, canAnswer) {
 /// Sends the tap with the fingerprint of the menu it was drawn from: the Mac types it only if that menu is still up.
 async function chooseOption(index, fingerprint, label) {
   for (const button of $('askOptions').children) button.disabled = true;
-  await send({ choose: index, fingerprint }, null, `“${label}” ✓`);
+  await send({ choose: index, fingerprint }, null, label === null ? null : `“${label}” ✓`);
   drawnMenu = '';   // redrawn from the next state: the answered menu, the next one, or a changed one after a 409
   refreshList(false);
 }
 
 /// A key button. While a menu is shown, its keys carry its fingerprint, as a tap does: a bare key would answer whatever
-/// question is up by the time it arrives. 1, 2 and 3 are taps on its options, ⏎ a tap on the highlighted one, and ↑ ↓
-/// move only while that menu is still up.
+/// question is up by the time it arrives. 1, 2 and 3 are taps on its options, ↑ ↓ move only while that menu is still up,
+/// and ⏎ takes what's highlighted when it reaches the Mac: this phone's copy of the cursor lags behind an arrow just
+/// pressed (the next state is seconds away), and sending that index would move the cursor back and pick what it left.
 function pressKey(button) {
   const session = shownSession();
   const menu = session && !session.paused ? session.menu : null;
   const key = button.dataset.key;
-  if (menu && key === 'enter') {
-    const index = menu.selected;
-    const label = index < menu.options.length ? menu.options[index] : menu.submit;
-    if (!Number.isInteger(index) || label === undefined) return setInputStatus('Tap an option.', true);
-    return chooseOption(index, menu.fingerprint, label);
-  }
+  if (menu && key === 'enter') return chooseOption('highlighted', menu.fingerprint, null);
   if (menu && (key === 'up' || key === 'down')) return send({ key, fingerprint: menu.fingerprint }, button);
   if (key) return send({ key }, button);
   if (menu && /^[1-9]$/.test(button.dataset.text)) {
@@ -805,11 +890,14 @@ function renderPauseControls(session) {
 async function setPause(duration, control) {
   if (!current || !duration) return;
   control.disabled = true;
+  $('pauseStatus').hidden = true;
   try {
     await api('/api/pause', { method: 'POST', body: JSON.stringify({ tty: current, sid: currentSid, duration }) });
     setTimeout(() => refreshList(false), 300);
   } catch (error) {
-    setInputStatus(error.message, true);
+    // Its own line: pausing works with replies off, when the composer (and the line under it) is hidden.
+    $('pauseStatus').textContent = error.message;
+    $('pauseStatus').hidden = false;
   } finally {
     control.disabled = false;
     if (control.tagName === 'SELECT') control.value = '';
@@ -916,7 +1004,7 @@ async function loadEarlier() {
   const screen = $('screen');
   try {
     const before = fromTail ? '' : `&before=${older.start}`;
-    const page = await api(`/api/history?${sessionQuery(tty)}${before}`);
+    const page = await api(`/api/history?${sessionQuery(tty)}${before}`, BIG_READ);
     if (gen !== older.gen || tty !== current) return;
     // A cleared terminal is shorter than what we asked about: start over from its end.
     if (!fromTail && page.total < older.start) {
@@ -1081,7 +1169,7 @@ async function refreshConversation(force = false) {
   const tty = current;
   try {
     const after = conversation.cursor === null ? '' : `&after=${conversation.cursor}&file=${encodeURIComponent(conversation.file)}`;
-    const result = await api(`/api/conversation?${sessionQuery(tty)}${after}`);
+    const result = await api(`/api/conversation?${sessionQuery(tty)}${after}`, BIG_READ);
     if (gen !== conversation.gen || tty !== current) return;
     // A fresh tail (first open, another transcript after /clear or /resume, or a big gap): start over.
     if (result.fresh) {
@@ -1112,7 +1200,7 @@ async function refreshConversation(force = false) {
 async function showFullTool(id, row) {
   const gen = conversation.gen;
   try {
-    const result = await api(`/api/conversation/tool?${sessionQuery()}&id=${encodeURIComponent(id)}`);
+    const result = await api(`/api/conversation/tool?${sessionQuery()}&id=${encodeURIComponent(id)}`, BIG_READ);
     if (gen !== conversation.gen) return;
     const node = entryNode(result.entry, true);
     node.open = true;
@@ -1212,11 +1300,12 @@ async function send(payload, button, doneLabel) {
     // Typing waits for a jump in progress on the Mac and takes a moment for long text: allow for it, and on a
     // timeout say what's unknown rather than "unreachable" (a retry could type it twice).
     const unknown = "The Mac didn't confirm in time. Check the screen before sending again.";
-    await api('/api/input', { method: 'POST', body: JSON.stringify({ tty: current, sid: currentSid, ...payload }),
-                              timeout: 30000, timeoutMessage: unknown, unknownOutcome: unknown });
+    const result = await api('/api/input', { method: 'POST', body: JSON.stringify({ tty: current, sid: currentSid, ...payload }),
+                                             timeout: 30000, timeoutMessage: unknown, unknownOutcome: unknown });
     if (reply) unconfirmed = null;
     const label = button && button.classList.contains('quickChip') ? `“${payload.text}” sent ✓` : 'Sent ✓';
-    setInputStatus(doneLabel || (payload.text && payload.submit ? label : `${button ? button.textContent : 'Key'} ✓`));
+    const said = result.chose ? `“${result.chose}” ✓` : null;   // the Mac says which option ⏎ took
+    setInputStatus(doneLabel || said || (payload.text && payload.submit ? label : `${button ? button.textContent : 'Key'} ✓`));
     setTimeout(refreshScreen, 250);
     setTimeout(refreshScreen, 1200);
     return true;
@@ -1459,6 +1548,8 @@ const brief = { gen: 0, url: null, writing: false, ready: false, projects: '' };
 const BRIEF_PROJECT = 'vs.briefProject';   // the picker's choice on this phone: a led project's name, or '' for all
 const BRIEF_POLL = 1000;      // ms between asks
 const BRIEF_WAIT = 150;       // asks: Claude may take a minute, ElevenLabs half of one more
+// The audio comes with the answer, a few MB once base64: it gets longer than a poll, and a slow download isn't an offline Mac.
+const BRIEF_ASK = { timeout: 60000, timeoutMessage: 'The briefing is taking too long to reach this phone. Try again.' };
 
 function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
@@ -1548,10 +1639,17 @@ async function briefMe() {
   try {
     const project = briefProject();
     let result = await api('/api/briefing', { method: 'POST', body: JSON.stringify(project ? { project } : {}) });
+    let slowAsks = 0;
     for (let asked = 0; result.writing && asked < BRIEF_WAIT; asked++) {
       await wait(BRIEF_POLL);
       if (gen !== brief.gen) return;
-      result = await api('/api/briefing');
+      try {
+        result = await api('/api/briefing', BRIEF_ASK);
+      } catch (error) {
+        // A connection that dropped meanwhile (the banner says so): the Mac is still writing it, so keep asking. Not
+        // for ever on one too slow to bring the audio.
+        if (!error.connection || (error.timedOut && ++slowAsks >= 2)) throw error;
+      }
     }
     if (gen !== brief.gen) return;
     if (result.writing) throw new Error('The Mac is taking too long to write it. Try again in a minute.');
@@ -1722,8 +1820,18 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('resize', layoutSession);
   applyViewPrefs();
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
-    if (current) refreshScreen(); else if (token) refreshList();
+    if (document.hidden) {
+      // The phone locked or the app went away with the mic held: no release is coming, and its timer stops with the page.
+      stopDictation();
+      hiddenAt = Date.now();
+      // An answer box left focused would hold the list still when you come back; its text is kept in `drafts`.
+      if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('qInput')) document.activeElement.blur();
+      return;
+    }
+    if (!token) return;
+    if (hiddenAt && Date.now() - hiddenAt >= CHECK_AFTER) setOnline(false, CHECKING);
+    hiddenAt = 0;
+    if (current) { refreshScreen(); refreshList(false); } else if (openLeadID) refreshLead(); else refreshList();
   });
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});

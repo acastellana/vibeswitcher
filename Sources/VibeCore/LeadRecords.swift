@@ -74,6 +74,8 @@ public final class LeadRecords: @unchecked Sendable {
     var lockWait: TimeInterval = 5
     /// What a commit does between two tries of a held index.lock (`Worktrees.withIndexLock`); nil waits 200 ms.
     var lockPause: (() -> Void)?
+    /// A test's stand-in for a route gone wrong or for git failing, in every landing's check (`Worktrees.Landing.probe`).
+    var landingProbe: Worktrees.LandingProbe?
     private let lock = NSLock()
     private var lastFlush: Date
     private var lastOutcome: Outcome?
@@ -207,7 +209,8 @@ public final class LeadRecords: @unchecked Sendable {
         }
         let result = Worktrees.commitFiles(root: root, branch: base, paths: paths, contents: snapshot,
                                            message: Self.message(dir, inventory: inventory != nil),
-                                           from: head, lockWait: lockWait, lockPause: lockPause)
+                                           from: head, lockWait: lockWait, lockPause: lockPause,
+                                           landing: Worktrees.Landing(route: "records commit", records: dir, probe: landingProbe))
         switch result {
         case .unchanged: return .unchanged
         case .failed(let why): return .failed(why)
@@ -224,35 +227,6 @@ public final class LeadRecords: @unchecked Sendable {
             }
             return .committed(commit)
         }
-    }
-
-    /// Takes the lines `carried` (a commit of the remote's, as fetch_remote fetched it) has in the records and `base`
-    /// (the branch before a merge brought `carried` in) lacks into the records in the main checkout, by union from
-    /// their merge base, under the records' lock: the lines written and not committed yet stay. The next flush commits
-    /// them. A merge that brings the remote's commits in lands with the base's records, so its fast-forward never
-    /// meets those uncommitted lines (merge-github-s-main, 2026-11-06: the other Mac's records were dropped). Nil when
-    /// done, else what failed.
-    public func takeRemote(_ carried: String, since base: String) -> String? {
-        guard let dir = store.recordsDir else { return nil }
-        let paths = Self.paths(dir)
-        let ancestor = Git.run(["merge-base", base, carried], in: root).output
-        do {
-            return try store.withRecordsLock {
-                let ours = paths.reduce(into: [String: Data]()) { taken, path in
-                    taken[path] = FileManager.default.contents(atPath: (root as NSString).appendingPathComponent(path))
-                }
-                switch Worktrees.unionRecords(root: root, paths: paths, ours: ours, ancestor: ancestor, theirs: carried) {
-                case .failure(let failure): return failure.description
-                case .success(let changed):
-                    for (path, data) in changed {
-                        let file = URL(fileURLWithPath: (root as NSString).appendingPathComponent(path))
-                        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-                        try data.write(to: file, options: .atomic)
-                    }
-                    return nil
-                }
-            }
-        } catch { return "\(error)" }
     }
 
     /// Whether any of `paths` in the working tree differs from `base`'s.

@@ -876,7 +876,7 @@ struct LeadToolsetTests: LeadTeamFixture {
                                         "failure_scenario": "cat b.txt gives bee where the contract wants b", "status": "open"]
         _ = call(try seat("verify-add-b", runtime), "submit_audit", ["completion": "complete", "integrity": "suspect", "summary": "checked",
                                                                      "tests": "passed", "findings": [important]])
-        #expect(!call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the contract asks only that b.txt exists"]).isError)
+        #expect(!call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the contract asks only that b.txt exists: b.txt:1"]).isError)
         #expect(vault.verdict(root: root, task: "add-b")?.dismissed(in: vault.audits(root: root, task: "add-b")) != nil)
         let again = call(lead, "audit", ["task": "add-b"])
         #expect(!again.isError, "\(again.text)")
@@ -1369,7 +1369,8 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(merged.text.contains("↳ the answer drifted"))
         #expect(!merged.text.contains("resumed"))
         let log = vault.scratch(root: root, "add-b/merge-test.log")
-        #expect(lines.last == "Full output: \(log.path)")
+        // The message names the copy its worker can read, never the vault's.
+        #expect(lines.last == "Full output: \(Worktrees.path(root: root, slug: "add-b"))/.vibeswitcher/merge-failure/merge-test.log")
         let saved = try String(contentsOf: log, encoding: .utf8)
         #expect(saved.contains("Test run with 5 tests failed") && saved.contains("captured var 'resumed'"))
         // The log is the rerun's: its first line says so, the next names the scratch home the tests ran with, gone by now.

@@ -51,4 +51,89 @@ struct ConfigHoldsTests {
         #expect(times["~/.claude/plugins: p@m"] == nil)
         #expect(times["~/.claude/settings.json"] != nil)
     }
+
+    // MARK: The card's detail
+
+    /// A vault's whole loop: a real book on a scratch home, a lead and a worker, and the sync's folder sealed; the app's
+    /// card reads from the vault and home, one look inline.
+    func team() throws -> (home: String, root: String, card: ConfigHolds, asLead: LeadVault, skill: String, manifest: String) {
+        let home = scratch.url("home").resolvingSymlinksInPath().path
+        let folder = scratch.url("vault")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let root = ((home as NSString).appendingPathComponent("repo") as NSString).standardizingPath
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        let account = home + "/.claude/skills/synced/acct-1"
+        try FileManager.default.createDirectory(atPath: account + "/built-in-browser", withIntermediateDirectories: true)
+        let skill = account + "/built-in-browser/SKILL.md", manifest = account + "/manifest.json"
+        try "name: browser\nold\nend\n".write(toFile: skill, atomically: true, encoding: .utf8)
+        try #"{"round":1}"#.write(toFile: manifest, atomically: true, encoding: .utf8)
+        let book = LeadVault.Book()
+        book.configHome = home
+        let app = book.vault(folder: folder, as: { .app })
+        try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "lead-session")
+        #expect(try app.checkConfig(root: root).held.isEmpty)
+        let lead = book.vault(folder: folder, as: { .session("lead-session") })
+        try lead.bind(try lead.issue(role: .worker, root: root, task: "sandbox-task"), root: root, session: "worker-session")
+        let card = ConfigHolds(vault: app, home: home, background: { $0() }, main: { $0() })
+        return (home, root, card, lead, skill, manifest)
+    }
+
+    /// The reported change, on the card's data: named by skill with its time, most likely the sync, its difference
+    /// read on request.
+    @Test func theCardNamesTheChangeAndCanShowItsDifference() throws {
+        let team = try team()
+        try "name: browser\nnew\nend\n".write(toFile: team.skill, atomically: true, encoding: .utf8)
+        try #"{"round":2}"#.write(toFile: team.manifest, atomically: true, encoding: .utf8)
+        #expect(try team.asLead.checkConfig(root: team.root).held == ["~/.claude/skills"])
+
+        team.card.look([team.root])
+        let detail = try #require(team.card.details[team.root]?["~/.claude/skills"])
+        let file = try #require(detail.files.first)
+        #expect(ConfigSeal.fileLabel(file, in: "~/.claude/skills") == "skill built-in-browser, SKILL.md")
+        #expect(file.at != nil)
+        #expect(team.card.sources[team.root]?["~/.claude/skills"] == .likelySync)
+
+        team.card.toggleDifference(root: team.root, name: "~/.claude/skills", file: file)
+        guard case .lines(let lines, _, _)? = team.card.differences[ConfigHolds.differenceKey(root: team.root, name: "~/.claude/skills", file: file)] else {
+            Issue.record("no difference")
+            return
+        }
+        #expect(lines.contains { $0.kind == .removed && $0.text == "old" })
+        #expect(lines.contains { $0.kind == .added && $0.text == "new" })
+    }
+
+    /// Accept seals what the card showed: a file that changes after the card was drawn, even one a look has held since,
+    /// isn't sealed by the click, which says so; the redrawn card's Accept seals it.
+    @Test func acceptOnACardDrawnBeforeAChangeSealsNothing() throws {
+        let team = try team()
+        try "name: browser\nnew\nend\n".write(toFile: team.skill, atomically: true, encoding: .utf8)
+        #expect(try team.asLead.checkConfig(root: team.root).held == ["~/.claude/skills"])
+        team.card.look([team.root])
+
+        // Changes after the card was drawn, and a look holds it again before the click.
+        try "name: browser\nnewer\nend\n".write(toFile: team.skill, atomically: true, encoding: .utf8)
+        _ = try team.asLead.checkConfig(root: team.root)
+        var accepted: [String] = []
+        team.card.onAccepted = { _, names in accepted = names }
+        team.card.accept(team.root)
+        #expect(accepted.isEmpty)
+        #expect(team.card.held[team.root] == ["~/.claude/skills"])
+        #expect(team.card.notices[team.root]?.contains("nothing was accepted") == true)
+
+        // The redrawn card's Accept seals what's there now.
+        team.card.accept(team.root)
+        #expect(accepted == ["~/.claude/skills"])
+        #expect(team.card.held[team.root] == nil)
+        #expect(team.card.notices[team.root] == nil)
+    }
+
+    /// Text shown from a changed file is drawn inert: the card's difference and file names go through `Text(verbatim:)`,
+    /// which takes no Markdown (`ConfigSeal.inert` has already stripped control and bidirectional characters).
+    @Test func theCardDrawsChangedFileTextVerbatim() throws {
+        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/VibeSwitcher/MainWindow/Lead/LeadViews.swift")
+        let source = try String(contentsOf: path, encoding: .utf8)
+        #expect(source.contains("Text(verbatim: Self.marker(line.kind) + line.text)"))
+        #expect(source.contains("Text(verbatim: ConfigSeal.fileLabel(file, in: name))"))
+    }
 }

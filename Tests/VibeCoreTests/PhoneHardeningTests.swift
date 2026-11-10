@@ -73,6 +73,18 @@ struct RemoteInputGateTests {
 struct RemoteGateTests {
     let host = "mac.tail1234.ts.net"
 
+    @Test func onlyThePagesOwnOriginMayPair() {
+        let host = "my-mac.tail1234.ts.net"
+        #expect(RemoteGate.originAllowed(nil, host: host, port: 8443))
+        #expect(RemoteGate.originAllowed("https://my-mac.tail1234.ts.net:8443", host: host, port: 8443))
+        #expect(RemoteGate.originAllowed("HTTPS://MY-MAC.tail1234.ts.net:8443", host: host + ".", port: 8443))
+        for origin in ["https://my-mac.tail1234.ts.net:8444", "http://my-mac.tail1234.ts.net:8443", "https://my-mac.tail1234.ts.net",
+                       "https://example.test:8443", "null", "", "https://my-mac.tail1234.ts.net:8443/x"] {
+            #expect(!RemoteGate.originAllowed(origin, host: host, port: 8443), "\(origin)")
+        }
+        #expect(!RemoteGate.originAllowed("https://:8443", host: "", port: 8443))
+    }
+
     @Test func onlyTheTailnetNameIsServed() {
         #expect(RemoteGate.hostMatches("mac.tail1234.ts.net:8443", host: host, port: 8443))
         #expect(RemoteGate.hostMatches("MAC.tail1234.ts.net.:8443", host: host, port: 8443))

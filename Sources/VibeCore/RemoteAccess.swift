@@ -156,6 +156,14 @@ public enum RemoteGate {
         return name == expected
     }
 
+    /// Whether a browser's `Origin` is the Phone Access page itself, on `host`'s `port` over HTTPS. A browser sends one on
+    /// every cross-origin POST, so a page elsewhere (a dev page on a sibling port, say) is refused; anything odd is too.
+    public static func originAllowed(_ header: String?, host: String, port: Int) -> Bool {
+        guard let header else { return true }
+        let expected = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return !expected.isEmpty && header.lowercased() == "https://\(expected):\(port)"
+    }
+
     /// Who a failed attempt is counted against: the account and the tailnet address `tailscale serve`
     /// reports for the device (`X-Forwarded-For`). One noisy source can't throttle anyone else.
     public static func source(login: String?, forwardedFor: String?) -> String {

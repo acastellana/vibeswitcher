@@ -9,6 +9,9 @@ struct PreferencesCheckTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     let temp = Scratch()
 
+    /// A process of this run opening the build's domain, as the bundle's hook records it (`PreferenceLedger`).
+    static let openBuildDomain = "echo VibeSwitcher >> \"$VIBESWITCHER_PREFERENCE_LEDGER\""
+
     /// A folder standing for ~/Library/Preferences, holding `files` (name to text).
     func preferences(_ files: [String: String]) throws -> URL {
         let folder = temp.url("preferences")
@@ -46,27 +49,76 @@ struct PreferencesCheckTests {
 
     @Test func aRunThatChangesTheBuildsDefaultsFailsNamingThem() async throws {
         let dir = try preferences(["VibeSwitcher.plist": "before"])
-        let (status, output) = try await run(dir, "echo after > VibeSwitcher.plist")
+        let (status, output) = try await run(dir, "\(Self.openBuildDomain); echo after > VibeSwitcher.plist")
         #expect(status == 1, "\(output)")
         #expect(output.contains("PREFERENCES CHANGED: the run changed \(dir.path)/VibeSwitcher.plist"), "\(output)")
         #expect(output.contains("BenchDefaults"), "\(output)")
     }
 
+    /// The build's defaults change for reasons outside this run (on 2026-11-09 at 18:16:56, inside a merge's run): unless
+    /// a process of this run opened that domain, the change is named in a line and the run stands.
+    @Test func aChangeToTheBuildsDefaultsThisRunDidntOpenIsNamedAndDoesntFail() async throws {
+        let dir = try preferences(["VibeSwitcher.plist": "before"])
+        let (status, output) = try await run(dir, "echo after > VibeSwitcher.plist")
+        #expect(status == 0, "\(output)")
+        #expect(!output.contains("PREFERENCES CHANGED"), "\(output)")
+        #expect(output.contains("\(dir.path)/VibeSwitcher.plist changed, and no process of this run opened its domain"), "\(output)")
+        #expect(try String(contentsOf: dir.appendingPathComponent("VibeSwitcher.plist"), encoding: .utf8) == "after\n")
+    }
+
     /// Made where there was none (a bench on a Mac that never had one) counts too.
     @Test func aRunThatMakesTheBuildsDefaultsFails() async throws {
         let dir = try preferences([:])
-        let (status, output) = try await run(dir, "echo new > VibeSwitcher.plist")
+        let (status, output) = try await run(dir, "\(Self.openBuildDomain); echo new > VibeSwitcher.plist")
         #expect(status == 1, "\(output)")
         #expect(output.contains("PREFERENCES CHANGED"), "\(output)")
     }
 
+    /// A suite a process of this run opened, as the bundle's hook records it (`PreferenceLedger`), and its file left.
+    static func leave(_ domain: String) -> String {
+        "echo \(domain) >> \"$VIBESWITCHER_PREFERENCE_LEDGER\"; echo x > \(domain).plist"
+    }
+
     @Test func aRunThatAddsATestsSuiteFileFailsNamingIt() async throws {
         let dir = try preferences(["VibeSwitcher.plist": "before"])
-        let (status, output) = try await run(dir, "echo x > dev.vibeswitcher.tests.0B9E.plist")
+        let (status, output) = try await run(dir, Self.leave("dev.vibeswitcher.tests.0B9E"))
         #expect(status == 1, "\(output)")
         #expect(output.contains("PREFERENCE FILES LEFT: the run added 1 to \(dir.path)"), "\(output)")
         #expect(output.contains("  dev.vibeswitcher.tests.0B9E.plist"), "\(output)")
         #expect(!output.contains("PREFERENCES CHANGED"), "\(output)")
+    }
+
+    /// Up to 3 suites run at once (vs-heavy's slots), and the check reads the one real folder: what another worktree's
+    /// run leaves between this run's two snapshots is that run's. Two real runs on one folder, each waiting on the other's
+    /// event: `quiet` is under way (its snapshot taken, as its command has started), then `leaver` leaves a file, then
+    /// `quiet` ends. `leaver` fails naming it; `quiet` passes, and says what it saw.
+    @Test func aPlistAnotherRunLeavesFailsThatRunAlone() async throws {
+        let dir = try preferences(["VibeSwitcher.plist": "before"])
+        let file = "dev.vibeswitcher.tests.0THER.plist"
+        // Long enough for any load; each ends at once when the event comes, and a missing event is a failure, not a pass.
+        let wait = { (path: String) in "for _ in $(seq 1 6000); do [[ -e \(path) ]] && break; sleep 0.02; done; [[ -e \(path) ]]" }
+        async let quiet = run(dir, "touch quiet-started; \(wait(file))")
+        async let leaver = run(dir, "\(wait("quiet-started")) && \(Self.leave("dev.vibeswitcher.tests.0THER"))")
+        let (quietRun, leaverRun) = try await (quiet, leaver)
+        #expect(leaverRun.status == 1, "\(leaverRun.output)")
+        #expect(leaverRun.output.contains("  \(file)"), "\(leaverRun.output)")
+        #expect(quietRun.status == 0, "\(quietRun.output)")
+        #expect(!quietRun.output.contains("PREFERENCE FILES LEFT"), "\(quietRun.output)")
+        #expect(quietRun.output.contains("no process of this run opened"), "\(quietRun.output)")
+        #expect(quietRun.output.contains("  \(file)"), "\(quietRun.output)")
+        // Left as it is: it's another run's to answer for.
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent(file).path))
+    }
+
+    /// The hook itself, in this very process: a suite opened here is in this run's ledger before the open returns. The
+    /// suite is `Scratch.defaults`', named by a path, so nothing goes near the real folder.
+    @Test func aSuiteOpenedInThisProcessIsInTheRunsLedger() throws {
+        let ledger = try #require(ProcessInfo.processInfo.environment["VIBESWITCHER_PREFERENCE_LEDGER"],
+                                  "scripts/test.sh gives every run a ledger")
+        let prefix = "ledger-\(UUID().uuidString)"
+        _ = temp.defaults(prefix)
+        let lines = try String(contentsOfFile: ledger, encoding: .utf8).components(separatedBy: "\n")
+        #expect(lines.contains { $0.contains(prefix) }, "the bundle's hook didn't record the suite: \(ledger)")
     }
 
     /// The installed app's own defaults change as you use it, during a run too: never the run's failure.

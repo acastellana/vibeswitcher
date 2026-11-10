@@ -515,11 +515,14 @@ public struct TranscriptTail: Equatable, Sendable {
         /// What it is: the call's description, or its command.
         public var what: String
         public var startedAt: Double?
+        /// A shell, with a process to look for. A background agent runs inside its parent and has none.
+        public var isShell: Bool
 
-        public init(id: String, what: String, startedAt: Double?) {
+        public init(id: String, what: String, startedAt: Double?, isShell: Bool = true) {
             self.id = id
             self.what = what
             self.startedAt = startedAt
+            self.isShell = isShell
         }
 
         /// "Final swift test and two load runs, started 14:17".
@@ -705,7 +708,7 @@ public struct TranscriptTail: Equatable, Sendable {
     private static func background(_ lines: [Data.SubSequence]) -> [Background] {
         // Only the lines that can say so are parsed.
         let marks = ["backgroundTaskId", "async_launched", "task-notification"].map { Data($0.utf8) }
-        var started: [(id: String, call: String?, what: String?, at: Double?)] = []
+        var started: [(id: String, call: String?, what: String?, at: Double?, shell: Bool)] = []
         var done = Set<String>()
         for line in lines where marks.contains(where: { line.range(of: $0) != nil }) {
             guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
@@ -722,11 +725,11 @@ public struct TranscriptTail: Equatable, Sendable {
             guard let id else { continue }
             let call = ((object["message"] as? [String: Any])?["content"] as? [[String: Any]])?
                 .first { $0["type"] as? String == "tool_result" }?["tool_use_id"] as? String
-            started.append((id, call, result["description"] as? String, ChatReader.date(object["timestamp"])?.timeIntervalSince1970))
+            started.append((id, call, result["description"] as? String, ChatReader.date(object["timestamp"])?.timeIntervalSince1970, result["backgroundTaskId"] is String))
         }
         let open = started.filter { !done.contains($0.id) && !($0.call.map(done.contains) ?? false) }
         return open.map { Background(id: $0.id, what: $0.what ?? $0.call.flatMap { description(of: $0, in: lines) } ?? "a background task",
-                                     startedAt: $0.at) }
+                                     startedAt: $0.at, isShell: $0.shell) }
     }
 
     /// The texts of `<task-notification>`s a line carries.

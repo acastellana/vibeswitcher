@@ -256,7 +256,7 @@ public enum Shell {
     public static func run(executable: String, args: [String], in directory: String, env: [String: String] = [:],
                            timeout: TimeInterval = 120, grace: TimeInterval = 5, interleaved: Bool = false,
                            branchCode: Bool = false, ownSession: Bool = false, watch: StallWatch? = nil,
-                           time: MacTime = .real) -> Git.Result {
+                           time: MacTime = .real, beforeStop: (() -> Void)? = nil) -> Git.Result {
         // Its limits count the time the Mac was awake. On 2026-11-08 a merge's run had 4.9 minutes awake out of 51.8:
         // the first look after a dark wake found test_timeout_min passed and called it hung, and the merges behind it waited.
         let now = time.awake
@@ -325,6 +325,8 @@ public enum Shell {
             let heard = [output.last, errors.last].compactMap { $0 }.max() ?? began
             quiet = timedOut ? max(0, now() - heard) : nil
             if cancelled { stall = nil }
+            // Whoever asked to see the run as it was, before it's stopped (its folder's place in a slot's line goes with it).
+            if timedOut { beforeStop?() }
             // Out of time: its children (a test runner's workers) go too, or they'd keep running in the worktree.
             // Asked first; whatever is still there after `grace` (it ignores TERM) is killed.
             stop(process, group: group, grace: grace)
@@ -819,7 +821,8 @@ public enum Worktrees {
     /// Fast-forwards main to `commit` (the tested one; the branch's head when nil). Never rewrites anything and
     /// never touches uncommitted work: uncommitted changes in the main checkout to files the merge changes, main
     /// checked out elsewhere, or a commit not on top of main is refused with the reason.
-    public static func merge(root: String, slug: String, commit: String? = nil, base: String? = nil) throws -> Merge {
+    public static func merge(root: String, slug: String, commit: String? = nil, base: String? = nil,
+                             records: String? = LeadWorkflow.defaultRecordsDir) throws -> Merge {
         let main = base ?? mainBranch(root: root)
         guard !["HEAD", ""].contains(main) else { return .refused("The repository has no main branch checked out.") }
         let branch = commit ?? branch(slug)
@@ -828,15 +831,19 @@ public enum Worktrees {
         }
         // Read once, before the checks: the update below is against this head and no later one.
         let current = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(main)"], in: root).output
-        return fastForward(root: root, base: main, to: Git.run(["rev-parse", branch], in: root).output, from: current)
+        return fastForward(root: root, base: main, to: Git.run(["rev-parse", branch], in: root).output, from: current,
+                           landing: Landing(route: "merge of \(self.branch(slug))", records: records))
     }
 
     /// Fast-forwards `base` from `expected` (its head as the caller last saw it) to `commit`. Refused when the
     /// branch isn't at `expected` any more (something else moved it, or another merge landed first), when `commit`
-    /// isn't on top of it, when its checkout has uncommitted changes to files the merge changes (named), or when it's
-    /// checked out in another worktree.
-    public static func fastForward(root: String, base main: String, to commit: String, from expected: String) -> Merge {
+    /// isn't on top of it, when its checkout has uncommitted changes to files the merge changes (named; the lead's
+    /// records' lines not committed yet stay, `landKeepingRecords`), when it's checked out in another worktree, or when
+    /// the commit fails `landing`'s check (`landingRefusal`), which runs here, before the branch moves, on the commit
+    /// that would land.
+    public static func fastForward(root: String, base main: String, to made: String, from expected: String, landing: Landing) -> Merge {
         guard !["HEAD", ""].contains(main) else { return .refused("The repository has no main branch checked out.") }
+        let commit = landing.probe?.candidate?(made) ?? made
         let current = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(main)"], in: root).output
         guard !expected.isEmpty, current == expected else {
             return .refused("\(main) is at \(current.prefix(8)), not at \(expected.prefix(8)) where it was; it moved meanwhile.")
@@ -844,25 +851,44 @@ public enum Worktrees {
         guard Git.run(["merge-base", "--is-ancestor", expected, commit], in: root).ok else {
             return .refused("The branch isn't on top of \(main); rebase and test it first.")
         }
+        if let refused = landingRefusal(landing, candidate: commit, from: expected, base: main, root: root) { return .refused(refused) }
         let resolvedRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
         switch checkout(of: main, root: root) {
         case .some(let place) where URL(fileURLWithPath: place).resolvingSymlinksInPath().path == resolvedRoot:
             if let lock = IndexLock.find(in: root) { return .refused(refusal(lock)) }
             // Only the uncommitted files the merge changes stop it, as they would stop git: the rest is the user's
             // work in progress, and stays as it is. git's own check still holds: --ff-only overwrites nothing.
+            let move = { () -> Merge in
+                let merge = Git.run(["merge", "--ff-only", "-q", commit], in: root)
+                guard merge.ok else {
+                    // One that came meanwhile: said whose it is, not as git's "Another git process seems to be running".
+                    if let lock = IndexLock.find(in: root) { return .refused(refusal(lock)) }
+                    return .refused(merge.error)
+                }
+                let landed = Git.run(["rev-parse", "refs/heads/\(main)"], in: root).output
+                return landed == commit ? .merged : .refused("\(main) ended at \(landed.prefix(8)), not \(commit.prefix(8)); it moved during the merge.")
+            }
             switch uncommitted(in: root, changedFrom: expected, to: commit) {
             case .failure(let error): return .refused(error.description)
-            case .success(let overlap) where !overlap.isEmpty: return .refused(refusal(overlap))
-            case .success: break
+            case .success(let overlap) where !overlap.isEmpty:
+                // The lead's lines not committed yet, in records the commit changes too: they stay. Anything else stops it.
+                guard let lock = landing.lockRecords, let records = landing.records,
+                      overlap.allSatisfy({ LeadRecords.paths(records).contains($0.path) && ["modified", "untracked"].contains($0.state) }) else {
+                    return .refused(refusal(overlap))
+                }
+                do {
+                    return try lock { landKeepingRecords(files: overlap.map(\.path), root: root, expected: expected, commit: commit, move: move) }
+                } catch {
+                    return .refused("The lead's records couldn't be locked to keep their uncommitted lines (\(error)); \(main) wasn't moved.")
+                }
+            case .success:
+                // git replaces the records' files the commit changes: no line may be appended to the old file meanwhile.
+                guard let lock = landing.lockRecords, let records = landing.records,
+                      !Git.run(["diff", "--quiet", expected, commit, "--"] + LeadRecords.paths(records), in: root).ok else { return move() }
+                do { return try lock(move) } catch {
+                    return .refused("The lead's records couldn't be locked for the fast-forward (\(error)); \(main) wasn't moved.")
+                }
             }
-            let merge = Git.run(["merge", "--ff-only", "-q", commit], in: root)
-            guard merge.ok else {
-                // One that came meanwhile: said whose it is, not as git's "Another git process seems to be running".
-                if let lock = IndexLock.find(in: root) { return .refused(refusal(lock)) }
-                return .refused(merge.error)
-            }
-            let landed = Git.run(["rev-parse", "refs/heads/\(main)"], in: root).output
-            return landed == commit ? .merged : .refused("\(main) ended at \(landed.prefix(8)), not \(commit.prefix(8)); it moved during the merge.")
         case .some(let place):
             return .refused(checkedOut(main, in: place, root: root))
         case .none:
@@ -966,7 +992,7 @@ public enum Worktrees {
     /// when it holds a merge; nil when HEAD is the result, else how it stopped (`conflict`, `error`, `cancelled`), with
     /// the worktree back at a clean state. The lead's records under `records` land as the base has them.
     /// A branch that carries commits of `remote` (the remote's tip fetch_remote fetched) the base lacks lands as a
-    /// true merge instead (`landAsMerge`), so they stay themselves.
+    /// true merge instead (`landAsMerge`), so they stay themselves, and the remote's records with them.
     /// With `trailers` (the merge's provenance, `LeadProvenance`), the commit that lands on top ends with them
     /// (`stamp`), before anything is tested: the tested commit is the one that lands.
     static func put(_ commit: String, onto base: String, in path: String, records: String?, remote: String? = nil,
@@ -1025,8 +1051,8 @@ public enum Worktrees {
         // other Mac's commits landed as copies, so origin/main wasn't an ancestor of main and push_remote refused,
         // and its lead records were put back to main's copy. Rebased or squashed, the remote's commits would be
         // copies; merged whole, they're themselves.
-        if carried(remote, onto: base, in: path) != nil {
-            guard let stopped = landAsMerge(onto: base, in: path, records: records) else { return nil }
+        if let carrying = carried(remote, onto: base, in: path) {
+            guard let stopped = landAsMerge(onto: base, in: path, records: records, carrying: carrying) else { return nil }
             return cancel?.isCancelled == true ? .cancelled : stopped
         }
         // A worker brings its branch up to date by merging the base in. Rebasing would drop that merge and replay
@@ -1376,14 +1402,24 @@ public enum Worktrees {
             }
             let started = Date()
             let stop = progress?.heartbeat { "Running the \(name) (\(duration(Date().timeIntervalSince(started))) so far)." }
+            // The two clocks at its start: what the Mac slept of its run, if it's stopped as hung (`MergeRerun.causeNote`).
+            let clocks = (wall: time.wall(), awake: time.awake())
+            // Something in its folder still in line for a slot when it's stopped: its ticket goes with the run.
+            var queued: TestLock.Wait?
             // The branch's code (its build, its tests): never the lead to the session host (see `BranchCode`).
             let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path, env: env, timeout: timeout, interleaved: true,
-                                branchCode: true, watch: lock?.watch, time: time)
+                                branchCode: true, watch: lock?.watch, time: time,
+                                beforeStop: { queued = lock?.waits(for: ["run": path])["run"] })
             stop?()
             // A run stopped for making no progress says so first, then what it was stuck on, after its output.
             // Stopped at test_timeout_min, it says how long it had been silent: a crawl keeps writing, a stuck one doesn't.
             let silent = run.stall == nil ? run.quiet.map { "\n\n" + MergeRerun.quietNote($0) } : nil
-            let said = (name == "rerun" ? rerunHeader : "") + header + run.output + (run.stall.map { "\n\n" + $0.report } ?? silent ?? "")
+            var said = (name == "rerun" ? rerunHeader : "") + header + run.output + (run.stall.map { "\n\n" + $0.report } ?? silent ?? "")
+            if run.timedOut, !run.cancelled {
+                let stopped = time.wall(), window = stopped.timeIntervalSince(clocks.wall)
+                said += "\n\n" + MergeRerun.causeNote(stall: run.stall, quiet: run.quiet, slept: max(0, window - (time.awake() - clocks.awake)), window: window,
+                                                      started: clocks.wall, stopped: stopped, queued: queued, recorded: recorded)
+            }
             outputs.append((name, said))
             if run.cancelled || cancel?.isCancelled == true { return (.cancelled, outputs) }
             if let stall = run.stall {
@@ -1446,7 +1482,9 @@ public enum Worktrees {
         switch stopped {
         case nil: outcome = outputs.contains { $0.name == "test command" } ? .passed : .noTests
         case .failed: outcome = .failed(outputs.last?.name ?? "test command")
-        case .hung(let command, let after, _, let stall): outcome = .hung(command, after: after, stall: stall?.summary)
+        case .hung(let command, let after, let output, let stall):
+            let said = [stall?.summary, MergeRerun.cause(in: output)].compactMap { $0 }.joined(separator: ". ")
+            outcome = .hung(command, after: after, stall: said.isEmpty ? nil : said)
         case .cancelled: outcome = .cancelled
         case .error(let text): outcome = .error(text)
         case .passed, .passedOnRerun, .conflict: outcome = .error("unexpected")
@@ -1590,12 +1628,12 @@ public enum Worktrees {
     /// Replaces the detached HEAD at `path` with a merge commit of it on `base` (the base its first parent, so the
     /// base's first-parent history stays a line), for a branch that carries `carried`, a remote's commit the base
     /// lacks (`carried(_:head:onto:in:)`): its commits stay themselves, so the remote's tip stays an ancestor of the
-    /// base. The records under `records` land as the base has them (`baseRecords`), as in a rebase or a squash, so the
-    /// fast-forward never meets the lead's lines not committed yet; merge then takes the remote's lines into the main
-    /// checkout's records (`LeadRecords.takeRemote`). Conflicts only in them don't stop it. Nil when that's done;
-    /// `conflict` when the branch conflicts with `base` elsewhere; `error`, saying what failed, when something else
-    /// stops it.
-    static func landAsMerge(onto base: String, in path: String, records: String?) -> Check? {
+    /// base. The records under `records` land as the base has them with the lines `carrying` brought (by union from
+    /// their merge base, `unionRecords`; a worker's own edits to them aren't taken), so the commit itself holds the
+    /// remote's lines and nothing after the merge has to add them. Conflicts only in them don't stop it. Nil when that's
+    /// done; `conflict` when the branch conflicts with `base` elsewhere; `error`, saying what failed, when something
+    /// else stops it.
+    static func landAsMerge(onto base: String, in path: String, records: String?, carrying: String) -> Check? {
         let tip = Git.run(["rev-parse", "HEAD"], in: path).output
         let subject = Git.run(["log", "-1", "--format=%s", tip], in: path).output
         let author = Git.run(["log", "-1", "--format=%an <%ae>", tip], in: path).output
@@ -1619,6 +1657,10 @@ public enum Worktrees {
             back()
             return .error("Taking \(base.prefix(8))'s lead records (\(records)) into the merge failed.")
         }
+        if let records, let failure = takeRecords(records, of: carrying, onto: base, in: path) {
+            back()
+            return .error("Taking the lead records of \(carrying.prefix(8)) into the merge failed: \(failure)")
+        }
         let message = "Merge \(tip.prefix(8))" + (subject.isEmpty ? "" : ": \(subject)")
         let committed = noEditor(["commit", "-q", "-m", message] + (author.isEmpty ? [] : ["--author", author]), in: path)
         guard committed.ok else {
@@ -1626,6 +1668,30 @@ public enum Worktrees {
             return .error("Committing the merge of \(tip.prefix(8)) into \(base.prefix(8)) failed: \(said(committed))")
         }
         return nil
+    }
+
+    /// At `path`, whose records are the base's (`baseRecords`): the lines `carrying` has in them that the base lacks,
+    /// staged, by union from their merge base. Nil when that's done, else what failed.
+    static func takeRecords(_ records: String, of carrying: String, onto base: String, in path: String) -> String? {
+        let paths = LeadRecords.paths(records)
+        let ancestor = Git.run(["merge-base", base, carrying], in: path).output
+        let ours = paths.reduce(into: [String: Data]()) { taken, file in
+            taken[file] = FileManager.default.contents(atPath: (path as NSString).appendingPathComponent(file))
+        }
+        switch unionRecords(root: path, paths: paths, ours: ours, ancestor: ancestor, theirs: carrying) {
+        case .failure(let failure): return failure.description
+        case .success(let changed):
+            for (file, data) in changed {
+                let target = URL(fileURLWithPath: (path as NSString).appendingPathComponent(file))
+                do {
+                    try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try data.write(to: target)
+                } catch { return "\(error)" }
+                let added = Git.run(["add", "--", file], in: path)
+                guard added.ok else { return said(added) }
+            }
+            return nil
+        }
     }
 
     /// The records at `paths` (relative to `root`) as `ours` has them (the main checkout's, committed or not) with
@@ -2333,9 +2399,11 @@ extension Worktrees {
     /// other staged or unstaged change there stays exactly as it was. A held index.lock is waited for up to
     /// `lockWait` (`lockPause` between tries), never removed. A path missing from the working tree is left as the
     /// branch has it. With `contents`, a path's text is what it gives (a snapshot taken under the caller's lock)
-    /// instead of the working tree's; with `expected`, only on top of that head.
+    /// instead of the working tree's; with `expected`, only on top of that head. The commit made must pass `landing`'s
+    /// check (`landingRefusal`) before the index or the branch is touched.
     public static func commitFiles(root: String, branch: String, paths: [String], contents: [String: Data] = [:], message: String,
-                                   from expected: String? = nil, lockWait: TimeInterval = 5, lockPause: (() -> Void)? = nil) -> FilesCommit {
+                                   from expected: String? = nil, lockWait: TimeInterval = 5, lockPause: (() -> Void)? = nil,
+                                   landing: Landing) -> FilesCommit {
         let git = { (args: [String], env: [String: String]) in
             Git.run(args, in: root, env: env, timeout: 60)
         }
@@ -2375,6 +2443,7 @@ extension Worktrees {
         let made = git(["-c", "commit.gpgsign=false", "commit-tree", tree.output, "-p", head, "-m", message], [:])
         guard made.ok, !made.output.isEmpty else { return .failed("git commit-tree failed: \(said(made))") }
         let commit = made.output
+        if let refused = landingRefusal(landing, candidate: commit, from: head, base: branch, root: root) { return .failed(refused) }
         // The checkout's index, for these paths only: what was there, then what's committed.
         let checkedOut = place != nil
         var before: [String: String] = [:]

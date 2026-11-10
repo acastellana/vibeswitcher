@@ -14,6 +14,8 @@ enum WebAssets {
         "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
         "/icon-192.png": ("icon-192.png", "image/png"),
         "/icon-512.png": ("icon-512.png", "image/png"),
+        // iOS takes its home-screen icon from this link, not the manifest: the 512 logo, which it scales down.
+        "/apple-touch-icon.png": ("icon-512.png", "image/png"),
     ]
 
     /// A short fingerprint of the web app's files: changes when an update serves a different app.

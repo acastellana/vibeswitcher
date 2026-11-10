@@ -2095,6 +2095,233 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-09 09:34 Merged readme-a-real-feature: README: a real feature list, and screenshots that show what their captions say (in a batch: readme-a-real-feature, ideas-review-addyosmani, ideas-review-cloudflare landed on one test run) (build 16ca360977ec)
 - 2026-11-09 09:34 Merged ideas-review-addyosmani: Ideas review: addyosmani/agent-skills (no audit: review none) (in a batch: readme-a-real-feature, ideas-review-addyosmani, ideas-review-cloudflare landed on one test run) (build 16ca360977ec)
 - 2026-11-09 09:34 Merged ideas-review-cloudflare: Ideas review: cloudflare/security-audit-skill (no audit: review none) (in a batch: readme-a-real-feature, ideas-review-addyosmani, ideas-review-cloudflare landed on one test run) (build 16ca360977ec)
+- 2026-11-09 09:34 Automatically (auto_advance): Merged readme-a-real-feature at 15b6a7c7 (its passing audit), ideas-review-addyosmani at 83f33d61 (review none: its worker's done report on a9498b2d), ideas-review-cloudflare at f2d05d8b (review none: its worker's done report on 6b2f5a0c) into main as one batch, on 1 test run for 3 tasks.
+- 2026-11-09 09:34 Automatically (auto_advance): Cleaned up readme-a-real-feature (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 09:34 Automatically (auto_advance): Cleaned up ideas-review-addyosmani (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 09:34 Automatically (auto_advance): Cleaned up ideas-review-cloudflare (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 09:34 Fetched origin/main at 28f6e0ac: main is 11 commits ahead of origin/main and 0 commits behind it
+- 2026-11-09 09:34 Asked the user to push main at 87340fff (11 commits) to origin/main
+- 2026-11-09 09:35 Pushed main at 87340fff (11 commits) to origin/main, on the user's click
+- 2026-11-09 09:44 Kept prototype-67js-a-session unmerged: Throwaway prototype for the user to look at; never merged (decision on the 67js prototypes). Delete or keep is the user's call.
+- 2026-11-09 09:44 Kept prototype-67js-a-lead unmerged: Throwaway prototype for the user to look at; never merged (decision on the 67js prototypes). Delete or keep is the user's call.
+- 2026-11-09 09:45 Kept prototype-67js-a-session-2 unmerged: Throwaway prototype for the user to look at; never merged (decision on the 67js prototypes). Delete or keep is the user's call.
+- 2026-11-09 09:46 Update: Three 67js prototypes of a session — Three throwaway 3D pages built with 67js, all with invented data. They stay on their own branches and aren't merged. To open one, double-click its `index.html`; no server or build is needed.
+- 2026-11-09 09:48 Automatically fetched origin/main at 87340fff: 0 commits from the other Mac at origin/main (87340fffd9fdf2deabdadcb45e8a0cf88eeac08b): merge_remote would do nothing: main has everything origin/main has.
+- 2026-11-09 09:49 Abandoned prototype-67js-a-session: The user looked at the three 67js prototypes and said "meh - remove them".
+- 2026-11-09 09:49 Abandoned prototype-67js-a-session-2: The user looked at the three 67js prototypes and said "meh - remove them".
+- 2026-11-09 09:49 Abandoned prototype-67js-a-lead: The user looked at the three 67js prototypes and said "meh - remove them".
+- 2026-11-09 09:52 Merged ideas-review-mattpocock: Ideas review: mattpocock/skills (in a batch: ideas-review-mattpocock, ideas-review-google landed on one test run) (build 16ca360977ec)
+- 2026-11-09 09:52 Merged ideas-review-google: Ideas review: google/elephant-goldfish-model (in a batch: ideas-review-mattpocock, ideas-review-google landed on one test run) (build 16ca360977ec)
+- 2026-11-09 09:52 Automatically (auto_advance): Merged ideas-review-mattpocock at f8db093c (its passing audit), ideas-review-google at 65024866 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-09 09:52 Automatically (auto_advance): Cleaned up ideas-review-mattpocock (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 09:52 Automatically (auto_advance): Cleaned up ideas-review-google (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 10:39 Planned verifier-eval-failed: Verifier eval: failed runs aren't scored, cases get REVIEW.md, and a true baseline (review audit)
+- 2026-11-09 10:39 Started a worker on verifier-eval-failed
+- 2026-11-09 10:39 Automatically (auto_advance): Started a worker on verifier-eval-failed (Verifier eval: failed runs aren't scored, cases get REVIEW.md, and a true baseline).
+- 2026-11-09 10:39 Planned dismissing-an-important: Dismissing an Important finding has to cite something checkable (review audit)
+- 2026-11-09 10:39 Started a worker on dismissing-an-important
+- 2026-11-09 10:39 Automatically (auto_advance): Started a worker on dismissing-an-important (Dismissing an Important finding has to cite something checkable).
+- 2026-11-09 10:39 Planned bug-tasks-start-from: Bug tasks start from a command that goes red on the reported symptom (review audit)
+- 2026-11-09 10:39 Started a worker on bug-tasks-start-from
+- 2026-11-09 10:39 Automatically (auto_advance): Started a worker on bug-tasks-start-from (Bug tasks start from a command that goes red on the reported symptom).
+- 2026-11-09 10:39 Planned each-merge-records-the: Each merge records the Claude Code version that made it
+- 2026-11-09 10:39 Started a worker on each-merge-records-the (auto → Claude: Claude weekly 53%, 3 points behind pace, not tight; Codex 59%)
+- 2026-11-09 10:39 Automatically (auto_advance): Started a worker on each-merge-records-the (Each merge records the Claude Code version that made it); its agent is auto, so it went to Claude: Claude weekly 53%, 3 points behind pace, not tight; Codex 59%.
+- 2026-11-09 10:39 Planned backtest-would-a-fresh: Backtest: would a fresh reader of contracts catch what later went wrong?
+- 2026-11-09 10:39 Started a worker on backtest-would-a-fresh (auto → Claude: Claude weekly 53%, 3 points behind pace, not tight; Codex 59%)
+- 2026-11-09 10:39 Automatically (auto_advance): Started a worker on backtest-would-a-fresh (Backtest: would a fresh reader of contracts catch what later went wrong?); its agent is auto, so it went to Claude: Claude weekly 53%, 3 points behind pace, not tight; Codex 59%.
+- 2026-11-09 10:39 Planned backtest-how-often-would: Backtest: how often would a 'tests got weaker' check have fired?
+- 2026-11-09 10:39 Started a worker on backtest-how-often-would (auto → Claude: Claude weekly 53%, 3 points behind pace, not tight; Codex 59%)
+- 2026-11-09 10:39 Automatically (auto_advance): Started a worker on backtest-how-often-would (Backtest: how often would a 'tests got weaker' check have fired?); its agent is auto, so it went to Claude: Claude weekly 53%, 3 points behind pace, not tight; Codex 59%.
+- 2026-11-09 10:40 Planned audits-settle-their: Audits settle their doubts, walk the skipped states, and flag what nobody asked for (review audit)
+- 2026-11-09 10:40 Planned a-size-ceiling-on: A size ceiling on each role's prompt
+- 2026-11-09 10:59 Released bug-tasks-start-from's worker (idle since its done report on c8f6637f) while its audit runs
+- 2026-11-09 10:59 Automatically (auto_advance): Started the audit of bug-tasks-start-from at c8f6637f (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 11:05 Released dismissing-an-important's worker (idle since its done report on b3fb1e1a) while its audit runs
+- 2026-11-09 11:05 Automatically (auto_advance): Started the audit of dismissing-an-important at b3fb1e1a (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 11:06 Audit of bug-tasks-start-from: complete, clean, round 1: 1 Nit open
+- 2026-11-09 11:17 Audit of dismissing-an-important: complete, clean, round 1: 2 Nit open
+- 2026-11-09 11:20 Merged each-merge-records-the: Each merge records the Claude Code version that made it (no audit: review none) (in a batch: each-merge-records-the, backtest-how-often-would landed on one test run) (build 16ca360977ec)
+- 2026-11-09 11:20 Merged backtest-how-often-would: Backtest: how often would a 'tests got weaker' check have fired? (no audit: review none) (in a batch: each-merge-records-the, backtest-how-often-would landed on one test run) (build 16ca360977ec)
+- 2026-11-09 11:20 Automatically (auto_advance): Merged each-merge-records-the at 471a03b2 (review none: its worker's done report on 2dcf4876), backtest-how-often-would at 001f18db (review none: its worker's done report on 9ad7d37e) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-09 11:20 Automatically (auto_advance): Cleaned up each-merge-records-the; ended pid 76195 (Worker: Each merge records the Claude Code version that made it) (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-09 11:20 Automatically (auto_advance): Cleaned up backtest-how-often-would (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 12:00 Merged dismissing-an-important: Dismissing an Important finding has to cite something checkable (in a batch: dismissing-an-important, bug-tasks-start-from, backtest-would-a-fresh landed on one test run) (build 16ca360977ec)
+- 2026-11-09 12:00 Merged bug-tasks-start-from: Bug tasks start from a command that goes red on the reported symptom (in a batch: dismissing-an-important, bug-tasks-start-from, backtest-would-a-fresh landed on one test run) (build 16ca360977ec)
+- 2026-11-09 12:00 Merged backtest-would-a-fresh: Backtest: would a fresh reader of contracts catch what later went wrong? (no audit: review none) (in a batch: dismissing-an-important, bug-tasks-start-from, backtest-would-a-fresh landed on one test run) (build 16ca360977ec)
+- 2026-11-09 12:00 Flaky in the batch dismissing-an-important, bug-tasks-start-from, backtest-would-a-fresh: aOneLineShellCommandIsDelivered(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-09 12:00 Automatically (auto_advance): Merged dismissing-an-important at 1e18e21d (its passing audit), bug-tasks-start-from at 67200183 (its passing audit), backtest-would-a-fresh at 8bb3f066 (review none: its worker's done report on 495f7b91) into main as one batch, on 1 test run for 3 tasks.
+- 2026-11-09 12:00 Automatically (auto_advance): Cleaned up dismissing-an-important (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-09 12:00 Automatically (auto_advance): Cleaned up bug-tasks-start-from (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-09 12:00 Automatically (auto_advance): Cleaned up backtest-would-a-fresh (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 13:32 Started a worker on verifier-eval-failed
+- 2026-11-09 13:43 Planned phone-over-tailscale: Phone over Tailscale: review and fix setup, pairing and staying connected (review audit)
+- 2026-11-09 13:43 Started a worker on phone-over-tailscale
+- 2026-11-09 13:43 Automatically (auto_advance): Started a worker on phone-over-tailscale (Phone over Tailscale: review and fix setup, pairing and staying connected).
+- 2026-11-09 13:43 Planned phone-day-to-day: Phone day to day: review and fix what it shows and how it recovers (review audit)
+- 2026-11-09 13:43 Started a worker on phone-day-to-day
+- 2026-11-09 13:43 Automatically (auto_advance): Started a worker on phone-day-to-day (Phone day to day: review and fix what it shows and how it recovers).
+- 2026-11-09 13:43 Planned phone-input-review-and: Phone input: review and fix replies, keys, lead answers and dictation (review audit)
+- 2026-11-09 13:43 Started a worker on phone-input-review-and
+- 2026-11-09 13:43 Automatically (auto_advance): Started a worker on phone-input-review-and (Phone input: review and fix replies, keys, lead answers and dictation).
+- 2026-11-09 13:45 Planned security-review-of-the: Security review of the phone, host authentication and tool boundaries (on Opus) (review audit)
+- 2026-11-09 14:20 Planned the-merge-checks-the: The merge checks the commit it's about to land before main moves (review audit)
+- 2026-11-09 14:20 Started a worker on the-merge-checks-the
+- 2026-11-09 14:20 Automatically (auto_advance): Started a worker on the-merge-checks-the (The merge checks the commit it's about to land before main moves).
+- 2026-11-09 14:20 Planned audit-exceptions-are-a: Audit exceptions are a structured record the verifier gets before it starts (review audit)
+- 2026-11-09 14:20 Started a worker on audit-exceptions-are-a
+- 2026-11-09 14:20 Automatically (auto_advance): Started a worker on audit-exceptions-are-a (Audit exceptions are a structured record the verifier gets before it starts).
+- 2026-11-09 14:20 Planned a-stalled-or-hung: A stalled or hung report says what it's really waiting on, with evidence (review audit)
+- 2026-11-09 14:20 Started a worker on a-stalled-or-hung
+- 2026-11-09 14:20 Automatically (auto_advance): Started a worker on a-stalled-or-hung (A stalled or hung report says what it's really waiting on, with evidence).
+- 2026-11-09 14:20 Planned start-worker-warns-when: start_worker warns when two tasks claim the same send path or file (review audit)
+- 2026-11-09 15:03 Started a worker on start-worker-warns-when (auto → Claude: Claude weekly 59%, on pace, not tight; Codex 59%)
+- 2026-11-09 15:03 Automatically (auto_advance): Started a worker on start-worker-warns-when (start_worker warns when two tasks claim the same send path or file); its agent is auto, so it went to Claude: Claude weekly 59%, on pace, not tight; Codex 59%.
+- 2026-11-09 15:03 Released phone-day-to-day's worker (idle since its done report on 74527dc7) while its audit runs
+- 2026-11-09 15:03 Automatically (auto_advance): Started the audit of phone-day-to-day at 74527dc7 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 15:27 Released phone-input-review-and's worker (idle since its done report on d8b86dae) while its audit runs
+- 2026-11-09 15:27 Automatically (auto_advance): Started the audit of phone-input-review-and at d8b86dae (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 15:27 Audit of phone-day-to-day: complete, clean, round 1: 2 Nit open, 2 Pre-existing open
+- 2026-11-09 15:28 Planned the-sandbox-s-phone: The sandbox's phone keeps a session's identity, and iOS gets its home-screen icon (review audit)
+- 2026-11-09 15:48 Automatically (auto_advance): Started the audit of audit-exceptions-are-a at 24469dd6 (Its review is audit).
+- 2026-11-09 15:48 Released audit-exceptions-are-a's worker (idle since its done report on 24469dd6) while its audit runs
+- 2026-11-09 15:48 Automatically (auto_advance): Released audit-exceptions-are-a's worker, idle since its done report on 24469dd6, while its audit runs (ended pid 82883 (Worker: Audit exceptions are a structured record the verifier gets before it starts)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-09 15:48 Merged phone-day-to-day: Phone day to day: review and fix what it shows and how it recovers (build 16ca360977ec)
+- 2026-11-09 15:48 Automatically (auto_advance): Merged phone-day-to-day (Phone day to day: review and fix what it shows and how it recovers) into main at ec7054ba, on its passing audit and the full test run.
+- 2026-11-09 15:48 Automatically (auto_advance): Cleaned up phone-day-to-day (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-09 15:55 Audit of phone-input-review-and: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-11-09 15:58 Started a worker on phone-input-review-and
+- 2026-11-09 15:58 Automatically (auto_advance): Merge of phone-input-review-and failed: Conflicts with main: the branch needs bringing up to date. Sent its worker the output; it's back at work.
+- 2026-11-09 16:03 Released start-worker-warns-when's worker (idle since its done report on 9f51c5d3) while its audit runs
+- 2026-11-09 16:03 Automatically (auto_advance): Started the audit of start-worker-warns-when at 9f51c5d3 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 16:08 Audit of audit-exceptions-are-a: complete, clean, round 1: 1 Nit open
+- 2026-11-09 16:16 Audit of start-worker-warns-when: complete, clean, round 1: 3 Nit open
+- 2026-11-09 16:30 Released phone-over-tailscale's worker (idle since its done report on 05af122c) while its audit runs
+- 2026-11-09 16:30 Automatically (auto_advance): Started the audit of phone-over-tailscale at 05af122c (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 16:30 Released the-merge-checks-the's worker (idle since its done report on 32f6aa40) while its audit runs
+- 2026-11-09 16:30 Automatically (auto_advance): Started the audit of the-merge-checks-the at 32f6aa40 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 16:31 Automatically (auto_advance): Started the audit of verifier-eval-failed at 174c137b (Its review is audit).
+- 2026-11-09 16:31 Released verifier-eval-failed's worker (idle since its done report on 174c137b) while its audit runs
+- 2026-11-09 16:31 Automatically (auto_advance): Released verifier-eval-failed's worker, idle since its done report on 174c137b, while its audit runs (ended pid 6254 (Worker: Verifier eval: failed runs aren't scored, cases get REVIEW.md, and a true baseline)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-09 16:33 Started a worker on audit-exceptions-are-a
+- 2026-11-09 16:33 Automatically (auto_advance): Merge of audit-exceptions-are-a failed: Tests fail rebased onto main: web tests: 2 of 2 passed Sent its worker the output; it's back at work.
+- 2026-11-09 16:36 Released a-stalled-or-hung's worker (idle since its done report on b71a4206) while its audit runs
+- 2026-11-09 16:36 Automatically (auto_advance): Started the audit of a-stalled-or-hung at b71a4206 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 16:39 Audit of phone-over-tailscale: complete, clean, round 1: 2 Nit open
+- 2026-11-09 16:47 Audit of the-merge-checks-the: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-11-09 16:52 Audit of verifier-eval-failed: incomplete, clean, round 1: 1 Important open, 2 Nit open
+- 2026-11-09 16:52 Started a worker on verifier-eval-failed
+- 2026-11-09 16:52 Automatically (auto_advance): Sent verifier-eval-failed's worker the open Important findings verifier-eval-failed:F1 from its audit at 174c137b (in a new worker: its last one was released during the audit).
+- 2026-11-09 16:52 Sent verifier-eval-failed's audit contract v3 (it had v2)
+- 2026-11-09 16:54 Released phone-input-review-and's worker (idle since its done report on f3e263b2) while its audit runs
+- 2026-11-09 16:54 Automatically (auto_advance): Started the audit of phone-input-review-and at f3e263b2 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 16:54 Merged start-worker-warns-when: start_worker warns when two tasks claim the same send path or file (build 16ca360977ec)
+- 2026-11-09 16:54 Automatically (auto_advance): Merged start-worker-warns-when (start_worker warns when two tasks claim the same send path or file) into main at 7e6636e1, on its passing audit and the full test run.
+- 2026-11-09 16:54 Automatically (auto_advance): Cleaned up start-worker-warns-when (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-09 16:54 Audit of a-stalled-or-hung: complete, clean, round 1: 5 Nit open
+- 2026-11-09 16:56 The worker on verifier-eval-failed answered findings: verifier-eval-failed:F1 fixed at 23a7fe0b: 3d2a4b19: score_case adds up len(permission_denials) over every result event in the stream instead of reading only the last one; cost and usage still come from the last event, which is the running total. New test aCaseAddsUpTheDenialsOfEveryResultInItsStream uses a 4-result stream (3, 0, 1, absent) and expects 4 denials and the last cost; with the script fix reverted it fails on exactly the denial expectations (2 issues), with it all 10 tests pass. Offl…
+- 2026-11-09 17:06 Released audit-exceptions-are-a's worker (idle since its done report on 00666440) while its audit runs
+- 2026-11-09 17:06 Automatically (auto_advance): Started the audit of audit-exceptions-are-a at 00666440 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 17:08 Automatically (auto_advance): Started the audit of verifier-eval-failed at 2fb6a7e3 (Its review is audit).
+- 2026-11-09 17:08 Audit of phone-input-review-and: complete, clean, round 2: 2 Nit open, 1 Pre-existing open
+- 2026-11-09 17:08 Released verifier-eval-failed's worker (idle since its done report on 2fb6a7e3) while its audit runs
+- 2026-11-09 17:08 Automatically (auto_advance): Released verifier-eval-failed's worker, idle since its done report on 2fb6a7e3, while its audit runs (ended pid 86620 (Worker: Verifier eval: failed runs aren't scored, cases get REVIEW.md, and a true baseline)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-09 17:10 Audit of audit-exceptions-are-a: complete, clean, round 2: 1 Nit open
+- 2026-11-09 17:13 Audit of verifier-eval-failed: complete, clean, round 2: 1 Important closed, 2 Nit open
+- 2026-11-09 17:14 Merged phone-over-tailscale: Phone over Tailscale: review and fix setup, pairing and staying connected (in a batch: phone-over-tailscale, the-merge-checks-the, a-stalled-or-hung landed on one test run) (build 16ca360977ec)
+- 2026-11-09 17:14 Merged the-merge-checks-the: The merge checks the commit it's about to land before main moves (in a batch: phone-over-tailscale, the-merge-checks-the, a-stalled-or-hung landed on one test run) (build 16ca360977ec)
+- 2026-11-09 17:14 Merged a-stalled-or-hung: A stalled or hung report says what it's really waiting on, with evidence (in a batch: phone-over-tailscale, the-merge-checks-the, a-stalled-or-hung landed on one test run) (build 16ca360977ec)
+- 2026-11-09 17:14 Automatically (auto_advance): Merged phone-over-tailscale at 622440e0 (its passing audit), the-merge-checks-the at 261b2d00 (its passing audit), a-stalled-or-hung at 92a26aa0 (its passing audit) into main as one batch, on 1 test run for 3 tasks.
+- 2026-11-09 17:14 Automatically (auto_advance): Cleaned up phone-over-tailscale (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-09 17:14 Automatically (auto_advance): Cleaned up the-merge-checks-the (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-09 17:14 Automatically (auto_advance): Cleaned up a-stalled-or-hung (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-09 17:30 Planned the-config-seal-s: The config seal's card says exactly what changed and what most likely changed it (review audit)
+- 2026-11-09 17:30 Started a worker on the-config-seal-s
+- 2026-11-09 17:30 Automatically (auto_advance): Started a worker on the-config-seal-s (The config seal's card says exactly what changed and what most likely changed it).
+- 2026-11-09 17:33 Merged verifier-eval-failed: Verifier eval: failed runs aren't scored, cases get REVIEW.md, and a true baseline (in a batch: verifier-eval-failed, phone-input-review-and, audit-exceptions-are-a landed on one test run) (build 16ca360977ec)
+- 2026-11-09 17:33 Merged phone-input-review-and: Phone input: review and fix replies, keys, lead answers and dictation (in a batch: verifier-eval-failed, phone-input-review-and, audit-exceptions-are-a landed on one test run) (build 16ca360977ec)
+- 2026-11-09 17:33 Merged audit-exceptions-are-a: Audit exceptions are a structured record the verifier gets before it starts (in a batch: verifier-eval-failed, phone-input-review-and, audit-exceptions-are-a landed on one test run) (build 16ca360977ec)
+- 2026-11-09 17:33 Automatically (auto_advance): Merged verifier-eval-failed at ae93a18c (its passing audit), phone-input-review-and at 23411571 (its passing audit), audit-exceptions-are-a at 0f72847d (its passing audit) into main as one batch, on 1 test run for 3 tasks.
+- 2026-11-09 17:33 Started a worker on security-review-of-the
+- 2026-11-09 17:33 Automatically (auto_advance): Started a worker on security-review-of-the (Security review of the phone, host authentication and tool boundaries (on Opus)), its after tasks done (phone-over-tailscale, phone-day-to-day, phone-input-review-and).
+- 2026-11-09 17:34 Started a worker on the-sandbox-s-phone
+- 2026-11-09 17:34 Automatically (auto_advance): Started a worker on the-sandbox-s-phone (The sandbox's phone keeps a session's identity, and iOS gets its home-screen icon), its after tasks done (phone-input-review-and).
+- 2026-11-09 17:34 Automatically (auto_advance): Cleaned up verifier-eval-failed (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-09 17:34 Automatically (auto_advance): Cleaned up phone-input-review-and (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-09 17:34 Automatically (auto_advance): Cleaned up audit-exceptions-are-a (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-09 17:34 Started a worker on audits-settle-their
+- 2026-11-09 17:34 Update: Phone and Tailscale review merged; needs an install and a real-phone try — The three phone reviews are merged, along with the merge-check and audit work. Each passed its audit and the full test run. **None of it has run on a real phone yet, and it won't reach your app until …
+- 2026-11-09 17:44 Automatically (auto_advance): Started the audit of the-sandbox-s-phone at e9d55bb2 (Its review is audit).
+- 2026-11-09 17:47 Released the-sandbox-s-phone's worker (idle since its done report on e9d55bb2) while its audit runs
+- 2026-11-09 17:47 Automatically (auto_advance): Released the-sandbox-s-phone's worker, idle since its done report on e9d55bb2, while its audit runs (ended pid 61370 (Worker: The sandbox's phone keeps a session's identity, and iOS gets its home-screen icon)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-09 18:00 Audit of the-sandbox-s-phone: complete, clean, round 1: 1 Nit open
+- 2026-11-09 18:25 Started a worker on the-sandbox-s-phone
+- 2026-11-09 18:25 Automatically (auto_advance): Merge of the-sandbox-s-phone failed: Tests fail rebased onto main: web tests: 2 of 2 passed Sent its worker the output; it's back at work.
+- 2026-11-09 18:26 Incident: A merge's failure sends its worker a log path neither the worker nor the lead can read, with a summary naming no failing test, so the failure can't be diagnosed (in the-sandbox-s-phone); planned turn-this-incident-into-17 to turn it into a check
+- 2026-11-09 18:26 Started a worker on turn-this-incident-into-17
+- 2026-11-09 18:26 Automatically (auto_advance): Started a worker on turn-this-incident-into-17 (Turn this incident into a check: A merge's failure sends its worker a log path neither the wo…).
+- 2026-11-09 18:26 Review of turn-this-incident-into-17: audit
+- 2026-11-09 18:39 Automatically (auto_advance): Started the audit of security-review-of-the at b9930882 (Its review is audit).
+- 2026-11-09 18:40 Released security-review-of-the's worker (idle since its done report on b9930882) while its audit runs
+- 2026-11-09 18:40 Automatically (auto_advance): Released security-review-of-the's worker, idle since its done report on b9930882, while its audit runs (ended pid 61205 (Worker: Security review of the phone, host authentication and tool boundaries (on Opus))): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-09 18:52 Released the-sandbox-s-phone's worker (idle since its done report on f53aa259) while its audit runs
+- 2026-11-09 18:52 Automatically (auto_advance): Started the audit of the-sandbox-s-phone at f53aa259 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 19:01 Audit of the-sandbox-s-phone: complete, clean, round 2: 1 Nit open
+- 2026-11-09 19:01 Audit of security-review-of-the: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-11-09 19:01 Planned a-test-run-s: A test run's leftover-preferences check blames it only for files it made (review audit)
+- 2026-11-09 19:05 Started a worker on a-test-run-s
+- 2026-11-09 19:05 Automatically (auto_advance): Started a worker on a-test-run-s (A test run's leftover-preferences check blames it only for files it made).
+- 2026-11-09 19:19 Merged security-review-of-the: Security review of the phone, host authentication and tool boundaries (on Opus) (in a batch: security-review-of-the, the-sandbox-s-phone landed on one test run) (build 16ca360977ec)
+- 2026-11-09 19:19 Merged the-sandbox-s-phone: The sandbox's phone keeps a session's identity, and iOS gets its home-screen icon (in a batch: security-review-of-the, the-sandbox-s-phone landed on one test run) (build 16ca360977ec)
+- 2026-11-09 19:19 Automatically (auto_advance): Merged security-review-of-the at b9eed611 (its passing audit), the-sandbox-s-phone at 23e6332a (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-09 19:19 Automatically (auto_advance): Cleaned up security-review-of-the (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-09 19:19 Automatically (auto_advance): Cleaned up the-sandbox-s-phone (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-09 19:30 Released the-config-seal-s's worker (idle since its done report on 6090b38f) while its audit runs
+- 2026-11-09 19:30 Automatically (auto_advance): Started the audit of the-config-seal-s at 6090b38f (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 19:30 Sent the-config-seal-s's audit contract v2 (it had v1)
+- 2026-11-09 19:46 Audit of the-config-seal-s: complete, clean, round 1: 4 Nit open
+- 2026-11-09 19:54 Released turn-this-incident-into-17's worker (idle since its done report on 9827cbe7) while its audit runs
+- 2026-11-09 19:54 Automatically (auto_advance): Started the audit of turn-this-incident-into-17 at 9827cbe7 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-09 19:55 Automatically (auto_advance): The account's usage is near a limit: the fable limit (seven_day_overage_included): reached (Claude refused a request at it), resets Nov 12, 12:00. At 80% of a limit VibeSwitcher starts no workers or audits on fable (this one runs fable), so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway, and a task can run on another model (update_task model, configure verifier_model). A bounded, mechanical task with a tight contract can run on Codex instead (update_task(<task>, agent: codex): the Codex account's usage, always audited by a Claude verifier); you decide.
+- 2026-11-09 19:58 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-09 20:06 Merged the-config-seal-s: The config seal's card says exactly what changed and what most likely changed it (build 16ca360977ec)
+- 2026-11-09 20:06 Automatically (auto_advance): Merged the-config-seal-s (The config seal's card says exactly what changed and what most likely changed it) into main at 74a97353, on its passing audit and the full test run.
+- 2026-11-09 20:06 Automatically (auto_advance): Cleaned up the-config-seal-s (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-09 20:24 Planned the-worker-brief-stops: The worker brief stops offering vs-shell, which the host refuses from a worker (review audit)
+- 2026-11-09 20:25 Update: Today: phone review and security fixes landed; audits pause until Nov 12 — **Landed**
+- 2026-11-09 21:45 Workflow: verifier_model = `opus`
+- 2026-11-09 21:45 Automatically (auto_advance): Didn't audit a-test-run-s: a-test-run-s's verifier not started: ~/.claude/skills changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made the change…
+- 2026-11-09 22:48 Audit of turn-this-incident-into-17: complete, clean, round 1: 1 Pre-existing open
+- 2026-11-09 22:56 Audit of a-test-run-s: complete, clean, round 1: 2 Nit open
+- 2026-11-09 23:08 Merged turn-this-incident-into-17: A failed merge run tells its worker and the lead what failed, in a form they can read (build 16ca360977ec)
+- 2026-11-09 23:08 Automatically (auto_advance): Merged turn-this-incident-into-17 (A failed merge run tells its worker and the lead what failed, in a form they can read) into main at c3b1e92d, on its passing audit and the full test run.
+- 2026-11-09 23:08 Automatically (auto_advance): Cleaned up turn-this-incident-into-17 (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-09 23:27 Merged a-test-run-s: A test run's leftover-preferences check blames it only for files it made (build 16ca360977ec)
+- 2026-11-09 23:27 Automatically (auto_advance): Merged a-test-run-s (A test run's leftover-preferences check blames it only for files it made) into main at ab1518aa, on its passing audit and the full test run.
+- 2026-11-09 23:28 Automatically (auto_advance): Cleaned up a-test-run-s; ended pid 19525 (Worker: A test run's leftover-preferences check blames it only for files it made) (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-10 00:01 App health: VibeSwitcher's day, 2026-11-09, from its own logs (read by VibeSwitcher itself, no model): 0 freezes (58.4 a day over the 7 days before), 0 crashes, 1 error line. Memory now: footprint 448 MB, peak 672 MB since launch 11 h ago, +19 MB an hour since it settled at 265 MB. The last footprint relief freed nothing (440 → 440 MB): macOS returned no pages (freed memory is kept for reuse).
+- 2026-11-10 12:37 Fetched origin/main at b87922e0: main is 96 commits ahead of origin/main and 12 commits behind it
+- 2026-11-10 12:37 Planned merge-github-s-main-2: Merge GitHub's main (b87922e0) from the other Mac, resolving PhoneAccess.swift (review audit)
+- 2026-11-10 12:37 Automatically fetched origin/main at b87922e0: 12 commits from the other Mac at origin/main (b87922e039e8c5acfc813dadf57b20a7c12419b6): merge_remote would stop: merging origin/main into main conflicts in Sources/VibeSwitcher/PhoneAccess.swift. It never picks a side for code: ask the user to resolve it (or plan a task that does).
+- 2026-11-10 16:42 Started a worker on merge-github-s-main-2
+- 2026-11-10 16:42 Automatically (auto_advance): Started a worker on merge-github-s-main-2 (Merge GitHub's main (b87922e0) from the other Mac, resolving PhoneAccess.swift).
+- 2026-11-10 17:04 Released merge-github-s-main-2's worker (idle since its done report on d1a4855b) while its audit runs
+- 2026-11-10 17:04 Automatically (auto_advance): Started the audit of merge-github-s-main-2 at d1a4855b (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-10 17:08 Audit of merge-github-s-main-2: complete, clean
+- 2026-11-10 17:08 Automatically (auto_advance): Didn't merge merge-github-s-main-2: Not merged (nothing was tested): Gate code on main isn't installed yet: 18 commits (A merge's failure report: another runner's failure line is named, hung logs and …; A merge's failed or stopped run is told so its worker and the lead can act on it; The held config's card says which files, what's different and what most likely d…; … and 15 more); merges run the installed build (16ca360977ec). agent/merge-github-s-main-2 holds commits of origin/main (up to b87922e0), and its merge runs through that build's gate, which lacks them. Ask the user to install the app from main (scripts/build-app.sh --…
+- 2026-11-10 17:38 Planned a-shell-run-card: A shell Run card goes away by itself a few seconds after it's handled (review audit)
+- 2026-11-10 17:41 Started a worker on a-shell-run-card
+- 2026-11-10 17:41 Automatically (auto_advance): Started a worker on a-shell-run-card (A shell Run card goes away by itself a few seconds after it's handled).
+- 2026-11-10 18:02 Merged merge-github-s-main-2: Merge GitHub's main (b87922e0) from the other Mac, resolving PhoneAccess.swift (build 1810015b999d)
+- 2026-11-10 18:02 Automatically (auto_advance): Merged merge-github-s-main-2 (Merge GitHub's main (b87922e0) from the other Mac, resolving PhoneAccess.swift) into main at ecddc011, on its passing audit and the full test run.
+- 2026-11-10 18:02 Automatically (auto_advance): Cleaned up merge-github-s-main-2 (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-10 18:02 Asked the user to push main at a6df08a0 (103 commits) to origin/main
+- 2026-11-10 18:04 Push of main at a6df08a0 (103 commits) to origin/main rejected: not a fast-forward; nothing forced
+- 2026-11-10 18:04 Fetched origin/main at 4fb46b33: main is 103 commits ahead of origin/main and 5 commits behind it
+- 2026-11-10 18:38 Automatically fetched origin/main at 4fb46b33: 5 commits from the other Mac at origin/main (4fb46b33f6844a4e08648971d045ff4491971950): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
+- 2026-11-10 18:52 Released a-shell-run-card's worker (idle since its done report on b16cdd93) while its audit runs
+- 2026-11-10 18:52 Automatically (auto_advance): Started the audit of a-shell-run-card at b16cdd93 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-10 18:56 Audit of a-shell-run-card: complete, clean, round 1: 2 Nit open
 - 2026-11-09 12:55 accepted 353 commits on main that you ran from VibeSwitcher's window: b87922e Merge remote-tracking branch 'origin/main' into agent/merge-github-s-main; be0dc71 Merge branch 'main' into agent/merge-github-s-main; f64272c Merge origin/main (28f6e0ac) from the other Mac; …
 - 2026-11-09 17:54 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-11-10 08:53 Fetched origin/main at b87922e0: main is 2 commits ahead of origin/main and 0 commits behind it
@@ -2145,3 +2372,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 21:03 Automatically (auto_advance): Merged send-all-rows-tell (Send all: rows tell apart calls that differ only in arguments, and a batch over 30 says what's left) into main at 9fa7577e, on its passing audit and the full test run.
 - 2026-11-10 21:03 Automatically (auto_advance): Cleaned up send-all-rows-tell (freed 1.6 GB of build output and temporary folders). It stays done.
 - 2026-11-10 21:04 Update: Send all waiting wallet requests with one reviewed action (merged, not installed yet) — **What changed.** When a session has 2 or more wallet cards waiting and a Wallet Manager is chosen, the cards offer **Send all N to Wallet Manager…**. It opens a list of exactly those requests: fields…
+- 2026-11-10 18:58 Merged origin/main into main: 5 commits from the remote, as a merge commit, ab1b80a3; the tests passed on it (build 1810015b999d)

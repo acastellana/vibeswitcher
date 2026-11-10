@@ -1,7 +1,7 @@
 #!/bin/bash
 # Lists the last merges VibeSwitcher landed, from git log alone: each one's commit, date, task, review, models, the
-# build of the tool server that merged it and its contract's hash, as the trailers merge put on it (VS-Task,
-# VS-Review, VS-Worker-Model, VS-Verifier-Model, VS-Build, VS-Contract). Read-only: it never writes anything.
+# build of the tool server that merged it, its contract's hash and its worker's Claude Code version, as the trailers
+# merge put on it (VS-Task, VS-Review, VS-Worker-Model, VS-Verifier-Model, VS-Build, VS-Contract, VS-CLI; - for a merge from before one). Read-only.
 #
 # scripts/merge-provenance.sh [-n N] [--build PREFIX] [--model TEXT] [--repo DIR] [REV]
 #   -n N            the last N merges (default 20; 0: all)
@@ -12,7 +12,7 @@
 #                   merge's other side too, so another Mac's merges carried in show as well
 #
 # Prints a header, then one tab-separated line per merge, newest first:
-#   commit  date  task  review  worker  verifier  build  contract
+#   commit  date  task  review  worker  verifier  build  contract  cli
 set -euo pipefail
 
 count=20
@@ -37,16 +37,16 @@ git -C "$repo" rev-parse --verify --quiet "$rev^{commit}" >/dev/null || { echo "
 
 # One field per trailer, its value only (several of a key joined with ", "), records apart by RS, fields by US.
 field() { printf '%%(trailers:key=%s,valueonly,separator=%%x2C%%x20)' "$1"; }
-format="%H%x1f%cs%x1f$(field VS-Task)%x1f$(field VS-Review)%x1f$(field VS-Worker-Model)%x1f$(field VS-Verifier-Model)%x1f$(field VS-Build)%x1f$(field VS-Contract)%x1e"
+format="%H%x1f%cs%x1f$(field VS-Task)%x1f$(field VS-Review)%x1f$(field VS-Worker-Model)%x1f$(field VS-Verifier-Model)%x1f$(field VS-Build)%x1f$(field VS-Contract)%x1f$(field VS-CLI)%x1e"
 
-printf 'commit\tdate\ttask\treview\tworker\tverifier\tbuild\tcontract\n'
+printf 'commit\tdate\ttask\treview\tworker\tverifier\tbuild\tcontract\tcli\n'
 shown=0
-while IFS=$'\x1f' read -r -d $'\x1e' commit date task review worker verifier made contract; do
+while IFS=$'\x1f' read -r -d $'\x1e' commit date task review worker verifier made contract cli; do
     commit="${commit#$'\n'}"
     [[ -n $task ]] || continue
     [[ -z $build || $made == "$build"* ]] || continue
     [[ -z $model || $worker == *"$model"* || $verifier == *"$model"* ]] || continue
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${commit:0:12}" "$date" "$task" "$review" "${worker:--}" "${verifier:--}" "${made:--}" "${contract:--}"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${commit:0:12}" "$date" "$task" "$review" "${worker:--}" "${verifier:--}" "${made:--}" "${contract:--}" "${cli:--}"
     shown=$((shown + 1))
     ((count == 0 || shown < count)) || break
 done < <(git -C "$repo" log --format="$format" "$rev")

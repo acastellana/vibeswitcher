@@ -87,7 +87,9 @@ extension LeadAuditFindersTests {
         let board = call(lead, "board", ["task": "add-b"]).text
         #expect(board.contains("Held by strict_paths: F1 is unconfirmed by the finders' vote, and strict_paths holds it"), "\(board)")
 
-        #expect(!call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the contract allows bee"]).isError)
+        // An unconfirmed Important finding is still Important: its dismissal cites something too.
+        #expect(call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the contract allows bee"]).isError)
+        #expect(!call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the contract allows bee: b.txt:1"]).isError)
         let merged = call(lead, "merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
         #expect(Git.run(["show", "main:b.txt"], in: root).ok)

@@ -334,7 +334,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `tell JSON` — hands a fake Claude (the selected one, or the one labelled "to") a FakeClaude op, e.g. '{"op": "permission"… — `Sources/VibeSwitcher/Sandbox.swift`
 - `notify prepare|allow|deny` — a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare… — `Sources/VibeSwitcher/Sandbox.swift`
 - `new [codex|shell|zsh] [LABEL]` — starts another fake session: a Claude, or a Codex or a plain shell (cat), or an interactive zsh on the… — `Sources/VibeSwitcher/Sandbox.swift`
-- `confighold [outside|accept]` — the agents' config held for the fake lead (ConfigSeal): its team's worker bound (outside: none, so it's held… — `Sources/VibeSwitcher/Sandbox.swift`
+- `confighold [outside|sync|diff|all|accept]` — the agents' config held for the fake lead (ConfigSeal): its team's worker bound (outside: none, so it's held… — `Sources/VibeSwitcher/Sandbox.swift`
 - `push [click|decline]` — the fake lead asks to push (push_remote): its folder a scratch repository and a scratch bare remote as origin… — `Sources/VibeSwitcher/Sandbox.swift`
 - `clear` — ends and removes every fake session: the sidebar is empty, with its New Session menu — `Sources/VibeSwitcher/Sandbox.swift`
 - `views` — the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls… — `Sources/VibeSwitcher/Sandbox.swift`
@@ -357,6 +357,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `answer` — answers the fake lead's open questions: its row reads as its terminal does again — `Sources/VibeSwitcher/Sandbox.swift`
 - `leadmail` — writes made-up messages between the fake lead and other projects' leads (start the lead first) to its private… — `Sources/VibeSwitcher/Sandbox.swift`
 - `extras` — adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task… — `Sources/VibeSwitcher/Sandbox.swift`
+- `phone-show off|notinstalled|notrunning|https|portinuse|expired|unreadable` — Settings › Phone as in that setup state, with nothing started (run phone first to have a phone listed): the… — `Sources/VibeSwitcher/Sandbox.swift`
 - `phone` — serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says… — `Sources/VibeSwitcher/Sandbox.swift`
 - `dictation key|nokey|note|ack|press|release|letgo|cancel|turnon` — push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or… — `Sources/VibeSwitcher/Sandbox.swift`
 - `soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop` — a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a… — `Sources/VibeSwitcher/Sandbox.swift`
