@@ -213,7 +213,7 @@ struct ShellTidierTests {
         defer { tidier.close() }
         var shells: [HostSession] = []
         for label in ["Kept", "Left"] {
-            let request = ShellRequest(session: UUID().uuidString, cwd: String(cString: realpath("/tmp", nil)), command: "echo ran-$((40 + 2))",
+            let request = ShellRequest(session: UUID().uuidString, cwd: String(cString: realpath(NSHomeDirectory(), nil)), command: "echo ran-$((40 + 2))",
                                        label: label, createdAt: Date())
             var result: Result<HostSession, HostClientError>?
             host.spawn(ShellAsk.spawnRequest(request, cols: 80, rows: 24)) { result = $0 }

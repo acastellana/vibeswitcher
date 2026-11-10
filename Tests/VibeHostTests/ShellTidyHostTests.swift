@@ -14,7 +14,7 @@ struct ShellTidyHostTests {
 
     /// A Run card's shell for `command`, started as the app starts it.
     static func runShell(_ command: String, on app: TestClient, label: String = "Install") async throws -> HostSession {
-        let request = ShellRequest(session: asker, cwd: String(cString: realpath("/tmp", nil)), command: command, label: label, createdAt: Date())
+        let request = ShellRequest(session: asker, cwd: String(cString: realpath(NSHomeDirectory(), nil)), command: command, label: label, createdAt: Date())
         let seq = app.send(.spawn(ShellAsk.spawnRequest(request, cols: 80, rows: 24)))
         #expect(await eventually { app.reply(to: seq) != nil })
         guard case .spawned(let shell)? = app.reply(to: seq) else { throw CancellationError() }
@@ -129,7 +129,7 @@ struct ShellTidyHostTests {
         let shell = try await Self.runShell("perl -e 'setpgrp(0, 0); $SIG{HUP} = q(IGNORE); $|=1; print qq(b=$$\\n); sleep 300' & true", on: app)
         // Another session, with a program of its own; and a shell the user opened by hand (File › New Shell).
         let other = try await app.spawn("perl -e '$|=1; print qq(o=$$\\n); sleep 300'; \(keepRunning)")
-        let seq = app.send(.spawn(SpawnRequest(cwd: "/tmp", command: nil, env: [:], cols: 80, rows: 24, keepShell: false, label: "Shell", agent: nil)))
+        let seq = app.send(.spawn(SpawnRequest(cwd: NSHomeDirectory(), command: nil, env: [:], cols: 80, rows: 24, keepShell: false, label: "Shell", agent: nil)))
         #expect(await eventually { app.reply(to: seq) != nil })
         guard case .spawned(let byHand)? = app.reply(to: seq) else { Issue.record("no shell"); return }
         await app.attach(shell.id)
