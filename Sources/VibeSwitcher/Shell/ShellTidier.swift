@@ -4,7 +4,7 @@ import VibeCore
 
 /// Ends the shells Run cards opened once they're finished and nobody uses them (`ShellTidy`): every `interval` it looks
 /// at the host's sessions and ends, as End Session does, each Run-card shell whose command exited 0 ten minutes ago or
-/// more, that is back at its prompt and wasn't typed into since. The session then shows under Ended, its output still
+/// more, that is back at its prompt, wasn't typed into since and whose command left nothing running. The session then shows under Ended, its output still
 /// there. A failed command's shell, one that was typed into, and any session no Run card started are left alone.
 ///
 /// Typed into (`typed`, told by `HostClient.onInput` for everything sent to a session but the terminal's own answers):
@@ -26,6 +26,8 @@ final class ShellTidier {
     var sessions: () -> [HostSession] = { [] }
     /// The session's shell is at its prompt.
     var idle: (HostSession) -> Bool = ShellTidy.idle
+    /// The session's command left something running (a server, a tunnel) that ending it would end too.
+    var leftRunning: (HostSession, ShellTidy.Ending) -> Bool = ShellTidy.leftRunning
     /// Ends the session, as End Session does (main thread).
     var end: (UUID) -> Void = { _ in }
     /// Asks the question (main thread): whether to go on. One without a button only says something.
@@ -81,7 +83,7 @@ final class ShellTidier {
             used.formIntersection(live)
             save()
         }
-        let due = ShellTidy.due(all, used: used, now: now(), after: endAfter, idle: idle)
+        let due = ShellTidy.due(all, used: used, now: now(), after: endAfter, idle: idle, leftRunning: leftRunning)
         for session in due {
             log("\(session.id.uuidString.prefix(8)) (\(session.label)) ended by itself: its command went well "
                 + "\(Durations.short(now().timeIntervalSince(ShellTidy.ending(of: session)?.at ?? now()))) ago and nobody used it since")

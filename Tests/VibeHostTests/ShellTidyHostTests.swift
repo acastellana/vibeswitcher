@@ -119,9 +119,23 @@ struct ShellTidyHostTests {
         #expect(ShellTidy.finished([try #require(app.latest(shell.id))]).map(\.id) == [shell.id])
     }
 
-    /// Ending a finished shell ends that session's own processes and nothing else (the 2026-10-23 decision on ending
-    /// sessions): another session, its program, and the user's own processes run on.
-    @Test func endingAFinishedShellLeavesOtherSessionsAndTheUsersProcessesAlone() async throws {
+    /// A command still running in the launch line's own shell (two servers and a `wait`) holds the terminal as a
+    /// prompt does: Close Finished Shells… doesn't take it for finished, nor is it ended by itself.
+    @Test func aCommandStillWaitingIsNotFinished() async throws {
+        let host = try TestHost()
+        let app = try TestClient(host)
+        let shell = try await Self.runShell("echo up-$((40 + 2)); sleep 3600 & wait", on: app)
+        defer { app.send(.kill(id: shell.id)) }
+        #expect(await eventually { app.screen(shell.id)?.contains("up-42") == true })
+        #expect(ShellTidy.finished([app.latest(shell.id) ?? shell]).isEmpty)
+        #expect(Self.tidy([shell], on: app, now: Date().addingTimeInterval(24 * 3600)).isEmpty)
+        #expect((app.latest(shell.id) ?? shell).isLive)
+    }
+
+    /// A shell whose command left a job running isn't ended by itself, however long ago it went well: ending it would
+    /// end the job. Close Finished Shells… takes it, and ending it ends that session's own processes and nothing else
+    /// (the 2026-10-23 decision on ending sessions): another session, its program, and the user's own processes run on.
+    @Test func aShellThatLeftAJobStaysAndClosingItLeavesOtherSessionsAndTheUsersProcessesAlone() async throws {
         let host = try TestHost()
         let app = try TestClient(host)
         // The Run card's command left a job behind, in a group of its own that ignores SIGHUP: the session's own, which
@@ -154,10 +168,15 @@ struct ShellTidyHostTests {
         #expect(await eventually { app.latest(shell.id).flatMap(ShellTidy.ending(of:))?.ok == true })
         #expect(await eventually { app.latest(shell.id).map(ShellTidy.idle) == true && ShellTidy.idle(byHand) })
 
-        // A day later: only the Run card's shell is ended, the others never looked at.
+        // A day later nothing is ended by itself: the Run card's shell has its job, the others are never looked at.
         let all = [shell, other, byHand]
+        #expect(Self.tidy(all, on: app, now: Date().addingTimeInterval(24 * 3600)).isEmpty)
+        #expect(ShellTidy.leftRunning(try #require(app.latest(shell.id)), try #require(app.latest(shell.id).flatMap(ShellTidy.ending(of:)))))
+        // Close Finished Shells… finds the Run card's shell alone, and ends it as End Session does.
+        let finished = ShellTidy.finished(all.map { app.latest($0.id) ?? $0 })
+        #expect(finished.map(\.id) == [shell.id])
         let ended = Date()
-        #expect(Self.tidy(all, on: app, now: Date().addingTimeInterval(24 * 3600)) == [shell.id])
+        finished.forEach { app.send(.kill(id: $0.id)) }
         #expect(await eventually(timeout: 60) { app.latest(shell.id)?.isLive == false && kill(job, 0) != 0 },
                 "shell live \(String(describing: app.latest(shell.id)?.isLive)), its job \(kill(job, 0) == 0)")
         // Past the 5 s mark too (when what didn't end on being asked is killed), the others run.

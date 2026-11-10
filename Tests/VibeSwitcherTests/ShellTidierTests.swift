@@ -19,6 +19,8 @@ struct ShellTidierTests {
         var now = ShellTidierTests.start
         var sessions: [HostSession] = []
         var busy: Set<UUID> = []
+        /// Shells whose command left something running.
+        var left: Set<UUID> = []
         var ended: [UUID] = []
         var asked: [ShellTidier.Question] = []
         var answer = true
@@ -37,6 +39,7 @@ struct ShellTidierTests {
         let tidier = ShellTidier(file: file ?? temp.url("used").appendingPathComponent("used.json"), now: { seen.now }, log: { _ in })
         tidier.sessions = { seen.sessions }
         tidier.idle = { !seen.busy.contains($0.id) }
+        tidier.leftRunning = { session, _ in seen.left.contains(session.id) }
         tidier.end = { seen.ended.append($0) }
         tidier.ask = { question in
             seen.asked.append(question)
@@ -74,8 +77,11 @@ struct ShellTidierTests {
         // Another program's report in a Run-card shell (an agent the user started there) isn't the command's end.
         let anothers = Self.session("Shell: Tools", state: .done, app: "claude-code")
         let legacy = Self.session("Shell: Old", command: Self.oldRunLine, state: nil)
-        seen.sessions = [failed, typedInto, busy, running, byHand, preset, agent, anothers, legacy]
+        // Its command went well and left a server up: ending the shell would end that too.
+        let server = Self.session("Shell: Tunnel")
+        seen.sessions = [failed, typedInto, busy, running, byHand, preset, agent, anothers, legacy, server]
         seen.busy = [busy.id]
+        seen.left = [server.id]
         let tidier = tidier(seen)
         tidier.typed(typedInto.id)
         seen.now = Self.start.addingTimeInterval(26 * 3600)
@@ -86,6 +92,10 @@ struct ShellTidierTests {
         // Back at its prompt, the busy one goes.
         seen.busy = []
         #expect(tidier.look() == [busy.id])
+        // What the command left has ended: so does the shell.
+        seen.sessions = [server]
+        seen.left = []
+        #expect(tidier.look() == [server.id])
     }
 
     /// A shell that was ended for the user (tidied away, or End Session) reads "ended" under Ended, not as a failure,
@@ -141,36 +151,43 @@ struct ShellTidierTests {
         let typedInto = Self.session("Shell: Query", ago: 300)
         let legacy = Self.session("Shell: Old", command: Self.oldRunLine, state: nil)
         let busy = Self.session("Shell: Server")
+        // Its command still runs, in the launch line's own shell (`a & b & wait`, a `read`): that shell holds the
+        // terminal, as one at its prompt does, but nothing has said the command ended.
+        let waiting = Self.session("Shell: Dev", state: nil)
+        // It left a tunnel up: not ended by itself, but this takes it (the confirmation says what's left ends too).
+        let tunnel = Self.session("Shell: Tunnel", ago: 3600)
+        seen.left = [tunnel.id]
         let byHand = Self.session("Shell", command: nil, state: nil)
         let agent = Self.session("Claude", command: "claude", state: .done, app: "claude-code", agent: "claude")
         let gone = Self.session("Shell: Gone", exit: .init(status: 0, at: Self.start))
         let elsewhere = Self.session("Shell: Elsewhere")
-        seen.sessions = [fine, failed, typedInto, legacy, busy, byHand, agent, gone, elsewhere]
+        seen.sessions = [fine, failed, typedInto, legacy, tunnel, busy, waiting, byHand, agent, gone, elsewhere]
         seen.busy = [busy.id]
         let tidier = tidier(seen)
         tidier.typed(typedInto.id)
-        let rows = Self.rows([fine, failed, typedInto, legacy, busy, byHand, agent, gone])
+        let rows = Self.rows([fine, failed, typedInto, legacy, tunnel, busy, waiting, byHand, agent, gone])
         // What the sidebar counts to offer it at all.
-        #expect(EndedSnapshots.actions.agentShells(rows) == 5 && EndedSnapshots.actions.agentShells(Self.rows([byHand, agent, gone])) == 0)
+        #expect(EndedSnapshots.actions.agentShells(rows) == 7 && EndedSnapshots.actions.agentShells(Self.rows([byHand, agent, gone])) == 0)
 
         // Cancelled: asked once, nothing ended.
         seen.answer = false
         #expect(tidier.close(project: "example", rows: rows).isEmpty && seen.ended.isEmpty && seen.asked.count == 1)
         let question = seen.asked[0]
-        #expect(question.message == "Close 4 finished shells in “example”?" && question.button == "Close 4 Shells")
+        #expect(question.message == "Close 5 finished shells in “example”?" && question.button == "Close 5 Shells")
         #expect(question.detail.hasPrefix("""
             Shell: Install: command finished 2h ago
             Shell: Backup: command failed 1d 2h ago
             Shell: Query: command finished 5m ago
             Shell: Old: at its prompt
+            Shell: Tunnel: command finished 1h ago
 
             """), "\(question.detail)")
         #expect(question.detail.contains("under Ended"))
 
-        // Confirmed: those four, once.
+        // Confirmed: those five, once.
         seen.answer = true
-        #expect(tidier.close(project: "example", rows: rows) == [fine, failed, typedInto, legacy].map(\.id))
-        #expect(seen.ended == [fine, failed, typedInto, legacy].map(\.id) && seen.asked.count == 2)
+        #expect(tidier.close(project: "example", rows: rows) == [fine, failed, typedInto, legacy, tunnel].map(\.id))
+        #expect(seen.ended == [fine, failed, typedInto, legacy, tunnel].map(\.id) && seen.asked.count == 2)
     }
 
     /// One that started a program while the question was up isn't ended; with nothing to close, that's said and

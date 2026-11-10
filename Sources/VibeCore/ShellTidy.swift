@@ -6,8 +6,8 @@ import Foundation
 /// host keeps it as the session's `programStatus`, with when), and from that:
 ///
 /// - the command exited 0, nobody typed into the shell since (`used`, the app's record), and the shell is back at its
-///   prompt (`idle`): the session is ended `idleFor` after the command finished (`due`), and shows under Ended, its
-///   output still there to read;
+///   prompt (`idle`) with nothing of the command's still running (`leftRunning`): the session is ended `idleFor` after
+///   the command finished (`due`), and shows under Ended, its output still there to read;
 /// - the command failed (non-zero, or killed): it stays until the user closes it, its row saying "command failed";
 /// - the user typed into it after the command ended: it's theirs, and stays.
 ///
@@ -51,19 +51,38 @@ public enum ShellTidy {
     }
 
     /// The sessions to end now: Run-card shells whose command exited 0 at least `after` ago, that nobody typed into
-    /// since (`used`) and that are back at their prompt (`idle`, asked only of those).
+    /// since (`used`), that are back at their prompt (`idle`) and whose command left nothing running (`leftRunning`);
+    /// the last two are asked only of those the rest holds for.
     public static func due(_ sessions: [HostSession], used: Set<UUID>, now: Date, after: TimeInterval = idleFor,
-                           idle: (HostSession) -> Bool = ShellTidy.idle) -> [HostSession] {
+                           idle: (HostSession) -> Bool = ShellTidy.idle,
+                           leftRunning: (HostSession, Ending) -> Bool = ShellTidy.leftRunning) -> [HostSession] {
         sessions.filter { session in
             guard let ending = ending(of: session), ending.ok, !used.contains(session.id) else { return false }
-            return now.timeIntervalSince(ending.at) >= after && idle(session)
+            return now.timeIntervalSince(ending.at) >= after && idle(session) && !leftRunning(session, ending)
         }
     }
 
     /// What Close Finished Shells… ends: the live Run-card shells that are back at their prompt, however their command
-    /// ended and whether or not they were typed into (the confirmation lists them).
+    /// ended and whether or not they were typed into (the confirmation lists them, and says that what they left
+    /// running ends too). Never one whose command still runs: a launch line that says how the command ended hasn't
+    /// yet (the shell holds its terminal meanwhile too, in a `wait` or a `read` of its own). A shell from before
+    /// launch lines said so is taken by its prompt alone.
     public static func finished(_ sessions: [HostSession], idle: (HostSession) -> Bool = ShellTidy.idle) -> [HostSession] {
-        sessions.filter { $0.isLive && opened($0) && idle($0) }
+        sessions.filter { session in
+            guard session.isLive, opened(session) else { return false }
+            if session.command?.contains(report) == true, ending(of: session) == nil { return false }
+            return idle(session)
+        }
+    }
+
+    /// The command left something running that ending the session would end with it (a server put in the background, a
+    /// tunnel or daemon that detached): a process of the session other than its shell (`SessionStrays`), started before
+    /// the command ended. Such a shell is never ended by itself; Close Finished Shells… takes it, after asking. What
+    /// started after the command's end in a shell nobody typed into is the shell's own (a prompt's helper).
+    public static func leftRunning(_ session: HostSession, _ ending: Ending) -> Bool {
+        let ended = UInt64(max(0, ending.at.timeIntervalSince1970) * 1_000_000)
+        return SessionStrays.of(session: session.id, started: SessionStrays.descendants(of: session.childPID))
+            .contains { $0.pid != session.childPID && $0.start < ended }
     }
 
     /// The session's shell is at its prompt: it holds its terminal's foreground (a program it runs in the foreground
