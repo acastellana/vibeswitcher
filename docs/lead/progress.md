@@ -2139,3 +2139,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 20:40 Released send-all-rows-tell's worker (idle since its done report on a49e738d) while its audit runs
 - 2026-11-10 20:40 Automatically (auto_advance): Started the audit of send-all-rows-tell at a49e738d (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-10 20:40 Sent send-all-rows-tell's audit contract v2 (it had v1)
+- 2026-11-10 20:42 Audit of send-all-rows-tell: complete, clean, round 1: 2 Nit open
+- 2026-11-10 20:54 Automatically fetched origin/main at 55fce1fb: 107 commits from the other Mac at origin/main (55fce1fb540cee63c7ce0183c895d2348eff2035): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
+- 2026-11-10 21:03 Merged send-all-rows-tell: Send all: rows tell apart calls that differ only in arguments, and a batch over 30 says what's left (build b87922e039e8 with changes not committed)
