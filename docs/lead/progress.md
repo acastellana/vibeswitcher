@@ -2142,3 +2142,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 20:42 Audit of send-all-rows-tell: complete, clean, round 1: 2 Nit open
 - 2026-11-10 20:54 Automatically fetched origin/main at 55fce1fb: 107 commits from the other Mac at origin/main (55fce1fb540cee63c7ce0183c895d2348eff2035): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
 - 2026-11-10 21:03 Merged send-all-rows-tell: Send all: rows tell apart calls that differ only in arguments, and a batch over 30 says what's left (build b87922e039e8 with changes not committed)
+- 2026-11-10 21:03 Automatically (auto_advance): Merged send-all-rows-tell (Send all: rows tell apart calls that differ only in arguments, and a batch over 30 says what's left) into main at 9fa7577e, on its passing audit and the full test run.
+- 2026-11-10 21:03 Automatically (auto_advance): Cleaned up send-all-rows-tell (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-10 21:04 Update: Send all waiting wallet requests with one reviewed action (merged, not installed yet) — **What changed.** When a session has 2 or more wallet cards waiting and a Wallet Manager is chosen, the cards offer **Send all N to Wallet Manager…**. It opens a list of exactly those requests: fields…
