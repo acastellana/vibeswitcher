@@ -2120,3 +2120,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 18:04 Merged passage-contract-check: Passage contract check: the real passage CLI still matches what VibeSwitcher assumes (build b87922e039e8 with changes not committed)
 - 2026-11-10 18:04 Automatically (auto_advance): Merged passage-contract-check (Passage contract check: the real passage CLI still matches what VibeSwitcher assumes) into main at 3d92996e, on its passing audit and the full test run.
 - 2026-11-10 18:04 Automatically (auto_advance): Cleaned up passage-contract-check (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-10 18:41 Planned wallet-cards-send-all: Wallet cards: Send all waiting requests of a session with one reviewed action (review audit)
+- 2026-11-10 18:41 Started a worker on wallet-cards-send-all
+- 2026-11-10 18:41 Automatically (auto_advance): Started a worker on wallet-cards-send-all (Wallet cards: Send all waiting requests of a session with one reviewed action).

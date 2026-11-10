@@ -301,3 +301,7 @@ The user asked to fetch the latest and install. The trial merge conflicts in Wal
 
 The user asked to see what's possible and said they'll probably delete them. Local npm install with --ignore-scripts in the prototype or scratch folder only, by the user's request to use this library; its MCP server and Claude plugin stay out because they'd write agent config and trip the seal.
 
+## 2026-11-10 18:41:18 Wallet cards get "Send all N to Wallet Manager…" for one session's waiting requests (task wallet-cards-send-all, audited): one action opens a list of exactly those requests, and confirming sends that snapshot one at a time through the existing single-card send, each with its own outcome, stopping at the first failure. No pre-authorisation of future requests by pattern, timer or setting: VibeSwitcher sends only what the user was shown in the list they confirmed. Never for Sign in browser wallet. The wallet-request format stays version 1, unchanged.
+
+The user said yes on 2026-11-10 after another project's lead asked for fewer clicks: its rollout files 36 near-identical requests, each needing its own Send. The lead advised against pattern pre-authorisation because VibeSwitcher never judges a transaction and the Send click exists to check the agent that files the requests; exact matching belongs with the Wallet Manager's checks.
+
