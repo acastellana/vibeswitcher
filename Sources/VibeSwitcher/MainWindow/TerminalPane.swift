@@ -29,30 +29,19 @@ final class HostTerminalView: TerminalView {
         onReply?(Data(data))
     }
 
-    /// SwiftTerm paints only cells with an explicit background and leaves the default one to the view's layer colour. A
-    /// drawing of the view that leaves the layer out (a snapshot, an ended session's screen as last drawn) then has no
-    /// background at all and shows whatever is behind it: white, under the dark palette's light text. This view under
-    /// the rest paints the default background itself, in the theme's colour (`apply` sets it).
-    private final class Backdrop: NSView {
-        var color = NSColor.clear { didSet { needsDisplay = true } }
-        override func draw(_ dirtyRect: NSRect) {
-            color.setFill()
-            dirtyRect.fill()
-        }
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-        override var isFlipped: Bool { true }
-    }
-
-    private var backdrop: Backdrop?
-
-    func paintBackground(_ color: NSColor) {
-        if backdrop == nil {
-            let view = Backdrop(frame: bounds)
-            view.autoresizingMask = [.width, .height]
-            addSubview(view, positioned: .below, relativeTo: nil)
-            backdrop = view
-        }
-        backdrop?.color = color
+    /// SwiftTerm paints only cells with an explicit background and clears the rest to transparent, leaving the default
+    /// background to the view's layer colour. A drawing of the view that leaves the layer out (a snapshot, a print, a
+    /// PDF) is then transparent there and shows what's behind it: white, under the dark palette's light text. After the
+    /// view has drawn, the default background goes in, in the theme's colour, behind what's drawn (only where it's
+    /// transparent).
+    override func displayIgnoringOpacity(_ rect: NSRect, in context: NSGraphicsContext) {
+        super.displayIgnoringOpacity(rect, in: context)
+        context.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.compositingOperation = .destinationOver
+        nativeBackgroundColor.setFill()
+        rect.fill()
+        context.restoreGraphicsState()
     }
 
     // MARK: Selection, as in Terminal.app
@@ -562,7 +551,6 @@ extension HostTerminalView {
         }
         nativeForegroundColor = color(palette.foreground)
         nativeBackgroundColor = color(palette.background)
-        paintBackground(nativeBackgroundColor)
         caretColor = color(palette.cursor)
         selectedTextBackgroundColor = color(palette.selection)
         installColors(palette.ansi.map { hex in

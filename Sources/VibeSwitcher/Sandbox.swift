@@ -197,7 +197,30 @@ enum Sandbox {
         guard let view = window.contentView?.superview ?? window.contentView,
               let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: bitmap)
+        underlayTerminalBackgrounds(in: view, bitmap)
         return (view, bitmap)
+    }
+
+    /// A terminal leaves its default background transparent for the layer's colour to show through, which a drawing of
+    /// the window (unlike the screen) doesn't composite: each shown terminal's theme background goes behind what was
+    /// drawn, where it is transparent, as it shows on screen.
+    static func underlayTerminalBackgrounds(in root: NSView, _ bitmap: NSBitmapImageRep) {
+        var terminals: [HostTerminalView] = []
+        func collect(_ view: NSView) {
+            guard !view.isHidden else { return }
+            if let terminal = view as? HostTerminalView { terminals.append(terminal) }
+            view.subviews.forEach(collect)
+        }
+        collect(root)
+        guard !terminals.isEmpty, let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = context
+        context.compositingOperation = .destinationOver
+        for terminal in terminals {
+            terminal.nativeBackgroundColor.setFill()
+            terminal.convert(terminal.bounds, to: root).fill()
+        }
     }
 
     /// `bitmap` as a PNG in `file`. False when it couldn't be written.
