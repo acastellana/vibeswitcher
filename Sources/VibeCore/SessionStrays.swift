@@ -52,7 +52,10 @@ public enum SessionStrays {
     @discardableResult
     static func endNow(session id: UUID, started: [Found], sparing groups: Set<pid_t> = [], keeping app: String? = nil,
                        grace: TimeInterval = 5) -> [Found] {
-        func mine() -> [Found] { of(session: id, started: started) }
+        let app = app.map(resolved)
+        func mine() -> [Found] {
+            of(session: id, started: started).filter { found in app.map { !runs(found.pid, executable: $0) } ?? true }
+        }
         let begun = Date()
         let asked = mine().filter { !groups.contains($0.group) }
         asked.forEach { kill($0.pid, SIGTERM) }
