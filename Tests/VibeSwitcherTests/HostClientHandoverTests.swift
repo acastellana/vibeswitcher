@@ -100,7 +100,12 @@ struct HostClientHandoverTests {
             }
         }
 
+        /// What every connection asked, in order (on `queue`).
+        private var asked: [HostRequest] = []
+        var requests: [HostRequest] { queue.sync { asked } }
+
         private func handle(_ envelope: HostRequestEnvelope, on fd: Int32) {
+            asked.append(envelope.request)
             switch envelope.request {
             case .hello:
                 send(.welcome(protocolVersion: HostProtocol.version, hostBuild: build, sessions: [session],
@@ -307,6 +312,34 @@ struct HostClientHandoverTests {
         #expect(log.handover == ["host: handover failed: Couldn't hand over: probe failed."], "\(log.lines)")
         #expect(log.lines.contains { $0.hasPrefix("host: handover: no answer in 1 s") }, "\(log.lines)")
         #expect(client.state == .outdated(live: 1, compatible: true))
+    }
+
+    /// The host closes the connection to re-execute and the app hasn't noticed yet (its close reaches the main thread
+    /// after what was queued there): a kill and a read asked then aren't lost, they go out once on the new connection,
+    /// and nothing is logged as "host: not sent". The main thread is held (as busy as it is at a window reopening)
+    /// until the connection has ended, so the requests are asked in that window.
+    @Test func requestsAskedAsTheHostHandsOverGoOutOnTheNewConnection() async throws {
+        let host = try FakeHost(pid: 31589, build: 8, onHandover: .onCue(then: .reExec(build: 9)))
+        defer { host.stop() }
+        let log = Log()
+        let client = client(of: host, log: log)
+        #expect(await until { log.lines.contains { $0.hasPrefix("host: handing over") } }, "\(log.lines)")
+        let id = try #require(client.sessions.first?.id)
+        #expect(host.cue())
+        let deadline = Date().addingTimeInterval(30)
+        while !client.connectionEnded, Date() < deadline { usleep(1_000) }
+        try #require(client.connectionEnded, "the connection never ended")
+        var history: Bool?
+        client.kill(id)
+        client.history(id, lines: 10) { history = ($0 != nil) }
+        client.resize(id, cols: 100, rows: 30, reason: .windowResize)
+        #expect(await until { client.state == .connected && host.requests.contains { if case .history = $0 { return true } else { return false } } })
+        let kills = host.requests.filter { if case .kill = $0 { return true } else { return false } }
+        let reads = host.requests.filter { if case .history = $0 { return true } else { return false } }
+        #expect(kills == [.kill(id: id)], "\(host.requests)")
+        #expect(reads == [.history(id: id, lines: 10)], "\(host.requests)")
+        #expect(await until { history != nil })
+        #expect(!log.lines.contains { $0.contains("host: not sent") }, "\(log.lines)")
     }
 
     /// The app's wait covers the host's: its probe limit, and a margin for saving the sessions and the exec.

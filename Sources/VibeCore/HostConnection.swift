@@ -311,7 +311,7 @@ public final class HostConnection: @unchecked Sendable {
         }
     }
 
-    private var isClosed: Bool { sendingState { closed } }
+    public var isClosed: Bool { sendingState { closed } }
 
     /// `body` under `sending`.
     private func sendingState<T>(_ body: () -> T) -> T {
