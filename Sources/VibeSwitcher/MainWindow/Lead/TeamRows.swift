@@ -96,7 +96,7 @@ struct TeamRow: Identifiable, Equatable {
     /// The dim line under the title: for a task at work, what its agent is doing (the plain-language summary, else
     /// the latest checkpoint, else the live activity); for a red one, what it asks or why.
     func line(summary: String?) -> String? {
-        if mark.isRed || [.waits, .blocked, .kept, .abandoned, .reverted].contains(mark) { return problem }
+        if mark.isRed || [.waits, .blocked, .queued, .kept, .abandoned, .reverted].contains(mark) { return problem }
         if let foldedText { return foldedText }
         guard isLive else { return nil }
         return summary ?? checkpoint?.text ?? activity
@@ -405,7 +405,7 @@ enum TeamRows {
             row.mark = .abandoned
             row.state = "Abandoned"
         case .planned:
-            break
+            row.problem = waitsOn(task, board: board)
         case .running:
             if let worker, !worker.live {
                 red(.ended, "Worker ended", "The worker ended without reporting.", since: nil)
@@ -478,7 +478,8 @@ enum TeamRows {
                     since: task.since.map(Date.init(timeIntervalSince1970:)))
             }
         case .blocked:
-            red(.blocked, "Blocked", waitsOn(task, board: board) ?? task.blocker, since: task.since.map(Date.init(timeIntervalSince1970:)))
+            let context = task.notes?.filter { $0.kind == .context && $0.at >= (task.since ?? -.infinity) }.max { $0.at < $1.at }?.text
+            red(.blocked, "Blocked", waitsOn(task, board: board) ?? context ?? task.blocker, since: task.since.map(Date.init(timeIntervalSince1970:)))
         case .kept:
             // Held back on purpose: finished for now, not failed.
             row.group = .finished
@@ -490,13 +491,14 @@ enum TeamRows {
     }
 
     /// "Waits on <title>, <title>": `task`'s after tasks not done yet, by title (a folded one by the task carrying it,
-    /// one not on the board by its slug); nil when none is left, or the board isn't known.
+    /// when still on the board); nil when none is left, or the board isn't known. Only finished tasks leave board.json
+    /// (`BoardStore.archivable`), so omit missing tasks without reading the archive on a row rebuild.
     static func waitsOn(_ task: LeadTask, board: LeadBoard?) -> String? {
         guard let board, let after = task.after, !after.isEmpty else { return nil }
         let open = after.compactMap { slug -> String? in
             var other = board.task(slug)
             if other?.status == .folded, let carrier = other?.foldedInto { other = board.task(carrier) ?? other }
-            guard let other else { return slug }
+            guard let other else { return nil }
             if other.status == .done { return nil }
             return other.title + (other.isAbandoned ? " (abandoned)" : "")
         }
