@@ -44,8 +44,8 @@ per task in a batch. It measures recorded successful checks, not independently v
 “Suite time” in `load-report.sh` is `duration_s`: initialization, tests, regression commands and any rerun combined,
 excluding load and slot waits. It is not isolated full-suite runtime. Its default median repeats a shared batch duration
 for each task; the additional median above counts each `(project, batch)` once and each unbatched tested row once.
-The mix differs: normal tested rows are VibeSwitcher 43, studio-metrics 12, GenSwap 1; boosted rows are VibeSwitcher
-86, studio-metrics 13, GenSwap 14, wallet-manager 7. Even within VibeSwitcher, median recorded command duration is
+The mix differs: normal tested rows are VibeSwitcher 43, project-b 12, project-c 1; boosted rows are VibeSwitcher
+86, project-b 13, project-c 14, project-d 7. Other project names are anonymized in this prose. Even within VibeSwitcher, median recorded command duration is
 662 s normally versus 908.5 s boosted; project mix alone does not explain the slowdown.
 
 Coverage reconciles to 9,716 samples (161.93 h), 276 merge rows and 572 distinct hang timestamps. There are no
