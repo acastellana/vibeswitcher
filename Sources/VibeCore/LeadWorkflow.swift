@@ -1181,7 +1181,11 @@ public enum LeadPrompts {
         takes only commits, and cleanup removes the worktree).
         \(scratchFiles) `git rm <path>` is for tracked files your change deletes.
         \(debuggers)
-        \(SessionNote.realTerminal) The card is in your own chat, which the user may not have open: say with ask_lead that it's waiting for their Run.
+        When something needs a real terminal (a password or other prompt, an install, an interactive program, anything \
+        that asks questions on stdin or files wallet requests), ask_lead with the exact command, working directory and \
+        why it needs a real terminal; the lead files the shell card for the user to Run. Wait for the lead's answer. \
+        Don't ask the user to open Terminal.app, paste a command into a shell, or type `! <command>` for it. A password \
+        is typed only into that shell, never into chat: don't ask for one here, and never put one in the command.
         Processes: stop one you started by its pid (`kill <pid>`; `$!` or `pgrep -f <your worktree path>` finds it). \
         pkill and killall are refused: their patterns match the other sessions on this Mac too.
         \(loadTests)
