@@ -490,9 +490,11 @@ enum TeamRows {
         return row
     }
 
-    /// "Waits on <title>, <title>": `task`'s after tasks not done yet, by title (a folded one by the task carrying it,
-    /// when still on the board); nil when none is left, or the board isn't known. Only finished tasks leave board.json
-    /// (`BoardStore.archivable`), so omit missing tasks without reading the archive on a row rebuild.
+    /// "Waits on <title>, <title>": `task`'s after tasks not done yet, by title (a folded one by the task carrying it
+    /// while still on the board); nil when none is left, or the board isn't known. Only finished tasks leave board.json
+    /// (`BoardStore.archivable`), so omit missing tasks without reading the archive on a row rebuild. An archived
+    /// folded task can still have a live carrier: the row omits that wait, while the start gate resolves it from the
+    /// archive. This deliberately shows less than the gate knows to keep row rebuilds free of archive I/O.
     static func waitsOn(_ task: LeadTask, board: LeadBoard?) -> String? {
         guard let board, let after = task.after, !after.isEmpty else { return nil }
         let open = after.compactMap { slug -> String? in
