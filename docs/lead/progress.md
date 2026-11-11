@@ -2383,3 +2383,4 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 05:48 Planned a-task-s-time: A task's time budget and its stall reports don't count time the Mac slept (review audit)
 - 2026-11-11 06:04 Started a worker on a-task-s-time
 - 2026-11-11 06:04 Automatically (auto_advance): Started a worker on a-task-s-time (A task's time budget and its stall reports don't count time the Mac slept).
+- 2026-11-11 07:03 Automatically (auto_advance): Not resumed after sleep: the worker on a-task-s-time could not be confirmed as still interrupted on its last turn. Check its session and resume it yourself if needed.
