@@ -2469,3 +2469,5 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 18:59 Automatically (auto_advance): Started the audit of boost-release-7-7 at ff419a7c (Its worker is Codex, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-11 19:00 Audit of boost-release-7-7: complete, clean, round 1: 1 Nit open
 - 2026-11-11 19:19 Merged boost-release-7-7: Boost release 7/7: release check: tune boost from the recorder's data, notes, and one install (build db38184dad1c)
+- 2026-11-11 19:19 Automatically (auto_advance): Merged boost-release-7-7 (Boost release 7/7: release check: tune boost from the recorder's data, notes, and one install) into main at edebace1, on its passing audit and the full test run.
+- 2026-11-11 19:19 Automatically (auto_advance): Cleaned up boost-release-7-7 (freed 1.5 GB of build output and temporary folders). It stays done.
