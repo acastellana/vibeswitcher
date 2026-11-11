@@ -97,22 +97,23 @@ struct LeadWitnessCauseTests {
     }
 
     @Test func onceTheMacHasBeenAwakeForTheStallsThresholdTheNormalReportComes() throws {
-        // Asleep from the worker's last line to minute 200, then awake, a look a minute.
-        var minutes: [Double] = [-1, 0, 200]
+        // Asleep from the worker's last line to minute 16, then awake, a look a minute.
+        var minutes: [Double] = [-1, 0, 16]
         var told: [String: String] = [:]
-        for minute in 201...216 {
+        for minute in 17...32 {
             minutes.append(Double(minute))
-            let log = Self.log(minutes, sleeps: [(0, 200)])
+            let log = Self.log(minutes, sleeps: [(0, 16)])
             let events = LeadWitness.events(board: Self.board(), seen: ["w1": Self.silent(sleep: log)], now: Self.at(Double(minute)))
-            // Awake less than the 15 min a silent stall takes: still the Mac's pause, however small its share of sleep.
-            if minute < 215 { #expect(events.isEmpty, "minute \(minute): \(events.map(\.text))") }
+            // Awake less than the 15 min a silent stall takes: still the Mac's pause, though the sleep's share of the
+            // whole window shrinks with each minute awake (16 of 18 is under 90% already).
+            if minute < 31 { #expect(events.isEmpty, "minute \(minute): \(events.map(\.text))") }
             for event in events { told[event.key] = event.text }
         }
         // One event, the normal report, with the sleep said beside it.
         #expect(told.count == 1, "\(told)")
         let text = try #require(told.values.first)
         #expect(text.hasPrefix("The worker on fix is stalled: it reads as working, but its transcript hasn't grown"), "\(text)")
-        #expect(text.contains("the Mac slept 200 min of the 216 min"), "\(text)")
+        #expect(text.contains("the Mac slept 16 min of the"), "\(text)")
         #expect(text.contains("read_session(fix)"), "\(text)")
     }
 

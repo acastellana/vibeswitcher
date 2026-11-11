@@ -61,7 +61,8 @@ public struct LeadStall: Codable, Equatable, Sendable {
     /// its transcript's last write, isn't what its turn waits on (see `LeadWitness.Seen.turnShells`).
     public static let bashCeiling: TimeInterval = 10 * 60
 
-    /// The share of a stall's window the Mac must have slept for it to be the Mac's pause, not a stall to tell.
+    /// The share of a stall's window (up to when the Mac last woke) the Mac must have slept for it to be the Mac's
+    /// pause, not a stall to tell.
     public static let sleptThroughShare = 0.9
 
     /// The Mac slept through its window, and it hasn't had its time awake since: the worker was paused with the Mac.
