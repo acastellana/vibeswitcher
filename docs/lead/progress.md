@@ -2446,3 +2446,4 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 13:37 Asked the user to push main at cf322ac9 (9 commits) to origin/main
 - 2026-11-11 14:00 Pushed main at cf322ac9 (9 commits) to origin/main, on the user's click
 - 2026-11-11 15:06 Automatically fetched origin/main at cf322ac9: 0 commits from the other Mac at origin/main (cf322ac99fde5b60dde4aaa79ecff3ca32bc6bf6): merge_remote would do nothing: main has everything origin/main has.
+- 2026-11-11 17:06 Automatically fetched origin/main at 2d71138d: 9 commits from the other Mac at origin/main (2d71138d3983a07d5e3c9a5f3b812d4933670101): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
