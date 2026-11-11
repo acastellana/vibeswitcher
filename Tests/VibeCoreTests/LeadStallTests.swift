@@ -839,6 +839,25 @@ struct LeadStallStatusTests: LeadTeamFixture {
         #expect(lines.contains("- two: not stalled: waiting on its own background job (the eval): pid 4242"), "\(lines)")
     }
 
+    /// A worker whose window the Mac slept through isn't under Stalled: it's paused, with nothing asked of the lead.
+    @Test func statusShowsAWorkerTheMacSleptThroughAsPausedNotStalled() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = lead.call("add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
+        _ = lead.call("start_worker", ["task": "one"])
+        let now = Date().timeIntervalSince1970
+        try BoardStore(root: root).update { board in
+            board.noteStalls([board.task("one")!.id: LeadStall(reason: .silent, lastActivity: now - 1020, at: now - 60,
+                cause: .sleptThrough(.init(from: now - 1020, slept: 1020, sleeps: 2, lastWoke: now - 60, unwatchedBefore: nil)))])
+        }
+        let text = lead.call("status", [:]).text
+        #expect(!text.contains("Stalled (") && !text.contains("- one: stalled"), "\(text)")
+        #expect(text.contains("Paused while the Mac slept, not stalled (1):"), "\(text)")
+        #expect(text.contains("- one: paused while the Mac slept: the Mac slept 17 min of the 17 min since"), "\(text)")
+        #expect(!text.contains("read_session(one) to see where it is"), "\(text)")
+    }
+
     @Test func aQuestionToTheLeadIsPendingUntilItAnswers() throws {
         let root = try repo()
         let runtime = FakeRuntime()

@@ -290,6 +290,8 @@ struct WitnessWork {
     /// The running tasks' workers at work (`LeadBudget.working`), and whether the board's counts change for it.
     var working: Set<String> = []
     var notesWork = false
+    /// The Mac's sleep as of the look: the count takes only time awake (`LeadBudget.awake`).
+    var sleep = MacSleepLog()
     /// The stall to keep on each task (`LeadWitness.stalls`), and whether the board's change for it.
     var stalls: [String: LeadStall] = [:]
     var notesStalls = false
@@ -297,7 +299,9 @@ struct WitnessWork {
     /// `firstSeen`: when the app first saw a verifier end for auto_advance (nil: not before now). `told`: whether an
     /// event key was told already. `step` names each computation as it starts (tests watch or slow them).
     init(board: LeadBoard, seen: [String: LeadWitness.Seen], now: Date, advancing: Bool, budgetMinutes: Int,
-         firstSeen: (String) -> Date?, told: (String) -> Bool, step: ((String) -> Void)? = nil, recoveryRoot: String? = nil) {
+         firstSeen: (String) -> Date?, told: (String) -> Bool, step: ((String) -> Void)? = nil, recoveryRoot: String? = nil,
+         sleep: MacSleepLog = MacSleepLog()) {
+        self.sleep = sleep
         step?("withoutTools")
         withoutTools = LeadWitness.withoutTools(board: board, seen: seen, now: now)
         // Sleep recovery also owns running workers and works with auto_advance off.
@@ -325,7 +329,7 @@ struct WitnessWork {
         working = LeadBudget.working(board: board, seen: seen)
         // The count not on board.json yet (`LeadBudgetClock`): a few bytes, read here off the main thread.
         let clock = recoveryRoot.map { BoardStore(root: $0).budgetClock() } ?? LeadBudgetClock()
-        notesWork = board.notesWork(working, defaultMinutes: budgetMinutes, now: now.timeIntervalSince1970, clock: clock)
+        notesWork = board.notesWork(working, defaultMinutes: budgetMinutes, now: now.timeIntervalSince1970, clock: clock, sleep: sleep)
         step?("stalls")
         stalls = LeadWitness.stalls(board: board, seen: seen, now: now)
         var noted = board
@@ -1867,10 +1871,10 @@ final class LeadController: ObservableObject {
         // What to tell and do is worked out off the main thread (see `WitnessWork`), with what's told and seen so far;
         // the boards' queue runs one thing at a time, so each look is applied before the next refresh's.
         let (toldNow, advanceSeenNow, step) = (told, advanceSeen, witnessStep)
-        let (advancing, budget) = (team.advancing, team.workflow.taskBudgetMinutes)
+        let (advancing, budget, sleep) = (team.advancing, team.workflow.taskBudgetMinutes, macSleep)
         reads.async({ _ in
             WitnessWork(board: board, seen: seen, now: now, advancing: advancing, budgetMinutes: budget,
-                        firstSeen: { advanceSeenNow["\(root)|\($0)"] }, told: { toldNow.contains("\(root)|\($0)") }, step: step, recoveryRoot: root)
+                        firstSeen: { advanceSeenNow["\(root)|\($0)"] }, told: { toldNow.contains("\(root)|\($0)") }, step: step, recoveryRoot: root, sleep: sleep)
         }) { [weak self] work in
             self?.witnessed(work, root: root, board: board, team: team, now: now)
         }
@@ -1936,11 +1940,11 @@ final class LeadController: ObservableObject {
         // written, so each budget is told once, to its worker and to the lead. The count is written off the main
         // thread, under the board's lock.
         let working = work.working
-        let budget = workflow.taskBudgetMinutes, at = now.timeIntervalSince1970
+        let budget = workflow.taskBudgetMinutes, at = now.timeIntervalSince1970, sleep = work.sleep
         if work.notesWork {
             let sessions = team.sessions
             reads.async({ _ in
-                (try? BoardStore(root: root).noteWork(working, defaultMinutes: budget, now: at)) ?? []
+                (try? BoardStore(root: root).noteWork(working, defaultMinutes: budget, now: at, sleep: sleep)) ?? []
             }) { [weak self] reached in
                 for task in reached {
                     let agent = task.worker.flatMap { worker in sessions[worker].map { LeadAgent(pid: $0.pid, tty: $0.tty, session: worker) } }

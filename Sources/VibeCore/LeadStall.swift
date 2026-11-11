@@ -61,6 +61,14 @@ public struct LeadStall: Codable, Equatable, Sendable {
     /// its transcript's last write, isn't what its turn waits on (see `LeadWitness.Seen.turnShells`).
     public static let bashCeiling: TimeInterval = 10 * 60
 
+    /// The share of a stall's window the Mac must have slept for it to be the Mac's pause, not a stall to tell.
+    public static let sleptThroughShare = 0.9
+
+    /// The Mac slept through its window, and it hasn't had its time awake since: the worker was paused with the Mac.
+    /// Not told to the lead; status says "paused while the Mac slept". Once the Mac has been awake for the stall's
+    /// own threshold the cause is no longer the sleep, and the normal report comes.
+    public var pausedAsleep: Bool { if case .sleptThrough? = cause { return true } else { return false } }
+
     /// The reason in words.
     public func why(now: Date = Date()) -> String {
         switch reason {
@@ -95,6 +103,7 @@ public struct LeadStall: Codable, Equatable, Sendable {
     /// A worker waiting on a live job of its own is labelled so, and isn't called stalled.
     public func report(now: Date = Date()) -> String {
         guard let cause else { return text(now: now) }
+        if pausedAsleep { return "paused while the Mac slept: \(cause.text(now: now))" }
         if waitsOnOwnJob {
             let last = Self.known(lastActivity).map { ", last activity \(LeadToolset.age(now.timeIntervalSince1970 - $0)) ago" } ?? ""
             return "\(heldBack ? "not stalled" : "not known to be stalled"): \(cause.text(now: now))\(last)\(sleepNote(now: now))"
@@ -105,6 +114,7 @@ public struct LeadStall: Codable, Equatable, Sendable {
     /// The Mac's sleep in the window, when the cause isn't that already and there was any.
     private func sleepNote(now: Date) -> String {
         if case .macAsleep? = cause { return "" }
+        if pausedAsleep { return "" }
         guard let sleep, sleep.slept > 0 else { return "" }
         return "; \(sleep.text(now: now))"
     }
@@ -114,14 +124,16 @@ public struct LeadStall: Codable, Equatable, Sendable {
     public var waitsOnOwnJob: Bool { reason == .idle && cause?.isOwnJob == true }
 
     /// Whether the witness keeps this from the lead: its own job, which its transcript names and which still runs (the
-    /// report would be a wake-up with nothing to do).
+    /// report would be a wake-up with nothing to do), or a window the Mac slept through (`pausedAsleep`).
     public var heldBack: Bool {
+        if pausedAsleep { return true }
         if case .backgroundJob(_, _, _, named: true)? = cause { return reason == .idle }
         return false
     }
 
     /// Whether the Team view shows it as a red "Stalled": not a wait on its own job, nor a prompt, which shows as waiting for input.
-    public var showsAsStalled: Bool { !waitsOnOwnJob && reason != .prompt }
+    /// Nor one paused while the Mac slept.
+    public var showsAsStalled: Bool { !waitsOnOwnJob && reason != .prompt && !pausedAsleep }
 
     /// A time, unless it's a placeholder for none (`.distantPast`, or anything before 2001).
     static func known(_ at: Double) -> Double? { at >= Date(timeIntervalSinceReferenceDate: 0).timeIntervalSince1970 ? at : nil }
@@ -145,6 +157,7 @@ public struct LeadStall: Codable, Equatable, Sendable {
         case .silent, .idle, .compacted:
             // Told as the Mac's sleep, it's told again if the worker is still silent once it has had its time awake.
             if case .macAsleep? = cause { return "\(session)|stalled-\(Int(lastActivity))|asleep" }
+            if pausedAsleep { return "\(session)|stalled-\(Int(lastActivity))|asleep" }
             return "\(session)|stalled-\(Int(lastActivity))"
         case .prompt: return "\(session)|prompt-\(Int(waitingSince ?? at))"
         }

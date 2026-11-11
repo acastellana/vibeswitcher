@@ -53,21 +53,73 @@ struct LeadWitnessCauseTests {
 
     // MARK: The Mac asleep
 
-    @Test func aMacThatSleptThroughTheWholeWindowIsTheCause() throws {
-        let log = Self.log([-1, 0.1, 20], sleeps: [(0.1, 20)])
+    @Test func aMacThatSleptMuchOfTheWindowIsTheCause() throws {
+        // Slept 12 of 20 minutes: 8 awake, less than the 15 a silent stall takes, and not the whole window either.
+        let log = Self.log([-1, 0.1, 8, 20], sleeps: [(8, 20)])
         let now = Self.at(20)
         let stall = try #require(LeadStall.detect(Self.silent(sleep: log), task: Self.task(), now: now).first)
         guard case .macAsleep(let reading)? = stall.cause else { Issue.record("\(String(describing: stall.cause))"); return }
-        #expect(reading.slept == 19.9 * 60 && reading.sleeps == 1)
+        #expect(reading.slept == 12 * 60 && reading.sleeps == 1)
+        #expect(!stall.pausedAsleep && !stall.heldBack && stall.showsAsStalled)
         let report = stall.report(now: now)
-        #expect(report.contains("the Mac was asleep: the Mac slept 20 min of the 20 min since \(Self.clock(0)), by its awake clock (1 sleep, last woke \(Self.clock(20)))"), "\(report)")
+        #expect(report.contains("the Mac was asleep: the Mac slept 12 min of the 20 min since \(Self.clock(0)), by its awake clock (1 sleep, last woke \(Self.clock(20)))"), "\(report)")
         #expect(LeadWitness.events(board: Self.board(), seen: ["w1": Self.silent(sleep: log)], now: now).first?.text.contains("the Mac was asleep") == true)
         // Still silent after a full stall's time awake: told again, as what it is now.
         let later = Self.at(36)
-        let awakeSince = Self.log([-1, 0.1, 20, 36], sleeps: [(0.1, 20)])
+        let awakeSince = Self.log([-1, 0.1, 8, 20, 36], sleeps: [(8, 20)])
         let again = try #require(LeadStall.detect(Self.silent(sleep: awakeSince), task: Self.task(), now: later).first)
         #expect(again.key(session: "w1") != stall.key(session: "w1"))
         guard case .unknown? = again.cause else { Issue.record("\(String(describing: again.cause))"); return }
+    }
+
+    /// The night of 2026-11-11: four reports reached the lead that each said the Mac had slept through the window (16
+    /// of 16, 26 of 26, 28 of 29, 17 of 17 min) and still asked it to act.
+    @Test func aWindowTheMacSleptThroughIsntToldAndReadsAsPaused() throws {
+        for (window, awakeAtEnd) in [(16.0, 0.0), (26, 0), (29, 1), (17, 0)] {
+            // One look as the worker last wrote, the Mac asleep from then until `awakeAtEnd` minutes before this look.
+            let woke = window - awakeAtEnd
+            let log = Self.log(awakeAtEnd > 0 ? [-1, 0, woke, window] : [-1, 0, window], sleeps: [(0, woke)])
+            let now = Self.at(window)
+            let seen = ["w1": Self.silent(sleep: log)]
+            let stall = try #require(LeadStall.detect(Self.silent(sleep: log), task: Self.task(), now: now).first)
+            guard case .sleptThrough(let reading)? = stall.cause else { Issue.record("\(window): \(String(describing: stall.cause))"); continue }
+            #expect(reading.slept == woke * 60)
+            #expect(stall.pausedAsleep && stall.heldBack && !stall.showsAsStalled, "\(window)")
+            // Nothing reaches the lead.
+            let events = LeadWitness.events(board: Self.board(), seen: seen, now: now)
+            #expect(events.isEmpty, "\(window): \(events.map(\.text))")
+            // The board keeps it for status, which says what it is.
+            let kept = try #require(LeadWitness.stalls(board: Self.board(), seen: seen, now: now).values.first)
+            let report = kept.report(now: now)
+            #expect(report.hasPrefix("paused while the Mac slept: the Mac slept \(Int(woke)) min of the \(Int(window)) min since \(Self.clock(0)), by its awake clock"), "\(report)")
+            #expect(!report.contains("stalled"), "\(report)")
+        }
+    }
+
+    @Test func onceTheMacHasBeenAwakeForTheStallsThresholdTheNormalReportComes() throws {
+        // Asleep from the worker's last line to minute 200, then awake, a look a minute.
+        var minutes: [Double] = [-1, 0, 200]
+        var told: [String: String] = [:]
+        for minute in 201...216 {
+            minutes.append(Double(minute))
+            let log = Self.log(minutes, sleeps: [(0, 200)])
+            let events = LeadWitness.events(board: Self.board(), seen: ["w1": Self.silent(sleep: log)], now: Self.at(Double(minute)))
+            // Awake less than the 15 min a silent stall takes: still the Mac's pause, however small its share of sleep.
+            if minute < 215 { #expect(events.isEmpty, "minute \(minute): \(events.map(\.text))") }
+            for event in events { told[event.key] = event.text }
+        }
+        // One event, the normal report, with the sleep said beside it.
+        #expect(told.count == 1, "\(told)")
+        let text = try #require(told.values.first)
+        #expect(text.hasPrefix("The worker on fix is stalled: it reads as working, but its transcript hasn't grown"), "\(text)")
+        #expect(text.contains("the Mac slept 200 min of the 216 min"), "\(text)")
+        #expect(text.contains("read_session(fix)"), "\(text)")
+    }
+
+    /// Fail closed: with no awake clock read, the stall is told as it always was.
+    @Test func aStallWithNoSleepLogIsToldAsBefore() throws {
+        let events = LeadWitness.events(board: Self.board(), seen: ["w1": Self.silent()], now: Self.at(20))
+        #expect(events.count == 1 && events[0].text.contains("is stalled:"), "\(events.map(\.text))")
     }
 
     @Test func aMacAwakeLongEnoughForTheStallIsntTheCauseButIsSaid() throws {
@@ -307,6 +359,7 @@ struct LeadWitnessCauseTests {
         #expect(!job.showsAsStalled)
         #expect(!LeadStall(reason: .prompt, lastActivity: Self.t0).showsAsStalled)
         #expect(LeadStall(reason: .silent, lastActivity: Self.t0, cause: .macAsleep(.init(from: Self.t0, slept: 60, sleeps: 1, lastWoke: nil, unwatchedBefore: nil))).showsAsStalled)
+        #expect(!LeadStall(reason: .silent, lastActivity: Self.t0, cause: .sleptThrough(.init(from: Self.t0, slept: 960, sleeps: 1, lastWoke: nil, unwatchedBefore: nil))).showsAsStalled)
     }
 
     // MARK: Hung runs
