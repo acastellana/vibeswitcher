@@ -11,6 +11,21 @@ struct LeadPolicyTextsTests {
     static let workflows = ["", "---\nmerge_policy: auto\n---", "---\nmerge_policy: ask_sensitive\n---", "---\nmerge_policy: ask_all\nbase_branch: dev\n---"]
         .map(LeadWorkflow.parse)
 
+    @Test func aWorkerAsksTheLeadForAnythingNeedingARealTerminal() {
+        for workflow in Self.workflows {
+            let brief = LeadPrompts.worker(task: Self.task, root: "/r", workflow: workflow)
+            #expect(!brief.contains("vs-shell"))
+            for need in ["needs a real terminal", "a password or other prompt", "an install", "interactive program",
+                         "ask_lead", "the lead files the shell card", "exact command", "working directory",
+                         "never into chat"] {
+                #expect(brief.contains(need), "missing \(need)")
+            }
+            let lead = LeadPrompts.lead(project: "p", root: "/r", workflow: workflow)
+            #expect(lead.contains(SessionNote.realTerminal))
+            #expect(lead.contains("vs-shell run"))
+        }
+    }
+
     static let sources = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Sources/VibeCore")

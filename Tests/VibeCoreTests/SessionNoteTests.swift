@@ -64,18 +64,14 @@ struct SessionNoteTests {
         #expect(text.contains("A password is typed only into that shell, never into chat"), "\(who)")
     }
 
-    @Test func theNoteTheLeadAndWorkersAllSayToFileAShellForARealTerminal() {
+    @Test func theNoteAndTheLeadSayToFileAShellForARealTerminal() {
         let workflow = LeadWorkflow()
-        let task = LeadTask(slug: "t", title: "T", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""))
         let lead = LeadPrompts.lead(project: "p", root: "/r/p", workflow: workflow, policy: "policy")
-        let worker = LeadPrompts.worker(task: task, root: "/r/p", workflow: workflow, policy: "policy")
-        for (who, text) in [("note", SessionNote.text), ("lead", lead), ("worker", worker)] {
+        for (who, text) in [("note", SessionNote.text), ("lead", lead)] {
             Self.saysToUseAShellCard(text, who)
             // One wording, so they can't drift apart.
             #expect(text.contains(SessionNote.realTerminal), "\(who)")
         }
-        // A worker's card is in a chat the user may not be looking at.
-        #expect(worker.contains("say with ask_lead that it's waiting for their Run"))
     }
 
     /// A lead reads its prompt from the file `--append-system-prompt-file` names: the rule has to be in that file.
