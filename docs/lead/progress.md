@@ -2520,3 +2520,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 00:13 Automatically fetched origin/main at 1bdf0aae: 4 commits from the other Mac at origin/main (1bdf0aaeb7871733fce6d05e042e5eb6368d4b02): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
 - 2026-11-12 00:14 Push of main at ace748d3 (21 commits) to origin/main rejected: not a fast-forward; nothing forced
 - 2026-11-12 00:15 Merged a-blocked-task-s: A blocked task's row says why it's blocked, not a dependency that's already done (build 1a6db7550ddd)
+- 2026-11-12 00:15 Automatically (auto_advance): Merged a-blocked-task-s (A blocked task's row says why it's blocked, not a dependency that's already done) into main at e1de0159, on its passing audit and the full test run.
+- 2026-11-12 00:15 Automatically (auto_advance): Cleaned up a-blocked-task-s (freed 1.6 GB of build output and temporary folders). It stays done.
