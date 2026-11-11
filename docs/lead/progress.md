@@ -2443,3 +2443,5 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 12:00 Audit of requests-the-app-sends: complete, clean, round 1: 3 Nit open
 - 2026-11-11 12:06 Automatically fetched origin/main at 56e5d6aa: 0 commits from the other Mac at origin/main (56e5d6aa1afced21db650dbf9951b07ce499051e): merge_remote would do nothing: main has everything origin/main has.
 - 2026-11-11 12:37 Merged requests-the-app-sends: Requests the app sends while the session host is handed over at an install (build db38184dad1c)
+- 2026-11-11 12:37 Automatically (auto_advance): Merged requests-the-app-sends (Requests the app sends while the session host is handed over at an install) into main at b9fe185c, on its passing audit and the full test run.
+- 2026-11-11 12:37 Automatically (auto_advance): Cleaned up requests-the-app-sends (freed 1.5 GB of build output and temporary folders). It stays done.
