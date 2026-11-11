@@ -2384,3 +2384,6 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 06:04 Started a worker on a-task-s-time
 - 2026-11-11 06:04 Automatically (auto_advance): Started a worker on a-task-s-time (A task's time budget and its stall reports don't count time the Mac slept).
 - 2026-11-11 07:03 Automatically (auto_advance): Not resumed after sleep: the worker on a-task-s-time could not be confirmed as still interrupted on its last turn. Check its session and resume it yourself if needed.
+- 2026-11-11 07:04 Released a-task-s-time's worker (idle since its done report on 5f7bd5e6) while its audit runs
+- 2026-11-11 07:04 Automatically (auto_advance): Started the audit of a-task-s-time at 5f7bd5e6 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-11 07:08 Audit of a-task-s-time: complete, clean, round 1: 1 Nit open
