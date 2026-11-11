@@ -2387,3 +2387,4 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 07:04 Released a-task-s-time's worker (idle since its done report on 5f7bd5e6) while its audit runs
 - 2026-11-11 07:04 Automatically (auto_advance): Started the audit of a-task-s-time at 5f7bd5e6 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-11 07:08 Audit of a-task-s-time: complete, clean, round 1: 1 Nit open
+- 2026-11-11 07:32 Merged a-task-s-time: A task's time budget and its stall reports don't count time the Mac slept (build 26dbfeb490a2 with changes not committed)
