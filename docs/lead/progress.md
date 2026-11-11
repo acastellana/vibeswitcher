@@ -2462,3 +2462,9 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 18:33 Automatically (auto_advance): Started a worker on boost-release-7-7 (Boost release 7/7: release check: tune boost from the recorder's data, notes, and one install), its after tasks done (boost-release-1-7, boost-release-2-7, boost-release-6-7).
 - 2026-11-11 18:33 Review of boost-release-7-7: audit
 - 2026-11-11 18:33 Started a worker on boost-release-7-7
+- 2026-11-11 18:59 Started a worker on the-worker-brief-stops (auto → Codex: Claude weekly 56%, 31 points ahead of pace; Codex 18%)
+- 2026-11-11 18:59 Automatically (auto_advance): Started a worker on the-worker-brief-stops (The worker brief stops offering vs-shell, which the host refuses from a worker); its agent is auto, so it went to Codex: Claude weekly 56%, 31 points ahead of pace; Codex 18%.
+- 2026-11-11 18:59 Automatically (auto_advance): Overlap for the-worker-brief-stops's start (a warning only: nothing was refused or reordered). Sources/VibeCore/LeadWorkflow.swift: audits-settle-their (blocked: its branch changes it).
+- 2026-11-11 18:59 Released boost-release-7-7's worker (idle since its done report on ff419a7c) while its audit runs
+- 2026-11-11 18:59 Automatically (auto_advance): Started the audit of boost-release-7-7 at ff419a7c (Its worker is Codex, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-11 19:00 Audit of boost-release-7-7: complete, clean, round 1: 1 Nit open
