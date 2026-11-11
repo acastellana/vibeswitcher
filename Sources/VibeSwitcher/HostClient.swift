@@ -421,6 +421,7 @@ final class HostClient: ObservableObject {
         screens = [:]
         state = .notRunning
         proofRefusal = nil
+        failHeld()
         finishWaiting("The session host stopped.")
     }
 
@@ -478,6 +479,7 @@ final class HostClient: ObservableObject {
                 entry.sink.resync()
                 sendAttach(id, cols: entry.cols, rows: entry.rows)
             }
+            resendHeld()
         case .spawned(let session), .sessionChanged(let session):
             upsert(session)
         case .sessionRemoved(let id):
@@ -647,9 +649,56 @@ final class HostClient: ObservableObject {
         }
     }
 
+    /// The connection has ended on the host's side and the app hasn't been told yet (tests).
+    var connectionEnded: Bool { connection?.isClosed ?? false }
+
+    /// What a request asks, for app.log: the case's name, without the session it's about.
+    private static func kind(of request: HostRequest) -> String {
+        String("\(request)".prefix { $0 != "(" })
+    }
+
+    /// Requests the connection couldn't take because it was going away (a host handing over closes it a moment before
+    /// `connectionLost` runs on the main thread), held for the next welcome: `resendHeld`.
+    private var held: [(request: HostRequest, wait: TimeInterval?, reply: ((HostEvent) -> Void)?)] = []
+
+    /// Whether a request is asked again on the next connection when this one is going: what ends or reads a session
+    /// (the same request, once, as it never went out). What a view asks (attach, detach, resize) isn't: the welcome
+    /// attaches every view again, at the size it has now.
+    private static func isHeldForNextConnection(_ request: HostRequest) -> Bool {
+        switch request {
+        case .kill, .remove, .screen, .styledScreen, .history: return true
+        default: return false
+        }
+    }
+
+    private static func isRedoneByTheWelcome(_ request: HostRequest) -> Bool {
+        switch request {
+        case .attach, .detach, .resize: return true
+        default: return false
+        }
+    }
+
+    /// Sends what was held while the connection was going, once, on the new one.
+    private func resendHeld() {
+        let resend = held
+        held = []
+        for item in resend { request(item.request, wait: item.wait, reply: item.reply) }
+    }
+
+    /// The host is gone: what was held is answered as failed.
+    private func failHeld() {
+        let failed = held
+        held = []
+        failed.forEach { $0.reply?(.error(Self.wentAway)) }
+    }
+
     /// `wait`: how long the reply is waited for before it's taken as unanswered; nil waits until the connection drops.
-    private func request(_ request: HostRequest, wait: TimeInterval? = HostClient.replyWait, reply: ((HostEvent) -> Void)? = nil) {
+    private func request(_ request: HostRequest, wait: TimeInterval? = HostClient.replyWait, holdable: Bool = true, reply: ((HostEvent) -> Void)? = nil) {
         guard let connection else {
+            if holdable, state == .connecting, Self.isHeldForNextConnection(request) {
+                held.append((request, wait, reply))
+                return
+            }
             reply?(.error("Not connected to the session host."))
             return
         }
@@ -657,7 +706,20 @@ final class HostClient: ObservableObject {
         do {
             seq = try connection.send(request)
         } catch {
-            note("host: not sent: \(error)")
+            // The host closed this connection (a handover re-executes it) and the app hasn't noticed yet.
+            if case HostConnection.SendFailure.closed = error {
+                if holdable, Self.isHeldForNextConnection(request) {
+                    note("host: \(Self.kind(of: request)) held for the next connection: the connection to the session host is closing")
+                    held.append((request, wait, reply))
+                    return
+                }
+                if Self.isRedoneByTheWelcome(request) {
+                    note("host: \(Self.kind(of: request)) dropped: the connection to the session host is closing; the next one redoes it")
+                    reply?(.error(Self.wentAway))
+                    return
+                }
+            }
+            note("host: not sent: \(Self.kind(of: request)): \(error)")
             reply?(.error("\(error)"))
             return
         }
@@ -931,7 +993,8 @@ final class HostClient: ObservableObject {
         replies[seq] = { event in if case .error(let message) = event { refusal = message } }
         paced.inFlight = true
         pacedInput[id] = paced
-        request(.screen(id: id)) { [weak self] event in
+        // The receipt of a piece means something only on the connection the piece went out on: never held.
+        request(.screen(id: id), holdable: false) { [weak self] event in
             guard let self, var paced = self.pacedInput[id] else { return }
             if refusal == nil { self.replies[seq] = nil }
             paced.inFlight = false
