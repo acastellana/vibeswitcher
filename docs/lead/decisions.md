@@ -348,3 +348,7 @@ Two paid evals were lost in part on 2026-11-09: about $12 when a session ended m
 
 The user preferred same-model audits to waiting. Two infrastructure audits can go ahead now, and the eval must keep the baseline's model to mean anything.
 
+## 2026-11-11 23:29:31 Until the-sandbox-app-builds merges, UI tasks with real layout changes go to a Claude worker (agent: claude), not auto. Text-only UI changes on Codex may waive screenshots when tests pin the text.
+
+Codex workers can't run scripts/sandbox-app.sh: the manifest compile writes ~/.cache/clang/ModuleCache, outside their sandbox. Screenshots were waived twice on 2026-11-11 (boost-release-7-7, a-blocked-task-s). The second time was a repeat, so it became a task instead of a third waiver.
+

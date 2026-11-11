@@ -2482,3 +2482,8 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 23:24 Planned a-blocked-task-s: A blocked task's row says why it's blocked, not a dependency that's already done
 - 2026-11-11 23:24 Started a worker on a-blocked-task-s (auto → Codex: Claude weekly 58%, 30 points ahead of pace; Codex 19%)
 - 2026-11-11 23:24 Automatically (auto_advance): Started a worker on a-blocked-task-s (A blocked task's row says why it's blocked, not a dependency that's already done); its agent is auto, so it went to Codex: Claude weekly 58%, 30 points ahead of pace; Codex 19%.
+- 2026-11-11 23:29 Planned the-sandbox-app-builds: The sandbox app builds inside Codex's sandbox (review audit)
+- 2026-11-11 23:29 Started a worker on the-sandbox-app-builds
+- 2026-11-11 23:29 Automatically (auto_advance): Started a worker on the-sandbox-app-builds (The sandbox app builds inside Codex's sandbox).
+- 2026-11-11 23:31 Released a-blocked-task-s's worker (idle since its done report on d0415bec) while its audit runs
+- 2026-11-11 23:31 Automatically (auto_advance): Started the audit of a-blocked-task-s at d0415bec (A Codex worker worked on it, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
