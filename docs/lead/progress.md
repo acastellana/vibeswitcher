@@ -2381,3 +2381,5 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 01:13 Started a worker on requests-the-app-sends (auto → Codex: Claude weekly 42%, 28 points ahead of pace; Codex 59%)
 - 2026-11-11 01:13 Automatically (auto_advance): Started a worker on requests-the-app-sends (Requests the app sends while the session host is handed over at an install); its agent is auto, so it went to Codex: Claude weekly 42%, 28 points ahead of pace; Codex 59%.
 - 2026-11-11 05:48 Planned a-task-s-time: A task's time budget and its stall reports don't count time the Mac slept (review audit)
+- 2026-11-11 06:04 Started a worker on a-task-s-time
+- 2026-11-11 06:04 Automatically (auto_advance): Started a worker on a-task-s-time (A task's time budget and its stall reports don't count time the Mac slept).
