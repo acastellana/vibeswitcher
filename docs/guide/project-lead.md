@@ -257,6 +257,9 @@ Merges wait while the Mac's load is above `load_threshold`. `merge_batching: boo
 tasks with one run: each is stacked on the base, and a run that fails is split to find the one that breaks it. Each task's
 merge is still recorded on its own, so revert undoes just that one.
 
+Batching is off by default. Set `merge_batching: boost` or `always` in the project's `workflow.md` through the lead's
+`configure` tool. Each task still needs its own passing review; batching shares the merge test run.
+
 A merge is run by the installed app's tool server, so a change to the gate's own code on the base doesn't apply until
 it's installed. `status` says when the base has such commits the running build lacks. `merge_remote` and the merge of a
 branch carrying the remote refuse then, until you install from the base (`scripts/build-app.sh --install`).
@@ -380,7 +383,9 @@ and for SwiftPM `swift build -j 2 -Xswiftc -j$(( (VS_HEAVY_CORES + 1) / 2 ))` (s
 working policy's `vs-heavy` line tells every role so. Uncapped, a `node --test` run on ~9 cores and a Swift build beside
 it held the Mac at load 62 inside the lock (2026-11-01).
 
-**Boost.** Settings › Performance › Boost is Off, On or Automatic (`Boost.swift`, `BoostWatch.swift`). While on, the
+### Boost
+
+Settings › Performance › Boost is Off, On or Automatic (`Boost.swift`, `BoostWatch.swift`). While on, the
 Mac-wide limits are raised to the boost values, each editable: `load_threshold` 36, `mac_max_sessions` 18,
 `max_workers` 7 per project (a project's own when higher), test and build slots 3 (from Settings' 2 on a 12-core Mac,
 so `VS_HEAVY_CORES` goes from 6 to 4; for `vs-heavy` and the leads' merges and audits alike); projects whose `merge_batching` is `boost` batch their merges. Automatic boosts only while the Mac is on AC power and
@@ -395,6 +400,18 @@ the normal limits), and each lead's `status` says it: `boost: on (automatic: awa
 boosted, room freed on the Mac goes first to the project you last worked in: the witness wakes its refused starts first,
 and other projects' starts are held while the room left wouldn't fit it. An orange bolt shows in the toolbar and the menu bar
 while boost is on; its tooltip says why, and the toolbar's opens Settings › Performance at Boost.
+
+### Heavy-job reports and the load recorder
+
+VibeSwitcher reports a job using more than 3 cores on average for at least 5 minutes outside the shared heavy slots,
+once per job, to its project's lead (or to you when no lead runs). The report names the command and project and says
+how to run it under `vs-heavy`; it stops nothing. These reports and the usage watch run with Boost off too.
+
+The load recorder keeps one sample a minute and each merge's test outcome for 14 days in `~/.vibeswitcher/stats`.
+Run `bash scripts/load-report.sh FROM TO` with dates such as `2026-11-01 2026-11-11` to see the load profile, freezes
+per sampled hour and merge-command times. It reads the recorder and hang-log filenames without changing them.
+See the [Boost release check](../process/boost-release-check.md) for the normal-versus-boosted comparison and the
+reason the release keeps its defaults.
 
 ## The account's usage limits
 

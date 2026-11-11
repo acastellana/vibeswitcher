@@ -42,17 +42,20 @@ enum SettingsNote: String, CaseIterable {
                         + "either changing: new work stops starting above the normal limits, and running work finishes.\n\n"
                         + "With Also on battery on, Boost runs until the charge drops below \(Boost.batteryFloor) %. The battery limit further down still pauses lead work.\n\n"
                         + "While boosted, room freed on the Mac goes first to the project you last worked in, and projects set to batch merges "
-                        + "during Boost (merge_batching: boost in workflow.md) test their merges in batches. Boost stays off once an account "
+                        + "during Boost (merge_batching: boost in workflow.md) test several passed tasks with one run, splitting failures to find the task that breaks it. Boost stays off once an account "
                         + "limit reaches \(MacLoad.number(Boost.vetoPercent)) %, unless Ignore usage limits is on.")
         case .macLimits:
             return ("Mac-wide limits", "Every project shares these limits: at one, leads start nothing new until there's room. Merges wait while the load is high.",
                     "Load is the greater of the Mac's 1- and 5-minute averages. A lead that was refused is told once there's room.\n\n"
                         + "Each build or full test run takes one slot. A project can set its own slots with heavy_slots in its workflow.md; "
                         + "load_threshold and mac_max_sessions there are ignored.\n\n"
+                        + "A job using more than 3 cores for at least 5 minutes outside the shared slots is reported once to its project's lead, "
+                        + "or to you when no lead runs. The report explains how to run it under vs-heavy; it stops nothing.\n\n"
                         + "These limits are kept in ~/.vibeswitcher/mac-limits.json.")
         case .usageLimits:
             return ("Usage limits", "On, leads keep starting work at any share of a Claude limit. A session that reaches a limit still stops, and its lead is told.",
-                    "Normally leads stop starting workers and audits at \(Int(AccountUsage.threshold)) % of a limit. With this on, Boost isn't held off "
+                    "The usage watch reads Claude Code's account usage when available and shows known limits and reset times in the lead's status. "
+                        + "Normally leads stop starting workers and audits at \(Int(AccountUsage.threshold)) % of a limit; running work finishes. With this on, Boost isn't held off "
                         + "for usage, and projects set to agent: auto stay on Claude until Claude refuses at a limit. "
                         + "Usage still shows, marked \(AccountUsage.ignoredMark).")
         case .power:
