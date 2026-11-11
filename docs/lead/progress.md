@@ -2479,3 +2479,6 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 19:48 Automatically (auto_advance): Cleaned up the-worker-brief-stops (freed 1.6 GB of build output and temporary folders). It stays done.
 - 2026-11-11 20:12 Automatically fetched origin/main at 32244f28: 6 commits from the other Mac at origin/main (32244f28b05f3e5c577df2f3c3aaf2e4caf7387c): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
 - 2026-11-11 22:29 Fetched origin/main at 32244f28: main is 15 commits ahead of origin/main and 6 commits behind it
+- 2026-11-11 23:24 Planned a-blocked-task-s: A blocked task's row says why it's blocked, not a dependency that's already done
+- 2026-11-11 23:24 Started a worker on a-blocked-task-s (auto → Codex: Claude weekly 58%, 30 points ahead of pace; Codex 19%)
+- 2026-11-11 23:24 Automatically (auto_advance): Started a worker on a-blocked-task-s (A blocked task's row says why it's blocked, not a dependency that's already done); its agent is auto, so it went to Codex: Claude weekly 58%, 30 points ahead of pace; Codex 19%.
