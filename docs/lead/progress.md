@@ -2375,3 +2375,8 @@ Proposed task 1: Find why requests to the session host aren't sent
   Counts by day, 2026-11-04 to 2026-11-10: 11-04 ×0, 11-05 ×0, 11-06 ×0, 11-07 ×0, 11-08 ×10, 11-09 ×2, 11-10 ×9.
   Lines: first at 2026-11-08 08:06:58, last at 2026-11-10 23:13:55 in ~/.vibeswitcher/debug/app.log (app.log.1 once it rotated).
   Line, masked: host: not sent: …
+- 2026-11-11 00:43 Automatically fetched origin/main at ce091bad: 22 commits from the other Mac at origin/main (ce091bad0c3f035d8035c94b21a96d7e60ac4620): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
+- 2026-11-11 00:56 Planned requests-the-app-sends: Requests the app sends while the session host is handed over at an install
+- 2026-11-11 01:13 Automatically (auto_advance): Didn't start requests-the-app-sends: requests-the-app-sends's worker was ended: its vibeswitcher tools didn't connect within 45 s of its start (its tool server never asked the session host which role its session holds), so it couldn't have reported, and its grant was withdrawn. Try again once; if it happens again, tell the user: Claude Code's MCP log for /Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/requests-the-app-sends says why (~/Library/Caches/claude-cli-nodejs/, mcp-logs-vibeswitcher).
+- 2026-11-11 01:13 Started a worker on requests-the-app-sends (auto → Codex: Claude weekly 42%, 28 points ahead of pace; Codex 59%)
+- 2026-11-11 01:13 Automatically (auto_advance): Started a worker on requests-the-app-sends (Requests the app sends while the session host is handed over at an install); its agent is auto, so it went to Codex: Claude weekly 42%, 28 points ahead of pace; Codex 59%.
