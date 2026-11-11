@@ -2474,3 +2474,4 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 19:25 Released the-worker-brief-stops's worker (idle since its done report on 13f9ed18) while its audit runs
 - 2026-11-11 19:25 Automatically (auto_advance): Started the audit of the-worker-brief-stops at 13f9ed18 (A Codex worker worked on it, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-11 19:26 Audit of the-worker-brief-stops: complete, clean, round 1: 1 Nit open
+- 2026-11-11 19:48 Merged the-worker-brief-stops: The worker brief stops offering vs-shell, which the host refuses from a worker (build db38184dad1c)
