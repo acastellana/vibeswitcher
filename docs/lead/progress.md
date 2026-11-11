@@ -2330,6 +2330,48 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 16:46 Planned passage-contract-check: Passage contract check: the real passage CLI still matches what VibeSwitcher assumes
 - 2026-11-10 16:46 Started a worker on passage-contract-check
 - 2026-11-10 16:46 Automatically (auto_advance): Started a worker on passage-contract-check (Passage contract check: the real passage CLI still matches what VibeSwitcher assumes).
+- 2026-11-10 16:54 Fetched origin/main at b87922e0: main is 5 commits ahead of origin/main and 0 commits behind it
+- 2026-11-10 16:54 Asked the user to push main at 4fb46b33 (5 commits) to origin/main
+- 2026-11-10 16:54 Pushed main at 4fb46b33 (5 commits) to origin/main, on the user's click
+- 2026-11-10 17:00 Automatically (auto_advance): Started the audit of passage-contract-check at 49258aef (It touches sensitive_paths (AGENTS.md), so it's treated as audit whatever its review says).
+- 2026-11-10 17:01 Released passage-contract-check's worker (idle since its done report on 49258aef) while its audit runs
+- 2026-11-10 17:01 Automatically (auto_advance): Released passage-contract-check's worker, idle since its done report on 49258aef, while its audit runs (ended pid 11402 (Worker: Passage contract check: the real passage CLI still matches what VibeSwitcher assumes)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-10 17:01 Sent passage-contract-check's audit contract v2 (it had v1)
+- 2026-11-10 17:03 Audit of passage-contract-check: complete, clean, round 1: 1 Nit open
+- 2026-11-10 17:36 Started a worker on passage-contract-check
+- 2026-11-10 17:36 Automatically (auto_advance): Merge of passage-contract-check failed: Tests fail rebased onto main: agentsStaysShort() Sent its worker the output; it's back at work.
+- 2026-11-10 17:36 Sent passage-contract-check's worker contract v3 (it had v2)
+- 2026-11-10 17:40 Released passage-contract-check's worker (idle since its done report on 09b3864e) while its audit runs
+- 2026-11-10 17:40 Automatically (auto_advance): Started the audit of passage-contract-check at 09b3864e (An audit was started on it: its verdict decides). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-10 17:45 Audit of passage-contract-check: complete, clean, round 2: 1 Nit open
+- 2026-11-10 18:04 Merged passage-contract-check: Passage contract check: the real passage CLI still matches what VibeSwitcher assumes (build b87922e039e8 with changes not committed)
+- 2026-11-10 18:04 Automatically (auto_advance): Merged passage-contract-check (Passage contract check: the real passage CLI still matches what VibeSwitcher assumes) into main at 3d92996e, on its passing audit and the full test run.
+- 2026-11-10 18:04 Automatically (auto_advance): Cleaned up passage-contract-check (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-10 18:41 Planned wallet-cards-send-all: Wallet cards: Send all waiting requests of a session with one reviewed action (review audit)
+- 2026-11-10 18:41 Started a worker on wallet-cards-send-all
+- 2026-11-10 18:41 Automatically (auto_advance): Started a worker on wallet-cards-send-all (Wallet cards: Send all waiting requests of a session with one reviewed action).
+- 2026-11-10 18:54 Automatically fetched origin/main at 4fb46b33: 0 commits from the other Mac at origin/main (4fb46b33f6844a4e08648971d045ff4491971950): merge_remote would do nothing: main has everything origin/main has.
+- 2026-11-10 19:32 Automatically (auto_advance): Started the audit of wallet-cards-send-all at 5c4ca69d (Its review is audit).
+- 2026-11-10 19:32 Released wallet-cards-send-all's worker (idle since its done report on 5c4ca69d) while its audit runs
+- 2026-11-10 19:32 Automatically (auto_advance): Released wallet-cards-send-all's worker, idle since its done report on 5c4ca69d, while its audit runs (ended pid 16920 (Worker: Wallet cards: Send all waiting requests of a session with one reviewed action)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-10 19:32 Sent wallet-cards-send-all's audit contract v2 (it had v1)
+- 2026-11-10 19:32 Planned send-all-rows-tell: Send all: rows tell apart calls that differ only in arguments, and a batch over 30 says what's left (review audit)
+- 2026-11-10 19:35 Audit of wallet-cards-send-all: complete, clean
+- 2026-11-10 20:14 Merged wallet-cards-send-all: Wallet cards: Send all waiting requests of a session with one reviewed action (build b87922e039e8 with changes not committed)
+- 2026-11-10 20:14 Flaky in wallet-cards-send-all's merge: sleepRecoveryRetriesAfterLoadDropsWithoutANewInterruption(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-10 20:14 Automatically (auto_advance): Merged wallet-cards-send-all (Wallet cards: Send all waiting requests of a session with one reviewed action) into main at b010f5e4, on its passing audit and the full test run. (Its first test run failed on sleepRecoveryRetriesAfterLoadDropsWithoutANewInterruption(), (the test command, naming no test) and the rerun of the whole test command passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/genlayer/.vibeswitcher/lead/scratch/05238e665841a2aa78fc/wallet-cards-send-all/merge-test.log. Each flaky test's failing li….)
+- 2026-11-10 20:14 Started a worker on send-all-rows-tell
+- 2026-11-10 20:14 Automatically (auto_advance): Started a worker on send-all-rows-tell (Send all: rows tell apart calls that differ only in arguments, and a batch over 30 says what's left), its after tasks done (wallet-cards-send-all).
+- 2026-11-10 20:14 Automatically (auto_advance): Cleaned up wallet-cards-send-all (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-10 20:40 Released send-all-rows-tell's worker (idle since its done report on a49e738d) while its audit runs
+- 2026-11-10 20:40 Automatically (auto_advance): Started the audit of send-all-rows-tell at a49e738d (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-10 20:40 Sent send-all-rows-tell's audit contract v2 (it had v1)
+- 2026-11-10 20:42 Audit of send-all-rows-tell: complete, clean, round 1: 2 Nit open
+- 2026-11-10 20:54 Automatically fetched origin/main at 55fce1fb: 107 commits from the other Mac at origin/main (55fce1fb540cee63c7ce0183c895d2348eff2035): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
+- 2026-11-10 21:03 Merged send-all-rows-tell: Send all: rows tell apart calls that differ only in arguments, and a batch over 30 says what's left (build b87922e039e8 with changes not committed)
+- 2026-11-10 21:03 Automatically (auto_advance): Merged send-all-rows-tell (Send all: rows tell apart calls that differ only in arguments, and a batch over 30 says what's left) into main at 9fa7577e, on its passing audit and the full test run.
+- 2026-11-10 21:03 Automatically (auto_advance): Cleaned up send-all-rows-tell (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-10 21:04 Update: Send all waiting wallet requests with one reviewed action (merged, not installed yet) — **What changed.** When a session has 2 or more wallet cards waiting and a Wallet Manager is chosen, the cards offer **Send all N to Wallet Manager…**. It opens a list of exactly those requests: fields…
 - 2026-11-10 18:58 Merged origin/main into main: 5 commits from the remote, as a merge commit, ab1b80a3; the tests passed on it (build 1810015b999d)
 - 2026-11-10 18:58 Asked the user to push main at 55fce1fb (107 commits) to origin/main
 - 2026-11-10 19:01 Pushed main at 55fce1fb (107 commits) to origin/main, on the user's click
@@ -2391,3 +2433,4 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 07:32 Automatically (auto_advance): Merged a-task-s-time (A task's time budget and its stall reports don't count time the Mac slept) into main at 3cc60daa, on its passing audit and the full test run.
 - 2026-11-11 07:32 Automatically (auto_advance): Cleaned up a-task-s-time (freed 1.5 GB of build output and temporary folders). It stays done.
 - 2026-11-11 11:15 Fetched origin/main at ce091bad: main is 42 commits ahead of origin/main and 22 commits behind it
+- 2026-11-10 21:54 Merged origin/main into main: 107 commits from the remote, as a merge commit, fe41feb6; the tests passed on it (build a57972181631)

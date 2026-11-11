@@ -10,7 +10,8 @@
 #                      from it as given, so give it as the apps are told the inbox (dev/inbox, vault/inbox)
 #   LOOP_PASSAGE_SIDE  dev or vault
 #
-# Commands, output and exit codes as in ~/dev/passage/README.md's command table (the subset both apps call):
+# Commands, output and exit codes as in Passage's README ("Command line", the subset both apps call);
+# scripts/e2e/passage-contract.sh compares this help with the installed passage's:
 #   send <peer> <file>|- [--name N] [--timeout S]   copies into <other>/inbox/<this side's peer ID>/<UTC>-<name>
 #                                                   (0600, never over a file: -2-, -3-… as Passage), prints
 #                                                   sent<TAB><peer ID><TAB><name><TAB><bytes>; 4 when nobody listens

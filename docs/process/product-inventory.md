@@ -292,6 +292,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - All-done card: a batch's summary and receipts — `Sources/VibeSwitcher/MainWindow/Chat/AllDoneCard.swift`
 - Shell request cards: an agent asks for a shell; Run or Decline — `Sources/VibeSwitcher/Shell/ShellCard.swift`
 - Wallet request cards: an agent's transaction request; Send to Wallet Manager or sign in a browser wallet — `Sources/VibeSwitcher/Wallet/WalletCard.swift`
+- Wallet request cards: Send all N to Wallet Manager… lists a session's 2 or more waiting requests, then sends the ones listed — `Sources/VibeSwitcher/Wallet/WalletSendAll.swift`
 
 ## Terminal
 
@@ -373,6 +374,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `wallet-card` — prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint… — `Sources/VibeSwitcher/Sandbox.swift`
 - `wallet-later MINUTES` — moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up… — `Sources/VibeSwitcher/Sandbox.swift`
 - `wallet-click send|retry|discard|browser|settings|dismiss` — presses that button on the newest wallet request card of the selected session, on its strip or not (dismiss… — `Sources/VibeSwitcher/Sandbox.swift`
+- `wallet-send-all open|rows|words|confirm|stop|cancel` — the selected session's Send all list, as Send all N to Wallet Manager… on its cards opens it (offered with 2… — `Sources/VibeSwitcher/Sandbox.swift`
 - `wallet-peer none|chosen|this-mac|this-mac-stopped` — no Wallet Manager peer chosen for the wallet desk (as with None in Settings › Wallet: cards offer the browser… — `Sources/VibeSwitcher/Sandbox.swift`
 - `wallet-page [NAME]` — draws the local Sign in browser wallet page as served (the one wallet-click browser opened, else one for a… — `Sources/VibeSwitcher/Sandbox.swift`
 - `wallet-answer received|proposed|signed|submitted|rejected|failed` — the fake Wallet Manager's Mac answers the newest card's request: the card shows it, and the asking fake… — `Sources/VibeSwitcher/Sandbox.swift`

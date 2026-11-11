@@ -4,6 +4,7 @@
 # into a Wallet Manager running from ~/dev/wallet-manager on a scratch synthetic vault; its real receiving code checks
 # it and answers; the answer comes back through the loop and updates the card. Only Passage's link between two Macs
 # is stood in for. Run on demand (never part of scripts/test.sh): it needs the Wallet Manager's checkout.
+# That the loop passage's help still agrees with the installed Passage's: scripts/e2e/passage-contract.sh, also on demand.
 #
 # scripts/e2e/wallet-e2e.sh [--wallet-manager DIR] [--binary PATH] [--keep]
 # scripts/e2e/wallet-e2e.sh --real-testnet [--dry-run|--check-guards] [--amount WEI] [--from 0x…] [--to 0x…] [--chain N]
