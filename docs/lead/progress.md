@@ -2373,6 +2373,66 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-10 21:03 Automatically (auto_advance): Cleaned up send-all-rows-tell (freed 1.6 GB of build output and temporary folders). It stays done.
 - 2026-11-10 21:04 Update: Send all waiting wallet requests with one reviewed action (merged, not installed yet) — **What changed.** When a session has 2 or more wallet cards waiting and a Wallet Manager is chosen, the cards offer **Send all N to Wallet Manager…**. It opens a list of exactly those requests: fields…
 - 2026-11-10 18:58 Merged origin/main into main: 5 commits from the remote, as a merge commit, ab1b80a3; the tests passed on it (build 1810015b999d)
+- 2026-11-10 18:58 Asked the user to push main at 55fce1fb (107 commits) to origin/main
+- 2026-11-10 19:01 Pushed main at 55fce1fb (107 commits) to origin/main, on the user's click
+- 2026-11-10 19:15 Merged a-shell-run-card: A shell Run card goes away by itself a few seconds after it's handled (build 1810015b999d)
+- 2026-11-10 19:15 Automatically (auto_advance): Merged a-shell-run-card (A shell Run card goes away by itself a few seconds after it's handled) into main at 0592e7c3, on its passing audit and the full test run.
+- 2026-11-10 19:15 Automatically (auto_advance): Cleaned up a-shell-run-card (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-10 20:38 Automatically fetched origin/main at 55fce1fb: 0 commits from the other Mac at origin/main (55fce1fb540cee63c7ce0183c895d2348eff2035): merge_remote would do nothing: main has everything origin/main has.
+- 2026-11-10 20:39 Planned shells-that-agents: Shells that agents opened tidy themselves away when their command is done (review audit)
+- 2026-11-10 20:39 Started a worker on shells-that-agents
+- 2026-11-10 20:39 Automatically (auto_advance): Started a worker on shells-that-agents (Shells that agents opened tidy themselves away when their command is done).
+- 2026-11-10 21:22 Automatically (auto_advance): Started the audit of shells-that-agents at f42b62ce (Its review is audit).
+- 2026-11-10 21:22 Released shells-that-agents's worker (idle since its done report on f42b62ce) while its audit runs
+- 2026-11-10 21:22 Automatically (auto_advance): Released shells-that-agents's worker, idle since its done report on f42b62ce, while its audit runs (ended pid 22017 (Worker: Shells that agents opened tidy themselves away when their command is done)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-10 21:27 Audit of shells-that-agents: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
+- 2026-11-10 21:27 Planned ended-sessions-output-is: Ended sessions' output is readable in dark mode, and the shell tidier scans off the main thread (review audit)
+- 2026-11-10 21:32 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-10 21:42 Merged shells-that-agents: Shells that agents opened tidy themselves away when their command is done (build 1810015b999d)
+- 2026-11-10 21:42 Automatically (auto_advance): Merged shells-that-agents (Shells that agents opened tidy themselves away when their command is done) into main at 832a2ae0, on its passing audit and the full test run.
+- 2026-11-10 21:42 Automatically (auto_advance): Cleaned up shells-that-agents (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-10 22:01 Started a worker on ended-sessions-output-is
+- 2026-11-10 22:01 Automatically (auto_advance): Started a worker on ended-sessions-output-is (Ended sessions' output is readable in dark mode, and the shell tidier scans off the main thread), its after tasks done (shells-that-agents).
+- 2026-11-10 22:09 Planned ending-a-shell-session: Ending a shell session makes VibeSwitcher quit (review audit)
+- 2026-11-10 22:09 Started a worker on ending-a-shell-session
+- 2026-11-10 22:09 Automatically (auto_advance): Started a worker on ending-a-shell-session (Ending a shell session makes VibeSwitcher quit).
+- 2026-11-10 22:09 Automatically (auto_advance): Overlap for ending-a-shell-session's start (a warning only: nothing was refused or reordered). Sources/VibeSwitcher/Sandbox.swift: ended-sessions-output-is (running: its boundaries name it).
+- 2026-11-10 22:31 Automatically (auto_advance): Started the audit of ending-a-shell-session at 2d2de6f9 (Its review is audit).
+- 2026-11-10 22:31 Released ending-a-shell-session's worker (idle since its done report on 2d2de6f9) while its audit runs
+- 2026-11-10 22:31 Automatically (auto_advance): Released ending-a-shell-session's worker, idle since its done report on 2d2de6f9, while its audit runs (ended pid 41412 (Worker: Ending a shell session makes VibeSwitcher quit)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-10 22:37 Audit of ending-a-shell-session: complete, clean, round 1: 2 Nit open
+- 2026-11-10 22:46 Released ended-sessions-output-is's worker (idle since its done report on 10d7f6bf) while its audit runs
+- 2026-11-10 22:46 Automatically (auto_advance): Started the audit of ended-sessions-output-is at 10d7f6bf (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-10 22:50 Audit of ended-sessions-output-is: complete, clean, round 1: 2 Nit open
+- 2026-11-10 22:53 Merged ending-a-shell-session: Ending a shell session makes VibeSwitcher quit (build 1810015b999d)
+- 2026-11-10 22:53 Automatically (auto_advance): Merged ending-a-shell-session (Ending a shell session makes VibeSwitcher quit) into main at 7533d160, on its passing audit and the full test run.
+- 2026-11-10 22:53 Automatically (auto_advance): Cleaned up ending-a-shell-session (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-10 23:08 Merged ended-sessions-output-is: Ended sessions' output is readable in dark mode, and the shell tidier scans off the main thread (build 1810015b999d)
+- 2026-11-10 23:08 Automatically (auto_advance): Merged ended-sessions-output-is (Ended sessions' output is readable in dark mode, and the shell tidier scans off the main thread) into main at ba7cbf06, on its passing audit and the full test run.
+- 2026-11-10 23:08 Automatically (auto_advance): Cleaned up ended-sessions-output-is (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-10 23:14 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-11 00:10 App health: VibeSwitcher's own logs show a cause that keeps coming back, grouped by cause and counted by VibeSwitcher itself (no model; lines masked and redacted). One proposed task each; one already on the board needs nothing:
+Proposed task 1: Find why requests to the session host aren't sent
+  Cause: the notice "Not sent to the session host" (doubled day over day (2 → 9)).
+  Counts by day, 2026-11-04 to 2026-11-10: 11-04 ×0, 11-05 ×0, 11-06 ×0, 11-07 ×0, 11-08 ×10, 11-09 ×2, 11-10 ×9.
+  Lines: first at 2026-11-08 08:06:58, last at 2026-11-10 23:13:55 in ~/.vibeswitcher/debug/app.log (app.log.1 once it rotated).
+  Line, masked: host: not sent: …
+- 2026-11-11 00:43 Automatically fetched origin/main at ce091bad: 22 commits from the other Mac at origin/main (ce091bad0c3f035d8035c94b21a96d7e60ac4620): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
+- 2026-11-11 00:56 Planned requests-the-app-sends: Requests the app sends while the session host is handed over at an install
+- 2026-11-11 01:13 Automatically (auto_advance): Didn't start requests-the-app-sends: requests-the-app-sends's worker was ended: its vibeswitcher tools didn't connect within 45 s of its start (its tool server never asked the session host which role its session holds), so it couldn't have reported, and its grant was withdrawn. Try again once; if it happens again, tell the user: Claude Code's MCP log for /Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/requests-the-app-sends says why (~/Library/Caches/claude-cli-nodejs/, mcp-logs-vibeswitcher).
+- 2026-11-11 01:13 Started a worker on requests-the-app-sends (auto → Codex: Claude weekly 42%, 28 points ahead of pace; Codex 59%)
+- 2026-11-11 01:13 Automatically (auto_advance): Started a worker on requests-the-app-sends (Requests the app sends while the session host is handed over at an install); its agent is auto, so it went to Codex: Claude weekly 42%, 28 points ahead of pace; Codex 59%.
+- 2026-11-11 05:48 Planned a-task-s-time: A task's time budget and its stall reports don't count time the Mac slept (review audit)
+- 2026-11-11 06:04 Started a worker on a-task-s-time
+- 2026-11-11 06:04 Automatically (auto_advance): Started a worker on a-task-s-time (A task's time budget and its stall reports don't count time the Mac slept).
+- 2026-11-11 07:03 Automatically (auto_advance): Not resumed after sleep: the worker on a-task-s-time could not be confirmed as still interrupted on its last turn. Check its session and resume it yourself if needed.
+- 2026-11-11 07:04 Released a-task-s-time's worker (idle since its done report on 5f7bd5e6) while its audit runs
+- 2026-11-11 07:04 Automatically (auto_advance): Started the audit of a-task-s-time at 5f7bd5e6 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-11 07:08 Audit of a-task-s-time: complete, clean, round 1: 1 Nit open
+- 2026-11-11 07:32 Merged a-task-s-time: A task's time budget and its stall reports don't count time the Mac slept (build 26dbfeb490a2 with changes not committed)
+- 2026-11-11 07:32 Automatically (auto_advance): Merged a-task-s-time (A task's time budget and its stall reports don't count time the Mac slept) into main at 3cc60daa, on its passing audit and the full test run.
+- 2026-11-11 07:32 Automatically (auto_advance): Cleaned up a-task-s-time (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-11 11:15 Fetched origin/main at ce091bad: main is 42 commits ahead of origin/main and 22 commits behind it
 - 2026-11-10 21:54 Merged origin/main into main: 107 commits from the remote, as a merge commit, fe41feb6; the tests passed on it (build a57972181631)
 - 2026-11-10 21:54 Asked the user to push main at ce091bad (22 commits) to origin/main
 - 2026-11-10 22:22 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
@@ -2381,3 +2441,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-11 07:45 Fetched origin/main at ce091bad: main is 4 commits ahead of origin/main and 0 commits behind it
 - 2026-11-11 11:10 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-11-11 13:06 Automatically fetched origin/main at 56e5d6aa: 45 commits from the other Mac at origin/main (56e5d6aa1afced21db650dbf9951b07ce499051e): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
+- 2026-11-11 11:32 Merged origin/main into main: 22 commits from the remote, as a merge commit, 6e43591e; the tests passed on it (build db38184dad1c)

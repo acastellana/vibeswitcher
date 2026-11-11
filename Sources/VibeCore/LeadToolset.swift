@@ -173,8 +173,10 @@ public final class LeadToolset: MCPToolset {
     /// after 5 s).
     var stopWait: TimeInterval = 10
     /// A session's processes cleanup may end itself when the host didn't: the user's carrying its
-    /// `VIBESWITCHER_SESSION` id (decision 2026-10-23 02:44; see `SessionStrays.carrying`). Faked in tests.
-    var sessionProcesses: (String) -> [SessionStrays.Found] = { id in UUID(uuidString: id).map { SessionStrays.carrying(session: $0) } ?? [] }
+    /// `VIBESWITCHER_SESSION` id (decision 2026-10-23 02:44; see `SessionStrays.carrying`), never the app. Faked in tests.
+    var sessionProcesses: (String) -> [SessionStrays.Found] = { id in
+        UUID(uuidString: id).map { SessionStrays.carrying(session: $0, keeping: SessionStrays.appBesideThisProgram) } ?? []
+    }
     /// The bytes free on the volume holding a path (see `DiskSpace.free`), and where Claude Code keeps its sessions'
     /// temporary folders (see `ClaudeScratch`). Faked in tests.
     var freeSpace: (String) -> Int64? = DiskSpace.free(at:)
@@ -5729,7 +5731,7 @@ public final class LeadToolset: MCPToolset {
             lines.append("The session host can't be read right now: what the workers are doing isn't known; the states below are the board's.")
         }
         // Stalled workers first: VibeSwitcher's witness noticed them stop making progress, whatever their screens say.
-        let stalled = board.stalled.filter { !$0.stall!.waitsOnOwnJob }
+        let stalled = board.stalled.filter { !$0.stall!.waitsOnOwnJob && !$0.stall!.pausedAsleep }
         if !stalled.isEmpty {
             let now = Date()
             lines.append("\nStalled (\(stalled.count)):")
@@ -5742,6 +5744,12 @@ public final class LeadToolset: MCPToolset {
             let now = Date()
             lines.append("\nWaiting on their own background jobs, not stalled (\(waitingOnJobs.count)):")
             lines += waitingOnJobs.prefix(Self.statusTasks).map { task in Self.clip("- \(task.slug): \(task.stall!.report(now: now))", 600) }
+        }
+        let paused = board.stalled.filter { $0.stall!.pausedAsleep }
+        if !paused.isEmpty {
+            let now = Date()
+            lines.append("\nPaused while the Mac slept, not stalled (\(paused.count)):")
+            lines += paused.prefix(Self.statusTasks).map { task in Self.clip("- \(task.slug): \(task.stall!.report(now: now))", 600) }
         }
         // Over their time budget: each waits on the lead's decision (see `LeadBudget`).
         let over = board.overBudget

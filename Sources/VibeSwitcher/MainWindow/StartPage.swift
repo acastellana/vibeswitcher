@@ -112,7 +112,7 @@ struct EndedBar: View {
 
     var body: some View {
         if let row = model.selectedRow, let info = row.hosted, let exit = info.exit {
-            let end = SessionEnd(status: exit.status)
+            let end = SessionEnd(exit: exit)
             let at = exit.at.formatted(date: .omitted, time: .shortened)
             HStack(spacing: 10) {
                 Image(systemName: end.symbol)

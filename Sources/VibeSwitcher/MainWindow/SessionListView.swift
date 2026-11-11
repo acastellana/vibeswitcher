@@ -36,10 +36,16 @@ struct SessionListView: View {
                     Text("\(section.rows.count)").foregroundStyle(.tertiary).monospacedDigit()
                     Spacer()
                     if model.grouping == .projects {
-                        NewSessionMenu(folder: section.rows.first?.cwd, actions: actions)
+                        NewSessionMenu(folder: section.rows.first?.cwd, actions: actions,
+                                       finishedShellsIn: actions.agentShells(section.rows) > 0 ? section.project : nil)
                     }
                 }
                 .groupHeader()
+                .contextMenu {
+                    if model.grouping == .projects, actions.agentShells(section.rows) > 0 {
+                        CloseFinishedShellsButton(project: section.project, actions: actions)
+                    }
+                }
                 // Ended sessions of finished tasks leave with them (WL-1).
                 ForEach(section.rows.filter { !arranged.nested.contains($0.id) || !TeamRows.isHistory($0, boards: leads.boards, now: Date()) }) { row in
                     rowView(row, arranged: arranged)
@@ -266,10 +272,11 @@ struct WindowRowView: View {
                             // A shape as well as the colour; the words beside it say "replaced".
                             Image(systemName: "arrow.turn.up.right").foregroundStyle(ReplacedLead.color).accessibilityHidden(true)
                         }
-                        let failed = replaced == nil && row.end?.isFailure == true
-                        if failed, let end = row.end {
-                            // A shape as well as the colour; the words beside it say the exit code.
-                            Image(systemName: end.symbol).foregroundStyle(SessionEnd.failureColor).accessibilityHidden(true)
+                        // A failed end, or a Run-card shell whose command failed (it stays until closed).
+                        let failed = replaced == nil && (row.end?.isFailure == true || row.commandFailed)
+                        if failed {
+                            // A shape as well as the colour; the words beside it say the exit code, or "command failed".
+                            Image(systemName: row.end?.symbol ?? "exclamationmark.circle").foregroundStyle(SessionEnd.failureColor).accessibilityHidden(true)
                         }
                         Text(state.text).foregroundStyle(replaced != nil ? AnyShapeStyle(ReplacedLead.color)
                             : failed ? AnyShapeStyle(SessionEnd.failureColor)
@@ -363,6 +370,8 @@ struct RowMenu: View {
             Divider()
             if actions.isLive(row) {
                 Button("End Session…") { actions.endSession(row) }
+                // On a shell an agent's Run card opened: its project's finished ones, all at once.
+                if actions.agentShells([row]) > 0 { CloseFinishedShellsButton(project: row.project, actions: actions) }
             } else {
                 if actions.canResume(row) { Button("Resume") { actions.resume(row) } }
                 Button("Remove") { actions.remove(row) }
@@ -387,11 +396,24 @@ enum Pasteboard {
     }
 }
 
-/// ⊕: the folder's presets (its default first).
+/// "Close Finished Shells…": in a project header's menus, and on the row of a shell an agent's Run card opened.
+struct CloseFinishedShellsButton: View {
+    let project: String
+    let actions: WindowActions
+
+    var body: some View {
+        Button("Close Finished Shells…") { actions.closeFinishedShells(project) }
+            .help("Ends the shells agents opened in this project that are back at their prompt, after asking")
+    }
+}
+
+/// ⊕: the folder's presets (its default first), and for a project with shells agents opened, closing the finished ones.
 struct NewSessionMenu: View {
     let folder: String?
     let actions: WindowActions
     var title: String?
+    /// The project to offer Close Finished Shells… for (it has shells agents' Run cards opened); nil: not offered.
+    var finishedShellsIn: String?
 
     var body: some View {
         Menu {
@@ -401,6 +423,10 @@ struct NewSessionMenu: View {
             Divider()
             let lead = Self.leadItem(folder: folder, actions: actions)
             Button(lead.title, action: lead.action)
+            if let finishedShellsIn {
+                Divider()
+                CloseFinishedShellsButton(project: finishedShellsIn, actions: actions)
+            }
         } label: {
             if let title {
                 Text(title)

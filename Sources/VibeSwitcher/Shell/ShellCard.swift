@@ -10,7 +10,14 @@ struct ShellCard: View {
     /// Why its last Run didn't go (`ShellDesk.refused`), while that shows.
     var refused: String? = nil
     var act: (ShellDesk.Action) -> Void = { _ in }
+    /// The card is on its way out by itself (`ShellDesk.leaving`): faded to nothing.
+    var leaving = false
+    /// The pointer is over the card or focus is in it, or neither any more: it stays meanwhile (`ShellDesk.hold`).
+    var hold: (Bool) -> Void = { _ in }
     @IncreasedContrast private var increased
+    @FocusState private var focused: Bool
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static func tint(_ state: ShellDesk.Card.State) -> Color {
         switch state {
@@ -108,6 +115,10 @@ struct ShellCard: View {
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(tint.opacity(increased ? 0 : 0.06)))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(tint.opacity(increased ? 1 : 0.4), lineWidth: 1.5))
         .contextMenu { Button("Copy Command") { Pasteboard.copy(card.request.command) } }
+        .opacity(leaving ? 0 : 1)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: leaving)
+        .onHover { hovering = $0; hold(hovering || focused) }
+        .onChange(of: focused) { _, now in hold(hovering || now) }
     }
 
     /// The "Not run: …" line under the detail, unless the detail already says the same (a start that failed).
@@ -162,7 +173,7 @@ struct ShellCard: View {
             case .starting:
                 EmptyView()
             default:
-                Button("Dismiss") { act(.dismiss) }
+                Button("Dismiss") { act(.dismiss) }.focused($focused)
             }
         }
         .controlSize(.regular)
@@ -180,7 +191,8 @@ struct ShellRequestStrip: View {
             ScrollView {
                 LazyVStack(spacing: 10) {
                     ForEach(cards) { card in
-                        ShellCard(card: card, refused: desk.refused[card.id]) { action in desk.act(action, on: card.id) }
+                        ShellCard(card: card, refused: desk.refused[card.id], act: { action in desk.act(action, on: card.id) },
+                                  leaving: desk.leaving.contains(card.id), hold: { desk.hold(card.id, $0) })
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 10)

@@ -13,6 +13,8 @@ struct ShellDeskTests {
     let temp = Scratch()
     static let session = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
     static let shell = UUID(uuidString: "99999999-2222-4333-8444-555555555555")!
+    /// Not the default 4 s, so these timers aren't mistaken for the "Not run" line's (`RunShown.lasts`).
+    static let tidy: TimeInterval = 4.25
     static let created = Date(timeIntervalSince1970: 1_793_448_000)
 
     final class Clock: @unchecked Sendable {
@@ -28,6 +30,8 @@ struct ShellDeskTests {
         var launched: [ShellRequest] = []
         var told: [(session: String, text: String)] = []
         var atOnce = false
+        /// What the desk asked `later` to run, and when: tests fire these themselves, never wait.
+        var timers: [(after: TimeInterval, run: () -> Void)] = []
         var names = [ShellDeskTests.session.uuidString.lowercased(): "Example agent"]
     }
 
@@ -40,6 +44,9 @@ struct ShellDeskTests {
             then(.delivered)
         }
         desk.atOnce = { seen.atOnce }
+        desk.later = { after, run in seen.timers.append((after, run)) }
+        desk.fadeFor = { 0 }
+        desk.tidyAfter = Self.tidy
         desk.launch = { request, then in
             seen.launched.append(request)
             then(.success((Self.shell, ShellAsk.sessionLabel(request))))
@@ -111,6 +118,89 @@ struct ShellDeskTests {
         await acted(restarted, .dismiss, request.id)
         #expect(restarted.cards.isEmpty)
         #expect(ShellAsk.filed(in: folder).requests.isEmpty)
+    }
+
+    /// Fires the oldest pending timer asked for `after` seconds, once.
+    func fire(_ seen: Seen, after: TimeInterval) {
+        guard let at = seen.timers.firstIndex(where: { $0.after == after }) else { Issue.record("no \(after)s timer pending"); return }
+        seen.timers.remove(at: at).run()
+    }
+
+    @Test func aHandledCardLeavesByItselfAfterFourSeconds() async throws {
+        let folder = temp.url("shells"), seen = Seen(), clock = Clock()
+        let desk = desk(seen, clock: clock, folder: folder)
+        let ran = try file(folder, command: "make one"), declined = try file(folder, command: "make two")
+        let waiting = try file(folder, command: "make three")
+        await refreshed(desk)
+        // Waiting for Run: nothing is scheduled, however often it looks.
+        await refreshed(desk)
+        #expect(seen.timers.isEmpty)
+        await acted(desk, .run, ran.id)
+        await acted(desk, .decline, declined.id)
+        _ = await until { seen.timers.filter { $0.after == Self.tidy }.count == 2 }
+        #expect(desk.cards.count == 3)
+        fire(seen, after: Self.tidy); fire(seen, after: Self.tidy)
+        _ = await until { desk.cards.count == 1 }
+        #expect(desk.cards.map(\.id) == [waiting.id])
+        // The waiting one never goes by itself; at its expiry it shows that, then goes too.
+        clock.now = Self.created.addingTimeInterval(30 * 60)
+        await refreshed(desk)
+        #expect(desk.cards.first?.state == .expired)
+        _ = await until { seen.timers.contains { $0.after == Self.tidy } }
+        fire(seen, after: Self.tidy)
+        _ = await until { desk.cards.isEmpty }
+        #expect(desk.cards.isEmpty)
+    }
+
+    @Test func aFailedStartStaysUntilDismissed() async throws {
+        let folder = temp.url("shells"), seen = Seen(), clock = Clock()
+        let desk = desk(seen, clock: clock, folder: folder)
+        desk.launch = { _, then in then(.failure(ShellAsk.Refusal("No such folder"))) }
+        let request = try file(folder)
+        await refreshed(desk)
+        await acted(desk, .run, request.id)
+        await refreshed(desk)
+        #expect(seen.timers.filter { $0.after == Self.tidy }.isEmpty)
+        #expect(desk.cards.first?.state == .failed("No such folder"))
+    }
+
+    @Test func aHeldCardStaysWhileThePointerOrFocusIsOnIt() async throws {
+        let folder = temp.url("shells"), seen = Seen(), clock = Clock()
+        let desk = desk(seen, clock: clock, folder: folder)
+        let request = try file(folder)
+        await refreshed(desk)
+        await acted(desk, .run, request.id)
+        _ = await until { seen.timers.contains { $0.after == Self.tidy } }
+        desk.hold(request.id, true)
+        fire(seen, after: Self.tidy)
+        await refreshed(desk)
+        #expect(desk.cards.count == 1, "held: it stays when its time is up")
+        desk.hold(request.id, false)
+        _ = await until { desk.cards.isEmpty }
+        #expect(desk.cards.isEmpty, "let go: it goes")
+    }
+
+    @Test func aCardFadesBeforeItGoesAndDismissStillWorksAtAnyTime() async throws {
+        let folder = temp.url("shells"), seen = Seen(), clock = Clock()
+        let desk = desk(seen, clock: clock, folder: folder)
+        desk.fadeFor = { 0.3 }
+        let request = try file(folder), other = try file(folder, command: "make other")
+        await refreshed(desk)
+        await acted(desk, .run, request.id)
+        await acted(desk, .run, other.id)
+        _ = await until { seen.timers.filter { $0.after == Self.tidy }.count == 2 }
+        fire(seen, after: Self.tidy)
+        #expect(desk.leaving.count == 1 && desk.cards.count == 2, "fading, still there")
+        let fading = try #require(desk.leaving.first)
+        fire(seen, after: 0.3)
+        _ = await until { desk.cards.count == 1 }
+        #expect(desk.cards.map(\.id) == [fading == request.id ? other.id : request.id] && desk.leaving.isEmpty)
+        // Dismissed before its time: gone at once, and its timer finds nothing.
+        await acted(desk, .dismiss, desk.cards[0].id)
+        #expect(desk.cards.isEmpty)
+        fire(seen, after: Self.tidy)
+        await refreshed(desk)
+        #expect(desk.cards.isEmpty && desk.leaving.isEmpty)
     }
 
     @Test func declineStartsNothingAndUnansweredExpires() async throws {
@@ -264,7 +354,7 @@ struct ShellCardRunTests {
         let folder = base.temp.url("shells"), seen = ShellDeskTests.Seen(), clock = ShellDeskTests.Clock()
         let desk = base.desk(seen, clock: clock, folder: folder)
         var clears: [() -> Void] = []
-        desk.later = { _, clear in clears.append(clear) }
+        desk.later = { after, clear in if after != ShellDeskTests.tidy { clears.append(clear) } }
         let refused = try base.file(folder, command: "make serve")
         let other = try base.file(folder, command: "make watch")
         await base.refreshed(desk)

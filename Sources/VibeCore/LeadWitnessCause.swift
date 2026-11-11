@@ -96,6 +96,10 @@ public enum StallCause: Codable, Equatable, Sendable {
     }
 
     case macAsleep(MacSleepLog.Reading)
+    /// The Mac slept through the window (at least `LeadStall.sleptThroughShare` of it, up to when it last woke) and
+    /// hasn't been awake for the stall's threshold: the worker was paused with the Mac, so it isn't told to the lead
+    /// as a stall (four such wake-ups reached it the night of 2026-11-11).
+    case sleptThrough(MacSleepLog.Reading)
     /// In line for a slot: which run, since when, how many ahead, and who holds the slots.
     case testSlot(what: String, since: Double?, ahead: Int, holders: [SlotHolder])
     /// Waiting on a permission prompt or a question.
@@ -122,6 +126,8 @@ public enum StallCause: Codable, Equatable, Sendable {
         switch self {
         case .macAsleep(let reading):
             return "the Mac was asleep: \(reading.text(now: now)), so it hasn't had the time to do anything"
+        case .sleptThrough(let reading):
+            return "\(reading.text(now: now)), so it hasn't had the time to do anything"
         case let .testSlot(what, since, ahead, holders):
             let waited = since.map { " since \(LeadBoard.clock($0)) (\(LeadToolset.age(now.timeIntervalSince1970 - $0)))" } ?? ""
             let line = ahead > 0 ? ", \(TestLock.ordinal(ahead + 1)) in line" : ", first in line"
@@ -237,7 +243,13 @@ extension LeadStall {
                                       startedAt: shell.startedAt.timeIntervalSince1970, named: false)
             }
         }
-        if let sleep, at - from - sleep.slept < needed, sleep.slept > 0 { return .macAsleep(sleep) }
+        if let sleep, at - from - sleep.slept < needed, sleep.slept > 0 {
+            // Slept through, it's the Mac's pause and isn't told; with less sleep than that it's told, naming the sleep.
+            // The window ends where the Mac last woke: its time awake since is what the stall still waits for, and
+            // counting it would tell a night's sleep as a stall two minutes into the morning.
+            let window = min(sleep.lastWoke ?? at, at) - from
+            return sleep.slept >= window * sleptThroughShare ? .sleptThrough(sleep) : .macAsleep(sleep)
+        }
         if let wait = seen.lockWait {
             return .testSlot(what: String(wait.waiter.name.prefix(120)), since: wait.waiter.who.since?.timeIntervalSince1970, ahead: wait.ahead,
                              holders: wait.holders.map(StallCause.SlotHolder.init(held:)))

@@ -242,7 +242,7 @@ public final class HostServer {
             self.clients.values.forEach { $0.close() }
             self.clients = [:]
             for session in self.sessions.values {
-                if terminateSessions { session.terminate() }
+                if terminateSessions { session.terminate(keeping: self.config.appExecutable) }
                 session.close()
             }
             self.sessions = [:]
@@ -517,7 +517,7 @@ public final class HostServer {
             } else {
                 log.note("kill \(Self.short(id)): no such session, \(HostLog.peer(client.peerPID))")
             }
-            sessions[id]?.terminate(by: client.peerPID)
+            sessions[id]?.terminate(by: client.peerPID, keeping: config.appExecutable)
             reply(.ok)
         case .remove(let id):
             guard let session = sessions[id] else { return reply(.ok) }
@@ -890,7 +890,7 @@ public final class HostServer {
         for (id, at) in vault.submittedSessions() where now.timeIntervalSince1970 - at >= config.submittedGrace {
             guard let uuid = UUID(uuidString: id), let session = sessions[uuid], session.info.isLive else { continue }
             log.note("kill \(Self.short(uuid)) pid \(session.info.childPID) label '\(session.info.label)': its verifier submitted its audit \(Int(now.timeIntervalSince1970 - at)) s ago, by the host")
-            session.terminate(by: getpid())
+            session.terminate(by: getpid(), keeping: config.appExecutable)
         }
     }
 

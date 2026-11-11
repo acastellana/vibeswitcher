@@ -22,6 +22,21 @@ public enum SessionStrays {
         return processes(user: user) { ProcessTable.environment(pid: $0)?.contains(entry) == true }
     }
 
+    /// `carrying(session:)` without the processes running `app` (VibeSwitcher itself, which carries a session's id
+    /// when something run in that session launched it, see `endNow`): what a lead ends itself when the host didn't.
+    public static func carrying(session id: UUID, keeping app: String?) -> [Found] {
+        guard let app = app.map(resolved) else { return carrying(session: id) }
+        return carrying(session: id).filter { !runs($0.pid, executable: app) }
+    }
+
+    /// VibeSwitcher's executable for one of its tools (the tool server, the session host): the one beside this
+    /// process's own, as the app's bundle holds them.
+    public static var appBesideThisProgram: String? {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(getpid(), &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        return URL(fileURLWithPath: String(cString: buffer)).deletingLastPathComponent().appendingPathComponent("VibeSwitcher").path
+    }
+
     /// The session's processes: those carrying its id, and those of `started` (what its program started, see
     /// `descendants`) still running whose environment can't be read. One whose environment names another session, or
     /// none, isn't.
@@ -36,15 +51,40 @@ public enum SessionStrays {
     /// Ends the session's processes (`of(session:started:)`) but those in `groups` (signalled by the caller): SIGTERM,
     /// then SIGKILL after `grace` to whatever of the session's still runs. On a thread of its own, not a dispatch
     /// queue's: on a busy Mac every thread of the global queues can be taken, and the ending would wait for one.
-    public static func end(session id: UUID, started: [Found], sparing groups: Set<pid_t> = [], grace: TimeInterval = 5) {
-        let thread = Thread {
-            let begun = Date()
-            for stray in of(session: id, started: started) where !groups.contains(stray.group) { kill(stray.pid, SIGTERM) }
-            Thread.sleep(until: begun.addingTimeInterval(grace))
-            of(session: id, started: started).forEach { kill($0.pid, SIGKILL) }
-        }
+    /// `app`: VibeSwitcher's executable, never signalled (see `endNow`).
+    public static func end(session id: UUID, started: [Found], sparing groups: Set<pid_t> = [], keeping app: String? = nil,
+                           grace: TimeInterval = 5) {
+        let thread = Thread { endNow(session: id, started: started, sparing: groups, keeping: app, grace: grace) }
         thread.name = "SessionStrays.end"
         thread.start()
+    }
+
+    /// `end`, on the calling thread: returns after the SIGKILLs, with the processes it asked to end.
+    /// A process running `app` (VibeSwitcher itself) is never one of them, though it carries the session's id: the app
+    /// isn't what the session started. It carries the id when something run in that session launched it (`open` hands
+    /// its caller's environment to the app, so an app relaunched by an install run in a shell carries that shell's id
+    /// for as long as it runs), and ending that shell then quit the app (2026-11-10 22:00).
+    @discardableResult
+    static func endNow(session id: UUID, started: [Found], sparing groups: Set<pid_t> = [], keeping app: String? = nil,
+                       grace: TimeInterval = 5) -> [Found] {
+        let app = app.map(resolved)
+        func mine() -> [Found] {
+            of(session: id, started: started).filter { found in app.map { !runs(found.pid, executable: $0) } ?? true }
+        }
+        let begun = Date()
+        let asked = mine().filter { !groups.contains($0.group) }
+        asked.forEach { kill($0.pid, SIGTERM) }
+        Thread.sleep(until: begun.addingTimeInterval(grace))
+        mine().forEach { kill($0.pid, SIGKILL) }
+        return asked
+    }
+
+    /// Whether `pid` runs the program at `executable` (a path with its symlinks resolved, as the kernel names a
+    /// process's program).
+    static func runs(_ pid: pid_t, executable: String) -> Bool {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return false }
+        return String(cString: buffer) == executable
     }
 
     /// What `pid` started that runs now, their children too, the user's only: to be found before it's asked to end

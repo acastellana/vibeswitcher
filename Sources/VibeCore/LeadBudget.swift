@@ -14,8 +14,8 @@ public enum LeadBudget {
     /// read back by everything watching it. A task reaching its budget, or leaving running, writes it at once
     /// (`BoardStore.noteWork`).
     public static let boardEvery: TimeInterval = 5 * 60
-    /// The most one step between two looks counts: past it the app wasn't looking (asleep, quit), so it isn't known
-    /// what the worker did meanwhile.
+    /// The most one step between two looks counts: past it the app wasn't looking (quit), so it isn't known what the
+    /// worker did meanwhile. A step counts only its time awake (`awake`), so the Mac's sleep is never in it.
     public static let longestStep: TimeInterval = 5 * 60
 
     /// The task's budget in minutes: its own (budget_min), else the workflow's; nil for none (0).
@@ -50,6 +50,14 @@ public enum LeadBudget {
             working.insert(task.id)
         }
         return working
+    }
+
+    /// The time awake from `from` to `to`, by the witness's sleep log (the awake clock merges and stall reports use):
+    /// a worker reads as working all through a sleep, and a Mac that wakes every few minutes in the night would count
+    /// each wake's step (2026-11-11: a worker that wrote one line was told to stop at its 60 min budget). What the
+    /// log can't say (nothing noted, or the time before it began) counts as awake.
+    static func awake(from: Double, to: Double, sleep: MacSleepLog) -> TimeInterval {
+        max(0, to - from - (sleep.reading(from: from, to: to)?.slept ?? 0))
     }
 
     /// "2 h 5 min" of working time.
@@ -126,12 +134,13 @@ extension BoardStore {
     /// count: to the clock, and to board.json when it's due (`LeadBudgetClock.due`) or a task reached its budget now.
     /// Under the board's lock. Returns the tasks that reached their budget now.
     @discardableResult
-    public func noteWork(_ working: Set<String>, defaultMinutes: Int, now: Double = Date().timeIntervalSince1970) throws -> [LeadTask] {
+    public func noteWork(_ working: Set<String>, defaultMinutes: Int, now: Double = Date().timeIntervalSince1970,
+                         sleep: MacSleepLog = MacSleepLog()) throws -> [LeadTask] {
         try locked {
             var board = try read()
             var clock = budgetClock()
             clock.apply(to: &board)
-            let noted = board.noteWork(working, defaultMinutes: defaultMinutes, now: now)
+            let noted = board.noteWork(working, defaultMinutes: defaultMinutes, now: now, sleep: sleep)
             if !noted.reached.isEmpty || clock.due(on: board, now: now) {
                 board.refreshScores(now: now)
                 try write(board)
@@ -182,20 +191,21 @@ public struct LeadOverBudget: Codable, Equatable, Sendable {
 }
 
 extension LeadBoard {
-    /// Counts working time: each running task whose worker works now (`working`, by task id) gets the time since its
-    /// last count (at most `LeadBudget.longestStep`, written at most every `LeadBudget.step`); any other stops counting.
+    /// Counts working time: each running task whose worker works now (`working`, by task id) gets the time awake since
+    /// its last count (by `sleep`, see `LeadBudget.awake`; at most `LeadBudget.longestStep`, written at most every
+    /// `LeadBudget.step`); any other stops counting.
     /// A running task whose time reached its budget (its own, else `defaultMinutes`) is marked over budget, once per
     /// budget: the lead changing budget_min clears it. Returns the tasks marked now, and whether anything changed.
     /// Only the tasks in `budgeted` are copied or changed: a board of hundreds of finished tasks costs no more than
     /// its running ones (hang-20261027-041428 caught it copying and comparing each of 254 on the main thread).
     @discardableResult
-    public mutating func noteWork(_ working: Set<String>, defaultMinutes: Int, now: Double = Date().timeIntervalSince1970)
-        -> (reached: [LeadTask], changed: Bool) {
+    public mutating func noteWork(_ working: Set<String>, defaultMinutes: Int, now: Double = Date().timeIntervalSince1970,
+                                  sleep: MacSleepLog = MacSleepLog()) -> (reached: [LeadTask], changed: Bool) {
         var reached: [LeadTask] = []
         var changed = false
         for index in budgeted {
             var task = tasks[index]
-            let noted = Self.noteWork(&task, working: working.contains(task.id), defaultMinutes: defaultMinutes, now: now)
+            let noted = Self.noteWork(&task, working: working.contains(task.id), defaultMinutes: defaultMinutes, now: now, sleep: sleep)
             if noted.reached { reached.append(task) }
             if noted.changed {
                 tasks[index] = task
@@ -208,13 +218,13 @@ extension LeadBoard {
     /// Whether `noteWork` would change anything, the clock's count on the board, without changing the board, or the
     /// count is due on board.json: the witness asks on the main thread, and only then writes it, off it.
     public func notesWork(_ working: Set<String>, defaultMinutes: Int, now: Double = Date().timeIntervalSince1970,
-                          clock: LeadBudgetClock = LeadBudgetClock()) -> Bool {
+                          clock: LeadBudgetClock = LeadBudgetClock(), sleep: MacSleepLog = MacSleepLog()) -> Bool {
         var board = self
         clock.apply(to: &board)
         if clock.due(on: board, now: now) { return true }
         return board.budgeted.contains { index in
             var task = board.tasks[index]
-            return Self.noteWork(&task, working: working.contains(task.id), defaultMinutes: defaultMinutes, now: now).changed
+            return Self.noteWork(&task, working: working.contains(task.id), defaultMinutes: defaultMinutes, now: now, sleep: sleep).changed
         }
     }
 
@@ -223,11 +233,12 @@ extension LeadBoard {
     var budgeted: [Int] { tasks.indices.filter { tasks[$0].status == .running || tasks[$0].workedAt != nil } }
 
     /// One task's count (see `noteWork`): whether it changed, and whether it reached its budget now.
-    private static func noteWork(_ task: inout LeadTask, working: Bool, defaultMinutes: Int, now: Double) -> (changed: Bool, reached: Bool) {
+    private static func noteWork(_ task: inout LeadTask, working: Bool, defaultMinutes: Int, now: Double, sleep: MacSleepLog) -> (changed: Bool, reached: Bool) {
         let before = (worked: task.worked, workedAt: task.workedAt)
         if task.status == .running, working {
             if let since = task.workedAt {
-                let step = now - since
+                // Until it has had a step's time awake the count stays where it began, so the sleep is all in one window.
+                let step = LeadBudget.awake(from: since, to: now, sleep: sleep)
                 if step >= LeadBudget.step {
                     task.worked = (task.worked ?? 0) + min(step, LeadBudget.longestStep)
                     task.workedAt = now

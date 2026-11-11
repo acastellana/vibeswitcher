@@ -42,6 +42,109 @@ struct LeadBudgetTests: LeadTeamFixture {
 
     static let t0: Double = 1_790_000_000
 
+    /// The Mac's two clocks, the test's own: `stayAwake` moves both, `sleep` only the wall clock. Each look notes them
+    /// in the sleep log first, as the witness does, then counts the work.
+    struct Mac {
+        var wall = LeadBudgetTests.t0
+        var awake: TimeInterval = 1_000
+        var log = MacSleepLog()
+        var told: [String] = []
+
+        /// The witness's looks every 3 s for `seconds` of time awake, the worker reading as working.
+        mutating func stayAwake(_ seconds: Double, _ board: inout LeadBoard) {
+            let end = wall + seconds
+            while true {
+                look(&board)
+                guard wall + 3 <= end else { break }
+                wall += 3
+                awake += 3
+            }
+        }
+
+        /// The Mac asleep for `seconds`: no look, and the awake clock stands still.
+        mutating func sleep(_ seconds: Double) { wall += seconds }
+
+        mutating func look(_ board: inout LeadBoard) {
+            log.note(wall: wall, awake: awake)
+            let working = LeadBudget.working(board: board, seen: ["w1": LeadBudgetTests.working])
+            told += board.noteWork(working, defaultMinutes: 120, now: wall, sleep: log).reached.map(\.slug)
+        }
+    }
+
+    // MARK: The Mac asleep
+
+    /// 2026-11-11 01:13 to 04:36: a worker that wrote one line read as working while the Mac slept nearly all of 3 h
+    /// 23 min, waking every few minutes; each wake's look counted the step since the last, and at 60 min it was told to stop.
+    @Test func aWorkerReadingAsWorkingThroughANightOfSleepDoesntReachItsBudget() {
+        var board = LeadBoard()
+        board.tasks = [Self.task(budget: 60)]
+        var mac = Mac()
+        var awake = 0.0
+        while mac.wall < Self.t0 + 203 * 60 {
+            // A dark wake: 21 s of looks, then asleep again for 4 min 39 s.
+            mac.stayAwake(21, &board)
+            awake += 21
+            mac.sleep(279)
+        }
+        mac.look(&board)
+        #expect(mac.told.isEmpty, "told to stop after \(LeadBudget.text(board.tasks[0].worked ?? 0)) of work in \(LeadBudget.text(awake)) awake")
+        #expect(board.tasks[0].overBudget == nil)
+        // Only the time awake counted (to the minute: a count is written once a minute's worth has passed).
+        let worked = board.tasks[0].worked ?? 0
+        #expect(worked <= awake && worked > awake - LeadBudget.step, "\(worked) of \(awake)")
+    }
+
+    @Test func anHourAsleepAndTenMinutesAwakeLeaveFiftyOfASixtyMinuteBudget() {
+        var board = LeadBoard()
+        board.tasks = [Self.task(budget: 60)]
+        var mac = Mac()
+        mac.stayAwake(5 * 60, &board)
+        mac.sleep(3600)
+        mac.stayAwake(5 * 60, &board)
+        let left = Double(LeadBudget.minutes(board.tasks[0], default: 120)! * 60) - (board.tasks[0].worked ?? 0)
+        #expect(left == Double(50 * 60), "\(left / 60) min left")
+        #expect(mac.told.isEmpty)
+        // And the budget is still reached, on time awake: 50 more minutes of it.
+        mac.stayAwake(50 * 60, &board)
+        #expect(mac.told == ["fix"])
+        #expect(board.tasks[0].overBudget?.at == mac.wall)
+    }
+
+    @Test func theStoresCountTakesOnlyTheTimeAwakeToo() throws {
+        let root = try repo()
+        let lead = try lead(root, FakeRuntime())
+        _ = lead.call("add_task", ["title": "Fix", "goal": "g", "acceptance": ["a"], "budget_min": 60])
+        _ = lead.call("start_worker", ["task": "fix"])
+        let store = BoardStore(root: root)
+        let id = try #require(store.load().task("fix")?.id)
+        var log = MacSleepLog()
+        log.note(wall: Self.t0, awake: 0)
+        try store.noteWork([id], defaultMinutes: 120, now: Self.t0, sleep: log)
+        // An hour asleep, then two minutes awake.
+        log.note(wall: Self.t0 + 3720, awake: 120)
+        #expect(store.load().notesWork([id], defaultMinutes: 120, now: Self.t0 + 3720, clock: store.budgetClock(), sleep: log))
+        try store.noteWork([id], defaultMinutes: 120, now: Self.t0 + 3720, sleep: log)
+        var board = store.load()
+        store.budgetClock().apply(to: &board)
+        #expect(board.task("fix")?.worked == 120)
+    }
+
+    /// Fail closed: what the awake clock can't say counts as awake, as it did before the clock was read.
+    @Test func timeTheSleepLogDoesntCoverCountsAsAwake() {
+        #expect(LeadBudget.awake(from: Self.t0, to: Self.t0 + 90, sleep: MacSleepLog()) == 90)
+        // The log began after the count did: only the sleep it saw is taken out.
+        var late = MacSleepLog()
+        late.note(wall: Self.t0 + 60, awake: 0)
+        late.note(wall: Self.t0 + 180, awake: 20)
+        #expect(LeadBudget.awake(from: Self.t0, to: Self.t0 + 180, sleep: late) == 80)
+        var board = LeadBoard()
+        board.tasks = [Self.task(budget: 60)]
+        let id = board.tasks[0].id
+        board.noteWork([id], defaultMinutes: 120, now: Self.t0)
+        board.noteWork([id], defaultMinutes: 120, now: Self.t0 + 90, sleep: MacSleepLog())
+        #expect(board.tasks[0].worked == 90)
+    }
+
     // MARK: Counting
 
     @Test func aWorkerThatKeepsWorkingIsToldOnceAtItsBudgetNotAtEveryLook() {

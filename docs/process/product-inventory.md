@@ -114,6 +114,7 @@ Right-click menus, by where they are. The chat's message text adds Copy and Sele
 - Menu bar popover, session row: Pause › For 1 Week — `Sources/VibeSwitcher/PopoverView.swift`
 - Menu bar popover, session row: Rename… — `Sources/VibeSwitcher/PopoverView.swift`
 - Menu bar popover, session row: Reset Name to “…” — `Sources/VibeSwitcher/PopoverView.swift`
+- Sidebar session row: Close Finished Shells… — `Sources/VibeSwitcher/MainWindow/SessionListView.swift`
 - Sidebar session row: Rename… — `Sources/VibeSwitcher/MainWindow/SessionListView.swift`
 - Sidebar session row: Resume Notifications — `Sources/VibeSwitcher/MainWindow/SessionListView.swift`
 - Sidebar session row: Pause › Until I Resume It — `Sources/VibeSwitcher/MainWindow/SessionListView.swift`
@@ -364,6 +365,11 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m] [--data 0x…] [--reason TEXT]` — the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-ask [COMMAND]` — the selected fake session's agent asks for a new shell running COMMAND (a made-up program unless given) in… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-click run|decline|dismiss` — presses that button on the newest shell request card in the selected chat (run starts the shell session in… — `Sources/VibeSwitcher/Sandbox.swift`
+- `shell-tidy SECONDS` — how long a handled shell card (started, declined, expired) shows before it leaves by itself, for cards… — `Sources/VibeSwitcher/Sandbox.swift`
+- `shell-idle SECONDS` — how long after its command went well an untouched Run-card shell is ended by itself (600 by default), and… — `Sources/VibeSwitcher/Sandbox.swift`
+- `end row|key|window` — ends the selected session as the window does: row is its End Session… in the sidebar's menu, key is the File… — `Sources/VibeSwitcher/Sandbox.swift`
+- `shell-close [PROJECT]` — the sidebar's Close Finished Shells… for PROJECT (the selected session's unless given), its confirmation… — `Sources/VibeSwitcher/Sandbox.swift`
+- `sidebar attention|projects [ended]` — groups the sidebar by attention or by project (a project's header has its menu), with the Ended fold open… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-fail on|off` — on: the sandbox's own host refuses to start the shells a card's Run asks for, so the Run says why it didn't… — `Sources/VibeSwitcher/Sandbox.swift`
 - `wallet-card` — prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint… — `Sources/VibeSwitcher/Sandbox.swift`
 - `wallet-later MINUTES` — moves the wallet desk's clock MINUTES ahead (never back) and redraws the cards, e.g. for the not-picked-up… — `Sources/VibeSwitcher/Sandbox.swift`

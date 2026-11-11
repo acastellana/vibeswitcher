@@ -29,6 +29,20 @@ final class HostTerminalView: TerminalView {
         onReply?(Data(data))
     }
 
+    /// SwiftTerm paints only cells with an explicit background and clears the rest to transparent, leaving the default
+    /// background to the view's layer colour. A drawing of the view that leaves the layer out (a snapshot, a print, a
+    /// PDF) is then transparent there and shows what's behind it: white, under the dark palette's light text. After the
+    /// view has drawn, the default background goes in, in the theme's colour, behind what's drawn (only where it's
+    /// transparent).
+    override func displayIgnoringOpacity(_ rect: NSRect, in context: NSGraphicsContext) {
+        super.displayIgnoringOpacity(rect, in: context)
+        context.saveGraphicsState()
+        NSGraphicsContext.current = context
+        nativeBackgroundColor.setFill()
+        rect.fill(using: .destinationOver)
+        context.restoreGraphicsState()
+    }
+
     // MARK: Selection, as in Terminal.app
 
     /// The session's output, drawn without dropping the selection. SwiftTerm 1.19 drops it as each piece of output
