@@ -693,9 +693,9 @@ final class HostClient: ObservableObject {
     }
 
     /// `wait`: how long the reply is waited for before it's taken as unanswered; nil waits until the connection drops.
-    private func request(_ request: HostRequest, wait: TimeInterval? = HostClient.replyWait, reply: ((HostEvent) -> Void)? = nil) {
+    private func request(_ request: HostRequest, wait: TimeInterval? = HostClient.replyWait, holdable: Bool = true, reply: ((HostEvent) -> Void)? = nil) {
         guard let connection else {
-            if state == .connecting, Self.isHeldForNextConnection(request) {
+            if holdable, state == .connecting, Self.isHeldForNextConnection(request) {
                 held.append((request, wait, reply))
                 return
             }
@@ -708,7 +708,7 @@ final class HostClient: ObservableObject {
         } catch {
             // The host closed this connection (a handover re-executes it) and the app hasn't noticed yet.
             if case HostConnection.SendFailure.closed = error {
-                if Self.isHeldForNextConnection(request) {
+                if holdable, Self.isHeldForNextConnection(request) {
                     note("host: \(Self.kind(of: request)) held for the next connection: the connection to the session host is closing")
                     held.append((request, wait, reply))
                     return
@@ -993,7 +993,8 @@ final class HostClient: ObservableObject {
         replies[seq] = { event in if case .error(let message) = event { refusal = message } }
         paced.inFlight = true
         pacedInput[id] = paced
-        request(.screen(id: id)) { [weak self] event in
+        // The receipt of a piece means something only on the connection the piece went out on: never held.
+        request(.screen(id: id), holdable: false) { [weak self] event in
             guard let self, var paced = self.pacedInput[id] else { return }
             if refusal == nil { self.replies[seq] = nil }
             paced.inFlight = false
