@@ -352,3 +352,7 @@ The user preferred same-model audits to waiting. Two infrastructure audits can g
 
 Codex workers can't run scripts/sandbox-app.sh: the manifest compile writes ~/.cache/clang/ModuleCache, outside their sandbox. Screenshots were waived twice on 2026-11-11 (boost-release-7-7, a-blocked-task-s). The second time was a repeat, so it became a task instead of a third waiver.
 
+## 2026-11-11 23:36:52 UI tasks that need sandbox screenshots go to a Claude worker (agent: claude), permanently, not auto or Codex. Text-only UI changes on Codex may waive screenshots when tests pin the text. This supersedes the 2026-11-11 "until the-sandbox-app-builds merges" decision.
+
+the-sandbox-app-builds showed that Codex's sandbox denies com.apple.hiservices-xpcservice, so the sandbox app can't start there even once it builds. The task was abandoned rather than merging Codex-only build paths that don't yield screenshots.
+
