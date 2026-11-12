@@ -396,30 +396,19 @@ extension Shell {
         /// as Process starts one, keeping this process's controlling terminal.
         init(_ argv: [String], in directory: String, environment: [String: String], output: ShellPipe, errors: ShellPipe,
              session: Bool = true) throws {
-            var attributes: posix_spawnattr_t?
-            posix_spawnattr_init(&attributes)
-            defer { posix_spawnattr_destroy(&attributes) }
-            let own = session ? POSIX_SPAWN_SETSID : POSIX_SPAWN_SETPGROUP
-            posix_spawnattr_setflags(&attributes, Int16(own | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF))
-            // Group 0: its own, its id its pid.
-            posix_spawnattr_setpgroup(&attributes, 0)
-            var none = sigset_t(), all = sigset_t()
-            sigemptyset(&none)
-            sigfillset(&all)
-            posix_spawnattr_setsigmask(&attributes, &none)
-            posix_spawnattr_setsigdefault(&attributes, &all)
-            var actions: posix_spawn_file_actions_t?
-            posix_spawn_file_actions_init(&actions)
-            defer { posix_spawn_file_actions_destroy(&actions) }
-            posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
-            posix_spawn_file_actions_adddup2(&actions, output.writing.fileDescriptor, 1)
-            posix_spawn_file_actions_adddup2(&actions, errors.writing.fileDescriptor, 2)
-            posix_spawn_file_actions_addchdir_np(&actions, directory)
-            let arguments = argv.map { strdup($0) } + [nil]
-            let variables = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
-            defer { (arguments + variables).forEach { free($0) } }
+            var program = Platform.Spawn(executable: argv[0], arguments: argv)
+            program.group = session ? .ownSession : .ownGroup
+            program.stdin = .path("/dev/null", flags: O_RDONLY)
+            program.stdout = .descriptor(output.writing.fileDescriptor)
+            program.stderr = .descriptor(errors.writing.fileDescriptor)
+            program.directory = directory
+            program.environment = environment.map { "\($0.key)=\($0.value)" }
             var pid: pid_t = 0
-            let code = posix_spawn(&pid, argv[0], &actions, &attributes, arguments, variables)
+            var code: Int32 = 0
+            switch program.start() {
+            case .success(let started): pid = started
+            case .failure(let failure): code = failure.code
+            }
             // Only the child writes into them now: their ends close when it (and what it starts) is done.
             output.closeWriting()
             errors.closeWriting()

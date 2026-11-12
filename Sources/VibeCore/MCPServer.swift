@@ -291,25 +291,15 @@ public enum MCPHandover {
         var pipe: [Int32] = [-1, -1]
         guard Sys.pipe(&pipe) == 0 else { return "no pipe for its probe" }
         defer { Sys.close(pipe[0]) }
-        var attributes: posix_spawnattr_t?
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
-        var all: sigset_t = ~0
-        var none: sigset_t = 0
-        posix_spawnattr_setsigdefault(&attributes, &all)
-        posix_spawnattr_setsigmask(&attributes, &none)
-        var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_adddup2(&actions, stateFD, 0)
-        posix_spawn_file_actions_adddup2(&actions, pipe[1], 1)
-        posix_spawn_file_actions_addinherit_np(&actions, 2)
-        let words = [executable, probeFlag]
-        let argv: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]
-        defer { argv.forEach { free($0) } }
+        var program = Platform.Spawn(executable: executable, arguments: [executable, probeFlag])
+        program.stdin = .descriptor(stateFD)
+        program.stdout = .descriptor(pipe[1])
         var pid: pid_t = 0
-        let spawned = posix_spawn(&pid, executable, &actions, &attributes, argv, environ)
+        var spawned: Int32 = 0
+        switch program.start() {
+        case .success(let started): pid = started
+        case .failure(let failure): spawned = failure.code
+        }
         Sys.close(pipe[1])
         guard spawned == 0 else { return "it couldn't start: \(String(cString: strerror(spawned)))" }
 
@@ -348,32 +338,15 @@ public enum MCPHandover {
     /// The exec itself: the new image keeps the pid and gets stdin, stdout, stderr and the state's descriptor (named in
     /// its environment), nothing else. Returns only when it failed.
     private static func exec(_ executable: String, arguments: [String], stateFD: Int32) -> String {
-        var attributes: posix_spawnattr_t?
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETEXEC | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
         // Default handling and an empty mask, as at a fresh start.
-        var all: sigset_t = ~0
-        var none: sigset_t = 0
-        posix_spawnattr_setsigdefault(&attributes, &all)
-        posix_spawnattr_setsigmask(&attributes, &none)
-        var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        for fd in [0, 1, 2, stateFD] { posix_spawn_file_actions_addinherit_np(&actions, fd) }
-        // An in-place exec refuses to hand on a descriptor marked close-on-exec (EBADF): unmark the state's while it
-        // runs, and mark it again if it fails.
-        _ = fcntl(stateFD, F_SETFD, 0)
-        defer { _ = fcntl(stateFD, F_SETFD, FD_CLOEXEC) }
-        let words = [executable] + arguments
-        let argv: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]
-        defer { argv.forEach { free($0) } }
+        var program = Platform.Spawn(executable: executable, arguments: [executable] + arguments)
+        // An in-place exec refuses to hand on a descriptor marked close-on-exec (EBADF): `replaceProcess` unmarks the
+        // state's while it runs, and marks it again if it fails.
+        program.keep = [stateFD]
         var environment = ProcessInfo.processInfo.environment
         environment[variable] = "\(stateFD)"
-        let envp: [UnsafeMutablePointer<CChar>?] = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
-        defer { envp.forEach { free($0) } }
-        var pid: pid_t = 0
-        let result = posix_spawn(&pid, executable, &actions, &attributes, argv, envp)
+        program.environment = environment.map { "\($0.key)=\($0.value)" }
+        let result = program.replaceProcess()
         return "it couldn't be executed: \(String(cString: strerror(result == 0 ? EINVAL : result)))"
     }
 }

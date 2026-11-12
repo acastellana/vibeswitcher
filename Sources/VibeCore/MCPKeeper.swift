@@ -204,26 +204,17 @@ public enum MCPKeeper {
             input.forEach { Sys.close($0) }
             return (nil, "couldn't be started: no pipe, \(MCPLog.errnoText(errno))")
         }
-        var attributes: posix_spawnattr_t?
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
         // Nothing but its stdio: no descriptor of the keeper's leaks into it. Default signals and an empty mask, as at a
         // fresh start (the keeper catches some).
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
-        var all: sigset_t = ~0
-        var none: sigset_t = 0
-        posix_spawnattr_setsigdefault(&attributes, &all)
-        posix_spawnattr_setsigmask(&attributes, &none)
-        var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_adddup2(&actions, input[0], 0)
-        posix_spawn_file_actions_adddup2(&actions, output[1], 1)
-        posix_spawn_file_actions_addinherit_np(&actions, 2)
-        let argv: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) } + [nil]
-        defer { argv.forEach { free($0) } }
+        var program = Platform.Spawn(executable: executable, arguments: [executable] + arguments)
+        program.stdin = .descriptor(input[0])
+        program.stdout = .descriptor(output[1])
         var pid: pid_t = 0
-        let spawned = posix_spawn(&pid, executable, &actions, &attributes, argv, environ)
+        var spawned: Int32 = 0
+        switch program.start() {
+        case .success(let started): pid = started
+        case .failure(let failure): spawned = failure.code
+        }
         Sys.close(input[0])
         Sys.close(output[1])
         guard spawned == 0 else {
