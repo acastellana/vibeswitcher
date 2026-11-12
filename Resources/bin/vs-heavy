@@ -339,7 +339,9 @@ if [[ $PWD =~ ^(.*)/\.vibeswitcher/worktrees/([^/]+) ]]; then
 fi
 project=${project##*/}
 # Linux: GNU date takes a time in seconds as -d @N (its -r is a file's time); the words below are the Mac's.
-[[ -n $linux ]] && date() { if [[ ${1:-} == -r ]]; then command date -d "@$2" "${@:3}"; else command date "$@"; fi; }
+if [[ -n $linux ]]; then
+    date() { if [[ ${1:-} == -r ]]; then command date -d "@$2" "${@:3}"; else command date "$@"; fi; }
+fi
 {
     echo "pid $$, $what in $PWD, since $(date -r "$now" +%H:%M:%S)"
     echo "taken $now"
