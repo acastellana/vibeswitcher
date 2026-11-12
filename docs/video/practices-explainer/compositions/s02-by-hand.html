@@ -1,0 +1,166 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s02 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+          width: 1680px;
+        }
+        .s02 .left {
+          position: absolute;
+          left: 120px;
+          top: 290px;
+          width: 760px;
+        }
+        .s02 .left .label {
+          margin-bottom: 26px;
+        }
+        .s02 .item {
+          display: flex;
+          align-items: baseline;
+          gap: 22px;
+          font-size: 30px;
+          line-height: 1.3;
+          margin-bottom: 26px;
+        }
+        .s02 .tick {
+          flex: none;
+          width: 16px;
+          height: 16px;
+          border-radius: 4px;
+          background: var(--go);
+          transform: translateY(-3px);
+        }
+        .s02 .right {
+          position: absolute;
+          left: 960px;
+          top: 290px;
+          width: 860px;
+          height: 700px;
+        }
+        .s02 .you {
+          position: absolute;
+          left: 0;
+          top: 250px;
+          width: 150px;
+          height: 150px;
+          border-radius: 50%;
+          border: 4px solid var(--accent);
+          background: var(--panel);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: var(--display);
+          font-size: 36px;
+          color: var(--fg);
+        }
+        .s02 .links {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 860px;
+          height: 700px;
+        }
+        .s02 .links path {
+          fill: none;
+          stroke: var(--line);
+          stroke-width: 3;
+        }
+        .s02 .job {
+          position: absolute;
+          left: 250px;
+          width: 610px;
+          font-family: var(--mono);
+          font-size: 24px;
+          color: var(--fg);
+          background: var(--panel);
+          border: 2px solid var(--line);
+          border-radius: 10px;
+          padding: 10px 18px;
+        }
+        .s02 .close {
+          position: absolute;
+          left: 120px;
+          top: 420px;
+          width: 1680px;
+        }
+        .s02 .close .h1 {
+          font-size: 96px;
+        }
+        .s02 .close .h1 span {
+          color: var(--accent);
+        }
+      </style>
+      <div id="root" data-composition-id="s02-by-hand" data-width="1920" data-height="1080">
+        <div class="stage s02">
+          <div class="kicker">01 / The starting point</div>
+          <div class="ghost">BY HAND</div>
+          <div class="cols">
+            <div class="head h2">Claude Code already gives you a lot.</div>
+            <div class="left">
+              <div class="label">Built in</div>
+              <div class="item"><span class="tick"></span><span>Subagents, each with its own context</span></div>
+              <div class="item"><span class="tick"></span><span>Git worktrees: <span class="code">claude --worktree</span></span></div>
+              <div class="item"><span class="tick"></span><span>Hooks that can block an action or run tests</span></div>
+              <div class="item"><span class="tick"></span><span>Permission rules, auto mode, a sandbox</span></div>
+              <div class="item"><span class="tick"></span><span>CLAUDE.md and auto memory</span></div>
+              <div class="item"><span class="tick"></span><span>Remote Control from your phone</span></div>
+            </div>
+            <div class="right">
+              <div class="label">Run a few sessions by hand, and you are the process</div>
+              <svg class="links" viewBox="0 0 860 700" aria-hidden="true">
+                <path pathLength="1" d="M 150 325 C 200 325 200 74 250 74" />
+                <path pathLength="1" d="M 150 325 C 200 325 200 146 250 146" />
+                <path pathLength="1" d="M 150 325 C 200 325 200 218 250 218" />
+                <path pathLength="1" d="M 150 325 C 200 325 200 290 250 290" />
+                <path pathLength="1" d="M 150 325 C 200 325 200 362 250 362" />
+                <path pathLength="1" d="M 150 325 C 200 325 200 434 250 434" />
+                <path pathLength="1" d="M 150 325 C 200 325 200 506 250 506" />
+                <path pathLength="1" d="M 150 325 C 200 325 200 578 250 578" />
+              </svg>
+              <div class="you">you</div>
+              <div class="job" style="top: 50px">write each brief</div>
+              <div class="job" style="top: 122px">keep sessions out of each other's files</div>
+              <div class="job" style="top: 194px">read every diff</div>
+              <div class="job" style="top: 266px">decide what's tested enough</div>
+              <div class="job" style="top: 338px">merge, in order</div>
+              <div class="job" style="top: 410px">remember why</div>
+              <div class="job" style="top: 482px">notice who's stuck</div>
+              <div class="job" style="top: 554px">watch the Mac and the usage limits</div>
+            </div>
+          </div>
+          <div class="close"><div class="h1">VibeSwitcher turns that process into <span>software.</span></div></div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s02");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 22);
+          K.rise(tl, ".s02 .head", 0.3, { y: 36, d: 0.7 });
+          K.rise(tl, ".s02 .left .label", 1.0);
+          K.slide(tl, ".s02 .item", 1.3, { stagger: 0.45, x: -40 });
+          K.rise(tl, ".s02 .right .label", 5.0);
+          K.pop(tl, ".s02 .you", 5.5, { from: 0.4 });
+          K.draw(tl, ".s02 .links path", 6.0, 0.6, { stagger: 0.42 });
+          K.slide(tl, ".s02 .job", 6.2, { stagger: 0.42, x: 40 });
+          // the jobs pile up on one person: the circle strains
+          tl.to(".s02 .you", { scale: 1.12, duration: 0.5, ease: "power2.inOut", yoyo: true, repeat: 3 }, 10.0);
+          tl.to(".s02 .cols", { opacity: 0, y: -30, duration: 0.6, ease: "power2.in" }, 14.4);
+          tl.fromTo(".s02 .close", { opacity: 0, y: 50 }, { opacity: 1, y: 0, duration: 0.8, ease: "expo.out" }, 15.2);
+          window.__timelines["s02-by-hand"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

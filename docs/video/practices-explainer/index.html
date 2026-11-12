@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>VibeSwitcher: the practices</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+    <style>
+      /* The look: frame.md. Shared by every scene (sub-compositions mount into this page). */
+      :root {
+        --bg: #12110f;
+        --panel: #1c1a17;
+        --panel2: #24211d;
+        --line: #3a352d;
+        --fg: #f1ebe0;
+        --muted: #a39a8b;
+        --accent: #f0a63a;
+        --go: #7ccf8e;
+        --stop: #ef7a68;
+        --info: #8fb6e8;
+        --display: "Archivo Black", "Arial Black", sans-serif;
+        --body: "Montserrat", "Helvetica Neue", sans-serif;
+        --mono: "IBM Plex Mono", "Courier New", monospace;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--bg);
+      }
+      #main-root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--body);
+      }
+
+      /* ---- shared scene vocabulary ---- */
+      .stage {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+      }
+      .kicker {
+        position: absolute;
+        left: 120px;
+        top: 72px;
+        font-family: var(--mono);
+        font-weight: 700;
+        font-size: 24px;
+        letter-spacing: 0.14em;
+        color: var(--accent);
+        text-transform: uppercase;
+      }
+      .ghost {
+        position: absolute;
+        right: -40px;
+        bottom: -70px;
+        font-family: var(--display);
+        font-size: 240px;
+        line-height: 1;
+        color: #1f1d19;
+        letter-spacing: -0.04em;
+        white-space: nowrap;
+      }
+      .h1 {
+        font-family: var(--display);
+        font-weight: 400;
+        font-size: 84px;
+        line-height: 1.02;
+        letter-spacing: -0.03em;
+        color: var(--fg);
+      }
+      .h2 {
+        font-family: var(--display);
+        font-weight: 400;
+        font-size: 58px;
+        line-height: 1.06;
+        letter-spacing: -0.025em;
+        color: var(--fg);
+      }
+      .h3 {
+        font-family: var(--display);
+        font-weight: 400;
+        font-size: 38px;
+        line-height: 1.1;
+        letter-spacing: -0.015em;
+        color: var(--fg);
+      }
+      .body {
+        font-family: var(--body);
+        font-size: 32px;
+        line-height: 1.38;
+        color: var(--fg);
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .mono {
+        font-family: var(--mono);
+      }
+      .code {
+        font-family: var(--mono);
+        color: var(--accent);
+      }
+      .card {
+        background: var(--panel);
+        border: 2px solid var(--line);
+        border-radius: 16px;
+        padding: 28px 34px;
+      }
+      .chip {
+        display: inline-block;
+        font-family: var(--mono);
+        font-weight: 700;
+        font-size: 22px;
+        letter-spacing: 0.04em;
+        padding: 6px 16px;
+        border: 2px solid var(--line);
+        border-radius: 999px;
+        color: var(--fg);
+        background: var(--panel);
+      }
+      .label {
+        font-family: var(--mono);
+        font-size: 22px;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        text-transform: uppercase;
+      }
+      .num {
+        font-family: var(--display);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.02em;
+        color: var(--fg);
+      }
+      .go {
+        color: var(--go);
+      }
+      .stop {
+        color: var(--stop);
+      }
+      .amber {
+        color: var(--accent);
+      }
+      .info {
+        color: var(--info);
+      }
+      .rail {
+        fill: none;
+        stroke: var(--line);
+        stroke-width: 6;
+        stroke-linecap: round;
+      }
+      .rail-hot {
+        fill: none;
+        stroke: var(--accent);
+        stroke-width: 6;
+        stroke-linecap: round;
+      }
+      .foot {
+        position: absolute;
+        left: 120px;
+        bottom: 60px;
+        font-family: var(--mono);
+        font-size: 22px;
+        color: var(--muted);
+      }
+    </style>
+    <script>
+      // Shared, seek-safe tween helpers for every scene. Each takes the scene's own paused timeline.
+      window.K = (function () {
+        const fmt = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        return {
+          fmt,
+          // Fade the stage in and out, drift the ghost word, and pad the timeline to the scene's length.
+          scene(tl, root, dur) {
+            const st = root.querySelector(".stage");
+            tl.fromTo(st, { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power1.out" }, 0);
+            tl.to(st, { opacity: 0, duration: 0.4, ease: "power1.in" }, dur - 0.45);
+            const k = root.querySelector(".kicker");
+            if (k) tl.fromTo(k, { opacity: 0, x: -30 }, { opacity: 1, x: 0, duration: 0.5, ease: "power3.out" }, 0.15);
+            const g = root.querySelector(".ghost");
+            if (g) tl.fromTo(g, { x: 80 }, { x: -80, duration: dur, ease: "none" }, 0);
+            tl.set({}, {}, dur);
+          },
+          rise(tl, t, at, o = {}) {
+            return tl.fromTo(
+              t,
+              { opacity: 0, y: o.y ?? 28 },
+              { opacity: 1, y: 0, duration: o.d ?? 0.55, ease: o.ease ?? "power3.out", stagger: o.stagger ?? 0 },
+              at,
+            );
+          },
+          slide(tl, t, at, o = {}) {
+            return tl.fromTo(
+              t,
+              { opacity: 0, x: o.x ?? -50 },
+              { opacity: 1, x: 0, duration: o.d ?? 0.6, ease: o.ease ?? "expo.out", stagger: o.stagger ?? 0 },
+              at,
+            );
+          },
+          pop(tl, t, at, o = {}) {
+            return tl.fromTo(
+              t,
+              { opacity: 0, scale: o.from ?? 0.6 },
+              { opacity: 1, scale: 1, duration: o.d ?? 0.55, ease: o.ease ?? "back.out(1.7)", stagger: o.stagger ?? 0 },
+              at,
+            );
+          },
+          // Paths carry pathLength="1": draw from 0 to 1 without measuring.
+          draw(tl, t, at, dur, o = {}) {
+            return tl.fromTo(
+              t,
+              { strokeDasharray: 1, strokeDashoffset: 1 },
+              { strokeDashoffset: 0, duration: dur, ease: o.ease ?? "power2.inOut", stagger: o.stagger ?? 0 },
+              at,
+            );
+          },
+          count(tl, el, to, at, dur, o = {}) {
+            const p = { v: 0 };
+            const pre = o.pre ?? "",
+              post = o.post ?? "";
+            el.textContent = pre + "0" + post;
+            return tl.to(
+              p,
+              {
+                v: to,
+                duration: dur,
+                ease: o.ease ?? "power2.out",
+                onUpdate() {
+                  el.textContent = pre + fmt(Math.round(p.v)) + post;
+                },
+              },
+              at,
+            );
+          },
+          type(tl, el, text, at, dur) {
+            const p = { n: 0 };
+            el.textContent = "";
+            return tl.to(
+              p,
+              {
+                n: text.length,
+                duration: dur,
+                ease: "none",
+                onUpdate() {
+                  el.textContent = text.slice(0, Math.round(p.n));
+                },
+              },
+              at,
+            );
+          },
+          breathe(tl, t, dur, o = {}) {
+            const cycle = o.cycle ?? 3;
+            const reps = Math.max(0, Math.floor(dur / cycle) - 1);
+            return tl.fromTo(
+              t,
+              { scale: 1 },
+              { scale: o.to ?? 1.06, duration: cycle, ease: "sine.inOut", yoyo: true, repeat: reps },
+              0,
+            );
+          },
+        };
+      })();
+    </script>
+  </head>
+  <body>
+    <div
+      id="main-root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="342"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div id="bg" data-composition-id="bg" data-composition-src="compositions/bg.html" data-start="0" data-duration="342" data-track-index="0" data-width="1920" data-height="1080"></div>
+
+      <div id="s01-title" data-composition-id="s01-title" data-composition-src="compositions/s01-title.html" data-start="0" data-duration="10" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s02-by-hand" data-composition-id="s02-by-hand" data-composition-src="compositions/s02-by-hand.html" data-start="10" data-duration="22" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s03-structure" data-composition-id="s03-structure" data-composition-src="compositions/s03-structure.html" data-start="32" data-duration="20" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s04-contract" data-composition-id="s04-contract" data-composition-src="compositions/s04-contract.html" data-start="52" data-duration="18" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s05-worktrees" data-composition-id="s05-worktrees" data-composition-src="compositions/s05-worktrees.html" data-start="70" data-duration="18" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s06-worker" data-composition-id="s06-worker" data-composition-src="compositions/s06-worker.html" data-start="88" data-duration="16" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s07-review" data-composition-id="s07-review" data-composition-src="compositions/s07-review.html" data-start="104" data-duration="18" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s08-verifier" data-composition-id="s08-verifier" data-composition-src="compositions/s08-verifier.html" data-start="122" data-duration="20" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s09-findings" data-composition-id="s09-findings" data-composition-src="compositions/s09-findings.html" data-start="142" data-duration="18" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s10-gate" data-composition-id="s10-gate" data-composition-src="compositions/s10-gate.html" data-start="160" data-duration="16" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s11-gate-safety" data-composition-id="s11-gate-safety" data-composition-src="compositions/s11-gate-safety.html" data-start="176" data-duration="18" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s12-advance" data-composition-id="s12-advance" data-composition-src="compositions/s12-advance.html" data-start="194" data-duration="16" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s13-incidents" data-composition-id="s13-incidents" data-composition-src="compositions/s13-incidents.html" data-start="210" data-duration="18" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s14-limits" data-composition-id="s14-limits" data-composition-src="compositions/s14-limits.html" data-start="228" data-duration="22" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s15-models" data-composition-id="s15-models" data-composition-src="compositions/s15-models.html" data-start="250" data-duration="18" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s16-memory" data-composition-id="s16-memory" data-composition-src="compositions/s16-memory.html" data-start="268" data-duration="16" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s17-controls" data-composition-id="s17-controls" data-composition-src="compositions/s17-controls.html" data-start="284" data-duration="20" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s18-compare" data-composition-id="s18-compare" data-composition-src="compositions/s18-compare.html" data-start="304" data-duration="24" data-track-index="1" data-width="1920" data-height="1080"></div>
+      <div id="s19-close" data-composition-id="s19-close" data-composition-src="compositions/s19-close.html" data-start="328" data-duration="14" data-track-index="1" data-width="1920" data-height="1080"></div>
+    </div>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      tl.set({}, {}, 342);
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

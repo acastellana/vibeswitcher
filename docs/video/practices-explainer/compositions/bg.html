@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .bgc .grid {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 1920px;
+          height: 1080px;
+          opacity: 0.55;
+        }
+        .bgc .glow {
+          position: absolute;
+          left: 1100px;
+          top: 80px;
+          width: 1000px;
+          height: 1000px;
+          border-radius: 50%;
+          background: radial-gradient(circle, rgba(240, 166, 58, 0.16) 0%, rgba(240, 166, 58, 0.05) 40%, rgba(240, 166, 58, 0) 70%);
+        }
+      </style>
+      <div id="root" data-composition-id="bg" data-width="1920" data-height="1080">
+        <div class="bgc">
+          <svg class="grid" viewBox="0 0 1920 1080" aria-hidden="true">
+            <g stroke="#1f1d19" stroke-width="2">
+              <line x1="0" y1="180" x2="1920" y2="180" />
+              <line x1="0" y1="360" x2="1920" y2="360" />
+              <line x1="0" y1="540" x2="1920" y2="540" />
+              <line x1="0" y1="720" x2="1920" y2="720" />
+              <line x1="0" y1="900" x2="1920" y2="900" />
+              <line x1="240" y1="0" x2="240" y2="1080" />
+              <line x1="480" y1="0" x2="480" y2="1080" />
+              <line x1="720" y1="0" x2="720" y2="1080" />
+              <line x1="960" y1="0" x2="960" y2="1080" />
+              <line x1="1200" y1="0" x2="1200" y2="1080" />
+              <line x1="1440" y1="0" x2="1440" y2="1080" />
+              <line x1="1680" y1="0" x2="1680" y2="1080" />
+            </g>
+          </svg>
+          <div class="glow"></div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const tl = gsap.timeline({ paused: true });
+          // The glow drifts slowly across the whole film and breathes (finite repeats over 342 s).
+          tl.fromTo(".bgc .glow", { x: 0, y: 0 }, { x: -760, y: 120, duration: 171, ease: "sine.inOut", yoyo: true, repeat: 1 }, 0);
+          tl.fromTo(".bgc .glow", { scale: 0.9 }, { scale: 1.12, duration: 6, ease: "sine.inOut", yoyo: true, repeat: 56 }, 0);
+          tl.set({}, {}, 342);
+          window.__timelines["bg"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

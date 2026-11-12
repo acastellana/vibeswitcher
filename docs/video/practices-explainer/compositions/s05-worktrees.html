@@ -1,0 +1,124 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s05 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s05 .yard {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 1920px;
+          height: 1080px;
+        }
+        .s05 .tr {
+          position: absolute;
+          left: 470px;
+          font-family: var(--mono);
+          font-size: 22px;
+        }
+        .s05 .tr .b {
+          color: var(--accent);
+          font-weight: 700;
+        }
+        .s05 .tr .p {
+          color: var(--muted);
+          margin-left: 18px;
+        }
+        .s05 .car {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 112px;
+          height: 40px;
+          border-radius: 9px;
+          background: var(--panel2);
+          border: 3px solid var(--accent);
+        }
+        .s05 .mainlabel {
+          position: absolute;
+          left: 120px;
+          top: 800px;
+          font-family: var(--mono);
+          font-size: 22px;
+          color: var(--fg);
+        }
+        .s05 .facts {
+          position: absolute;
+          left: 120px;
+          top: 860px;
+          width: 1680px;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 18px 60px;
+        }
+        .s05 .fact {
+          font-size: 26px;
+          line-height: 1.32;
+          padding-left: 18px;
+          border-left: 4px solid var(--accent);
+        }
+      </style>
+      <div id="root" data-composition-id="s05-worktrees" data-width="1920" data-height="1080">
+        <div class="stage s05">
+          <div class="kicker">04 / Isolated, in parallel</div>
+          <div class="head h2">Each task runs on its own track.</div>
+          <svg class="yard" viewBox="0 0 1920 1080" aria-hidden="true">
+            <path class="rail main" pathLength="1" d="M 100 780 L 1820 780" />
+            <path class="rail sid" pathLength="1" d="M 200 780 C 300 780 300 400 400 400 L 1480 400 C 1580 400 1580 780 1680 780" />
+            <path class="rail sid" pathLength="1" d="M 240 780 C 330 780 330 520 420 520 L 1460 520 C 1550 520 1550 780 1640 780" />
+            <path class="rail sid" pathLength="1" d="M 280 780 C 360 780 360 640 440 640 L 1440 640 C 1520 640 1520 780 1600 780" />
+          </svg>
+          <div class="tr" style="top: 348px"><span class="b">agent/a-task-s-time</span><span class="p">.vibeswitcher/worktrees/a-task-s-time</span></div>
+          <div class="tr" style="top: 468px"><span class="b">agent/requests-the-app-sends</span><span class="p">.vibeswitcher/worktrees/requests-the-app-sends</span></div>
+          <div class="tr" style="top: 588px"><span class="b">agent/boost-release-7-7</span><span class="p">.vibeswitcher/worktrees/boost-release-7-7</span></div>
+          <div class="car c1"></div>
+          <div class="car c2"></div>
+          <div class="car c3"></div>
+          <div class="mainlabel">main · the lead's branch</div>
+          <div class="facts">
+            <div class="fact">Up to 3 workers per project, 7 with Boost</div>
+            <div class="fact">Its own worktree and branch: no two agents in one checkout</div>
+            <div class="fact">Can't push, move refs or check out the lead's branch: Claude Code permission rules deny it</div>
+            <div class="fact">To catch up, a worker merges the base in</div>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s05");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 18);
+          K.rise(tl, ".s05 .head", 0.3);
+          K.draw(tl, ".s05 .main", 0.6, 1.2);
+          K.rise(tl, ".s05 .mainlabel", 1.2);
+          K.draw(tl, ".s05 .sid", 1.4, 1.4, { stagger: 0.3 });
+          K.slide(tl, ".s05 .tr", 2.4, { stagger: 0.3, x: -30 });
+          // three cars, three speeds, never on one another's track
+          const cars = [
+            [".s05 .c1", 380, 3.0, 1480],
+            [".s05 .c2", 500, 3.3, 1300],
+            [".s05 .c3", 620, 3.6, 1120],
+          ];
+          cars.forEach(([sel, y, at, end]) => {
+            tl.fromTo(sel, { opacity: 0, x: 460, y: y }, { opacity: 1, x: 470, y: y, duration: 0.4 }, at);
+            tl.to(sel, { x: end - 120, duration: 9.5, ease: "sine.inOut" }, at + 0.4);
+          });
+          K.slide(tl, ".s05 .fact", 5.0, { stagger: 1.4, x: -24 });
+          window.__timelines["s05-worktrees"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

@@ -1,0 +1,118 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s01 .yard {
+          position: absolute;
+          left: 0;
+          top: 560px;
+          width: 1920px;
+          height: 420px;
+        }
+        .s01 .title {
+          position: absolute;
+          left: 120px;
+          top: 150px;
+          width: 1720px;
+        }
+        .s01 .title .h1 {
+          font-size: 104px;
+        }
+        .s01 .sub {
+          position: absolute;
+          left: 124px;
+          top: 430px;
+          font-size: 38px;
+        }
+        .s01 .car {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 120px;
+          height: 46px;
+          border-radius: 10px;
+          background: var(--accent);
+        }
+        .s01 .car-b {
+          background: var(--panel2);
+          border: 3px solid var(--go);
+        }
+        .s01 .car-c {
+          background: var(--panel2);
+          border: 3px solid var(--info);
+        }
+        .s01 .signal {
+          position: absolute;
+          left: 1560px;
+          top: 680px;
+          width: 30px;
+          height: 30px;
+          border-radius: 50%;
+          background: var(--go);
+        }
+        .s01 .signal-post {
+          position: absolute;
+          left: 1572px;
+          top: 710px;
+          width: 6px;
+          height: 74px;
+          background: var(--line);
+        }
+        .s01 .yard-label {
+          position: absolute;
+          font-size: 22px;
+        }
+      </style>
+      <div id="root" data-composition-id="s01-title" data-width="1920" data-height="1080">
+        <div class="stage s01">
+          <div class="kicker">VibeSwitcher · engineering practices</div>
+          <div class="title"><div class="h1"><div>One conversation.</div><div>A whole engineering team.</div></div></div>
+          <div class="sub body muted">The practices VibeSwitcher builds around Claude Code sessions</div>
+          <svg class="yard" viewBox="0 560 1920 420" aria-hidden="true">
+            <path class="rail main" pathLength="1" d="M -20 800 L 1940 800" />
+            <path class="rail sid" pathLength="1" d="M 260 800 C 380 800 380 700 500 700 L 1180 700 C 1300 700 1300 800 1420 800" />
+            <path class="rail sid" pathLength="1" d="M 320 800 C 470 800 470 610 620 610 L 1060 610 C 1210 610 1210 800 1360 800" />
+            <path class="rail sid" pathLength="1" d="M 380 800 C 560 800 560 900 740 900 L 960 900 C 1140 900 1140 800 1300 800" />
+          </svg>
+          <div class="car car-a"></div>
+          <div class="car car-b"></div>
+          <div class="car car-c"></div>
+          <div class="signal-post"></div>
+          <div class="signal"></div>
+          <div class="yard-label mono muted" style="left: 1640px; top: 810px">main</div>
+          <div class="foot">numbers from the project's own records · 17 Oct – 12 Nov 2026</div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s01");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 10);
+          K.draw(tl, ".s01 .main", 0.2, 1.4);
+          K.draw(tl, ".s01 .sid", 0.7, 1.6, { stagger: 0.18 });
+          // cars sit on the sidings, then the amber one runs out onto the main line past the green signal
+          tl.fromTo(".s01 .car-b", { opacity: 0, x: 700, y: 677 }, { opacity: 1, x: 760, y: 677, duration: 0.8, ease: "power2.out" }, 1.6);
+          tl.fromTo(".s01 .car-c", { opacity: 0, x: 640, y: 587 }, { opacity: 1, x: 700, y: 587, duration: 0.8, ease: "power2.out" }, 1.8);
+          tl.fromTo(".s01 .car-a", { opacity: 0, x: 600, y: 877 }, { opacity: 1, x: 660, y: 877, duration: 0.8, ease: "power2.out" }, 2.0);
+          tl.to(".s01 .car-a", { x: 1020, duration: 1.0, ease: "power3.in" }, 4.2);
+          tl.to(".s01 .car-a", { x: 1300, y: 777, duration: 0.9, ease: "none" }, 5.2);
+          tl.to(".s01 .car-a", { x: 2000, duration: 1.6, ease: "power2.out" }, 6.1);
+          tl.fromTo(".s01 .signal", { scale: 0.4, opacity: 0.3 }, { scale: 1, opacity: 1, duration: 0.4, ease: "back.out(2)" }, 5.6);
+          K.rise(tl, ".s01 .title", 0.5, { y: 40, d: 0.8 });
+          K.rise(tl, ".s01 .sub", 1.4);
+          K.rise(tl, ".s01 .foot", 2.4);
+          K.rise(tl, ".s01 .yard-label", 2.0);
+          window.__timelines["s01-title"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>
