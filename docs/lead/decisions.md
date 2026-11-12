@@ -364,3 +364,11 @@ The user's answer to EE3A5F57, 2026-11-12. Switching by hand cost a halted worke
 
 The user: Opus works well for nearly everything, Fable should go to the hardest parts (strategy, decisions, organisation), and "we need to just do optimally" (credits aside, since part of Fable is included in the plan). Claude Code's advisor puts Fable at decision points without running it throughout.
 
+## 2026-11-12 09:23:09 Contracts for tasks that run on Fable state the outcome and its acceptance checks, give a larger scope than an Opus task would get, and leave the steps and routine test reminders out. Hard tasks get effort xhigh once per-task effort exists (each-role-gets-the). The user's global ~/.claude effort and advisor settings are left alone.
+
+Anthropic's Claude Code guidance for Fable: describe the outcome rather than the steps, skip routine test or check reminders, and give it larger tasks you'd normally split up. xhigh is the recommended effort for agentic coding on these models. A global advisorModel would change every Claude session on the Mac.
+
+## 2026-11-12 09:23:57 Tasks get bigger: one outcome with verification points (acceptance checks that pass or fail, with their output quoted) rather than several small tasks, wherever the parts share files or one would just wait on another. Split only for independent work that runs in parallel, or where review levels differ.
+
+The Claude Code team's talk (2026-11-12): today's models run for hours and verify their own work, so give them tasks bigger than you normally would, with verification points along the way. Each VibeSwitcher task also pays a fixed overhead (worktree init, a ~1.5 GB build, a 9–14 min merge suite, an audit), so fewer, larger tasks speed up delivery.
+
