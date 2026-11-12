@@ -2749,3 +2749,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 17:25 Merged app-health-doesn-t: App health doesn't count a task named "…fail…" as an error line (no audit: review none) (in a batch: app-health-doesn-t, a-size-ceiling-on, audit-eval-on-opus landed on one test run) (build cb245343d3d4 with changes not committed)
 - 2026-11-12 17:25 Merged a-size-ceiling-on: A size ceiling on each role's prompt (in a batch: app-health-doesn-t, a-size-ceiling-on, audit-eval-on-opus landed on one test run) (build cb245343d3d4 with changes not committed)
 - 2026-11-12 17:25 Merged audit-eval-on-opus: Audit eval on Opus: does an Opus verifier find as much as Fable? (in a batch: app-health-doesn-t, a-size-ceiling-on, audit-eval-on-opus landed on one test run) (build cb245343d3d4 with changes not committed)
+- 2026-11-12 17:25 Automatically (auto_advance): Cleaned up audit-eval-on-opus (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-12 17:25 Automatically (auto_advance): Cleaned up app-health-doesn-t; ended pid 8479 (Worker: App health doesn't count a task named "…fail…" as an error line) (freed 0 MB of build output and temporary folders). It stays done.
+- 2026-11-12 17:25 Automatically (auto_advance): Didn't cleanup|a-size-ceiling-on: error: branch 'agent/a-size-ceiling-on' not found
