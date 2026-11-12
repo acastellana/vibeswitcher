@@ -26,7 +26,7 @@ let environment = ProcessInfo.processInfo.environment
 // What a fresh Terminal session would inherit from launchd; the login shell adds the rest.
 let inherited = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "PATH", "LANG", "LC_ALL", "LC_CTYPE", "SSH_AUTH_SOCK",
                  "__CF_USER_TEXT_ENCODING"]
-let shell = environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
+let shell = environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? Platform.Tools.loginShell
 let executable = Bundle.main.executablePath ?? arguments[0]
 let build = HostBuild.id(ofExecutableAt: executable)
 let lockPath = value(after: "--lock") ?? VibePaths.hostLock.path

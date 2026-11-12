@@ -111,7 +111,7 @@ public enum LeadRemote {
         }
         let env = Git.environment.merging(["GIT_DIR": dir.path, "GIT_OBJECT_DIRECTORY": (common as NSString).appendingPathComponent("objects")]) { $1 }
         let front = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.allow=never", "-c", "submodule.recurse=false"]
-        var run = Shell.run(executable: "/usr/bin/git", args: front + args, in: scratch.path, env: env, timeout: timeout, grace: 5)
+        var run = Shell.run(executable: Platform.Tools.git, args: front + args, in: scratch.path, env: env, timeout: timeout, grace: 5)
         if run.timedOut || run.cancelled {
             run.output = ""
             let stopped = run.cancelled ? "git was stopped: cancelled." : "git was stopped: it ran past \(Worktrees.duration(timeout))."
@@ -119,7 +119,7 @@ public enum LeadRemote {
         }
         var found: [String: String] = [:]
         for ref in read {
-            let value = Shell.run(executable: "/usr/bin/git", args: front + ["rev-parse", "--verify", "--quiet", ref + "^{commit}"], in: scratch.path,
+            let value = Shell.run(executable: Platform.Tools.git, args: front + ["rev-parse", "--verify", "--quiet", ref + "^{commit}"], in: scratch.path,
                                   env: env, timeout: 30, grace: 1)
             if value.status == 0, !value.output.isEmpty { found[ref] = value.output }
         }
@@ -130,7 +130,7 @@ public enum LeadRemote {
     /// `credential.helper`, which drops every helper read before (the repository's own config could name any program
     /// there), these come back. A key `-c` can't spell (an `=` in its URL) is left out.
     static func credentialHelpers(root: String) -> [String] {
-        let listed = Shell.run(executable: "/usr/bin/git", args: ["config", "--show-scope", "-z", "--get-regexp", #"^credential\..*helper$"#],
+        let listed = Shell.run(executable: Platform.Tools.git, args: ["config", "--show-scope", "-z", "--get-regexp", #"^credential\..*helper$"#],
                                in: root, env: Git.environment, timeout: 30, grace: 1)
         guard listed.status == 0 else { return [] }
         let fields = listed.output.components(separatedBy: "\0")
@@ -364,7 +364,7 @@ public enum LeadRemote {
                 result = one
             case (let ours?, let theirs?):
                 // In place, into ours; it exits with the number of conflicts (none with --union), a negative status on error.
-                let run = Shell.run(executable: "/usr/bin/git", args: ["merge-file", "--union", ours, base ?? "/dev/null", theirs],
+                let run = Shell.run(executable: Platform.Tools.git, args: ["merge-file", "--union", ours, base ?? "/dev/null", theirs],
                                     in: path, env: Git.environment, timeout: 30, grace: 1)
                 guard run.status == 0, !run.timedOut, !run.cancelled else { return "git merge-file --union on \(file) failed: \(Worktrees.said(run))" }
                 result = ours

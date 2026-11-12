@@ -35,7 +35,7 @@ public enum Git {
                            grace: TimeInterval = 5) -> Result {
         let guarded = GitGuard.command(args, in: directory, env: env)
         if let refused = guarded.refused { return Result(status: 128, output: "", error: refused) }
-        var result = Shell.run(executable: "/usr/bin/git", args: guarded.args, in: directory,
+        var result = Shell.run(executable: Platform.Tools.git, args: guarded.args, in: directory,
                                env: environment.merging(guarded.env) { $1 }.merging(env) { $1 }, timeout: timeout, grace: grace)
         if result.timedOut || result.cancelled {
             result.output = ""
@@ -253,7 +253,7 @@ public enum GitGuard {
     /// The executable keys git reads in `directory` with `env`, from every scope (includes followed). Asked of git as it
     /// is, with nothing guarded: `git config` runs no hooks, filters or programs.
     static func executableEntries(in directory: String, env: [String: String] = [:]) -> [Entry] {
-        let listed = Shell.run(executable: "/usr/bin/git", args: ["config", "--show-scope", "-z", "--get-regexp", executableKeys],
+        let listed = Shell.run(executable: Platform.Tools.git, args: ["config", "--show-scope", "-z", "--get-regexp", executableKeys],
                                in: directory, env: Git.environment.merging(env) { $1 }, timeout: 30, grace: 1)
         guard listed.status == 0 else { return [] }
         // "<scope>\0<key>\n<value>\0", the value and its newline missing for a key without one.
@@ -274,7 +274,7 @@ public enum GitGuard {
     static func fileEntries(_ file: String, env: [String: String]) -> [(key: String, value: String)] {
         let inner = executableKeys.dropFirst(2).dropLast(2)
         let pattern = "^(\(inner)|include\\.path|includeif\\..+\\.path)$"
-        let listed = Shell.run(executable: "/usr/bin/git", args: ["config", "--file", file, "--no-includes", "-z", "--get-regexp", pattern],
+        let listed = Shell.run(executable: Platform.Tools.git, args: ["config", "--file", file, "--no-includes", "-z", "--get-regexp", pattern],
                                in: (file as NSString).deletingLastPathComponent, env: Git.environment.merging(env) { $1 }, timeout: 30, grace: 1)
         guard listed.status == 0 else { return [] }
         return listed.output.components(separatedBy: "\0").filter { !$0.isEmpty }.map { pair in
@@ -390,14 +390,16 @@ public enum GitGuard {
         let quote = { (word: String) in "'" + word.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         let command = (BranchCode.wrapper + [hook]).map(quote).joined(separator: " ") + " \"$@\""
         let session = #"use POSIX (); my $pid = fork; defined $pid or die "fork: $!\n"; if (!$pid) { POSIX::setsid(); POSIX::close($_) for 3 .. 255; exec { $ARGV[0] } @ARGV; POSIX::_exit(127); } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8);"#
+        let unset = Platform.Tools.branchShellStartupVariables
         return "#!/bin/sh\n# VibeSwitcher: the hook the lead accepted, run as branch code (GitGuard.shim).\n"
+            + (unset.isEmpty ? "" : "unset \(unset.joined(separator: " "))\n")
             + "if [ -x /usr/bin/perl ]; then exec /usr/bin/perl -e \(quote(session)) \(command); fi\n"
             + "exec \(command)\n"
     }
 
     /// The hooks folder git itself would use at `root` (core.hooksPath from any scope, else `<common>/hooks`).
     static func hooksFolder(root: String) -> String? {
-        let asked = Shell.run(executable: "/usr/bin/git", args: ["rev-parse", "--path-format=absolute", "--git-path", "hooks"],
+        let asked = Shell.run(executable: Platform.Tools.git, args: ["rev-parse", "--path-format=absolute", "--git-path", "hooks"],
                               in: root, env: Git.environment, timeout: 30, grace: 1)
         return asked.ok && !asked.output.isEmpty ? asked.output : nil
     }

@@ -32,6 +32,25 @@ extension Platform {
             #endif
         }
 
+        /// The variables of an environment that name a file `branchShell` reads as it starts, whatever its options.
+        /// The Mac: none (zsh `-f` reads no file a variable names). Linux: `BASH_ENV`, whose file bash reads before a
+        /// `-c` command, and `ENV`, the same for a bash started as sh.
+        public static var branchShellStartupVariables: [String] {
+            #if canImport(Darwin)
+            return []
+            #else
+            return ["BASH_ENV", "ENV"]
+            #endif
+        }
+
+        /// The environment a branch's code is started with, made of `environment`: the same without
+        /// `branchShellStartupVariables`, so the branch shell reads no startup file there either. The Mac: `environment`
+        /// as it is. What the shell starts has the same environment, so none of it reads such a file.
+        public static func branchEnvironment(_ environment: [String: String]) -> [String: String] {
+            let dropped = branchShellStartupVariables
+            return dropped.isEmpty ? environment : environment.filter { !dropped.contains($0.key) }
+        }
+
         /// The login shell for a user whose `SHELL` isn't set. As a login shell (`-l`) zsh reads ~/.zprofile, and
         /// bash ~/.bash_profile or ~/.profile: not ~/.bashrc, unless one of those reads it.
         public static var loginShell: String {
@@ -74,6 +93,17 @@ extension Platform {
             return namesAFolder(["/usr/bin/xcode-select", "-p"], timeout: 10)
             #else
             return nil
+            #endif
+        }
+
+        /// Whether this system has such tools to ask after at all: the Mac. false on Linux, where
+        /// `hasDeveloperTools()` is always nil. For a caller that asks `xcode-select` itself, at a path and with a
+        /// time of its own (`LaunchPreflight`): it knows without starting anything that its check is passed over.
+        public static var developerToolsApply: Bool {
+            #if canImport(Darwin)
+            return true
+            #else
+            return false
             #endif
         }
 

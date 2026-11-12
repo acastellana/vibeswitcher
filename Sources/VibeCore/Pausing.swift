@@ -10,12 +10,12 @@ public final class PauseStore {
         case untilTomorrowMorning
     }
 
-    private let defaults: UserDefaults
+    private let defaults: any SettingsStore
     private let key = "pausedSessions"
     /// Session key → end of the pause (`distantFuture`: until resumed).
     private var pauses: [String: Date]
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: any SettingsStore = Platform.standardSettings) {
         self.defaults = defaults
         pauses = (defaults.dictionary(forKey: key) as? [String: Date]) ?? [:]
     }

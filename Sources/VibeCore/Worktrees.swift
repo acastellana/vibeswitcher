@@ -123,7 +123,7 @@ final class ShellPipe: @unchecked Sendable {
 public enum BranchCode {
     /// What the wrapper's argv starts with, the command after it: zsh without startup files, running the command and
     /// then a builtin, so it waits for the command rather than becoming it.
-    static let wrapper = ["/bin/zsh", "-f", "-c", "\"$@\"; exit $?", "vibeswitcher-branch-code"]
+    static let wrapper = Platform.Tools.branchShell + ["-c", "\"$@\"; exit $?", "vibeswitcher-branch-code"]
 
     /// Whether a process started with these arguments is the wrapper.
     public static func isRunner(_ arguments: [String]) -> Bool { arguments.starts(with: wrapper) }
@@ -180,14 +180,14 @@ public enum BranchCode {
         }
         if let shell = usable(environment["CLAUDE_CODE_SHELL"]) { return shell }
         if let shell = usable(environment["SHELL"]), ["zsh", "bash"].contains((shell as NSString).lastPathComponent) { return shell }
-        return "/bin/zsh"
+        return Platform.Tools.loginShell
     }
 
     /// Becomes what `prefix` says to run for `arguments[1]`, its environment without `prefixVariable`; returns only
     /// when that can't start (the error is printed, and the command fails).
     public static func runPrefix(_ arguments: [String], environment: [String: String], executable: String) -> Int32 {
         let argv = prefix(arguments[1], executable: executable, shell: prefixShell(environment))
-        var passed = environment
+        var passed = isRunner(argv) ? Platform.Tools.branchEnvironment(environment) : environment
         passed[prefixVariable] = nil
         let cArgs = argv.map { strdup($0) } + [nil]
         let cEnv = passed.map { strdup("\($0.key)=\($0.value)") } + [nil]
@@ -270,7 +270,8 @@ public enum Shell {
         // nothing of why; posix_spawn's errno does.
         let process: Running
         do {
-            process = try Spawned((branchCode ? BranchCode.wrapper : []) + [executable] + args, in: directory, environment: environment,
+            process = try Spawned((branchCode ? BranchCode.wrapper : []) + [executable] + args, in: directory,
+                                  environment: branchCode ? Platform.Tools.branchEnvironment(environment) : environment,
                                   output: out, errors: err, session: branchCode || ownSession)
         } catch { return Git.Result(status: -1, output: "", error: "\(error)") }
         let pid = process.processIdentifier
@@ -1371,7 +1372,7 @@ public enum Worktrees {
             }
             let started = Date()
             let stop = progress?.heartbeat { "Running the failing tests once on the base \(baseline.commit.prefix(8)), record only (\(duration(Date().timeIntervalSince(started))) so far)." }
-            let run = Shell.run(executable: "/bin/zsh", args: ["-lc", "export HOME=\(RecentProjects.shellQuote(home))\n" + command], in: path, env: env,
+            let run = Shell.run(executable: Platform.Tools.loginShell, args: ["-lc", "export HOME=\(RecentProjects.shellQuote(home))\n" + command], in: path, env: env,
                                 timeout: timeout, interleaved: true, branchCode: true, watch: lock?.watch, time: time)
             stop?()
             if run.cancelled || cancel?.isCancelled == true { return true }
@@ -1396,7 +1397,7 @@ public enum Worktrees {
             // Something in its folder still in line for a slot when it's stopped: its ticket goes with the run.
             var queued: TestLock.Wait?
             // The branch's code (its build, its tests): never the lead to the session host (see `BranchCode`).
-            let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path, env: env, timeout: timeout, interleaved: true,
+            let run = Shell.run(executable: Platform.Tools.loginShell, args: ["-lc", script], in: path, env: env, timeout: timeout, interleaved: true,
                                 branchCode: true, watch: lock?.watch, time: time,
                                 beforeStop: { queued = lock?.waits(for: ["run": path])["run"] })
             stop?()

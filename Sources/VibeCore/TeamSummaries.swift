@@ -206,7 +206,7 @@ public enum ClaudeHeadless {
 
     /// The program and arguments that write one line for `prompt`.
     public static func command(prompt: String, system: String = SummaryPrompts.system, model: String = model) -> (executable: String, args: [String]) {
-        ("/bin/zsh", ["-lc", "exec claude \"$@\"", "zsh", "-p", "--model", model, "--tools", "", "--no-session-persistence",
+        (Platform.Tools.loginShell, ["-lc", "exec claude \"$@\"", "zsh", "-p", "--model", model, "--tools", "", "--no-session-persistence",
                       "--setting-sources", "", "--strict-mcp-config", "--system-prompt", system, prompt])
     }
 

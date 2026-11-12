@@ -50,7 +50,7 @@ public struct LaunchPreflight: Sendable {
     var now: @Sendable () -> Date
     private let passed = Passes()
 
-    public init(shell: String = LoginShellVariable.userShell, xcodeSelect: String = "/usr/bin/xcode-select", git: String = "/usr/bin/git",
+    public init(shell: String = LoginShellVariable.userShell, xcodeSelect: String = "/usr/bin/xcode-select", git: String = Platform.Tools.git,
                 timeout: TimeInterval = 10, keep: TimeInterval = 60) {
         self.init(shell: shell, xcodeSelect: xcodeSelect, git: git, timeout: timeout, keep: keep, now: { Date() })
     }
@@ -102,6 +102,8 @@ public struct LaunchPreflight: Sendable {
     /// itself is run only once it's there (the stub without one offers to install the Command Line Tools).
     func lookAtGit() -> Missing? {
         guard FileManager.default.isExecutableFile(atPath: git) else { return .git(git) }
+        // No developer tools to ask after (Linux, see `Platform.Tools.hasDeveloperTools`): git is only run.
+        guard Platform.Tools.developerToolsApply else { return lookAtGitItself() }
         guard FileManager.default.isExecutableFile(atPath: xcodeSelect) else { return .commandLineTools }
         let selected = Shell.run(executable: xcodeSelect, args: ["-p"], in: "/", timeout: timeout, grace: 1)
         let developer = selected.output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -111,6 +113,11 @@ public struct LaunchPreflight: Sendable {
         guard FileManager.default.isExecutableFile(atPath: (developer as NSString).appendingPathComponent("usr/bin/git")) else {
             return .gitStub(developer: developer)
         }
+        return lookAtGitItself()
+    }
+
+    /// git run once (`git --version`): what it says when it doesn't run.
+    func lookAtGitItself() -> Missing? {
         let version = Shell.run(executable: git, args: ["--version"], in: "/", timeout: timeout, grace: 1)
         if version.timedOut || version.cancelled { return nil }
         guard version.ok, version.output.hasPrefix("git version") else {

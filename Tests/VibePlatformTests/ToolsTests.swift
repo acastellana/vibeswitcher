@@ -179,6 +179,39 @@ struct ToolsTests {
         #expect(ended.exit == 7)
     }
 
+    /// bash reads the file `BASH_ENV` names before a `-c` command, whatever its options: the environment a branch's
+    /// code is started with names none on Linux, and is the caller's own on the Mac, whose zsh -f reads no such file.
+    @Test func theBranchEnvironmentNamesNoStartupFile() throws {
+        let folder = try TestScriptLinuxTests.scratch("tools")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let startup = folder.appendingPathComponent("startup")
+        try Self.write("echo polluted\n", to: startup)
+        let environment = ["HOME": folder.path, "PATH": "/usr/bin:/bin", "BASH_ENV": startup.path, "ENV": startup.path, "KEPT": "1"]
+        let passed = Platform.Tools.branchEnvironment(environment)
+        #if os(Linux)
+        #expect(passed == ["HOME": folder.path, "PATH": "/usr/bin:/bin", "KEPT": "1"])
+        #else
+        #expect(passed == environment)
+        #endif
+        #expect(Set(environment.keys).subtracting(passed.keys) == Set(Platform.Tools.branchShellStartupVariables))
+        #expect(Platform.Tools.branchEnvironment([:]) == [:])
+
+        func said(in environment: [String: String]) throws -> String {
+            let shell = Platform.Tools.branchShell
+            var spawn = Platform.Spawn(executable: shell[0], arguments: shell + ["-c", "echo ok"])
+            spawn.environment = environment.map { "\($0.key)=\($0.value)" }
+            spawn.directory = folder.path
+            spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+            spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+            return try SpawnTests.output(of: spawn).output
+        }
+        #expect(try said(in: passed) == "ok\n")
+        #if os(Linux)
+        // Why: with the variable left in, the file is read.
+        #expect(try said(in: environment) == "polluted\nok\n")
+        #endif
+    }
+
     @Test func theLoginShellIsAShellOfThisSystem() {
         let shell = Platform.Tools.loginShell
         #expect(Platform.Tools.isExecutableFile(shell), "\(shell)")
@@ -196,8 +229,10 @@ struct ToolsTests {
     @Test func developerToolsAreAskedOnlyOfAMac() {
         #if os(Linux)
         #expect(Platform.Tools.hasDeveloperTools() == nil)
+        #expect(!Platform.Tools.developerToolsApply)
         #else
         #expect(Platform.Tools.hasDeveloperTools() != nil)
+        #expect(Platform.Tools.developerToolsApply)
         #endif
     }
 

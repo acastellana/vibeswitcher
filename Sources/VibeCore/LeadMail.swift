@@ -78,7 +78,7 @@ public enum LeadMail {
     public static let defaultsDomain = "dev.vibeswitcher.VibeSwitcher"
 
     /// Whether the channel is on, by `defaults` (the app's).
-    public static func isOn(_ defaults: UserDefaults?) -> Bool {
+    public static func isOn(_ defaults: (any SettingsStore)?) -> Bool {
         (defaults?.object(forKey: enabledKey) as? Bool) ?? true
     }
 

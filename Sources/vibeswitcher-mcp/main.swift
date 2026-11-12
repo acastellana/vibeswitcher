@@ -72,7 +72,7 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--test-failure
 // nothing is sent from here. Filed with or without the Wallet Manager set up in Settings › Wallet (the app's own defaults
 // say): without it, the output says the browser wallet is the way to sign it.
 if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--wallet-request" {
-    let defaults = UserDefaults(suiteName: "dev.vibeswitcher.VibeSwitcher")
+    let defaults = Platform.settings()
     let environment = ProcessInfo.processInfo.environment
     let walletManager = WalletAsk.WalletManager.from(peer: defaults?.string(forKey: "walletPeerID") ?? "",
                                                     passagePath: defaults?.string(forKey: "walletPassagePath") ?? "",
@@ -90,7 +90,7 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--wallet-reque
 // (see `ShellAsk`). Nothing starts from here. The app's defaults say only what the output tells (whether Settings ›
 // Agents lets agents open shells without asking); the app decides.
 if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--shell-request" {
-    let defaults = UserDefaults(suiteName: "dev.vibeswitcher.VibeSwitcher")
+    let defaults = Platform.settings()
     let ran = ShellAsk.run(Array(CommandLine.arguments.dropFirst(2)), cwd: FileManager.default.currentDirectoryPath, vault: .standard,
                            atOnce: defaults?.bool(forKey: "letAgentsOpenShells") ?? false)
     if !ran.output.isEmpty { print(ran.output) }
@@ -234,7 +234,7 @@ final class HostRuntime: LeadRuntime {
     /// The same command the app starts `agent` with (its preferences and launch presets), so workers run like your own
     /// sessions.
     private func command(_ agent: Agent, root: String) -> String? {
-        let preferences = UserDefaults(suiteName: "dev.vibeswitcher.VibeSwitcher")
+        let preferences = Platform.settings()
         let presets = LaunchPresets.load(from: VibePaths.presetsFile,
                                          claudeCommand: preferences?.string(forKey: "claudeCommand") ?? "claude",
                                          codexCommand: preferences?.string(forKey: "codexCommand") ?? "codex")
@@ -449,7 +449,7 @@ let toolset = MCPHostedToolset(attempt: {
     // the contract and REVIEW.md only.
     toolset.riskModel = ClaudeHeadless.risk
     // tell_lead goes only while the Mac-wide setting is on (the app's defaults; on unless set), read at each call.
-    toolset.leadMailOn = { LeadMail.isOn(UserDefaults(suiteName: LeadMail.defaultsDomain)) }
+    toolset.leadMailOn = { LeadMail.isOn(Platform.settings(domain: LeadMail.defaultsDomain)) }
     // No tools: that's the host's answer, unless it couldn't be asked by then either.
     if toolset.tools.isEmpty && !hostAnswers(.standard) { return nil }
     // The lead's decision and progress logs go into the repository every few minutes (and after each merge), each

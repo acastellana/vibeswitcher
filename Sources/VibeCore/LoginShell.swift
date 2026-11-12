@@ -22,7 +22,7 @@ public enum LoginShellVariable {
     static let command = "printf '%s' '\(marker)'; exec /usr/bin/printenv \"$1\""
 
     public static var userShell: String {
-        ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
+        ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? Platform.Tools.loginShell
     }
 
     /// `$SHELL -l -i -c <command> <shell> NAME`: the session's arguments, then `$0` and `$1`.
