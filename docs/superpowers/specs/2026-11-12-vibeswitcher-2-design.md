@@ -459,7 +459,8 @@ What "distributed broadly" asks of the design, beyond rules 10 to 13:
 
 ## The branch
 
-Version 2 lives on `v2`, pushed to GitHub. Main is not touched.
+Version 2 lives on `v2`, pushed to GitHub. Main is not touched. The routine, as commands:
+[v2-branch.md](../../process/v2-branch.md).
 
 1. **Main is merged into `v2`** at least every working day: its changes to `VibeCore` and `VibeHost` are the lead's
    own improvements, which version 2 wants, and they arrive by the merge. Conflicts are settled here. The merge is
