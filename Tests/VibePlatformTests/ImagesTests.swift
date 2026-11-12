@@ -169,6 +169,41 @@ struct ImagesTests {
         #expect(Platform.Images.pngThumbnail(of: folder.appendingPathComponent("never-made.png"), maxSide: 4) == nil)
     }
 
+    /// A file opened once answers as the three questions asked of its path do: whether it's an image, its size, and
+    /// a smaller copy of it (several, from the one opened file: what `KeptImages` asks while it scales one down).
+    @Test func anOpenedImageAnswersAsItsPathDoes() throws {
+        let folder = try TestScriptLinuxTests.scratch("images")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        for fixture in Self.fixtures {
+            let file = try Self.write(fixture.bytes, fixture.name, in: folder)
+            #expect(Platform.Images.isImage(file), "\(fixture.name)")
+            let source = try #require(Platform.Images.Source(url: file), "\(fixture.name)")
+            #expect(source.hasImage, "\(fixture.name)")
+            #expect(Self.text(source.pixelSize) == "\(fixture.width)x\(fixture.height)", "\(fixture.name)")
+        }
+        let source = try #require(Platform.Images.Source(url: try Self.write(Self.jpeg, "nine-by-six-again.jpg", in: folder)))
+        for side in [4, 3, 2] {
+            let thumbnail = source.pngThumbnail(maxSide: side)
+            #if os(Linux)
+            #expect(thumbnail == nil)
+            #else
+            let made = try #require(thumbnail)
+            let size = Platform.Images.headerSize(of: try Self.write(Array(made), "thumbnail-\(side).png", in: folder))
+            #expect(max(size?.width ?? 0, size?.height ?? 0) == side, "\(Self.text(size))")
+            #endif
+        }
+        // What is no image: by its path, and opened (when it opens at all).
+        let text = try Self.write(Array("Not an image, whatever its name says.\n".utf8), "notes.png", in: folder)
+        let empty = try Self.write([], "empty.jpg", in: folder)
+        for file in [text, empty, folder, folder.appendingPathComponent("never-made.png")] {
+            #expect(!Platform.Images.isImage(file), "\(file.lastPathComponent)")
+            let opened = Platform.Images.Source(url: file)
+            #expect(opened?.hasImage != true, "\(file.lastPathComponent)")
+            #expect(Self.text(opened?.pixelSize ?? nil) == "nil", "\(file.lastPathComponent)")
+            #expect(opened?.pngThumbnail(maxSide: 4) == nil, "\(file.lastPathComponent)")
+        }
+    }
+
     // MARK: The images
 
     /// A PNG, 5 wide and 3 high: 8-bit grey, 83 bytes.

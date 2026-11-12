@@ -22,22 +22,26 @@ let portableTargets: [Target] = [
     .target(name: "CVibePlatform"),
     // Every system call the shared code makes, one implementation per system.
     .target(name: "VibePlatform", dependencies: ["CVibePlatform"]),
+    // Shared model, status rules, process table and hook installer (the plan's Task 11; what only the Mac has is in
+    // Sources/VibeCore/MacOnly, compiled there alone).
+    .target(name: "VibeCore", dependencies: ["VibePlatform", crypto]),
+    // Tiny binary that Claude Code / Codex hooks invoke on every lifecycle event.
+    .executableTarget(name: "vibeswitcher-hook", dependencies: ["VibeCore"]),
+    // The project lead's tool server (MCP over stdio) for the lead, its workers and its verifiers.
+    .executableTarget(name: "vibeswitcher-mcp", dependencies: ["VibeCore"]),
     // PlatformLintPending.txt: the files still to be cleaned, read from the source tree (`PlatformLintTests`).
     .testTarget(name: "VibePlatformTests", dependencies: ["VibePlatform"], exclude: ["PlatformLintPending.txt"],
                 swiftSettings: testSettings),
-    // Each of `notYetPortableTargets` moves up here when it compiles on Linux: VibeCore (the plan's Task 11, with
-    // VibeCoreTests in Task 12), then VibeHost and the three executables (Task 13).
+    // Still to come: VibeCoreTests (Task 12), and each of `notYetPortableTargets` when it compiles on Linux (the
+    // session host: stage 2).
 ]
 // VIBE_LINUX_ALL=1 adds the portable targets that don't compile on Linux yet, only to count their errors
 // (scripts/ci/linux-core-errors.sh). The package's dependencies are the same with and without it, and so is
 // Package.resolved.
 let measuring = Context.environment["VIBE_LINUX_ALL"] == "1"
 let notYetPortableTargets: [Target] = [
-    .target(name: "VibeCore", dependencies: ["VibePlatform", crypto]),
     .target(name: "VibeHost", dependencies: ["VibeCore", .product(name: "SwiftTerm", package: "SwiftTerm"), crypto]),
     .executableTarget(name: "vibeswitcher-host", dependencies: ["VibeHost"]),
-    .executableTarget(name: "vibeswitcher-hook", dependencies: ["VibeCore"]),
-    .executableTarget(name: "vibeswitcher-mcp", dependencies: ["VibeCore"]),
 ]
 
 let package = Package(

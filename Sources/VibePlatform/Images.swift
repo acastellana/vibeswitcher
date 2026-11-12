@@ -7,6 +7,9 @@ extension Platform {
     ///   orientation) not applied; nil when the file isn't an image the system reads.
     /// - `pngThumbnail(of:maxSide:) -> Data?`: the image as a PNG whose longer side is at most `maxSide` pixels,
     ///   turned upright; nil when it can't be made.
+    /// - `isImage(_:) -> Bool`: whether the file reads as an image at all.
+    /// - `Source(url:)`: the file opened once, for a caller that asks its size and then several smaller copies:
+    ///   `hasImage`, `pixelSize` and `pngThumbnail(maxSide:)` are the three above, of the one opened file.
     ///
     /// The Mac's are ImageIO's (Images+Darwin.swift), which reads every format the Mac shows. Linux has no image
     /// library here: the size is read from the header of a PNG, a GIF, a JPEG or a WebP (`headerSize(of:)`, below),
@@ -14,14 +17,37 @@ extension Platform {
     public enum Images {}
 }
 
-#if !canImport(Darwin)
 extension Platform.Images {
     public static func pixelSize(of url: URL) -> (width: Int, height: Int)? {
-        headerSize(of: url)
+        Source(url: url)?.pixelSize
     }
 
     public static func pngThumbnail(of url: URL, maxSide: Int) -> Data? {
-        nil
+        Source(url: url)?.pngThumbnail(maxSide: maxSide)
+    }
+
+    public static func isImage(_ url: URL) -> Bool {
+        Source(url: url)?.hasImage == true
+    }
+}
+
+#if !canImport(Darwin)
+extension Platform.Images {
+    /// Linux's: the size the file's header states, read once as the source is made; nil for a file that is no PNG,
+    /// GIF, JPEG or WebP.
+    public struct Source {
+        public let pixelSize: (width: Int, height: Int)?
+
+        public init?(url: URL) {
+            guard let size = Platform.Images.headerSize(of: url) else { return nil }
+            pixelSize = size
+        }
+
+        public var hasImage: Bool { true }
+
+        public func pngThumbnail(maxSide: Int) -> Data? {
+            nil
+        }
     }
 }
 #endif

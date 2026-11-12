@@ -1,6 +1,4 @@
 import Foundation
-import ImageIO
-import UniformTypeIdentifiers
 
 /// Copies of the screenshots the user and the lead are shown: a post_update's images and a done report's evidence
 /// screenshots, kept in the project's `.vibeswitcher` folder (`updates/<update id>/`, `evidence/<task>/<report id>/`).
@@ -117,9 +115,7 @@ public struct KeptImages {
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &directory), !directory.boolValue else {
             throw Refusal(text: "\(path) isn't there\(given.hasPrefix("/") ? "" : " (looked in \(base))"): give the path of an image file that exists.")
         }
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              properties[kCGImagePropertyPixelWidth] != nil else {
+        guard Platform.Images.isImage(url) else {
             throw Refusal(text: "\(path) isn't an image (PNG, JPEG, …): give the path of a screenshot.")
         }
         return url
@@ -128,20 +124,12 @@ public struct KeptImages {
     /// The image at `url` (`size` bytes) as a PNG of at most `limit` bytes, scaled down in steps; nil when even a
     /// small one doesn't fit.
     static func downscaled(_ url: URL, size: Int, under limit: Int) -> Data? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = properties[kCGImagePropertyPixelWidth] as? Int, let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        guard let source = Platform.Images.Source(url: url), let (width, height) = source.pixelSize else { return nil }
         // Bytes go roughly with the area: the side that would fit, a little under, then smaller until it does.
         var side = Double(max(width, height)) * min(0.9, (Double(limit) / Double(size)).squareRoot() * 0.9)
         while side >= 32 {
-            let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
-                                            kCGImageSourceThumbnailMaxPixelSize: Int(side)]
-            let data = NSMutableData()
-            guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
-                  let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else { return nil }
-            CGImageDestinationAddImage(destination, image, nil)
-            guard CGImageDestinationFinalize(destination) else { return nil }
-            if data.length <= limit { return data as Data }
+            guard let data = source.pngThumbnail(maxSide: Int(side)) else { return nil }
+            if data.count <= limit { return data }
             side *= 0.7
         }
         return nil

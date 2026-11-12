@@ -1,3 +1,4 @@
+#if canImport(Darwin)
 import Foundation
 import Network
 
@@ -336,3 +337,4 @@ public final class PreviewProxy: @unchecked Sendable {
         }
     }
 }
+#endif

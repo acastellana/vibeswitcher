@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 /// Where a session's terminal sits on screen: its window's frame (top-left origin, as Terminal reports
