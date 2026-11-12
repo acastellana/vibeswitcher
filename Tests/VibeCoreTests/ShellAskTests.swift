@@ -142,9 +142,12 @@ struct ShellAskTests {
         let request = ShellRequest(session: Self.session, cwd: "/work/example", command: "npm test # and a comment", label: "Tests", createdAt: Self.now)
         let spawn = ShellAsk.spawnRequest(request)
         #expect(spawn.cwd == "/work/example" && spawn.keepShell && spawn.agent == nil && spawn.label == "Shell: Tests")
-        // The command, then how it ended, told to the terminal (`ShellTidy`): never `$?`, which fish hasn't.
-        #expect(spawn.command == "eval \"$VIBESWITCHER_SHELL_COMMAND\" && printf '\\033]7501;state=done:app=vs-shell\\007' "
-                + "|| printf '\\033]7501;state=error:app=vs-shell\\007'")
+        // Its start, the command, then how it ended with its status, told to the terminal (`ShellTidy`, `CommandCapture`):
+        // never `$?`, which fish refuses to parse.
+        #expect(spawn.command == "printf '\\033]7501;state=working:app=vs-shell:id=command\\007'; eval \"$VIBESWITCHER_SHELL_COMMAND\" "
+                + "&& printf '\\033]7501;state=done:app=vs-shell:exit=0\\007' "
+                + "|| printf '\\033]7501;state=error:app=vs-shell:exit=%s%s\\007' \"$status\" \"$PIPESTATUS\"")
+        #expect(spawn.command?.contains("$?") == false)
         #expect(spawn.env == ["VIBESWITCHER_SHELL_COMMAND": "npm test # and a comment"])
         #expect(ShellAsk.sessionLabel(ShellRequest(session: Self.session, cwd: "/", command: "x", label: "", createdAt: Self.now)) == "Shell")
     }
@@ -157,5 +160,31 @@ struct ShellAskTests {
         #expect(ShellAsk.message(request, .init(state: .started, at: Self.now, auto: true, shell: "abc", name: "Shell"))?.contains("at once") == true)
         #expect(ShellAsk.message(request, .init(state: .declined, at: Self.now))?.contains("declined") == true)
         #expect(ShellAsk.message(request, .init(state: .expired, at: Self.now))?.contains("expired after 30 minutes") == true)
+        // A start this build follows says the end comes too.
+        #expect(ShellAsk.message(request, .init(state: .started, at: Self.now, shell: "abc", name: "Shell", endTold: false))?
+            .contains("When the command ends, its exit status and the last lines of its output come to you as another message.") == true)
+    }
+
+    /// The user's report (2026-11-12): `vs-shell run -- bash -c 'git log -1 --oneline && …'` ran `bash -c git log …`.
+    /// Words the shell would split or read again once joined are warned about at filing, with the line that runs and
+    /// the one meant; a single word is the whole line, as meant, and plain words say nothing.
+    @Test func wordsTheShellWouldSplitAreWarnedAbout() throws {
+        let cwd = try project()
+        let line = "git log -1 --oneline && scripts/build-app.sh --install"
+        let ran = run(["run", "--", "bash", "-c", line], cwd: cwd)
+        #expect(ran.status == 0, "\(ran.error)")
+        #expect(ran.output.contains("Warning: word 3 (`\(line)`)"), "\(ran.output)")
+        #expect(ran.output.contains("the card runs exactly `bash -c \(line)`"), "\(ran.output)")
+        let meant = "bash -c " + RecentProjects.shellQuote(line)
+        #expect(ran.output.hasSuffix("vs-shell run -- " + RecentProjects.shellQuote(meant)), "\(ran.output)")
+        for quiet in [["npm", "run", "local-test", "--", "--workspace", "x"], ["bash -c 'git log -1 && make'"]] {
+            let filed = run(["run", "--"] + quiet, cwd: cwd)
+            #expect(filed.status == 0 && !filed.output.contains("Warning"), "\(quiet): \(filed.output)")
+        }
+        #expect(run(["run", "--", "find", ".", "-name", "*.swift"], cwd: cwd).output.contains("Warning: word 4 (`*.swift`)"))
+        // The help, the filing and the prompts' line on vs-shell say the outcome comes back.
+        #expect(ShellAsk.usage.contains("another with its exit status, how long it ran and the") && ShellAsk.usage.contains("as one argument"))
+        #expect(ran.output.contains("when the command ends, its exit status and the last lines of its output"))
+        #expect(SessionNote.realTerminal.contains("when the command ends, its exit status and last lines of output come back to you as a message"))
     }
 }
