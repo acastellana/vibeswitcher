@@ -49,6 +49,27 @@ struct MacOnlyTestsLintTests {
         #expect(listed.map(\.file) == names.sorted(), "MacOnlyTests.txt is sorted, each file once")
     }
 
+    /// The stop rule of the plan's sorting (docs/superpowers/plans/2026-11-12-v2-stage-1-core-on-linux.md, Task 12
+    /// Step 3) as a fraction: `listed` lines of MacOnlyTests.txt are fewer than a tenth of the target's `files`.
+    static func underTheStopRule(listed: Int, files: Int) -> Bool { listed * 10 < files }
+
+    /// Fewer than a tenth of the core's test files are the Mac's, whole or in part: both counted as they are now, so
+    /// the threshold moves with the target.
+    @Test func fewerThanATenthOfATargetsFilesAreMacOnly() throws {
+        let files = (try FileManager.default.contentsOfDirectory(atPath: Self.folder.path)).filter { $0.hasSuffix(".swift") }
+        #expect(files.contains("TestSupport.swift"), "the core's tests weren't read")
+        let listed = try Self.listed()
+        #expect(Self.underTheStopRule(listed: listed.count, files: files.count), """
+            \(listed.count) of the core's \(files.count) test files are in Tests/VibeCoreTests/MacOnlyTests.txt: a \
+            tenth or more, the plan's point to stop and report (Task 12 Step 3) before listing another
+            """)
+        // The rule's edge: 23 of 236 is under it, 24 isn't; a tenth exactly isn't.
+        #expect(Self.underTheStopRule(listed: 23, files: 236))
+        #expect(!Self.underTheStopRule(listed: 24, files: 236))
+        #expect(!Self.underTheStopRule(listed: 10, files: 100))
+        #expect(Self.underTheStopRule(listed: 0, files: 1))
+    }
+
     @Test func aWholeFileWrapIsToldFromAWrapInside() {
         #expect(Self.isWrappedWhole("#if canImport(Darwin)\nimport Foundation\n#endif\n"))
         #expect(Self.isWrappedWhole("// Why.\n\n  /// More.\n#if canImport(Darwin)\nimport Security\n#endif\n"))
