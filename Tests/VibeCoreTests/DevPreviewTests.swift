@@ -411,28 +411,65 @@ func until(timeout: TimeInterval = hangGuard, _ condition: () -> Bool) async -> 
     return condition()
 }
 
+/// Connects to 127.0.0.1:`port` on `queue` (call it there) and calls `ready` with the connection once it's ready (never,
+/// if it never is: the caller's hang guard ends the wait). Its local port is bound before it connects, as the proxy's
+/// are (`PreviewProxy.parameters(for:)`): left to Network.framework, it can be one whose pair with the server's is still
+/// taken (EADDRINUSE, in full suite runs), and the connection waits for good. One that still can't have its port is
+/// replaced by a new one, up to `tries`. Returns what cancels the one tried last and stops trying.
+func connectLoopback(port: UInt16, queue: DispatchQueue, tries: Int = 5,
+                     ready: @escaping (NWConnection) -> Void) -> () -> Void {
+    var current: NWConnection?
+    var stopped = false
+    func attempt(_ left: Int) {
+        let parameters = NWParameters.tcp
+        parameters.allowLocalEndpointReuse = false
+        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
+        let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: parameters)
+        current = connection
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready: ready(connection)
+            case .waiting(.posix(let code)) where left > 1 && (code == .EADDRINUSE || code == .EADDRNOTAVAIL):
+                connection.stateUpdateHandler = nil
+                connection.cancel()
+                if !stopped { attempt(left - 1) }
+            default: break
+            }
+        }
+        connection.start(queue: queue)
+    }
+    attempt(tries)
+    return {
+        stopped = true
+        current?.cancel()
+    }
+}
+
 /// Sends `request` to 127.0.0.1:`port`; returns everything received until the server closes (or the hang guard
 /// passes).
 func exchange(port: UInt16, _ request: String, timeout: TimeInterval = hangGuard) async -> Data {
     await withCheckedContinuation { continuation in
-        let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
         let queue = DispatchQueue(label: "test-client")
         var received = Data()
         var finished = false
+        var cancel: () -> Void = {}
         func finish() {
             guard !finished else { return }
             finished = true
-            connection.cancel()
+            cancel()
             continuation.resume(returning: received)
         }
-        func read() {
+        func read(_ connection: NWConnection) {
             connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { data, _, done, error in
                 if let data { received.append(data) }
-                if done || error != nil { finish() } else { read() }
+                if done || error != nil { finish() } else { read(connection) }
             }
         }
-        connection.start(queue: queue)
-        connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in read() })
+        queue.async {
+            cancel = connectLoopback(port: port, queue: queue) { connection in
+                connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in read(connection) })
+            }
+        }
         queue.asyncAfter(deadline: .now() + timeout) { finish() }
     }
 }
@@ -443,30 +480,33 @@ func exchange(port: UInt16, _ request: String, timeout: TimeInterval = hangGuard
 func exchangeDetailed(port: UInt16, _ request: String, timeout: TimeInterval = hangGuard, onData: ((Data) -> Void)? = nil) async
     -> (data: Data, endedWithError: Bool, arrivals: [(TimeInterval, Data)]) {
     await withCheckedContinuation { continuation in
-        let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
         let queue = DispatchQueue(label: "test-client-detailed")
         let started = Date()
         var received = Data()
         var arrivals: [(TimeInterval, Data)] = []
         var finished = false
+        var cancel: () -> Void = {}
         func finish(error: Bool) {
             guard !finished else { return }
             finished = true
-            connection.cancel()
+            cancel()
             continuation.resume(returning: (received, error, arrivals))
         }
-        func read() {
+        func read(_ connection: NWConnection) {
             connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { data, _, done, error in
                 if let data, !data.isEmpty {
                     received.append(data)
                     arrivals.append((Date().timeIntervalSince(started), data))
                     onData?(received)
                 }
-                if error != nil { finish(error: true) } else if done { finish(error: false) } else { read() }
+                if error != nil { finish(error: true) } else if done { finish(error: false) } else { read(connection) }
             }
         }
-        connection.start(queue: queue)
-        connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in read() })
+        queue.async {
+            cancel = connectLoopback(port: port, queue: queue) { connection in
+                connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in read(connection) })
+            }
+        }
         queue.asyncAfter(deadline: .now() + timeout) { finish(error: false) }
     }
 }
@@ -474,18 +514,18 @@ func exchangeDetailed(port: UInt16, _ request: String, timeout: TimeInterval = h
 /// Sends an upgrade request; once the response head arrives, sends `payload` and waits for it to come back.
 func upgradeExchange(port: UInt16, _ request: String, payload: Data) async -> (head: String, echoed: Data) {
     await withCheckedContinuation { continuation in
-        let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
         let queue = DispatchQueue(label: "test-upgrade")
         var buffer = Data()
         var head: String?
         var finished = false
+        var cancel: () -> Void = {}
         func finish() {
             guard !finished else { return }
             finished = true
-            connection.cancel()
+            cancel()
             continuation.resume(returning: (head ?? String(decoding: buffer, as: UTF8.self), head == nil ? Data() : buffer))
         }
-        func read() {
+        func read(_ connection: NWConnection) {
             connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, done, error in
                 if let data { buffer.append(data) }
                 if head == nil, let end = buffer.range(of: Data("\r\n\r\n".utf8)) {
@@ -494,11 +534,14 @@ func upgradeExchange(port: UInt16, _ request: String, payload: Data) async -> (h
                     connection.send(content: payload, completion: .contentProcessed { _ in })
                 }
                 if head != nil, buffer.count >= payload.count { return finish() }
-                if done || error != nil { finish() } else { read() }
+                if done || error != nil { finish() } else { read(connection) }
             }
         }
-        connection.start(queue: queue)
-        connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in read() })
+        queue.async {
+            cancel = connectLoopback(port: port, queue: queue) { connection in
+                connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in read(connection) })
+            }
+        }
         queue.asyncAfter(deadline: .now() + hangGuard) { finish() }
     }
 }
@@ -583,11 +626,14 @@ struct PreviewProxyTests {
         defer { proxy.stop(); upstream.stop() }
         // The client gives up once the request has reached the dev server: after a fixed second, on a busy Mac,
         // it might not have yet, and then there's no connection there to release.
-        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
-        client.start(queue: DispatchQueue(label: "abandoning-client"))
-        client.send(content: Data("GET /slow HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n".utf8), completion: .contentProcessed { _ in })
+        let queue = DispatchQueue(label: "abandoning-client")
+        let cancel = queue.sync {
+            connectLoopback(port: port, queue: queue) { client in
+                client.send(content: Data("GET /slow HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n".utf8), completion: .contentProcessed { _ in })
+            }
+        }
         #expect(await until { upstream.recorded.count == 1 })
-        client.cancel()
+        queue.sync(execute: cancel)
         // Released long before the dev server would answer.
         #expect(await until { upstream.closed == 1 })
     }
