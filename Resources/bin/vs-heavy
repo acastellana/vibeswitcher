@@ -443,6 +443,11 @@ done
             # Linux: procps writes a time of a day or more as DD-HH:MM:SS; the days go into the hours.
             $time = ($1 * 24 + $2) . $3 if $^O eq "linux" && $time =~ /^(\d+)-(\d+)(:.*)$/;
             $seconds = $seconds * 60 + $_ for split /:/, $time;
+            # Linux: procps gives whole seconds, too coarse for 1 % of a core between looks (the Mac gives hundredths):
+            # its clock ticks, from /proc (the last ")" ends the name; then the state, ten fields, user and system time).
+            if ($^O eq "linux" && open(my $stat, "<", "/proc/$pid/stat")) {
+                $seconds = ($1 + $2) / POSIX::sysconf(POSIX::_SC_CLK_TCK()) if ((scalar <$stat>) // "") =~ /.*\)\s+\S+(?:\s+\S+){10}\s+(\d+)\s+(\d+)/s;
+            }
             $table{$pid} = [$ppid, $pgid, $seconds, $lstart];
         }
         return \%table;
@@ -521,6 +526,16 @@ done
             for (<$ps>) { my @row = split " ", $_, 5; push @processes, join(" ", @row) =~ s/\s+$//r if exists $tree{$row[0]}; }
             close $ps;
         }
+        # Linux: comm is the name alone, cut at 15 bytes; the Mac names what the process was started as (/usr/bin/perl),
+        # its argv[0], which /proc has.
+        if ($^O eq "linux") {
+            for (@processes) {
+                my ($pid) = /^(\d+)/;
+                open(my $in, "<", "/proc/$pid/cmdline") or next;
+                my ($argv0) = split /\0/, (scalar <$in>) // "";
+                s/^((?:\S+ ){4}).*/$1$argv0/ if defined $argv0 && length $argv0;
+            }
+        }
         my $min = $idle >= 60 ? int($idle / 60 + 0.5) . " min" : int($idle + 0.5) . " s";
         my $at = defined $load ? sprintf("at load %.1f under load_threshold %s", $load, $loadLimit + 0) : "load unread";
         binmode(STDERR, ":utf8");
@@ -538,6 +553,12 @@ done
     my ($progressed, $marked, $loaded) = (now(), mark(), undef);
     while (1) {
         if (waitpid($child, WNOHANG) == $child) { $status = $?; last; }
+        # Linux: an orphan goes to the nearest subreaper, not always pid 1, and a script killed outright is a zombie
+        # that kill 0 still finds until its parent waits for it: a parent that is no longer the script says it went.
+        if ($^O eq "linux" && !defined $stop && getppid() != $script) {
+            print STDERR "vs-heavy: $what: vs-heavy (pid $script) went: stopping it.\n";
+            $stop = "TERM";
+        }
         if (!defined $stop && (getppid() == 1 || !kill(0, $script))) {
             print STDERR "vs-heavy: $what: vs-heavy (pid $script) went: stopping it.\n";
             $stop = "TERM";
