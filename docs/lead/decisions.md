@@ -356,3 +356,7 @@ Codex workers can't run scripts/sandbox-app.sh: the manifest compile writes ~/.c
 
 the-sandbox-app-builds showed that Codex's sandbox denies com.apple.hiservices-xpcservice, so the sandbox app can't start there even once it builds. The task was abandoned rather than merging Codex-only build paths that don't yield screenshots.
 
+## 2026-11-12 09:00:36 Build an automatic Fable→Opus fallback for workers and audits when Claude has refused a request at the Fable limit, with a return to Fable at the recorded reset (task when-fable-s-limit or as named). Once it merges, the lead clears its hand-set verifier_model=opus.
+
+The user's answer to EE3A5F57, 2026-11-12. Switching by hand cost a halted worker (boost-release-7-7) and repeated lead attention during Fable limits.
+

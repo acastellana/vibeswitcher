@@ -2530,3 +2530,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 00:32 Asked the user to push main at f2ebe92b (28 commits) to origin/main
 - 2026-11-12 00:39 Pushed main at f2ebe92b (28 commits) to origin/main, on the user's click
 - 2026-11-12 02:13 Automatically fetched origin/main at f2ebe92b: 0 commits from the other Mac at origin/main (f2ebe92b3518adebac54e585ae6c0d26510bb853): merge_remote would do nothing: main has everything origin/main has.
+- 2026-11-12 09:00 Planned when-fable-s-limit: When Fable's limit runs out, workers and audits fall back to Opus, and return to Fable at the reset (review audit)
+- 2026-11-12 09:00 Started a worker on when-fable-s-limit
+- 2026-11-12 09:00 Automatically (auto_advance): Started a worker on when-fable-s-limit (When Fable's limit runs out, workers and audits fall back to Opus, and return to Fable at the reset).
