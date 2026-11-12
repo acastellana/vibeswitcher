@@ -506,7 +506,8 @@ public final class LeadAdvance: @unchecked Sendable {
     /// refusal halted started again on Opus in its worktree, once per halt.
     private func followFable() {
         let fallback = LeadUsageFallback.Store(root: lead.root)
-        let sessions = try? lead.advanceSessions()
+        // The host unread: nothing is claimed (the next pass looks again), nor said to be over.
+        guard let sessions = try? lead.advanceSessions() else { return }
         let held = lead.fableFallback(sessions: sessions)?.fableHeldBack(now: lead.usageClock())
         if let held {
             let ends = AccountUsage.ends(held)
@@ -527,12 +528,12 @@ public final class LeadAdvance: @unchecked Sendable {
         guard let pending = try? fallback.pending(), !pending.isEmpty else { return }
         for halt in pending {
             let task = lead.store.load().task(halt.slug)
-            let info = sessions?.first { $0.id == halt.session }
+            let info = sessions.first { $0.id == halt.session }
             let current = [.running, .failed].contains(task?.status ?? .done) && task?.worker == halt.session && task?.stopped != halt.session
                 && info.map { $0.live && $0.usageLimit != nil } == true
             guard let allowed = try? fallback.claim(halt, now: lead.usageClock().timeIntervalSince1970, attempting: current && held != nil) else { continue }
-            guard current else { continue }
-            guard held != nil else {
+            // Moved on (another worker, a report, the user), or not seen halted here: the lead's, as the witness tells it.
+            guard current, held != nil else {
                 try? fallback.release(halt)
                 continue
             }
@@ -1081,7 +1082,8 @@ public final class LeadAdvance: @unchecked Sendable {
             let route = task.workerAgent == .auto ? lead.workerRoute(for: task, sessions: try? lead.advanceSessions()) : nil
             // Near a usage limit on its model: another task on another model may still start.
             // A Codex task runs on the Codex account: Claude's limits don't hold it.
-            if (route?.agent ?? task.workerAgent) != .codex, usageHeld(model: lead.workerModel(for: task)) { continue }
+            // On the model it would start on: Opus in Fable's place while Fable is held back (`LeadUsageFallback`).
+            if (route?.agent ?? task.workerAgent) != .codex, usageHeld(model: lead.startModel(for: task)) { continue }
             let after = (task.after ?? []).joined(separator: ", ")
             var overlap: String?
             step("start|\(task.slug)") {

@@ -408,27 +408,33 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// `heldBack`: a model family Claude refuses now (fable, see `AccountUsage.fableHeldBack`; the workers then run on
     /// opus, which `workerModel` says). A choice of that family goes to the most capable model that isn't it and that
     /// the floor allows: opus, or with a floor that keeps audits off the workers' opus, the next one down.
-    public func auditModel(workerModel: String?, taskModel: String? = nil, heldBack: String? = nil) -> String {
-        let chosen = unheldAuditModel(workerModel: workerModel, taskModel: taskModel)
+    ///
+    /// `launchedModel`: the model the task's current worker was started on (`LeadTask.launchedModels`), kept off the
+    /// audit under that floor as the task's model is.
+    public func auditModel(workerModel: String?, taskModel: String? = nil, launchedModel: String? = nil, heldBack: String? = nil) -> String {
+        let chosen = unheldAuditModel(workerModel: workerModel, taskModel: taskModel, launchedModel: launchedModel)
         guard let heldBack, LeadReviewFloor.sameModel(chosen, heldBack) else { return chosen }
         let different = floor?.verifierDifferent == true
         let workers = LeadReviewFloor.workersModel(workerModel)
         return ["fable", "opus", "sonnet"].first { model in
             !LeadReviewFloor.sameModel(model, heldBack)
-                && (!different || (!LeadReviewFloor.sameModel(model, workers) && !LeadReviewFloor.sameModel(model, taskModel)))
+                && (!different || (!LeadReviewFloor.sameModel(model, workers) && !LeadReviewFloor.sameModel(model, taskModel)
+                                   && !LeadReviewFloor.sameModel(model, launchedModel)))
         } ?? "sonnet"
     }
 
-    private func unheldAuditModel(workerModel: String?, taskModel: String?) -> String {
+    private func unheldAuditModel(workerModel: String?, taskModel: String?, launchedModel: String?) -> String {
         let different = floor?.verifierDifferent == true
         if let verifierModel, !verifierModel.isEmpty {
             if !different { return verifierModel }
             if LeadReviewFloor.knownModel(verifierModel), !LeadReviewFloor.sameModel(verifierModel, LeadReviewFloor.workersModel(workerModel)),
-               !LeadReviewFloor.sameModel(verifierModel, taskModel) { return verifierModel }
+               !LeadReviewFloor.sameModel(verifierModel, taskModel), !LeadReviewFloor.sameModel(verifierModel, launchedModel) { return verifierModel }
         }
         guard different else { return Self.otherModel(than: workerModel) }
         let workers = LeadReviewFloor.workersModel(workerModel)
-        return ["fable", "opus", "sonnet"].first { !LeadReviewFloor.sameModel($0, workers) && !LeadReviewFloor.sameModel($0, taskModel) } ?? "sonnet"
+        return ["fable", "opus", "sonnet"].first {
+            !LeadReviewFloor.sameModel($0, workers) && !LeadReviewFloor.sameModel($0, taskModel) && !LeadReviewFloor.sameModel($0, launchedModel)
+        } ?? "sonnet"
     }
 
     /// A model at least as capable as `worker` and not it: fable, or opus for a worker on fable.

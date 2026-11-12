@@ -2842,12 +2842,23 @@ public final class LeadToolset: MCPToolset {
     /// While Fable is held back (`AccountUsage.fableHeldBack`), the workers' model and the task's are the ones their
     /// sessions start on (opus in Fable's place), and the audit goes on the most capable model that isn't Fable and that
     /// the floor allows.
+    /// The model its current worker was started on counts as the workers' too (a worker run on Opus while Fable was
+    /// held back is never audited on Opus under that floor, the reset passed or not).
     func auditModel(_ workflow: LeadWorkflow, task: LeadTask? = nil) -> String {
         let workers = runtime.workerModel(root: root)
-        guard let usage = fableFallback() else { return workflow.auditModel(workerModel: workers, taskModel: task?.model) }
+        let launched = task.flatMap { task in task.worker.flatMap { task.launchedModels?[$0] } }
+            .flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
+        guard let usage = fableFallback() else { return workflow.auditModel(workerModel: workers, taskModel: task?.model, launchedModel: launched) }
         let now = usageClock()
         return workflow.auditModel(workerModel: usage.startModel(workers, now: now), taskModel: usage.startModel(task?.model, now: now),
-                                   heldBack: AccountUsage.heldBackFamily)
+                                   launchedModel: launched, heldBack: AccountUsage.heldBackFamily)
+    }
+
+    /// The model a task's worker would start on now: its own or the project's (`workerModel`), Opus in Fable's place
+    /// while Fable is held back.
+    func startModel(for task: LeadTask) -> String? {
+        let model = workerModel(for: task)
+        return fableFallback()?.startModel(model, now: usageClock()) ?? model
     }
 
     /// " The worktree has 3 untracked files (12.0 KB), leftovers …: path (size), …", or "" for none.
