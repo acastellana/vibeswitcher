@@ -13,11 +13,18 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/vfs.h>
 #include <unistd.h>
+#if __has_include(<linux/magic.h>)
+#include <linux/magic.h>
+#endif
 
 _Static_assert(VIBE_POSIX_SPAWN_SETSID == POSIX_SPAWN_SETSID, "POSIX_SPAWN_SETSID");
 #ifdef RENAME_NOREPLACE
 _Static_assert(VIBE_RENAME_NOREPLACE == RENAME_NOREPLACE, "RENAME_NOREPLACE");
+#endif
+#ifdef V9FS_MAGIC
+_Static_assert(VIBE_9P_MAGIC == V9FS_MAGIC, "V9FS_MAGIC");
 #endif
 _Static_assert(sizeof(struct vibe_ucred) == sizeof(struct ucred)
                && offsetof(struct vibe_ucred, pid) == offsetof(struct ucred, pid)
@@ -46,6 +53,13 @@ int vibe_birth_time(int dirfd, const char *path, int flags, struct timespec *bir
     }
     birth->tv_sec = info.stx_btime.tv_sec;
     birth->tv_nsec = info.stx_btime.tv_nsec;
+    return 0;
+}
+
+int vibe_filesystem_type(const char *path, unsigned long *type) {
+    struct statfs info;
+    if (statfs(path, &info) != 0) return -1;
+    *type = (unsigned long)info.f_type;
     return 0;
 }
 

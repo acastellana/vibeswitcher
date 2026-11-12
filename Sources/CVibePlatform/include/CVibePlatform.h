@@ -39,6 +39,12 @@ int vibe_ptsname_r(int fd, char *buffer, size_t length);
 // POSIX_SPAWN_SETSID, for posix_spawnattr_setflags.
 #define VIBE_POSIX_SPAWN_SETSID 0x80
 
+// statfs(2)'s f_type: the kind of file system that holds `path`, one of <linux/magic.h>'s numbers. Swift's Glibc module
+// has no statfs. 0 and `type` filled; -1 and errno, as the call.
+int vibe_filesystem_type(const char *path, unsigned long *type);
+// V9FS_MAGIC: 9p, as a Windows drive under WSL is mounted.
+#define VIBE_9P_MAGIC 0x01021997
+
 // siginfo_t's si_pid, the process that sent a signal: `info` is the siginfo_t a handler installed with SA_SIGINFO is
 // given. In glibc and in musl `si_pid` is a macro over unions each names its own way, and Swift imports no such
 // macro. The pointer is untyped so that this header needs no <signal.h>.
