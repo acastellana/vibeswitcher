@@ -42,6 +42,22 @@ private let refuseTheAccountRootOnLinux: @convention(c) () -> Void = {
 private let fakeTheDiskOnLinux: @convention(c) () -> Void = { fakeTheDisk() }
 #endif
 
+#if os(Linux)
+/// Every `Process()` in this target, on Linux: Foundation's, started with no signal blocked. A test's task runs on a
+/// thread of libdispatch's there, which blocks every signal it can, and a child started from one inherits that: TERM,
+/// INT and HUP wait at its door for good (a `sleep` ends only by KILL, a script's trap never runs, vs-heavy never hears
+/// it's to stop). The code under test starts its own through `Platform.Spawn`, which gives a child an empty mask.
+final class Process: Foundation.Process, @unchecked Sendable {
+    override func run() throws {
+        var none = sigset_t(), before = sigset_t()
+        sigemptyset(&none)
+        pthread_sigmask(SIG_SETMASK, &none, &before)
+        defer { pthread_sigmask(SIG_SETMASK, &before, nil) }
+        try super.run()
+    }
+}
+#endif
+
 /// How long a wait may go on before the test calls it hung. Every wait ends as soon as what it waits for happens;
 /// This counts awake time through `MacTime`, so a sleep cannot exhaust a wait at the wake.
 /// This is only a guard, sized for a Mac running several suites at once (load 100+), never a measure of speed.
