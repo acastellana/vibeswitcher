@@ -187,7 +187,7 @@ Decided 2026-11-12: everything is built on `v2`, on Linux, and main is not touch
 checks at the end. What follows from that:
 
 - **`VibeCore` and `VibeHost` are shared with main**, and main changes them every day. On `v2` they change only at
-  the platform layer's seams (a system call moved behind `Platform/`), so main's changes keep merging in. Version
+  the platform layer's seams (a system call moved behind `VibePlatform`), so main's changes keep merging in. Version
   2's own code is in new files and folders.
 - **The Mac app target is left as it is on `v2`.** It keeps building, checked by a macOS runner. Nothing in
   `Sources/VibeSwitcher` or `Web/` is edited from here.
@@ -208,8 +208,9 @@ checks at the end. What follows from that:
 ### Targets
 
 ```
-VibeCore              shared model and rules; Platform/                (both, shared with main)
-VibeHost              PTYs, replay, socket server, vault; Platform/    (both, shared with main)
+VibePlatform          NEW: every system call, one form per system      (both, v2 only)
+VibeCore              shared model and rules; MacOnly/                 (both, shared with main)
+VibeHost              PTYs, replay, socket server, vault               (both, shared with main)
 VibeNode              NEW: stores, the lead engine, the wire types     (both, v2 only)
 vibeswitcher-server   NEW: VibeNode + listeners + the web client       (both, v2 only)
 vibeswitcher          NEW: the command line, a client                  (both, v2 only)
@@ -219,9 +220,13 @@ VibeSwitcher          the Mac app, as on main                          (macOS, u
 
 ### The platform layer
 
-Each portable target gets a `Platform/` folder holding a protocol per service and one implementation per system.
-Nothing outside `Platform/` imports Darwin, Glibc or an Apple-only framework, or uses `#if os`. A lint test
-(`PlatformLint`, in the style of the existing lints) enforces it, and runs on the Mac with no Linux toolchain.
+Every system call the shared code makes goes through one module, `VibePlatform`: static functions, one
+implementation per system, compiled against glibc and musl on Linux. It knows nothing of VibeSwitcher, so it builds
+and is tested on Linux before anything else does. Nothing outside it imports Darwin, Glibc or an Apple-only
+framework, or uses `#if os`; a lint test (`PlatformLint`) enforces that on both systems. What only the Mac can have
+(the dev previews' proxy, the Keychain store, drawing the status marks) moves file by file into
+`Sources/VibeCore/MacOnly/`, each file compiled only there. The exact functions and every call site are in
+[the stage 1 recon](../../process/v2-stage1-recon.md).
 
 | Service | macOS today | Linux |
 | --- | --- | --- |
@@ -467,7 +472,7 @@ Version 2 lives on `v2`, pushed to GitHub. Main is not touched. The routine, as 
    pushed only with both runners green.
 2. **The port ledger** (see [Strict isolation](#strict-isolation)) covers what a merge can't carry.
 3. **Lints on the branch** say at each merge what main brought that Linux can't take: `PlatformLint` (no Apple-only
-   import and no `#if os` outside `Platform/` in the portable targets) and `LinuxAPILint` (calls that exist on the
+   import and no `#if os` outside `VibePlatform` in the portable targets) and `LinuxAPILint` (calls that exist on the
    Mac and not in Linux's Foundation; it grows by a line each time a merge breaks the Linux build). Fixing what they
    find is part of the merge.
 4. **How much the merges cost is measured.** If they take more than a fifth of the working time, the user hears it,
@@ -521,8 +526,8 @@ Done when: both runners are green on `v2`, and the inventory is in the repositor
 
 ### Stage 1: the core on Linux
 
-- The `Platform/` layer in `VibeCore`, a service at a time, each with a test that runs on both systems. One shared
-  spawn wrapper removes a fifth of the errors.
+- `VibePlatform`, a service at a time, each with tests that run on both systems
+  ([plan](../plans/2026-11-12-v2-stage-1-core-on-linux.md)). One shared spawn wrapper removes a fifth of the errors.
 - swift-crypto on Linux. Tools found on PATH. Resources inside the binaries (rule 10). A format version in every
   file the core writes (rule 11).
 - The agent adapters (rule 12) around what the core already knows of Claude Code and Codex.
@@ -670,7 +675,7 @@ For the user:
 
 - swift-nio or plain sockets for the listeners and the WebSocket; whichever it is, pinned exact and few.
 - The rendering library and terminal emulator, after the spike.
-- The layout of `Platform/` and the names in it; the change-stream type in `VibeNode`.
+- The change-stream type in `VibeNode`.
 - How the generated wire types are produced.
 - The sandbox's mechanism (bubblewrap, or the namespaces directly), within what [Security](#security) requires.
 - The order of slices inside each stage, and their contracts.
