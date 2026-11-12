@@ -116,6 +116,43 @@ struct LeadDoneCheckTests: LeadTeamFixture {
         #expect(task("add-b", root)?.status == .review)
     }
 
+    @Test func aCancelledCheckRecordsNothing() async throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let started = temp.url("started").path
+        let (_, worker) = try working(root, runtime, check: "touch \(RecentProjects.shellQuote(started)); sleep 600")
+        let token = ShellCancel()
+        nonisolated(unsafe) let seat = worker
+        let call = Task.detached { ShellCancel.with(token) { seat.call("report", doneReport("added b.txt")) } }
+        // Once the check runs, its call is cancelled (the client gave up on it).
+        #expect(await until { FileManager.default.fileExists(atPath: started) })
+        token.cancel()
+        let reported = await call.value
+        #expect(reported.isError && reported.text.contains("the pre-done check was cancelled"), "\(reported.text)")
+        #expect(task("add-b", root)?.status == .running && task("add-b", root)?.report == nil)
+        #expect(try vault.unaudited(root: root, task: "add-b").reported == nil)
+    }
+
+    @Test func aCommitMadeWhileTheCheckRunsIsntReportedUnchecked() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        // The check commits, as a worker might while it waits on the call.
+        let check = "echo c > c.txt && git add c.txt && git commit -q -m 'add c'"
+        let (_, worker) = try working(root, runtime, check: check)
+        let reported = worker.call("report", doneReport("added b.txt"))
+        #expect(reported.isError && reported.text.contains("your branch moved") && reported.text.contains("while the pre-done check ran"), "\(reported.text)")
+        #expect(try vault.unaudited(root: root, task: "add-b").reported == nil)
+    }
+
+    @Test func aCodexWorkersToolCallsMayOutlastTheCheck() throws {
+        let root = try repo()
+        let prepared = try LeadLaunch.prepareCodex(root: root, task: "t", base: "codex", prompt: "p", start: "s", server: "/App/vibeswitcher-mcp",
+                                                   name: "worker-t", folder: temp.url("run"), cwd: root, temporary: temp.url("tmp"),
+                                                   toolTimeout: LeadDoneCheck.callTimeout(limit: 300))
+        // Codex's own limit is 60 s unless set: the slot's wait and the check's run, 5 min each, and two more.
+        #expect(prepared.command.contains("mcp_servers.vibeswitcher.tool_timeout_sec=720"), "\(prepared.command)")
+    }
+
     @Test func offOrADoneAgainOnTheSameCommitRunsNoCheck() throws {
         let root = try repo()
         let runtime = FakeRuntime()
@@ -175,7 +212,7 @@ struct LeadDoneCheckTests: LeadTeamFixture {
         let args = ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
         // Codex's workspace-write sandbox, no network, the worktree's writable roots; never the project command's flags.
         #expect(args.first == "sandbox" && args.contains("sandbox_mode=\"workspace-write\"") && args.contains("sandbox_workspace_write.network_access=false"), "\(args)")
-        #expect(args.contains { $0.hasPrefix("sandbox_workspace_write.writable_roots=") && $0.contains("done-check-add-b-home") }, "\(args)")
+        #expect(args.contains { $0.hasPrefix("sandbox_workspace_write.writable_roots=") && $0.contains("done-check-add-b-") }, "\(args)")
         #expect(!args.contains("--yolo") && !args.contains("danger-full-access"), "\(args)")
         #expect(args.last == check, "\(args)")
     }

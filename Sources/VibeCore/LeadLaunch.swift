@@ -462,7 +462,8 @@ public enum LeadLaunch {
     /// configuration given on the command line as JSON, for reading back.
     public static func prepareCodex(root: String, task: String, base: String, prompt: String, start: String, server: String,
                                     name: String, model: String? = nil, folder: URL? = nil, cwd: String? = nil,
-                                    temporary: URL = SessionTemp.root) throws -> Prepared {
+                                    temporary: URL = SessionTemp.root,
+                                    toolTimeout: TimeInterval = LeadDoneCheck.callTimeout(limit: LeadDoneCheck.defaultMinutes * 60)) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -487,6 +488,9 @@ public enum LeadLaunch {
             ("mcp_servers.vibeswitcher.command", toml(server)),
             ("mcp_servers.vibeswitcher.args", toml(args)),
             ("mcp_servers.vibeswitcher.startup_timeout_sec", "60"),
+            // A tool call may take minutes (report runs the pre-done check, `LeadDoneCheck`): Codex's own limit, 60 s
+            // unless set, would drop the call while the check runs, and its worker would see a timeout, not the result.
+            ("mcp_servers.vibeswitcher.tool_timeout_sec", String(Int(toolTimeout.rounded(.up)))),
             // Its tools need no approval: under approval never, Codex refuses a tool call that needs one ("MCP tool call
             // requires approval, but approval policy is never", the real run of 2026-11-01), and no worker could report.
             ("mcp_servers.vibeswitcher.default_tools_approval_mode", toml("approve")),

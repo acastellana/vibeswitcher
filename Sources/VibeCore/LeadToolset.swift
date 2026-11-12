@@ -2573,7 +2573,7 @@ public final class LeadToolset: MCPToolset {
             let launch = codex
                 ? try LeadLaunch.prepareCodex(root: root, task: slug, base: command, prompt: prompt, start: start, server: runtime.server,
                                               name: name, model: model, folder: vault.runFolder(root: root, name: name), cwd: folder,
-                                              temporary: sessionTempRoot)
+                                              temporary: sessionTempRoot, toolTimeout: LeadDoneCheck.callTimeout(limit: workflow.doneCheckTimeout))
                 : try LeadLaunch.prepare(role: role, root: root, task: slug, base: command, prompt: prompt,
                                          start: start, server: runtime.server, name: name, model: model, branch: branch,
                                          records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name),
@@ -5265,7 +5265,8 @@ public final class LeadToolset: MCPToolset {
                                                               lints: lints, suites: suites) else { return nil }
         let limit = doneCheckLimit ?? workflow.doneCheckTimeout
         let undecided = { (why: String) in LeadDoneCheck.undecidedNote(command: command, why: why) }
-        let home = vault.scratch(root: root, "done-check-\(slug)-home")
+        // Its own, per call: a report again while one runs (a client that gave up on the first) doesn't share it.
+        let home = vault.scratch(root: root, "done-check-\(slug)-\(UUID().uuidString.prefix(8))-home")
         var run = command
         if task.runningAgent == .codex {
             let inside = alreadySandboxed()
@@ -5281,8 +5282,13 @@ public final class LeadToolset: MCPToolset {
         defer { try? FileManager.default.removeItem(at: home) }
         let (stopped, _) = Worktrees.runChecks(setup: nil, test: run, in: worktree, home: home.path, timeout: limit, lock: heavyLock(workflow),
                                                as: "the pre-done check of \(slug)", place: worktree)
+        // What's recorded is the commit checked: one committed while it ran wasn't.
+        if let now = branchHead(Worktrees.branch(slug)), now != head {
+            throw Problem(text: "Not reported: your branch moved from \(head.prefix(8)) to \(now.prefix(8)) while the pre-done check ran, so it didn't check what you'd report. Report done again.")
+        }
         switch LeadDoneCheck.outcome(stopped, limit: limit) {
         case .passed: return "Its pre-done check passed (`\(command)`)."
+        case .cancelled: throw Problem(text: "Not reported: the pre-done check was cancelled with the call, and nothing was recorded. Report done again.")
         case .failed(let output): throw Problem(text: LeadDoneCheck.refusal(command: command, source: source, output: output))
         case .undecided(let why): return undecided(why)
         }

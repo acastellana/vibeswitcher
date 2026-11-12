@@ -100,6 +100,8 @@ public enum LeadDoneCheck {
         case failed(String)
         /// It didn't decide: why (it ran past its limit, or couldn't start). The report goes through.
         case undecided(String)
+        /// The call was cancelled (its client gave up, or the server stops): nothing is recorded, as for a refusal.
+        case cancelled
     }
 
     /// The outcome of `runChecks`' result for a check limited to `limit`.
@@ -111,10 +113,14 @@ public enum LeadDoneCheck {
             return .undecided(stall == nil ? "it ran past its \(Worktrees.duration(limit)) limit and was stopped"
                               : "it made no progress and was stopped (\(Worktrees.hung(after: after, stall: stall)))")
         case .error(let text)?: return .undecided("it couldn't start: \(text)")
-        case .cancelled?: return .undecided("it was cancelled")
+        case .cancelled?: return .cancelled
         case .conflict?: return .undecided("it couldn't start")
         }
     }
+
+    /// How long a report call may take with a check limited to `limit`: a wait for a slot up to `limit`, the run up to
+    /// `limit`, and two minutes for the rest. A Codex worker's tool server is given it (`LeadLaunch.prepareCodex`).
+    public static func callTimeout(limit: TimeInterval) -> TimeInterval { 2 * limit + 120 }
 
     /// `output`'s last `shownOutput` characters, from a line's start.
     static func tail(_ output: String) -> String {
