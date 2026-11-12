@@ -527,9 +527,13 @@ import Testing
 
     @Test func workersAndVerifiersRunLoadTestsOnlyThroughTheHarness() {
         let task = LeadTask(slug: "t", title: "T", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
-        for prompt in [LeadPrompts.worker(task: task, root: "/r", workflow: LeadWorkflow()),
-                       LeadPrompts.verifier(task: task, root: "/r", workflow: LeadWorkflow())] {
-            #expect(prompt.contains(LeadPrompts.loadTests))
+        // The verifier's rule; the worker's is part of its new-tests rule (the script caps and queues the load itself).
+        #expect(LeadPrompts.verifier(task: task, root: "/r", workflow: LeadWorkflow()).contains(LeadPrompts.loadTests))
+        let worker = LeadPrompts.worker(task: task, root: "/r", workflow: LeadWorkflow())
+        #expect(worker.contains(LeadPrompts.newTests))
+        for words in ["Load the Mac only through scripts/test-under-load.sh", "never with busy loops of your own",
+                      "A project without the script gets no load"] {
+            #expect(LeadPrompts.newTests.contains(words), "\(words)")
         }
         for words in ["only through scripts/test-under-load.sh", "never more than 2×ncpu load processes",
                       "never when the Mac is already loaded"] {

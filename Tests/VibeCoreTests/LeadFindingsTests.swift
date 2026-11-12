@@ -450,8 +450,9 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         let lead = try lead(root, runtime)
         let tool = try #require(lead.tools.first { $0.name == "dismiss_finding" })
         #expect(tool.description.contains("file and line") && tool.description.contains("decisions.md") && tool.description.contains("question id"), "\(tool.description)")
+        // The prompt names the tool; what a dismissal cites is the tool's description (and its refusal), said once.
         let prompt = LeadPrompts.lead(project: "p", root: "/r", workflow: LeadWorkflow())
-        #expect(prompt.contains("dismiss_finding") && prompt.contains("file and line") && prompt.contains("question id"), "\(prompt)")
+        #expect(prompt.contains("or dismiss_finding when it isn't a real problem"), "\(prompt)")
     }
 
     @Test func onlyTheLeadDismissesAFinding() throws {

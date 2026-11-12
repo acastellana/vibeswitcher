@@ -326,10 +326,15 @@ struct LeadDecisionTimerTests: LeadTeamFixture {
         #expect(!lead.call("ask_user", ["question": "Delete the old fixtures?", "options": ["Yes", "No"], "priority": "blocking"]).isError)
     }
 
-    @Test func theLeadIsToldToPreferTimersForReversibleChoices() {
+    @Test func theLeadIsToldToPreferTimersForReversibleChoices() throws {
         let prompt = LeadPrompts.lead(project: "acme", root: "/r", workflow: LeadWorkflow.parse("---\nmax_workers: 2\n---"))
-        for needle in ["proposal", "decide_in", "reversible", "Never put a timer on a blocking question", "outward-facing", "deleting"] {
+        for needle in ["reversible choice, propose your answer with a timer", "don't act on it"] {
             #expect(prompt.contains(needle), "\(needle)")
+        }
+        // Where a timer may not go is ask_user's own description (and its refusals), not repeated in the prompt.
+        let tool = try #require(try lead(repo(), FakeRuntime()).tools.first { $0.name == "ask_user" })
+        for needle in ["proposal, decide_in", "reversible", "Never a timer on a blocking question", "outward-facing", "deleting"] {
+            #expect(tool.description.contains(needle), "\(needle)")
         }
     }
 }

@@ -173,9 +173,10 @@ struct LeadArchiveTests: LeadTeamFixture {
         #expect(LeadRecords.archiveNudge(entries: 5, bytes: LeadRecords.archiveBytes + 1, rules: nil)?.contains("lists them") == false)
     }
 
-    @Test func theBriefSaysWhenToArchive() {
+    @Test func theBriefSaysWhenToArchive() throws {
         let brief = LeadPrompts.lead(project: "p", root: "/p", workflow: LeadWorkflow())
         #expect(brief.contains("archive_decisions the entries that are superseded, obsolete or now enforced by a check (docs/process/lead-rules.md"))
-        #expect(LeadPrompts.tools.contains("archive_decisions"))
+        // The tool itself is in the lead's tool list (the prompt no longer repeats that list).
+        #expect(try lead(repo(), FakeRuntime()).tools.contains { $0.name == "archive_decisions" })
     }
 }

@@ -669,8 +669,6 @@ public struct LeadWorkflow: Equatable, Sendable {
 
 /// What each role is told (appended to Claude Code's own system prompt).
 public enum LeadPrompts {
-    public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, dismiss_finding, record_decision, archive_decisions, record_incident, merge, revert, cleanup, fetch_remote, merge_remote, push_remote, configure"
-
     /// Read before proposing or asking (backlog A5, the cheap A4): on 2026-11-07 the lead proposed four chat features
     /// that already existed (⌘F search, tool groups, Latest, Copy as Markdown).
     static let productCheck = "Before you propose a feature or ask the user anything, check the code, "
@@ -689,15 +687,17 @@ public enum LeadPrompts {
     static let proofLoad = 2 * ProcessInfo.processInfo.activeProcessorCount
     static let proofCommand = "scripts/test-under-load.sh --load \(proofLoad) -r 3 -f '<those tests>'"
 
-    /// What workers are told about the tests they add: on 2026-10-23 three new tests passed in their workers and failed
-    /// in a loaded merge run (a SIGTERM racing the server's handler, a 1 s wall-clock dedupe window, a pid read before
-    /// the state file existed), each a failed merge and a rework.
+    /// What workers are told about the tests they add and about load: on 2026-10-23 three new tests passed in their
+    /// workers and failed in a loaded merge run (a SIGTERM racing the server's handler, a 1 s wall-clock dedupe window, a
+    /// pid read before the state file existed), each a failed merge and a rework. The worker's whole load rule: the
+    /// script caps the load at 2×ncpu and waits while the Mac is loaded, and report refuses a done without the run
+    /// (`LeadToolset`'s load proof), so neither is said here; `loadTests` is the verifier's wording.
     public static let newTests = "New tests: a test waits on the real event it checks (a file, a reply, a semaphore, an "
         + "injected clock), never on a fixed sleep or a wall-clock window: on a loaded Mac those race. Before you report done, "
-        + "run every test your branch adds or changes under load once, through scripts/test-under-load.sh (e.g. "
-        + "`\(proofCommand)`), and put its result line in your report (`all 3 runs passed and left nothing behind`, or the "
-        + "run that failed): report refuses a done without it. A test that fails there isn't done: fix its wait, not the load. A project without the script: "
-        + "say so in your report."
+        + "run every test your branch adds or changes under load once (`\(proofCommand)`) and put its result line in your "
+        + "report. A test that fails there isn't done: fix its wait, not the load. Load the Mac only through "
+        + "scripts/test-under-load.sh, never with busy loops of your own: other sessions and the user share this Mac. A "
+        + "project without the script gets no load: say so in your report."
 
     /// The verifier's part of `newTests`: one run under load of the branch's new tests (a finder panel's first finder
     /// only, so the panel puts that load on the Mac once).
@@ -722,6 +722,15 @@ public enum LeadPrompts {
     public static let scratchFiles = "Scratch files: leave what's in your TMPDIR and your scratchpad where it is; don't rm it. "
         + "Both go when your session ends or the task is cleaned up, and a removal outside the worktree waits on a "
         + "permission prompt only the user can answer (the lead can't, and its messages reach you only after it's answered)."
+
+    /// The worker's files rule: `scratchFiles` (the verifier's wording) and where builds and scratch go, said once.
+    /// A full disk stops every session, and cleanup removes the worktree, its build folders, the TMPDIR and the scratchpad.
+    public static let workerFiles = "Keep your temporary folder small: build or download into the worktree's "
+        + "git-ignored build folders, and put other scratch (test homes, bench output, notes) in your session's TMPDIR or "
+        + "your scratchpad, never inside the worktree. Don't rm any of it: cleanup removes it all, and a removal outside the worktree waits on a "
+        + "permission prompt only the user can answer (the lead can't, and its messages reach you only after it's answered). "
+        + "`git rm <path>` is for tracked files your change deletes. Name in your report a big build folder (a full disk "
+        + "stops every session) or an untracked file left in the worktree (the merge takes only commits)."
 
     /// What workers and verifiers are told about debuggers (`LeadLaunch.debuggers` refuses the usual ones): on
     /// 2026-10-23 a worker's lldb put a password dialog on the user's screen and stalled two merges behind it.
@@ -833,13 +842,11 @@ public enum LeadPrompts {
                 + "wrong then), and nothing cosmetic. Fix what it finds, or say why not."
         }
 
-        /// What a worker's done report carries, and the blind check before it.
+        /// What a worker's done report carries, and the blind check before it. The evidence's fields, and that a done
+        /// without them is refused, are the report tool's own description (`LeadToolset.evidenceShape`).
         public static func workerEvidence(base: String) -> String {
-            "Evidence: report done with `evidence`, one entry per acceptance check: check (its number, 1 for the first, or its "
-                + "text), how (the command you ran and what it printed, the test's name, or what you looked at), result (what "
-                + "it showed), and screenshots (the paths of any screenshots you took, optional). A task with no acceptance "
-                + "checks needs one entry, for its goal. A done report without an entry for every check is refused, naming the "
-                + "ones missing; blocked needs none. The lead, the verifier and the merge see it. Blind check: before you report "
+            "Evidence: report done with `evidence`, one entry per acceptance check (one for the goal when there are none); "
+                + "the lead, the verifier and the merge see it. Blind check: before you report "
                 + "done, " + blindCheck(base: base) + " Then put in `blind_check` what it found and, for each item, what you "
                 + "did: fixed (in which commit) or why not (\"nothing blocking\" when it found nothing)."
         }
@@ -874,18 +881,17 @@ public enum LeadPrompts {
             + "finding describes (it would pass on the old code too), the finding can still be fixed, but raise a Nit at the "
             + "test's file and line saying which: the test doesn't cover the fix."
 
-        /// How a worker answers its audit's findings (answer_findings): each open one fixed or disagreed with, by id.
+        /// How a worker answers its audit's findings: answer_findings' description says fixed or disagree.
         public static let workerFindings = "Findings: when the lead sends you audit findings by id (F1, F2…), answer each "
-            + "open one with answer_findings: fixed (commit the fix first) or disagree, with a reason the re-audit can check "
-            + "(why the failure it describes can't happen, or what allows it). Then report done again."
+            + "open one with answer_findings, with a reason the re-audit can check (why the failure it describes can't "
+            + "happen, or what allows it). Then report done again."
 
-        /// What happens at a task's time budget (see `LeadBudget`), as the worker's brief says it in one line.
+        /// What happens at a task's time budget (see `LeadBudget`), as the worker's brief says it in one line: the
+        /// message at the budget (`LeadBudget`) says what an over_budget report holds.
         public static func workerBudget(_ minutes: Int?) -> String {
             guard let minutes else { return "Time budget: none for this task." }
             return "Time budget: \(minutes) min of your working time (waiting on the user or the lead doesn't count). When "
-                + "it's reached, VibeSwitcher tells you to stop: commit what works, then report with status over_budget "
-                + "saying what works (with evidence), what's missing and your proposal (finish in N more minutes, cut scope, "
-                + "or another approach), and wait for the lead's decision."
+                + "it's reached, VibeSwitcher tells you to stop and report over_budget, and you wait for the lead's decision."
         }
 
         /// What happens at a task's time budget, as the lead's brief says it in one line.
@@ -994,20 +1000,13 @@ public enum LeadPrompts {
 
         \(WorkingPolicy.section(policy))
 
-        Your tools (the vibeswitcher MCP server): \(tools).
-
-        How you work:
+        How you work (your tools are the vibeswitcher MCP server's):
         0. Set up the project's workflow yourself: when status says workflow.md has a problem or no test_command, \
         set it with configure (status suggests a command from the repository; run it once first if unsure) and tell \
         the user what you set. Don't ask the user to edit workflow.md.
         1. Understand what the user wants. \(productCheck) Ask only what you truly need (direction, product choices, anything risky or \
-        irreversible) with ask_user. It doesn't block: keep working while the user answers; the answer arrives as a \
-        message. For a reversible choice, prefer proposing your answer with a timer (ask_user with proposal, one of \
-        the options, and decide_in minutes, 10 by default): the user can pick another option or hold it, and if no \
-        answer comes in time you get a message to go ahead with your proposal, recorded as your decision. Until that \
-        message, don't act on it. Never put a timer on a blocking question, on merging a sensitive path, on deleting \
-        or discarding work, or on anything outward-facing (publishing, pushing, sending): ask_user refuses those, and \
-        they wait for the user's say.
+        irreversible) with ask_user, and keep working while the user answers. For a reversible choice, propose your \
+        answer with a timer; until its go-ahead message comes, don't act on it.
         2. Break the work into tasks on the board (add_task), each with a contract: a goal, acceptance checks that can \
         be run or seen, boundaries (which files or areas, what not to touch) and the context a fresh worker needs. \
         \(Policy.leadContracts) \(Policy.leadBugContracts) Workers are refused these git commands, so no brief may need one: \(deniedGit(workflow)).
@@ -1018,9 +1017,7 @@ public enum LeadPrompts {
         reports wake you even between turns: a short prompt from VibeSwitcher says what came in. When woken, call \
         status and act on the reports. Meanwhile plan the next tasks, review, or answer the user.
         5. When a worker says it's done: \(Policy.leadUnaudited) An audit task: run audit(task). A worker's own report is \
-        a claim, not evidence: for an audit task only the verifier's report counts, and only it moves the task to done. audit refuses a branch that hasn't taken in \
-        \(workflow.base)'s commits to files it changes too, naming them: have the worker `git merge \(workflow.base)` \
-        first. That check is audit's, so the verifier needn't be told \(workflow.base) moved.
+        a claim, not evidence: for an audit task only the verifier's report counts, and only it moves the task to done.
         6. If the audit is complete and clean (a review none task: once its worker reported done), check first that nothing holds the task back: a recorded decision \
         (decisions.md), the task's own contract or notes, or something the user said (e.g. "prototype: never merge \
         until the user has looked"). If something does, don't merge and don't cleanup: update_task(task, status: \
@@ -1030,26 +1027,14 @@ public enum LeadPrompts {
         When a merged change broke something and a fix-forward would take longer than undoing it, revert(task, reason) \
         undoes its merge in one tested commit on \(workflow.base); then post_update and record_incident.
         A task that won't merge by itself is never marked failed for it: failed is for work that was tried and didn't \
-        pass, blocked for work that waits on something. Folded when another task carries its work (overtaken, or \
-        batched with others into one): update_task(task, status: folded, into: the task that carries it); it counts \
-        with the merged ones and reads "folded into" that task. Abandoned when nothing will carry it (dropped, no \
-        longer wanted): update_task(task, status: abandoned, reason: why); it counts under Abandoned. For either, \
-        stop_worker first if its worker runs, then cleanup(task), which removes its worktree and branch (an abandoned \
-        task's work with them); start_worker, audit and merge refuse it until you set it back to planned. Removed \
-        only for a record made by mistake that never ran (no worker ever started, no branch, no merge): \
-        update_task(task, status: removed) takes it off the board, kept in board.json for the record; anything that \
-        ran is refused, and is folded or abandoned instead.
-        Audits come with findings, each Important, Nit or Pre-existing at a file:line with its evidence, named \
-        <task>:<id> (status and board(task) list them by severity). merge refuses while an Important one is open; \
-        Nits never block, and a Pre-existing one never fails the task. An Important finding comes with its failure \
-        (failure_scenario: these inputs or this state give this wrong result); one without is recorded as a Nit. \
-        Resolve each Important one: message the worker the open ids; it answers each with answer_findings, fixed (in \
-        a commit) or disagree with a reason, and board(task) shows the answers; then audit again (a re-audit checks \
-        only those findings' concerns and judges the answers: it closes a finding whose disagreement it accepts, \
-        and a closed finding isn't raised again); or dismiss_finding with a reason when it isn't a real problem (for \
-        an Important one the reason must cite a file and line, a decision's timestamp from decisions.md, or the \
-        question id of the user's answer; if the only evidence is your memory, record_decision first or ask_user); or \
-        add_task(from_finding: <task>:<id>) to make it a task of its own (good for Pre-existing ones that matter). \
+        pass, blocked for work that waits on something, folded when another task carries its work, abandoned when \
+        nothing will (update_task says each); for the last two, stop_worker if its worker runs, then cleanup(task).
+        Audits come with findings, each Important, Nit or Pre-existing, named <task>:<id>. merge refuses while an \
+        Important one is open; Nits never block, and a Pre-existing one never fails the task. Resolve each Important \
+        one: message the worker the open ids; it answers each with answer_findings, and board(task) shows the answers; \
+        then audit again (a re-audit checks only those findings' concerns and judges the answers); or dismiss_finding \
+        when it isn't a real problem; or add_task(from_finding: <task>:<id>) to make it a task of its own (good for \
+        Pre-existing ones that matter). \
         \(Policy.nits) After \(LeadAuditLedger.roundCap) audits in a row that left Important findings open, the task's \
         status line says "reconsider the approach": don't send the worker back for a third round; re-roll it \
         (update_task(task, reroll: true), with a sharper contract in the same call if you have one): its worker \
@@ -1207,29 +1192,19 @@ public enum LeadPrompts {
 
         \(WorkingPolicy.section(policy))
 
-        Start: read the task; \(workflow.initCommand.map { "run `\($0)`; " } ?? "")look at the code you'll touch and the tests that cover it.
+        \(workflow.initCommand.map { "Start by running `\($0)`.\n" } ?? "")\
         While working: stay inside the boundaries. \(Policy.workerOwnership) Commit small, descriptive commits as you go. Don't switch to \(workflow.base), \
-        don't push, don't delete branches; the lead merges. At each milestone (a part working, checks \
-        passing, what's next), call progress with one line: the lead and the user see it on your task's lane. \
-        Keep your temporary folder small: build or download into the worktree's git-ignored build folders, not your \
-        scratchpad. Cleanup removes them with the worktree, so don't rm what's there: name a big one in your report \
-        (a full disk stops every session). Any \
-        other scratch (test homes, bench output, notes) goes in your session's TMPDIR or your scratchpad, never inside \
-        the worktree. If an untracked file is left there anyway, don't rm it: name it in your report (the merge \
-        takes only commits, and cleanup removes the worktree).
-        \(scratchFiles) `git rm <path>` is for tracked files your change deletes.
+        don't push, don't delete branches; the lead merges.
+        \(workerFiles)
         \(debuggers)
         When something needs a real terminal (a password or other prompt, an install, an interactive program, anything \
         that asks questions on stdin or files wallet requests), ask_lead with the exact command, working directory and \
         why it needs a real terminal; the lead files the shell card for the user to Run. Wait for the lead's answer. \
         Don't ask the user to open Terminal.app, paste a command into a shell, or type `! <command>` for it. A password \
         is typed only into that shell, never into chat: don't ask for one here, and never put one in the command.
-        Processes: stop one you started by its pid (`kill <pid>`; `$!` or `pgrep -f <your worktree path>` finds it). \
-        pkill and killall are refused: their patterns match the other sessions on this Mac too.
-        \(loadTests)
+        Processes: stop one you started by its pid (`$!`, or `pgrep -f <your worktree path>`): a looser pattern matches \
+        the other sessions on this Mac too, which is why pkill and killall are refused.
         \(newTests)
-        \(heavyWork)
-        Git commands refused here, by your permission rules: \(deniedGit(workflow)).
         Out of date: when the lead says your branch conflicts with \(workflow.base), bring it up to date here by \
         merging: run `git merge \(workflow.base)`, resolve each conflict, `git add` the files, then `git commit` \
         (`git merge --abort` starts over). Then run the affected tests again, commit and report. The lead's merge puts your \
@@ -1248,8 +1223,8 @@ public enum LeadPrompts {
         \(Policy.regressionTest(base: workflow.base))
         \(Policy.workerFindings)
         \(Policy.workerBudget(LeadBudget.minutes(task, default: workflow.taskBudgetMinutes)))
-        Stuck: say exactly what you need and stop. Don't fake a pass: never weaken or delete tests.
-        \(task.workerAgent == .codex ? "\n" + codexWorker + "\n" : "")
+        Stuck: report blocked with exactly what you need. Don't fake a pass: never weaken or delete tests.
+        \(task.workerAgent == .codex ? "\n" + codexWorker + "\nGit commands a Claude worker's rules refuse, which you hold yourself: \(deniedGit(workflow)).\n" : "")
         \(WorkerBrief.render(task))
         """
     }

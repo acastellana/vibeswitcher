@@ -140,8 +140,8 @@ struct LeadPolicyTextsTests {
         // Said after the lints, before Done: what a worker does last before reporting.
         #expect(brief.contains("along with the affected tests. They take seconds and catch what a filtered run misses, "
                                + "which otherwise only the merge's full run finds.\n" + text + "\nDone:"))
-        // The evidence it points to is the done report's (`workerEvidence`), which has a screenshots list per check.
-        #expect(LeadPrompts.Policy.workerEvidence(base: "main").contains("screenshots (the paths of any screenshots you took"))
+        // The evidence it points to is the done report's, whose tool description has a screenshots list per check.
+        #expect(LeadToolset.evidenceShape.contains("screenshots: the paths of any screenshots"))
         // The script the brief names is the repository's.
         #expect(FileManager.default.isExecutableFile(atPath: repository + "/" + LeadPrompts.Policy.sandboxScript))
 
@@ -197,35 +197,40 @@ struct LeadPolicyTextsTests {
         #expect(LeadPrompts.lead(project: "films", root: "/r", workflow: LeadWorkflow.parse("")).contains(review))
     }
 
-    @Test func theLeadAndTheWorkerListEveryGitCommandAWorkerIsRefused() {
+    /// The lead lists them (it writes the briefs); a Claude worker's own rules refuse them and say so, and a Codex
+    /// worker, which has no such rules, gets the list in its brief.
+    @Test func theLeadAndACodexWorkerListEveryGitCommandAWorkerIsRefused() {
         for (workflow, records) in [(LeadWorkflow.parse(""), "docs/lead"), (LeadWorkflow.parse("---\nbase_branch: project-lead\nrecords_dir: notes\n---"), "notes")] {
             let rules = LeadLaunch.deny(.worker, base: workflow.base, records: workflow.recordsDir)
             #expect(workflow.recordsDir == records)
             // Not the outside-read patterns (round 1's F8): quotes, backticks and wildcards that read as noise there.
             let git = rules.filter { $0.hasPrefix("Bash(git ") && !LeadLaunch.outsideReads.contains($0) }
-            let brief = LeadPrompts.worker(task: Self.task, root: "/r", workflow: workflow)
-            #expect(!brief.contains("git diff*`*") && !brief.contains("`git diff */..*`") && !brief.contains("git diff \"~"))
+            let lead = LeadPrompts.lead(project: "project-c", root: "/r", workflow: workflow)
+            #expect(!lead.contains("git diff*`*") && !lead.contains("`git diff */..*`") && !lead.contains("git diff \"~"))
             #expect(git.count > 30 && git.contains("Bash(git -C:*)") && git.contains("Bash(git worktree:*)") && git.contains("Bash(git tag:*)")
                     && git.contains("Bash(git commit --amend:*)"))
-            let lead = LeadPrompts.lead(project: "project-c", root: "/r", workflow: workflow)
             let worker = LeadPrompts.worker(task: Self.task, root: "/r", workflow: workflow)
+            var codexTask = Self.task
+            codexTask.agent = .codex
+            let codex = LeadPrompts.worker(task: codexTask, root: "/r", workflow: workflow)
+            #expect(codex.contains("Git commands a Claude worker's rules refuse, which you hold yourself: " + LeadPrompts.deniedGit(workflow) + "."))
             for rule in git {
                 var command = String(rule.dropFirst("Bash(".count).dropLast())
                 if command.hasSuffix(":*") { command.removeLast(2) }
                 #expect(lead.contains("`\(command)`"), "lead: missing \(rule)")
-                #expect(worker.contains("`\(command)`"), "worker: missing \(rule)")
             }
             // git under another name too, and nothing a worker may run (its allow rules).
-            #expect(lead.contains("`env git`") && worker.contains("`/usr/bin/git`"))
+            #expect(lead.contains("`env git`") && lead.contains("`/usr/bin/git`"))
             // The remotes' writes, both spellings of removing one (`noRoleMayChangeTheRemotes`).
             for command in ["git remote set-url", "git remote rm", "git remote remove", "git remote -v add"] {
-                #expect(lead.contains("`\(command)`") && worker.contains("`\(command)`"), "missing \(command)")
+                #expect(lead.contains("`\(command)`"), "missing \(command)")
             }
-            #expect(!worker.contains("`git remote -v`,") && !worker.contains("`git remote show`"))
+            #expect(!lead.contains("`git remote -v`,") && !lead.contains("`git remote show`"))
             let listed = LeadLaunch.deniedGit(.worker, base: workflow.base, records: workflow.recordsDir)
             for allowed in ["git merge \(workflow.base)", "git commit", "git add", "git rebase --continue"] { #expect(!listed.contains(allowed)) }
             #expect(lead.contains("Workers are refused these git commands, so no brief may need one: " + LeadPrompts.deniedGit(workflow) + "."))
-            #expect(worker.contains("Git commands refused here, by your permission rules: " + LeadPrompts.deniedGit(workflow) + ".\nOut of date:"))
+            // The worker's own rules refuse them and say so when one is tried: its brief doesn't list them again.
+            #expect(!worker.contains(LeadPrompts.deniedGit(workflow)) && !worker.contains("`git filter-branch`"))
         }
     }
 
