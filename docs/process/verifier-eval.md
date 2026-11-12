@@ -264,7 +264,7 @@ from audit-eval-on-opus, the 2026-11-12 run of main's prompt):
 | | Found | As Important | False alarms on 3 clean cases |
 |---|---|---|---|
 | Baseline, main's prompt, Fable (2026-11-09) | 6 of 14 | 4 | 0 |
-| Main's prompt, Opus (2026-11-12) | 7 of 14 | 6 | not given here |
+| Main's prompt, Opus (2026-11-12) | 7 of 14 | 6 | 0 (its entry below) |
 | This prompt, Fable | 9 of 14 | 7 | 2 by the script; 1 clearly false, 1 contestable |
 
 By the script's score: 7 → 10 of 14 found, 4 → 7 as Important, false alarms 0 → 2. The numbers in the rest of this entry are by substance.
@@ -319,3 +319,108 @@ say less about a new bug of the same kind, and two of this run's three gains are
 doubt rule closes Nit as a parking place but not Pre-existing (lead-record-commits), which never fails the task. The
 Pre-existing sentence is a separate, later change. The new rule also raised a fact it settled from a stale source
 (every-task-gets-a). Cost per scored case fell from $4.45 in the baseline to $3.60.
+
+### 2026-11-12, --all (audit-eval-on-opus): 12 of 12 cases, checklist auto, model opus (claude-opus-5-5)
+
+The same set, the same REVIEW.md (blob 5ba8d39b) and main's verifier prompt as the 2026-11-09 Fable baseline above. The
+only deliberate change is the audit model: `verifier_model: opus`, which each case printed as `model opus` and the
+stream recorded as `claude-opus-5-5`. Claude Code 2.1.322 (Fable's run used 2.1.319). Its summary, as the script
+printed it:
+
+```
+verifier eval, --all, checklist auto, Claude Code 2.1.322, REVIEW.md 5ba8d39b
+bugs found: 5 of 14 (5 as Important) in 9 bug cases
+false alarms: 0 Important finding(s) on 3 clean cases
+tokens: 20996830; cost: $13.75; 93 min
+per case:
+  a-fix-s-regression: 1 of 3 found (1 as Important), $0.58, 2 permission denial(s)
+  a-slash-command-that: 0 of 1 found (0 as Important), $2.21, 0 permission denial(s)
+  the-briefing-uses: 0 of 1 found (0 as Important), $0.82, 0 permission denial(s)
+  ending-a-session-ends: 0 of 3 found (0 as Important), $0.64, 1 permission denial(s)
+  memory-the-host-parser: 1 of 1 found (1 as Important), $1.08, 2 permission denial(s)
+  lead-record-commits: 0 of 1 found (0 as Important), $0.78, 3 permission denial(s)
+  a-base-branch-the: 1 of 2 found (1 as Important), $0.75, 0 permission denial(s)
+  finished-work-lands: 1 of 1 found (1 as Important), $2.07, 1 permission denial(s)
+  steadier-merge-gate: 1 of 1 found (1 as Important), $0.78, 0 permission denial(s)
+  the-lead-s-rules: clean, 0 Important finding(s), $1.32, 2 permission denial(s)
+  the-phone-shows-needs: clean, 0 Important finding(s), $0.70, 1 permission denial(s)
+  every-task-gets-a: clean, 0 Important finding(s), $2.03, 0 permission denial(s)
+```
+
+No case errored or was left unscored. The run exited 1 because bugs were missed. It was the only paid run.
+
+**The two models, by both counts.**
+
+| | Fable, 2026-11-09 | Opus, 2026-11-12 |
+|---|---|---|
+| Known bugs found, by the script's score | 7 of 14 | 5 of 14 |
+| Found, by substance (each finding read) | 6 of 14 | 7 of 14 |
+| Found as Important, by substance | 4 | 6 |
+| False alarms (Important on the 3 clean cases) | 0 | 0 |
+| Cost | $53.34 | $13.75 |
+| Time | 161 min | 93 min |
+| Tokens | 33.0 M | 21.0 M |
+
+**Each known bug, side by side.** Found: in substance and as Important. Too lightly weighted: found in substance, but
+as a Nit, which doesn't stop a merge. Weak evidence: found, but neither run nor reproduced, or the probe was denied.
+Missed: no finding describes it, even if one matched by place.
+
+| Bug | Fable, 2026-11-09 | Opus, 2026-11-12 |
+|---|---|---|
+| a-fix-s-regression F1 (`git archive --remote/--exec` runs a command) | Found, Important at :69, run in a scratch folder | Found, Important at :69, reproduced: `git archive --remote=. --exec='echo PWNED-RAN >&2; …'` printed PWNED-RAN |
+| a-fix-s-regression F2 (`--add-file` reads any file) | Missed | Missed |
+| a-fix-s-regression F3 (a symlinked folder takes `tar -x`/`mkdir -p` out of TMPDIR) | Too lightly weighted and weak evidence: a Nit at :69, its probe denied | Missed |
+| a-slash-command-that F1 (`noMenuSince` shared by every session) | Missed | Missed (4 Nits elsewhere in the hold logic) |
+| the-briefing-uses F1 (reopening Settings never re-reads the key) | Missed (a Nit at :540 matched by place only) | Missed (1 Nit, a boundary note) |
+| ending-a-session-ends F1 (the new test fails in the suite) | Missed | Missed: it ran EndingASessionTests focused, and it passed |
+| ending-a-session-ends F2 (`terminationReason` of a running process) | Missed (a Nit at :64 matched by place only) | Missed |
+| ending-a-session-ends F3 (perl's bareword `setsid`) | Missed | Missed: its summary takes "the setsid'd perl" as working |
+| memory-the-host-parser F1 (`ring.replay()` loses lines before a reset) | Found, Important at :634 | Found, Important at :634, from reading OutputRing (its repro was denied), with a concrete `git log`/less scenario |
+| lead-record-commits F1 (a record that merges cleanly keeps the branch's edits) | Too lightly weighted: a Nit at :822, called not blocking | Too lightly weighted and weak evidence: a Nit at :783 ("not reproduced: permission rules blocked the multi-step scratch git commands"). Scored missed: 6 lines from :789 |
+| a-base-branch-the F1 (raw writes, PrivateWriteLint fails) | Found, Important at LeadBaseMoves.swift:353, from the lint | Found, Important at :353, from the lint |
+| a-base-branch-the F2 (a team command still running doesn't mark the move as the team's) | Missed (also missed in substance on 2026-10-26 and 2026-11-01; found as Important by Fable on audits-settle-their's prompt and REVIEW.md, which has a line written from this bug: the entry above) | Found, Important, by reading: `made()` returns false while `run.ended` is nil, so `check()` lets a typed `!` line take the move, and no test covers an unfinished team run. Scored missed: it gave BaseMoves.swift:404, a line of the `git diff` it had saved to a file, not of BaseMoves.swift (223 lines; the guard is at :112). The board's own :404 for this finding most likely came the same way. |
+| finished-work-lands F1 (auto_advance and the opt-out read once per pass) | Found, Important at :272 (scored missed: 35 lines off) | Found, Important at :307, quoting REVIEW.md's read-once rule |
+| steadier-merge-gate F1 (a crashed or stopped run reruns with `--filter`) | Missed (its Important at :34 is about parameterized names; also missed on 2026-10-26 and 2026-11-01; found as Important by Fable on audits-settle-their's prompt and REVIEW.md, which has a line written from this bug: the entry above) | Found, Important at :35, by reading: a crash's in-flight tests become the rerun's whole filter, and the branch's own test expects it |
+
+**Its other findings.** Opus raised Important findings that aren't known bugs only on bug cases, where they don't count
+as false alarms. Ending-a-session-ends: the TemporaryFolderLint failure (Fable raised it too). Memory-the-host-parser
+and a-base-branch-the: an acceptance check's report (a measurement, a diagnosis) is missing. That comes from the
+replay, which has no done report. Finished-work-lands :360: a hung merge leaves the task in review and the next pass
+merges it again. Nobody has checked whether that one is real. On the clean cases it raised 10 Nits and no Important
+finding. It marked every-task-gets-a's integrity `suspect`, for three files outside the listed boundaries
+(Worktrees.swift, BatchSummary.swift, Sandbox.swift) with no lead's note and no done report naming them. In a real
+audit that verdict holds the merge until the lead accepts it. The eval doesn't score integrity, and the replay has no
+done report to list a worker's routine calls, so this may be a replay artifact. Fable's integrity on these cases
+wasn't recorded.
+
+**How it worked.** Opus audits are shallower: a case took 3–19 minutes (median about 6) against Fable's 7–26, and
+21.0 M tokens in all against 33.0 M. Four of its six Important finds by substance (memory-the-host-parser,
+a-base-branch-the F2, finished-work-lands, steadier-merge-gate) rest on reading the code, not on running it. Its
+reasoning was concrete enough to name the failing state, though. It tried to probe and was refused 12 times in 7 cases.
+
+**Verdict.** For routine audits, Opus did at least as well as Fable on this run. It found 7 known bugs in substance
+to Fable's 6, 6 as Important to Fable's 4, and every bug Fable found as Important it found as Important too. On one
+kind it did worse: the probe-dependent security bug a-fix-s-regression F3, which Fable caught as a Nit and Opus missed. It raised no false alarms on the clean cases, at a
+quarter of the cost and three fifths of the time. The script's score says the opposite (5 against 7), because three of
+Fable's seven are place-only matches that aren't the bug. Two of Opus's finds don't score: a-base-branch-the F2 sits
+at a diff-dump line, and lead-record-commits' Nit is 6 lines from its place. Read the
+findings, not the score.
+
+- Where Opus did better: logic bugs that take following state across functions or files. a-base-branch-the F2 and
+  steadier-merge-gate F1 were both found as Important. Fable missed each of them in all three of its runs before
+  audits-settle-their (2026-10-26, 2026-11-01 and the baseline, the last on the same prompt and REVIEW.md as this run).
+  Fable did find both as Important in audits-settle-their's run (the entry above), but on a new prompt and a REVIEW.md
+  with a line written from each of these two bugs, so that run doesn't show Fable finds them unprompted, nor that
+  Opus does better than Fable would there. It's the strongest signal here, and it is about Opus against Fable on
+  main's prompt only.
+- Where it did worse: a-fix-s-regression F3, the symlink escape, a security bug that needs a probe. Fable caught it,
+  if only as a Nit with its probe denied. Opus stopped after one Important on that case (3.4 min, 0.5 M tokens).
+- Where they were the same: both missed every bug that needs the test run in the full suite or a tool's exact
+  semantics (ending-a-session-ends F1–F3, a-fix-s-regression F2). Both missed the shared-state bug a-slash-command-that
+  F1, though REVIEW.md has its rule. Both found lead-record-commits only as a Nit.
+
+This is one run of each model. A gap of one or two bugs between single runs is inside the noise: Fable's own runs moved
+8 → 7 by place between 2026-11-01 and 2026-11-09. The data supports "Opus is not worse for routine correctness audits".
+It doesn't show that Opus is better. The two bugs Opus found that Fable missed in its three runs before
+audits-settle-their are a hint, not a rate, and Fable found both once REVIEW.md had a line for each. The one place to
+watch is security audits that need a probe: a second Opus run would show whether a-fix-s-regression F3's miss repeats.
