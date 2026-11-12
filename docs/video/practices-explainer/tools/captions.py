@@ -121,7 +121,12 @@ def caption_html(text):
 
 def main():
     ids = sorted(BASE)
-    scene_files = {f[:3]: f for f in os.listdir("compositions") if re.match(r"s\d\d-.*\.html$", f)}
+    scene_files = {}
+    for f in sorted(os.listdir("compositions")):
+        m = re.fullmatch(r"(s\d\d)-[a-z0-9-]+\.html", f)
+        if m:
+            assert m.group(1) not in scene_files, f"two files for {m.group(1)}: {scene_files[m.group(1)]}, {f}"
+            scene_files[m.group(1)] = f
     plan, t = [], 0.0
     for sid in ids:
         meta = json.load(open(f"assets/voice/{sid}.json", encoding="utf-8"))
@@ -141,7 +146,8 @@ def main():
             src,
         )
         assert n == 1, name
-    src = re.sub(r'(id="(?:main-root|bg|captions)"[^>]*?data-duration=")[\d.]+(")', rf"\g<1>{total:g}\g<2>", src)
+    src, n = re.subn(r'(id="(?:main-root|bg|captions)"[^>]*?data-duration=")[\d.]+(")', rf"\g<1>{total:g}\g<2>", src, flags=re.S)
+    assert n == 3, f"film length set on {n} of main-root, bg, captions"
     src, n = re.subn(r"tl\.set\(\{\}, \{\}, [\d.]+\);(\s*window\.__timelines\[\"main\"\])", rf"tl.set({{}}, {{}}, {total:g});\1", src)
     assert n == 1
     audio = [
@@ -189,7 +195,9 @@ def main():
     for a, b in zip(cues, cues[1:]):
         assert a[1] <= b[0] + 1e-6, (a, b)
     for p in plan:
-        assert p["start"] + LEAD + p["voice"] <= p["start"] + p["length"] - 0.45, p["id"]
+        # the stage starts fading 0.45 s before the end of the silent cut's timing, stretched by K.fit
+        fade = 0.45 * p["length"] / BASE[p["id"]]
+        assert LEAD + p["voice"] <= p["length"] - fade, (p["id"], "voice runs into the fade-out")
 
     divs = "\n".join(
         f'        <div class="cg" id="cg-{i}"><span class="tx">{caption_html(c[2])}</span></div>' for i, c in enumerate(cues)

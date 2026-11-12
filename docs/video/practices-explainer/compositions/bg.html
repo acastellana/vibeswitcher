@@ -51,7 +51,7 @@
       </div>
       <script>
         (function () {
-          const T = 411.7; // the film's length (tools/captions.py keeps it in step with index.html)
+          const T = 413.6; // the film's length (tools/captions.py keeps it in step with index.html)
           const tl = gsap.timeline({ paused: true });
           // The glow drifts slowly across the whole film and breathes (finite repeats over T).
           tl.fromTo(".bgc .glow", { x: 0, y: 0 }, { x: -760, y: 120, duration: T / 2, ease: "sine.inOut", yoyo: true, repeat: 1 }, 0);

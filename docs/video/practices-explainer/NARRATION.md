@@ -13,10 +13,11 @@ ElevenLabs' own quickstart uses with `eleven_v4` (its voice-description pages we
 he reads at a measured pace, about 130 words a minute, with every word clear in transcription, which suits a technical
 walk-through. Whether the voice is as warm as wanted is for a human ear to judge. ElevenLabs' model guide recommends `eleven_v4` (or `eleven_multilingual_v2`) for video narration.
 
-**Characters used:** 5,075 for the 19 scene files, plus 458 for a probe, the opening sample and a speed test, so
-5,533 in all. The account's quota couldn't be read (`GET /v1/user/subscription` needs `user_read`), and no call was
-refused. **Voice length:** 6:20 of speech in a 6:52 film. The model ignores `voice_settings.speed` (1.0, 1.1 and 1.2
-gave the same length), so the voice keeps its natural pace, about 130 words a minute.
+**Characters used:** the 19 scene files hold 5,218 characters. In all, 6,661 were spent: 6,338 voicing scenes (s04,
+s08, s15 and s16 were voiced twice, after a review tightened their wording to the sources) and 323 on a probe, the
+opening sample and a speed test. The account's quota couldn't be read (`GET /v1/user/subscription` needs `user_read`),
+and no call was refused. **Voice length:** 6:21 of speech in a 6:54 film. The model ignores `voice_settings.speed`
+(1.0, 1.1 and 1.2 gave the same length), so the voice keeps its natural pace, about 130 words a minute.
 
 The opening was sampled first and transcribed with whisper (`small.en` and `base.en`): "VibeSwitcher", "worktree" and
 "Codex" come through as written.
@@ -46,8 +47,7 @@ voice.
 ## s04 · The contract
 
 > Every task starts as a contract: what must be true when it's done, how the worker has to show it, and where it may
-> make changes. The worker gets it word for word, with your working policy. And its hash rides along in the merge
-> commit.
+> make changes. The worker gets it word for word, with your working policy. And its hash is recorded with the merge.
 
 ## s05 · Isolated, in parallel
 
@@ -69,8 +69,8 @@ voice.
 ## s08 · An independent verifier
 
 > The audit is independent. A read-only verifier works from the contract, not the worker's story, and runs real
-> commands to try to break the change, on a different model by default. Two or three finders share one build, and a
-> finding stays open when most of them raised it.
+> commands to try to break the change, on a different model by default. An audit can also use two or three finders,
+> sharing one build. Then a finding stays open when most of them raised it.
 
 ## s09 · Findings, rounds, re-rolls
 
@@ -111,15 +111,14 @@ voice.
 
 ## s15 · The right model for each role
 
-> Each role gets a model that suits it. This project's workers run on Opus, and by default the verifier runs on a
-> different model: Fable, when the workers are on Opus. Codex takes bounded, mechanical tasks, and is picked
-> automatically when Claude's limits run tight. A Claude verifier always audits its work. The dashed roles are still
-> being built.
+> Each role gets a model that suits it. By default, the verifier runs on a different model from the workers. In this
+> project, for now, both run on Opus. Codex takes bounded, mechanical tasks, and with agent set to auto, it's picked
+> when Claude's limits run tight. A Claude verifier always audits its work. The dashed roles are still being built.
 
 ## s16 · Memory that lives in the repo
 
 > The project's memory lives in the repository: decisions with their reasons, progress, and incidents. The tool server
-> commits them, and workers can't edit them. A new lead reads them first. And every merge commit names its task, its
+> commits them, and workers can't edit them. A new lead reads them first. And every merge records its task, its
 > review, its models, and its contract.
 
 ## s17 · You keep the keys

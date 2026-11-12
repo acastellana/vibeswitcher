@@ -7,7 +7,7 @@ destination: youtube
 aspect: 1920x1080
 language: en
 audience: developers who already use Claude Code (or Codex) and drive one or a few sessions by hand
-length: about 7 minutes (6:52 narrated; the silent cut was 5:42)
+length: about 7 minutes (6:54 narrated; the silent cut was 5:42)
 angle: explainer, process walk-through with the project's own numbers
 narration: yes (ElevenLabs, see NARRATION.md)
 ---
