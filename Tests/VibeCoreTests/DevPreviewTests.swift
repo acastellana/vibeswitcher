@@ -530,13 +530,16 @@ struct PreviewProxyTests {
     static let me = "Host: mac.example.ts.net:8444\r\nTailscale-User-Login: me@example.com\r\n"
     static let ours = "Cookie: vs_preview_8444=TOK\r\n"
 
-    func startProxy(target: PreviewTarget?, redeemed: (path: String, sessionToken: String, clearSite: Bool)? = nil) async throws -> (PreviewProxy, UInt16) {
+    /// `configure`: anything else to set before it starts.
+    func startProxy(target: PreviewTarget?, redeemed: (path: String, sessionToken: String, clearSite: Bool)? = nil,
+                    configure: (PreviewProxy) -> Void = { _ in }) async throws -> (PreviewProxy, UInt16) {
         let proxy = PreviewProxy(label: "test-proxy", context: {
             PreviewProxy.Context(owner: "me@example.com", ownOrigin: "https://mac.example.ts.net:8444",
                                  siblingOrigins: Set((8443...8447).map { "https://mac.example.ts.net:\($0)" }), publicPort: 8444)
         }, redeem: { $0 == "TICKET" ? redeemed : nil }, resolve: { $0 == "TOK" ? target : nil })
         // A busy Mac can take seconds to resolve localhost and connect; a dev server that's down still fails at once.
         proxy.connectTimeout = hangGuard
+        configure(proxy)
         // The port is read once `start` has returned (it keeps the listener then): ready can come first on a busy Mac.
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             proxy.start(port: 0, callbackQueue: .global(), onReady: { continuation.resume() },

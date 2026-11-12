@@ -179,6 +179,43 @@ extension PreviewProxyTests {
         #expect(upstream.recordedBodies.first == Data(body.utf8))
     }
 
+    /// A local port whose connection to the dev server is still taken: the system refuses the connect (EADDRINUSE) and
+    /// Network.framework waits on it for good. Seen in full suite runs, where loopback ports churn (2026-11-12: six of these
+    /// tests got a 502 or no answer). A new connection, on another port, gets through.
+    @Test func aConnectionWhoseLocalPortIsTakenIsTriedAgainOnAnother() async throws {
+        let upstream = try FakeUpstream()
+        let upstreamPort = await upstream.start()
+        // An open connection to the dev server from 127.0.0.1:taken (it sends nothing, so the server keeps it open).
+        let holder = socket(AF_INET, SOCK_STREAM, 0)
+        defer { close(holder) }
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        address.sin_port = upstreamPort.bigEndian
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let connected = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(holder, $0, length) } }
+        try #require(connected == 0)
+        _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(holder, $0, &length) } }
+        let taken = UInt16(bigEndian: address.sin_port)
+        let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
+        let (proxy, port) = try await startProxy(target: target, configure: { proxy in
+            // The first try from that same port: the clash, every time.
+            let standard = proxy.upstreamParameters
+            proxy.upstreamParameters = { attempt, host in
+                guard attempt == 0 else { return standard(attempt, host) }
+                let parameters = NWParameters.tcp
+                parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: taken)!)
+                parameters.allowLocalEndpointReuse = true
+                return parameters
+            }
+        })
+        defer { proxy.stop(); upstream.stop() }
+        let response = text(await exchange(port: port, "GET / HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n"))
+        #expect(response.hasPrefix("HTTP/1.1 200"))
+        #expect(response.hasSuffix("ok"))
+        #expect(upstream.recorded.count == 1)
+    }
+
     @Test func streamsServerSentEventsAsTheyCome() async throws {
         let upstream = try FakeUpstream()
         upstream.reply = Data("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n6\r\ndata:1\r\n".utf8)

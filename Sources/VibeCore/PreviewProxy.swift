@@ -44,6 +44,9 @@ public final class PreviewProxy: @unchecked Sendable {
     /// How long the dev server has to accept a connection before the phone gets a 502. Set before `start`; tests
     /// give a busy Mac longer.
     public var connectTimeout: TimeInterval = 5
+    /// The parameters of each try at the dev server (`attempt` counts from 0) at `host`. Set before `start`; tests pin a
+    /// first try's local port.
+    var upstreamParameters: (_ attempt: Int, _ host: NWEndpoint.Host) -> NWParameters = { _, _ in .tcp }
 
     public init(label: String, context: @escaping () -> Context?,
                 redeem: @escaping (String) -> (path: String, sessionToken: String, clearSite: Bool)?,
@@ -195,7 +198,7 @@ public final class PreviewProxy: @unchecked Sendable {
         guard let port = NWEndpoint.Port(rawValue: UInt16(clamping: target.port)) else {
             return reply(client, Self.page(502, PreviewGate.unreachableMessage(target)))
         }
-        let upstream = NWConnection(host: host, port: port, using: .tcp)
+        let upstream = NWConnection(host: host, port: port, using: upstreamParameters(0, host))
         upstreams[ObjectIdentifier(client)] = upstream
         let settled = Flag()
         let fail = { [weak self] in
