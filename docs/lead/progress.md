@@ -2559,3 +2559,12 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 10:32 Started a worker on agents-md-run-every (auto → Claude: Claude weekly 61%, 27 points ahead of pace (limits ignored), not tight; Codex 13%)
 - 2026-11-12 10:32 Automatically (auto_advance): Merge of agents-md-run-every failed: Tests fail rebased onto main: everyLintAgentsNamesIsATest(); the run stopped partway: 664 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running Sent its worker the output; it's back at work.
 - 2026-11-12 10:43 Merged remind-the-user-to: Remind the user to run /doctor prompt-audit per project (every 14 days and after a model change) (build 32244f28b05f)
+- 2026-11-12 10:43 Automatically (auto_advance): Merged remind-the-user-to (Remind the user to run /doctor prompt-audit per project (every 14 days and after a model change)) into main at 6340fa31, on its passing audit and the full test run.
+- 2026-11-12 10:43 Automatically (auto_advance): Cleaned up remind-the-user-to (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-12 10:43 Update: Merged: a reminder to run /doctor prompt-audit in each project — **What changed:** each project's lead chat shows a card when 14 days have passed since its last `/doctor prompt-audit`, or once its sessions have moved off the model the last audit was for. The card h…
+- 2026-11-12 10:45 Automatically (auto_advance): Started the audit of agents-md-run-every at f27384b1 (An audit was started on it: its verdict decides).
+- 2026-11-12 10:45 Released agents-md-run-every's worker (idle since its done report on f27384b1) while its audit runs
+- 2026-11-12 10:45 Automatically (auto_advance): Released agents-md-run-every's worker, idle since its done report on f27384b1, while its audit runs (ended pid 18595 (Worker: AGENTS.md: run every lint, and a load test command that works on any Mac)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-12 10:45 Audit of agents-md-run-every: complete, clean, round 2: 1 Nit closed
+- 2026-11-12 10:53 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-12 10:57 Merged agents-md-run-every: AGENTS.md: run every lint, and a load test command that works on any Mac (build 32244f28b05f)
