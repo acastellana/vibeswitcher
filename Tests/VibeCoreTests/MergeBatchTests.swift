@@ -390,6 +390,12 @@ struct MergeBatchTests: LeadTeamFixture {
         #expect(fixes.count == 1 && fixes.first?.status == .planned, "\(board(root).tasks.map(\.title))")
         #expect(merged.text.contains("Its rerun failed on breaks(), which failed on main"), "\(merged.text)")
         #expect(board(root).task("add-x")?.receipt?.mergeReruns == 1)
+        // Landed without it, and main is red all the same: the board keeps it, and the lead is told with the base
+        // run's first failing lines.
+        let red = try #require(board(root).mainRed)
+        #expect(red.tests == ["breaks()"] && !red.all && red.fixes == fixes.map(\.slug), "\(red)")
+        let told = (board(root).reports ?? []).filter { $0.text.hasPrefix("main is red: breaks()") }
+        #expect(told.count == 1 && told.first?.text.contains("    ✘ Test breaks()") == true, "\((board(root).reports ?? []).map(\.text))")
     }
 
     /// A split doesn't send back the task a test red on main puts it on: each of the bisect's runs gets the base run

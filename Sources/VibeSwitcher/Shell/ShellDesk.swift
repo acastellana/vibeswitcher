@@ -81,6 +81,9 @@ final class ShellDesk: ObservableObject {
     }
     /// Settings › Agents › Let agents open shells without asking (main thread).
     var atOnce: () -> Bool = { false }
+    /// A shell the user's Run started (main thread), with when Run was taken, before its shell started. Never for one
+    /// Settings › Agents started at once: nobody pressed anything, so it vouches for nothing it does (`BaseMoves.ranCard`).
+    var userRan: (_ request: ShellRequest, _ at: Date) -> Void = { _, _ in }
     let now: () -> Date
     let log: (String) -> Void
 
@@ -321,6 +324,7 @@ final class ShellDesk: ObservableObject {
                     switch result {
                     case .success(let shell):
                         log("\(request.id) started as \(shell.id)")
+                        if !auto { userRan(request, time) }
                         answer(request, ShellAsk.Answer(state: .started, at: now(), auto: auto, shell: shell.id.uuidString.lowercased(),
                                                         name: shell.name)) { done(.ran) }
                     case .failure(let why):

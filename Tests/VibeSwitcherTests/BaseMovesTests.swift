@@ -243,6 +243,44 @@ final class BaseMovesTests {
         #expect(moves.asking[root]?.commits.count == 1)
     }
 
+    /// The lead's own vs-shell card, which you pressed Run on, committed on the base (2026-11-12: `git add docs/lead &&
+    /// git commit …`): taken as the lead's, recording the card's id, with no Accept asked of you.
+    @Test func aCommitTheLeadsShellCardMadeIsTakenWithoutAsking() throws {
+        let lead = "4f1e2d3c-0000-4000-8000-000000000001"
+        try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: lead)
+        let moves = moves()
+        let card = ShellRequest(session: lead, cwd: root, command: "git add c.txt && git commit -m 'Lead: records'", label: "", createdAt: Date())
+        moves.ranCard(card)
+        try commit("c.txt")
+        let now = head()
+        moves.look([root])
+        #expect(moves.asking.isEmpty)
+        #expect(asked.isEmpty)
+        #expect(takers == [.card([card.id])])
+        #expect(try app.head(root: root, branch: "main") == now)
+        let update = try #require(board().updates.last)
+        #expect(update.body.hasPrefix("accepted 1 commit on main that the lead's vs-shell card \(card.id) asked for and you ran"), "\(update.body)")
+        #expect(logged.contains { $0.contains(card.id) })
+        // Used up: a later commit nobody accounts for is asked about.
+        try commit("d.txt")
+        moves.look([root])
+        #expect(moves.asking[root]?.commits.count == 1)
+    }
+
+    /// A card another session filed (a worker's) isn't the lead's request: its commit is asked about as before. A card
+    /// with no git command in it isn't kept at all.
+    @Test func aShellCardAnotherSessionFiledIsAskedAbout() throws {
+        try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "4f1e2d3c-0000-4000-8000-000000000001")
+        let moves = moves()
+        moves.ranCard(ShellRequest(session: "4f1e2d3c-0000-4000-8000-0000000000ff", cwd: root, command: "git commit -am 'x'", label: "", createdAt: Date()))
+        moves.ranCard(ShellRequest(session: "4f1e2d3c-0000-4000-8000-000000000001", cwd: root, command: "make test", label: "", createdAt: Date()))
+        #expect(moves.sent.count == 1)
+        try commit("c.txt")
+        moves.look([root])
+        #expect(moves.asking[root] != nil)
+        #expect(takers.isEmpty)
+    }
+
     @Test func whatYouSentDoesntTakeAMoveATeamSessionCouldHaveMade() throws {
         let (moves, worktree) = try switchedBase()
         moves.typed("! cd \(worktree) && git commit -am 'mine'", session: "lead-session", cwd: root)

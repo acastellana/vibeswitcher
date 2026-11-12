@@ -19,14 +19,18 @@ extension Worktrees {
         public var lockRecords: ((() -> Merge) throws -> Merge)?
         /// A test's stand-in for a route gone wrong, or for git failing; nil in the app.
         public var probe: LandingProbe?
+        /// The lines of the records redact_record replaced to clear a lint (`LeadRedaction`): each may leave its file,
+        /// its new text in its place. Only the records commit carries them.
+        public var redactions: [LeadRedaction]
 
         public init(route: String, records: String?, carried: [String] = [], lockRecords: ((() -> Merge) throws -> Merge)? = nil,
-                    probe: LandingProbe? = nil) {
+                    probe: LandingProbe? = nil, redactions: [LeadRedaction] = []) {
             self.route = route
             self.records = records
             self.carried = carried
             self.lockRecords = lockRecords
             self.probe = probe
+            self.redactions = redactions
         }
 
         /// A landing with nothing to check: no records in the repository and no remote carried.
@@ -95,9 +99,13 @@ extension Worktrees {
                 var kept = try lines(candidate, file)
                 if let archive { kept.formUnion(try lines(candidate, "\(dir)/\(archive.name)")) }
                 // The one line decisions.md rewrites: how many entries the archive holds.
-                let missing = try lines(from, file).filter { !kept.contains($0) && !$0.hasPrefix(LeadRecords.pointerPrefix) }
+                // And a line redact_record replaced to clear a lint, its new text in its place.
+                let missing = try lines(from, file).filter {
+                    !kept.contains($0) && !$0.hasPrefix(LeadRecords.pointerPrefix)
+                        && !LeadRedaction.excuses(landing.redactions, file: file, line: $0, kept: kept)
+                }
                 if let first = missing.sorted().first {
-                    return "\(start), and \(file) would lose \(count(missing.count)) \(base) has, “\(clip(first))” among them. Records only ever grow; lines leave only through archive_decisions or the month's roll of progress.md. \(unmoved)"
+                    return "\(start), and \(file) would lose \(count(missing.count)) \(base) has, “\(clip(first))” among them. Records only ever grow; lines leave only through archive_decisions, the month's roll of progress.md, or redact_record to clear a lint. \(unmoved)"
                 }
                 // What the remote's commits brought is in the candidate itself: nothing after the move has to add it.
                 for carried in landing.carried {

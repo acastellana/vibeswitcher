@@ -481,6 +481,13 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(fix.contract.context.contains("✘ Test flaky() recorded an issue"), "\(fix.contract.context)")
         #expect(merged.text.contains("Its rerun failed on flaky(), which failed on main"), "\(merged.text)")
         #expect(merged.text.contains("flaky(): planned \(fix.slug) to fix it."), "\(merged.text)")
+        // Merged without it, and main is red all the same: the board keeps it (not the whole failure: it holds no merge),
+        // and the lead is told so, with the base run's first failing lines.
+        let red = try #require(board.mainRed)
+        #expect(red.tests == ["flaky()"] && !red.all && red.fixes == [fix.slug] && red.onto == board.task("add-b")?.merged?.onto, "\(red)")
+        let told = (board.reports ?? []).filter { $0.text.hasPrefix("main is red: flaky()") }
+        #expect(told.count == 1 && told.first?.text.contains("    ✘ Test flaky() recorded an issue") == true, "\((board.reports ?? []).map(\.text))")
+        #expect(lead.mainRedHold("add-c") == nil)
         // Not a flake: it never passed.
         #expect(ledger(root).flakes.isEmpty, "\(ledger(root).flakes)")
         let rerun = try #require(ledger(root).reruns.first)
@@ -503,7 +510,8 @@ struct MergeGateTests: LeadTeamFixture {
     }
 
     /// Red on main too, but something else failed on the branch (the rest of the checks, here regression_command):
-    /// the failure stands, whatever main says.
+    /// the failure stands, whatever main says. Main being red is still told, with a task to fix the test, but merges
+    /// aren't held for it: it isn't the whole failure.
     @Test func aTestRedOnTheBaseExcusesNothingElseThatFailed() throws {
         let root = try repo()
         try fakeSuite(root, passes: "[[ \"$*\" == *--skip* ]]")
@@ -517,7 +525,9 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(ran().count == 4, "\(ran())")
         let board = BoardStore(root: root).load()
         #expect(board.task("add-b")?.status == .failed)
-        #expect(!board.tasks.contains { $0.title.hasPrefix("Fix the test") })
+        #expect(board.tasks.filter { $0.title == "Fix the test flaky(), red on main" }.count == 1, "\(board.tasks.map(\.title))")
+        #expect(board.mainRed?.tests == ["flaky()"] && board.mainRed?.all == false, "\(String(describing: board.mainRed))")
+        #expect(lead.mainRedHold("add-c") == nil)
         #expect(ledger(root).reruns.first?.base == .red && ledger(root).reruns.first?.redOnBase == nil, "\(ledger(root).reruns)")
         #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
     }

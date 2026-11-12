@@ -496,6 +496,18 @@ extension Shell {
 /// Workers' worktrees (`<repo>/.vibeswitcher/worktrees/<slug>` on `agent/<slug>`) and the merge queue's git steps.
 public enum Worktrees {
     public enum Check: Equatable, Sendable {
+        /// The failing outputs of a run that ended (empty when its first run passed); nil when it didn't end with a
+        /// verdict (hung, cancelled, an error, a conflict).
+        public var failingOutputs: [String]? {
+            switch self {
+            case .passed: return []
+            case .passedOnRerun(_, let failed, _): return [failed]
+            case .passedRedOnBase(_, let failed, let rerun, _): return [failed, rerun]
+            case .failed(let output): return [output]
+            default: return nil
+            }
+        }
+
         /// The checks passed on this commit (the branch rebased onto main).
         case passed(String)
         /// The test command failed, and its rerun (`Rerun`) passed on this commit: the first run's output, then the

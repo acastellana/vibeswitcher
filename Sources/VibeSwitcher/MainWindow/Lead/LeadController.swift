@@ -726,6 +726,9 @@ final class LeadController: ObservableObject {
             case .typed:
                 self.deliver("VibeSwitcher took the \(span) as the user's: they ran it from its window. Merges start from there now.",
                              from: .system("VibeSwitcher, from what the user sent in the window"), root: root)
+            case .card(let ids):
+                self.deliver("VibeSwitcher took the \(span) as your own: the user ran your vs-shell card\(ids.count == 1 ? "" : "s") \(ids.joined(separator: ", ")). Merges start from there now.",
+                             from: .system("VibeSwitcher, from your vs-shell card the user ran"), root: root)
             case .you:
                 self.deliver("The user accepted the \(span) in VibeSwitcher: merges start from there now.",
                              from: .system("the user, in the window"), root: root)

@@ -110,6 +110,8 @@ public final class LeadAdvance: @unchecked Sendable {
     /// runs (see `running`).
     private var stopWrite: Int32 = -1
     private var runningLock: FileLock?
+    /// The pipeline watch's next look, as armed (`watchPipeline`): armed once each.
+    private var pipelineWake: Date?
     /// What the next report to the lead says, a line per step.
     private var lines: [String] = []
     /// Refusals and holds told already (a step's, on a commit), each told once.
@@ -272,6 +274,7 @@ public final class LeadAdvance: @unchecked Sendable {
             lines = []
             lock.unlock()
             if !report.isEmpty { tell(report) }
+            watchPipeline()
             lock.lock()
             // Something came in while the report went out: another run.
             let more = again && !stopped
@@ -286,6 +289,22 @@ public final class LeadAdvance: @unchecked Sendable {
             ended?()
             if !more { return }
         }
+    }
+
+    /// The pipeline watch (`LeadPipeline`), after each run of passes: the lead is told once when work ready to merge
+    /// has sat 20 min with no merge landing, naming the cause, again at most every 30 min while it lasts. Nothing in the
+    /// project's folder changes while merges are held, so the next look is armed for when it's due.
+    private func watchPipeline() {
+        guard !stopped else { return }
+        let look = lead.watchPipeline()
+        guard let next = look.next else { return }
+        lock.lock()
+        let armed = pipelineWake == next
+        pipelineWake = next
+        lock.unlock()
+        guard !armed else { return }
+        let root = lead.root
+        lead.usageWake(next.addingTimeInterval(1)) { LeadAdvance.nudge(root: root) }
     }
 
     /// Only successful housekeeping is FYI. Unknown outcomes and refusals still need judgement.
@@ -686,6 +705,11 @@ public final class LeadAdvance: @unchecked Sendable {
         // approval, say) is said once and left out, so it never holds back a batch of the ones behind it.
         let found = everyReady.filter { task in
             guard !resting.contains(task.slug) else { return false }
+            // The base is red on what every merge fails on: only its fix merges (`LeadToolset.mainRedHold`).
+            if let held = lead.mainRedHold(task.slug) {
+                once("merge|\(task.slug)|main-red|\(held.prefix(60))", "Didn't merge \(task.slug): \(LeadToolset.clip(held, 600))")
+                return false
+            }
             guard let refusal = lead.advanceGate(task.slug) else { return true }
             once("merge|\(task.slug)|\(task.head)|\(refusal.prefix(60))", "Didn't merge \(task.slug): \(LeadToolset.clip(refusal, 600))")
             return false
@@ -838,6 +862,10 @@ public final class LeadAdvance: @unchecked Sendable {
         // A merge under way (this loop's, the lead's own, or into the same branch): its end, or the board's change once
         // it's done, looks again. Before the load: a merge's own tests are what loads the Mac.
         guard !resting.contains(slug), !mergeOut(waiting: true), lead.mergeIdle(slug) else { return }
+        // The base is red on what every merge fails on: only its fix merges; the base's move looks again.
+        if let held = lead.mainRedHold(slug) {
+            return once("merge|\(slug)|main-red|\(held.prefix(60))", "Didn't merge \(slug): \(LeadToolset.clip(held, 600))")
+        }
         // A loaded Mac: merge would wait in its tests' place; the app nudges once the load drops.
         guard !busy else { return roomWait("merge(\(slug))", need: 0) }
         // Held or switched off while an earlier step ran.

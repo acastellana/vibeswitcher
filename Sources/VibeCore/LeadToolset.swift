@@ -277,6 +277,14 @@ public final class LeadToolset: MCPToolset {
     var batchWindow: TimeInterval = 180
     var batchSize = 4
     var batchClock: () -> Date = { Date() }
+    /// The pipeline watch's clock (`LeadPipeline`): a test's stand-in.
+    var pipelineClock: () -> Date = { Date() }
+    /// The lints this repository carries that read the lead's records (`RecordLint.carried`), read once; a test's
+    /// stand-in.
+    lazy var recordLints: () -> RecordLint.Lints = { [root] in
+        let carried = RecordLint.carried(root: root)
+        return { carried }
+    }()
     /// Whether lead mail (tell_lead) is on: the tool server reads the app's Mac-wide setting (`LeadMail.isOn`) at each
     /// call; on unless set (tests set it off to see the refusal). The clock its records and rate limit go by.
     public var leadMailOn: () -> Bool = { true }
@@ -785,6 +793,11 @@ public final class LeadToolset: MCPToolset {
                             properties: ["entries": P(type: "array", description: "The entries to move, each by its heading (without ##) or its start, e.g. its stamp \"2026-10-17 12:15\" (to the minute or the second)", items: "string"),
                                          "reason": P(type: "string", description: "Why they go, in one line (it heads this batch in the archive)")],
                             required: ["entries", "reason"]),
+                MCPToolInfo(name: "redact_record", description: "Replace one line of your records (records_dir: progress.md, decisions.md, incidents.md or an archive) that a repository lint fails on (it names one of the user's other projects: PrivateNamesLint; or holds a credential's shape: SecretShapeLint) with corrected text. Only to clear a lint: records otherwise only grow, and the records commit refuses any other change to an existing line. The next records commit carries it, before the next merge, and its message names the redaction. When the user already fixed the line by hand, pass the corrected line as it is now: the commit then carries their fix.",
+                            properties: ["file": P(type: "string", description: "The record: progress.md, decisions.md, incidents.md, decisions-archive.md or progress-archive.md"),
+                                         "line": P(type: "string", description: "The line to replace: all of it, or a part no other line of that file has"),
+                                         "text": P(type: "string", description: "The corrected line, whole (it must pass the lints)")],
+                            required: ["file", "line", "text"]),
                 MCPToolInfo(name: "record_incident", description: "Record an incident (something broke the user's work: a hang, a lost message, a reverted merge) in incidents.md, and plan a task that turns it into a check that runs before merge (a test, or a case in regression_command's corpus), so a merge that brings it back is refused. That task doesn't start by itself until update_task changes its contract, or auto_advance: true or start_worker sets it going.",
                             properties: ["what": P(type: "string", description: "What happened, in one line"),
                                          "evidence": P(type: "string", description: "How it showed: the transcript, log, commit or steps that reproduce it"),
@@ -843,6 +856,10 @@ public final class LeadToolset: MCPToolset {
             defer { rotationGate?.release() }
             let member = try authenticate()
             if role == .lead { introduceLead() }
+            // Text bound for the lead's records passes the repository's lints that read them first (`RecordLint`).
+            if RecordLint.recordingTools.contains(name), let refusal = RecordLint.refusal(tool: name, arguments: arguments, lints: recordLints()) {
+                return fail(refusal)
+            }
             switch name {
             case "status": return withGitNotice(MCPToolResult(text: status()))
             case "board": return try MCPToolResult(text: boardText(task: arguments["task"] as? String))
@@ -886,6 +903,7 @@ public final class LeadToolset: MCPToolset {
             case "record_decision": return try recordDecision(arguments)
             case "archive_decisions": return try archiveDecisions(arguments)
             case "record_incident": return try recordIncident(arguments)
+            case "redact_record": return try redactRecord(arguments)
             case "sessions": return MCPToolResult(text: sessionsText())
             case "configure": return try configure(arguments)
             case "report": return try report(arguments)
@@ -3668,6 +3686,7 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func merge(_ slug: String, acceptStale: String? = nil, locked: (() -> Void)? = nil) throws -> MCPToolResult {
+        commitRecordsFirst(not: slug)
         // The remote's tip, read once: what the gate checks the branch against, what it lands as and whose records are
         // taken after are the same answer, and no answer stops it here, before anything is tested.
         let fetched = try fetchedTip(self.workflow, not: "Not merged (nothing was tested)")
@@ -3687,6 +3706,7 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "Another merge into \(base) is running; merge \(slug) when it's done.")
         }
         defer { held.release() }
+        noteMergeStarted([slug])
         guard let current = branchHead(base) else { throw Problem(text: "There's no branch \(base) to merge into.") }
         try checkBaseMoves(base: base, current: current)
         // A lock in the main checkout stops the fast-forward at the end: said now, before the tests run.
@@ -3704,7 +3724,7 @@ public final class LeadToolset: MCPToolset {
         var flaked: (plan: MergeRerun.Plan, failed: String)?
         // Its rerun failed on tests that failed on the base too (`Worktrees.Check.passedRedOnBase`): they, and the
         // rerun's output (their failing lines).
-        var redOnBase: (tests: [String], rerun: String)?
+        var redOnBase: (tests: [String], rerun: String, onBase: String)?
         // The passing run's test count, for its receipt.
         var testCount: Int?
         // The width the passing run got (`MergeSample.cores`), from its output.
@@ -3727,6 +3747,9 @@ public final class LeadToolset: MCPToolset {
                                               }, baseline: baseline(on: current, plan: { rerun }, pairing: pairing),
                                               tested: { testCount = LeadReceipt.testCount($0); testedCores = MergeSample.cores(in: $0) },
                                               begun: { begun = ($0, LoadRecorder.averages() ?? []) })
+        // Which of the lead's records its failure named, for the next merge (`LeadRecords.commitBeforeMerge`).
+        if let failing = checked.failingOutputs { records.noteMergeRun(failing: failing) }
+        noteMainGreen(checked)
         if let folder = mergeStats() {
             let start = begun?.at ?? called
             var sample = MergeSample(check: checked, rerun: rerun, project: (root as NSString).lastPathComponent, task: slug,
@@ -3785,7 +3808,7 @@ public final class LeadToolset: MCPToolset {
             }
             tested = commit
             _ = saveMergeLog(failed + "\n" + again + "\n" + onBase, slug: slug)
-            redOnBase = (red, again)
+            redOnBase = (red, again, onBase)
             // What failed the first run and passed the rerun is a flake, as on any rerun.
             if MergeRerun.flakes(in: failed).contains(where: { !red.contains($0) }) { flaked = (plan, failed) }
         case .cancelled:
@@ -3839,9 +3862,21 @@ public final class LeadToolset: MCPToolset {
         case .failed(let output):
             let what = output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker) ? "regression_command fails" : "Tests fail"
             if let changed = changedMeanwhile(slug, since: task, tests: "failed") { throw changed }
+            // Red on the base too (its paired base run): those tests send no branch back; when they're the whole
+            // failure, nothing does, and the merge waits for their fix.
+            var redOnMain: [String] = []
+            var mainSaid = ""
+            if let red = MergeRerun.redOnBase(output, pairing: pairing) {
+                let said = mainIsRed(red, rerun: output, slug: slug, onto: current, workflow: workflow)
+                if red.all {
+                    throw Problem(text: "Not merged, and \(slug) isn't sent back: its run failed only on tests that fail on \(base) itself. " + said + "\n" + MergeFailure.end(of: scrubbed(output)))
+                }
+                redOnMain = red.red
+                mainSaid = "\n" + said
+            }
             let told = testFailure(output, slug: slug, base: base, commit: commit, onto: current)
-            try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "\(what) rebased onto \(base): \(MergeFailure.reason(in: scrubbed(output)))", detail: MergeFailure.capped(told)))
-            throw Problem(text: told)
+            try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "\(what) rebased onto \(base): \(MergeFailure.reason(in: scrubbed(output), redOnBase: redOnMain))", detail: MergeFailure.capped(told)))
+            throw Problem(text: told + mainSaid)
         case .error(let text):
             throw Problem(text: "Not merged: \(text)")
         }
@@ -3934,7 +3969,11 @@ public final class LeadToolset: MCPToolset {
                     + tellRecurrences(flakePlan.recurred, slug: slug)
                     + ")"
             }
-            if let redOnBase { flakeNote += tellRedOnBase(redOnBase.tests, planned: redPlan, slug: slug, base: base, onto: current) }
+            if let redOnBase {
+                flakeNote += tellRedOnBase(redOnBase.tests, planned: redPlan, slug: slug, base: base, onto: current)
+                // Merged without them, and main is red all the same: the lead hears it, with the base run's first lines.
+                mainIsRed((redOnBase.tests, false, redOnBase.onBase), rerun: redOnBase.rerun, slug: slug, onto: current, workflow: workflow, planned: redPlan)
+            }
             let caughtUp = tellToCatchUp(merged: slug, from: current, to: tested, base: base)
             archiveFinished(force: false)
             let staleNote = gate.staleAccepted.map { " (Its passing audit \($0.stale.text): merged on it with your reason, in the progress log.)" } ?? ""
@@ -4047,11 +4086,12 @@ public final class LeadToolset: MCPToolset {
     /// names one already (a fix planned by an earlier merge, a flake's), a note in that task's context. Called under
     /// the board's lock: an audit under way on a noted task hears of it once the board is written (`sendFlakeNotes`).
     func planRedOnBaseFixes(_ board: inout LeadBoard, tests: [String], rerun: String, slug: String, onto: String,
-                            workflow: LeadWorkflow) -> [(test: String, slug: String, noted: Bool)] {
+                            workflow: LeadWorkflow, landed: Bool = true) -> [(test: String, slug: String, noted: Bool)] {
         let base = workflow.base
         let lines = MergeRerun.evidence(in: rerun, tests: tests)
-        return tests.map { test in
-            let said = "Merge rerun: \(test) failed \(slug)'s merge run, its rerun, and the same run on \(base) (\(onto.prefix(8))), so it's red on \(base) and didn't send \(slug) back: the merge went ahead without it."
+        let planned = tests.map { test -> (test: String, slug: String, noted: Bool) in
+            let said = "Merge rerun: \(test) failed \(slug)'s merge run, its rerun, and the same run on \(base) (\(onto.prefix(8))), so it's red on \(base) and didn't send \(slug) back: "
+                + (landed ? "the merge went ahead without it." : "every merge fails on it while it's red, so merges wait on this fix.")
                 + (lines[test].map { "\nIts failing lines in the rerun (secrets masked):\n" + $0.map { "    " + $0 }.joined(separator: "\n") } ?? "")
             if let open = board.openTask(naming: test), let index = board.taskIndex(open.id) {
                 Self.appendContext(said, to: &board.tasks[index])
@@ -4064,6 +4104,87 @@ public final class LeadToolset: MCPToolset {
             board.tasks.append(fix)
             return (test, fix.slug, false)
         }
+        Self.putFirst(planned.map(\.slug), in: &board)
+        return planned
+    }
+
+    /// Urgent: `slugs`' planned tasks moved before every other planned task, in their order, so auto_advance (which
+    /// starts planned tasks in board order) starts them first. A test red on the base fails every merge.
+    static func putFirst(_ slugs: [String], in board: inout LeadBoard) {
+        var moving: [LeadTask] = []
+        for slug in slugs where !moving.contains(where: { $0.slug == slug }) {
+            guard let index = board.taskIndex(slug), board.tasks[index].status == .planned else { continue }
+            moving.append(board.tasks.remove(at: index))
+        }
+        guard !moving.isEmpty else { return }
+        let at = board.tasks.firstIndex { $0.status == .planned } ?? board.tasks.count
+        board.tasks.insert(contentsOf: moving, at: at)
+    }
+
+    /// `red` failed a merge's run, its rerun and the same run on the base at `onto` (`MergeRerun.redOnBase`), and the
+    /// merge (`slug`'s, or a batch's top) didn't go ahead on it: each test gets a fix task at the front of the plan (or a
+    /// note in an open task naming it), the board keeps it (`LeadMainRed`), and the lead is told "main is red", with the
+    /// base run's first failing lines, once for these tests on this commit. Returns what's said. `planned`: the merge
+    /// went ahead without them (`Worktrees.Check.passedRedOnBase`), and planned their fixes already, with its own
+    /// progress line (`tellRedOnBase`): the board keeps the red and the lead is told all the same.
+    @discardableResult
+    func mainIsRed(_ red: (red: [String], all: Bool, output: String), rerun: String, slug: String, onto: String, workflow: LeadWorkflow,
+                   planned given: [(test: String, slug: String, noted: Bool)]? = nil) -> String {
+        let evidence = MergeRerun.evidence(in: red.output, tests: red.red)
+        var lines = Array(red.red.flatMap { evidence[$0] ?? [] }.prefix(8))
+        if lines.isEmpty { lines = MergeRerun.capped(Array(red.output.components(separatedBy: "\n").filter { $0.contains("✘") }.prefix(8))) }
+        var planned: [(test: String, slug: String, noted: Bool)] = []
+        var record: LeadMainRed?
+        var isNew = true
+        // Read before the board's lock: the same red, still holding (records commits since), isn't told again.
+        let earlier = store.load().mainRed
+        let stillHolds = earlier.map { !mainRedLifted($0) } ?? false
+        try? store.update { board in
+            planned = given ?? planRedOnBaseFixes(&board, tests: red.red, rerun: rerun, slug: slug, onto: onto, workflow: workflow, landed: false)
+            var fixes: [String] = []
+            for fix in planned.map(\.slug) where !fixes.contains(fix) { fixes.append(fix) }
+            let made = LeadMainRed(tests: red.red, onto: onto, at: Date().timeIntervalSince1970, all: red.all, fixes: fixes, lines: lines)
+            if let old = board.mainRed, Set(old.tests) == Set(red.red), old.all == red.all,
+               old.onto == onto || (old == earlier && stillHolds) { isNew = false }
+            board.mainRed = made
+            record = made
+        }
+        if given == nil { sendFlakeNotes(FlakePlan(planned: planned)) }
+        guard let record else { return "\(workflow.base) is red: \(red.red.joined(separator: ", ")) (the board couldn't be written)." }
+        let text = record.text(base: workflow.base)
+        if isNew {
+            if given == nil { try? store.appendProgress("\(workflow.base) is red in \(slug)'s merge: \(Self.clip(red.red.joined(separator: ", "), 300)) failed its run, its rerun and the same run on \(workflow.base) (\(onto.prefix(8))); nothing sent back for them"
+                                      + (record.fixes.isEmpty ? "" : "; to fix first: \(record.fixes.joined(separator: ", "))")) }
+            _ = try? tellLead(text, about: LeadAdvance.sender)
+        }
+        return text
+    }
+
+    /// Whether `red` no longer holds merges: one of its fixes landed, or the base moved past `red.onto` by anything but
+    /// the lead's records commits (which `mainIsRed`'s own progress line makes: they mustn't lift it, or every ready
+    /// task would run its whole merge again on the same red tests, each round). A base git can't read lifts it.
+    func mainRedLifted(_ red: LeadMainRed) -> Bool {
+        let board = store.loadAll()
+        if red.fixes.contains(where: { board.task($0)?.status == .done }) { return true }
+        guard let head = branchHead(base) else { return true }
+        guard head != red.onto else { return false }
+        let log = Git.run(["log", "--format=%s", "\(red.onto)..\(head)"], in: root)
+        guard log.ok, Git.run(["merge-base", "--is-ancestor", red.onto, head], in: root).ok else { return true }
+        return log.output.split(separator: "\n").contains { $0 != Substring(LeadRecords.subject) }
+    }
+
+    /// A merge's first run passed on the base at `onto`: nothing is red there that it ran.
+    func noteMainGreen(_ check: Worktrees.Check) {
+        guard case .passed = check, store.load().mainRed != nil else { return }
+        try? store.update { board in board.mainRed = nil }
+    }
+
+    /// Why auto_advance doesn't merge `slug` now: the base is red on tests that are the whole failure of every merge
+    /// (`LeadMainRed.holds`), and `slug` isn't their fix. Nil when it may merge.
+    func mainRedHold(_ slug: String) -> String? {
+        guard let red = store.load().mainRed, red.all, !red.fixes.contains(slug), red.holds(slug, lifted: mainRedLifted(red)) else { return nil }
+        return "\(base) is red (\(Self.clip(red.tests.joined(separator: ", "), 200)) fail on \(base) itself at \(red.onto.prefix(8))), so any merge would fail on them: "
+            + (red.fixes.isEmpty ? "it waits for \(base) to move." : "it waits for \(red.fixes.joined(separator: ", ")) to land.")
     }
 
     /// What a merge that went ahead on `tests` red on `base` too says, and the progress log: which task fixes each.
@@ -4081,6 +4202,27 @@ public final class LeadToolset: MCPToolset {
     /// The base run of a merge's failing tests on `base` after its rerun failed (`MergeRerun.baseline`).
     func baseline(on base: String, plan: @escaping () -> MergeRerun.Plan?, pairing: MergeRerun.Pairing) -> Worktrees.Baseline {
         MergeRerun.baseline(commit: base, plan: plan, workflow: workflow, pairing: pairing)
+    }
+
+    /// Before a merge of `merging` starts: the records committed first when the last merge failed on one of them, or a
+    /// redaction waits (`LeadRecords.commitBeforeMerge`), noted in the progress log.
+    func commitRecordsFirst(not merging: String) {
+        let failedOn = records.mergeFailedOn
+        guard let outcome = records.commitBeforeMerge(base: base) else { return }
+        let why = failedOn.isEmpty ? "a redaction (redact_record) waited" : "the last merge failed on \(failedOn.joined(separator: ", "))"
+        switch outcome {
+        case .committed(let commit):
+            try? store.appendProgress("Committed the records at \(commit.prefix(8)) before merging \(merging): \(why)")
+        case .waiting(let text), .failed(let text):
+            // The refusal may quote the line main has that the records lost (`Worktrees.landingRefusal`): a line the
+            // lints fail on, put back into progress.md, would fail every merge again. The lead hears it whole; the log
+            // keeps it only when it's clean.
+            let clean = RecordLint.problems(in: text, lints: recordLints()).isEmpty
+            try? store.appendProgress("The records couldn't be committed before merging \(merging) (\(why))"
+                                      + (clean ? ": \(text)" : "; why is in the lead's reports (it quotes a line the records lints fail on)"))
+            if !clean { _ = try? tellLead("The records couldn't be committed before merging \(merging) (\(why)): \(text) Clear the line with redact_record.", about: LeadAdvance.sender) }
+        case .unchanged, .local: break
+        }
     }
 
     /// The base moves only through merges and reverts: anything else that moved it from where the vault last saw it
@@ -5106,6 +5248,27 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: "Archived \(archived.moved.count) \(archived.moved.count == 1 ? "entry" : "entries") in \(file): "
                              + archived.moved.map { "“\(Self.clip($0, 80))”" }.joined(separator: ", ")
                              + ". decisions.md keeps \(archived.kept); the archive holds \(archived.archived).")
+    }
+
+    /// redact_record: one line of the records replaced to clear a lint (`LeadRedaction`), committed now when no merge
+    /// runs (else before the next one starts: `flushRecordsFirst`), and noted in the progress log without the old line.
+    private func redactRecord(_ arguments: [String: Any]) throws -> MCPToolResult {
+        let done: (redaction: LeadRedaction, written: Bool)
+        do {
+            done = try LeadRedaction.redact(arguments["file"] as? String ?? "", line: arguments["line"] as? String ?? "",
+                                            with: arguments["text"] as? String ?? "", in: store, base: base, lints: recordLints())
+        } catch let refusal as LeadRedaction.Refusal { throw Problem(text: refusal.text) }
+        let redaction = done.redaction
+        try? store.appendProgress("Redacted one line of \(redaction.file) to clear \(redaction.lints.joined(separator: " and ")) (redact_record): now “\(Self.clip(redaction.new, 160))”")
+        let outcome = records.flush(base: base)
+        let committed: String
+        switch outcome {
+        case .committed(let commit): committed = "Committed to \(base) at \(commit.prefix(8)), the redaction named in its message."
+        case .waiting(let why), .failed(let why): committed = "Not committed yet (\(why)): the records commit carries it before the next merge starts."
+        case .unchanged, .local: committed = "Nothing new to commit."
+        }
+        return MCPToolResult(text: (done.written ? "Replaced the line in \(redaction.file)" : "The line in \(redaction.file) was corrected already (by hand); kept the redaction")
+                             + " (it failed \(redaction.lints.joined(separator: " and "))). " + committed)
     }
 
     /// An incident in incidents.md, and the planned task that turns it into a check run before merge.
@@ -6255,6 +6418,8 @@ public final class LeadToolset: MCPToolset {
         lines += diskWarning(workflow, board: board, sessions: listing)
         if let line = records.statusLine { lines.append(line) }
         if let lag = gateLag(workflow) { lines.append(lag.text(base: workflow.base)) }
+        if let line = pipelineLine() { lines.append(line) }
+        if let red = board.mainRed { lines.append(red.text(base: workflow.base).replacingOccurrences(of: "\n", with: " ")) }
         if let line = archiveNudgeOnce() { lines.append(line) }
         if let line = progressNudgeOnce() { lines.append(line) }
         if let listing {

@@ -57,6 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             leadController.tell(text, from: .system("from New Shell"), session: id, then: then)
         }
         desk.atOnce = { [weak self] in self?.preferences.letAgentsOpenShells ?? false }
+        // Only a card you ran vouches for the commit it makes on the base; one started at once doesn't.
+        desk.userRan = { [weak self] request, at in self?.leadController.baseMoves.ranCard(request, at: at) }
         desk.launch = { [weak self] request, then in
             guard let self else { return then(.failure(ShellAsk.Refusal("VibeSwitcher is quitting"))) }
             // In the window's session host only, never a Terminal tab: the card said this window.

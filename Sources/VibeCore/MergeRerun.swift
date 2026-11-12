@@ -208,6 +208,37 @@ public enum MergeRerun {
             found = (base, note)
             lock.unlock()
         }
+
+        /// The base run's own word, when it ran to its end: the failing tests it failed too (`red`), and its output.
+        private var ran: (red: [String], output: String)?
+
+        public var onBase: (red: [String], output: String)? {
+            lock.lock()
+            defer { lock.unlock() }
+            return ran
+        }
+
+        public func heard(red: [String], output: String) {
+            lock.lock()
+            ran = (red, output)
+            lock.unlock()
+        }
+    }
+
+    /// What a run that failed for good says of the base, from its paired base run (`pairing`): the tests its rerun
+    /// still failed (`output`, the failure) that failed on the base too, and whether they're the whole failure (`all`):
+    /// each test the rerun still failed is red on the base, the rest of the checks didn't fail, and the run left
+    /// nothing else (an error naming no test, processes or preferences behind). Nil when none is red on the base.
+    public static func redOnBase(_ output: String, pairing: Pairing) -> (red: [String], all: Bool, output: String)? {
+        guard let base = pairing.onBase, !base.red.isEmpty else { return nil }
+        let failures = TestFailures(output: output)
+        let failing = failures.tests
+        let red = base.red.filter(failing.contains)
+        guard !red.isEmpty else { return nil }
+        let all = failing.allSatisfy(red.contains) && failures.errors.isEmpty && !output.contains(Worktrees.restHeader)
+            && !suiteMarkers.contains(where: output.contains)
+            && !output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker)
+        return (red, all, base.output)
     }
 
     /// The base run of `plan`'s failing tests on `commit`, after a filtered rerun that failed (a whole one isn't run
@@ -234,6 +265,7 @@ public enum MergeRerun {
             case .ran(let ok, let output):
                 let result = baseResult(plan, ok: ok, output: output)
                 pairing.note(result.base, result.note)
+                if !ok { pairing.heard(red: TestFailures(output: output).tests.filter(plan.tests.contains), output: output) }
             case .hung: pairing.note(.hung)
             case .unchecked(let why): pairing.note(.skipped, why)
             }

@@ -67,7 +67,7 @@ extension LeadToolset {
             case flaked(plan: MergeRerun.Plan, failed: String, rerun: String)
             /// The first run failed with `failed`, the rerun failed on `red` alone, and they failed on the base too,
             /// the rest of the checks passing without them (`Worktrees.Check.passedRedOnBase`): it lands.
-            case redOnBase(plan: MergeRerun.Plan, failed: String, rerun: String, red: [String])
+            case redOnBase(plan: MergeRerun.Plan, failed: String, rerun: String, red: [String], onBase: String)
             /// It failed (on its rerun too, when there was one): the output to tell.
             case failed(String)
             /// Hung, cancelled or an error: the batch stops.
@@ -78,6 +78,8 @@ extension LeadToolset {
         var tests: Int?
         /// The rerun planned after its first run failed, for the stats.
         var plan: MergeRerun.Plan?
+        /// Its paired base run's result, after a rerun that failed (`MergeRerun.redOnBase`).
+        var pairing: MergeRerun.Pairing?
         var passed: Bool { if case .stopped = outcome { return false } else if case .failed = outcome { return false } else { return true } }
     }
 
@@ -87,6 +89,7 @@ extension LeadToolset {
         var slugs: [String] = []
         for slug in given where !slugs.contains(slug) { slugs.append(slug) }
         guard slugs.count <= Self.batchLimit else { throw Problem(text: "Not merged: a batch takes at most \(Self.batchLimit) tasks; this was \(slugs.count).") }
+        commitRecordsFirst(not: slugs.joined(separator: ", "))
         try checkBattery(not: "Not merged")
         let workflow = self.workflow
         try checkSettings(workflow, not: "Not merged (nothing was tested)")
@@ -124,6 +127,7 @@ extension LeadToolset {
             throw Problem(text: "Another merge into \(base) is running; merge \(slugs.joined(separator: ", ")) when it's done.")
         }
         defer { held.release() }
+        noteMergeStarted(gates.map(\.task.slug))
         guard let current = branchHead(base) else { throw Problem(text: "There's no branch \(base) to merge into.") }
         try checkBaseMoves(base: base, current: current)
         if let lock = Worktrees.indexLock(blocking: base, root: root) {
@@ -153,6 +157,8 @@ extension LeadToolset {
         var lines: [String] = []
         var flakeNotes: [String] = []
         var onto = current
+        // The failing tests the batch's runs found red on the base too (their paired base runs): no setback names them.
+        var redOnMain: Set<String> = []
 
         /// Tests the stack's first `count` tasks, `top` the last of them (the flake ledger's rerun record names it).
         /// A rerun is recorded, with its paired base run, only for a round's whole stack (`recorded`): a bisect's runs
@@ -187,6 +193,9 @@ extension LeadToolset {
                                        if begun == nil { begun = (at, LoadRecorder.averages() ?? []) }
                                    })
             if runs == 1 { firstCores = MergeSample.cores(in: check) ?? testedCores }
+            // Which of the lead's records its failure named, for the next merge (`LeadRecords.commitBeforeMerge`).
+            if recorded, let failing = check.failingOutputs { records.noteMergeRun(failing: failing) }
+            if recorded { noteMainGreen(check) }
             if recorded, let plan {
                 switch check {
                 case .passedOnRerun(let tip, _, let again):
@@ -216,10 +225,10 @@ extension LeadToolset {
                 } else {
                     outcome = .failed(failed)
                 }
-            case .passedRedOnBase(_, let failed, let again, _):
+            case .passedRedOnBase(_, let failed, let again, let onBase):
                 // Only `runChecks` decides this, on the rerun's tests (`MergeRerun.redOnBranch`) and the base's run.
                 if let plan, let red = MergeRerun.redOnBranch(plan, first: failed, rerun: again) {
-                    outcome = .redOnBase(plan: plan, failed: failed, rerun: again, red: red)
+                    outcome = .redOnBase(plan: plan, failed: failed, rerun: again, red: red, onBase: onBase)
                 } else {
                     outcome = .failed(again)
                 }
@@ -243,7 +252,7 @@ extension LeadToolset {
                 case .stopped: break
                 }
             }
-            return BatchRun(outcome: outcome, tests: tests, plan: plan)
+            return BatchRun(outcome: outcome, tests: tests, plan: plan, pairing: pairing)
         }
 
         /// Lands the stack's first `count` tasks (`stacked`), which `passing` passed on: false when something stopped it.
@@ -308,14 +317,14 @@ extension LeadToolset {
             }
             let last = order[order.count - 1]
             var flaked: (plan: MergeRerun.Plan, failed: String)?
-            var redOnBase: (tests: [String], rerun: String)?
+            var redOnBase: (tests: [String], rerun: String, onBase: String)?
             if case .flaked(let plan, let failed, let again) = passing.outcome {
                 _ = saveMergeLog(failed + "\n" + again, slug: last)
                 flaked = (plan, failed)
             }
-            if case .redOnBase(let plan, let failed, let again, let red) = passing.outcome {
+            if case .redOnBase(let plan, let failed, let again, let red, let onBase) = passing.outcome {
                 _ = saveMergeLog(failed + "\n" + again, slug: last)
-                redOnBase = (red, again)
+                redOnBase = (red, again, onBase)
                 // What failed the first run and passed the rerun is a flake, as on any rerun.
                 if MergeRerun.flakes(in: failed).contains(where: { !red.contains($0) }) { flaked = (plan, failed) }
             }
@@ -390,6 +399,8 @@ extension LeadToolset {
             }
             if let redOnBase {
                 flakeNotes.append(tellRedOnBase(redOnBase.tests, planned: redPlan, slug: last, base: base, onto: onto).trimmingCharacters(in: .whitespaces))
+                // Landed without them, and main is red all the same: the lead hears it, with the base run's first lines.
+                mainIsRed((redOnBase.tests, false, redOnBase.onBase), rerun: redOnBase.rerun, slug: last, onto: onto, workflow: workflow, planned: redPlan)
             }
             let caughtUp = tellToCatchUp(merged: order.joined(separator: ", "), from: onto, to: tip, base: base)
             if !caughtUp.isEmpty { lines.append(caughtUp.trimmingCharacters(in: .whitespaces)) }
@@ -405,7 +416,7 @@ extension LeadToolset {
                 ends[slug] = .refused(changed.text)
                 return
             }
-            let reason = MergeFailure.reason(in: scrubbed(output))
+            let reason = MergeFailure.reason(in: scrubbed(output), redOnBase: Array(redOnMain))
             let what = output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker) ? "regression_command fails" : "Tests fail"
             // Told to this task's worker and copied to this task's worktree: each task that broke the stack has its own.
             let told = testFailure(output, slug: slug, base: base, commit: gate.commit, onto: onto, worktree: place)
@@ -502,6 +513,18 @@ extension LeadToolset {
                 break
             }
             guard case .failed(var failing) = whole.outcome else { break }
+            // Before the split: the failing tests' run on the base (the whole run's paired one). Red there too, they send
+            // no task back (each of the split's runs is paired too); the lead is told the base is red, and each gets a
+            // fix at the front of the plan. When they're the whole failure, every prefix would fail on them: no split.
+            if let pairing = whole.pairing, let red = MergeRerun.redOnBase(failing, pairing: pairing) {
+                redOnMain.formUnion(red.red)
+                let said = mainIsRed(red, rerun: failing, slug: stacked[count - 1].task.slug, onto: onto, workflow: workflow)
+                flakeNotes.append(said.trimmingCharacters(in: .whitespacesAndNewlines))
+                if red.all {
+                    stopped = "\(base) is red: \(Self.clip(red.red.joined(separator: ", "), 300)) fail on \(base) itself and are the whole failure, so a split can't tell any task's failure from them; no task was sent back"
+                    break
+                }
+            }
             // The first prefix that fails: `lo` passes (or is empty), `hi` fails.
             var lo = 0, hi = count
             var passing: BatchRun?
@@ -515,6 +538,7 @@ extension LeadToolset {
                 case .failed(let output):
                     hi = mid
                     failing = output
+                    if let pairing = tried.pairing, let red = MergeRerun.redOnBase(output, pairing: pairing) { redOnMain.formUnion(red.red) }
                 case .passed, .flaked, .redOnBase:
                     lo = mid
                     passing = tried

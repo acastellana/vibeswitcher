@@ -54,10 +54,12 @@ public final class LeadRecords: @unchecked Sendable {
 
     /// No trailer (Co-Authored-By or any other): a project's workflow may refuse them (project-c's regression_command
     /// does), and these commits land on its base among its own.
-    static func message(_ dir: String, inventory: Bool = false) -> String {
+    static func message(_ dir: String, inventory: Bool = false, redactions: [LeadRedaction] = []) -> String {
         "\(subject)\n\nThe project lead's \(dir)/decisions.md, \(dir)/progress.md, \(dir)/incidents.md, \(dir)/decisions-archive.md and \(dir)/progress-archive.md"
             + (inventory ? ", and \(ProductInventory.output) as \(ProductInventory.script) makes it from the code before this commit," : "")
             + " committed by VibeSwitcher for the lead (its tool server); nothing else is in this commit."
+            + (redactions.isEmpty ? "" : "\n\nRedacted by the lead (redact_record), each line replaced only to clear a lint:\n"
+                + redactions.map(\.messageLine).joined(separator: "\n"))
     }
 
     /// The records' paths in the repository with `records_dir` `dir`.
@@ -207,14 +209,21 @@ public final class LeadRecords: @unchecked Sendable {
             paths.append(ProductInventory.output)
             snapshot[ProductInventory.output] = inventory
         }
+        // The lines redact_record replaced to clear a lint, whose new text this commit carries: its landing check
+        // accepts exactly those, and its message names each.
+        let redactions = LeadRedaction.pending(store).filter { redaction in
+            snapshot[redaction.file].map { String(decoding: $0, as: UTF8.self).components(separatedBy: "\n")
+                .contains { $0.trimmingCharacters(in: .whitespacesAndNewlines) == redaction.new } } ?? false
+        }
         let result = Worktrees.commitFiles(root: root, branch: base, paths: paths, contents: snapshot,
-                                           message: Self.message(dir, inventory: inventory != nil),
+                                           message: Self.message(dir, inventory: inventory != nil, redactions: redactions),
                                            from: head, lockWait: lockWait, lockPause: lockPause,
-                                           landing: Worktrees.Landing(route: "records commit", records: dir, probe: landingProbe))
+                                           landing: Worktrees.Landing(route: "records commit", records: dir, probe: landingProbe, redactions: redactions))
         switch result {
         case .unchanged: return .unchanged
         case .failed(let why): return .failed(why)
         case .committed(let commit, _):
+            LeadRedaction.settle(redactions, store)
             // The checkout's copy as committed (its index entry already is), as a merge's fast-forward leaves files.
             if let inventory, checkedOut {
                 let file = URL(fileURLWithPath: (root as NSString).appendingPathComponent(ProductInventory.output))
@@ -227,6 +236,47 @@ public final class LeadRecords: @unchecked Sendable {
             }
             return .committed(commit)
         }
+    }
+
+    // MARK: A records fix lands first
+
+    /// Where the records files the last merge's test run failed on are kept (`noteMergeRun`), across tool servers.
+    var failedOnFile: URL { URL(fileURLWithPath: (store.folder as NSString).appendingPathComponent("run/merge-failed-on-records")) }
+
+    /// The records files (their paths in the repository) the last merge's failing output named; empty when it named
+    /// none, or passed on its first run.
+    public var mergeFailedOn: [String] {
+        ((try? String(contentsOf: failedOnFile, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+    }
+
+    /// The records files under `records_dir` that `output` (a failing test run's) names, as a lint names a file
+    /// ("docs/lead/progress.md:12"): the failure is in the lead's own records.
+    public static func named(in output: String, dir: String) -> [String] {
+        paths(dir).filter { output.contains($0) }
+    }
+
+    /// A merge's test run ended: `failing` holds its failing outputs (empty when its first run passed). Keeps which of
+    /// the records they named, for the next merge to commit the records before it starts (`commitBeforeMerge`).
+    public func noteMergeRun(failing: [String]) {
+        guard let dir = store.recordsDir else { return }
+        let named = Self.named(in: failing.joined(separator: "\n"), dir: dir)
+        if named.isEmpty {
+            try? FileManager.default.removeItem(at: failedOnFile)
+            return
+        }
+        try? VibePaths.ensurePrivate(failedOnFile.deletingLastPathComponent())
+        try? VibePaths.writePrivate(Data((named.joined(separator: "\n") + "\n").utf8), to: failedOnFile)
+    }
+
+    /// Before a merge starts: when the records have changes not committed and the last merge failed on one of them (a
+    /// lint over docs/lead/, say), or a redaction waits (`LeadRedaction`), they're committed now, so the merge tests
+    /// the fix rather than the line it fixes. On 2026-11-12 the fix of a progress.md line waited behind every merge,
+    /// each built on the bad line. Nil when nothing was due; else what the flush did.
+    @discardableResult
+    public func commitBeforeMerge(base: String, now: Date = Date()) -> Outcome? {
+        guard let dir = store.recordsDir, !mergeFailedOn.isEmpty || !LeadRedaction.pending(store).isEmpty,
+              changed(Self.paths(dir), on: base) else { return nil }
+        return flush(base: base, now: now)
     }
 
     /// Whether any of `paths` in the working tree differs from `base`'s.

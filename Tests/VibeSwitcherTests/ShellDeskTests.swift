@@ -28,6 +28,8 @@ struct ShellDeskTests {
 
     final class Seen {
         var launched: [ShellRequest] = []
+        /// The shells the user's Run started (`ShellDesk.userRan`), never one started at once.
+        var userRan: [ShellRequest] = []
         var told: [(session: String, text: String)] = []
         var atOnce = false
         /// What the desk asked `later` to run, and when: tests fire these themselves, never wait.
@@ -44,6 +46,7 @@ struct ShellDeskTests {
             then(.delivered)
         }
         desk.atOnce = { seen.atOnce }
+        desk.userRan = { request, _ in seen.userRan.append(request) }
         desk.later = { after, run in seen.timers.append((after, run)) }
         desk.fadeFor = { 0 }
         desk.tidyAfter = Self.tidy
@@ -103,6 +106,7 @@ struct ShellDeskTests {
 
         await acted(desk, .run, request.id)
         #expect(seen.launched == [request])
+        #expect(seen.userRan == [request], "the user's Run vouches for what the shell does")
         #expect(desk.cards(for: Self.session).first?.state == .started(name: "Shell: Local test", auto: false))
         #expect(seen.told.count == 1 && seen.told.first?.session == Self.session.uuidString.lowercased())
         #expect(seen.told.first?.text.contains("the user pressed Run") == true)
@@ -231,6 +235,7 @@ struct ShellDeskTests {
         _ = await until { desk.cards.first?.state == .started(name: "Shell: Local test", auto: true) }
         #expect(desk.cards.first?.state == .started(name: "Shell: Local test", auto: true))
         #expect(seen.launched == [request])
+        #expect(seen.userRan.isEmpty, "nobody pressed Run: a shell started at once vouches for nothing it commits")
         #expect(seen.told.first?.text.contains("at once") == true)
         // One filed long before it was first seen (the app was closed) waits for the click even so.
         clock.now = Self.created.addingTimeInterval(20 * 60)

@@ -145,6 +145,7 @@ extension LeadBoard {
             && same(tasks, other.tasks) && same(questions, other.questions) && same(updates, other.updates) && same(reports, other.reports)
             && reportsSeenAt == other.reportsSeenAt && same(removed, other.removed) && same(allDone, other.allDone) && same(flakes, other.flakes)
             && archivedScores == other.archivedScores && same(archivedBatch, other.archivedBatch)
+            && mainRed == other.mainRed && pipeline == other.pipeline
     }
 }
 

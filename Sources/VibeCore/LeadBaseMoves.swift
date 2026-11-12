@@ -279,15 +279,24 @@ extension LeadVault {
         public var line: String
         public var cwd: String
         public var at: Double
+        /// A vs-shell card's id (`ShellRequest.id`) when this is the command of a card you pressed Run on, which the
+        /// session `session` filed; nil for a line you sent yourself.
+        public var card: String?
 
         /// How long after it was sent a line accounts for what it moved: such a command runs as soon as it's sent.
         public static let lasts: Double = 30
+        /// A card's command runs in a new shell, after its login files: a little longer.
+        public static let cardLasts: Double = 300
 
-        public init(session: String, line: String, cwd: String, at: Double) {
+        /// How long this one accounts for what it moved.
+        public var lasting: Double { card == nil ? Self.lasts : Self.cardLasts }
+
+        public init(session: String, line: String, cwd: String, at: Double, card: String? = nil) {
             self.session = session
             self.line = line
             self.cwd = cwd
             self.at = at
+            self.card = card
         }
 
         /// The shell line in what was sent: what follows a leading `!`. Anything else is a message to the agent,
@@ -314,7 +323,7 @@ extension LeadVault {
                 known[command.folder] = place
                 guard let place, GitMoves.resolved(place.root) == root, place.branch == branch else { return nil }
                 return GitRun(session: typed.session, user: true, call: nil, verb: command.verb, branch: branch, before: recorded,
-                              after: head, started: typed.at, ended: min(now, typed.at + Typed.lasts))
+                              after: head, started: typed.at, ended: min(now, typed.at + typed.lasting))
             }
         }
     }

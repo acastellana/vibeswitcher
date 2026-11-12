@@ -1401,6 +1401,12 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     /// and receipts read (`BoardStore.batchCopy`): the batch is told from this file alone (`BatchSummary.batch`).
     /// Those a mark has taken in leave with the next archive. Optional: boards before the archive have none.
     public var archivedBatch: [LeadTask]?
+    /// Tests a merge found red on the base itself (`LeadMainRed`): the pipeline watch's cause, and, while the failure is
+    /// theirs alone and the base hasn't moved, what holds auto_advance's merges but their fixes'. Optional: older
+    /// boards have none.
+    public var mainRed: LeadMainRed?
+    /// The pipeline watch's state (`LeadPipeline`): when it last told the lead what holds the merges. Optional.
+    public var pipeline: LeadPipeline.Told?
 
     public static let keptReports = 50
     /// Past these, the oldest updates and closed questions move to the board's archive (`BoardStore.archive`).
