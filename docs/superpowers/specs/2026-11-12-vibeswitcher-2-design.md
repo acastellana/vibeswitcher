@@ -229,6 +229,7 @@ Nothing outside `Platform/` imports Darwin, Glibc or an Apple-only framework, or
 | User presence (for Boost Automatic, reminders) | CGEventSource idle time | the web client reports activity over its connection |
 | Notifications | UserNotifications | the browser: Web Notifications while a window is open, the existing web push otherwise |
 | Login shell and PATH | `LoginShell` | the same approach; no `launchctl` |
+| The shell that runs a branch's code | `/bin/zsh -f -c` (`Worktrees.swift`) | `/bin/bash --noprofile --norc -c`; this machine has no zsh |
 | Images (`LeadImages`, `MenuBarDots`) | ImageIO, CoreGraphics | `LeadImages`: size and type read from headers, no decode **(call)**; `MenuBarDots` stays Mac-only |
 
 ### The portable file set: the app without a UI
@@ -365,7 +366,8 @@ against accidents; a worker that sets out to act as the user has ways around it,
 
 What both modes share:
 
-- **Who is asking.** `SO_PEERCRED` gives pid and uid when the connection is made. The host accepts the user's uid
+- **Who is asking.** `SO_PEERCRED` gives pid and uid when the connection is made, and is fixed from then on, so the
+  Mac's re-check of who last used the socket becomes credentials sent with each message (`SCM_CREDENTIALS`). The host accepts the user's uid
   (and its own), places the pid in a session's process tree through `/proc`, and guards against pid reuse by comparing
   the process's start time before and after each decision, with a pidfd where the kernel offers one. A connection
   inherited by a child counts as no one, as on the Mac.
@@ -398,6 +400,33 @@ What both modes share:
 What isn't protected, in either mode: a process running as the user that reads a paired browser's own storage on the
 same machine; signals; what the sessions themselves run. On WSL the Windows-side browser's profile is reachable
 through `/mnt/c`; the first-run page says so.
+
+**Open problems, found in review (2026-11-12).** The strong mode as written above has holes. They don't touch
+stages 0 to 4, and stage 5 starts with a design of its own that settles them:
+
+1. **Root without a password.** On WSL with interop on, as on this machine, any process can run `wsl.exe -u root`.
+   The same holds for a cloud VM's passwordless sudo and for a user in the `docker` group. Where that is so, a second
+   system user protects nothing.
+2. **What `sudo vibeswitcher install` trusts.** The checkout, `.build/`, the build script and the toolchain are all
+   the user's files, so a worker can change what the user's password then installs. The install has to build a named
+   commit from a clean clone with a toolchain a worker can't write.
+3. **The port.** The inherited socket proves the server to the host, and nothing proves it to a browser. A worker
+   can end the server, take its port first and collect the tokens of devices that reconnect. The host should own the
+   listener and pass it to each server it starts.
+4. **One session acting as another.** Roles are decided by process tree. With no Yama, a worker can attach to the
+   lead's or a verifier's agent, or replace the `claude` or `codex` binary in the user's home, and then speak as that
+   role. Non-dumpable covers only the host and the server.
+5. **The command line's standing.** `vibeswitcher attach`, `lead`, `stop` run as the user outside every session;
+   a token for them in a file is a token a worker can read.
+6. **Who runs the root steps** while this is built, since agents have no sudo here.
+
+The direction the stage 5 design starts from **(call)**: confine team sessions as well as protecting the host from
+them. Each worker and verifier runs in a sandbox of its own (a mount and a process namespace, as Claude Code's own
+Linux sandbox uses): it sees its worktree and what it needs to build, and not `~/.vibeswitcher`, the other sessions'
+processes, the agents' binaries and config as writable files, `/mnt/c`, WSL's interop or the docker socket. That
+answers 1, 3 and 4 where a second user can't, and makes the config seal a lock instead of an alarm. The second user
+stays for what must survive a reboot. What it costs in what a worker can still do (containers, system services) is
+that design's first question.
 
 `docs/security/` gets a Linux section, and the security audit's tests (`Tests/SecurityAudit/`) run on Linux in CI, in
 both modes (a hosted Ubuntu runner has root).
@@ -524,10 +553,14 @@ and a parser killed under it; and a process inside one session is refused anothe
 - The first two slices of the portable file set (`HostClient`, `SessionStore`, then the phone's API).
 - `vibeswitcher-server`, started by the host and known by its socket: start, stop, pair, the loopback listener,
   `Host` and `Origin` checks.
-- The existing `Web/` client, unchanged, served from Linux.
+- The existing `Web/` client, unchanged, served from Linux, and reached the way the Mac's is: through
+  `tailscale serve`, with the tailnet login the phone's API already requires (`PhoneAccess.swift`,
+  `RemoteAccess.swift`). No loopback gate is added to that API; pairing on this machine without Tailscale arrives
+  with the new client's own gate in stage 6.
 - `scripts/build-linux.sh --install` and the systemd unit.
 
-Done when (**first light**): `vibeswitcher start` on this machine, pair Chrome on the Windows side, and the phone app
+Done when (**first light**): `vibeswitcher start` on this machine, pair a browser on a device of the user's tailnet,
+and the phone app
 shows the list and each session's screen and transcript, and takes replies, with sessions surviving a server restart.
 
 ### Stage 4: leads on Linux
