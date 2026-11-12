@@ -80,6 +80,24 @@ struct StatTests {
         #expect(Platform.Files.birthTime(folder.appendingPathComponent("never-made").path) == nil)
     }
 
+    /// A file's blocks on its volume: at least its bytes, less than a block's slack more (Linux's Foundation says 8
+    /// times that on ext4); a folder has none, and on Linux a link has its own.
+    @Test func allocatedSizeIsTheBlocksAFileTakes() throws {
+        let folder = try TestScriptLinuxTests.scratch("allocated")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("file")
+        try Data((0..<100_000).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ $0 >> 8) }).write(to: file)
+        let size = try #require(Platform.Files.allocatedSize(of: file))
+        #expect(size >= 100_000 && size <= 100_000 + 64 * 1024, "\(size)")
+        #expect(Platform.Files.allocatedSize(of: folder) == nil)
+        #if os(Linux)
+        let link = folder.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: file)
+        #expect((Platform.Files.allocatedSize(of: link) ?? 0) < 100_000)
+        #endif
+        #expect(Platform.Files.allocatedSize(of: folder.appendingPathComponent("never-made")) == nil)
+    }
+
     #if os(Linux)
     /// /proc keeps no birth time: "not known", not an error's garbage and not 1970.
     @Test func aFileSystemWithNoBirthTimesReadsNil() {

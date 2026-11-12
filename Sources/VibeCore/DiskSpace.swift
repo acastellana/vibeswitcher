@@ -54,8 +54,7 @@ public enum DiskSpace {
         }
         var total: Int64 = 0
         for case let item as URL in items {
-            let values = try? item.resourceValues(forKeys: Set(keys))
-            total += Int64(values?.totalFileAllocatedSize ?? values?.fileAllocatedSize ?? 0)
+            total += Int64(Platform.Files.allocatedSize(of: item) ?? 0)
         }
         return total
     }

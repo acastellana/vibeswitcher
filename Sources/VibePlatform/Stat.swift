@@ -40,6 +40,21 @@ extension Platform.Files {
     /// The file's length in bytes.
     public static func byteSize(_ info: stat) -> Int64 { Int64(info.st_size) }
 
+    /// The bytes the file at `url` takes on its volume (a link's own, not followed); nil for a folder or when it can't
+    /// be read. On the Mac it is Foundation's `totalFileAllocatedSize`, else `fileAllocatedSize` (a file's keys, which
+    /// a folder hasn't). Linux's Foundation gives those as `st_blocks` × `st_blksize`, but `st_blocks` counts 512-byte
+    /// units whatever the block size: 8 times the truth on ext4. So Linux's is `st_blocks` × 512, as `du` counts it.
+    public static func allocatedSize(of url: URL) -> Int? {
+        #if canImport(Darwin)
+        let values = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey])
+        return values?.totalFileAllocatedSize ?? values?.fileAllocatedSize
+        #else
+        var info = stat()
+        guard lstat(url.path, &info) == 0, (info.st_mode & S_IFMT) != S_IFDIR else { return nil }
+        return Int(info.st_blocks) * 512
+        #endif
+    }
+
     /// When the file at `path` was made (the file a link leads to), in seconds since 1970; nil when it can't be read
     /// or isn't known. The Mac's `stat` has it. On Linux it is asked with `statx`, and a file system that keeps none
     /// (tmpfs, 9p, /proc) reads nil.
