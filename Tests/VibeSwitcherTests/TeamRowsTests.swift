@@ -250,15 +250,72 @@ struct TeamRowsTests {
         blocked.after = ["first", "folded", "done", "gone"]
         blocked.blocker = "Waiting for the ledger"
         board.tasks = [first, folded, carrier, done, blocked]
-        // The after tasks still open, by title (a folded one by the task that carries it; one not on the board by its
-        // slug), before the reason given.
-        #expect(TeamRows.row(blocked, seen: [:], board: board).line(summary: nil) == "Waits on Ledger reconciles, Payout report, gone")
+        // The after tasks still open, by title (a folded one by the task carrying it), before the reason given.
+        // Missing tasks have finished and left the live board for the archive.
+        #expect(TeamRows.row(blocked, seen: [:], board: board).line(summary: nil) == "Waits on Ledger reconciles, Payout report")
         // Its after tasks all done: the reason given.
         blocked.after = ["done"]
         #expect(TeamRows.row(blocked, seen: [:], board: board).line(summary: nil) == "Waiting for the ledger")
         // Neither: "Blocked" alone.
         blocked.blocker = nil
         #expect(TeamRows.row(blocked, seen: [:], board: board).line(summary: nil) == nil)
+    }
+
+    @Test func aBlockedTaskShowsOnlyCurrentContextOrItsBlocker() {
+        var blocked = Self.task("blocked", .blocked)
+        blocked.after = ["done"]
+        blocked.blocker = "Usage limit"
+        let since = blocked.since!
+        var board = LeadBoard()
+        board.tasks = [Self.task("done", .done)]
+        blocked.notes = [LeadNote(kind: .context, text: "Latest reason", by: "lead", at: since + 2),
+                         LeadNote(kind: .context, text: "At blocking", by: "lead", at: since),
+                         LeadNote(kind: .message, text: "A message", by: "lead", at: since + 3)]
+        #expect(TeamRows.row(blocked, seen: [:], board: board).line(summary: nil) == "Latest reason")
+        blocked.notes?.removeFirst()
+        #expect(TeamRows.row(blocked, seen: [:], board: board).line(summary: nil) == "At blocking")
+        blocked.notes = [LeadNote(kind: .context, text: "Old approval", by: "lead", at: since - 1)]
+        #expect(TeamRows.row(blocked, seen: [:], board: board).line(summary: nil) == "Usage limit")
+        blocked.blocker = nil
+        let row = TeamRows.row(blocked, seen: [:], board: board)
+        #expect(row.state == "Blocked" && row.line(summary: nil) == nil)
+        blocked.after = ["open", "done"]
+        board.tasks.append(Self.task("open", .running, title: "Still working"))
+        #expect(TeamRows.row(blocked, seen: [:], board: board).line(summary: nil) == "Waits on Still working")
+    }
+
+    @Test func archivedDoneDependenciesAreNotWaitsOnLines() throws {
+        let temp = Scratch()
+        let root = temp.url("row-archive").path
+        let store = BoardStore(root: root)
+        var done = Self.task("done", .done, title: "Already merged")
+        done.worktree = nil
+        done.createdAt = Self.now.timeIntervalSince1970 - BoardStore.archiveAge - 3600
+        done.since = Self.now.timeIntervalSince1970 - BoardStore.archiveAge - 1
+        var blocked = Self.task("blocked", .blocked)
+        blocked.after = ["done"]
+        blocked.notes = [LeadNote(kind: .context, text: "Usage limit", by: "lead", at: Self.now.timeIntervalSince1970)]
+        var planned = Self.task("planned", .planned)
+        planned.after = ["done", "open"]
+        let open = Self.task("open", .running, title: "Still working")
+        try store.update { $0.tasks = [done, blocked, planned, open] }
+        #expect(try store.archive(now: Self.now.timeIntervalSince1970) == 1)
+        let board = store.load()
+        #expect(board.task("done") == nil)
+        let rows = TeamRowsCache().rows(root, board: board, seen: TeamSeen())
+        #expect(rows.first { $0.id == blocked.id }?.line(summary: nil) == "Usage limit")
+        #expect(rows.first { $0.id == planned.id }?.line(summary: nil) == "Waits on Still working")
+        #expect(!rows.contains { $0.id == done.id })
+    }
+
+    @Test func aPlannedTaskNamesOnlyOpenAfterTasks() {
+        var planned = Self.task("planned", .planned)
+        planned.after = ["done", "open"]
+        var board = LeadBoard()
+        board.tasks = [Self.task("done", .done), Self.task("open", .running, title: "Still working"), planned]
+        #expect(TeamRows.row(planned, seen: [:], board: board).line(summary: nil) == "Waits on Still working")
+        planned.after = ["done"]
+        #expect(TeamRows.row(planned, seen: [:], board: board).line(summary: nil) == nil)
     }
 
     @Test func aReviewNoneTaskItsWorkerReportedIsReadyToMerge() {

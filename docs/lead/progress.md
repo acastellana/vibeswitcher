@@ -2459,7 +2459,69 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 15:06 Automatically fetched origin/main at cf322ac9: 0 commits from the other Mac at origin/main (cf322ac99fde5b60dde4aaa79ecff3ca32bc6bf6): merge_remote would do nothing: main has everything origin/main has.
 - 2026-11-11 17:06 Automatically fetched origin/main at 2d71138d: 9 commits from the other Mac at origin/main (2d71138d3983a07d5e3c9a5f3b812d4933670101): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
 - 2026-11-11 14:28 Merged origin/main into main: 9 commits from the remote, as a merge commit, 7e07e869; the tests passed on it (build db38184dad1c)
+- 2026-11-11 14:28 Asked the user to push main at 2d71138d (9 commits) to origin/main
+- 2026-11-11 15:32 Pushed main at 2d71138d (9 commits) to origin/main, on the user's click
+- 2026-11-11 16:12 Automatically fetched origin/main at 2d71138d: 0 commits from the other Mac at origin/main (2d71138d3983a07d5e3c9a5f3b812d4933670101): merge_remote would do nothing: main has everything origin/main has.
+- 2026-11-11 18:33 Started a worker on boost-release-7-7
+- 2026-11-11 18:33 Automatically (auto_advance): Started a worker on boost-release-7-7 (Boost release 7/7: release check: tune boost from the recorder's data, notes, and one install), its after tasks done (boost-release-1-7, boost-release-2-7, boost-release-6-7).
+- 2026-11-11 18:33 Review of boost-release-7-7: audit
+- 2026-11-11 18:33 Started a worker on boost-release-7-7
+- 2026-11-11 18:59 Started a worker on the-worker-brief-stops (auto → Codex: Claude weekly 56%, 31 points ahead of pace; Codex 18%)
+- 2026-11-11 18:59 Automatically (auto_advance): Started a worker on the-worker-brief-stops (The worker brief stops offering vs-shell, which the host refuses from a worker); its agent is auto, so it went to Codex: Claude weekly 56%, 31 points ahead of pace; Codex 18%.
+- 2026-11-11 18:59 Automatically (auto_advance): Overlap for the-worker-brief-stops's start (a warning only: nothing was refused or reordered). Sources/VibeCore/LeadWorkflow.swift: audits-settle-their (blocked: its branch changes it).
+- 2026-11-11 18:59 Released boost-release-7-7's worker (idle since its done report on ff419a7c) while its audit runs
+- 2026-11-11 18:59 Automatically (auto_advance): Started the audit of boost-release-7-7 at ff419a7c (Its worker is Codex, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-11 19:00 Audit of boost-release-7-7: complete, clean, round 1: 1 Nit open
+- 2026-11-11 19:19 Merged boost-release-7-7: Boost release 7/7: release check: tune boost from the recorder's data, notes, and one install (build db38184dad1c)
+- 2026-11-11 19:19 Automatically (auto_advance): Merged boost-release-7-7 (Boost release 7/7: release check: tune boost from the recorder's data, notes, and one install) into main at edebace1, on its passing audit and the full test run.
+- 2026-11-11 19:19 Automatically (auto_advance): Cleaned up boost-release-7-7 (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-11 19:25 Released the-worker-brief-stops's worker (idle since its done report on 13f9ed18) while its audit runs
+- 2026-11-11 19:25 Automatically (auto_advance): Started the audit of the-worker-brief-stops at 13f9ed18 (A Codex worker worked on it, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-11 19:26 Audit of the-worker-brief-stops: complete, clean, round 1: 1 Nit open
+- 2026-11-11 19:48 Merged the-worker-brief-stops: The worker brief stops offering vs-shell, which the host refuses from a worker (build db38184dad1c)
+- 2026-11-11 19:48 Automatically (auto_advance): Merged the-worker-brief-stops (The worker brief stops offering vs-shell, which the host refuses from a worker) into main at a891fe8d, on its passing audit and the full test run.
+- 2026-11-11 19:48 Automatically (auto_advance): Cleaned up the-worker-brief-stops (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-11 20:12 Automatically fetched origin/main at 32244f28: 6 commits from the other Mac at origin/main (32244f28b05f3e5c577df2f3c3aaf2e4caf7387c): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
+- 2026-11-11 22:29 Fetched origin/main at 32244f28: main is 15 commits ahead of origin/main and 6 commits behind it
+- 2026-11-11 23:24 Planned a-blocked-task-s: A blocked task's row says why it's blocked, not a dependency that's already done
+- 2026-11-11 23:24 Started a worker on a-blocked-task-s (auto → Codex: Claude weekly 58%, 30 points ahead of pace; Codex 19%)
+- 2026-11-11 23:24 Automatically (auto_advance): Started a worker on a-blocked-task-s (A blocked task's row says why it's blocked, not a dependency that's already done); its agent is auto, so it went to Codex: Claude weekly 58%, 30 points ahead of pace; Codex 19%.
+- 2026-11-11 23:29 Planned the-sandbox-app-builds: The sandbox app builds inside Codex's sandbox (review audit)
+- 2026-11-11 23:29 Started a worker on the-sandbox-app-builds
+- 2026-11-11 23:29 Automatically (auto_advance): Started a worker on the-sandbox-app-builds (The sandbox app builds inside Codex's sandbox).
+- 2026-11-11 23:31 Released a-blocked-task-s's worker (idle since its done report on d0415bec) while its audit runs
+- 2026-11-11 23:31 Automatically (auto_advance): Started the audit of a-blocked-task-s at d0415bec (A Codex worker worked on it, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-11 23:35 Audit of a-blocked-task-s: incomplete, clean, round 1: 2 Important open, 1 Nit open
+- 2026-11-11 23:35 Started a worker on a-blocked-task-s (auto → Codex: Claude weekly 59%, 31 points ahead of pace; Codex 23%)
+- 2026-11-11 23:35 Automatically (auto_advance): Sent a-blocked-task-s's worker the open Important findings a-blocked-task-s:F1, a-blocked-task-s:F2 from its audit at d0415bec (in a new worker: its last one was released during the audit).
+- 2026-11-11 23:36 Automatically (auto_advance): Started the audit of the-sandbox-app-builds at cb2aac9c (Its worker is Codex, so a Claude verifier audits it whatever its review says).
+- 2026-11-11 23:36 Released the-sandbox-app-builds's worker (idle since its done report on cb2aac9c) while its audit runs
+- 2026-11-11 23:36 Automatically (auto_advance): Released the-sandbox-app-builds's worker, idle since its done report on cb2aac9c, while its audit runs (ended pid 22282 (Worker: The sandbox app builds inside Codex's sandbox)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-11 23:36 Abandoned the-sandbox-app-builds: Goal unreachable: under Codex the sandbox app builds, but it can't start: Codex's sandbox denies com.apple.hiservices-xpcservice, so no screenshots. Codex-only build paths with no screenshots to show for them aren't worth the build-script complexity. UI tasks with layout changes go to Claude workers instead.
+- 2026-11-11 23:37 The worker on a-blocked-task-s answered findings: a-blocked-task-s:F1 fixed at a5a75130: a5a75130: TeamRowsCache lazily resolves missing after slugs and folded carriers via BoardStore.withArchive; Mac and phone share this path.; a-blocked-task-s:F2 fixed at a5a75130: a5a75130: open waitsOn wins; otherwise newest context note at/after since, then blocker, then state-only Blocked.; a-blocked-task-s:F3 fixed at a5a75130: a5a75130: archive-only done dependency regression creates and archives the dependency, then checks cached blocked and planned ro…
+- 2026-11-11 23:41 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
+Crashes (reports in ~/Library/Logs/DiagnosticReports):
+- VibeSwitcher-2026-11-11-233125.ips: VibeSwitcher  (): EXC_BREAKPOINT (SIGTRAP), Trace/BPT trap: 5; top frames: closure #1 in closure #1 in _assertionFailure(_:_:file:line:flags:) (libswiftCore.dylib) < _assertionFailure(_:_:file:line:flags:) (libswiftCore.dylib) < static SandboxPasteboard.sandboxGeneral() (VibeSwitcher) < @objc static SandboxPasteboard.sandboxGeneral() (VibeSwitcher) < static Sandbox.redirectPasteboard() (VibeSwitcher)
+Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
+- 2026-11-11 23:42 Sent a-blocked-task-s's worker contract v2 (it had v1)
+- 2026-11-11 23:42 The worker on a-blocked-task-s answered findings: a-blocked-task-s:F1 fixed at ce026c29: a5a75130 and 6bb004de resolve missing after dependencies and folded carriers through BoardStore.withArchive in the shared TeamRowsCache. Archived done tasks no longer appear in waitsOn, for both blocked and planned rows. Archive-only regression passes.; a-blocked-task-s:F2 fixed at ce026c29: a5a75130 selects newest context by timestamp at/after task.since, then task.blocker, else Blocked alone. Open after-dependency waitsOn wins, per lead steer. Tests cover…
+- 2026-11-11 23:42 Released a-blocked-task-s's worker (idle since its done report on ce026c29) while its audit runs
+- 2026-11-11 23:42 Automatically (auto_advance): Started the audit of a-blocked-task-s at ce026c29 (A Codex worker worked on it, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-11 23:45 Audit of a-blocked-task-s: incomplete, clean, round 2: 3 Important (1 open), 1 Nit closed
+- 2026-11-11 23:46 Re-rolled a-blocked-task-s after 2 audit rounds: its branch is kept as archive/a-blocked-task-s-1
+- 2026-11-11 23:46 Started a worker on a-blocked-task-s (auto → Codex: Claude weekly 59%, 31 points ahead of pace; Codex 24%)
+- 2026-11-11 23:53 Released a-blocked-task-s's worker (idle since its done report on 601cc3ad) while its audit runs
+- 2026-11-11 23:53 Automatically (auto_advance): Started the audit of a-blocked-task-s at 601cc3ad (A Codex worker worked on it, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-11 18:11 Merged origin/main into main: 9 commits from the remote, as a merge commit, e179a043; the tests passed on it (build 56bef28ae192)
+- 2026-11-11 23:54 Merged origin/main into main: 6 commits from the remote, as a merge commit, 559065b9; the tests passed on it (build 1a6db7550ddd)
+- 2026-11-11 23:54 Asked the user to push main at ace748d3 (21 commits) to origin/main
+- 2026-11-11 23:56 Audit of a-blocked-task-s: complete, clean, round 3: 3 Important closed, 2 Nit (1 open)
+- 2026-11-12 00:01 App health: VibeSwitcher's day, 2026-11-11, from its own logs (read by VibeSwitcher itself, no model): 0 freezes (56.9 a day over the 7 days before), 1 crash, 0 error lines. Memory now: footprint 316 MB, peak 503 MB since launch 1 h ago. The last footprint relief freed nothing (329 → 329 MB): macOS returned no pages (freed memory is kept for reuse).
+- 2026-11-12 00:13 Automatically fetched origin/main at 1bdf0aae: 4 commits from the other Mac at origin/main (1bdf0aaeb7871733fce6d05e042e5eb6368d4b02): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
+- 2026-11-12 00:14 Push of main at ace748d3 (21 commits) to origin/main rejected: not a fast-forward; nothing forced
+- 2026-11-12 00:15 Merged a-blocked-task-s: A blocked task's row says why it's blocked, not a dependency that's already done (build 1a6db7550ddd)
+- 2026-11-12 00:15 Automatically (auto_advance): Merged a-blocked-task-s (A blocked task's row says why it's blocked, not a dependency that's already done) into main at e1de0159, on its passing audit and the full test run.
+- 2026-11-12 00:15 Automatically (auto_advance): Cleaned up a-blocked-task-s (freed 1.6 GB of build output and temporary folders). It stays done.
 - 2026-11-11 18:15 Asked the user to push main at 32244f28 (6 commits) to origin/main
 - 2026-11-11 18:23 Pushed main at 32244f28 (6 commits) to origin/main, on the user's click
 - 2026-11-11 19:07 Automatically fetched origin/main at 32244f28: 0 commits from the other Mac at origin/main (32244f28b05f3e5c577df2f3c3aaf2e4caf7387c): merge_remote would do nothing: main has everything origin/main has.
@@ -2468,3 +2530,4 @@ Proposed task 1: Find why requests to the session host aren't sent
 - 2026-11-11 23:38 Asked the user to push main at 1bdf0aae (4 commits) to origin/main
 - 2026-11-11 23:39 Pushed main at 1bdf0aae (4 commits) to origin/main, on the user's click
 - 2026-11-12 01:39 Automatically fetched origin/main at f2ebe92b: 28 commits from the other Mac at origin/main (f2ebe92b3518adebac54e585ae6c0d26510bb853): merge_remote would make a merge commit of origin/main into main (it merges cleanly), once the test command passes on it.
+- 2026-11-12 00:32 Merged origin/main into main: 4 commits from the remote, as a merge commit, 77e673c3; the tests passed on it (build 1a6db7550ddd)
