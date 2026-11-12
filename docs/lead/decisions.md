@@ -372,3 +372,7 @@ Anthropic's Claude Code guidance for Fable: describe the outcome rather than the
 
 The Claude Code team's talk (2026-11-12): today's models run for hours and verify their own work, so give them tasks bigger than you normally would, with verification points along the way. Each VibeSwitcher task also pays a fixed overhead (worktree init, a ~1.5 GB build, a 9–14 min merge suite, an audit), so fewer, larger tasks speed up delivery.
 
+## 2026-11-12 09:35:22 Briefs for tasks that use a third-party CLI scaffold (e.g. `npx hyperframes init`) say whether it writes outside the worktree. Where it does, as HyperFrames' init installs skills into ~/.claude/skills, ~/.agents, ~/.cursor, ~/.gemini and opencode, the brief forbids it and names the alternative, or the lead gets the user's OK first.
+
+2026-11-12: the an-animated-explainer worker ran `npx hyperframes init` as the skill said, and it installed two new skills into ~/.claude/skills plus symlinks into other agents' folders. The config seal caught it, but every new worker, audit and merge was held until the user ruled. My brief allowed "project-local npx" without checking what init writes.
+
