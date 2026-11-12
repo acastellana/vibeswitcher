@@ -220,6 +220,8 @@ export VIBESWITCHER_PREFERENCE_LEDGER=$tool_scratch/preference-suites
 # (Scratch.defaults, a suite named by a path); on 2026-10-24 that folder held 8,012 dev.vibeswitcher.tests.<UUID>.plist
 # and 11,000 more from tests, 18 VibeSwitcher-* from benches run on renamed binaries.
 real_preferences=$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2> /dev/null | awk '{print $2}')/Library/Preferences
+# Linux (`on_linux`, scripts/lib/processes.sh) has no such folder and no cfprefsd: none, and `check_preferences` says so.
+[[ -n $on_linux ]] && real_preferences=""
 # The files there named the way tests and benches named theirs ("briefing-tests-<UUID>", "KeepAwakeTests-<UUID>",
 # "dev.vibeswitcher.snapshots"), sorted. Another app's never match; the app's own (dev.vibeswitcher.VibeSwitcher) neither.
 test_preferences() {
@@ -240,6 +242,10 @@ build_defaults() {
 # run had left there; VibeSwitcher.plist was rewritten at 18:16:56, inside a merge's run.
 check_preferences() {
     local added own others status=0
+    if [[ -z $real_preferences ]]; then
+        echo "preferences check: skipped on Linux, which has no ~/Library/Preferences for a test to leave a file in"
+        return 0
+    fi
     added=$(comm -13 <(echo "$1") <(test_preferences))
     own=$(awk 'NR == FNR { opened[$0 ".plist"]; next } $0 in opened' "$VIBESWITCHER_PREFERENCE_LEDGER" <(echo "$added"))
     others=$(comm -23 <(echo "$added") <(echo "$own"))
@@ -313,6 +319,8 @@ else
             # Their scratch host listens on a Unix socket, which Codex's sandbox refuses (network off): the probe
             # times out, and every Codex worker's run would fail on it. The merge's and an audit's runs have them.
             echo "security socket/signing tests: skipped inside Codex's sandbox, which refuses their scratch host's socket"
+        elif [[ -n $on_linux ]]; then
+            echo "security socket/signing tests: skipped on Linux until the session host builds here"
         elif [[ -x .build/debug/vibeswitcher-host ]]; then
             run_web_tests Tests/SecurityAudit || status=1
         else

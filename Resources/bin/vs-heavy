@@ -107,10 +107,17 @@ fi
 [[ -n $what ]] || what=$(printf '%s' "$*" | tr '\n' ' ' | cut -c 1-120)
 
 lock_dir=${VIBESWITCHER_TEST_LOCK_DIR:-/private/tmp/vibeswitcher-$(id -u)}
+# Set on Linux (uname -s), which answers some of what this asks the Mac in other words; empty on the Mac, where nothing
+# changes. Its first: there is no /private/tmp there, and the slots are kept under /tmp itself.
+linux=""
+[[ $(uname -s) == Linux ]] && linux=1
+[[ -n $linux && -z ${VIBESWITCHER_TEST_LOCK_DIR:-} ]] && lock_dir=/tmp/vibeswitcher-$(id -u)
 # As TestLock names it (no trailing slash), so a run under a holder of the Swift side's slot knows it.
 while [[ $lock_dir == */ && $lock_dir != / ]]; do lock_dir=${lock_dir%/}; done
 
 ncpu=${VIBESWITCHER_HEAVY_NCPU:-}
+# Linux: nproc, the cores this may run on (it has no hw.ncpu).
+[[ -n $linux ]] && { [[ $ncpu =~ ^[0-9]+$ ]] && (( 10#$ncpu >= 1 )) || ncpu=$(nproc 2>/dev/null); }
 [[ $ncpu =~ ^[0-9]+$ ]] && (( 10#$ncpu >= 1 )) || ncpu=$(sysctl -n hw.ncpu 2>/dev/null)
 # Where the sysctl command fails (Codex's sandbox: it asks for each name's format first, which the seatbelt refuses,
 # and a Codex worker's runs counted 4 cores and one slot), getconf's count: sysconf reads hw.ncpu, which it allows.
@@ -191,6 +198,8 @@ done
 # line but waits on nothing in it, so it can hold the line up only while its command runs.
 taken=$(/usr/bin/perl -MFcntl=:DEFAULT,:flock -MPOSIX=strftime -e '
     my ($what, $script, $place, @slots) = @ARGV;
+    # Linux has no O_EXLOCK (Fcntl dies on its name): nothing there, and a ticket is flocked before it has its name (below).
+    BEGIN { *O_EXLOCK = sub () { 0 } if $^O eq "linux"; }
     my @handles;
     for my $slot (@slots) {
         my ($fd, $file) = split /:/, $slot, 2;
@@ -236,7 +245,18 @@ taken=$(/usr/bin/perl -MFcntl=:DEFAULT,:flock -MPOSIX=strftime -e '
     my $mine = $given + 1;
     seek($queue, 0, 0); truncate($queue, 0); syswrite($queue, "$mine\n") or exit 2;
     my $path = "$dir/ticket-$mine";
+    # Linux: made as ticket.new, a name no reader of the line looks for (one a maker that died left goes first: only the
+    # holder of queue.lock makes one).
+    if ($^O eq "linux") { $path = "$dir/ticket.new"; unlink $path; }
     sysopen(my $ticket, $path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_EXLOCK, 0600) or exit 2;
+    # Then flocked, and only then given its name (a link, which fails on a name there is, as O_EXCL does): never seen
+    # unlocked while its waiter lives, as with O_EXLOCK.
+    if ($^O eq "linux") {
+        flock($ticket, LOCK_EX) or exit 2;
+        link($path, "$dir/ticket-$mine") or exit 2;
+        unlink $path;
+        $path = "$dir/ticket-$mine";
+    }
     syswrite($ticket, "pid $script, $what in $place, since " . strftime("%H:%M:%S", localtime) . "\nslots $n\n");
     close($queue);
     # Out of line, removed first so no one finds it let go.
@@ -318,6 +338,8 @@ if [[ $PWD =~ ^(.*)/\.vibeswitcher/worktrees/([^/]+) ]]; then
     project=${BASH_REMATCH[1]} task=${BASH_REMATCH[2]}
 fi
 project=${project##*/}
+# Linux: GNU date takes a time in seconds as -d @N (its -r is a file's time); the words below are the Mac's.
+[[ -n $linux ]] && date() { if [[ ${1:-} == -r ]]; then command date -d "@$2" "${@:3}"; else command date "$@"; fi; }
 {
     echo "pid $$, $what in $PWD, since $(date -r "$now" +%H:%M:%S)"
     echo "taken $now"
@@ -358,12 +380,16 @@ done
             return ($wall + 0, $awake + 0) if defined $awake;
         }
         my $awake = eval { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_UPTIME_RAW()) };
+        # Linux has no such clock: its monotonic one, which stands still while the machine sleeps too.
+        $awake //= eval { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) } if $^O eq "linux";
         return (time, defined $awake && $awake > 0 ? $awake : time);
     }
     # What --timeout and --stall count on: the time the Mac was awake, as a merge'\''s run does (Shell.run). A Mac that
     # slept through a run gave it no time to finish, and the first look after waking would find the limit passed.
     sub now { (clocks())[1] }
     my ($script, $what, $limit, $active, $every, $stall, $loadLimit, $loadGiven, @command) = @ARGV;
+    # Linux has no F_GETPATH (fcntl 50, which `report` asks for an output file by): the link under /proc names it.
+    BEGIN { *CORE::GLOBAL::fcntl = sub { $_[1] == 50 ? defined($_[2] = readlink("/proc/self/fd/" . fileno($_[0]))) : CORE::fcntl($_[0], $_[1], $_[2]) } if $^O eq "linux"; }
     my $stop;
     $SIG{$_} = sub { $stop //= $_[0] } for qw(TERM INT HUP);
     POSIX::setpgid(0, 0);
@@ -381,6 +407,8 @@ done
     # The Mac'\''s 1-minute load (VIBESWITCHER_HEAVY_LOAD for it in tests); undef when unread.
     sub load {
         return $loadGiven + 0 if $loadGiven =~ /^[0-9]+(\.[0-9]+)?$/;
+        # Linux: the first number of /proc/loadavg.
+        if ($^O eq "linux") { open(my $in, "<", "/proc/loadavg") or return undef; return ((scalar <$in>) // "") =~ /^([0-9]+(?:\.[0-9]+)?)/ ? $1 + 0 : undef; }
         my $out = `/usr/sbin/sysctl -n vm.loadavg 2>/dev/null`;
         return $out =~ /([0-9]+(?:[.,][0-9]+)?)/ ? do { (my $n = $1) =~ tr/,/./; $n + 0 } : undef;
     }
@@ -410,6 +438,8 @@ done
         for (@lines) {
             my ($pid, $ppid, $pgid, $time, $lstart) = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.*?)\s*$/ or next;
             my $seconds = 0;
+            # Linux: procps writes a time of a day or more as DD-HH:MM:SS; the days go into the hours.
+            $time = ($1 * 24 + $2) . $3 if $^O eq "linux" && $time =~ /^(\d+)-(\d+)(:.*)$/;
             $seconds = $seconds * 60 + $_ for split /:/, $time;
             $table{$pid} = [$ppid, $pgid, $seconds, $lstart];
         }

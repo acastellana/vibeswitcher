@@ -13,6 +13,10 @@
 # On 2026-11-02 a Codex worker's scripts/test.sh printed "env: /bin/ps: Operation not permitted" twice, and its
 # leftover check found nothing whatever was left.
 
+# Set on Linux (uname -s), where a script asks some of this in other words; empty on the Mac, where nothing changes.
+on_linux=""
+[[ $(uname -s) == Linux ]] && on_linux=1
+
 # The python that reads libproc: one line a process, "pid ppid stat command", the command as ps -wwE gives it (its
 # arguments, then its environment). stat is ps's first letter: Z for a zombie, else R, S, T or I. Only the processes it
 # may read (in a sandbox, its own sandbox's); a zombie, whose arguments are gone, shows its name.
@@ -51,6 +55,11 @@ sys.stdout.buffer.write(b"\n".join(out) + b"\n")
 # above, with an empty environment too. Fails when neither answers.
 processes() {
     local out status
+    # Linux: procps' ps, whose `e` prints the environment after the command as the Mac's -E does. No libproc there.
+    if [[ -n $on_linux ]]; then
+        out=$(env -i PATH=/usr/bin:/bin ps axwwe -o pid=,ppid=,stat=,command= 2> /dev/null) && [[ -n $out ]] && printf '%s\n' "$out"
+        return
+    fi
     out=$(env -i PATH=/usr/bin:/bin /bin/ps -axwwE -o pid=,ppid=,stat=,command= 2> /dev/null)
     status=$?
     if (( status == 0 )) && [[ -n $out ]]; then
