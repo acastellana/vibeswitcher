@@ -30,7 +30,7 @@ public struct LaunchPreflight: Sendable {
         public var missing: [Missing]
         public init(missing: [Missing]) { self.missing = missing }
         public var title: String {
-            missing.count == 1 ? LaunchPreflight.title(missing[0]) : "\(missing.count) things it needs are missing on this Mac."
+            missing.count == 1 ? LaunchPreflight.title(missing[0]) : "\(missing.count) things it needs are missing on \(Platform.Words.thisMachine)."
         }
         public var text: String {
             missing.count == 1 ? LaunchPreflight.text(missing[0])
@@ -215,7 +215,7 @@ public struct LaunchPreflight: Sendable {
         case .agent(let program, _): return "\(agentName(program)) isn't installed."
         case .commandLineTools, .gitStub: return "git needs Apple's Command Line Tools."
         case .gitFails: return "git doesn't run."
-        case .git: return "git isn't on this Mac."
+        case .git: return "git isn't on \(Platform.Words.thisMachine)."
         case .helper(let name, _): return "VibeSwitcher is missing its \(name)."
         }
     }
@@ -224,14 +224,14 @@ public struct LaunchPreflight: Sendable {
         switch missing {
         case .shell(let shell):
             return "Sessions start in your login shell, \(shell) ($SHELL), and there's nothing at that path. Set a shell that's installed "
-                + "(chsh -s /bin/zsh in Terminal), then quit and reopen VibeSwitcher."
+                + "(chsh -s \(Platform.Tools.loginShell) \(Platform.Words.inATerminal)), then quit and reopen VibeSwitcher."
         case .agent(let program, let shell):
             if program.contains("/") {
                 return "VibeSwitcher starts it as \(program), and there's nothing at that path. \(install(program)), or set the Claude "
                     + "preset's Command in Settings to where it is, then try again."
             }
             return "VibeSwitcher starts it as “\(program)”, and your login shell (\((shell as NSString).lastPathComponent) -l) doesn't find "
-                + "that command. \(install(program)), check that “\(program)” runs in a new Terminal window, then try again."
+                + "that command. \(install(program)), check that “\(program)” runs in \(Platform.Words.aNewTerminalWindow), then try again."
         case .commandLineTools:
             return "They aren't installed on this Mac (xcode-select -p names no developer folder). Run xcode-select --install in "
                 + "Terminal, finish the installer, then try again."
@@ -242,9 +242,9 @@ public struct LaunchPreflight: Sendable {
             let license = said.localizedCaseInsensitiveContains("license")
             return "git --version failed: \(said)" + (said.hasSuffix(".") ? "" : ".")
                 + (license ? " Accept Xcode's license (sudo xcodebuild -license in Terminal), then try again."
-                           : " Run git --version in Terminal to see why, then try again.")
+                           : " Run git --version \(Platform.Words.inATerminal) to see why, then try again.")
         case .git(let path):
-            return "VibeSwitcher runs git from \(path), and there's nothing there. Run xcode-select --install in Terminal, then try again."
+            return "VibeSwitcher runs git from \(path), and there's nothing there. \(Platform.Words.installGit), then try again."
         case .helper(let name, let path):
             return "\(name) should be at \(path), and isn't. Reinstall VibeSwitcher, then try again."
         }

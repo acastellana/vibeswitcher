@@ -126,11 +126,21 @@ struct LaunchPreflightTests {
     }
 
     @Test func severalMissingAreEachSaid() throws {
+        #if canImport(Darwin)
         let mac = try make(Mac(claude: false, developer: nil))
         let problem = try #require(mac.preflight.check(command: "claude"))
         #expect(problem.missing == [.agent(program: "claude", shell: mac.preflight.shell), .commandLineTools])
         #expect(problem.title == "2 things it needs are missing on this Mac.")
         #expect(problem.text.contains("Claude Code isn't installed.") && problem.text.contains("git needs Apple's Command Line Tools."))
+        #else
+        // Linux has no Command Line Tools to miss: its second missing piece is a git that doesn't run.
+        let said = "git: error while loading shared libraries: libpcre2-8.so.0"
+        let mac = try make(Mac(claude: false, gitVersion: said, gitStatus: 127))
+        let problem = try #require(mac.preflight.check(command: "claude"))
+        #expect(problem.missing == [.agent(program: "claude", shell: mac.preflight.shell), .gitFails(said)])
+        #expect(problem.title == "2 things it needs are missing on this computer.")
+        #expect(problem.text.contains("Claude Code isn't installed.") && problem.text.contains("git doesn't run."))
+        #endif
     }
 
     /// A pass is kept for `keep` seconds: a start asked for again meanwhile starts no shell. A miss isn't kept: once
@@ -256,6 +266,32 @@ struct LaunchPreflightTests {
             """)
         #expect(LoginShellCommand.resolve("claude", shell: shell, timeout: Self.budget) == .unknown)
         #expect(LoginShellCommand.resolve("sh", shell: shell, timeout: Self.budget) == .unknown)
+    }
+
+    /// The messages name the machine and its terminal in this system's words: the Mac's own on the Mac; on Linux no
+    /// Mac, no Terminal app and no xcode-select in what Linux can say (it has no Command Line Tools to miss).
+    @Test func theMessagesSayThisSystemsWords() {
+        let several = LaunchPreflight.Problem(missing: [.agent(program: "claude", shell: "/bin/zsh"), .git("/usr/bin/git")])
+        #if canImport(Darwin)
+        #expect(several.title == "2 things it needs are missing on this Mac.")
+        #expect(LaunchPreflight.title(.git("/usr/bin/git")) == "git isn't on this Mac.")
+        #expect(LaunchPreflight.text(.git("/usr/bin/git"))
+                == "VibeSwitcher runs git from /usr/bin/git, and there's nothing there. Run xcode-select --install in Terminal, then try again.")
+        #expect(LaunchPreflight.text(.shell("/bin/nosh")).contains("(chsh -s /bin/zsh in Terminal)"))
+        #expect(LaunchPreflight.text(.agent(program: "claude", shell: "/bin/zsh")).contains("runs in a new Terminal window, then"))
+        #expect(LaunchPreflight.text(.gitFails("it broke")).hasSuffix(" Run git --version in Terminal to see why, then try again."))
+        #else
+        #expect(several.title == "2 things it needs are missing on this computer.")
+        #expect(LaunchPreflight.text(.git("/usr/bin/git"))
+                == "VibeSwitcher runs git from /usr/bin/git, and there's nothing there. Install git with your system's package manager, then try again.")
+        #expect(LaunchPreflight.text(.shell("/bin/nosh")).contains("(chsh -s /bin/bash in a terminal)"))
+        let linuxCanSay: [LaunchPreflight.Missing] = [.shell("/bin/nosh"), .agent(program: "claude", shell: "/bin/bash"),
+                                                       .gitFails("it broke"), .git("/usr/bin/git"), .helper(name: "vibeswitcher-mcp", path: "/x")]
+        for missing in linuxCanSay {
+            let said = LaunchPreflight.title(missing) + " " + LaunchPreflight.text(missing)
+            #expect(!said.contains("Mac") && !said.contains("Terminal") && !said.contains("xcode-select"), "\(said)")
+        }
+        #endif
     }
 
     /// ENOENT from a spawn names the program and where it was expected (or the folder, when the program is there).
