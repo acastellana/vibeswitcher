@@ -1,0 +1,234 @@
+import Foundation
+import Testing
+@testable import VibePlatform
+
+/// `Platform.Tools`: where git and the shells are on this system, and that the branch shell is what its users take it
+/// for. Each child is read to the end of its output and reaped (`SpawnTests.output`); files are the test's own, in
+/// the run's scratch folder, and none of them is run as a program itself (a script is given to /bin/sh): a file just
+/// written can be "busy" to exec while another test's child is starting.
+struct ToolsTests {
+    static func write(_ text: String, to file: URL, mode: mode_t = 0o644) throws {
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: file)
+        try #require(chmod(file.path, mode) == 0)
+    }
+
+    // MARK: git
+
+    @Test func gitIsAnAbsolutePathToAnExecutable() throws {
+        let git = Platform.Tools.git
+        #expect(git.hasPrefix("/"))
+        #expect(Platform.Tools.isExecutableFile(git), "\(git)")
+        #expect(FileManager.default.isExecutableFile(atPath: git))
+        #expect(Platform.Tools.git == git)
+        #if os(Linux)
+        // The first on PATH, as a shell would find it.
+        #expect(git == Platform.Tools.find("git", path: nil))
+        #else
+        #expect(git == "/usr/bin/git")
+        #endif
+        // And it is git.
+        let version = try SpawnTests.output(of: Platform.Spawn(executable: git, arguments: ["git", "--version"]))
+        #expect(version.exit == 0)
+        #expect(version.output.hasPrefix("git version"), "\(version.output)")
+    }
+
+    /// With no git on PATH, `git` is a path with nothing at it: `missing()` lists it, and running it fails as a
+    /// program that isn't there does.
+    @Test func aToolThatIsNotThereIsListedAndFailsToStart() throws {
+        let folder = try TestScriptLinuxTests.scratch("tools")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        #expect(Platform.Tools.missing() == [])
+        let nowhere = folder.appendingPathComponent("usr/bin/git").path
+        #expect(Platform.Tools.missing(git: nowhere, shell: Platform.Tools.branchShell[0]) == ["git"])
+        #expect(Platform.Tools.missing(git: nowhere, shell: "/bin/no-such-shell") == ["git", "/bin/no-such-shell"])
+        #expect(Platform.Tools.missing(git: Platform.Tools.git, shell: "/bin/no-such-shell") == ["/bin/no-such-shell"])
+        // A folder isn't a program, whatever its mode says.
+        #expect(Platform.Tools.missing(git: folder.path, shell: "/bin/sh") == ["git"])
+        #expect(Platform.Spawn(executable: nowhere, arguments: ["git", "--version"]).start() == .failure(Platform.Errno(code: ENOENT)))
+        // What `git` is while none is found: an absolute path, so a spawn fails rather than looks around.
+        #expect(Platform.Tools.absentGit.hasPrefix("/"))
+    }
+
+    /// A path is looked for until it is found, and never again after.
+    @Test func aPathIsFoundOnce() {
+        let found = Platform.Tools.Found()
+        var asked = 0
+        #expect(found.path { asked += 1; return nil } == nil)
+        #expect(found.path { asked += 1; return nil } == nil)
+        #expect(found.path { asked += 1; return "/first/git" } == "/first/git")
+        #expect(found.path { asked += 1; return "/second/git" } == "/first/git")
+        #expect(asked == 3)
+    }
+
+    // MARK: find
+
+    @Test func findReturnsNilForAToolThatIsNowhere() throws {
+        let folder = try TestScriptLinuxTests.scratch("tools")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let name = "vibeswitcher-no-such-tool-\(UUID().uuidString.prefix(8))"
+        #expect(Platform.Tools.find(name, path: nil) == nil)
+        #expect(Platform.Tools.find(name) == nil)
+        #expect(Platform.Tools.find(name, path: "\(folder.path):/usr/bin:/bin") == nil)
+        #expect(Platform.Tools.find("sh", path: "") == nil)
+        #expect(Platform.Tools.find("sh", path: folder.path) == nil)
+        #expect(Platform.Tools.find("", path: nil) == nil)
+        #expect(Platform.Tools.find("/no/such/folder/\(name)", path: nil) == nil)
+        // A name with a slash is a path, never looked for on PATH; only an absolute one is taken.
+        #expect(Platform.Tools.find("bin/sh", path: "/") == nil)
+        // An entry that isn't absolute (the working directory's, the empty one) is never looked in.
+        try Self.write("#!/bin/sh\n", to: folder.appendingPathComponent("here/tool"), mode: 0o755)
+        #expect(Platform.Tools.find("tool", path: "here::.:\(folder.lastPathComponent)/here") == nil)
+        #expect(Platform.Tools.find("tool", path: "here::\(folder.path)/here") == folder.path + "/here/tool")
+    }
+
+    @Test func findPrefersTheFirstOnThePathAndSkipsNonExecutables() throws {
+        let folder = try TestScriptLinuxTests.scratch("tools")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        func place(_ name: String) -> String { folder.appendingPathComponent(name).path }
+        // In PATH's order: a file nobody may run, a folder of the tool's name, then two that can be run.
+        try Self.write("#!/bin/sh\n", to: URL(fileURLWithPath: place("plain/tool")), mode: 0o644)
+        try FileManager.default.createDirectory(atPath: place("folder/tool"), withIntermediateDirectories: true)
+        try Self.write("#!/bin/sh\n", to: URL(fileURLWithPath: place("second/tool")), mode: 0o755)
+        try Self.write("#!/bin/sh\n", to: URL(fileURLWithPath: place("third/tool")), mode: 0o700)
+        try Self.write("#!/bin/sh\n", to: URL(fileURLWithPath: place("third/other")), mode: 0o755)
+        let path = [place("absent"), place("plain"), place("folder"), place("second"), place("third")].joined(separator: ":")
+
+        #expect(Platform.Tools.find("tool", path: path) == place("second/tool"))
+        #expect(Platform.Tools.find("other", path: path) == place("third/other"))
+        #expect(Platform.Tools.find("tool", path: [place("third") + "/", place("second")].joined(separator: ":")) == place("third/tool"))
+        #expect(Platform.Tools.find("tool", path: [place("plain"), place("folder")].joined(separator: ":")) == nil)
+        // An absolute name is checked as it is, whatever the path says.
+        #expect(Platform.Tools.find(place("third/tool"), path: place("second")) == place("third/tool"))
+        #expect(Platform.Tools.find(place("plain/tool"), path: path) == nil)
+        #expect(Platform.Tools.find(place("folder/tool"), path: path) == nil)
+        // A link is the file it leads to.
+        try FileManager.default.createDirectory(atPath: place("links"), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: place("links/tool"), withDestinationPath: place("third/tool"))
+        try FileManager.default.createSymbolicLink(atPath: place("links/other"), withDestinationPath: place("nothing"))
+        #expect(Platform.Tools.find("tool", path: place("links")) == place("links/tool"))
+        #expect(Platform.Tools.find("other", path: place("links")) == nil)
+        // The process's own PATH, when none is given.
+        #expect(Platform.Tools.find("sh") == Platform.Tools.find("sh", path: ProcessInfo.processInfo.environment["PATH"]))
+        #expect(Platform.Tools.find("sh")?.hasSuffix("/sh") == true)
+    }
+
+    // MARK: The shells
+
+    /// The branch shell runs a command without reading a startup file: under a home whose every startup file prints
+    /// "polluted", and with what makes Ubuntu's bash read ~/.bashrc for a plain `bash -c` (`SSH_CLIENT`: it takes
+    /// itself for a command run over ssh), the output is the command's alone.
+    @Test func branchShellStartsAShellThatReadsNoStartupFile() throws {
+        let folder = try TestScriptLinuxTests.scratch("tools")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let home = folder.appendingPathComponent("home", isDirectory: true)
+        for file in [".bashrc", ".profile", ".bash_profile", ".bash_login", ".zshenv", ".zshrc", ".zprofile", ".zlogin"] {
+            try Self.write("echo polluted\n", to: home.appendingPathComponent(file))
+        }
+        let shell = Platform.Tools.branchShell
+        #expect(Platform.Tools.isExecutableFile(shell[0]), "\(shell[0])")
+        let pipe = try SpawnTests.newPipe()
+        var spawn = Platform.Spawn(executable: shell[0], arguments: shell + ["-c", "echo ok"])
+        spawn.environment = ["HOME=\(home.path)", "ZDOTDIR=\(home.path)", "PATH=/usr/bin:/bin", "SSH_CLIENT=192.0.2.1 50000 22"]
+        spawn.directory = home.path
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        // Whatever a startup file would say, on either output.
+        spawn.stderr = .descriptor(pipe.writing)
+        let ended = try SpawnTests.output(of: spawn) { spawn in
+            defer { close(pipe.writing) }
+            return spawn.start()
+        }
+        let errors = SpawnTests.everything(from: pipe.reading)
+        close(pipe.reading)
+        #expect(ended.output == "ok\n")
+        #expect(errors == "")
+        #expect(ended.exit == 0)
+    }
+
+    /// The wrapper around a branch's code is the branch shell running `"$@"; exit $?`: the shell stays, as the parent
+    /// of what it runs (it never becomes the command), with the arguments it was given, which is how it is known
+    /// (`BranchCode.isRunner`); and it ends as its command did.
+    @Test func theBranchShellStaysTheParentOfItsCommandAndIsKnownByItsArguments() throws {
+        let wrapper = Platform.Tools.branchShell + ["-c", "\"$@\"; exit $?", "vibeswitcher-branch-code"]
+        // The command says who started it, then waits to be let go.
+        let release = try SpawnTests.newPipe(), said = try SpawnTests.newPipe()
+        var spawn = Platform.Spawn(executable: wrapper[0], arguments: wrapper + ["/bin/sh", "-c", "echo $PPID; read line; exit 7"])
+        spawn.stdin = .descriptor(release.reading)
+        spawn.stdout = .descriptor(said.writing)
+        let started = spawn.start()
+        close(release.reading)
+        close(said.writing)
+        defer { close(said.reading) }
+        guard case .success(let pid) = started else {
+            close(release.writing)
+            Issue.record("the wrapper didn't start: \(started)")
+            return
+        }
+        // One line: the command's parent.
+        var line = [UInt8]()
+        var byte: UInt8 = 0
+        while read(said.reading, &byte, 1) == 1, byte != 0x0A { line.append(byte) }
+        let parent = Int32(String(decoding: line, as: UTF8.self))
+        let arguments = Platform.Processes.arguments(pid)
+        close(release.writing)
+        let ended = SpawnTests.ended(pid, output: said.reading)
+
+        #expect(parent == pid, "the command's parent is \(String(describing: parent)), the wrapper \(pid)")
+        #expect(arguments.starts(with: wrapper), "\(arguments)")
+        #expect(arguments == wrapper + ["/bin/sh", "-c", "echo $PPID; read line; exit 7"])
+        #expect(ended.exit == 7)
+    }
+
+    @Test func theLoginShellIsAShellOfThisSystem() {
+        let shell = Platform.Tools.loginShell
+        #expect(Platform.Tools.isExecutableFile(shell), "\(shell)")
+        #if os(Linux)
+        #expect(shell == "/bin/bash")
+        #expect(Platform.Tools.branchShell == ["/bin/bash", "--noprofile", "--norc"])
+        #else
+        #expect(shell == "/bin/zsh")
+        #expect(Platform.Tools.branchShell == ["/bin/zsh", "-f"])
+        #endif
+    }
+
+    // MARK: The developer tools
+
+    @Test func developerToolsAreAskedOnlyOfAMac() {
+        #if os(Linux)
+        #expect(Platform.Tools.hasDeveloperTools() == nil)
+        #else
+        #expect(Platform.Tools.hasDeveloperTools() != nil)
+        #endif
+    }
+
+    /// The check itself, on stand-ins for `xcode-select -p`: one that names a folder, one that names none (as on a
+    /// Mac without the tools: an error and status 2), one that prints nothing, one that isn't there, and one that
+    /// never answers.
+    @Test func aToolThatNamesAFolderIsThereAndASilentOneIsNotKnown() throws {
+        let folder = try TestScriptLinuxTests.scratch("tools")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        func standIn(_ name: String, _ script: String) throws -> [String] {
+            let file = folder.appendingPathComponent(name)
+            try Self.write(script, to: file)
+            return ["/bin/sh", file.path, "-p"]
+        }
+        let names = try standIn("names", "[ \"$1\" = -p ] && echo /Library/Developer/CommandLineTools\n")
+        let none = try standIn("none", "echo 'xcode-select: error: unable to get active developer directory' >&2\nexit 2\n")
+        let silent = try standIn("silent", "exit 0\n")
+        let hangs = try standIn("hangs", "exec tail -f /dev/null\n")
+        #expect(Platform.Tools.namesAFolder(names, timeout: 60) == true)
+        #expect(Platform.Tools.namesAFolder(none, timeout: 60) == false)
+        #expect(Platform.Tools.namesAFolder(silent, timeout: 60) == false)
+        #expect(Platform.Tools.namesAFolder([folder.appendingPathComponent("absent").path, "-p"], timeout: 60) == false)
+        #expect(Platform.Tools.namesAFolder([folder.path, "-p"], timeout: 60) == false)
+        #expect(Platform.Tools.namesAFolder(hangs, timeout: 0.2) == nil)
+
+        #expect(Platform.Tools.run(names, timeout: 60) == .ended(status: 0, output: "/Library/Developer/CommandLineTools\n"))
+        #expect(Platform.Tools.run(none, timeout: 60) == .ended(status: 2, output: ""))
+        #expect(Platform.Tools.run(["/bin/sh", "-c", "printf partial; kill -TERM $$"], timeout: 60) == .ended(status: 128 + SIGTERM, output: "partial"))
+        #expect(Platform.Tools.run(["/no/such/tool"], timeout: 60) == .failed)
+        #expect(Platform.Tools.run([], timeout: 60) == .failed)
+        // One that writes and then hangs is ended too, and what it started with it.
+        #expect(Platform.Tools.run(["/bin/sh", "-c", "echo started; tail -f /dev/null & wait"], timeout: 0.2) == .timedOut)
+    }
+}
