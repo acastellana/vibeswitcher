@@ -691,7 +691,7 @@ is the runs on `47636aaf`.
   `timeout-minutes: 90` and the workflow check first; `scripts/ci/check-workflows.sh` passes. This is the first commit
   of this list, pushed only when no run someone is waiting on is in progress. (The suite took 12.5 minutes on this
   24-core machine; the hosted runner has 4.)
-- [ ] **Step 2: Read the Mac.** Once 43275652285 ends, download `macos-test-log-core`, `-platform`, `-host` and
+- [x] **Step 2: Read the Mac.** Once 43275652285 ends, download `macos-test-log-core`, `-platform`, `-host` and
   `-app` into a scratch folder and compare them with 43260865049. `LoadHarnessTests.itsBuildRunsOnItsSlotsShareOfTheCores`:
   its Linux side is cause A; for the Mac, read `b445bf0a` and `438b1270` for any line that runs there. A test that
   starts and never ends in the platform job is a bug to fix with a hang guard that names it, not a skip.
@@ -950,6 +950,10 @@ Not tasks here; they go to the lead's backlog, or to `v2-mac-tasks.md` where onl
 - **`SessionStrays.processes(user:)`** compares with `user` again.
 
 ## Done when (revised 2026-11-13)
+
+**Reached 2026-11-13, except R10:** `4485b65a` is the first commit with every job green on both systems
+(`v2 linux` 43308185013: platform, core; `v2 macos` 43308184833: platform, core, host, app, with the 10 listed skips).
+R10 waits for the user's Claude Code config folder.
 
 On Ubuntu, `bash scripts/test.sh` is green for `VibePlatformTests`, `VibeCoreTests` and `VibeNodeTests`, with the
 Mac-only tests listed under a tenth of each target. `vibeswitcher status` showed a real Claude Code session go from
