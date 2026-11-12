@@ -11,7 +11,7 @@ struct PlatformLintTests {
 
     /// The portable targets' folders.
     static let folders = ["Sources/VibeCore", "Sources/VibeHost", "Sources/vibeswitcher-host", "Sources/vibeswitcher-hook",
-                          "Sources/vibeswitcher-mcp"]
+                          "Sources/vibeswitcher-mcp", "Sources/VibeNode", "Sources/vibeswitcher-cli"]
     /// The Mac's own files, each wrapped whole in `#if canImport(Darwin)`.
     static let macOnly = "Sources/VibeCore/MacOnly/"
     /// VibeCore's one file of exported imports: the platform layer, and what a system names differently.
@@ -50,6 +50,51 @@ struct PlatformLintTests {
         return list.components(separatedBy: "\n").filter { !$0.isEmpty }
     }
 
+    /// What `git ls-files` lists in `repo`, one path each.
+    static func trackedPaths(in repo: URL) throws -> [String] {
+        try git(["ls-files", "-z"], in: repo).split(separator: "\0").map(String.init)
+    }
+
+    /// The groups of paths among `paths` and every folder above them that are the same but for case, each group
+    /// sorted, the groups in order.
+    static func caseCollisions(_ paths: [String]) -> [[String]] {
+        var prefixes: Set<String> = []
+        for path in paths {
+            var prefix = ""
+            for part in path.split(separator: "/") {
+                prefix += prefix.isEmpty ? String(part) : "/" + part
+                prefixes.insert(prefix)
+            }
+        }
+        return Dictionary(grouping: prefixes) { $0.lowercased() }.values
+            .filter { $0.count > 1 }
+            .map { $0.sorted() }
+            .sorted { $0[0] < $1[0] }
+    }
+
+    /// git's output, run in `folder`; it throws when git fails.
+    @discardableResult
+    static func git(_ arguments: [String], in folder: URL, input: String? = nil) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", folder.path] + arguments
+        let output = Pipe(), feed = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = input == nil ? FileHandle.nullDevice : feed
+        try process.run()
+        if let input {
+            feed.fileHandleForWriting.write(Data(input.utf8))
+            try feed.fileHandleForWriting.close()
+        }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw CocoaError(.executableLoad, userInfo: [NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) failed"])
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     @Test func noSystemCodeOutsideThePlatform() throws {
         let files = Self.files()
         #expect(files.contains { $0.path == "Sources/VibeCore/Paths.swift" }, "the rule's folders weren't read")
@@ -73,6 +118,35 @@ struct PlatformLintTests {
             \(clean.joined(separator: "\n"))
             """)
         #expect(pending == Set(pending).sorted(), "PlatformLintPending.txt is sorted, each path once")
+    }
+
+    /// No two paths the repository tracks differ only in case, a folder's as well as a file's: on the Mac's
+    /// case-insensitive file system they are one, so `Sources/vibeswitcher/Run.swift` beside the app's
+    /// `Sources/VibeSwitcher/main.swift` would put both in one folder and one target (the command line's target is
+    /// `vibeswitcher-cli` for that reason). Linux checks out both, so only this says so before the Mac's build does.
+    @Test func noTwoTrackedPathsDifferOnlyInCase() throws {
+        let tracked = try Self.trackedPaths(in: Self.repo)
+        #expect(tracked.contains("Sources/VibeCore/Paths.swift"), "the repository's files weren't read")
+        #expect(Self.caseCollisions(tracked) == [], "paths that are one on the Mac (case-insensitive): rename one of each")
+    }
+
+    /// The rule finds a folder that differs from another only in case though their files' names differ, and a file;
+    /// and nothing in paths that only share a prefix. The scratch tree's index is written directly, so the Mac's file
+    /// system can't fold the two spellings into one before git sees them.
+    @Test func theCaseRuleFindsAFolderThatDiffersOnlyInCase() throws {
+        let tree = try TestScriptLinuxTests.scratch("case-rule")
+        defer { try? FileManager.default.removeItem(at: tree) }
+        try Self.git(["init", "-q"], in: tree)
+        let blob = try Self.git(["hash-object", "-w", "--stdin"], in: tree, input: "x\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        for path in ["Sources/VibeSwitcher/main.swift", "Sources/vibeswitcher/Run.swift", "Sources/vibeswitcher-cli/main.swift",
+                     "README.md", "docs/readme.md"] {
+            try Self.git(["update-index", "--add", "--cacheinfo", "100644,\(blob),\(path)"], in: tree)
+        }
+        let tracked = try Self.trackedPaths(in: tree)
+        #expect(tracked.count == 5)
+        #expect(Self.caseCollisions(tracked) == [["Sources/VibeSwitcher", "Sources/vibeswitcher"]])
+        #expect(Self.caseCollisions(["a/B.swift", "a/b.swift", "c/d"]) == [["a/B.swift", "a/b.swift"]])
+        #expect(Self.caseCollisions(["Sources/VibeSwitcher/main.swift", "Sources/vibeswitcher-cli/main.swift"]) == [])
     }
 
     @Test func theRuleKnowsSystemCodeFromTheRest() {
