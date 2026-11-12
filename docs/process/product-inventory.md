@@ -197,6 +197,8 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - Team: Summarize what each agent is doing with AI — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Team: Start a fresh lead session — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Team: Let project leads message each other — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Team: Remind me to run a prompt audit — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Team: Days between prompt audits — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Working policy: Working policy — `Sources/VibeSwitcher/WorkingPolicySettings.swift`
 - Review rules floor: Project — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
 - Review rules floor: Sensitive paths — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
@@ -364,6 +366,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop` — a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a… — `Sources/VibeSwitcher/Sandbox.swift`
 - `wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m] [--data 0x…] [--reason TEXT]` — the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-ask [COMMAND]` — the selected fake session's agent asks for a new shell running COMMAND (a made-up program unless given) in… — `Sources/VibeSwitcher/Sandbox.swift`
+- `prompt-audit due|model|snooze|off` — the selected fake lead's project as due for a /doctor prompt-audit (due: 15 days since VibeSwitcher first saw… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-click run|decline|dismiss` — presses that button on the newest shell request card in the selected chat (run starts the shell session in… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-tidy SECONDS` — how long a handled shell card (started, declined, expired) shows before it leaves by itself, for cards… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-idle SECONDS` — how long after its command went well an untouched Run-card shell is ended by itself (600 by default), and… — `Sources/VibeSwitcher/Sandbox.swift`
