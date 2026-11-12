@@ -2706,3 +2706,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 16:29 Merged each-role-gets-the: Each role gets the model that suits it: Opus by default, Fable as advisor at decision points, Fable for re-rolls and sensitive audits (in a batch: check-whether-a-phone, prompts-and-agents-md, each-role-gets-the, a-failed-merge-run landed on one test run) (build b26422310962)
 - 2026-11-12 16:29 Merged a-failed-merge-run: A failed merge run reruns only the tests it names, on the branch and on main (in a batch: check-whether-a-phone, prompts-and-agents-md, each-role-gets-the, a-failed-merge-run landed on one test run) (build b26422310962)
 - 2026-11-12 16:29 Flaky in the batch check-whether-a-phone, prompts-and-agents-md, each-role-gets-the, a-failed-merge-run: headlessAnswersQueriesOnlyWhenNoClient(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-12 16:29 Started a worker on merges-never-sit-blocked
+- 2026-11-12 16:30 Started a worker on a-size-ceiling-on (auto → Claude: Claude weekly 20%, 7 points ahead of pace, not tight; Codex 24%)
