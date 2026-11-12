@@ -136,6 +136,13 @@ func waitForEnd(_ process: Process, within timeout: TimeInterval = hangGuard) ->
     let command = ([process.executableURL?.path ?? "?"] + (process.arguments ?? [])).joined(separator: " ")
     Issue.record(Comment(rawValue: "pid \(pid) (\(command.prefix(200))) never seen to end"
                          + (goneSince != nil ? ": gone, reaped by someone else" : " in \(Int(timeout)) s")))
+    #if os(Linux)
+    // Foundation on Linux traps when asked how a process ended that it hasn't seen end, which the caller usually asks
+    // next, and that ends the whole run, every test after it unrun: so there it's killed and waited for (10 s more).
+    kill(pid, SIGKILL)
+    let killed = MacTime.real.awake() + 10
+    while process.isRunning, MacTime.real.awake() < killed { Thread.sleep(forTimeInterval: 0.01) }
+    #endif
     return false
 }
 

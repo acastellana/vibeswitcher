@@ -1,3 +1,4 @@
+#if canImport(Darwin)
 import VibeCore
 import Foundation
 import Testing
@@ -452,3 +453,4 @@ struct InstallRelaunchTests {
         #expect(try stand.running() == [launched])
     }
 }
+#endif
