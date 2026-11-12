@@ -189,8 +189,8 @@ struct RunnableCommandTests {
     /// What `command` prints, run by zsh (the shell Claude Code's `!` uses on a Mac).
     static func shell(_ command: String) throws -> String {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-f", "-c", command]
+        process.executableURL = URL(fileURLWithPath: Platform.Tools.branchShell[0])
+        process.arguments = Array(Platform.Tools.branchShell.dropFirst()) + ["-c", command]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardInput = FileHandle.nullDevice

@@ -248,7 +248,7 @@ struct WorkingPolicyTests: LeadTeamFixture {
         let home = temp.url("home")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.executableURL = URL(fileURLWithPath: Platform.Tools.loginShell)
         process.arguments = ["-l", "-c", "command -v vs-heavy"]
         process.environment = ["PATH": environment["PATH"]!, "HOME": home.path, "ZDOTDIR": home.path]
         let pipe = Pipe()

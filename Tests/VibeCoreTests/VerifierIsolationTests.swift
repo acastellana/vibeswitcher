@@ -189,7 +189,7 @@ struct VerifierIsolationTests {
     @Test func theShellIsTheOneClaudeCodeBuiltTheCommandFor() {
         #expect(BranchCode.prefixShell(["CLAUDE_CODE_SHELL": "/bin/bash", "SHELL": "/bin/zsh"]) == "/bin/bash")
         #expect(BranchCode.prefixShell(["SHELL": "/bin/bash"]) == "/bin/bash")
-        #expect(BranchCode.prefixShell(["SHELL": "/usr/local/bin/fish"]) == "/bin/zsh")
-        #expect(BranchCode.prefixShell([:]) == "/bin/zsh")
+        #expect(BranchCode.prefixShell(["SHELL": "/usr/local/bin/fish"]) == Platform.Tools.loginShell)
+        #expect(BranchCode.prefixShell([:]) == Platform.Tools.loginShell)
     }
 }

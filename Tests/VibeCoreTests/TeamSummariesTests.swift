@@ -151,7 +151,7 @@ struct TeamSummariesTests {
 
     @Test func headlessClaudeIsASmallModelWithNoToolsSettingsOrSession() {
         let command = ClaudeHeadless.command(prompt: "the prompt")
-        #expect(command.executable == "/bin/zsh")
+        #expect(command.executable == Platform.Tools.loginShell)
         let args = command.args
         #expect(args.starts(with: ["-lc", "exec claude \"$@\"", "zsh", "-p"]))
         func value(_ flag: String) -> String? { args.firstIndex(of: flag).map { args[$0 + 1] } }
