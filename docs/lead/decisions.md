@@ -412,3 +412,7 @@ The batch split marked branches failed for problems on main. Only a fresh done r
 
 The user, 2026-11-12: "you need to be extremely proactive and try to make sure that everything gets to the finish line as quickly as possible." After the block, auto_advance went to merging the 14 ready tasks one at a time, about 15 min each, 3–4 h in all, where two batches take about 30–40 min.
 
+## 2026-11-12 16:27:53 Before batching, order tasks so that those touching the same hot files (LeadToolset.swift, LeadAdvance.swift, LeadWorkflow.swift, the merge path) go in separate batches or in a known order, and the rest go together. When planning, avoid running more than two tasks at once that change the same hot file.
+
+2026-11-12: a batch of 6 lost 2 tasks (a-calm-mac-merge, small-non-sensitive) to conflicts with others in the same stack, all touching LeadToolset and the merge path, which costs another round of catching up and testing.
+
