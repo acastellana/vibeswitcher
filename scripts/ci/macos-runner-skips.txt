@@ -1,1 +1,15 @@
-# Tests GitHub's hosted Mac runner can't run: `Suite` or `Suite/test`, two spaces, the reason. Sorted.
+# Tests GitHub's hosted Mac runner can't run: `Suite`, `Suite/test` or `Tests/….test.mjs`, two spaces, the reason. Sorted.
+# Found on the xcode-27 image, 2026-11-12 (4 cores, python3 older than 3.11, code signing not enforced as on a Mac).
+BoostMarkTests/theMarkFollowsBoostOnAndOff  expects the boosted limits of a Mac with more cores; the runner has 4
+BoostTests/boostRaisesTheLimitsAndNeverLowersThem  expects the boosted limits of a Mac with more cores; the runner has 4
+BoostTests/theLeadsReadTheDecisionAndAStaleOneIsOff  expects the boosted limits of a Mac with more cores; the runner has 4
+BoostTests/theWitnessWakesTheFavoredProjectFirst  expects the boosted limits of a Mac with more cores; the runner has 4
+BoostWatchTests/automaticFollowsPowerAndPresenceWithinOneHeartbeat  expects the boosted limits of a Mac with more cores; the runner has 4
+EndingASessionTests/endingASessionEndsWhatItStartedOnly  the runner shows another process's environment, which a Mac hides (seen in SessionStraysTests; inferred here)
+LeadToolsetTests/startWorkerAndAuditUseTheBoostedMacLimits  expects the boosted limits of a Mac with more cores; the runner has 4
+LeadToolsetTests/statusSaysWhetherBoostIsOnAndWhy  expects the boosted limits of a Mac with more cores; the runner has 4
+LoadReportScriptTests/itPrintsTheProfileAndFreezesPerLoadBucketForTheDays  scripts/load-report.sh reads dates ending in Z, which the runner's python3 (older than 3.11) refuses
+MCPHandoverTests/anUnsignedBuildLeavesTheOldOneServing  the runner runs an unsigned build's probe; a Mac kills it (signal 9)
+SessionStraysTests/aProcessWhoseEnvironmentIsHiddenIsTheSessionsOnlyWhenItStartedIt  the runner shows another process's environment, which a Mac hides
+TestScriptWidthTests/aRunsSwiftTestGetsItsSlotsShare  expects the width a heavy slot gives on a Mac with more cores; the runner has 4
+Tests/SecurityAudit/library-injection.test.mjs  on the runner an injected library loads into a Hardened Runtime binary; a Mac refuses it

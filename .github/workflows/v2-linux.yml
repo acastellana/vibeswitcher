@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
       - name: Check the workflows
         run: bash scripts/ci/check-workflows.sh
       - name: Swift, the version in .swift-version
