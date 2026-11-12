@@ -207,7 +207,12 @@ struct LaunchPreflightTests {
         let shellPid = try #require(pid, "no pid from the fake shell; resolve said \(String(describing: answer.wait(0)))")
         #expect(getsid(shellPid) == shellPid, "the login shell shares the caller's session (\(getsid(shellPid)), the caller's \(getsid(0)))")
         FileManager.default.createFile(atPath: go, contents: nil)
+        #if canImport(Darwin)
         #expect(await offPool { answer.wait(shellBudget + 10) } == .found("/bin/sh"))
+        #else
+        // The first sh on PATH: Ubuntu's PATH has /usr/bin before /bin, and both hold it.
+        #expect(await offPool { answer.wait(shellBudget + 10) } == .found(Platform.Tools.find("sh") ?? "/bin/sh"))
+        #endif
     }
 
     /// `LoginShellCommand.resolve`'s answer, given once from its thread and waited for any number of times.
@@ -237,6 +242,20 @@ struct LaunchPreflightTests {
         #expect(LoginShellCommand.outcome(status: 127, output: "\(marker)") == .unknown)
         #expect(LoginShellCommand.outcome(status: 3, output: "bye") == .unknown)
         #expect(!LoginShellCommand.validName("claude; rm") && !LoginShellCommand.validName("-v") && LoginShellCommand.validName("claude"))
+    }
+
+    /// A login shell whose `command -v` doesn't answer (here a `command` that only fails, with 127 as a shell without
+    /// one does) says nothing of the program: not known, so never called missing, whatever sh the system has.
+    @Test func aShellWhoseCommandLookupDoesntAnswerIsntTakenToSayMissing() throws {
+        let folder = scratch.url("no-command").path
+        let shell = folder + "/fakesh"
+        // `-l -i -c COMMAND $0 NAME`: the command run by sh after a `command` function that fails as a missing one.
+        try script(shell, """
+            [ "$1" = -l ] && [ "$2" = -i ] && [ "$3" = -c ] || exit 64
+            exec /bin/sh -c "command() { return 127; }; $4" "$5" "$6"
+            """)
+        #expect(LoginShellCommand.resolve("claude", shell: shell, timeout: Self.budget) == .unknown)
+        #expect(LoginShellCommand.resolve("sh", shell: shell, timeout: Self.budget) == .unknown)
     }
 
     /// ENOENT from a spawn names the program and where it was expected (or the folder, when the program is there).

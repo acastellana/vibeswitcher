@@ -88,6 +88,19 @@ extension Platform {
             #endif
         }
 
+        /// What a shell command runs right after `command -v "$1"` so that its exit status says a name the shell
+        /// doesn't know as 1. POSIX lets that lookup exit with any status but 0: zsh and bash say 1, and dash
+        /// (Ubuntu's /bin/sh) 127, the status a shell with no `command` at all ends with too. The Mac: nothing (its
+        /// login shell is zsh, and 1 is missing, any other status not known). Linux: when the lookup fails and the
+        /// shell has `command` (`command -v command` answers), it exits 1; otherwise with the status it had.
+        public static var commandLookupEnd: String {
+            #if canImport(Darwin)
+            return ""
+            #else
+            return " || { command -v command >/dev/null 2>&1 && exit 1; }"
+            #endif
+        }
+
         /// Where the program `name` is: the first folder of `path` (folders with ":" between them, as PATH has them;
         /// nil: this process's PATH) that holds a file of that name this process may run, as that folder and the
         /// name. A folder that isn't an absolute path is passed over (PATH's empty entry is the working directory:

@@ -62,7 +62,7 @@ public enum LoginShellCommand {
     }
 
     static let marker = "VIBESWITCHER-LOGIN-SHELL-COMMAND:"
-    static let command = "printf '%s' '\(marker)'; command -v \"$1\""
+    static let command = "printf '%s' '\(marker)'; command -v \"$1\"" + Platform.Tools.commandLookupEnd
 
     /// `$SHELL -l -i -c <command> <shell> NAME`.
     public static func arguments(shell: String, name: String) -> [String] {
