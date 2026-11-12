@@ -83,7 +83,12 @@ struct SignalsTests {
             let now = Self.disposition(SIGUSR2)
             #expect(Self.handler(now) == unsafeBitCast(handler, to: UnsafeRawPointer?.self))
             #expect(Self.handler(now) != nil)
+            // The Mac's sigaction(2) doesn't give SA_RESETHAND back in what it reads (seen on GitHub's Mac runner,
+            // 2026-11-13: sa_flags 0 with the handler in place); that the handler runs once and the default is back is
+            // what `aFatalHandlerRunsAndTheDefaultIsBack` shows, on both systems.
+            #if os(Linux)
             #expect(Self.has(now, Self.resetHand))
+            #endif
             #expect(!Self.has(now, Self.sigInfo))
             // The handler runs with no other signal held back for it.
             var mask = now.sa_mask
