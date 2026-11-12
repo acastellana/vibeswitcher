@@ -628,16 +628,29 @@ public enum AppHealth {
         return "\(part): \(word)"
     }
 
-    /// Whether `text` has `word` with no letter right before or after it ("error", not "apierror" or "errors").
+    /// Whether `text` has `word` as a word of its own, not inside a name: nothing that joins it to a name right before or
+    /// after it ("error", not "apierror", "errors", the task "a-failed-merge-run", "error_log" or "build.failed.log").
     static func contains(_ text: String, word: String) -> Bool {
         var start = text.startIndex
         while let range = text.range(of: word, range: start..<text.endIndex) {
-            let before = range.lowerBound == text.startIndex ? nil : text[text.index(before: range.lowerBound)]
-            let after = range.upperBound == text.endIndex ? nil : text[range.upperBound]
-            if !(before?.isLetter ?? false), !(after?.isLetter ?? false) { return true }
+            let before = range.lowerBound == text.startIndex ? nil : text.index(before: range.lowerBound)
+            let joinedBefore = before.map { joins(text, at: $0, toward: text.startIndex) } ?? false
+            let joinedAfter = range.upperBound != text.endIndex && joins(text, at: range.upperBound, toward: text.index(before: text.endIndex))
+            if !joinedBefore, !joinedAfter { return true }
             start = range.upperBound
         }
         return false
+    }
+
+    /// Whether the character at `index`, next to a word, makes the word part of a name: a letter or digit, a joiner of
+    /// slugs and paths ("-", "_", "/"), or a dot with a letter or digit beyond it (a file name's, not a sentence's end).
+    /// `toward` is the end of the text away from the word.
+    private static func joins(_ text: String, at index: String.Index, toward end: String.Index) -> Bool {
+        let character = text[index]
+        if character.isLetter || character.isNumber || "-_/".contains(character) { return true }
+        guard character == ".", index != end else { return false }
+        let beyond = text[end < index ? text.index(before: index) : text.index(after: index)]
+        return beyond.isLetter || beyond.isNumber
     }
 
     // MARK: The files
