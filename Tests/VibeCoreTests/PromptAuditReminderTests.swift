@@ -72,7 +72,7 @@ struct PromptAuditReminderTests {
                     Self.assistant("claude-opus-5-5", at: at(-1))], to: folder.appendingPathComponent("a.jsonl"))
         var project = look(nil, folder, at(0))
         #expect(project.lastRun == at(-60).timeIntervalSince1970)
-        #expect(project.model == "claude-opus-5-5")
+        #expect(project.models == ["claude-opus-5-5"])
         for days in [0.0, 5, 13.9] {
             project = look(project, folder, at(days))
             #expect(PromptAudit.due(project, now: at(days)) == nil, "\(days) days")
@@ -91,7 +91,7 @@ struct PromptAuditReminderTests {
         var project = look(nil, folder, at(0))
         try append([Self.userCommand("/doctor", args: "prompt-audit", at: at(1)), Self.assistant("claude-opus-5-5[1m]", at: at(1))], to: file)
         project = look(project, folder, at(1))
-        #expect(project.lastRun == at(1).timeIntervalSince1970 && project.model == "claude-opus-5-5")
+        #expect(project.lastRun == at(1).timeIntervalSince1970 && project.models == ["claude-opus-5-5"])
         // The same model, spelled with a context suffix or a date: no change.
         try append([Self.assistant("claude-opus-5-5-20261101", at: at(2))], to: file)
         project = look(project, folder, at(2))
@@ -108,6 +108,39 @@ struct PromptAuditReminderTests {
         #expect(PromptAudit.due(project, now: at(18)) == .interval(since: at(4), ranBefore: true))
     }
 
+    /// The blind check's case: the lead on one model and your own session in the same folder on another, each
+    /// writing last in turn. No card, whatever order the looks fall in; once the lead moves to a third model (and the
+    /// one its audit was for goes quiet), the card shows.
+    @Test func twoSessionsOnTwoModelsInOneFolderAreNoModelChange() throws {
+        let folder = try folder()
+        let lead = folder.appendingPathComponent("lead.jsonl"), mine = folder.appendingPathComponent("mine.jsonl")
+        try append([Self.assistant("claude-opus-5-5", at: at(0))], to: lead)
+        try append([Self.assistant("claude-sonnet-4-5", at: at(0.01))], to: mine)
+        var project = look(nil, folder, at(0.02))
+        #expect(project.models == ["claude-opus-5-5", "claude-sonnet-4-5"])
+        // A run in the lead: the audit is for the lead's model only, though your session answered last.
+        try append([Self.userCommand("/doctor", args: "prompt-audit", at: at(1)), Self.assistant("claude-opus-5-5", at: at(1.01))], to: lead)
+        try append([Self.assistant("claude-sonnet-4-5", at: at(1.02))], to: mine)
+        project = look(project, folder, at(1.03))
+        #expect(project.models == ["claude-opus-5-5"])
+        for step in 0..<6 {
+            let when = 2.0 + Double(step) * 0.1
+            try append([Self.assistant(step.isMultiple(of: 2) ? "claude-sonnet-4-5" : "claude-opus-5-5", at: at(when))],
+                       to: step.isMultiple(of: 2) ? mine : lead)
+            project = look(project, folder, at(when + 0.01))
+            #expect(PromptAudit.due(project, now: at(when + 0.01)) == nil, "step \(step)")
+        }
+        // The lead quiet for a day while your session goes on: still no card.
+        try append([Self.assistant("claude-sonnet-4-5", at: at(2.9))], to: mine)
+        project = look(project, folder, at(2.95))
+        #expect(PromptAudit.due(project, now: at(2.95)) == nil)
+        // The lead moves to Fable; your Sonnet session goes on.
+        try append([Self.assistant("claude-fable-5-2", at: at(3))], to: lead)
+        try append([Self.assistant("claude-sonnet-4-5", at: at(3.1))], to: mine)
+        project = look(project, folder, at(3.2))
+        #expect(PromptAudit.due(project, now: at(3.2)) == .modelChanged(from: "claude-opus-5-5", to: "claude-fable-5-2"))
+    }
+
     @Test func snoozeMovesTheCardAWeek() throws {
         let folder = try folder()
         var project = look(nil, folder, at(0))
@@ -117,8 +150,8 @@ struct PromptAuditReminderTests {
         #expect(PromptAudit.due(project, now: at(21)) != nil)
         // A model change during the week waits for it too.
         project = PromptAudit.snoozed(project, at: at(21))
-        project.latestModel = "claude-fable-5-2"
-        project.model = "claude-opus-5-5"
+        project.models = ["claude-opus-5-5"]
+        project.sessions = ["lead.jsonl": PromptAudit.Seen(model: "claude-fable-5-2", last: at(23).timeIntervalSince1970)]
         #expect(PromptAudit.due(project, now: at(25)) == nil)
         #expect(PromptAudit.due(project, now: at(28)) == .modelChanged(from: "claude-opus-5-5", to: "claude-fable-5-2"))
     }
@@ -138,7 +171,8 @@ struct PromptAuditReminderTests {
         }
         // A model change doesn't bring it back either.
         var one = kept.projects["/p/one"]!
-        (one.model, one.latestModel) = ("a", "b")
+        one.models = ["a"]
+        one.sessions = ["x.jsonl": PromptAudit.Seen(model: "b", last: at(0.5).timeIntervalSince1970)]
         #expect(PromptAudit.due(one, now: at(1)) == nil)
     }
 
@@ -182,7 +216,7 @@ struct PromptAuditReminderTests {
         #expect(first.read["a.jsonl"] == size - 40)
         try (try FileHandle(forWritingTo: file)).then { try $0.seekToEnd(); try $0.write(contentsOf: Data((run.dropFirst(40) + "\n").utf8)); try $0.close() }
         let second = PromptAudit.scan(folder, read: first.read)
-        #expect(second.runs == [PromptAudit.Run(at: at(1).timeIntervalSince1970, model: nil)])
+        #expect(second.runs == [PromptAudit.Run(at: at(1).timeIntervalSince1970, file: "a.jsonl")])
         #expect(PromptAudit.scan(folder, read: second.read).runs.isEmpty)
         // Rewritten shorter: from the start.
         try Data((run + "\n").utf8).write(to: file)

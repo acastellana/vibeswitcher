@@ -39,25 +39,43 @@ public enum PromptAudit {
         public var firstSeen: Double
         /// The last run known: found in its transcripts or sent by Run now.
         public var lastRun: Double?
-        /// The model the reminder compares against: the last run's, or (before any run since first seen) the one its
-        /// sessions answered on when first seen. Nil: not known yet.
-        public var model: String?
+        /// The transcript the last run found was in (by file name): its answer's model is the run's.
+        public var runFile: String?
+        /// The models the last audit is for: the one that answered the last run, or (before any run since first seen)
+        /// those its sessions answered on when first seen. Nil: not known yet (a run whose answer isn't read yet).
+        public var models: [String]?
+        /// Answers count from here: the last run, or first sight.
+        public var since: Double
+        /// Each session's (transcript's, by file name) model as of its last answer since `since`.
+        public var sessions: [String: Seen]
         /// Remind me in a week: no card before this.
         public var snoozedUntil: Double?
         /// Not for this project.
         public var off: Bool
         /// Each transcript's bytes read so far (by file name): read on from there next time.
         public var read: [String: UInt64]
-        /// The newest model its sessions answered on, and when (seconds since 1970).
-        public var latestModel: String?
-        public var latestModelAt: Double?
 
         public init(firstSeen: Date) {
             self.firstSeen = firstSeen.timeIntervalSince1970
+            since = self.firstSeen
+            sessions = [:]
             off = false
             read = [:]
         }
     }
+
+    /// A session's model as of its last answer, and when that was (seconds since 1970).
+    public struct Seen: Codable, Equatable, Sendable {
+        public var model: String
+        public var last: Double
+        public init(model: String, last: Double) {
+            self.model = model
+            self.last = last
+        }
+    }
+
+    /// A session that hasn't answered in this long before the folder's newest answer no longer counts as in use.
+    static let activeWindow: TimeInterval = 2 * day
 
     /// Why a card shows.
     public enum Due: Equatable, Sendable {
@@ -75,14 +93,26 @@ public enum PromptAudit {
         return name.isEmpty ? nil : name
     }
 
+    /// The model its sessions moved to, if they did: none of the sessions in use (those that answered within two days
+    /// of the folder's newest answer) is on a model the last audit is for any more. Two sessions on two models in the
+    /// folder (the lead on one, your own session on another) are no change while either is still on the audited one,
+    /// whichever wrote last.
+    public static func movedTo(_ project: Project) -> (from: String, to: String)? {
+        guard let models = project.models, !models.isEmpty, let newest = project.sessions.values.map(\.last).max() else { return nil }
+        let active = project.sessions.values.filter { $0.last >= newest - activeWindow }
+        guard !active.contains(where: { models.contains($0.model) }),
+              let newest = active.max(by: { ($0.last, $0.model) < ($1.last, $1.model) })?.model else { return nil }
+        // Named by the session the last run was in (the lead's, as a rule), when it's among those in use.
+        let to = project.runFile.flatMap { file in project.sessions[file].flatMap { active.contains($0) ? $0.model : nil } } ?? newest
+        return (models.sorted().joined(separator: ", "), to)
+    }
+
     /// Whether `project` gets a card at `now`, and why. Off, snoozed or turned off: none. A model change shows at once;
     /// the interval counts from the last run, never from before VibeSwitcher first saw the project.
     public static func due(_ project: Project, now: Date, intervalDays: Int = defaultIntervalDays) -> Due? {
         guard !project.off else { return nil }
         if let until = project.snoozedUntil, now.timeIntervalSince1970 < until { return nil }
-        if let was = normalized(project.model), let now = normalized(project.latestModel), was != now {
-            return .modelChanged(from: was, to: now)
-        }
+        if let moved = movedTo(project) { return .modelChanged(from: moved.from, to: moved.to) }
         let since = max(project.lastRun ?? project.firstSeen, project.firstSeen)
         guard now.timeIntervalSince1970 >= since + Double(intervalDays) * day else { return nil }
         return .interval(since: Date(timeIntervalSince1970: since), ranBefore: project.lastRun != nil)
@@ -92,7 +122,7 @@ public enum PromptAudit {
     public static func reason(_ due: Due, now: Date) -> String {
         switch due {
         case .interval(let since, let ranBefore):
-            let days = max(0, Int((now.timeIntervalSince(since) / day).rounded(.down)))
+            let days = max(0, Int((now.timeIntervalSince(since) / day + 0.001).rounded(.down)))
             return ranBefore ? "The last prompt audit here was \(days) days ago."
                 : "No prompt audit seen here in the \(days) days VibeSwitcher has known this project."
         case .modelChanged(let from, let to):
@@ -102,33 +132,64 @@ public enum PromptAudit {
 
     // MARK: Changes
 
-    /// The book's record for `root` after a look at its transcripts: first seen now if new (the model it answers on
-    /// now is where it starts from, whatever an older run was on), every run found after the last one taken as the
-    /// last run (the model it answered on, the snooze cleared), and the newest model seen.
+    /// How far back first sight looks for the models in use.
+    static let firstSightWindow: TimeInterval = 7 * day
+
+    /// The book's record for `root` after a look at its transcripts. New: first seen now, the models its sessions
+    /// answered on in the week before (else the last one) what it starts from, whatever an older run was on. A run
+    /// found after the last one: the last run (the clock restarts, the snooze is cleared), and the model that answers
+    /// it in its own transcript is what the audit is for. Every answer since is counted by model.
     public static func observe(_ project: Project?, scan: Scan, now: Date) -> Project {
         let isNew = project == nil
         var project = project ?? Project(firstSeen: now)
         project.read = scan.read
-        if let latest = scan.latestModel, latest.at >= (project.latestModelAt ?? -.infinity) {
-            project.latestModel = latest.model
-            project.latestModelAt = latest.at
+        if isNew {
+            // Every session's model as of its last answer, whenever that was; the audit is for those in use this week.
+            project.since = -.infinity
+            take(scan.answers, into: &project)
+            project.since = project.firstSeen
+            let recent = Set(project.sessions.values.filter { $0.last >= now.timeIntervalSince1970 - firstSightWindow }.map(\.model))
+            let models = recent.isEmpty ? project.sessions.values.max(by: { $0.last < $1.last }).map { [$0.model] } ?? [] : recent.sorted()
+            project.models = models.isEmpty ? nil : models
+            if let run = scan.runs.max(by: { $0.at < $1.at }) { project.lastRun = run.at }
+            return project
         }
         if let run = scan.runs.max(by: { $0.at < $1.at }), run.at > (project.lastRun ?? -.infinity) {
             project.lastRun = run.at
-            if !isNew {
-                project.model = run.model ?? project.latestModel
-                project.snoozedUntil = nil
-            }
+            project.runFile = run.file
+            project.since = run.at
+            project.sessions = [:]
+            project.models = nil
+            project.snoozedUntil = nil
         }
-        if isNew || project.model == nil { project.model = project.latestModel }
+        // The run's answer, in its own transcript (in this look or a later one).
+        if project.models == nil, let file = project.runFile, let lastRun = project.lastRun,
+           let answer = scan.answers.filter({ $0.file == file && $0.at >= lastRun }).min(by: { $0.at < $1.at }) {
+            project.models = [answer.model]
+        }
+        take(scan.answers, into: &project)
+        // Nothing says which model a run was for (it was sent but never found, or found with no answer) a day on:
+        // the models that answered since.
+        if project.models == nil, now.timeIntervalSince1970 - (project.lastRun ?? project.firstSeen) > day, !project.sessions.isEmpty {
+            project.models = Array(Set(project.sessions.values.map(\.model))).sorted()
+        }
         return project
     }
 
-    /// Run now: run at `now`, on the model its sessions answer on.
+    private static func take(_ answers: [Answer], into project: inout Project) {
+        for answer in answers where answer.at >= project.since && answer.at >= (project.sessions[answer.file]?.last ?? -.infinity) {
+            project.sessions[answer.file] = Seen(model: answer.model, last: answer.at)
+        }
+    }
+
+    /// Run now: run at `now`; the model it's for is the one that answers it, once a look finds the run.
     public static func ran(_ project: Project, at now: Date) -> Project {
         var project = project
         project.lastRun = now.timeIntervalSince1970
-        project.model = project.latestModel ?? project.model
+        project.runFile = nil
+        project.since = now.timeIntervalSince1970
+        project.sessions = [:]
+        project.models = nil
         project.snoozedUntil = nil
         return project
     }
@@ -142,27 +203,35 @@ public enum PromptAudit {
 
     // MARK: Transcripts
 
-    /// One run found in a transcript: when, and the model that answered it (nil: no answer read yet).
+    /// One run found in a transcript: when, and in which (by file name).
     public struct Run: Equatable, Sendable {
         public var at: Double
-        public var model: String?
-        public init(at: Double, model: String?) {
+        public var file: String
+        public init(at: Double, file: String) {
             self.at = at
+            self.file = file
+        }
+    }
+
+    /// One assistant answer: its model, when, and in which transcript.
+    public struct Answer: Equatable, Sendable {
+        public var model: String
+        public var at: Double
+        public var file: String
+        public init(model: String, at: Double, file: String) {
             self.model = model
+            self.at = at
+            self.file = file
         }
     }
 
     /// What a look at a project's transcripts found.
     public struct Scan: Equatable, Sendable {
         public var runs: [Run] = []
-        public var latestModel: (model: String, at: Double)?
+        public var answers: [Answer] = []
         /// Each transcript's bytes read, to read on from next time.
         public var read: [String: UInt64] = [:]
         public init() {}
-
-        public static func == (a: Scan, b: Scan) -> Bool {
-            a.runs == b.runs && a.read == b.read && a.latestModel?.model == b.latestModel?.model && a.latestModel?.at == b.latestModel?.at
-        }
     }
 
     /// Claude Code's folder of transcripts for the project at `root`.
@@ -189,13 +258,11 @@ public enum PromptAudit {
             if offset > size { offset = 0 }
             guard (try? handle.seek(toOffset: offset)) != nil else { continue }
             var pending = Data()
-            /// A run whose answer (its model) isn't read yet.
-            var waiting: Int?
             while offset < size, let data = try? handle.read(upToCount: chunk), !data.isEmpty {
                 pending.append(data)
                 guard let last = pending.lastIndex(of: UInt8(ascii: "\n")) else { continue }
                 let lines = pending[pending.startIndex...last]
-                for line in lines.split(separator: UInt8(ascii: "\n")) { take(Data(line), into: &scan, waiting: &waiting) }
+                for line in lines.split(separator: UInt8(ascii: "\n")) { take(Data(line), file: name, into: &scan) }
                 offset += UInt64(lines.count)
                 pending = Data(pending[(last + 1)...])
             }
@@ -204,23 +271,18 @@ public enum PromptAudit {
         return scan
     }
 
-    private static func take(_ line: Data, into scan: inout Scan, waiting: inout Int?) {
+    private static func take(_ line: Data, file: String, into scan: inout Scan) {
         let isRun = line.range(of: commandNeedle) != nil
         guard isRun || line.range(of: modelNeedle) != nil,
               let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let at = (object["timestamp"] as? String).flatMap(CodexUsage.timestamp) else { return }
         let message = object["message"] as? [String: Any]
         if isRun, object["type"] as? String == "user", isAuditRun(message?["content"]) {
-            scan.runs.append(Run(at: at, model: nil))
-            waiting = scan.runs.count - 1
+            scan.runs.append(Run(at: at, file: file))
             return
         }
         guard object["type"] as? String == "assistant", let model = normalized(message?["model"] as? String) else { return }
-        if let index = waiting {
-            scan.runs[index].model = model
-            waiting = nil
-        }
-        if at >= (scan.latestModel?.at ?? -.infinity) { scan.latestModel = (model, at) }
+        scan.answers.append(Answer(model: model, at: at, file: file))
     }
 
     /// A user turn's content is `/doctor prompt-audit`: its command name and its arguments' first word.

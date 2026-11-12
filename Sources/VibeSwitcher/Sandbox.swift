@@ -1619,13 +1619,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
         guard let root = model.selectedRow.flatMap({ leads.lead(for: $0) })?.root else { return reply(false, "no lead selected: lead first") }
         let now = Date()
         var project = PromptAudit.Project(firstSeen: now.addingTimeInterval(-15 * 86_400))
-        project.model = "claude-opus-5-5"
-        project.latestModel = "claude-opus-5-5"
+        project.models = ["claude-opus-5-5"]
         switch rest.isEmpty ? "due" : rest {
         case "due": break
         case "model":
-            project.lastRun = now.addingTimeInterval(-3 * 86_400).timeIntervalSince1970
-            project.latestModel = "claude-fable-5-2"
+            let ran = now.addingTimeInterval(-3 * 86_400).timeIntervalSince1970
+            (project.lastRun, project.since) = (ran, ran)
+            project.sessions = ["lead.jsonl": PromptAudit.Seen(model: "claude-fable-5-2", last: now.timeIntervalSince1970 - 600)]
         case "snooze": promptAudit.snooze(root); return settle { reply(true, "snoozed a week: \(self.promptAudit.due[root] == nil ? "no card" : "card still shown")") }
         case "off": promptAudit.turnOff(root); return settle { reply(true, "off for this project: \(self.promptAudit.due[root] == nil ? "no card" : "card still shown")") }
         default: return reply(false, "prompt-audit due|model|snooze|off")

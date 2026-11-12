@@ -85,8 +85,10 @@ final class PromptAuditDesk: ObservableObject {
                         if let current = self.book.projects[root], current != before {
                             merged.off = current.off
                             if current.snoozedUntil != before?.snoozedUntil { merged.snoozedUntil = current.snoozedUntil }
+                            // Run now meanwhile: its clock and what it's for; this look's answers from then on only.
                             if (current.lastRun ?? -.infinity) > (merged.lastRun ?? -.infinity) {
-                                (merged.lastRun, merged.model) = (current.lastRun, current.model)
+                                (merged.lastRun, merged.runFile, merged.since, merged.models) = (current.lastRun, current.runFile, current.since, current.models)
+                                merged.sessions = merged.sessions.filter { $0.value.last >= current.since }
                             }
                         }
                         self.book.projects[root] = merged
