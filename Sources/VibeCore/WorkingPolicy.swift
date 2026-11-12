@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// The user's working policy: one text, kept in `~/.vibeswitcher/policy.md` and edited in Settings › Project lead, that

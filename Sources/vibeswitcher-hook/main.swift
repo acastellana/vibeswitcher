@@ -5,7 +5,6 @@
 // exceptions are a steered message (see `SteerInbox`): handed to Claude as JSON on the events that take it, as added
 // context on each, Stop included (a Stop block would show in its window as "Stop hook error"; see `SteerReply.output`);
 // and, the same way, the note a session VibeSwitcher started gets at its start (`SessionNote`).
-import Darwin
 import Foundation
 import VibeCore
 

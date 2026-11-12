@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import VibeCore
 
@@ -106,13 +105,13 @@ public enum HostHandover {
         var written = 0
         let failure: Int32? = data.withUnsafeBytes { raw in
             while written < raw.count {
-                let count = Darwin.write(fd, raw.baseAddress! + written, raw.count - written)
+                let count = Sys.write(fd, raw.baseAddress! + written, raw.count - written)
                 if count < 0 { if errno == EINTR { continue }; return errno }
                 written += count
             }
             return fsync(fd) == 0 ? nil : errno
         }
-        Darwin.close(fd)
+        Sys.close(fd)
         if let failure {
             unlink(partial)
             throw Failure.write(failure)
@@ -157,8 +156,8 @@ public enum HostHandover {
     /// the server's queue.
     static func probe(_ executable: String, statePath: String, timeout: TimeInterval = probeLimit) throws {
         var pipe: [Int32] = [-1, -1]
-        guard Darwin.pipe(&pipe) == 0 else { throw Failure.probe("no pipe") }
-        defer { Darwin.close(pipe[0]) }
+        guard Sys.pipe(&pipe) == 0 else { throw Failure.probe("no pipe") }
+        defer { Sys.close(pipe[0]) }
         var attributes: posix_spawnattr_t?
         posix_spawnattr_init(&attributes)
         defer { posix_spawnattr_destroy(&attributes) }
@@ -178,7 +177,7 @@ public enum HostHandover {
         defer { argv.forEach { free($0) } }
         var pid: pid_t = 0
         let spawned = posix_spawn(&pid, executable, &actions, &attributes, argv, environ)
-        Darwin.close(pipe[1])
+        Sys.close(pipe[1])
         guard spawned == 0 else { throw Failure.probe(String(cString: strerror(spawned))) }
 
         _ = fcntl(pipe[0], F_SETFL, fcntl(pipe[0], F_GETFL) | O_NONBLOCK)
@@ -205,7 +204,7 @@ public enum HostHandover {
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 4_096)
         while true {
-            let count = Darwin.read(fd, &buffer, buffer.count)
+            let count = Sys.read(fd, &buffer, buffer.count)
             guard count > 0 else { return data }
             data.append(contentsOf: buffer[0..<count])
         }
@@ -272,15 +271,15 @@ public enum HostHandover {
             var written = 0
             secret.withUnsafeBytes { raw in
                 while written < raw.count {
-                    let count = Darwin.write(writer, raw.baseAddress! + written, raw.count - written)
+                    let count = Sys.write(writer, raw.baseAddress! + written, raw.count - written)
                     if count < 0, errno == EINTR { continue }
                     guard count > 0 else { return }
                     written += count
                 }
             }
-            Darwin.close(writer)
+            Sys.close(writer)
             guard written == secret.count else {
-                Darwin.close(reader)
+                Sys.close(reader)
                 throw Failure.secretTooLarge(secret.count)
             }
             return reader
@@ -288,12 +287,12 @@ public enum HostHandover {
 
         /// Everything in the channel; closes it.
         static func take(_ fd: Int32) -> Data {
-            defer { Darwin.close(fd) }
+            defer { Sys.close(fd) }
             _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
             var data = Data()
             var buffer = [UInt8](repeating: 0, count: 65_536)
             while true {
-                let count = Darwin.read(fd, &buffer, buffer.count)
+                let count = Sys.read(fd, &buffer, buffer.count)
                 if count < 0, errno == EINTR { continue }
                 guard count > 0 else { return data }
                 data.append(contentsOf: buffer[0..<count])

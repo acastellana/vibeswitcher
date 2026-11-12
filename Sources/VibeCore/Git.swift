@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// Runs git (never through a shell, never prompting for credentials), with what the repository's own git folder could

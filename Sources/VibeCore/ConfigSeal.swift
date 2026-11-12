@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// What the agents load from outside a worktree, which a branch's code can write: Claude Code's own settings, hooks,

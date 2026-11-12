@@ -221,7 +221,7 @@ public final class LeadAdvance: @unchecked Sendable {
         lock.unlock()
         held?.release()
         guard write >= 0 else { return }
-        _ = Darwin.write(write, [UInt8(1)], 1)
+        _ = Sys.write(write, [UInt8(1)], 1)
         close(write)
     }
 

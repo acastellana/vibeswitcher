@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 /// Keeps a session's tool server running: `vibeswitcher-mcp --keeper <its arguments>` holds Claude Code's stdio and
@@ -144,7 +143,7 @@ public enum MCPKeeper {
 
         init() {
             var fds: [Int32] = [-1, -1]
-            if Darwin.pipe(&fds) == 0 {
+            if Sys.pipe(&fds) == 0 {
                 for fd in fds {
                     _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
                     _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
@@ -185,7 +184,7 @@ public enum MCPKeeper {
             return number
         }
 
-        func nudge() { if wake[1] >= 0 { _ = Darwin.write(wake[1], [UInt8(1)], 1) } }
+        func nudge() { if wake[1] >= 0 { _ = Sys.write(wake[1], [UInt8(1)], 1) } }
     }
 
     /// A running child: its pid, and this side of its stdin and stdout.
@@ -200,9 +199,9 @@ public enum MCPKeeper {
     /// Starts `executable` with `arguments` on new pipes for stdin and stdout, stderr shared; nil and why when it can't.
     private static func spawn(_ executable: String, _ arguments: [String]) -> (child: Child?, why: String?) {
         var input: [Int32] = [-1, -1], output: [Int32] = [-1, -1]
-        guard Darwin.pipe(&input) == 0 else { return (nil, "couldn't be started: no pipe, \(MCPLog.errnoText(errno))") }
-        guard Darwin.pipe(&output) == 0 else {
-            input.forEach { Darwin.close($0) }
+        guard Sys.pipe(&input) == 0 else { return (nil, "couldn't be started: no pipe, \(MCPLog.errnoText(errno))") }
+        guard Sys.pipe(&output) == 0 else {
+            input.forEach { Sys.close($0) }
             return (nil, "couldn't be started: no pipe, \(MCPLog.errnoText(errno))")
         }
         var attributes: posix_spawnattr_t?
@@ -225,11 +224,11 @@ public enum MCPKeeper {
         defer { argv.forEach { free($0) } }
         var pid: pid_t = 0
         let spawned = posix_spawn(&pid, executable, &actions, &attributes, argv, environ)
-        Darwin.close(input[0])
-        Darwin.close(output[1])
+        Sys.close(input[0])
+        Sys.close(output[1])
         guard spawned == 0 else {
-            Darwin.close(input[1])
-            Darwin.close(output[0])
+            Sys.close(input[1])
+            Sys.close(output[0])
             return (nil, "couldn't be started: \(MCPLog.errnoText(spawned))")
         }
         for fd in [input[1], output[0]] {
@@ -253,7 +252,7 @@ public enum MCPKeeper {
     /// Writes what it can of `data` to `fd` (non-blocking); false when the reader has gone.
     private static func flush(_ data: inout Data, to fd: Int32) -> Bool {
         while !data.isEmpty {
-            let count = data.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+            let count = data.withUnsafeBytes { Sys.write(fd, $0.baseAddress, $0.count) }
             if count > 0 {
                 data.removeFirst(count)
                 continue
@@ -268,7 +267,7 @@ public enum MCPKeeper {
     private static func drain(_ fd: Int32, into buffer: inout Data) -> Bool {
         var chunk = [UInt8](repeating: 0, count: 65_536)
         while true {
-            let count = Darwin.read(fd, &chunk, chunk.count)
+            let count = Sys.read(fd, &chunk, chunk.count)
             if count > 0 {
                 buffer.append(contentsOf: chunk[0..<count])
                 continue
@@ -368,7 +367,7 @@ public enum MCPKeeper {
 
             // The client's input once it's said all (a child closes its input when the client's does).
             if !clientOpen || clientGone, toChild.isEmpty || clientGone, var running = child, running.input >= 0 {
-                Darwin.close(running.input)
+                Sys.close(running.input)
                 running.input = -1
                 child = running
             }
@@ -395,7 +394,7 @@ public enum MCPKeeper {
                 usleep(100_000)
             }
             var scratch = [UInt8](repeating: 0, count: 64)
-            if fds[0].revents != 0 { while Darwin.read(events.wake[0], &scratch, scratch.count) > 0 {} }
+            if fds[0].revents != 0 { while Sys.read(events.wake[0], &scratch, scratch.count) > 0 {} }
 
             if readClient >= 0, fds[readClient].revents != 0 {
                 if !drain(clientIn, into: &fromClient) {
@@ -412,7 +411,7 @@ public enum MCPKeeper {
             if let running = child, readChild >= 0, fds[readChild].revents != 0 {
                 if !drain(running.output, into: &fromChild) {
                     // Its end, heard: closed, so the poll doesn't wake for it again.
-                    Darwin.close(running.output)
+                    Sys.close(running.output)
                     child?.output = -1
                     child?.outputEnded = Date()
                 }
@@ -444,8 +443,8 @@ public enum MCPKeeper {
             if running.output >= 0 { _ = drain(running.output, into: &fromChild) }
             for line in lines(&fromChild) where relay.fromChild(line) { toClient += line }
             fromChild = Data()
-            if running.output >= 0 { Darwin.close(running.output) }
-            if running.input >= 0 { Darwin.close(running.input) }
+            if running.output >= 0 { Sys.close(running.output) }
+            if running.input >= 0 { Sys.close(running.input) }
             child = nil
             let why = reaped < 0 ? "ended (its status couldn't be read: \(MCPLog.errnoText(errno)))" : describe(status: status)
             if stopping || !clientOpen || clientGone {

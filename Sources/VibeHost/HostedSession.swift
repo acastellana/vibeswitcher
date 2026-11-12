@@ -368,7 +368,7 @@ public final class HostedSession {
     private func drain(reads: Int = 16, pausing: Bool = true) {
         var buffer = [UInt8](repeating: 0, count: 65_536)
         for _ in 0..<reads {
-            let count = Darwin.read(masterFD, &buffer, buffer.count)
+            let count = Sys.read(masterFD, &buffer, buffer.count)
             if count > 0 {
                 let chunk = Data(buffer[0..<count])
                 ring?.append(chunk)
@@ -557,7 +557,7 @@ public final class HostedSession {
         guard !bytes.isEmpty else { return true }
         guard !closed else { return false }
         if pendingInput.isEmpty {
-            let written = bytes.withUnsafeBytes { Darwin.write(masterFD, $0.baseAddress, $0.count) }
+            let written = bytes.withUnsafeBytes { Sys.write(masterFD, $0.baseAddress, $0.count) }
             if written == bytes.count { return true }
             let rest = written > 0 ? bytes.dropFirst(written) : bytes[...]
             guard written >= 0 || errno == EAGAIN || errno == EINTR else { return false }
@@ -579,7 +579,7 @@ public final class HostedSession {
     }
 
     private func flushInput() {
-        let written = pendingInput.withUnsafeBytes { Darwin.write(masterFD, $0.baseAddress, $0.count) }
+        let written = pendingInput.withUnsafeBytes { Sys.write(masterFD, $0.baseAddress, $0.count) }
         if written > 0 { pendingInput = Data(pendingInput.dropFirst(written)) }
         if pendingInput.isEmpty || (written < 0 && errno != EAGAIN && errno != EINTR) {
             pendingInput = Data()
@@ -810,10 +810,10 @@ public final class HostedSession {
         let groups = Set([info.childPID, tcgetpgrp(masterFD)].filter { $0 > 0 })
         // Before the shell is asked to end: once it has, what it started is launchd's.
         let started = info.isLive ? SessionStrays.descendants(of: info.childPID) : []
-        groups.forEach { Darwin.kill(-$0, SIGHUP) }
+        groups.forEach { Sys.kill(-$0, SIGHUP) }
         SessionStrays.end(session: id, started: started, sparing: groups, keeping: app)
         queue.asyncAfter(deadline: .now() + 5) {
-            for group in groups where Darwin.kill(-group, 0) == 0 { Darwin.kill(-group, SIGKILL) }
+            for group in groups where Sys.kill(-group, 0) == 0 { Sys.kill(-group, SIGKILL) }
         }
     }
 
@@ -840,7 +840,7 @@ public final class HostedSession {
         // in one full suite's runner, 2026-11-01. One not told to end is left alone: a handover's new image reaps it.
         if ending, info.isLive { Self.reap([info.childPID], until: Date().addingTimeInterval(Self.reapPatience)) }
         let fd = masterFD
-        done.notify(queue: queue) { Darwin.close(fd) }
+        done.notify(queue: queue) { Sys.close(fd) }
     }
 
     /// How long a closed session's program, told to end, is looked for: past the SIGKILL `terminate` sends 5 s on,

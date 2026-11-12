@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 /// What a session's agent started that would outlive it: a Bash-tool command in a process group of its own, a

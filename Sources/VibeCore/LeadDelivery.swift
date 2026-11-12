@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 
 /// How a message reaches an agent: steered in while it works (at its next step, without stopping it), typed in
 /// as its next prompt while it's idle (a steer would wait for a turn that never comes).

@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import VibeCore
 
@@ -33,7 +32,7 @@ final class HostLog: @unchecked Sendable {
         let fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0o600)
         guard fd >= 0 else { return }
         _ = line.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
-        Darwin.close(fd)
+        Sys.close(fd)
     }
 
     /// "peer pid 4242 (vibeswitcher-mcp)": the process on the other end of a client's connection.

@@ -214,7 +214,7 @@ public final class PassageListener: WalletListening, @unchecked Sendable {
             let reading = out.reading
             var buffer = [UInt8](repeating: 0, count: 4096)
             while true {
-                let count = Darwin.read(reading.fileDescriptor, &buffer, buffer.count)
+                let count = Sys.read(reading.fileDescriptor, &buffer, buffer.count)
                 if count < 0, errno == EINTR { continue }
                 guard count > 0 else { break }
                 for _ in 0..<buffer[..<count].filter({ $0 == 0x0a }).count { heard() }

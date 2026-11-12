@@ -269,7 +269,7 @@ public final class FlakeLedgerStore: @unchecked Sendable {
         }
         var written = 0
         while written < data.count {
-            let wrote = data.withUnsafeBytes { Darwin.write(fd, $0.baseAddress! + written, data.count - written) }
+            let wrote = data.withUnsafeBytes { Sys.write(fd, $0.baseAddress! + written, data.count - written) }
             if wrote < 0, errno == EINTR { continue }
             guard wrote > 0 else { throw BoardError(text: "\(file) couldn't be appended to (\(String(cString: strerror(errno)))); nothing more was recorded.") }
             written += wrote

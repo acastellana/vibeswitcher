@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 /// Unix-domain socket plumbing shared by the session host and the app.
@@ -58,12 +57,12 @@ public enum UnixSocket {
             var address = try address(path)
             let result = withUnsafePointer(to: &address) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                    Sys.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
                 }
             }
             guard result == 0 else { throw Failure.system("connect", errno) }
         } catch {
-            Darwin.close(fd)
+            Sys.close(fd)
             throw error
         }
         configure(fd)
@@ -86,9 +85,9 @@ public enum UnixSocket {
             }
             guard bound == 0 else { throw Failure.system("bind", errno) }
             guard chmod(path, 0o600) == 0 else { throw Failure.system("chmod", errno) }
-            guard Darwin.listen(fd, SOMAXCONN) == 0 else { throw Failure.system("listen", errno) }
+            guard Sys.listen(fd, SOMAXCONN) == 0 else { throw Failure.system("listen", errno) }
         } catch {
-            Darwin.close(fd)
+            Sys.close(fd)
             throw error
         }
         configure(fd)

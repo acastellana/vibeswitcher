@@ -3,7 +3,6 @@
 // the session host says this process's session holds (see `LeadVault`), `--role` and `--task` only say what it was
 // started as. The tools live in `LeadToolset`; this file connects them to the session host,
 // the steer inboxes and the hooks' state.
-import Darwin
 import Foundation
 import VibeCore
 

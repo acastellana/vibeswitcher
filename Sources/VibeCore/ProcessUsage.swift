@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 /// A process's CPU use, as `ps -o pid=,ppid=,pgid=,uid=,time=,etime=` gives it, read from the kernel (no `ps`

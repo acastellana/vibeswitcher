@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import VibeCore
 
@@ -51,7 +50,7 @@ final class ClientConnection {
     func start() {
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         source.setEventHandler { [weak self] in self?.readAvailable() }
-        source.setCancelHandler { [fd] in Darwin.close(fd) }
+        source.setCancelHandler { [fd] in Sys.close(fd) }
         readSource = source
         source.resume()
     }
@@ -108,7 +107,7 @@ final class ClientConnection {
     private func flush() {
         while let head = pending.first {
             let written = head.data.withUnsafeBytes { raw in
-                Darwin.write(fd, raw.baseAddress! + headWritten, raw.count - headWritten)
+                Sys.write(fd, raw.baseAddress! + headWritten, raw.count - headWritten)
             }
             if written > 0 {
                 headWritten += written
@@ -152,7 +151,7 @@ final class ClientConnection {
         }
         guard deliver() else { return }
         while !closed, bytesRead < 256 * 1024, framesRead < 64 {
-            let count = Darwin.read(fd, &buffer, buffer.count)
+            let count = Sys.read(fd, &buffer, buffer.count)
             if count > 0 {
                 bytesRead += count
                 onRead?()

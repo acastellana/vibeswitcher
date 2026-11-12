@@ -459,7 +459,7 @@ public enum UsageStatusLine {
             }
             for event in fired where Int32(event.filter) == EVFILT_READ {
                 while true {
-                    let read = Darwin.read(reader, &chunk, chunk.count)
+                    let read = Sys.read(reader, &chunk, chunk.count)
                     if read > 0 { output.append(contentsOf: chunk[0..<read]); continue }
                     if read < 0 && errno == EINTR { continue }
                     if read == 0 || errno != EAGAIN {
@@ -473,7 +473,7 @@ public enum UsageStatusLine {
                 // Its reader gone (EV_EOF): the command closed its stdin or exited.
                 if event.flags & UInt16(EV_EOF) != 0 { stopWriting(); continue }
                 while !pending.isEmpty {
-                    let wrote = pending.withUnsafeBytes { Darwin.write(writer, $0.baseAddress, $0.count) }
+                    let wrote = pending.withUnsafeBytes { Sys.write(writer, $0.baseAddress, $0.count) }
                     if wrote > 0 { pending = pending.dropFirst(wrote); continue }
                     if wrote < 0 && errno == EINTR { continue }
                     if wrote < 0 && errno == EAGAIN { break }

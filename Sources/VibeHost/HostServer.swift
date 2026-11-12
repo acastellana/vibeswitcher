@@ -1,5 +1,3 @@
-import CryptoKit
-import Darwin
 import Foundation
 import VibeCore
 
@@ -144,7 +142,7 @@ public final class HostServer {
         lockFD = open(config.lockPath, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard lockFD >= 0 else { throw Failure.lock(errno) }
         guard flock(lockFD, LOCK_EX | LOCK_NB) == 0 else {
-            Darwin.close(lockFD)
+            Sys.close(lockFD)
             lockFD = -1
             throw Failure.alreadyRunning
         }
@@ -163,7 +161,7 @@ public final class HostServer {
         listenFD = state.listenFD
         for fd in [lockFD, listenFD] { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
         // The socket keeps the backlog the build that first listened gave it (16, before): listening again sets ours.
-        _ = Darwin.listen(listenFD, SOMAXCONN)
+        _ = Sys.listen(listenFD, SOMAXCONN)
         var state = state
         let secrets = HostHandover.takeSecrets(from: &state)
         queue.sync {
@@ -201,7 +199,7 @@ public final class HostServer {
         source.resume()
         ownerWatch = source
         // Gone before the watch began: no exit comes.
-        queue.async { if Darwin.kill(owner, 0) != 0, errno == ESRCH { self.ownerGone(owner) } }
+        queue.async { if Sys.kill(owner, 0) != 0, errno == ESRCH { self.ownerGone(owner) } }
     }
 
     private func ownerGone(_ owner: pid_t) {
@@ -219,7 +217,7 @@ public final class HostServer {
         let left = programs.filter { pid in
             var status: Int32 = 0
             let reaped = waitpid(pid, &status, WNOHANG)
-            return (reaped == 0 || (reaped < 0 && errno == EINTR)) || Darwin.kill(-pid, 0) == 0
+            return (reaped == 0 || (reaped < 0 && errno == EINTR)) || Sys.kill(-pid, 0) == 0
         }
         guard left.isEmpty || Date() >= deadline else {
             return queue.asyncAfter(deadline: .now() + 0.1) { self.exitOnceEnded(left, deadline: deadline) }
@@ -246,8 +244,8 @@ public final class HostServer {
                 session.close()
             }
             self.sessions = [:]
-            if self.listenFD >= 0 { Darwin.close(self.listenFD); unlink(self.config.socketPath) }
-            if self.lockFD >= 0 { Darwin.close(self.lockFD) }
+            if self.listenFD >= 0 { Sys.close(self.listenFD); unlink(self.config.socketPath) }
+            if self.lockFD >= 0 { Sys.close(self.lockFD) }
             self.listenFD = -1
             self.lockFD = -1
         }
@@ -258,14 +256,14 @@ public final class HostServer {
 
     private func acceptAll() {
         while true {
-            let fd = Darwin.accept(listenFD, nil, nil)
+            let fd = Sys.accept(listenFD, nil, nil)
             guard fd >= 0 else { return }
             guard UnixSocket.peerUID(fd) == getuid() else {
-                Darwin.close(fd)
+                Sys.close(fd)
                 continue
             }
             guard clients.count < max(1, config.maxClients) else {
-                Darwin.close(fd)
+                Sys.close(fd)
                 continue
             }
             UnixSocket.configure(fd)
@@ -749,7 +747,7 @@ public final class HostServer {
                     throw HostHandover.exec(executable, arguments: arguments, inherit: state.descriptors)
                 } catch {
                     if parsersStopped { self.sessions.values.forEach { $0.resumeParser() } }
-                    if let secretFD { Darwin.close(secretFD) }
+                    if let secretFD { Sys.close(secretFD) }
                     fail(error)
                     // Answered ok already when the exec itself failed: clients waiting for the new build come back to
                     // this one's welcome.

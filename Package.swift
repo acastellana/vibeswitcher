@@ -5,6 +5,13 @@ import PackageDescription
 // initializer: `refuseTheAccountRoot` in its TestSupport.swift).
 let testSettings: [SwiftSetting] = [.enableExperimentalFeature("SymbolLinkageMarkers")]
 
+// swift-crypto: CryptoKit's API where there is no CryptoKit. The package names it on both systems, so Package.resolved
+// holds the same pins on the Mac and on Linux; VibeCore and VibeHost depend on it only in a build for Linux (the
+// condition below), and a build for the Mac uses CryptoKit. Sources/VibeCore/PlatformExport.swift exports the one
+// or the other to every file.
+let swiftCrypto: Package.Dependency = .package(url: "https://github.com/apple/swift-crypto.git", exact: "3.15.1")
+let crypto: Target.Dependency = .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux]))
+
 #if os(Linux)
 // On Linux (the system this manifest is read on, not the one built for) the package is only the portable targets
 // that compile there so far: docs/superpowers/plans/2026-11-12-v2-stage-1-core-on-linux.md. The Mac's package is
@@ -21,12 +28,10 @@ let portableTargets: [Target] = [
     // Each of `notYetPortableTargets` moves up here when it compiles on Linux: VibeCore (the plan's Task 11, with
     // VibeCoreTests in Task 12), then VibeHost and the three executables (Task 13).
 ]
-// VIBE_LINUX_ALL=1 adds the portable targets that don't compile on Linux yet, only to count their errors, and with
-// them swift-crypto: CryptoKit's API where there is no CryptoKit. A build with it adds swift-crypto's pins to
-// Package.resolved, which is the Mac's file too: put the file back after it (`git restore Package.resolved`). The
-// pins aren't committed while the Mac's package doesn't name swift-crypto, since a Mac build can take them out again.
+// VIBE_LINUX_ALL=1 adds the portable targets that don't compile on Linux yet, only to count their errors
+// (scripts/ci/linux-core-errors.sh). The package's dependencies are the same with and without it, and so is
+// Package.resolved.
 let measuring = Context.environment["VIBE_LINUX_ALL"] == "1"
-let crypto: Target.Dependency = .product(name: "Crypto", package: "swift-crypto")
 let notYetPortableTargets: [Target] = [
     .target(name: "VibeCore", dependencies: ["VibePlatform", crypto]),
     .target(name: "VibeHost", dependencies: ["VibeCore", .product(name: "SwiftTerm", package: "SwiftTerm"), crypto]),
@@ -38,10 +43,11 @@ let notYetPortableTargets: [Target] = [
 let package = Package(
     name: "VibeSwitcher",
     dependencies: [
-        // Named before a target here uses it, as the Mac's package names it: Package.resolved then holds the same
-        // pins on both systems (SwiftPM removes the file when a package names no dependency).
+        // Both named before a target here uses them, as the Mac's package names them: Package.resolved then holds
+        // the same pins on both systems (SwiftPM removes a pin when the package no longer names its dependency).
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.19.0"),
-    ] + (measuring ? [.package(url: "https://github.com/apple/swift-crypto.git", exact: "3.15.1")] : []),
+        swiftCrypto,
+    ],
     targets: portableTargets + (measuring ? notYetPortableTargets : []),
     swiftLanguageModes: [.v5]
 )
@@ -52,14 +58,15 @@ let package = Package(
     dependencies: [
         // Terminal emulator: the window's terminal view and the host's headless terminal.
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.19.0"),
+        swiftCrypto,
     ],
     targets: [
         // Every system call the shared code makes, one implementation per system.
         .target(name: "VibePlatform"),
         // Shared model, status rules, process table and hook installer.
-        .target(name: "VibeCore", dependencies: ["VibePlatform"]),
+        .target(name: "VibeCore", dependencies: ["VibePlatform", crypto]),
         // The session host's internals: PTYs, replay buffers, the socket server.
-        .target(name: "VibeHost", dependencies: ["VibeCore", .product(name: "SwiftTerm", package: "SwiftTerm")]),
+        .target(name: "VibeHost", dependencies: ["VibeCore", .product(name: "SwiftTerm", package: "SwiftTerm"), crypto]),
         // The menu bar app.
         .executableTarget(name: "VibeSwitcher", dependencies: ["VibeCore", .product(name: "SwiftTerm", package: "SwiftTerm")]),
         // Background process that keeps window sessions alive across app restarts.

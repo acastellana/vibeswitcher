@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// Which session a request means. A tty outlives its session: when an agent exits, the tab (or later a

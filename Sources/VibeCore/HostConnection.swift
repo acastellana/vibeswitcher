@@ -1,5 +1,3 @@
-import CryptoKit
-import Darwin
 import Foundation
 
 /// The app's end of the session host socket. Every call and callback is on `queue` (a serial one), but `send`, which may
@@ -70,7 +68,7 @@ public final class HostConnection: @unchecked Sendable {
     /// `patience`: how long to retry a refused connect (see `UnixSocket.connect`); the app's own connection, made on
     /// the main thread, doesn't wait.
     public convenience init(path: String, queue: DispatchQueue, appKey: SymmetricKey? = HostConnection.appKey, patience: TimeInterval = 0) throws {
-        try self.init(path: path, queue: queue, appKey: appKey, patience: patience, write: { Darwin.write($0, $1, $2) })
+        try self.init(path: path, queue: queue, appKey: appKey, patience: patience, write: { Sys.write($0, $1, $2) })
     }
 
     init(path: String, queue: DispatchQueue, appKey: SymmetricKey?, patience: TimeInterval = 0, write: @escaping Write,
@@ -87,7 +85,7 @@ public final class HostConnection: @unchecked Sendable {
         source.setEventHandler { [weak self] in self?.readAvailable() }
         sources.enter()
         source.setCancelHandler { [sources] in sources.leave() }
-        sources.notify(queue: reading) { [fd] in Darwin.close(fd) }
+        sources.notify(queue: reading) { [fd] in Sys.close(fd) }
         source.resume()
         writer.failed = { [weak self, queue] in queue.async { self?.finish(notify: true) } }
     }
@@ -196,7 +194,7 @@ public final class HostConnection: @unchecked Sendable {
         var buffer = [UInt8](repeating: 0, count: 65_536)
         var received = 0
         while sendingState({ !closed && !paused }), received < 256 * 1024 {
-            let count = Darwin.read(fd, &buffer, buffer.count)
+            let count = Sys.read(fd, &buffer, buffer.count)
             if count > 0 {
                 received += count
                 decoder.append(Data(buffer[0..<count]))

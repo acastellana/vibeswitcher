@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// A phone allowed to use Phone Access. Only a hash of its token is kept.

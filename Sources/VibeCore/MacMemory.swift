@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 /// The Mac's memory as start_worker, audit and auto_advance's starts weigh it beside the load: the kernel's memory

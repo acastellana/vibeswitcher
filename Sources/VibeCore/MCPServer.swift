@@ -1,5 +1,3 @@
-import CryptoKit
-import Darwin
 import Foundation
 
 /// A tool as `tools/list` describes it; its arguments are an object of named properties.
@@ -237,7 +235,7 @@ public enum MCPHandover {
         var template = Array((NSTemporaryDirectory() as NSString).appendingPathComponent("vibeswitcher-mcp-handover.XXXXXX").utf8CString)
         let fd = mkstemp(&template)
         guard fd >= 0 else { return "no state file: \(String(cString: strerror(errno)))" }
-        defer { Darwin.close(fd) }
+        defer { Sys.close(fd) }
         // Only this descriptor holds it: nothing to clean up, nothing anyone else can open.
         unlink(template)
         _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
@@ -258,7 +256,7 @@ public enum MCPHandover {
         let named = Int32(String(cString: value))
         unsetenv(variable)
         guard let fd = named, fd > 2, fcntl(fd, F_GETFD) != -1 else { return nil }
-        defer { Darwin.close(fd) }
+        defer { Sys.close(fd) }
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 65_536)
         while true {
@@ -278,7 +276,7 @@ public enum MCPHandover {
         data.withUnsafeBytes { raw in
             var written = 0
             while written < raw.count {
-                let count = Darwin.write(fd, raw.baseAddress! + written, raw.count - written)
+                let count = Sys.write(fd, raw.baseAddress! + written, raw.count - written)
                 if count < 0, errno == EINTR { continue }
                 guard count > 0 else { return false }
                 written += count
@@ -291,8 +289,8 @@ public enum MCPHandover {
     /// when it does, else why not.
     static func probe(_ executable: String, stateFD: Int32, timeout: TimeInterval) -> String? {
         var pipe: [Int32] = [-1, -1]
-        guard Darwin.pipe(&pipe) == 0 else { return "no pipe for its probe" }
-        defer { Darwin.close(pipe[0]) }
+        guard Sys.pipe(&pipe) == 0 else { return "no pipe for its probe" }
+        defer { Sys.close(pipe[0]) }
         var attributes: posix_spawnattr_t?
         posix_spawnattr_init(&attributes)
         defer { posix_spawnattr_destroy(&attributes) }
@@ -312,7 +310,7 @@ public enum MCPHandover {
         defer { argv.forEach { free($0) } }
         var pid: pid_t = 0
         let spawned = posix_spawn(&pid, executable, &actions, &attributes, argv, environ)
-        Darwin.close(pipe[1])
+        Sys.close(pipe[1])
         guard spawned == 0 else { return "it couldn't start: \(String(cString: strerror(spawned)))" }
 
         _ = fcntl(pipe[0], F_SETFL, fcntl(pipe[0], F_GETFL) | O_NONBLOCK)
@@ -341,7 +339,7 @@ public enum MCPHandover {
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 4_096)
         while true {
-            let count = Darwin.read(fd, &buffer, buffer.count)
+            let count = Sys.read(fd, &buffer, buffer.count)
             guard count > 0 else { return data }
             data.append(contentsOf: buffer[0..<count])
         }
@@ -588,7 +586,7 @@ public final class MCPServer: @unchecked Sendable {
     /// Wakes the input loop (a call ended, or it's to stop). Under `lock`: `serve` closes the pipe under it too, so the
     /// byte never goes to a descriptor closed meanwhile, or to the file that took its number. The pipe doesn't block.
     private func nudge() {
-        if wake >= 0 { _ = Darwin.write(wake, [UInt8(1)], 1) }
+        if wake >= 0 { _ = Sys.write(wake, [UInt8(1)], 1) }
     }
 
     /// `stop` on any of `signals`: each caught (so a command a call starts gets it at its default, not ignored) and
@@ -681,13 +679,13 @@ public final class MCPServer: @unchecked Sendable {
             writing.lock()
             var sent = 0
             while sent < line.count {
-                let count = line[sent...].withUnsafeBytes { Darwin.write(output, $0.baseAddress, $0.count) }
+                let count = line[sent...].withUnsafeBytes { Sys.write(output, $0.baseAddress, $0.count) }
                 if count > 0 { sent += count } else if count < 0 && errno == EINTR { continue } else { break }
             }
             writing.unlock()
         }
         var wakeup: [Int32] = [-1, -1]
-        if Darwin.pipe(&wakeup) == 0 {
+        if Sys.pipe(&wakeup) == 0 {
             for fd in wakeup {
                 _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
                 _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
@@ -704,7 +702,7 @@ public final class MCPServer: @unchecked Sendable {
             lock.lock()
             wake = -1
             announce = nil
-            for fd in wakeup where fd >= 0 { Darwin.close(fd) }
+            for fd in wakeup where fd >= 0 { Sys.close(fd) }
             lock.unlock()
         }
         if let changed = toolsChanged() { respond(changed) }
@@ -747,14 +745,14 @@ public final class MCPServer: @unchecked Sendable {
                 MCPLog.note("serve: poll failed with \(MCPLog.errnoText(code)); ending, \(MCPLog.descriptors())")
                 return
             }
-            if fds[1].revents != 0 { while Darwin.read(wakeup[0], &chunk, chunk.count) > 0 {} }
+            if fds[1].revents != 0 { while Sys.read(wakeup[0], &chunk, chunk.count) > 0 {} }
             guard fds[0].revents != 0 else { continue }
             if fds[0].revents & Int16(POLLNVAL) != 0 {
                 // Not the client's doing: something in this process closed the descriptor it reads.
                 MCPLog.note("serve: input fd \(input) is no longer open (POLLNVAL: closed in this process); ending, \(MCPLog.descriptors())")
                 return
             }
-            let count = Darwin.read(input, &chunk, chunk.count)
+            let count = Sys.read(input, &chunk, chunk.count)
             let code = errno
             if count > 0 {
                 pending.append(contentsOf: chunk[0..<count])

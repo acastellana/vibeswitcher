@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 /// What a command in a settings or plugin file runs, for the config seal: the files that are code, not what the

@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 /// The tool server's own log (`vibeswitcher-mcp`): its start, its switches of builds, the tool calls that failed (with
@@ -69,7 +68,7 @@ public final class MCPLog: @unchecked Sendable {
         if size > 0, size + line.count > maxBytes { rotate() }
         var sent = 0
         while sent < line.count {
-            let count = line[sent...].withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+            let count = line[sent...].withUnsafeBytes { Sys.write(fd, $0.baseAddress, $0.count) }
             if count > 0 { sent += count } else if count < 0 && errno == EINTR { continue } else { break }
         }
         size += sent
@@ -161,7 +160,7 @@ public final class MCPLog: @unchecked Sendable {
             var action = sigaction()
             action.__sigaction_u.__sa_handler = { number in
                 if MCPLog.crashFD >= 0, number > 0, number < 32, let line = MCPLog.crashLines[Int(number)] {
-                    _ = Darwin.write(MCPLog.crashFD, line, strlen(line))
+                    _ = Sys.write(MCPLog.crashFD, line, strlen(line))
                 }
                 signal(number, SIG_DFL)
                 raise(number)

@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 /// What a worker is asked to do: the bounded contract it runs and the verifier checks.

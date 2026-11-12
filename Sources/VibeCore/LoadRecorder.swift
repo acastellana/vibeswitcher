@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 /// The Mac's working conditions, once a minute, and each merge's test run, kept so the leads' limits and the boost

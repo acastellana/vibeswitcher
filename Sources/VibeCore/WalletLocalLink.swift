@@ -115,7 +115,7 @@ public struct WalletLocalLink: WalletTransport {
     /// link followed: every one a directory of this user's that no one else can write, and the last with no group or
     /// other permission at all (0700). Throws what's wrong, in a few words.
     func open(_ name: String, events: Bool = false) throws -> Folder {
-        var current = Darwin.open(home, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        var current = Sys.open(home, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard current >= 0 else { throw Failure(description: "the home folder can't be opened") }
         let parts = VibePaths.walletLocalTransportParts + [name]
         for (index, part) in parts.enumerated() {

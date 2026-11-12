@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// A code block in a reply that's a shell command, as the prompt that runs it in the session (`! command`: Claude

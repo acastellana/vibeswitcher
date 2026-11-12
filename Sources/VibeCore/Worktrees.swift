@@ -93,7 +93,7 @@ final class ShellPipe: @unchecked Sendable {
 
     init() throws {
         var fds: [Int32] = [-1, -1]
-        guard Darwin.pipe(&fds) == 0 else {
+        guard Sys.pipe(&fds) == 0 else {
             let code = errno
             MCPLog.note("no pipe for a command: \(MCPLog.errnoText(code)), \(MCPLog.descriptors())")
             throw Failure(code: code)

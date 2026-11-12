@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 /// What the archived tasks add to the scorecard (`LeadScorecard`): their parts of its sums, kept on the board as they
@@ -243,7 +242,7 @@ extension BoardStore {
     private func readArchive(repair: Bool) throws -> ArchiveContents {
         guard let data = FileManager.default.contents(atPath: archiveFile) else { return ArchiveContents() }
         let whole = data.lastIndex(of: 0x0A).map { $0 + 1 } ?? 0
-        if repair, whole < data.count, Darwin.truncate(archiveFile, off_t(whole)) != 0 {
+        if repair, whole < data.count, Sys.truncate(archiveFile, off_t(whole)) != 0 {
             throw BoardError(text: "\(archiveFile) ends in a line cut short, and it couldn't be cut off (\(String(cString: strerror(errno)))); nothing was archived.")
         }
         let decoder = JSONDecoder()
@@ -286,7 +285,7 @@ extension BoardStore {
         defer { close(fd) }
         var written = 0
         while written < data.count {
-            let wrote = data.withUnsafeBytes { Darwin.write(fd, $0.baseAddress! + written, data.count - written) }
+            let wrote = data.withUnsafeBytes { Sys.write(fd, $0.baseAddress! + written, data.count - written) }
             if wrote < 0, errno == EINTR { continue }
             guard wrote > 0 else { throw BoardError(text: "\(archiveFile) couldn't be appended to (\(String(cString: strerror(errno)))); nothing was archived.") }
             written += wrote

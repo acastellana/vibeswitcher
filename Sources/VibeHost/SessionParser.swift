@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import SwiftTerm
 import VibeCore
@@ -277,9 +276,9 @@ final class ParserLink {
         defer { (argv + envp).forEach { free($0) } }
         var pid: pid_t = 0
         let spawned = posix_spawn(&pid, launcher, &actions, &attributes, argv, envp)
-        Darwin.close(theirs)
+        Sys.close(theirs)
         guard spawned == 0 else {
-            Darwin.close(ours)
+            Sys.close(ours)
             return nil
         }
         _ = fcntl(ours, F_SETFL, fcntl(ours, F_GETFL) | O_NONBLOCK)
@@ -297,7 +296,7 @@ final class ParserLink {
         source.setEventHandler { [weak self] in
             guard let self else { return }
             while true {
-                let count = Darwin.read(self.fd, &buffer, buffer.count)
+                let count = Sys.read(self.fd, &buffer, buffer.count)
                 if count < 0, errno == EAGAIN { break }
                 if count < 0, errno == EINTR { continue }
                 guard count > 0 else {
@@ -426,7 +425,7 @@ final class ParserLink {
 
     private func flush() {
         while !outbox.isEmpty {
-            let written = outbox.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+            let written = outbox.withUnsafeBytes { Sys.write(fd, $0.baseAddress, $0.count) }
             if written > 0 {
                 outbox = Data(outbox.dropFirst(written))
                 continue
@@ -475,8 +474,8 @@ final class ParserLink {
         readSource?.cancel()
         done.enter()
         readFinished.notify(queue: readQueue) { done.leave() }
-        done.notify(queue: readQueue) { [fd] in Darwin.close(fd) }
-        Darwin.kill(pid, SIGKILL)
+        done.notify(queue: readQueue) { [fd] in Sys.close(fd) }
+        Sys.kill(pid, SIGKILL)
         var status: Int32 = 0
         while waitpid(pid, &status, 0) < 0, errno == EINTR {}
         for number in locked({ Array(pending.keys) }) { answer(number, nil) }

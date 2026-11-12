@@ -4254,7 +4254,7 @@ public final class LeadToolset: MCPToolset {
         var found: [String: [SessionStrays.Found]] = [:]
         for ending in endings where ending.failure != nil {
             let processes = sessionProcesses(ending.session.id)
-            processes.forEach { Darwin.kill($0.pid, SIGTERM) }
+            processes.forEach { Sys.kill($0.pid, SIGTERM) }
             found[ending.session.id] = processes
         }
         var running = found.values.joined().filter(SessionStrays.isRunning)
@@ -4263,7 +4263,7 @@ public final class LeadToolset: MCPToolset {
             usleep(50_000)
             running = running.filter(SessionStrays.isRunning)
         }
-        running.forEach { Darwin.kill($0.pid, SIGKILL) }
+        running.forEach { Sys.kill($0.pid, SIGKILL) }
         // The host sees the session end once its agent's process is gone.
         let ids = Set(found.filter { !$0.value.isEmpty }.keys)
         var live = ids
@@ -4281,7 +4281,7 @@ public final class LeadToolset: MCPToolset {
                               itself: "itself, after the host didn't (\(failure)): \(processes.count) process\(processes.count == 1 ? "" : "es") carrying its session's id")
             }
             // What still runs of it: its agent, and those of its processes that outlived the signals.
-            let pids = ([ending.session.pid].compactMap { $0 }.filter { Darwin.kill($0, 0) == 0 }
+            let pids = ([ending.session.pid].compactMap { $0 }.filter { Sys.kill($0, 0) == 0 }
                         + processes.filter(SessionStrays.isRunning).map(\.pid))
             let remaining = pids.reduce(into: [Int32]()) { if !$0.contains($1) { $0.append($1) } }
             let named = remaining.isEmpty ? "" : "; still running: " + remaining.prefix(8).map { "pid \($0) (\(Self.command(of: $0)))" }.joined(separator: ", ")
@@ -4602,7 +4602,7 @@ public final class LeadToolset: MCPToolset {
     private func listed() throws -> [LeadSessionInfo] {
         try runtime.sessions().map { session in
             var session = session
-            if session.live, let pid = session.pid, Darwin.kill(pid, 0) != 0, errno == ESRCH { session.live = false }
+            if session.live, let pid = session.pid, Sys.kill(pid, 0) != 0, errno == ESRCH { session.live = false }
             return session
         }
     }
