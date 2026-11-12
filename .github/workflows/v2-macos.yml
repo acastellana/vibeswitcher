@@ -68,7 +68,7 @@ jobs:
           sysctl -n hw.ncpu
           csrutil status || true
       - name: Tests
-        run: bash scripts/ci/macos-tests.sh VibeCoreTests 2>&1 | tee test.log
+        run: bash scripts/ci/macos-tests.sh 'VibeCoreTests|VibeNodeTests' 2>&1 | tee test.log
       - name: Keep the log
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

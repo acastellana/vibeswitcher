@@ -9,7 +9,7 @@ concurrency:
   group: v2-linux-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  linux:
+  platform:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -39,7 +39,37 @@ jobs:
         run: |
           swift --version
           node --version
-      - name: Build what builds on Linux
-        run: swift build --build-system native --force-resolved-versions
       - name: Tests
-        run: bash scripts/test.sh
+        run: bash scripts/test.sh --filter 'VibePlatformTests'
+  core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Check the workflows
+        run: bash scripts/ci/check-workflows.sh
+      - name: Swift, the version in .swift-version
+        run: |
+          wanted=$(cat .swift-version)
+          if swift --version 2>&1 | grep -q "Swift version $wanted "; then
+            echo "the image's Swift is $wanted"
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y gnupg2 libcurl4-openssl-dev libsqlite3-dev libxml2-dev libz3-dev
+          cd "$RUNNER_TEMP"
+          curl -fsSLO https://download.swift.org/swiftly/linux/swiftly-1.2.0-x86_64.tar.gz
+          echo "0b26b568811404374c7d7f07276b6aad4145db5d1893a45f307de6a94ca8d9c3  swiftly-1.2.0-x86_64.tar.gz" | sha256sum -c -
+          tar zxf swiftly-1.2.0-x86_64.tar.gz
+          ./swiftly init --assume-yes --quiet-shell-followup --skip-install
+          . "$HOME/.local/share/swiftly/env.sh"
+          swiftly install --use --assume-yes "$wanted"
+          echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+      - name: Versions
+        run: |
+          swift --version
+          node --version
+      - name: Tests
+        run: bash scripts/test.sh --filter 'VibeCoreTests|VibeNodeTests'
