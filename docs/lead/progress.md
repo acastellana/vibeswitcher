@@ -2782,3 +2782,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 19:28 Merged a-vs-shell-command: A vs-shell command's outcome reaches the agent that asked: exit status and the end of its output (build 6edb56ed9c9c)
 - 2026-11-12 19:28 Automatically (auto_advance): Merged a-vs-shell-command (A vs-shell command's outcome reaches the agent that asked: exit status and the end of its output) into main at f2217cf7, on its passing audit and the full test run.
 - 2026-11-12 19:28 Automatically (auto_advance): Cleaned up a-vs-shell-command (freed 3.1 GB of build output and temporary folders). It stays done.
+- 2026-11-12 19:45 Automatically (auto_advance): Didn't cleanup|an-animated-explainer: fatal: '/Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/an-animated-explainer' is not a working tree
+- 2026-11-12 19:45 Update: Installed at 19:45: blocked merges get noticed, and card commands report how they ended — **Live in your app since the 19:45 install.** The board is empty: nothing running, nothing waiting.
+- 2026-11-12 19:45 Update: Correction: the empty an-animated-explainer folder was not removed — The 19:45 update says I removed the empty `an-animated-explainer` folder. That's wrong: the permission check refused the removal, so the folder is still there and the repeated cleanup error continues.…
