@@ -106,6 +106,13 @@ ps_denied() { (( $1 == 126 || $1 == 127 )); }
 # though it lives. Only "No such process" is gone.
 process_alive() {
     local err
+    # Linux: a zombie (ended, not yet waited for) is gone. kill -0 still reaches one, and an owner killed outright stays
+    # one while its parent doesn't wait: Foundation there waits for a child only once every process it started has
+    # closed the socket it inherited (the Mac's waits at once). Its state follows the name's last ")" in /proc.
+    if [[ -n $on_linux ]]; then
+        local stat
+        stat=$(cat "/proc/$1/stat" 2> /dev/null) && [[ ${stat##*) } == Z* ]] && return 1
+    fi
     err=$(kill -0 "$1" 2>&1) && return 0
     [[ $err != *"No such process"* ]]
 }

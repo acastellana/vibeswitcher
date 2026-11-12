@@ -225,7 +225,18 @@ fi
 free_memory() {
     echo "${TEST_UNDER_LOAD_FAKE_MEMORY:-$(memory_pressure -Q | sed -nE 's/.*free percentage: *([0-9]+)%.*/\1/p')}"
 }
+# Linux has no memory_pressure: the share of memory free is /proc/meminfo's MemAvailable of MemTotal.
+if [[ -n $on_linux ]]; then
+    free_memory() {
+        echo "${TEST_UNDER_LOAD_FAKE_MEMORY:-$(awk '$1 == "MemTotal:" { t = $2 } $1 == "MemAvailable:" { a = $2 } END { if (t > 0) print int(a * 100 / t) }' /proc/meminfo)}"
+    }
+fi
 memory=$(free_memory)
+if [[ -n $on_linux ]] && [[ -z $memory || $memory -lt $memory_floor ]]; then
+    echo "not starting: only ${memory:-?} % of memory is free (under the floor of $memory_floor %). Wait until" \
+        "/proc/meminfo's MemAvailable is at least $memory_floor % of its MemTotal (another session's build or test run finishing)."
+    exit 1
+fi
 if [[ -z $memory || $memory -lt $memory_floor ]]; then
     echo "not starting: only ${memory:-?} % of memory is free (under the floor of $memory_floor %). Wait until" \
         "\`memory_pressure -Q\` shows at least $memory_floor % free (another session's build or test run finishing)."
@@ -253,6 +264,8 @@ fi
 # vs-heavy and its supervisor (an exec keeps the fd) until the run is over, a kill -9 too.
 if [[ $inner -eq 0 ]]; then
     lock_dir=${VIBESWITCHER_TEST_LOCK_DIR:-/private/tmp/vibeswitcher-$(id -u)}
+    # Linux has no /private/tmp: vs-heavy keeps its folder under /tmp itself (Resources/bin/vs-heavy).
+    [[ -n $on_linux && -z ${VIBESWITCHER_TEST_LOCK_DIR:-} ]] && lock_dir=/tmp/vibeswitcher-$(id -u)
     while [[ $lock_dir == */ && $lock_dir != / ]]; do lock_dir=${lock_dir%/}; done
     mkdir -p -m 700 "$lock_dir" || { echo "can't make $lock_dir for the load-run lock"; exit 1; }
     [[ -O $lock_dir && ! -L $lock_dir ]] || { echo "$lock_dir isn't a folder of yours: the load-run lock can't be kept there"; exit 1; }
@@ -384,8 +397,22 @@ if [[ ${#command[@]} -eq 0 ]]; then
     fi
     bin=$(swift build $(swiftpm_options) --show-bin-path 2>/dev/null 8>&- | tail -n 1)
     [[ -d $bin ]] || { echo "no build folder at ${bin:-?} (swift build --show-bin-path)"; exit 1; }
+    # Linux has no xcrun or swiftpm-testing-helper: a test bundle is an executable that runs its own tests, as `swift
+    # test` runs it there. `linux_test_runner` takes the helper's arguments (`run_bundles`) and runs the executable so.
+    if [[ -n $on_linux ]]; then
+        linux_test_runner() {
+            local filter=()
+            while [[ $1 == --* ]]; do
+                [[ $1 == --filter ]] && filter=(--filter "$2")
+                shift 2
+            done
+            "$@" ${filter[@]+"${filter[@]}"}
+        }
+        helper=linux_test_runner
+    else
     helper="$(dirname "$(xcrun --find swift)")/../libexec/swift/pm/swiftpm-testing-helper"
     [[ -x $helper ]] || { echo "no test runner at $helper"; exit 1; }
+    fi
     # The test bundles the build produced, as `swift test` would run them: the deprecated native build system's one
     # <Package>PackageTests.xctest holding every test target, or Swift Build's (the default since Swift 6.4) one
     # <Target>.xctest per test target. Which is in $bin says which; the package's test targets (swift package describe)
@@ -403,8 +430,15 @@ if [[ ${#command[@]} -eq 0 ]]; then
         for target in $targets; do bundles+=("$bin/$target.xctest"); done
         layout="one bundle per test target ($(tr '\n' ' ' <<< "$targets" | sed 's/ $//'); Swift Build)"
     fi
+    # Linux: the native build system's bundle is one executable file, not a folder.
+    if [[ -n $on_linux && -f $bin/${package}PackageTests.xctest ]]; then
+        bundles=("$bin/${package}PackageTests.xctest")
+        layout="one bundle, ${package}PackageTests.xctest (the native build system)"
+    fi
     for bundle in "${bundles[@]}"; do
         executable=$bundle/Contents/MacOS/$(basename "$bundle" .xctest)
+        # Linux: the bundle is the executable itself.
+        [[ -n $on_linux ]] && executable=$bundle
         made=$(ls -d "$bin"/*.xctest 2>/dev/null | tr '\n' ' ')
         [[ -x $executable ]] || { echo "no test bundle at $executable: the build made ${made:-none}"; exit 1; }
     done
@@ -561,6 +595,8 @@ else
             [[ -e $scratch/stopping || -e $scratch/disk-low || -e $scratch/memory-low ]] && return 130
             name=$(basename "$bundle" .xctest)
             executable=$bundle/Contents/MacOS/$name
+            # Linux: the bundle is the executable itself.
+            [[ -n $on_linux ]] && executable=$bundle
             args=(--test-bundle-path "$executable")
             [[ -n $filter ]] && args+=(--filter "$filter")
             echo "=== $name" >> "$log"

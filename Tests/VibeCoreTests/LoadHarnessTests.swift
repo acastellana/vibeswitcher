@@ -423,9 +423,18 @@ import Testing
     @Test func aSuiteRunRecordsItsResultForTheDoneCheck() async throws {
         let copy = temp.url("repo"), tools = temp.url("toolchain"), bin = temp.url("bin"), developer = temp.url("developer")
         let fm = FileManager.default
+        #if os(Linux)
+        // Linux has no xcrun or swiftpm-testing-helper: there the native build system's bundle is one executable that
+        // runs its own tests (scripts/test-under-load.sh's `linux_test_runner`), so the fake runner is the bundle.
+        let runner = bin.appendingPathComponent("FakePackageTests.xctest"), bundle: [(URL, String)] = []
+        try fm.createDirectory(at: bin, withIntermediateDirectories: true)
+        #else
+        let runner = tools.appendingPathComponent("libexec/swift/pm/swiftpm-testing-helper")
+        let bundle = [(bin.appendingPathComponent("FakePackageTests.xctest/Contents/MacOS/FakePackageTests"), "#!/bin/bash\n")]
+        try fm.createDirectory(at: bin.appendingPathComponent("FakePackageTests.xctest/Contents/MacOS"), withIntermediateDirectories: true)
+        #endif
         for folder in [copy.appendingPathComponent("Resources/bin"), copy.appendingPathComponent("Tests/FakeTests"),
                        tools.appendingPathComponent("bin"), tools.appendingPathComponent("libexec/swift/pm"),
-                       bin.appendingPathComponent("FakePackageTests.xctest/Contents/MacOS"),
                        developer.appendingPathComponent("Library/Developer/Frameworks/Testing.framework")] {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
         }
@@ -453,7 +462,7 @@ import Testing
                 """),
             (tools.appendingPathComponent("bin/xcrun"), "#!/bin/bash\necho '\(tools.path)/bin/swift'\n"),
             (tools.appendingPathComponent("bin/xcode-select"), "#!/bin/bash\necho '\(developer.path)'\n"),
-            (tools.appendingPathComponent("libexec/swift/pm/swiftpm-testing-helper"), """
+            (runner, """
                 #!/bin/bash
                 if [[ -e '\(fail.path)' ]]; then
                     echo "✘ Test run with 2 tests in 1 suite failed after 0.01 seconds with 1 issue."
@@ -461,9 +470,8 @@ import Testing
                 fi
                 echo "✔ Test run with 2 tests in 1 suite passed after 0.01 seconds."
                 """),
-            (bin.appendingPathComponent("FakePackageTests.xctest/Contents/MacOS/FakePackageTests"), "#!/bin/bash\n"),
             (bin.appendingPathComponent("vibeswitcher-mcp"), "#!/bin/bash\necho 'FooTests/a() failed'\n"),
-        ]
+        ] + bundle
         for (url, text) in scripts {
             try text.write(to: url, atomically: true, encoding: .utf8)
             try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)

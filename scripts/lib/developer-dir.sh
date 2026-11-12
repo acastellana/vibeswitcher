@@ -52,6 +52,8 @@ pick_developer_dir() {
         developer_dir=$selected
         return 0
     fi
+    local default_places=""
+    (( $# > 0 )) || default_places=1
     (( $# > 0 )) || set -- /Applications/Xcode.app /Applications/Xcode*.app
     for app in "$@"; do
         if developer_frameworks "$app/Contents/Developer"; then
@@ -60,6 +62,12 @@ pick_developer_dir() {
             return 0
         fi
     done
+    # Linux, asked to look in the default places: there are no Xcodes there, and a test executable finds the
+    # toolchain's Testing itself (its runpath), as under `swift test`: nothing to pass dyld, "the toolchain" to name.
+    if [[ $(uname -s) == Linux && -n $default_places ]]; then
+        developer_dir="the toolchain"
+        return 0
+    fi
     echo "no Xcode found with Swift Testing (looked in $*), and xcode-select's ${selected:-(none)} holds no" \
         "Testing.framework: install Xcode, or set DEVELOPER_DIR to an Xcode's Contents/Developer"
     return 1
