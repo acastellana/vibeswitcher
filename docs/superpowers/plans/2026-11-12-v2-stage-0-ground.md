@@ -108,7 +108,7 @@ jobs:
           swift --version
           echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
       - name: Build what builds on Linux
-        run: swift build --build-system native --product SwiftTerm
+        run: swift build --build-system native --target SwiftTerm
       - name: Web tests
         run: bash scripts/test.sh --web Tests/Web
 ```
@@ -118,7 +118,7 @@ for "don't ask" and "don't install a toolchain yet", use those.
 
 - [ ] **Step 4: Run the check and the steps locally**
 
-Run: `bash scripts/ci/check-workflows.sh && . ~/.local/share/swiftly/env.sh && swift build --build-system native --product SwiftTerm && bash scripts/test.sh --web Tests/Web`
+Run: `bash scripts/ci/check-workflows.sh && . ~/.local/share/swiftly/env.sh && swift build --build-system native --target SwiftTerm && bash scripts/test.sh --web Tests/Web`
 Expected: exit 0; the last lines include `web tests: 7 of 7 passed`.
 
 - [ ] **Step 5: Commit, push, and watch the run**
@@ -160,7 +160,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   macos:
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
