@@ -342,9 +342,9 @@ struct FilesExclusiveTests {
         // program this process starts.
         var info = stat(), byName = stat()
         #expect(fstat(made.result, &info) == 0 && stat(path, &byName) == 0)
-        #expect(info.inode == byName.inode)
+        #expect(Platform.Files.inode(info) == Platform.Files.inode(byName))
         #expect(info.st_nlink == 1)
-        #expect(info.byteSize == 0)
+        #expect(Platform.Files.byteSize(info) == 0)
         #expect(info.st_mode & 0o7777 == 0o600)
         #expect(info.st_mode & S_IFMT == S_IFREG)
         #expect(fcntl(made.result, F_GETFD) & FD_CLOEXEC != 0)
@@ -410,7 +410,7 @@ struct FilesExclusiveTests {
         #if os(Linux)
         // Linux reads: what is in the folder is reached through it.
         #expect(Platform.Files.eventsOnly == O_RDONLY)
-        #expect(fstatat(watched, "inside", &info, AT_SYMLINK_NOFOLLOW) == 0 && info.byteSize == 1)
+        #expect(fstatat(watched, "inside", &info, AT_SYMLINK_NOFOLLOW) == 0 && Platform.Files.byteSize(info) == 1)
         #endif
     }
 

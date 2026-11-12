@@ -23,9 +23,11 @@ struct SysTests {
         #expect(Sys.close(ends[1]) == 0)
         // The end closed twice is first moved to a number far above the lowest free one, which is what the system
         // gives the next descriptor opened: no other test's, opened between the two, is closed in its place.
-        let high = fcntl(ends[0], F_DUPFD_CLOEXEC, 100)
+        // From 400: SpawnTests numbers its extra descriptors from 100, and one of those opened between the two closes
+        // would be closed by the second.
+        let high = fcntl(ends[0], F_DUPFD_CLOEXEC, 400)
         #expect(Sys.close(ends[0]) == 0)
-        try #require(high >= 100)
+        try #require(high >= 400)
         #expect(Sys.close(high) == 0)
         let again = Sys.close(high)
         let code = errno

@@ -55,7 +55,19 @@ struct ProcessesTests {
                 var none = sigset_t()
                 sigemptyset(&none)
                 pthread_sigmask(SIG_SETMASK, &none, nil)
-                done.resume(with: Result { try process.run() })
+                done.resume(with: Result {
+                    // "Text file busy": a program a test has just copied can't be run while any process still holds
+                    // the copy open for writing, and a child another test forked during the copy holds it until that
+                    // child execs. It lasts a moment and no event says when it is over, so the run is tried again,
+                    // for at most 10 s.
+                    let giveUp = DispatchTime.now() + .seconds(10)
+                    while true {
+                        do { return try process.run() } catch let error as NSError
+                            where error.domain == NSPOSIXErrorDomain && error.code == Int(ETXTBSY) && DispatchTime.now() < giveUp {
+                            usleep(20_000)
+                        }
+                    }
+                })
             }
             thread.name = "start"
             thread.start()

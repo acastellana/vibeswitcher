@@ -34,10 +34,10 @@ final class FileSettings: SettingsStore, @unchecked Sendable {
 
         init(_ info: stat) {
             device = UInt64(info.st_dev)
-            inode = info.inode
-            seconds = Int64(info.modified.tv_sec)
-            nanoseconds = Int64(info.modified.tv_nsec)
-            size = info.byteSize
+            inode = Platform.Files.inode(info)
+            seconds = Int64(Platform.Files.modified(info).tv_sec)
+            nanoseconds = Int64(Platform.Files.modified(info).tv_nsec)
+            size = Platform.Files.byteSize(info)
         }
     }
 
