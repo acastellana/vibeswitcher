@@ -58,6 +58,43 @@ final class Process: Foundation.Process, @unchecked Sendable {
 }
 #endif
 
+/// One test at a time, of those in any test target that change what SIGURG, SIGWINCH or SIGUSR2 do in the test
+/// process or send one to it: VibePlatformTests' `SignalTestLock` (its TestSupport.swift says why), on the same file,
+/// `signal-tests.lock` in the run's VibeSwitcher folder. A flock belongs to the open file description, so the two
+/// targets' opens exclude each other in one process, and need no module in common.
+enum SignalTestLock {
+    static var path: String { VibePaths.root.appendingPathComponent("signal-tests.lock").path }
+
+    /// Runs `body` holding the lock, waited for on a thread of its own (never on Swift's cooperative pool).
+    static func held<T>(isolation: isolated (any Actor)? = #isolation, _ body: () async throws -> T) async rethrows -> T {
+        let fd = await taken(path)
+        if fd < 0 { Issue.record("SignalTestLock: \(path) couldn't be opened (errno \(-fd)): the test runs without the lock") }
+        defer {
+            if fd >= 0 {
+                flock(fd, LOCK_UN)
+                close(fd)
+            }
+        }
+        return try await body()
+    }
+
+    /// The descriptor of `path`, flocked; minus errno when it can't be opened.
+    static func taken(_ path: String) async -> Int32 {
+        await withCheckedContinuation { (done: CheckedContinuation<Int32, Never>) in
+            let thread = Thread {
+                try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
+                                                         withIntermediateDirectories: true)
+                let fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+                guard fd >= 0 else { return done.resume(returning: -errno) }
+                while flock(fd, LOCK_EX) != 0, errno == EINTR {}
+                done.resume(returning: fd)
+            }
+            thread.name = "SignalTestLock"
+            thread.start()
+        }
+    }
+}
+
 /// How long a wait may go on before the test calls it hung. Every wait ends as soon as what it waits for happens;
 /// This counts awake time through `MacTime`, so a sleep cannot exhaust a wait at the wake.
 /// This is only a guard, sized for a Mac running several suites at once (load 100+), never a measure of speed.

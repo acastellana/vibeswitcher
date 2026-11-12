@@ -1,7 +1,55 @@
 import Foundation
+import Testing
 
 /// Set when `refuseTheAccountRoot` has run (`TestHomeGuardTests` checks it did).
 var homeGuardRan = false
+
+/// One test at a time, of those in any test target that change what SIGURG, SIGWINCH or SIGUSR2 do in the test
+/// process or send one to it (SignalsTests, PipeCommandTests, MCPLogTests): a signal one test sends the process lands
+/// in whatever handler another has installed, and a handler one test puts back takes away another's. On Linux every
+/// target runs in one process; on the Mac every target a run names. `SignalsTests.everyTestThatHandlesTheseSignalsHoldsTheLock`
+/// holds each such test to it.
+///
+/// A flock on `signal-tests.lock` in the run's VibeSwitcher folder, opened anew for each use: a flock belongs to the
+/// open file description, so two opens in one process exclude each other, and VibeCoreTests' `SignalTestLock` (its
+/// TestSupport.swift), on the same file, needs no module in common with this one.
+enum SignalTestLock {
+    /// The lock's file: VibeCore's `VibePaths.root`, as `TestHome.root` reads it, then `signal-tests.lock`.
+    static var path: String {
+        TestHome.root(variable: { name in getenv(name).map { String(cString: $0) } }, fallbackHome: NSHomeDirectory())
+            .appendingPathComponent("signal-tests.lock").path
+    }
+
+    /// Runs `body` holding the lock. The wait is on a thread of its own, never on Swift's cooperative pool: tests
+    /// waiting there would hold its few threads while the holder's body needs one.
+    static func held<T>(isolation: isolated (any Actor)? = #isolation, _ body: () async throws -> T) async rethrows -> T {
+        let fd = await taken(path)
+        if fd < 0 { Issue.record("SignalTestLock: \(path) couldn't be opened (errno \(-fd)): the test runs without the lock") }
+        defer {
+            if fd >= 0 {
+                flock(fd, LOCK_UN)
+                close(fd)
+            }
+        }
+        return try await body()
+    }
+
+    /// The descriptor of `path`, flocked; minus errno when it can't be opened.
+    static func taken(_ path: String) async -> Int32 {
+        await withCheckedContinuation { (done: CheckedContinuation<Int32, Never>) in
+            let thread = Thread {
+                try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
+                                                         withIntermediateDirectories: true)
+                let fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+                guard fd >= 0 else { return done.resume(returning: -errno) }
+                while flock(fd, LOCK_EX) != 0, errno == EINTR {}
+                done.resume(returning: fd)
+            }
+            thread.name = "SignalTestLock"
+            thread.start()
+        }
+    }
+}
 
 /// Where VibeSwitcher's folder resolves for this run, and whether the tests may run on it: VibeCore's `VibePaths.root`,
 /// `accountHome`, `isAccountRoot` and `testRefusal`, kept in step with them by hand. This target can't import VibeCore

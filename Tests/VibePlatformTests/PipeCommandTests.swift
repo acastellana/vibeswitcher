@@ -17,7 +17,9 @@ private let countBrokenPipe: @convention(c) (Int32) -> Void = { _ in
 /// stop signal comes. A command that should end by itself is given the hang guard as its patience and must come
 /// back well inside it.
 ///
-/// One at a time: one test sends this process a signal, and one changes what SIGPIPE does for its length.
+/// One at a time: one test sends this process a signal, and one changes what SIGPIPE does for its length. The tests
+/// with a stop signal, or that send this process one, hold `SignalTestLock` too: SignalsTests installs handlers for
+/// the same signals in the same process.
 @Suite(.serialized)
 struct PipeCommandTests {
     static let hangGuard = TestScriptLinuxTests.hangGuard
@@ -71,16 +73,18 @@ struct PipeCommandTests {
         if !lifeline.letGo, let sleeper { kill(sleeper, SIGKILL) }
     }
 
-    @Test func pipeCommandReturnsWhatTheCommandPrinted() {
-        let input = Data("one\ntwo\n".utf8)
-        #expect(Platform.pipeCommand("cat", input: input, patience: Self.hangGuard, stopSignals: []) == input)
-        // More than a pipe holds (64 KB): written and read by turns.
-        let long = Data((0..<1_500_000).map { UInt8(truncatingIfNeeded: $0 &* 31) })
-        #expect(Platform.pipeCommand("cat", input: long, patience: Self.hangGuard, stopSignals: [SIGTERM, SIGHUP, SIGINT]) == long)
-        // Its stdout alone, and its input's end at once when there is none.
-        #expect(Self.text(Platform.pipeCommand("cat; echo out; echo err >&2", input: Data(), patience: Self.hangGuard, stopSignals: [])) == "out\n")
-        // A pipeline's every program.
-        #expect(Self.text(Platform.pipeCommand("tr a-z A-Z | sed s/ONE/1/", input: input, patience: Self.hangGuard, stopSignals: [])) == "1\nTWO\n")
+    @Test func pipeCommandReturnsWhatTheCommandPrinted() async {
+        await SignalTestLock.held {
+            let input = Data("one\ntwo\n".utf8)
+            #expect(Platform.pipeCommand("cat", input: input, patience: Self.hangGuard, stopSignals: []) == input)
+            // More than a pipe holds (64 KB): written and read by turns.
+            let long = Data((0..<1_500_000).map { UInt8(truncatingIfNeeded: $0 &* 31) })
+            #expect(Platform.pipeCommand("cat", input: long, patience: Self.hangGuard, stopSignals: [SIGTERM, SIGHUP, SIGINT]) == long)
+            // Its stdout alone, and its input's end at once when there is none.
+            #expect(Self.text(Platform.pipeCommand("cat; echo out; echo err >&2", input: Data(), patience: Self.hangGuard, stopSignals: [])) == "out\n")
+            // A pipeline's every program.
+            #expect(Self.text(Platform.pipeCommand("tr a-z A-Z | sed s/ONE/1/", input: input, patience: Self.hangGuard, stopSignals: [])) == "1\nTWO\n")
+        }
     }
 
     /// More input than the pipe takes, and a command that never reads it: back when the command has exited, not
@@ -120,30 +124,34 @@ struct PipeCommandTests {
     /// patience, with the line, and the sleep is gone. The signal is SIGWINCH, which this process ignores by
     /// default: the case of a status line that ignores its stop signals, and nothing ends when it is let through
     /// again afterwards.
-    @Test func aStopSignalStopsTheCommandAndItsGroup() throws {
-        let folder = try TestScriptLinuxTests.scratch("pipe-command")
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let lifeline = try Self.lifeline(in: folder)
-        defer { close(lifeline.reading) }
-        let ready = folder.appendingPathComponent("ready").path
-        try #require(mkfifo(ready, 0o600) == 0, "mkfifo: errno \(errno)")
-        let command = "sh -c 'echo $$; echo go > \"$0\"; exec sleep 600' '\(ready)' > '\(lifeline.path)' & "
-            + "read go < '\(ready)'; echo started; kill -WINCH $PPID; wait"
-        let started = Date()
-        let output = Platform.pipeCommand(command, input: Data(), patience: Self.hangGuard, stopSignals: [SIGWINCH])
-        #expect(Self.text(output) == "started\n")
-        #expect(Date().timeIntervalSince(started) < Self.hangGuard / 2, "stopped by its patience, not by the signal")
-        Self.expectTheSleepGone(lifeline.reading)
-        // The signal does again what it did before the command.
-        let handling = signal(SIGWINCH, SIG_DFL)
-        #expect(unsafeBitCast(handling, to: Int.self) == unsafeBitCast(SIG_DFL, to: Int.self))
+    @Test func aStopSignalStopsTheCommandAndItsGroup() async throws {
+        try await SignalTestLock.held {
+            let folder = try TestScriptLinuxTests.scratch("pipe-command")
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let lifeline = try Self.lifeline(in: folder)
+            defer { close(lifeline.reading) }
+            let ready = folder.appendingPathComponent("ready").path
+            try #require(mkfifo(ready, 0o600) == 0, "mkfifo: errno \(errno)")
+            let command = "sh -c 'echo $$; echo go > \"$0\"; exec sleep 600' '\(ready)' > '\(lifeline.path)' & "
+                + "read go < '\(ready)'; echo started; kill -WINCH $PPID; wait"
+            let started = Date()
+            let output = Platform.pipeCommand(command, input: Data(), patience: Self.hangGuard, stopSignals: [SIGWINCH])
+            #expect(Self.text(output) == "started\n")
+            #expect(Date().timeIntervalSince(started) < Self.hangGuard / 2, "stopped by its patience, not by the signal")
+            Self.expectTheSleepGone(lifeline.reading)
+            // The signal does again what it did before the command.
+            let handling = signal(SIGWINCH, SIG_DFL)
+            #expect(unsafeBitCast(handling, to: Int.self) == unsafeBitCast(SIG_DFL, to: Int.self))
+        }
     }
 
     #if os(Linux)
     /// A signal that isn't one of the command's stop signals stops nothing, though it comes the same way.
-    @Test func aSignalThatIsNotAStopSignalStopsNothing() {
-        let output = Platform.pipeCommand("kill -WINCH $PPID; echo went on", input: Data(), patience: Self.hangGuard, stopSignals: [SIGURG])
-        #expect(Self.text(output) == "went on\n")
+    @Test func aSignalThatIsNotAStopSignalStopsNothing() async {
+        await SignalTestLock.held {
+            let output = Platform.pipeCommand("kill -WINCH $PPID; echo went on", input: Data(), patience: Self.hangGuard, stopSignals: [SIGURG])
+            #expect(Self.text(output) == "went on\n")
+        }
     }
 
     /// Linux can't tell a pipe not to raise SIGPIPE: the signal is held back around the writes and the one a write
@@ -216,16 +224,18 @@ struct PipeCommandTests {
 
     /// Fifty commands leave this process no descriptor more: the pipes, the command's descriptor. (The count is
     /// shared with the tests running beside this one: held to less than one a command.)
-    @Test func fiftyCommandsLeaveNoDescriptor() throws {
-        // The first one with a stop signal makes the pipe the signals are noted in, kept for good.
-        _ = Platform.pipeCommand("true", input: Data(), patience: Self.hangGuard, stopSignals: [SIGURG])
-        let before = try FolderWatchTests.descriptors().all
-        for index in 0..<50 {
-            let output = Platform.pipeCommand("cat", input: Data("\(index)".utf8), patience: Self.hangGuard, stopSignals: [SIGURG])
-            #expect(Self.text(output) == "\(index)")
+    @Test func fiftyCommandsLeaveNoDescriptor() async throws {
+        try await SignalTestLock.held {
+            // The first one with a stop signal makes the pipe the signals are noted in, kept for good.
+            _ = Platform.pipeCommand("true", input: Data(), patience: Self.hangGuard, stopSignals: [SIGURG])
+            let before = try FolderWatchTests.descriptors().all
+            for index in 0..<50 {
+                let output = Platform.pipeCommand("cat", input: Data("\(index)".utf8), patience: Self.hangGuard, stopSignals: [SIGURG])
+                #expect(Self.text(output) == "\(index)")
+            }
+            let after = try FolderWatchTests.descriptors().all
+            #expect(after - before < 50, "\(after - before) descriptors more than before")
         }
-        let after = try FolderWatchTests.descriptors().all
-        #expect(after - before < 50, "\(after - before) descriptors more than before")
     }
     #endif
 }

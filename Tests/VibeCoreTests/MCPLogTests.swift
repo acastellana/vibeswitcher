@@ -16,6 +16,11 @@ import Testing
     func serve(_ lines: [String], stopWith signal: Int32? = nil) -> Bool {
         let server = MCPServer(name: "vibeswitcher", version: "1", toolset: Failing())
         let input = Pipe(), output = Pipe()
+        // What the signal did before, put back once serve has returned: its source stays registered, and nothing
+        // sends the signal after that (a test in another suite may install its own handler for it next).
+        var before = sigaction()
+        if let signal { sigaction(signal, nil, &before) }
+        defer { if let signal { Self.putBack(signal, before) } }
         if let signal { server.stop(on: [signal]) }
         let done = DispatchSemaphore(value: 0)
         Thread.detachNewThread {
@@ -43,7 +48,23 @@ import Testing
         return false
     }
 
-    @Test func itSaysWhyServingEndedAndAToolsErrnoButNoneOfItsText() throws {
+    /// Puts `action` back for `signal` once none of it waits for this process: a kill the loop in `serve` sent before
+    /// it saw serve return, which the server's source hasn't read yet, would otherwise meet the action put back (for
+    /// SIGUSR2 its default: the end of the test run).
+    static func putBack(_ signal: Int32, _ action: sigaction) {
+        let deadline = Date().addingTimeInterval(10)
+        var waiting = sigset_t()
+        while true {
+            sigemptyset(&waiting)
+            sigpending(&waiting)
+            guard sigismember(&waiting, signal) == 1, Date() < deadline else { break }
+            usleep(1_000)
+        }
+        var action = action
+        sigaction(signal, &action, nil)
+    }
+
+    @Test func itSaysWhyServingEndedAndAToolsErrnoButNoneOfItsText() async throws {
         let temp = Scratch()
         let root = temp.url("vs")
         let log = try #require(MCPLog.start(role: "lead", root: root))
@@ -59,7 +80,7 @@ import Testing
         var info = stat()
         #expect(stat(log.path, &info) == 0 && info.st_mode & 0o777 == 0o600)
 
-        #expect(serve([], stopWith: SIGUSR2))
+        #expect(await SignalTestLock.held { serve([], stopWith: SIGUSR2) })
         let stopped = try String(contentsOfFile: log.path, encoding: .utf8)
         #expect(stopped.contains("stopping: signal \(SIGUSR2)"), "\(stopped)")
         #expect(stopped.contains("serve: stopped (asked to)"), "\(stopped)")
