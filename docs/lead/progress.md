@@ -2533,3 +2533,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 09:00 Planned when-fable-s-limit: When Fable's limit runs out, workers and audits fall back to Opus, and return to Fable at the reset (review audit)
 - 2026-11-12 09:00 Started a worker on when-fable-s-limit
 - 2026-11-12 09:00 Automatically (auto_advance): Started a worker on when-fable-s-limit (When Fable's limit runs out, workers and audits fall back to Opus, and return to Fable at the reset).
+- 2026-11-12 09:04 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-12 09:06 Planned audit-eval-on-opus: Audit eval on Opus: does an Opus verifier find as much as Fable?
+- 2026-11-12 09:06 Started a worker on audit-eval-on-opus
+- 2026-11-12 09:06 Automatically (auto_advance): Started a worker on audit-eval-on-opus (Audit eval on Opus: does an Opus verifier find as much as Fable?).
+- 2026-11-12 09:06 Planned each-role-gets-the: Each role gets the model that suits it: Opus by default, Fable as advisor at decision points, Fable for re-rolls and sensitive audits (review audit)

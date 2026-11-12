@@ -360,3 +360,7 @@ the-sandbox-app-builds showed that Codex's sandbox denies com.apple.hiservices-x
 
 The user's answer to EE3A5F57, 2026-11-12. Switching by hand cost a halted worker (boost-release-7-7) and repeated lead attention during Fable limits.
 
+## 2026-11-12 09:06:53 Model routing, 2026-11-12: Opus is the default everywhere. Fable goes to the lead as advisor, to hard tasks as advisor, to re-rolled tasks and to sensitive or security audits (task each-role-gets-the, after when-fable-s-limit). Whether routine audits move from Fable to Opus waits on audit-eval-on-opus. Keep verifier_model=opus until that eval has finished, so its run stays on Opus, and only then reconsider clearing it.
+
+The user: Opus works well for nearly everything, Fable should go to the hardest parts (strategy, decisions, organisation), and "we need to just do optimally" (credits aside, since part of Fable is included in the plan). Claude Code's advisor puts Fable at decision points without running it throughout.
+
