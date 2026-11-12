@@ -482,6 +482,33 @@ Each stage ends in something that runs and can be shown, and gets its own implem
 (`docs/superpowers/plans/`) when it starts. Security isn't a stage: each stage builds its part of the security
 architecture, and stage 6 ends with an attack on the whole.
 
+### The bootstrap
+
+Decided 2026-11-12: Claude Code builds version 2 only until VibeSwitcher on Linux can run a lead end to end. From
+then on a VibeSwitcher lead on this machine builds the rest of its own version 2, supervised from Claude Code. So
+stages 1 to 4 are each cut to what a lead needs first, and the rest of each is the lead's own early work:
+
+| Stage | Before the bootstrap | After it, built by the lead |
+| --- | --- | --- |
+| 1 | The platform services a lead's path uses (processes, spawning, file watching, clocks and `stat`, load and cores, the settings store, tools on PATH), swift-crypto, the hook and tool server, `scripts/test.sh` on Linux, `VibeCoreTests` green, `vibeswitcher status` | Dev previews' proxy, image thumbnails, power and keep-awake, `doctor`, the adapters' version ranges and nightly run |
+| 2 | The security architecture document; the host with PTYs, parsers, handover, per-message credentials, sessions identified by an inherited socket, clones for workers | The sandbox itself and the egress proxy |
+| 3 | The sessions and chats stores, the protocol over a Unix socket, the command line as a client | The WebSocket, device keys and pairing, the terminal spike, the two-node smoke test |
+| 4 | The lead engine, the team seam, boards and cards as stores, the merge gate, `auto_advance`, limits, `vibeswitcher lead` and answering from the command line | Approvals as device signatures |
+
+**(call)** What shapes the host (identity by socket, clones) comes before the bootstrap; the sandbox comes after,
+because until then the only repository a lead works on here is VibeSwitcher's own, which the user trusts. No other
+project runs on the node before stage 6's attack has passed.
+
+- **The lead that builds is an installed build**, in its own folder, made on purpose from a commit of `v2` that both
+  runners passed. It is never the working copy. A new build replaces it only by a deliberate install; if that build
+  can't run a lead, the previous one is put back and the fault is fixed from Claude Code.
+- The lead's base branch is `v2`, its records are `docs/lead-v2/`, and it pushes nothing: `v2` is pushed after its
+  merges pass both runners.
+- The user answers the lead from the command line until stage 5's web client exists.
+
+Done when (**the bootstrap**): from an installed build, a lead on this machine plans a real version 2 task, a worker
+builds it, it is audited, and it merges into `v2` through the gate with the tests green.
+
 ### Stage 0: ground
 
 - The `v2` branch and two CI workflows on it: macOS (build everything; run what a hosted runner can) and Ubuntu.
@@ -586,8 +613,9 @@ of the branch on a real Mac; what that finds is fixed before anything new is bui
 
 ### How the work is done
 
-- By Claude Code on this machine, on `v2`: a subagent per slice in its own git worktree, a reviewer that hasn't seen
-  the slice before it joins the branch. From stage 4 on, increasingly by a VibeSwitcher lead running here.
+- Until the bootstrap, by Claude Code on this machine, on `v2`: a subagent per slice in its own git worktree, a
+  reviewer that hasn't seen the slice before it joins the branch. After it, by a VibeSwitcher lead running here,
+  with Claude Code supervising and taking what the lead can't.
 - `AGENTS.md` applies as written: tests only through `scripts/test.sh`, fake ttys, nothing typed into a real session,
   nothing installed by an agent, a fix's test shown failing without the fix.
 - Real agents in end-to-end runs use Sonnet or a smaller model.
@@ -623,6 +651,7 @@ of the branch on a real Mac; what that finds is fixed before anything new is bui
 ## Decided
 
 - Strict isolation: everything on `v2`, here; main untouched; the Mac checks at the end (2026-11-12).
+- The bootstrap: Claude Code builds until a lead runs here, then VibeSwitcher builds its own version 2 (2026-11-12).
 - `v2` lands on main only once the Mac is on version 2 (2026-11-12).
 - The fleet is designed generically, for any mix of machines (2026-11-12).
 - The stronger security; signing in the browser's wallet for the wallet plugin; real agents on Sonnet or smaller in
