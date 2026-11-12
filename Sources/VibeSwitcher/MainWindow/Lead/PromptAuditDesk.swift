@@ -8,7 +8,8 @@ import VibeCore
 ///
 /// Nothing here types into a session by itself: only `runNow`, from the card's Run now, hands the command to `send`
 /// (the composer's own send into the lead's session, as the user's message).
-/// Used on the main thread only (its looks run on a queue of their own and come back to it).
+/// Used on the main thread only (its looks run on a queue of their own and come back to it). Its record file is read
+/// (on the first look) and written (`writer`) off the main thread too: never a file read or write on the main thread.
 final class PromptAuditDesk: ObservableObject {
     /// The projects whose card shows now, and why (none while the reminders are off).
     @Published private(set) var due: [String: PromptAudit.Due] = [:]
@@ -29,6 +30,11 @@ final class PromptAuditDesk: ObservableObject {
     var every: TimeInterval = 30 * 60
 
     private let queue = DispatchQueue(label: "dev.vibeswitcher.prompt-audit", qos: .utility)
+    /// The record's writes, in order, off the main thread.
+    private let writer = DispatchQueue(label: "dev.vibeswitcher.prompt-audit.write", qos: .utility)
+    /// The record file read in (by the first look): until then nothing is written, so a click or `set` before it
+    /// can't put a record without the file's projects over the file.
+    private var loaded = false
     private var timer: Timer?
     private var looking = false
     /// Asked for while a look was under way: their `done`s, for the look after it.
@@ -38,7 +44,7 @@ final class PromptAuditDesk: ObservableObject {
         self.file = file
         self.home = home
         self.clock = clock
-        book = PromptAudit.Book.load(from: file)
+        book = PromptAudit.Book()
     }
 
     func start() {
@@ -52,6 +58,8 @@ final class PromptAuditDesk: ObservableObject {
     func close() {
         timer?.invalidate()
         timer = nil
+        // The last click's write lands before quitting (a small file: the scans aren't waited for).
+        writer.sync {}
     }
 
     /// Looks at each project's transcripts (on from where the last look stopped), keeps what it found, and works out
@@ -64,10 +72,15 @@ final class PromptAuditDesk: ObservableObject {
         }
         let roots = Set(roots().map { ($0 as NSString).standardizingPath })
         looking = true
-        let projects = book.projects
+        let mine = book.projects
+        let loadFirst = !loaded
+        let file = file
         let now = clock()
         let home = home
         queue.async { [weak self] in
+            // The first look reads the record in; what was set here before it (the sandbox's `set`) wins over it.
+            let fromFile = loadFirst ? PromptAudit.Book.load(from: file).projects : [:]
+            let projects = fromFile.merging(mine) { _, set in set }
             var seen: [String: PromptAudit.Project] = [:]
             for root in roots {
                 let kept = projects[root]
@@ -78,6 +91,10 @@ final class PromptAuditDesk: ObservableObject {
                 guard let self else { return }
                 do {
                     self.looking = false
+                    if loadFirst {
+                        self.loaded = true
+                        for (root, project) in fromFile where self.book.projects[root] == nil { self.book.projects[root] = project }
+                    }
                     // What changed meanwhile (a click) is kept: only this look's reading and runs are laid over it.
                     for (root, project) in seen {
                         var merged = project
@@ -154,8 +171,13 @@ final class PromptAuditDesk: ObservableObject {
         recompute()
     }
 
+    /// The record written on `writer` (in order), once it has been read in.
     private func save() {
-        do { try book.save(to: file) } catch { Breadcrumbs.shared.note("prompt audit: couldn't keep its record: \(error)") }
+        guard loaded else { return }
+        let (book, file) = (book, file)
+        writer.async {
+            do { try book.save(to: file) } catch { Breadcrumbs.shared.note("prompt audit: couldn't keep its record: \(error)") }
+        }
     }
 
     /// For the sandbox and tests: the project's record set as given (then the cards worked out again).

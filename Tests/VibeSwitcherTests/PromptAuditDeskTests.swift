@@ -70,6 +70,7 @@ struct PromptAuditDeskTests {
         // Not for this project: gone for good, kept across a new desk on the same record.
         desk.turnOff(root)
         #expect(desk.due.isEmpty)
+        desk.close()  // its write landed
         let again = PromptAuditDesk(file: desk.file, home: desk.home, clock: { clock.now })
         again.roots = { [root] in [root] }
         clock.now = start.addingTimeInterval(400 * 86_400)
@@ -105,5 +106,34 @@ struct PromptAuditDeskTests {
         }
         #expect(prompts.filter { $0 == PromptAudit.command }.count == 1, "\(prompts)")
         #expect(desk.due.isEmpty)
+    }
+}
+
+extension PromptAuditDeskTests {
+    /// The record file is read by the first look (off the main thread), not when the desk is made, and nothing set
+    /// before that look writes over the projects the file holds.
+    @Test func theRecordIsReadByTheFirstLookAndNotWrittenOverBeforeIt() async throws {
+        let home = temp.url("prompt-audit-record-home")
+        let other = "/Users/someone/dev/another-project"
+        try FileManager.default.createDirectory(at: PromptAudit.transcripts(root: root, home: home.path), withIntermediateDirectories: true)
+        let file = home.appendingPathComponent("prompt-audit.json")
+        var kept = PromptAudit.Book()
+        var off = PromptAudit.Project(firstSeen: start)
+        off.off = true
+        kept.projects[other] = off
+        try kept.save(to: file)
+        let clock = Clock(start)
+        let desk = PromptAuditDesk(file: file, home: home.path, clock: { clock.now })
+        desk.roots = { [root] in [root] }
+        #expect(desk.book.projects.isEmpty)
+        // Set before the first look: shown, kept, and laid over the file's projects rather than written over them.
+        desk.set(root, PromptAudit.Project(firstSeen: start.addingTimeInterval(-15 * 86_400)))
+        #expect(desk.due[root] != nil)
+        await refresh(desk)
+        desk.close()
+        #expect(desk.book.projects[other]?.off == true)
+        #expect(desk.due[root] != nil)
+        let written = PromptAudit.Book.load(from: file)
+        #expect(written.projects[other]?.off == true && written.projects[root] != nil)
     }
 }
