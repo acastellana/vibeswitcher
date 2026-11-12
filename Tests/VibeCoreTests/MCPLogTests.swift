@@ -60,8 +60,35 @@ import Testing
             guard sigismember(&waiting, signal) == 1, Date() < deadline else { break }
             usleep(1_000)
         }
+        // A default that ends the process goes back as "ignored": sigpending sees only the calling thread's signals on
+        // the Mac, so a kill still on its way to another thread could otherwise end the test run.
         var action = action
+        if Self.isDefault(action) {
+            var ignored = sigaction()
+            sigemptyset(&ignored.sa_mask)
+            sigaction(signal, nil, &ignored)
+            Self.setIgnored(&ignored)
+            action = ignored
+        }
         sigaction(signal, &action, nil)
+    }
+
+    /// Whether `action` is the signal's default (no handler: SIG_DFL), on both systems.
+    static func isDefault(_ action: sigaction) -> Bool {
+        #if os(Linux)
+        action.sa_flags & Int32(SA_SIGINFO) == 0 && action.__sigaction_handler.sa_handler == nil
+        #else
+        action.sa_flags & SA_SIGINFO == 0 && action.__sigaction_u.__sa_handler == nil
+        #endif
+    }
+
+    /// `action` made SIG_IGN, its other fields as they are.
+    static func setIgnored(_ action: inout sigaction) {
+        #if os(Linux)
+        action.__sigaction_handler.sa_handler = SIG_IGN
+        #else
+        action.__sigaction_u.__sa_handler = SIG_IGN
+        #endif
     }
 
     @Test func itSaysWhyServingEndedAndAToolsErrnoButNoneOfItsText() async throws {
