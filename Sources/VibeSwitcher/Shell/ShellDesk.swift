@@ -377,16 +377,20 @@ final class ShellDesk: ObservableObject {
         guard let text = ShellAsk.ending(request, answer, session: session) else { return }
         tellingEnd.insert(request.id)
         deliver(request.session, text) { [self] delivery in
-            tellingEnd.remove(request.id)
-            guard delivery != .notYet else { return }
+            guard delivery != .notYet else { tellingEnd.remove(request.id); return }
             let end = session?.commandEnd
             log("\(request.id) ended: " + (end.map { $0.ok ? "status 0" : "failed, status \($0.status.map(String.init) ?? "not known")" } ?? "not captured")
                 + (delivery == .ended ? "; its asker's session ended, so no one is told" : "; told"))
+            // Recorded before it may be told again: a look whose read came before this write can't send it twice.
             work.async { [self] in
-                guard var now = ShellAsk.answer(request.id, in: folder), now.awaitsEnd else { return }
-                now.endTold = true
-                try? ShellAsk.record(now, for: request.id, in: folder)
-                DispatchQueue.main.async { [self] in refresh() }
+                if var now = ShellAsk.answer(request.id, in: folder), now.awaitsEnd {
+                    now.endTold = true
+                    try? ShellAsk.record(now, for: request.id, in: folder)
+                }
+                DispatchQueue.main.async { [self] in
+                    tellingEnd.remove(request.id)
+                    refresh()
+                }
             }
         }
     }
