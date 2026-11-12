@@ -97,6 +97,45 @@ extension LeadAdvanceTests {
         lead.usageClock = { Date(timeIntervalSince1970: Self.fableReset) }
         try vault.setReviewFloor(LeadReviewFloor(), root: root)
         #expect(lead.auditModel(lead.workflow) == "opus")
+        // But "one"'s worker ran on Opus: under the floor its audit stays off Opus after the reset too.
+        let one = try #require(task("one", root))
+        #expect(one.launchedModels?[try #require(one.worker)] == "opus")
+        #expect(lead.auditModel(lead.workflow, task: one) == "sonnet")
+    }
+
+    @Test func autoAdvanceStartsAPlannedFableTaskOnOpusWhileFableIsHeldBack() throws {
+        let (root, runtime, lead) = try fableTeam(["auto_advance": true])
+        recordFableRefusal()
+        _ = lead.call("add_task", ["title": "Planned", "goal": "g", "acceptance": ["a"]])
+        let loop = LeadAdvance(lead: lead, run: { $0(); return true })
+        defer { withExtendedLifetime(lead) {} }
+        loop.trigger()
+        #expect(task("planned", root)?.status == .running, "\(reports(runtime))")
+        let planned = try #require(command("planned", runtime))
+        #expect(planned.contains("--model 'opus'") && !planned.contains("fable"), "\(planned)")
+    }
+
+    @Test func aHaltTheLoopCantActOnIsLeftToTheLeadOrToTheNextPass() throws {
+        let (root, runtime, lead) = try fableTeam()
+        _ = lead.call("add_task", ["title": "Halted", "goal": "g", "acceptance": ["a"]])
+        #expect(!lead.call("start_worker", ["task": "halted"]).isError)
+        let halted = try #require(task("halted", root)?.worker)
+        let loop = LeadAdvance(lead: lead, run: { $0(); return true })
+        defer { withExtendedLifetime(lead) {} }
+        let seen = [halted: LeadWitness.Seen(live: true, status: .working, activity: .usageLimit(Self.outOfCredits))]
+        let halts = LeadUsageFallback.halts(board: BoardStore(root: root).load(), seen: seen)
+        #expect(!LeadUsageFallback.enqueue(halts, root: root).isEmpty)
+        // The host unread in the tool server: nothing claimed, the halt still due.
+        runtime.hostDown = "host gone"
+        loop.trigger()
+        #expect(try LeadUsageFallback.Store(root: root).pending() == halts)
+        // Read, but the tool server doesn't see it halted (its refusal not read there): released, so the witness's own
+        // notice reaches the lead; no restart.
+        runtime.hostDown = nil
+        loop.trigger()
+        #expect(try LeadUsageFallback.Store(root: root).pending().isEmpty)
+        #expect(LeadUsageFallback.enqueue(halts, root: root).isEmpty)
+        #expect(task("halted", root)?.worker == halted && !runtime.killed.contains(halted))
     }
 
     @Test func aWorkerHaltedAtTheFableLimitStartsAgainOnOpusInItsWorktreeOncePerHalt() throws {
