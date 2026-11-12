@@ -2772,3 +2772,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 18:58 Automatically (auto_advance): Started the audit of merges-never-sit-blocked at 3bf51d2d (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-12 18:58 Started a worker on a-vs-shell-command
 - 2026-11-12 18:58 Automatically (auto_advance): Merge of a-vs-shell-command failed: Tests fail rebased onto main: theAppReceivesOnTheMainRunLoopOnlyTheNewestValue(); the run stopped partway: 690 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running Sent its worker the output; it's back at work.
+- 2026-11-12 18:59 Audit of merges-never-sit-blocked: complete, clean, round 2: 3 Important closed, 4 Nit open
+- 2026-11-12 19:07 Released a-vs-shell-command's worker (idle since its done report on c312dc54) while its audit runs
+- 2026-11-12 19:07 Automatically (auto_advance): Started the audit of a-vs-shell-command at c312dc54 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-12 19:09 Audit of a-vs-shell-command: complete, clean, round 2: 1 Nit open
+- 2026-11-12 19:13 Merged merges-never-sit-blocked: Merges never sit blocked unnoticed: VibeSwitcher finds what holds the pipeline and acts on it (build 6edb56ed9c9c)
