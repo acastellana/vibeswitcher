@@ -2549,3 +2549,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 09:23 Started a worker on a-worker-can-t-2
 - 2026-11-12 09:23 Automatically (auto_advance): Started a worker on a-worker-can-t-2 (A worker can't report done while its focused tests or lints fail).
 - 2026-11-12 09:24 Sent where-development's worker contract v3 (it had v2)
+- 2026-11-12 09:27 Planned fable-checks-the-speed: Fable checks the speed review's ranking
+- 2026-11-12 09:30 Planned an-animated-explainer: An animated explainer video: the engineering practices VibeSwitcher makes possible, compared with using Claude on its own
+- 2026-11-12 09:30 Automatically (auto_advance): Didn't start an-animated-explainer: an-animated-explainer's worker not started: ~/.claude/skills changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made the…
