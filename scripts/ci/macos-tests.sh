@@ -1,7 +1,7 @@
 #!/bin/bash
-# scripts/ci/macos-tests.sh [TARGET]: the suite on GitHub's hosted Mac, through scripts/test.sh, without what a hosted
-# runner can't run. With TARGET (VibeCoreTests, VibeHostTests, VibeSwitcherTests) only that target's tests: the whole
-# suite takes over an hour on the runner's 4 cores, so the workflow runs one job a target.
+# scripts/ci/macos-tests.sh [TARGETS]: the suite on GitHub's hosted Mac, through scripts/test.sh, without what a hosted
+# runner can't run. With TARGETS (a test target, or several as 'A|B') only those targets' tests: the whole suite takes
+# over an hour on the runner's cores, so the workflow runs a job for each of three groups.
 #
 # What isn't run is listed in scripts/ci/macos-runner-skips.txt, one a line, then two spaces, then the reason:
 #   Suite or Suite/test       a Swift test, passed to swift test as --skip
@@ -74,7 +74,7 @@ if [[ -n ${JUDGE:-} ]]; then
 fi
 
 arguments=()
-[[ -n ${1:-} ]] && arguments+=(--filter "^$1\\.")
+[[ -n ${1:-} ]] && arguments+=(--filter "^($1)\\.")
 for skip in ${skips[@]+"${skips[@]}"}; do arguments+=(--skip "$skip"); done
 # GitHub's own temporary folder on the runner; the build folder (git-ignored) anywhere else.
 log=${RUNNER_TEMP:-.build}/macos-tests.log

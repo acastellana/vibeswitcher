@@ -40,6 +40,12 @@ jobs:
           swift --version
           node --version
       - name: Build what builds on Linux
-        run: swift build --build-system native --force-resolved-versions --target SwiftTerm
+        run: swift build --build-system native --force-resolved-versions
+      - name: The platform's tests, on a scratch home
+        # Through scripts/test.sh once it runs on Linux (the stage 1 plan's Task 2).
+        run: |
+          scratch=$(mktemp -d "$RUNNER_TEMP/home.XXXXXX")
+          HOME=$scratch CFFIXED_USER_HOME=$scratch VIBESWITCHER_HOME=$scratch/.vibeswitcher \
+            swift test --build-system native --force-resolved-versions --filter VibePlatformTests
       - name: Web tests
         run: bash scripts/test.sh --web Tests/Web
