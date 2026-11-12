@@ -2729,3 +2729,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 16:47 Automatically (auto_advance): Sent audit-eval-on-opus's worker the open Important findings audit-eval-on-opus:F1 from its audit at a793c3eb (in a new worker: its last one was released during the audit).
 - 2026-11-12 16:48 Released a-calm-mac-merge's worker (idle since its done report on 0f8dd00f) while its audit runs
 - 2026-11-12 16:48 Automatically (auto_advance): Released a-calm-mac-merge's worker, idle since its done report on 0f8dd00f, while its audit runs (ended pid 70621 (Worker: A calm-Mac merge gets the free cores (back to about 9 min from 15))): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-12 16:51 Audit of a-calm-mac-merge: complete, clean, round 2: 2 Nit open, 3 Pre-existing (2 open)
+- 2026-11-12 16:52 Sampled a-size-ceiling-on for audit from review none (at 6d239639): draw 0.70 under audit_sample_percent 10 (seed 2662330972507541)
+- 2026-11-12 16:53 Released a-size-ceiling-on's worker (idle since its done report on 6d239639) while its audit runs
+- 2026-11-12 16:53 Automatically (auto_advance): Started the audit of a-size-ceiling-on at 6d239639 (Sampled for audit: draw 0.70 under audit_sample_percent 10 (seed 2662330972507541)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-12 16:54 Audit of small-non-sensitive: complete, clean, round 3: 1 Important closed, 1 Nit closed
