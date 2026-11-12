@@ -2757,3 +2757,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 17:41 Automatically (auto_advance): Started a worker on a-vs-shell-command (A vs-shell command's outcome reaches the agent that asked: exit status and the end of its output).
 - 2026-11-12 17:45 Automatically (auto_advance): Didn't cleanup|an-animated-explainer: fatal: '/Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/an-animated-explainer' is not a working tree
 - 2026-11-12 17:45 Update: Installed at 17:45: faster merges on a calm Mac, and small tasks skip their audit — **Live in your app since the 17:45 install** (built from main with everything merged today).
+- 2026-11-12 18:07 Released merges-never-sit-blocked's worker (idle since its done report on 42e7a908) while its audit runs
+- 2026-11-12 18:07 Automatically (auto_advance): Started the audit of merges-never-sit-blocked at 42e7a908 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
