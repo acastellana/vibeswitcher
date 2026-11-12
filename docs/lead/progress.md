@@ -2577,3 +2577,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 12:01 Automatically (auto_advance): Started the audit of docs-guide-development at 8b30b7ea (Sampled for audit: draw 3.88 under audit_sample_percent 10 (seed 3684418736803315)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-12 12:03 Audit of docs-guide-development: complete, clean
 - 2026-11-12 12:24 Merged docs-guide-development: docs/guide/development.md: the same lint filter and load-test line as AGENTS.md (build 32244f28b05f)
+- 2026-11-12 12:24 Automatically (auto_advance): Merged docs-guide-development (docs/guide/development.md: the same lint filter and load-test line as AGENTS.md) into main at 6215676d, on its passing audit and the full test run.
+- 2026-11-12 12:24 Automatically (auto_advance): Cleaned up docs-guide-development (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-12 12:24 Update: Today: the prompt-audit reminder and AGENTS.md fixes landed — **Landed:**
