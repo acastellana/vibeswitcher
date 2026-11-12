@@ -33,6 +33,7 @@ struct PromptAuditDeskTests {
     @Test func theCardsButtonsAndNothingSentWithoutTheClick() async throws {
         let clock = Clock(start)
         let desk = try await desk(clock)
+        defer { desk.close() }  // its writes land before the scratch home goes
         var sent: [String] = []
         let send: (String) -> Bool = { sent.append($0); return true }
         #expect(desk.due.isEmpty)
@@ -73,6 +74,7 @@ struct PromptAuditDeskTests {
         desk.close()  // its write landed
         let again = PromptAuditDesk(file: desk.file, home: desk.home, clock: { clock.now })
         again.roots = { [root] in [root] }
+        defer { again.close() }
         clock.now = start.addingTimeInterval(400 * 86_400)
         await refresh(again)
         #expect(again.due.isEmpty)
@@ -89,6 +91,7 @@ struct PromptAuditDeskTests {
         defer { h.stop() }
         let clock = Clock(start)
         let desk = try await desk(clock)
+        defer { desk.close() }
         clock.now = start.addingTimeInterval(14 * 86_400)
         await refresh(desk)
         #expect(desk.due[root] != nil)
