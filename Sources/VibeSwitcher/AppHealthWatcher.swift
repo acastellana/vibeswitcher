@@ -13,6 +13,8 @@ final class AppHealthWatcher: @unchecked Sendable {
     private let stateFile: URL
     private let now: () -> Date
     private let memory: () -> AppHealth.Memory?
+    /// What the Mac's sleep paused, for the day's trend (`SleepCost`, which the lead controller's `SleepWatch` keeps).
+    private let sleepCost: () -> SleepCost?
     private let send: (String) -> Bool
     /// Whether it sets a timer for its next look (tests look themselves, with a clock of their own).
     private let timed: Bool
@@ -30,12 +32,14 @@ final class AppHealthWatcher: @unchecked Sendable {
     init(folders: AppHealth.Folders = .app, appLog: URL = Breadcrumbs.appLog,
          stateFile: URL = VibePaths.root.appendingPathComponent("app-health.json"),
          now: @escaping () -> Date = Date.init, memory: @escaping () -> AppHealth.Memory? = AppHealthWatcher.memoryReader(),
+         sleepCost: @escaping () -> SleepCost? = { SleepCost.load() },
          timed: Bool = true, send: @escaping (String) -> Bool) {
         self.folders = folders
         self.appLog = appLog
         self.stateFile = stateFile
         self.now = now
         self.memory = memory
+        self.sleepCost = sleepCost
         self.timed = timed
         self.send = send
     }
@@ -173,7 +177,7 @@ final class AppHealthWatcher: @unchecked Sendable {
             scan()
         }
         if log == nil { openLog(fromEnd: false) }
-        watch.look(now: now(), folders: folders, memory: memory())
+        watch.look(now: now(), folders: folders, memory: memory(), sleep: sleepCost)
         save()
         deliver()
         schedule()

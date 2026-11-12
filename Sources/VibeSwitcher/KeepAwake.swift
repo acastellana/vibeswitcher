@@ -201,3 +201,80 @@ final class KeepAwake: ObservableObject {
         }
     }
 }
+
+/// What the Mac's sleep paused (see `SleepCost`): at each refresh of the leads' boards the lead controller hands it the
+/// witness's sleep log, which notes the clocks; when that finds the Mac slept, the sleep is counted against each
+/// project's tasks in flight (running or in review) into `file`, which the day's app-health digest and the lead's
+/// status read. A night asleep is many sleeps to the clocks: the Mac's dark wakes (a few seconds every 15 minutes or
+/// so) run the refresh too. Sleeps with less than `realWake` awake between them are one, and it's told once the Mac
+/// has stayed awake `realWake`: after `SleepCost.noticeAfter` or more of it with work in flight, the user is told
+/// which tasks it paused.
+final class SleepWatch {
+    /// Awake this long after a sleep, the Mac is really awake (the user back), not in a dark wake.
+    static let realWake: TimeInterval = 120
+
+    private let time: MacTime
+    let file: URL
+    /// The ledger is read and written here, off the main thread.
+    private let queue = DispatchQueue(label: "VibeSwitcher.sleep-cost", qos: .utility)
+    /// The sleep under way, dark wakes and all: when it began, how long the Mac slept of it, the tasks it paused (by
+    /// root, then slug); told once the Mac stays awake.
+    private var episode: (from: Double, to: Double, slept: TimeInterval, inFlight: [String: [String: LeadTask]])?
+    /// The awake clock at the look that found the last sleep.
+    private var wokeAt: TimeInterval?
+    /// The day the ledger was last brought up to date (`SleepCost.seen`): once a day at least, so the digest knows
+    /// it's whole.
+    private var savedDay: String?
+
+    init(time: MacTime = .real, file: URL = SleepCost.file) {
+        self.time = time
+        self.file = file
+    }
+
+    /// Notes the clocks into `log` (before anything is judged: a look just after a sleep sees that sleep). After a
+    /// sleep, records what it paused of `boards` (by root). Returns the notice to tell the user, once the Mac has
+    /// stayed awake after a long sleep with work in flight.
+    func look(_ log: inout MacSleepLog, boards: [String: LeadBoard]) -> (title: String, body: String)? {
+        let wake = log.note(time)
+        let awake = time.awake()
+        let now = time.wall().timeIntervalSince1970
+        guard let wake else {
+            if AppHealth.Watch.day(Date(timeIntervalSince1970: now)) != savedDay { save { $0.seen = max($0.seen ?? now, now) } }
+            guard let episode, let wokeAt, awake - wokeAt >= Self.realWake else { return nil }
+            self.episode = nil
+            let paused = episode.inFlight.mapValues { Array($0.values).sorted { $0.slug < $1.slug } }
+            return SleepCost.notice(MacSleepLog.Wake(from: episode.from, to: episode.to, slept: episode.slept), inFlight: paused)
+        }
+        let continuing = episode != nil && wokeAt.map { awake - $0 < Self.realWake } == true
+        wokeAt = awake
+        let inFlight = boards.mapValues(SleepCost.inFlight).filter { !$0.value.isEmpty }
+        var current = continuing ? episode! : (from: wake.from, to: wake.to, slept: 0, inFlight: [:])
+        current.to = wake.to
+        current.slept += wake.slept
+        for (root, tasks) in inFlight { for task in tasks { current.inFlight[root, default: [:]][task.slug] = task } }
+        episode = current
+        let slugs = inFlight.mapValues { $0.map(\.slug) }
+        let long = current.slept
+        save { $0.record(wake, inFlight: slugs, continuing: continuing, episode: long) }
+        if !inFlight.isEmpty {
+            let count = slugs.values.reduce(0) { $0 + $1.count }
+            Breadcrumbs.shared.note("sleep: the Mac slept \(SleepCost.duration(wake.slept)) with \(count) task(s) in flight")
+        }
+        return nil
+    }
+
+    /// Changes the ledger on the queue, then prunes and saves it.
+    private func save(_ change: @escaping (inout SleepCost) -> Void) {
+        let now = time.wall()
+        savedDay = AppHealth.Watch.day(now)
+        queue.async { [file] in
+            var cost = SleepCost.load(from: file)
+            change(&cost)
+            cost.prune(now: now)
+            cost.save(to: file)
+        }
+    }
+
+    /// Returns once every record asked for so far is written (for tests).
+    func settled() { queue.sync {} }
+}

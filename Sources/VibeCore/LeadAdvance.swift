@@ -113,6 +113,8 @@ public final class LeadAdvance: @unchecked Sendable {
     private var lines: [String] = []
     /// Refusals and holds told already (a step's, on a commit), each told once.
     private var told: Set<String> = []
+    /// Under `lock`: when the battery hold told last began (wall clock), while it lasts; its end is logged with how long.
+    private var batteryHeldAt: Double?
     /// The usage holds whose reset has a look again armed (`usageHeld`), each armed once.
     private var wakes: Set<String> = []
     /// Called after each run of passes (tests wait on it).
@@ -400,9 +402,21 @@ public final class LeadAdvance: @unchecked Sendable {
         if let power {
             if onHold, let limit = power.heldUnder {
                 forget(where: { $0.hasPrefix("battery|") && $0 != "battery|\(limit)" })
-                once("battery|\(limit)", "Held: on battery under your \(limit) % limit, so nothing starts, audits or merges by itself until AC power returns.")
+                // Since the hold began, whatever limit it's told under now.
+                let since = lock.withLock { () -> Double in
+                    if batteryHeldAt == nil { batteryHeldAt = Date().timeIntervalSince1970 }
+                    return batteryHeldAt!
+                }
+                once("battery|\(limit)", "Held: on battery under your \(limit) % limit, so nothing starts, audits or merges by itself until AC power returns: "
+                     + SleepCost.pausedText(board, since: since) + ".")
             } else {
                 forget(where: { $0.hasPrefix("battery|") })
+                // The hold's end, with how long it lasted (the speed review couldn't tell: only its start was logged).
+                let since = lock.withLock { () -> Double? in
+                    defer { batteryHeldAt = nil }
+                    return batteryHeldAt
+                }
+                if let since { did(SleepCost.releasedText(onBattery: power.onBattery, after: Date().timeIntervalSince1970 - since)) }
             }
         }
         let limits = lead.macLimits()

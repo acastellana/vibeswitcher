@@ -185,6 +185,8 @@ public final class LeadToolset: MCPToolset {
     var sessionTempRoot = SessionTemp.root
     /// The Mac's power source as the app last read it (see `PowerState.load`). Faked in tests.
     var power: () -> PowerState? = { PowerState.load() }
+    /// What the Mac's sleep paused, by project and day (the app keeps it, see `SleepCost`). Faked in tests.
+    var sleepCost: () -> SleepCost = { SleepCost.load() }
     /// The home whose `.claude/projects` holds its workers' and verifiers' transcripts, read for receipts (see
     /// `LeadReceipts`). A scratch one in tests.
     var claudeHome = VibePaths.home
@@ -5869,6 +5871,8 @@ public final class LeadToolset: MCPToolset {
             }
         }
         if let line = boostLine(workflow) { lines.append(line) }
+        // What the Mac's sleep paused of this project's work (the app keeps it at each wake, see `SleepCost`).
+        if let line = sleepCost().statusLine(root: root, now: Date()) { lines.append(line) }
         // One line, only where the floor holds a rule above workflow.md: status stays bounded on a big board;
         // configure() shows every rule.
         if let line = workflow.floor?.statusLine(workflow, workerModel: runtime.workerModel(root: root)) { lines.append(Self.clip(line, 600)) }

@@ -60,7 +60,12 @@ enum SettingsNote: String, CaseIterable {
                         + "Usage still shows, marked \(AccountUsage.ignoredMark).")
         case .power:
             return ("Power", "The Mac stays awake while a worker, verifier or merge runs; on battery, only if set to Always. At the battery limit, running work finishes and nothing new starts.",
-                    "Above the battery limit, leads work just as they do on power. The display can still sleep.")
+                    "Above the battery limit, leads work just as they do on power. The display can still sleep.\n\n"
+                        + "Keep the Mac awake stops only idle sleep. To keep work running overnight, leave the Mac on AC power "
+                        + "with the lid open, or with an external display connected. A closed lid sleeps whatever this setting says, "
+                        + "and so does a battery that runs out.\n\n"
+                        + "On waking from \(Int(SleepCost.noticeAfter / 60)) minutes of sleep or more with tasks in flight, you're told which ones "
+                        + "it paused. Each day's app-health digest and the lead's status say how many task-hours sleep paused.")
         case .dictation:
             return ("Dictation", "Your recording goes to OpenAI and the text lands in the box for you to check. Your key stays on this Mac, in your login Keychain.",
                     "Hold the mic in the composer, on the Mac or the phone, and speak; when you let go, the recording goes to OpenAI with this key. "

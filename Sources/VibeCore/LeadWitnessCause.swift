@@ -30,19 +30,37 @@ public struct MacSleepLog: Equatable, Sendable {
         a.spans == b.spans && a.since == b.since && a.last?.wall == b.last?.wall && a.last?.awake == b.last?.awake
     }
 
-    /// Takes a look at the clocks.
-    public mutating func note(_ time: MacTime) { note(wall: time.wall().timeIntervalSince1970, awake: time.awake()) }
+    /// A sleep this look found: the wall clock at the look before and at this one, and how long of that the Mac slept.
+    public struct Wake: Equatable, Sendable {
+        public var from: Double
+        public var to: Double
+        public var slept: TimeInterval
 
-    public mutating func note(wall: Double, awake: TimeInterval) {
+        public init(from: Double, to: Double, slept: TimeInterval) {
+            self.from = from
+            self.to = to
+            self.slept = slept
+        }
+    }
+
+    /// Takes a look at the clocks: the sleep since the last look, if the Mac slept (see `SleepCost`).
+    @discardableResult
+    public mutating func note(_ time: MacTime) -> Wake? { note(wall: time.wall().timeIntervalSince1970, awake: time.awake()) }
+
+    @discardableResult
+    public mutating func note(wall: Double, awake: TimeInterval) -> Wake? {
         if since == nil { since = wall }
+        var woke: Wake?
         if let last {
             let slept = (wall - last.wall) - (awake - last.awake)
             if slept >= Self.jitter {
                 spans.append(Span(from: last.wall, to: wall, slept: slept))
                 if spans.count > Self.keep { spans.removeFirst(spans.count - Self.keep) }
+                woke = Wake(from: last.wall, to: wall, slept: slept)
             }
         }
         last = (wall, awake)
+        return woke
     }
 
     /// What the log says of `from` to `to`.

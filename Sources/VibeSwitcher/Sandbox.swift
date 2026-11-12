@@ -1412,6 +1412,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
             editor.reload()
             return AnyView(Form { ReviewFloorSection(editor: editor) }.formStyle(.grouped).frame(width: 620, height: 720))
         }),
+        // The notice on waking from a long sleep with work in flight, as its banner shows it (the sandbox posts no
+        // notifications): two made-up projects' tasks, a made-up clock asleep 2 h 10 min, through `SleepWatch` as the
+        // lead controller looks at each refresh.
+        ("sleep-notice", { driver in
+            let notice = Driver.sleepNotice(home: driver.home)
+            return AnyView(SleepNoticeBanner(title: notice.title, text: notice.body).padding(16).frame(width: 420))
+        }),
         ("toolchain-note", { _ in
             let before = ToolchainSnapshot(developerDir: "/Library/Developer/CommandLineTools", swift: "Apple Swift version 6.4.1",
                                            sdkPath: "/Library/Developer/CommandLineTools/SDKs/MacOSX27.sdk", sdkVersion: "27",
@@ -2128,6 +2135,31 @@ private final class Driver: NSObject, NSApplicationDelegate {
                              installedAt: index == 0 ? nil : now - Double(index + 1) * day + Double(5 + index) * 3600)
         }
         return SetupScorecard(week: week, previous: previous, installs: installs)
+    }
+
+    /// The wake notice `SleepWatch` gives after a made-up 2 h 10 min sleep with three tasks in flight in two made-up
+    /// projects; its ledger goes to a file of the sandbox's own home.
+    static func sleepNotice(home: String) -> (title: String, body: String) {
+        var wall = Date().timeIntervalSince1970 - 2 * 3600 - 600, awake: TimeInterval = 0
+        let watch = SleepWatch(time: MacTime(wall: { Date(timeIntervalSince1970: wall) }, awake: { awake }),
+                               file: URL(fileURLWithPath: home + "/sleep-cost-sandbox.json"))
+        func task(_ slug: String, _ status: LeadTask.Status) -> LeadTask {
+            var task = LeadTask(slug: slug, title: slug, contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
+            task.status = status
+            return task
+        }
+        var site = LeadBoard(), payouts = LeadBoard()
+        site.tasks = [task("cache-headers", .running), task("login-flow", .review), task("dark-mode", .planned)]
+        payouts.tasks = [task("refund-retries", .running)]
+        let boards = [home + "/projects/example-site": site, home + "/projects/example-payouts": payouts]
+        var log = MacSleepLog()
+        _ = watch.look(&log, boards: boards)
+        wall += 2 * 3600 + 600
+        _ = watch.look(&log, boards: boards)
+        // Told once the Mac has stayed awake (a dark wake isn't the user back).
+        wall += SleepWatch.realWake
+        awake += SleepWatch.realWake
+        return watch.look(&log, boards: boards) ?? (title: "no notice", body: "")
     }
 
     /// The `all-done` sheet's mark: a batch of four, three merged with receipts and one folded.
@@ -4198,5 +4230,29 @@ private struct MenuBarStrip: View {
             }
         }
         .frame(width: caption ? 360 : 300).padding(12)
+    }
+}
+
+/// A notification banner as macOS draws one (the sandbox posts none, so a shot shows its words this way).
+struct SleepNoticeBanner: View {
+    let title: String
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 36, height: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text("VibeSwitcher").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("now").font(.caption).foregroundStyle(.secondary)
+                }
+                Text(title).font(.headline)
+                Text(text).font(.callout).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
     }
 }

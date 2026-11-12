@@ -1355,6 +1355,45 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(holds().count == 3, "\(holds())")
     }
 
+    /// The speed review (2026-11-12) couldn't tell how long battery holds lasted: only their start was logged. The
+    /// hold's progress line says how many tasks it pauses and since when, and its end is logged with how long it lasted.
+    @Test func aBatteryHoldSaysWhatItPausesAndItsEndIsLogged() async throws {
+        let (root, runtime, lead) = try team()
+        var low = PowerState(onBattery: true, percent: 20)
+        low.heldUnder = 50
+        let power = Locked<PowerState?>(low)
+        lead.power = { power.get() }
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Waits", "goal": "g", "acceptance": ["a"]])
+        func said(_ prefix: String) -> [String] { reports(runtime).filter { $0.contains(prefix) } }
+        #expect(await advancing.until { said("Held: on battery").count == 1 })
+        let progress = { (try? String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)) ?? "" }
+        #expect(progress().contains("Held: on battery under your 50 % limit, so nothing starts, audits or merges by itself until AC power returns: "), "\(progress())")
+        #expect(progress().range(of: #"\d+ tasks? paused since \d\d:\d\d \(\d+ planned, 0 in review\)"#, options: .regularExpression) != nil
+                || progress().contains("no task paused yet, since"), "\(progress())")
+        // AC power back: the end is logged, once, with how long it lasted; the task starts.
+        power.set(PowerState(onBattery: false, percent: 60, charging: true))
+        LeadAdvance.nudge(root: root)
+        #expect(await advancing.until { task("waits", root)?.status == .running })
+        #expect(progress().range(of: #"Released: on AC power, after \d+ min\."#, options: .regularExpression) != nil, "\(progress())")
+        await advancing.settle()
+        #expect(progress().components(separatedBy: "Released:").count == 2, "\(progress())")
+    }
+
+    /// Status says what the Mac's sleep paused of this project's work, from the app's ledger.
+    @Test func statusSaysWhatSleepPaused() throws {
+        let (root, _, lead) = try team()
+        var cost = SleepCost()
+        let now = Date().timeIntervalSince1970
+        cost.record(MacSleepLog.Wake(from: now - 7200, to: now - 3600, slept: 3600), inFlight: [root: ["a", "b"], "/elsewhere": ["c"]])
+        lead.sleepCost = { cost }
+        let status = lead.call("status", [:]).text
+        // Today's or yesterday's, or both (run between 01:00 and 02:00 the sleep is shared between them): the week has it whole.
+        #expect(status.contains("Sleep paused in-flight work (running or in review), by the Mac's awake clock: today "), "\(status)")
+        #expect(status.contains("7 days 2.0 task-hours"), "\(status)")
+    }
+
     // MARK: two at once, and restarts
 
     @Test func twoWorkersReportingAtOnceMergeOneAfterTheOtherNeverAtOnce() async throws {
