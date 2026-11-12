@@ -46,7 +46,24 @@ public final class PreviewProxy: @unchecked Sendable {
     public var connectTimeout: TimeInterval = 5
     /// The parameters of each try at the dev server (`attempt` counts from 0) at `host`. Set before `start`; tests pin a
     /// first try's local port.
-    var upstreamParameters: (_ attempt: Int, _ host: NWEndpoint.Host) -> NWParameters = { _, _ in .tcp }
+    var upstreamParameters: (_ attempt: Int, _ host: NWEndpoint.Host) -> NWParameters = { _, host in PreviewProxy.parameters(for: host) }
+
+    /// A connection to the dev server at `host` takes a local port of its own: for a loopback address, bound before it
+    /// connects (the kernel gives a bind a port nothing uses). Left to Network.framework, the port it connects from can
+    /// be one whose pair with the dev server's is still taken (EADDRINUSE: on a Mac whose loopback ports churn, seen in
+    /// full test runs on 2026-11-12), and every new connection to that server got the same one.
+    static func parameters(for host: NWEndpoint.Host) -> NWParameters {
+        let parameters = NWParameters.tcp
+        parameters.allowLocalEndpointReuse = false
+        switch host {
+        case .ipv4(let address) where address == .loopback:
+            parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
+        case .ipv6(let address) where address == .loopback:
+            parameters.requiredLocalEndpoint = .hostPort(host: .ipv6(.loopback), port: .any)
+        default: break   // "localhost": either family, so no address of its own (`isLocalPortClash` tries again)
+        }
+        return parameters
+    }
 
     public init(label: String, context: @escaping () -> Context?,
                 redeem: @escaping (String) -> (path: String, sessionToken: String, clearSite: Bool)?,
@@ -198,9 +215,36 @@ public final class PreviewProxy: @unchecked Sendable {
         guard let port = NWEndpoint.Port(rawValue: UInt16(clamping: target.port)) else {
             return reply(client, Self.page(502, PreviewGate.unreachableMessage(target)))
         }
-        let upstream = NWConnection(host: host, port: port, using: upstreamParameters(0, host))
-        upstreams[ObjectIdentifier(client)] = upstream
         let settled = Flag()
+        connect(attempt: 0, host: host, port: port, first: first, client: client, target: target, token: token, settled: settled)
+        // The whole connect, retries included: the one tried last gives up.
+        let id = ObjectIdentifier(client)
+        queue.asyncAfter(deadline: .now() + connectTimeout) { [weak self] in
+            guard let self, !settled.value else { return }
+            settled.value = true
+            self.upstreams[id]?.cancel()
+            self.reply(client, Self.page(502, PreviewGate.unreachableMessage(target)))
+        }
+    }
+
+    /// The most tries at the dev server when the system can't give a try a local port (`isLocalPortClash`).
+    static let connectTries = 5
+
+    /// The system couldn't give the connection its local port: EADDRINUSE when its address pair is still taken (on a
+    /// Mac whose loopback ports churn, a pair left in TIME_WAIT: seen in full test runs, 2026-11-12), EADDRNOTAVAIL
+    /// when none is free. Network.framework then waits on it for good; a new connection gets another port. Not the dev
+    /// server's doing: one that's down refuses (ECONNREFUSED), and the phone gets its 502 at once.
+    static func isLocalPortClash(_ error: NWError) -> Bool {
+        guard case .posix(let code) = error else { return false }
+        return code == .EADDRINUSE || code == .EADDRNOTAVAIL
+    }
+
+    /// One try at the dev server for `client`'s request (`first`: its head and what came with it).
+    private func connect(attempt: Int, host: NWEndpoint.Host, port: NWEndpoint.Port, first: Data, client: NWConnection,
+                         target: PreviewTarget, token: String, settled: Flag) {
+        let id = ObjectIdentifier(client)
+        let upstream = NWConnection(host: host, port: port, using: upstreamParameters(attempt, host))
+        upstreams[id] = upstream
         let fail = { [weak self] in
             // Once the request is on its way, the answer's side ends the exchange (its pending read fails now):
             // it resets the phone's connection when the dev server's broke mid-answer, which a clean close here,
@@ -223,13 +267,20 @@ public final class PreviewProxy: @unchecked Sendable {
                     self?.pump(from: client, to: upstream, onEnd: { _ in client.cancel(); upstream.cancel() })
                 })
                 self?.forwardResponse(upstream, to: client, buffer: Data(), ended: false, failed: false, target: target, token: token)
+            case .waiting(let error) where !settled.value && Self.isLocalPortClash(error) && attempt + 1 < Self.connectTries,
+                 .failed(let error) where !settled.value && Self.isLocalPortClash(error) && attempt + 1 < Self.connectTries:
+                upstream.stateUpdateHandler = nil
+                upstream.cancel()
+                // Not when the phone has gone, or the connect timed out, meanwhile.
+                guard let self, self.upstreams[id] === upstream else { return }
+                self.connect(attempt: attempt + 1, host: host, port: port, first: first, client: client,
+                             target: target, token: token, settled: settled)
             case .waiting, .failed:
                 fail()
             default: break
             }
         }
         upstream.start(queue: queue)
-        queue.asyncAfter(deadline: .now() + connectTimeout) { if !settled.value { fail() } }
     }
 
     /// `failed`: the dev server's connection ended with an error (not a clean close).
