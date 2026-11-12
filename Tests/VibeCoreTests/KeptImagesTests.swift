@@ -138,7 +138,13 @@ struct KeptImagesTests: LeadTeamFixture {
         let made = { (group: String, ago: Double) throws -> String in
             let path = try #require(kept.keep([source], as: group, relativeTo: root).first)
             // Their age set outright: what goes first doesn't hang on the clock's resolution.
+            #if os(Linux)
+            // Linux can't set a birth time (setAttributes says yes and does nothing) and stamps it with the kernel's
+            // tick: they're made oldest first, the next once the file system's clock is past this one's birth.
+            try waitPastBirth(of: folder + "/" + group, in: root)
+            #else
             try fm.setAttributes([.creationDate: Date(timeIntervalSinceNow: -ago)], ofItemAtPath: folder + "/" + group)
+            #endif
             return path
         }
         let oldest = try made("evidence/add-b/r1", 300)
@@ -157,6 +163,24 @@ struct KeptImagesTests: LeadTeamFixture {
         #expect(!fm.fileExists(atPath: older) && !fm.fileExists(atPath: newest))
         #expect(KeptImages.defaultCap == 500 << 20)
     }
+
+    #if os(Linux)
+    /// Returns once a folder made now is born after `path` (as the pruning reads it, its creation date): Linux stamps
+    /// births with the kernel's tick, 10 ms on WSL2, so two folders made in a row can be born at once.
+    func waitPastBirth(of path: String, in root: String) throws {
+        let born = { (path: String) in try URL(fileURLWithPath: path).resourceValues(forKeys: [.creationDateKey]).creationDate }
+        let made = try #require(try born(path))
+        let probe = root + "/scratch/birth-probe"
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            try FileManager.default.createDirectory(atPath: probe, withIntermediateDirectories: true)
+            let now = try born(probe)
+            try FileManager.default.removeItem(atPath: probe)
+            if let now, now > made { return }
+        }
+        Issue.record("the file system's clock didn't pass \(path)'s birth in 10 s")
+    }
+    #endif
 
     #if canImport(Darwin)
     /// An image over `largest` is downscaled to a PNG that fits, not refused; one that's small enough is copied as is.

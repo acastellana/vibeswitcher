@@ -200,6 +200,12 @@ public enum LeadTokenLedger {
 
     /// When `file` was made (its birth time), nil when not known.
     static func born(_ file: URL) -> Double? {
-        Platform.Files.birthTime(file.path)
+        if let given = givenBirthsLock.withLock({ givenBirths[file.path] }) { return given }
+        return Platform.Files.birthTime(file.path)
     }
+
+    /// Birth times a test gives files, by path: Linux can't set one (`setAttributes` says yes and does nothing), the
+    /// Mac can. Empty in the app.
+    nonisolated(unsafe) static var givenBirths: [String: Double] = [:]
+    static let givenBirthsLock = NSLock()
 }

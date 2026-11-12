@@ -34,7 +34,14 @@ struct LeadTokenLedgerTests {
 
     /// Dates `file`'s making back to `at`, as if it had been written since then (its responses are older than now).
     func backdate(_ file: URL, to at: Double) throws {
+        #if os(Linux)
+        // Linux can't set a birth time (setAttributes says yes and does nothing): the ledger reads the real one (statx,
+        // where the file system keeps it), just now, and is given the one wanted.
+        if let real = LeadTokenLedger.born(file) { #expect(abs(real - Date().timeIntervalSince1970) < 60) }
+        LeadTokenLedger.givenBirthsLock.withLock { LeadTokenLedger.givenBirths[file.path] = at }
+        #else
         try FileManager.default.setAttributes([.creationDate: Date(timeIntervalSince1970: at)], ofItemAtPath: file.path)
+        #endif
         #expect(abs((LeadTokenLedger.born(file) ?? 0) - at) < 1)
     }
 
