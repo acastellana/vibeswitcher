@@ -313,6 +313,16 @@ struct WalletE2ERealTestnetGuardTests {
             """
     }
 
+    /// Whether the real node runs `source` as a .ts file, exiting 0 with nothing on stdout or stderr.
+    static func nodeRunsQuietly(typeScript source: String, _ scratch: Scratch) async throws -> Bool {
+        let node = try #require(realNode, "node isn't on the test's PATH")
+        let file = scratch.url("typescript-probe").appendingPathComponent("probe.ts")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try source.write(to: file, atomically: true, encoding: .utf8)
+        let ran = try await HomeIsolationTests.run(node, [file.path], environment: ["PATH": "/usr/bin:/bin", "HOME": scratch.url("probe-home").path])
+        return ran.status == 0 && ran.output.isEmpty
+    }
+
     struct Setup {
         let root: URL
         var script: String { root.appendingPathComponent("repo/scripts/e2e/wallet-e2e.sh").path }
@@ -506,6 +516,12 @@ struct WalletE2ERealTestnetGuardTests {
         ("", "no src/networks.ts in a Wallet Manager checkout at "),
     ])
     func refusesAWalletManagerWhoseTestnetIsntGenLayers(_ networks: String, _ why: String) async throws {
+        // A module (`export`) in a .ts file runs, printing nothing, only on a Node that runs TypeScript (22.18 and
+        // later); an older one refuses the file on stderr, and the script says it failed. This node is asked which.
+        var why = why
+        if networks.hasPrefix("export "), try await !Self.nodeRunsQuietly(typeScript: networks, scratch) {
+            why = "`node src/networks.ts --json` failed (it wrote to stderr)"
+        }
         let setup = try Setup(scratch)
         if networks.isEmpty { try FileManager.default.removeItem(at: setup.networks) }
         else { try networks.write(to: setup.networks, atomically: true, encoding: .utf8) }
