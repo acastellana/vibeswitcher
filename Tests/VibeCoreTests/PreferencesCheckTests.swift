@@ -110,6 +110,7 @@ struct PreferencesCheckTests {
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent(file).path))
     }
 
+    #if canImport(Darwin)
     /// The hook itself, in this very process: a suite opened here is in this run's ledger before the open returns. The
     /// suite is `Scratch.defaults`', named by a path, so nothing goes near the real folder.
     @Test func aSuiteOpenedInThisProcessIsInTheRunsLedger() throws {
@@ -120,6 +121,7 @@ struct PreferencesCheckTests {
         let lines = try String(contentsOfFile: ledger, encoding: .utf8).components(separatedBy: "\n")
         #expect(lines.contains { $0.contains(prefix) }, "the bundle's hook didn't record the suite: \(ledger)")
     }
+    #endif
 
     /// The installed app's own defaults change as you use it, during a run too: never the run's failure.
     @Test func theInstalledAppsDefaultsStayOutOfIt() async throws {

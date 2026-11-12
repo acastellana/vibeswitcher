@@ -5,6 +5,7 @@ InstallRelaunchTests.swift  scripts/build-app.sh's install step replaces and rel
 KeptImagesTests.swift  aLargeImageIsDownscaled: a smaller copy of an image is ImageIO's (Platform.Images.pngThumbnail is nil on Linux)
 KeychainLiveTests.swift  the login Keychain (Security.framework)
 PreferenceLedger.swift  wraps NSUserDefaults' suite initializer through the Objective-C runtime, for the files cfprefsd writes: Linux has neither
+PreferencesCheckTests.swift  aSuiteOpenedInThisProcessIsInTheRunsLedger: the ledger's hook is the Mac's (PreferenceLedger.swift)
 ProcessTableTests.swift  aTerminalIsNamedByItsNumber and its openPty: TerminalNames and devname() are the Mac's
 SessionStraysTests.swift  procargsGiveTheArgumentsAndTheEnvironmentNotTheKernelsOwn: ProcessTable.parse(procargs:) reads the Mac's KERN_PROCARGS2
 StatusAccessibilityTests.swift  marksStayInsideTheirRect: StatusMark's shapes are CGPaths
