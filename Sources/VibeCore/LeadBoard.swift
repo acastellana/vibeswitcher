@@ -867,6 +867,20 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// auto_advance's audit sample draw for it (see `LeadAuditSample`), made once at its first done report on review
     /// none's path, with its seed; sampled: its review became audit. nil: none drawn (sampling off, or never on that path).
     public var auditSample: LeadAuditSample?
+    /// small_task_min dropped its review from audit to none for its first round (see `LeadSmallTask`): its minutes of
+    /// work, the commit, and why it went back to audit once it did. nil: never dropped.
+    public var smallTask: LeadSmallTask?
+    /// Why the lead keeps it audited whatever small_task_min says (add_task's and update_task's `audit_reason`); nil:
+    /// none given.
+    public var auditReason: AuditReason?
+
+    /// What the lead may file an audit task for that small_task_min never drops.
+    public enum AuditReason: String, Codable, Sendable, CaseIterable {
+        case security, irreversible
+
+        /// "security", " Irreversible ": the reason; nil for anything else.
+        public init?(text: String) { self.init(rawValue: text.trimmingCharacters(in: .whitespaces).lowercased()) }
+    }
     /// The tasks (their slugs) that must be done before it starts by itself (add_task's and update_task's `after`; see
     /// `LeadAdvance`); nil or empty: none.
     public var after: [String]?

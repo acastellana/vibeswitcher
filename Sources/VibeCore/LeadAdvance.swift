@@ -6,7 +6,8 @@ import Foundation
 /// Each pass looks at the board and the vault as they are and takes the steps that are due:
 /// - a review none task whose worker reported done on its branch's head merges (merge's full test run is its check),
 ///   unless the risk check (`LeadRisk`) raises it to audit from what its branch changes, or the audit sample
-///   (`LeadAuditSample`, audit_sample_percent of them at random) draws it: then it's audited instead;
+///   (`LeadAuditSample`, audit_sample_percent of them at random) draws it: then it's audited instead; a small review
+///   audit task on its first round is taken as review none first (`LeadSmallTask`, small_task_min);
 /// - an audit task reported done gets its audit, and a passing verdict on its head merges, unless it judged an older
 ///   version of the task's contract than it has now (`LeadToolset.StaleVerdict`): then it's audited again, on what
 ///   changed since that version;
@@ -592,6 +593,9 @@ public final class LeadAdvance: @unchecked Sendable {
         }
         // An audit under way on this commit: its verdict comes, unless its verifier ended without one.
         if vault.current(.verifier, root: root, task: slug)?.auditing == head { return auditAgain(slug, head: head, busy: busy) }
+        // A small review audit task's first round is review none (`LeadSmallTask`); one dropped earlier that doesn't
+        // qualify any more is audit again. Before the risk check, which then judges it as any review none task.
+        lead.advanceSmallTask(slug, head: head)
         // The risk check runs here too (`LeadRisk`): a review none task whose change it flags is audited, not merged.
         if let needed = lead.advanceReviewNeeded(slug, commit: head) {
             // One the sample drew is audit from then on: its audit says why, however long it waits for room.
@@ -657,6 +661,7 @@ public final class LeadAdvance: @unchecked Sendable {
         if kept == drawn, drawn.sampled {
             try? lead.vault.setReview(.audit, root: lead.root, task: slug)
             try? lead.store.appendProgress("Sampled \(slug) for audit from review none (at \(head.prefix(8))): \(drawn.text)")
+            lead.restoreSmallTask(slug, "the audit sample drew it")
         }
         return kept
     }

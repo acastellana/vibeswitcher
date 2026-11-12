@@ -691,7 +691,7 @@ public final class LeadToolset: MCPToolset {
                                          "boundaries": P(type: "array", description: "Files or areas it may touch; what it must not do", items: "string"),
                                          "context": P(type: "string", description: "What a fresh worker needs to know"),
                                          "from_finding": P(type: "string", description: "A finding as status and board name it, <task>:<id> (e.g. add-b:F2)"),
-                                         "review": Self.reviewProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
+                                         "review": Self.reviewProperty, "audit_reason": Self.auditReasonProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
                                          "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty, "done_check": Self.doneCheckProperty,
                                          "advisor": Self.advisorProperty, "effort": Self.effortProperty,
                                          "origin": Self.originProperty]),
@@ -708,7 +708,7 @@ public final class LeadToolset: MCPToolset {
                                          "status": P(type: "string", description: "New state", options: Self.settableStates.map(\.rawValue) + [Self.removedState]),
                                          "reason": P(type: "string", description: "With status kept: what holds it back (a decision, the user's word); merge names it when it refuses. With abandoned: why nothing will carry it. With removed: why it was a mistake (optional)"),
                                          "into": P(type: "string", description: "With status folded: the task (its slug) that carries this one's work"),
-                                         "review": Self.reviewProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
+                                         "review": Self.reviewProperty, "audit_reason": Self.auditReasonProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
                                          "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty, "done_check": Self.doneCheckProperty,
                                          "advisor": Self.advisorProperty, "effort": Self.effortProperty,
                                          "reroll": P(type: "boolean", description: "Re-roll it after audit rounds that didn't land: its worker and verifier stop, its branch is kept as archive/<slug>-<n>, its worktree goes, and a fresh worker starts from the base on a new agent/<slug>, its context given a summary of the findings and the worker's answers so far. Contract changes in the same call apply first; not with status"),
@@ -822,6 +822,7 @@ public final class LeadToolset: MCPToolset {
                                          "risk_lines": P(type: "integer", description: "The risk check's size trigger: a review none task whose branch changes more lines than this (added and removed) is audited instead of merged when it reports done (default 400; 0: no size trigger)"),
                                          "risk_model": P(type: "boolean", description: "Whether the risk check also asks headless Claude, from the diff's stat, the contract and the base branch's REVIEW.md (no code), to raise a review none task to audit (default true); it only raises, and a timeout or error leaves the deterministic triggers' result"),
                                          "audit_sample_percent": P(type: "integer", description: "The share of review none tasks, in percent (0 to 100), that auto_advance audits anyway when their worker reports done (default 10; 0: off): a seeded random draw, recorded on the task, so the unaudited path's escape rate is known, not assumed zero"),
+                                         "small_task_min": P(type: "integer", description: "A review audit task whose worker reports done on its first round with fewer minutes of counted work than this, touching no sensitive_paths or strict_paths, not flagged by the risk check, not Codex's and not filed with an audit_reason, merges as review none that round: its tests, the risk check and the audit sample are its checks (default 30; 0: off)"),
                                          "watch_app_logs": P(type: "boolean", description: "Whether you get VibeSwitcher's own health digests (default false; only for the project that builds VibeSwitcher): its freezes, crashes and error lines as it logs them, and a daily trend, each as a witness report to turn into tasks where it's a real bug")]),
             ]
         }
@@ -962,8 +963,12 @@ public final class LeadToolset: MCPToolset {
     static let removedState = "removed"
     /// add_task's and update_task's review level.
     static var reviewProperty: MCPToolInfo.Property {
-        MCPToolInfo.Property(type: "string", description: "Who checks it before merge: none (the default: its worker owns it through completion, and merge takes it on the worker's done report and its own full test run) or audit (a verifier's passing verdict: for security, irreversible operations or complex changes). A branch that touches sensitive_paths is audited whatever this says.",
+        MCPToolInfo.Property(type: "string", description: "Who checks it before merge: none (the default: its worker owns it through completion, and merge takes it on the worker's done report and its own full test run) or audit (a verifier's passing verdict: for security, irreversible operations or complex changes). A branch that touches sensitive_paths is audited whatever this says. An audit task done on its first round in under small_task_min minutes of work merges as review none unless you give audit_reason (security or irreversible).",
                              options: LeadTask.Review.allCases.map(\.rawValue))
+    }
+    static var auditReasonProperty: MCPToolInfo.Property {
+        MCPToolInfo.Property(type: "string", description: "Why it's audit, when it's security or irreversible: its review is audit, and small_task_min never drops it to none however small it is. update_task: empty clears it (its review stays audit until you set none)",
+                             options: LeadTask.AuditReason.allCases.map(\.rawValue))
     }
     /// add_task's and update_task's prerequisites.
     static var afterProperty: MCPToolInfo.Property {
@@ -1139,11 +1144,13 @@ public final class LeadToolset: MCPToolset {
         if agent == .codex, givenReview == LeadTask.Review.none {
             throw Problem(text: "Not added: a Codex task is always audited by a Claude verifier, so its review can't be none. Leave review out (it's audit) or run it on Claude.")
         }
-        let review: LeadTask.Review? = agent == .codex ? .audit : givenReview
+        let auditReason = try Self.auditReasonArgument(arguments, review: givenReview) ?? nil
+        let review: LeadTask.Review? = agent == .codex || auditReason != nil ? .audit : givenReview
         let taskOrigin = try Self.originArgument(arguments) ?? (origin != nil ? .audit : nil)
         let task = try store.update { board -> LeadTask in
             var task = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title, contract: contract)
             task.review = review
+            task.auditReason = auditReason
             task.origin = taskOrigin?.rawValue
             if arguments["after"] != nil { task.after = try Self.afterList(strings(arguments["after"]), on: store.withArchive(board), for: task.slug) }
             task.autoAdvance = auto == false ? false : nil
@@ -1156,7 +1163,9 @@ public final class LeadToolset: MCPToolset {
             board.tasks.append(task)
             return task
         }
-        try? store.appendProgress("Planned \(task.slug): \(title)" + (review == .audit ? " (review audit)" : ""))
+        // What small_task_min judges it by, where a worker can't write it: filed where audit_reason could be given.
+        noteSmallTask(task.slug, LeadVault.SmallTaskNote(auditReason: auditReason?.rawValue, reviewOffered: true, codex: agent == .codex ? true : nil))
+        try? store.appendProgress("Planned \(task.slug): \(title)" + (review == .audit ? " (review audit\(auditReason.map { ", for \($0.rawValue)" } ?? ""))" : ""))
         let recorded = review.map { recordReview($0, slug: task.slug) } ?? ""
         var closed = ""
         // An unconfirmed one strict_paths holds is closed too: making it a task is the lead's ruling on it.
@@ -1191,6 +1200,20 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "review is none or audit, not \(given). Nothing was changed.")
         }
         return review
+    }
+
+    /// The `audit_reason` passed to add_task or update_task: nil when none was, .some(nil) when it was cleared (empty).
+    /// With review none it's refused: a reason to audit is audit.
+    static func auditReasonArgument(_ arguments: [String: Any], review: LeadTask.Review?) throws -> LeadTask.AuditReason?? {
+        guard let given = arguments["audit_reason"], !(given is NSNull) else { return nil }
+        if (given as? String)?.trimmingCharacters(in: .whitespaces).isEmpty == true { return .some(nil) }
+        guard let text = given as? String, let reason = LeadTask.AuditReason(text: text) else {
+            throw Problem(text: "audit_reason is " + LeadTask.AuditReason.allCases.map(\.rawValue).joined(separator: " or ") + " (empty clears it), not \(given). Nothing was changed.")
+        }
+        if review == LeadTask.Review.none {
+            throw Problem(text: "audit_reason \(reason.rawValue) keeps the task audited, so its review can't be none. Nothing was changed.")
+        }
+        return .some(reason)
     }
 
     /// The `auto_advance` passed to add_task or update_task; nil when none was.
@@ -1419,7 +1442,7 @@ public final class LeadToolset: MCPToolset {
         + "evidence: what you ran and what it gave, or what the code at file:line does. status: open; in a re-audit, each open finding you were given "
         + "by its id: fixed, open (still), or dismissed with a reason. id: leave it out for a new finding. Empty or left out: you found nothing."
 
-    static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason", "into", "review", "reroll",
+    static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason", "into", "review", "audit_reason", "reroll",
                                           "after", "auto_advance", "budget_min", "model", "agent", "advisor", "effort", "done_check", "exception", "accept_verdict", "hold_audit"]
 
     private func updateTask(_ arguments: [String: Any]) throws -> MCPToolResult {
@@ -1503,7 +1526,8 @@ public final class LeadToolset: MCPToolset {
            let why = (agent.map { changed -> LeadTask in var task = task; task.agent = changed; return task } ?? task).codexAudit {
             throw Problem(text: "Not changed: \(why) Its review stays audit. Nothing was changed.")
         }
-        let review: LeadTask.Review? = agent == .codex ? .audit : givenReview
+        let auditReason = try Self.auditReasonArgument(arguments, review: givenReview)
+        let review: LeadTask.Review? = agent == .codex || (auditReason ?? nil) != nil ? .audit : givenReview
         let defaultBudget = workflow.taskBudgetMinutes
         var budgetCleared = false
         let appended = (arguments["append_context"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -1575,6 +1599,15 @@ public final class LeadToolset: MCPToolset {
             if arguments["boundaries"] != nil { board.tasks[index].contract.boundaries = strings(arguments["boundaries"]); changed.append("boundaries") }
             if let context = arguments["context"] as? String { board.tasks[index].contract.context = context; changed.append("context (replaced)") }
             if let review { board.tasks[index].review = review; changed.append("review \(review.rawValue)") }
+            // The lead lowering it to none drops its reason to audit too.
+            if review == LeadTask.Review.none, board.tasks[index].auditReason != nil {
+                board.tasks[index].auditReason = nil
+                changed.append("audit_reason cleared")
+            }
+            if let auditReason {
+                board.tasks[index].auditReason = auditReason
+                changed.append(auditReason.map { "audit_reason \($0.rawValue)" } ?? "audit_reason cleared")
+            }
             if arguments["after"] != nil {
                 board.tasks[index].after = try Self.afterList(strings(arguments["after"]), on: store.withArchive(board), for: slug)
                 changed.append(board.tasks[index].after.map { "after \($0.joined(separator: ", "))" } ?? "after cleared")
@@ -1681,6 +1714,11 @@ public final class LeadToolset: MCPToolset {
         // Planned again: re-planned, so its failed audit rounds count from here (its findings stay).
         if status == .planned, let ledger = vault.audits(root: root, task: slug), ledger.failedRounds > 0 {
             if let replanned = try? vault.replan(root: root, task: slug) { mirror(replanned, on: slug) }
+        }
+        // Its review set where audit_reason could be given (none drops the reason too), as the vault keeps it.
+        if review != nil || auditReason != nil {
+            let reason = auditReason.map { $0?.rawValue ?? "" } ?? (review == LeadTask.Review.none ? "" : nil)
+            noteSmallTask(slug, LeadVault.SmallTaskNote(auditReason: reason, reviewOffered: true, codex: agent == .codex ? true : nil))
         }
         var recorded = ""
         if let review {
@@ -1945,6 +1983,7 @@ public final class LeadToolset: MCPToolset {
                                                                   base: workflow.base, number: number)
         let note = leadNote(.context, summary, on: slug)
         let record = LeadReroll(archive: archive ?? "", commit: head, round: ledger?.rounds ?? 0)
+        restoreSmallTask(slug, "re-rolled")
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             Self.appendContext(summary, to: &board.tasks[index])
@@ -2377,11 +2416,20 @@ public final class LeadToolset: MCPToolset {
                 throw Problem(text: "No worker started: \(slug)'s halted worker wasn't ended (\(ended.said)). If the host keeps refusing, tell the user.")
             }
         }
+        // Codex's work is audited, whatever small_task_min says: noted where a worker can't write it, before it starts.
+        if codex { noteSmallTask(slug, LeadVault.SmallTaskNote(codex: true)) }
+        // A worker granted on it before (the vault's own record, not the board's status or attempts, which anyone may
+        // write) makes this one a later round: small_task_min's drop is for the first. Unreadable: taken as later.
+        let laterWorker = (try? vault.smallTaskFacts(root: root, task: slug)).map { $0?.startedAt != nil } ?? true
         let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(briefed.title)", trust: true,
                                  prompt: LeadPrompts.worker(task: briefed, root: root, workflow: workflow),
                                  start: (note.map { $0 + " " } ?? "") + "Start on your task (it's in your instructions)." + finish
                                     + " Call progress at each milestone. When done, call report.",
                                  model: runModel, advisor: run.advisor, effort: run.effort, branch: base, agent: agent)
+        // A failed task started again is a new round: small_task_min's drop was for its first. So is any start after a
+        // drop, whatever the board's status says (anyone may write it).
+        if laterWorker || store.load().task(slug)?.status == .failed { restoreSmallTask(slug, "a new round of work") }
+        endSmallTaskRound(slug, "a worker started again after its drop")
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             // A failed task started again is a new round of work; its setback stays to say why.
@@ -2555,6 +2603,15 @@ public final class LeadToolset: MCPToolset {
         // rework round (its setback stays to say why).
         // (Delivered already: a host that can't be read now only leaves the board's state as it was.)
         if (try? listed())?.contains(where: { $0.id == worker && $0.live }) == true {
+            // A failed one's rework is a new round: small_task_min's drop was for its first.
+            if store.load().task(slug).map({ $0.worker == worker && $0.status == .failed }) == true {
+                restoreSmallTask(slug, "sent back to work")
+            } else if (try? vault.unaudited(root: root, task: slug))?.reported != nil,
+                      (try? vault.smallTaskFacts(root: root, task: slug))??.dropped == nil {
+                // Work after a done report that wasn't dropped is a later round, whatever the board's status says
+                // (anyone may write it): its next done report keeps its audit.
+                noteSmallTask(slug, LeadVault.SmallTaskNote(kept: "sent back to work after its done report"))
+            }
             try store.update { board in
                 guard let index = board.taskIndex(slug), board.tasks[index].worker == worker,
                       [.failed, .blocked].contains(board.tasks[index].status) else { return }
@@ -4279,6 +4336,118 @@ public final class LeadToolset: MCPToolset {
         return riskRaise(task, commit: commit, workflow: workflow, model: model)
     }
 
+    // MARK: Small tasks (`LeadSmallTask`)
+
+    /// Why `task` at `head` doesn't qualify for small_task_min's drop to review none; nil when it does: what the vault
+    /// keeps of it and the board (`LeadSmallTask.ineligible`), then its branch's paths and the risk check's deterministic
+    /// triggers (the model pass runs after the drop, as for any review none task, and can only raise it). `facts`: the
+    /// vault's, as read (nil: read them here).
+    func smallTaskIneligible(_ task: LeadTask, head: String, facts given: LeadVault.SmallTaskFacts?? = nil, redrop: Bool = false) -> String? {
+        let workflow = self.workflow
+        let facts: LeadVault.SmallTaskFacts?
+        if let given { facts = given } else {
+            do { facts = try vault.smallTaskFacts(root: root, task: task.slug) } catch { return "the vault can't be read (\(error))" }
+        }
+        // The settings it's judged by (small_task_min, the sample, sensitive and strict paths, what the risk check reads)
+        // count only as the lead last set them with configure: any session of the team can write workflow.md, and a
+        // worker that raised small_task_min for its done report could set it back before merge looks. Judged on this
+        // one read of the file; a guard rail the vault has no record of keeps the audit.
+        let recorded: [String: String]
+        do { recorded = try vault.guardedSettings(root: root) ?? [:] } catch { return "the vault can't say what the lead last set workflow.md's settings to (\(error))" }
+        let hashes = LeadVault.guardedHashes(workflow)
+        let unset = LeadVault.guardedKeys.filter { recorded[$0] == nil }
+        if !unset.isEmpty { return "the vault has no record of workflow.md's \(unset.joined(separator: ", ")) as the lead set it" }
+        let changed = LeadVault.guardedKeys.filter { recorded[$0] != hashes[$0] }
+        if !changed.isEmpty { return "workflow.md's \(changed.joined(separator: ", ")) isn't what the lead last set with configure" }
+        let rounds = max(task.audits?.rounds ?? 0, vault.audits(root: root, task: task.slug)?.rounds ?? 0)
+        if let why = LeadSmallTask.ineligible(task, facts: facts, workflow: workflow, auditRounds: rounds, redrop: redrop) { return why }
+        let range = "\(workflow.base)...\(head)"
+        let diff = Self.changedFiles(range, root: root)
+        guard diff.ok else { return "which files it changes can't be told (\(diff.error))" }
+        let files = diff.output.split(whereSeparator: \.isNewline).map(String.init)
+        let sensitive = files.filter { path in workflow.sensitiveGlobs.contains { LeadWorkflow.matches(path, glob: $0) } }
+        if !sensitive.isEmpty { return "it touches sensitive_paths (\(LeadRisk.list(sensitive)))" }
+        let strict = files.filter { path in (workflow.strictGlobs ?? []).contains { LeadWorkflow.matches(path, glob: $0) } }
+        if !strict.isEmpty { return "it touches strict_paths (\(LeadRisk.list(strict)))" }
+        let numstat = Git.run(["diff", "--numstat", "--no-color", range], in: root)
+        guard numstat.ok else { return "what its branch changes can't be read for the risk check (\(numstat.error))" }
+        if let flagged = LeadRisk.deterministic(changes: LeadRisk.changes(numstat: numstat.output), patch: {
+            let patch = Git.run(["diff", "-U0", "--no-color", range], in: root)
+            return patch.ok ? patch.output : nil
+        }, workflow: workflow) {
+            return "the risk check flags it: \(flagged)"
+        }
+        return nil
+    }
+
+    /// The minutes of work (as the vault counted them) `slug`'s done report on `head` would be dropped to review none
+    /// for: its review is audit, no audit has started on it, and it qualifies; nil when it wouldn't be.
+    func smallTaskQualifies(_ slug: String, head: String?) -> Int? {
+        guard let head, let task = store.load().task(slug) else { return nil }
+        guard let kept = try? vault.unaudited(root: root, task: slug), task.reviewLevel.atLeast(kept.review) == .audit,
+              vault.current(.verifier, root: root, task: slug) == nil, task.auditHeld == nil,
+              let facts = try? vault.smallTaskFacts(root: root, task: slug), facts.dropped == nil else { return nil }
+        return smallTaskIneligible(task, head: head, facts: .some(facts)) == nil ? Int((facts.worked ?? 0) / 60) : nil
+    }
+
+    /// Notes `note` on `slug` in the vault (the lead's tool server only: the host refuses anyone else's), for
+    /// small_task_min. A note that can't be recorded leaves the task audited, as nothing on record does.
+    func noteSmallTask(_ slug: String, _ note: LeadVault.SmallTaskNote) {
+        guard role == .lead else { return }
+        try? vault.noteSmallTask(note, root: root, task: slug)
+    }
+
+    /// auto_advance's step at a done report (lead only: the vault takes a review level from the lead alone): a review
+    /// audit task that qualifies has its review dropped to none for this round, in the vault and on the board, recorded
+    /// on it and in progress.md; one dropped earlier that no longer qualifies (a raise, more work) goes back to audit,
+    /// for good. What decides is the vault's (`LeadVault.SmallTaskFacts`), never only the board's.
+    func advanceSmallTask(_ slug: String, head: String) {
+        guard role == .lead, let task = store.load().task(slug), let facts = try? vault.smallTaskFacts(root: root, task: slug) else { return }
+        if facts.dropped != nil {
+            if facts.kept == nil, let why = smallTaskIneligible(task, head: head, facts: .some(facts), redrop: true) {
+                restoreSmallTask(slug, "at \(head.prefix(8)): \(why)")
+            }
+            return
+        }
+        // Only on its worker's done report on this head: work nobody said is done isn't judged.
+        guard (try? vault.unaudited(root: root, task: slug))?.reported == head, let minutes = smallTaskQualifies(slug, head: head) else { return }
+        // Recorded as dropped first: a drop the vault doesn't know of would never be undone.
+        do {
+            try vault.noteSmallTask(LeadVault.SmallTaskNote(dropped: head), root: root, task: slug)
+            try vault.setReview(.none, root: root, task: slug)
+        } catch { return }
+        try? store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].review = LeadTask.Review.none
+            board.tasks[index].auditNeeded = nil
+            board.tasks[index].smallTask = LeadSmallTask(minutes: minutes, commit: head)
+        }
+        try? store.appendProgress(LeadSmallTask.progressText(slug, minutes: minutes))
+    }
+
+    /// small_task_min's round ends (`why`): when the vault says it was dropped, it's audited for good from now.
+    func endSmallTaskRound(_ slug: String, _ why: String) {
+        guard role == .lead, (try? vault.smallTaskFacts(root: root, task: slug))?.dropped != nil else { return }
+        restoreSmallTask(slug, why)
+    }
+
+    /// `slug` is audited for good from now (`why`): noted in the vault, and when small_task_min dropped it, its review
+    /// goes back to audit, the vault's first, the board's and progress.md after. A new round (the lead's tools sending it
+    /// back to work, a restart, a re-roll), a raise by the risk check or the sample, or a drop that no longer qualifies.
+    func restoreSmallTask(_ slug: String, _ why: String) {
+        guard role == .lead else { return }
+        let facts = try? vault.smallTaskFacts(root: root, task: slug)
+        try? vault.noteSmallTask(LeadVault.SmallTaskNote(kept: why), root: root, task: slug)
+        guard facts?.dropped != nil, facts?.kept == nil else { return }
+        try? vault.setReview(.audit, root: root, task: slug)
+        try? store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].review = .audit
+            if board.tasks[index].smallTask?.restored == nil { board.tasks[index].smallTask?.restored = why }
+        }
+        try? store.appendProgress("\(slug) small task: back to audit (\(why))")
+    }
+
     /// What `LeadRisk` says of `task`'s branch at `commit`, as reviewNeeded's sentence; nil: it stays review none. The
     /// model pass runs only when nothing deterministic raised it, once per commit, and its keep, error or timeout leave
     /// the deterministic result. Only the stat, the contract and the base branch's REVIEW.md go to it.
@@ -4333,6 +4502,7 @@ public final class LeadToolset: MCPToolset {
             }
         }
         if first { try? store.appendProgress("Raised \(slug) to audit (the risk check, at \(raise.commit.prefix(8))): \(raise.reason)") }
+        restoreSmallTask(slug, "the risk check raised it")
     }
 
     /// The commit a review none task merges at: its branch's head, as long as its own worker reported done on it (as
@@ -5036,6 +5206,10 @@ public final class LeadToolset: MCPToolset {
                     throw Problem(text: "audit_sample_percent must be a whole number from 0 (no sampling) to 100.")
                 }
                 value = String(percent)
+            case "small_task_min":
+                guard !value.isEmpty else { break }
+                guard let count = Int(value), count >= 0 else { throw Problem(text: "small_task_min must be a whole number of minutes, 0 (off) or more.") }
+                value = String(count)
             case "task_budget_min":
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 0 else { throw Problem(text: "task_budget_min must be a whole number of minutes, 0 (no budget) or more.") }
@@ -5127,7 +5301,7 @@ public final class LeadToolset: MCPToolset {
                                           "records_dir": after.recordsDir ?? "", "auto_advance": String(after.autoAdvance),
                                           "merge_batching": after.mergeBatching.rawValue,
                                           "risk_lines": String(after.riskLines), "risk_model": String(after.riskModel),
-                                          "audit_sample_percent": String(after.auditSamplePercent),
+                                          "audit_sample_percent": String(after.auditSamplePercent), "small_task_min": String(after.smallTaskMin),
                                           "watch_app_logs": String(after.watchAppLogs), "agent_default": after.agentDefault.rawValue]
             // A limit cleared reads back as its default.
             let defaults = ["lead_model": LeadWorkflow.defaultLeadModel, "lead_advisor": LeadWorkflow.defaultLeadAdvisor, "worker_advisor": "none",
@@ -5139,7 +5313,7 @@ public final class LeadToolset: MCPToolset {
                             "auto_advance": String(LeadWorkflow().autoAdvance), "watch_app_logs": String(LeadWorkflow().watchAppLogs),
                             "merge_batching": LeadWorkflow().mergeBatching.rawValue,
                             "risk_lines": String(LeadWorkflow().riskLines), "risk_model": String(LeadWorkflow().riskModel),
-                            "audit_sample_percent": String(LeadWorkflow().auditSamplePercent),
+                            "audit_sample_percent": String(LeadWorkflow().auditSamplePercent), "small_task_min": String(LeadWorkflow().smallTaskMin),
                             "agent_default": LeadWorkflow().agentDefault.rawValue]
             for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
                 throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
@@ -5300,6 +5474,8 @@ public final class LeadToolset: MCPToolset {
     }
 
     func setStatus(_ slug: String, _ status: LeadTask.Status, setback: LeadSetback? = nil) throws {
+        // A merge that failed ends small_task_min's round: what comes next is audited.
+        if setback?.stage == .merge { endSmallTaskRound(slug, "its merge failed") }
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].status = status
@@ -5364,7 +5540,11 @@ public final class LeadToolset: MCPToolset {
         let hold = standing == nil ? Hold() : self.hold(slug, vault.audits(root: root, task: slug), head: head)
         let blocking = hold.findings
         // Why it's audited; with neither that nor a standing verdict, the merge's own test run is its check.
-        let needed = standing == nil && done ? reviewNeeded(slug, commit: head) : nil
+        let reviewed = standing == nil && done ? reviewNeeded(slug, commit: head) : nil
+        // A small audit task's first round: auto_advance takes it as review none (`LeadSmallTask`; the drop is the
+        // lead's tool server's, which the vault takes a review level from), so it isn't said to need an audit.
+        let small = reviewed != nil && advances(slug) ? smallTaskQualifies(slug, head: head) : nil
+        let needed = small == nil ? reviewed : nil
         // A verdict the lead settled as an exception stands too: a repeated done doesn't undo that.
         let settled = standing.flatMap { verdict in store.load().task(slug).flatMap { acceptedException($0, verdict) } } != nil
         try store.update { board in
@@ -5416,7 +5596,11 @@ public final class LeadToolset: MCPToolset {
         // No audit asked for: the merge's own test run is the check.
         let unaudited = standing == nil && needed == nil
         var next: String?
-        if let needed {
+        if let small, case .success = recorded {
+            next = "Its review is audit, but it's a small task (\(small) min of work, under small_task_min \(workflow.smallTaskMin)) on its first round, "
+                + "touching no sensitive or strict path and not flagged by the risk check: auto_advance takes it as review none this round, "
+                + "so the risk check, the audit sample and the merge's full test run are its checks."
+        } else if let needed {
             next = needed + " Run audit(\(slug)); only the verifier's report counts."
         } else if unaudited, case .failure(let error) = recorded {
             next = "Its done couldn't be recorded in the vault (\(error)), so merge can't take it without an audit: run audit(\(slug))."
@@ -6166,6 +6350,8 @@ public final class LeadToolset: MCPToolset {
         // The scorecard's cost line: the batch's receipts summed, and its most expensive task.
         if let receipts = LeadReceiptTotals.line(all) { lines.append("\n" + receipts) }
         if let origins = LeadOrigins.statusLine(all.tasks, now: Date().timeIntervalSince1970) { lines.append("\n" + origins) }
+        // The scorecard's small_task_min line: how the rule went this week, to judge it on numbers.
+        if let small = LeadSmallTask.statusLine(all.tasks, now: Date().timeIntervalSince1970) { lines.append("\n" + Self.clip(small, 600)) }
         if !ended.isEmpty {
             lines.append("\nworker ended (\(ended.count)), not running:")
             lines += ended.prefix(Self.statusTasks).map { task, who in
@@ -6587,6 +6773,9 @@ public final class LeadToolset: MCPToolset {
         lines.append("- audit_sample_percent: " + (workflow.auditSamplePercent > 0
             ? "\(workflow.auditSamplePercent) (auto_advance audits that share of review none tasks anyway, at random, when they report done)"
             : "0 (no review none task is sampled for audit)"))
+        lines.append("- small_task_min: " + (workflow.smallTaskMin > 0
+            ? "\(workflow.smallTaskMin) (a review audit task done on its first round in fewer minutes of work, touching no sensitive or strict path and not flagged by the risk check, nor Codex's, nor filed with an audit_reason, merges as review none that round)"
+            : "0 (off: review audit tasks are always audited)"))
         if workflow.watchAppLogs {
             lines.append("- watch_app_logs: true (VibeSwitcher's own freezes, crashes, error lines and daily trend come to you as witness reports)")
         }
@@ -6632,7 +6821,12 @@ public final class LeadToolset: MCPToolset {
                 + (task.waitsForContract ? " (record_incident's generic brief: it doesn't start by itself until update_task changes its contract, or auto_advance: true or start_worker sets it going)" : ""))
             lines.append("Worker: \(Self.agentText(task))" + (task.codexAudit.map { " (\($0))" } ?? ""))
             lines.append("Review: \(task.reviewLevel.rawValue)" + (task.merged.map { $0.unaudited ? " (merged with no audit)" : "" } ?? "")
-                + (task.riskRaised.map { " (audited: \($0.reason), raised by the risk check at \($0.commit.prefix(8)))" } ?? ""))
+                + (task.riskRaised.map { " (audited: \($0.reason), raised by the risk check at \($0.commit.prefix(8)))" } ?? "")
+                + (task.auditReason.map { " (audit_reason \($0.rawValue): small_task_min never drops it)" } ?? "")
+                + (task.smallTask.map { small in
+                    " (small task: merged on tests (\(small.minutes) min of work), dropped from audit at \(small.commit.prefix(8))"
+                        + (small.restored.map { "; back to audit: \($0)" } ?? "") + ")"
+                } ?? ""))
             if let receipt = task.receipt { lines.append("\n" + receipt.line) }
             if let sessions, let ended = Self.endedMember(task, sessions) { lines.append("\nNow: \(ended)") }
             if let released = Self.releasedText(task, sessions) {

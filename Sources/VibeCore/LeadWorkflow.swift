@@ -89,6 +89,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// (`audit_sample_percent:`, 0 to 100; 0: off; see `LeadAuditSample`): a tripwire on what the unaudited path lets
     /// through, not a statistic.
     public var auditSamplePercent = LeadAuditSample.defaultPercent
+    /// A review audit task whose worker reports done on its first round with fewer minutes of counted work than this,
+    /// touching no sensitive or strict path and not flagged by the risk check, merges as review none that round
+    /// (`small_task_min:`; 0: off; see `LeadSmallTask`).
+    public var smallTaskMin = LeadSmallTask.defaultMinutes
     /// This project's lead gets VibeSwitcher's own health digests (`watch_app_logs:`, see `AppHealth`): its freezes,
     /// crashes and error lines, and a daily trend. Off for every project but the one that builds VibeSwitcher.
     public var watchAppLogs = false
@@ -173,6 +177,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "risk_lines": workflow.riskLines = Int(value).map { max(0, $0) } ?? LeadRisk.defaultLines
                 case "risk_model": workflow.riskModel = flag(value) ?? true
                 case "audit_sample_percent": workflow.auditSamplePercent = Int(value).map { min(100, max(0, $0)) } ?? LeadAuditSample.defaultPercent
+                case "small_task_min": workflow.smallTaskMin = Int(value).map { max(0, $0) } ?? LeadSmallTask.defaultMinutes
                 case "watch_app_logs": workflow.watchAppLogs = flag(value) ?? false
                 default: break
                 }
@@ -507,7 +512,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     public static let configurable = ["test_command", "regression_command", "done_check_command", "done_check_min", "init_command", "base_branch", "remote", "verifier_model", "lead_model", "lead_advisor", "worker_advisor", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "stall_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
-                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "watch_app_logs", "agent_default"]
+                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "small_task_min", "watch_app_logs", "agent_default"]
 
     /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
     /// time (`BoardStore.prepare`), the lead's `configure` after.
@@ -705,6 +710,11 @@ public struct LeadWorkflow: Equatable, Sendable {
     # seeded random draw, recorded on the task, tells how often the unaudited path lets problems through. 0: off.
     # Empty: 10.
     audit_sample_percent: 10
+    # A review audit task whose worker reports done on its first round with fewer minutes of counted work than this,
+    # touching no sensitive_paths or strict_paths and not flagged by the risk check (nor Codex's, nor filed with an
+    # audit_reason), merges as review none that round: its tests, the risk check and the audit sample are its checks.
+    # 0: off. Empty: 30.
+    small_task_min: 30
     ---
     Notes for the lead: conventions, priorities, what not to touch. The lead reads this at the start of every session.
     """

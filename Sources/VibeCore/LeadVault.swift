@@ -221,6 +221,13 @@ public struct LeadVault: Sendable {
         case reportDone(root: String, task: String, commit: String?, evidence: LeadDoneEvidence? = nil)
         /// The task's review level and the commit its worker last reported done on (`Reply.unaudited`).
         case unaudited(root: String, task: String)
+        /// What small_task_min judges a task by, as the vault keeps it (`Reply.smallTask`; see `LeadVault.SmallTaskFacts`).
+        case smallTaskFacts(root: String, task: String)
+        /// The repository's lead only: notes on a task small_task_min judges it by (`LeadVault.SmallTaskNote`).
+        case noteSmallTask(root: String, task: String, note: SmallTaskNote)
+        /// The app only: the sessions its witness sees at work now (`at`, its clock); each worker's task counts the time
+        /// since it was last seen so.
+        case noteWorking(root: String, sessions: [String], at: Double)
         /// The session the calling process runs in, as the host tells from that process (`Reply.session`): the one a
         /// wallet request it files names. Refused outside every session.
         case walletSession
@@ -256,6 +263,8 @@ public struct LeadVault: Sendable {
         case session(String)
         /// A push request (`Request.pushRequest`, `settlePush`), or none.
         case push(LeadPush.Request?)
+        /// `Request.smallTaskFacts`: none while nothing is kept for the task.
+        case smallTask(SmallTaskFacts?)
     }
 
     /// The host said no, or couldn't be asked.
@@ -576,6 +585,8 @@ extension LeadVault {
             /// began. Each counts as running at every look until it ends, or for `maxOpenRun` (a host that went away
             /// mid-run never ends it).
             var openRuns: [String: Double]?
+            /// What small_task_min judges each task by, by task (optional: older vaults have none; see `SmallTaskFacts`).
+            var smallTasks: [String: SmallTaskFacts]?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`, with the role and task each held.
@@ -844,6 +855,14 @@ extension LeadVault {
                         other.role == role && other.task == member.task
                             && (finder == nil || other.finder?.panel != finder?.panel || other.finder?.index == finder?.index)
                     }
+                    // When its first worker was started, on the host's clock: small_task_min's bound on its work.
+                    if role == .worker, let task, team.smallTasks?[task]?.startedAt == nil {
+                        var all = team.smallTasks ?? [:]
+                        var facts = all[task] ?? SmallTaskFacts()
+                        facts.startedAt = member.issuedAt
+                        all[task] = facts
+                        team.smallTasks = all
+                    }
                     if role == .verifier, let task {
                         team.verdicts[task] = nil
                         if team.ballots?[task]?.panel != finder?.panel { team.ballots?[task] = nil }
@@ -1104,6 +1123,37 @@ extension LeadVault {
                     var kept = team.evidence ?? [:]
                     kept[task] = commit == nil ? nil : evidence
                     team.evidence = kept
+                    // When it said done, on the host's clock: with `startedAt`, small_task_min's bound on its work.
+                    if commit != nil, team.smallTasks?[task] != nil { team.smallTasks?[task]?.reportedAt = Date().timeIntervalSince1970 }
+                }
+                return .ok
+            case .smallTaskFacts(let root, let task):
+                return .smallTask(team(root)?.smallTasks?[task])
+            case .noteSmallTask(let root, let task, let note):
+                // What lowers an audit is the lead's word only: a worker that wrote these would merge with no verdict.
+                guard isLead(caller, root) else { return .refused("Only the repository's lead notes what small_task_min judges a task by.") }
+                change(root, &changed) { team in
+                    var all = team.smallTasks ?? [:]
+                    all[task] = (all[task] ?? SmallTaskFacts()).noting(note)
+                    team.smallTasks = all
+                }
+                return .ok
+            case .noteWorking(let root, let sessions, let at):
+                // Only what the app's witness sees: a session's word about its own work counts for nothing.
+                guard caller == .app else { return .refused("Only VibeSwitcher counts a task's working time.") }
+                guard let current = team(root) else { return .ok }
+                let busy = Set(sessions.map { $0.lowercased() })
+                let tasks = Set(current.members.filter { $0.role == .worker && $0.session.map { busy.contains($0.lowercased()) } == true }.compactMap(\.task))
+                let counting = Set((current.smallTasks ?? [:]).filter { $0.value.workingSince != nil }.keys)
+                guard !tasks.isEmpty || !counting.isEmpty else { return .ok }
+                change(root, &changed) { team in
+                    var all = team.smallTasks ?? [:]
+                    for task in tasks.union(counting) {
+                        var facts = all[task] ?? SmallTaskFacts()
+                        facts.count(working: tasks.contains(task), at: at)
+                        all[task] = facts
+                    }
+                    team.smallTasks = all
                 }
                 return .ok
             case .unaudited(let root, let task):

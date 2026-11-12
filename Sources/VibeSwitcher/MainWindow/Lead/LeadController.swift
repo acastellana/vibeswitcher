@@ -313,6 +313,8 @@ struct WitnessWork {
     /// The running tasks' workers at work (`LeadBudget.working`), and whether the board's counts change for it.
     var working: Set<String> = []
     var notesWork = false
+    /// Every session the look saw at work (`LeadBudget.works`): the vault counts its workers' tasks' time from these.
+    var busySessions: Set<String> = []
     /// The Mac's sleep as of the look: the count takes only time awake (`LeadBudget.awake`).
     var sleep = MacSleepLog()
     /// The stall to keep on each task (`LeadWitness.stalls`), and whether the board's change for it.
@@ -352,6 +354,7 @@ struct WitnessWork {
         stuckPrompts = LeadWitness.stuckPrompts(board: board, seen: seen, now: now, advanced: advanced).filter { !told($0.key) }
         step?("working")
         working = LeadBudget.working(board: board, seen: seen)
+        busySessions = Set(seen.filter { LeadBudget.works($0.value) }.keys)
         // The count not on board.json yet (`LeadBudgetClock`): a few bytes, read here off the main thread.
         let clock = recoveryRoot.map { BoardStore(root: $0).budgetClock() } ?? LeadBudgetClock()
         notesWork = board.notesWork(working, defaultMinutes: budgetMinutes, now: now.timeIntervalSince1970, clock: clock, sleep: sleep)
@@ -598,6 +601,9 @@ final class LeadController: ObservableObject {
     private var refreshing = false
     private var refreshAgain = false
     private let vault: LeadVault
+    /// What the vault was last told was at work, per project, and when (`LeadVault.noteWorking`).
+    private var workingTold: [String: (sessions: Set<String>, at: Date)] = [:]
+    static let workingEvery: TimeInterval = 30
     /// Leads whose role another session of their project holds now (VibeSwitcher started a new lead), by window
     /// session: the window says so, and what's typed into them goes to the live lead (see `ReplacedLead`).
     @Published private(set) var replacedLeads: [UUID: ReplacedLead] = [:]
@@ -1984,6 +1990,15 @@ final class LeadController: ObservableObject {
                     self?.stopForBudget(task, root: root, worker: agent, defaultMinutes: budget)
                 }
             }
+        }
+        // The vault's own count of working time (`LeadVault.noteWorking`), which small_task_min goes by: the board's is
+        // anyone's to write. Told when the set changes, else at most every `workingEvery`.
+        let busy = work.busySessions
+        let lastTold = workingTold[root]
+        if lastTold.map({ $0.sessions != busy || now.timeIntervalSince($0.at) >= Self.workingEvery }) ?? !busy.isEmpty {
+            workingTold[root] = (busy, now)
+            let vault = self.vault
+            reads.async { _ in try? vault.noteWorking(root: root, sessions: Array(busy), at: at) }
         }
         // On the board too, for status and the Team view, until the worker moves again.
         let stalls = work.stalls
