@@ -2568,3 +2568,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 10:45 Audit of agents-md-run-every: complete, clean, round 2: 1 Nit closed
 - 2026-11-12 10:53 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-11-12 10:57 Merged agents-md-run-every: AGENTS.md: run every lint, and a load test command that works on any Mac (build 32244f28b05f)
+- 2026-11-12 10:57 Automatically (auto_advance): Merged agents-md-run-every (AGENTS.md: run every lint, and a load test command that works on any Mac) into main at 7015f209, on its passing audit and the full test run.
+- 2026-11-12 10:57 Automatically (auto_advance): Cleaned up agents-md-run-every (freed 1.6 GB of build output and temporary folders). It stays done.
