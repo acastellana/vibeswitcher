@@ -309,8 +309,8 @@ public enum LeadLaunch {
     /// The session's TMPDIR is made under `temporary` for `cwd`, where it's started (the task's worktree, else `root`):
     /// what its swift builds and tests leave there goes with it (see `SessionTemp`).
     public static func prepare(role: Role, root: String, task: String?, base: String, prompt: String, start: String,
-                               server: String, name: String, model: String? = nil, branch: String? = nil,
-                               records: String? = nil, folder: URL? = nil, cwd: String? = nil,
+                               server: String, name: String, model: String? = nil, advisor: String? = nil, effort: String? = nil,
+                               branch: String? = nil, records: String? = nil, folder: URL? = nil, cwd: String? = nil,
                                temporary: URL = SessionTemp.root) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
@@ -350,7 +350,13 @@ public enum LeadLaunch {
         let trimmed = base.trimmingCharacters(in: .whitespaces)
         // The model given replaces one the project's command names (`--model x`, `--model=x`): `claude --help` doesn't
         // say which of two wins.
-        var parts = [trimmed.isEmpty ? "claude" : model == nil ? trimmed : withoutModel(trimmed)]
+        // Likewise an effort given replaces the command's own. The command's own advisor never goes through, passed one
+        // or not: lead_advisor, worker_advisor and the task decide a session's advisor (`run`), so a command's
+        // `--advisor fable` can't reach a session while Fable is held back, a task that says none, or a main it ranks
+        // below (an interactive session exits at launch on that pairing).
+        var command = without("--advisor", in: trimmed.isEmpty ? "claude" : model == nil ? trimmed : withoutModel(trimmed))
+        if effort != nil { command = without("--effort", in: command) }
+        var parts = [command.isEmpty ? "claude" : command]
         // From its file, so the prompt's length and characters never matter on the command line.
         parts.append("--append-system-prompt-file \(quote(promptFile))")
         parts.append("--mcp-config \(quote(mcpFile))")
@@ -360,10 +366,16 @@ public enum LeadLaunch {
         if role == .verifier { parts.append("--setting-sources user --strict-mcp-config") }
         parts.append("--name \(quote(name))")
         if let model { parts.append("--model \(quote(model))") }
+        // Consulted at decision points (Claude Code's advisor; the flag isn't in `claude --help`).
+        if let advisor { parts.append("--advisor \(quote(advisor))") }
+        if let effort { parts.append("--effort \(quote(claudeEffort(effort)))") }
         parts.append("-- \(quote(start))")
         var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
         // Marks the role's session: its hook gives it none of the notes plain sessions get (`SessionNote`).
         prepared.environment[SessionNote.roleVariable] = role.rawValue
+        // The lead's model, for its tool server to note on the board (`LeadBoard.leadModel`): a refusal its session
+        // stops at is then kept for that model, so a lead stopped at Fable's limit holds Fable back.
+        if role == .lead, let model { prepared.environment[leadModelVariable] = model }
         // Also from the start (Claude Code takes the settings' env as it reads them).
         if role == .verifier { prepared.environment.merge(verifierEnvironment(server: server)) { $1 } }
         // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
@@ -461,7 +473,7 @@ public enum LeadLaunch {
     /// What Codex can't hold is `codexUnenforced`. The files go in `folder` as `prepare`'s do: the prompt, and the
     /// configuration given on the command line as JSON, for reading back.
     public static func prepareCodex(root: String, task: String, base: String, prompt: String, start: String, server: String,
-                                    name: String, model: String? = nil, folder: URL? = nil, cwd: String? = nil,
+                                    name: String, model: String? = nil, effort: String? = nil, folder: URL? = nil, cwd: String? = nil,
                                     temporary: URL = SessionTemp.root,
                                     toolTimeout: TimeInterval = LeadDoneCheck.callTimeout(limit: LeadDoneCheck.defaultMinutes * 60)) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
@@ -474,7 +486,7 @@ public enum LeadLaunch {
         let writable = codexWritableRoots(cwd: cwd, slug: task, temporary: temporaryFolder?.path, root: root)
         let args = [MCPKeeper.flag, "--role", Role.worker.rawValue, "--root", root, "--task", task]
         // In order; each is one `-c key=value`.
-        let config: [(key: String, value: String)] = [
+        var config: [(key: String, value: String)] = [
             ("sandbox_workspace_write.writable_roots", toml(writable)),
             ("sandbox_workspace_write.network_access", "false"),
             // The worktree trusted, as the whole `projects` table (for this session only: the file isn't changed). Not as
@@ -499,6 +511,8 @@ public enum LeadLaunch {
             // the wrong place and never gets its role (the host run of 2026-11-01).
             ("mcp_servers.vibeswitcher.env_vars", toml(mcpVariables)),
         ]
+        // The task's effort; not set: config.toml's model_reasoning_effort, as before.
+        if let effort { config.append(("model_reasoning_effort", toml(codexEffort(effort)))) }
         let record: [String: Any] = ["config": config.map { ["key": $0.key, "value": $0.value] }, "writableRoots": writable,
                                      "mcpServer": ["command": server, "args": args],
                                      "unenforced": codexUnenforced.map { ["rule": $0.rule, "instead": $0.instead] }]
@@ -538,6 +552,148 @@ public enum LeadLaunch {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return command }
         let range = NSRange(command.startIndex..., in: command)
         return regex.stringByReplacingMatches(in: command, range: range, withTemplate: "").trimmingCharacters(in: .whitespaces)
+    }
+
+    /// `command` without `option` and its value (`--advisor x`, `--effort=x`); the rest as it was.
+    static func without(_ option: String, in command: String) -> String {
+        let pattern = #"(^|\s+)"# + NSRegularExpression.escapedPattern(for: option) + #"(=|\s+)('[^']*'|"[^"]*"|\S+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return command }
+        let range = NSRange(command.startIndex..., in: command)
+        return regex.stringByReplacingMatches(in: command, range: range, withTemplate: "").trimmingCharacters(in: .whitespaces)
+    }
+
+    // MARK: Models, advisors and effort
+
+    /// The variable a lead's session carries its `--model` in (none: Claude's default).
+    public static let leadModelVariable = "VIBESWITCHER_LEAD_MODEL"
+
+    /// What a session runs on: its model (`--model`; nil: its command's, else Claude's settings'), the advisor its main
+    /// model consults at decision points (Claude Code's `--advisor`: before it commits to an approach, when an error
+    /// recurs, before it declares done; billed at the advisor's rates only when called), and its reasoning effort
+    /// (`effortLevels`; nil: the CLI's default). The user, 2026-11-12: Opus for nearly everything, Fable where judgment
+    /// decides the outcome (the lead, hard tasks, re-rolls, sensitive audits).
+    public struct Run: Equatable, Sendable {
+        public var model: String?
+        public var advisor: String?
+        public var effort: String?
+
+        public init(model: String? = nil, advisor: String? = nil, effort: String? = nil) {
+            self.model = model
+            self.advisor = advisor
+            self.effort = effort
+        }
+
+        /// "opus, effort high, advisor fable"; `fallback` names the model when none is passed ("its command's model").
+        public func text(fallback: String) -> String {
+            ([model ?? fallback] + [effort.map { "effort \($0)" }, advisor.map { "advisor \($0)" }].compactMap { $0 }).joined(separator: ", ")
+        }
+    }
+
+    /// What a Codex session runs when it's given no model or effort: config.toml's top-level `model` and
+    /// `model_reasoning_effort` (in `$CODEX_HOME`, else `~/.codex`), for showing only; nil for one not set or not read.
+    /// VibeSwitcher never names a Codex model itself.
+    public static func codexDefaults(home: String = VibePaths.home,
+                                     codexHome: String? = ProcessInfo.processInfo.environment["CODEX_HOME"]) -> (model: String?, effort: String?) {
+        let folder = codexHome.flatMap { $0.isEmpty ? nil : $0 } ?? (home as NSString).appendingPathComponent(".codex")
+        guard let text = try? String(contentsOfFile: (folder as NSString).appendingPathComponent("config.toml"), encoding: .utf8) else { return (nil, nil) }
+        var values: [String: String] = [:]
+        for line in text.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") { break }
+            guard let equals = trimmed.firstIndex(of: "=") else { continue }
+            let key = trimmed[..<equals].trimmingCharacters(in: .whitespaces)
+            guard key == "model" || key == "model_reasoning_effort" else { continue }
+            var value = trimmed[trimmed.index(after: equals)...].trimmingCharacters(in: .whitespaces)
+            if let hash = value.range(of: " #") { value = String(value[..<hash.lowerBound]).trimmingCharacters(in: .whitespaces) }
+            value = value.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if !value.isEmpty { values[key] = value }
+        }
+        return (values["model"], values["model_reasoning_effort"])
+    }
+
+    /// The effort levels a task may set (add_task's and update_task's `effort`).
+    public static let effortLevels = ["low", "medium", "high", "xhigh"]
+    /// The advisors a task may set: fable, opus, or none (no advisor, whatever worker_advisor says).
+    public static let advisorChoices = ["fable", "opus", "none"]
+    /// A hard task's effort when it sets none (a task the lead marks advisor: fable).
+    public static let hardEffort = "high"
+    /// The model a re-rolled task's next worker runs on when the task names none: two rounds of patching that didn't
+    /// land call for more judgment, not more of the same.
+    public static let rerollModel = "fable"
+
+    /// Effort levels from least to most, as both CLIs order theirs.
+    static let effortLadder = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+    /// `claude --effort`'s levels (Claude Code's `--help`, 2026-11-12: low, medium, high, xhigh, max).
+    static let claudeEfforts = ["low", "medium", "high", "xhigh", "max"]
+    /// Codex's `model_reasoning_effort` values (codex-cli 0.167.0's: none, minimal, low, medium, high, xhigh, max).
+    static let codexEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+    /// `level` as a CLI with `levels` takes it: itself when it has it, else its nearest on `effortLadder` (the higher one
+    /// on a tie: a task asked for more, not less), else as it is.
+    static func nearestEffort(_ level: String, in levels: [String]) -> String {
+        if levels.contains(level) { return level }
+        guard let at = effortLadder.firstIndex(of: level) else { return level }
+        let known = levels.compactMap { effortLadder.firstIndex(of: $0) }
+        return known.min { (abs($0 - at), -$0) < (abs($1 - at), -$1) }.map { effortLadder[$0] } ?? level
+    }
+
+    static func claudeEffort(_ level: String) -> String { nearestEffort(level, in: claudeEfforts) }
+    static func codexEffort(_ level: String) -> String { nearestEffort(level, in: codexEfforts) }
+
+    /// A model family's rank for the advisor rule ("an advisor must rank at or above your session's main model",
+    /// code.claude.com/docs/en/advisor): fable above opus above sonnet above haiku; nil for one not known.
+    static func rank(_ model: String?) -> Int? {
+        switch AccountUsage.family(model) {
+        case "fable": return 4
+        case "opus": return 3
+        case "sonnet": return 2
+        case "haiku": return 1
+        default: return nil
+        }
+    }
+
+    /// The advisor a session whose main model is `main` (nil: not known) gets, of `advisor`; nil for none. Claude Code
+    /// refuses a pairing whose advisor ranks below its main (a Fable main with an Opus advisor), and an interactive
+    /// session it refuses one for exits at launch: such an advisor is dropped, as is a Fable advisor to a Fable main
+    /// (nothing more to consult), and with the main unknown, every advisor but Fable (which ranks above every main).
+    public static func advisor(_ advisor: String?, main: String?) -> String? {
+        guard let advisor = advisor?.trimmingCharacters(in: .whitespaces).lowercased(), !advisor.isEmpty, advisor != "none",
+              let wanted = rank(advisor) else { return nil }
+        guard let ranked = rank(main) else { return wanted == rank("fable") ? advisor : nil }
+        if ranked == rank("fable") { return nil }
+        return wanted >= ranked ? advisor : nil
+    }
+
+    /// The run a session meant for `model`, `advisor` and `effort` starts with. `defaultModel`: what no `--model` runs
+    /// (the command's own, else Claude's settings'; nil: not known). While Fable is held back (`AccountUsage.fableHeldBack`),
+    /// a session meant for Fable starts on Opus, passed explicitly when it was Fable by default, and a Fable advisor is
+    /// dropped: no session starts with `--advisor fable` then.
+    public static func run(model: String?, advisor: String?, effort: String?, defaultModel: String?, fableHeldBack: Bool) -> Run {
+        var model = model
+        if fableHeldBack, AccountUsage.family(model ?? defaultModel) == AccountUsage.heldBackFamily { model = AccountUsage.fallbackModel }
+        var advisor = advisor
+        if fableHeldBack, AccountUsage.family(advisor) == AccountUsage.heldBackFamily { advisor = nil }
+        return Run(model: model, advisor: Self.advisor(advisor, main: model ?? defaultModel), effort: effort)
+    }
+
+    /// The lead's run: lead_model (Fable by default: the session that decides what to do and judges what comes back),
+    /// Opus in Fable's place while Fable is held back; lead_advisor only while it runs on Opus.
+    public static func leadRun(_ workflow: LeadWorkflow, defaultModel: String?, fableHeldBack: Bool) -> Run {
+        let chosen = run(model: workflow.leadModel, advisor: nil, effort: nil, defaultModel: defaultModel, fableHeldBack: fableHeldBack)
+        guard AccountUsage.family(chosen.model ?? defaultModel) == "opus" else { return chosen }
+        return run(model: chosen.model, advisor: workflow.leadAdvisor, effort: nil, defaultModel: defaultModel, fableHeldBack: fableHeldBack)
+    }
+
+    /// A worker's run on `task`. Claude: the task's model, else Fable once it's been re-rolled (`rerollModel`), else the
+    /// command's; its advisor (none: no advisor), else worker_advisor; its effort, else high for a hard task. Codex: no
+    /// advisor (a Claude flag), the task's model unless an auto task was routed there (`routed`: Claude's model names
+    /// mean nothing to Codex), and the effort as Codex's model_reasoning_effort.
+    public static func workerRun(_ task: LeadTask, workflow: LeadWorkflow, codex: Bool, routed: Bool = false, defaultModel: String?,
+                                 fableHeldBack: Bool) -> Run {
+        let effort = task.effort ?? (task.hard ? hardEffort : nil)
+        if codex { return Run(model: routed ? nil : task.model, effort: effort) }
+        return run(model: task.intendedModel, advisor: task.advisor ?? workflow.workerAdvisor, effort: effort, defaultModel: defaultModel,
+                   fableHeldBack: fableHeldBack)
     }
 
     /// Where a new lead finds the last turns of the lead it replaces: in the project's `.vibeswitcher` folder (kept out

@@ -1094,11 +1094,14 @@ final class LeadController: ObservableObject {
                     self.holders[root] = nil
                     self.markReplaced(holders: self.holders)
                 }
+                // lead_model (Fable unless set), Opus while Fable is held back; lead_advisor only on Opus.
+                let run = Self.leadRun(workflow, base: base, home: home)
                 let launch = try LeadLaunch.prepare(
                     role: .lead, root: root, task: nil, base: base,
                     prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow, policy: policy),
                     start: LeadPrompts.leadStart(root: root, goal: goal, note: Self.commandLineNote, replaced: handed),
-                    server: Self.serverPath, name: name, folder: vault.runFolder(root: root, name: name), cwd: root)
+                    server: Self.serverPath, name: name, model: run.model, advisor: run.advisor,
+                    folder: vault.runFolder(root: root, name: name), cwd: root)
                 return (grant, launch)
             }
             if case .failure = prepared, let issued { try? vault.revoke(issued, root: root) }
@@ -2182,6 +2185,13 @@ final class LeadController: ObservableObject {
         }
     }
 
+    /// What a lead starts on (`LeadLaunch.leadRun`): its command's model (else Claude's settings in `home`) is what no
+    /// `--model` would run, and the account's kept usage says whether Fable is held back.
+    static func leadRun(_ workflow: LeadWorkflow, base: String, home: String) -> LeadLaunch.Run {
+        LeadLaunch.leadRun(workflow, defaultModel: LeadWorkflow.claudeModel(command: base, home: home),
+                           fableHeldBack: AccountUsageStore().load().fableHeldBack() != nil)
+    }
+
     private func cancelRotation(_ root: String, now: Date) {
         rotationEvent("cancelled")
         rotationAsked[root] = nil
@@ -2206,9 +2216,10 @@ final class LeadController: ObservableObject {
                 let workflow = LeadWorkflow.load(from: BoardStore(root: root).folder + "/workflow.md")
                 let start = LeadPrompts.leadStart(root: root, goal: nil, note: Self.commandLineNote,
                                                    replaced: (old.tty, file), scheduledNote: noteFile)
+                let run = Self.leadRun(workflow, base: base, home: home)
                 let launch = try LeadLaunch.prepare(role: .lead, root: root, task: nil, base: base,
                     prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow, policy: policy), start: start,
-                    server: Self.serverPath, name: "lead-\(Slug.make(project, taken: []))",
+                    server: Self.serverPath, name: "lead-\(Slug.make(project, taken: []))", model: run.model, advisor: run.advisor,
                     folder: vault.runFolder(root: root, name: "scheduled-\(UUID().uuidString)"), cwd: root)
                 return (launch, policy)
             }

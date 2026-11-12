@@ -23,6 +23,13 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The verifier's model (`verifier_model:`); when it's empty, audits run on another model than the workers' (see
     /// `auditModel`), a second opinion.
     public var verifierModel: String?
+    /// The lead's model (`lead_model:`; empty: fable): the session that decides what to do and judges what comes back
+    /// runs on the model best at that (the user, 2026-11-12), Opus in its place while Fable is held back.
+    public var leadModel = LeadWorkflow.defaultLeadModel
+    /// The lead's advisor while it runs on Opus (`lead_advisor:`; empty: fable; none: no advisor), see `LeadLaunch.leadRun`.
+    public var leadAdvisor: String? = LeadWorkflow.defaultLeadAdvisor
+    /// Every worker's advisor when its task sets none (`worker_advisor:`; empty or none: no advisor, the default).
+    public var workerAdvisor: String?
     /// The branch the lead builds on and merges into (`base_branch:`; otherwise the one checked out when the lead
     /// first started there, kept on its board).
     public var baseBranch: String?
@@ -140,6 +147,9 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "worker_agent": workflow.workerAgent = present ?? "claude"
                 case "agent_default": workflow.agentDefault = present.flatMap(LeadTask.WorkerAgent.init(text:)).flatMap { $0 == .codex ? nil : $0 } ?? .claude
                 case "verifier_model": workflow.verifierModel = present
+                case "lead_model": workflow.leadModel = present ?? defaultLeadModel
+                case "lead_advisor": workflow.leadAdvisor = advisorValue(present ?? defaultLeadAdvisor)
+                case "worker_advisor": workflow.workerAdvisor = present.flatMap(advisorValue)
                 case "base_branch": workflow.baseBranch = present
                 case "remote": workflow.remote = present
                 case "disk_warning_gb": workflow.diskWarningGB = gigabytes(value) ?? 10
@@ -176,6 +186,14 @@ public struct LeadWorkflow: Equatable, Sendable {
     }
 
     public static let defaultRecordsDir = "docs/lead"
+    public static let defaultLeadModel = "fable"
+    public static let defaultLeadAdvisor = "fable"
+
+    /// An advisor key's value: the model's name, lowercased; nil for none.
+    static func advisorValue(_ value: String) -> String? {
+        let value = value.trimmingCharacters(in: .whitespaces).lowercased()
+        return value.isEmpty || value == "none" ? nil : value
+    }
 
     /// The most finders an audit runs: contract and acceptance, bugs and regressions, and security or tests.
     public static let maxFinders = 3
@@ -421,8 +439,14 @@ public struct LeadWorkflow: Equatable, Sendable {
     ///
     /// `launchedModel`: the model the task's current worker was started on (`LeadTask.launchedModels`), kept off the
     /// audit under that floor as the task's model is.
-    public func auditModel(workerModel: String?, taskModel: String? = nil, launchedModel: String? = nil, heldBack: String? = nil) -> String {
-        let chosen = unheldAuditModel(workerModel: workerModel, taskModel: taskModel, launchedModel: launchedModel)
+    ///
+    /// `security`: the audited branch touches sensitive_paths or is flagged for security (`LeadToolset.securityReason`):
+    /// it's audited on Fable, whatever verifier_model says, where the floor allows Fable (not the workers', the task's
+    /// or its worker's under a different-model floor); else as any other audit.
+    public func auditModel(workerModel: String?, taskModel: String? = nil, launchedModel: String? = nil, heldBack: String? = nil,
+                           security: Bool = false) -> String {
+        let chosen = security && securityAllowed(workerModel: workerModel, taskModel: taskModel, launchedModel: launchedModel)
+            ? Self.securityAuditModel : unheldAuditModel(workerModel: workerModel, taskModel: taskModel, launchedModel: launchedModel)
         guard let heldBack, LeadReviewFloor.sameModel(chosen, heldBack) else { return chosen }
         let different = floor?.verifierDifferent == true
         let workers = LeadReviewFloor.workersModel(workerModel)
@@ -431,6 +455,18 @@ public struct LeadWorkflow: Equatable, Sendable {
                 && (!different || (!LeadReviewFloor.sameModel(model, workers) && !LeadReviewFloor.sameModel(model, taskModel)
                                    && !LeadReviewFloor.sameModel(model, launchedModel)))
         } ?? "sonnet"
+    }
+
+    /// The model a sensitive or security audit runs on.
+    public static let securityAuditModel = "fable"
+
+    /// Whether the floor lets a sensitive audit run on `securityAuditModel`: always, unless it keeps audits off the
+    /// workers' model and that's one of theirs.
+    private func securityAllowed(workerModel: String?, taskModel: String?, launchedModel: String?) -> Bool {
+        guard floor?.verifierDifferent == true else { return true }
+        let model = Self.securityAuditModel
+        return !LeadReviewFloor.sameModel(model, LeadReviewFloor.workersModel(workerModel)) && !LeadReviewFloor.sameModel(model, taskModel)
+            && !LeadReviewFloor.sameModel(model, launchedModel)
     }
 
     private func unheldAuditModel(workerModel: String?, taskModel: String?, launchedModel: String?) -> String {
@@ -468,7 +504,7 @@ public struct LeadWorkflow: Equatable, Sendable {
         return model
     }
 
-    public static let configurable = ["test_command", "regression_command", "done_check_command", "done_check_min", "init_command", "base_branch", "remote", "verifier_model", "max_workers",
+    public static let configurable = ["test_command", "regression_command", "done_check_command", "done_check_min", "init_command", "base_branch", "remote", "verifier_model", "lead_model", "lead_advisor", "worker_advisor", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "stall_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
                                       "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "watch_app_logs", "agent_default"]
@@ -601,6 +637,13 @@ public struct LeadWorkflow: Equatable, Sendable {
     # The verifier's model (e.g. fable, opus). Empty: audits run on another model than the workers', at least as
     # capable (fable; opus when the workers run fable).
     verifier_model:
+    # The lead's own model (empty: fable, best at deciding what to do and judging what comes back; Opus in its place
+    # while Fable is held back), and its advisor while it runs on Opus (fable, opus or none; empty: fable).
+    lead_model: fable
+    lead_advisor: fable
+    # Every worker's advisor when its task sets none (none, fable or opus). Workers run on Opus; mark a hard task
+    # with add_task's advisor: fable instead.
+    worker_advisor: none
     # The branch workers start from and verified work is merged into. Empty: the one checked out when the lead first
     # started here.
     base_branch:
@@ -1012,7 +1055,9 @@ public enum LeadPrompts {
         \(Policy.leadContracts) \(Policy.leadBugContracts) Workers are refused these git commands, so no brief may need one: \(deniedGit(workflow)).
         \(Policy.leadReview)
         3. Start workers (start_worker) only for tasks that don't depend on each other, at most \(workflow.maxWorkers) \
-        workers at once. Each works alone in its own worktree on its own branch. Fewer, sharper tasks beat many vague ones.
+        workers at once. Each works alone in its own worktree on its own branch. Fewer, sharper tasks beat many vague ones. \
+        Workers run on Opus; mark a task hard with add_task's advisor: fable when judgment decides it (concurrency, \
+        root-cause debugging, many parts at once, architecture choices): its worker consults Fable at decision points, at effort high.
         4. Don't sleep, wait or poll. VibeSwitcher sends you a message when a worker finishes, needs input or stalls, and \
         reports wake you even between turns: a short prompt from VibeSwitcher says what came in. When woken, call \
         status and act on the reports. Meanwhile plan the next tasks, review, or answer the user.

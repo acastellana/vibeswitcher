@@ -883,6 +883,16 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The model its worker runs on, as `claude --model` takes it (add_task's and update_task's `model`: sonnet for a
     /// mechanical task, say); nil: the project's Claude command's, as before.
     public var model: String?
+    /// The advisor its Claude worker consults at decision points (add_task's and update_task's `advisor`: fable, opus or
+    /// none); nil: workflow.md's worker_advisor. fable marks it hard (`hard`).
+    public var advisor: String?
+    /// Its worker's reasoning effort (add_task's and update_task's `effort`: low, medium, high, xhigh); nil: high for a
+    /// hard task, else the CLI's default (see `LeadLaunch.workerRun`).
+    public var effort: String?
+    /// The advisor and effort each of its sessions was started with, by session, as `launchedModels` (its current
+    /// members only; a session started with neither has no entry): what status and its start report show.
+    public var launchedAdvisors: [String: String]?
+    public var launchedEfforts: [String: String]?
     /// The command its worker's done report runs first (add_task's and update_task's `done_check`; "off": none); nil:
     /// workflow.md's done_check_command, else `LeadDoneCheck`'s default.
     public var doneCheck: String?
@@ -937,10 +947,28 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     }
 
     /// Notes that `sessions` were started on `model` (nil: Claude's default), keeping only its members' entries.
-    public mutating func launched(_ sessions: [String], on model: String?) {
+    public mutating func launched(_ sessions: [String], on model: String?, advisor: String? = nil, effort: String? = nil) {
         var kept = (launchedModels ?? [:]).filter { members.contains($0.key) }
         for session in sessions { kept[session] = model ?? "" }
         launchedModels = kept.isEmpty ? nil : kept
+        var advisors = (launchedAdvisors ?? [:]).filter { members.contains($0.key) }
+        var efforts = (launchedEfforts ?? [:]).filter { members.contains($0.key) }
+        for session in sessions {
+            advisors[session] = advisor
+            efforts[session] = effort
+        }
+        launchedAdvisors = advisors.isEmpty ? nil : advisors
+        launchedEfforts = efforts.isEmpty ? nil : efforts
+    }
+
+    /// The lead marked it hard (advisor: fable): concurrency, root-cause debugging, many parts at once, architecture.
+    /// Its worker consults Fable, runs at effort high unless it sets one, and auto prefers Claude for it.
+    public var hard: Bool { AccountUsage.family(advisor) == "fable" }
+
+    /// The model its Claude worker is meant to run on: its own, else Fable once it's been re-rolled
+    /// (`LeadLaunch.rerollModel`); nil: the project's command's. Its own always wins.
+    public var intendedModel: String? {
+        model ?? (rerolls?.isEmpty == false ? LeadLaunch.rerollModel : nil)
     }
     /// How long its workers have worked on it, in seconds, as the witness counted (see `LeadBudget.counts`): waiting
     /// on a prompt, the lead or the user, and its audits, don't count.
@@ -1329,6 +1357,9 @@ public struct LeadFlake: Codable, Equatable, Sendable {
 public struct LeadBoard: Codable, Equatable, Sendable {
     /// The lead's session (host id) and agent pid, so answers and events can be steered into it.
     public var leadSession: String?
+    /// The model the lead's session was started on (`LeadLaunch.leadModelVariable`, as its tool server read it); nil:
+    /// Claude's default or not known. What a refusal its session stops at is kept for.
+    public var leadModel: String?
     public var leadPid: Int32?
     public var leadTTY: String?
     /// The branch the lead builds on and merges into: the one checked out when it first started here.

@@ -627,7 +627,7 @@ public final class LeadAdvance: @unchecked Sendable {
             }
             return roomWait("audit(\(slug))", need: finders)
         }
-        if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug))) { return }
+        if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug), head: head)) { return }
         step(key ?? "audit|\(slug)|\(head)") {
             guard let before = due(slug, [.review]) else { throw NotDue() }
             _ = try lead.advanceAudit(slug)
@@ -793,7 +793,7 @@ public final class LeadAdvance: @unchecked Sendable {
         }
         let finders = lead.workflow.findersInForce
         guard !busy, hasRoom(slug, need: finders) else { return roomWait("audit(\(slug))", need: finders) }
-        if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug))) { return }
+        if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug), head: head)) { return }
         step("audit|\(slug)|\(head)|again") {
             guard let task = due(slug, [.review]), task.evidence == nil, endedVerifier(task)?.session == ended.session else { throw NotDue() }
             _ = try lead.advanceAudit(slug)
