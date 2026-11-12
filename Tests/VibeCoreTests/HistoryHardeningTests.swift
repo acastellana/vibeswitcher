@@ -6,8 +6,10 @@ import Testing
 /// ids, pasted HTML prompts, and odd characters in the scrollback.
 struct HistoryHardeningTests {
     let temp = Scratch()
+    /// Keys sorted: unsorted, the same dictionary can come out in another order on each call (Linux's Foundation
+    /// follows Swift's per-table hash seeds), and a line's id is its bytes'.
     func jsonl(_ objects: [[String: Any]]) -> Data {
-        Data(objects.map { String(decoding: try! JSONSerialization.data(withJSONObject: $0), as: UTF8.self) + "\n" }.joined().utf8)
+        Data(objects.map { String(decoding: try! JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys]), as: UTF8.self) + "\n" }.joined().utf8)
     }
 
     func tempHome() throws -> URL {
