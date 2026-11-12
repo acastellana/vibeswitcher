@@ -2575,3 +2575,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 12:01 Sampled docs-guide-development for audit from review none (at 8b30b7ea): draw 3.88 under audit_sample_percent 10 (seed 3684418736803315)
 - 2026-11-12 12:01 Released docs-guide-development's worker (idle since its done report on 8b30b7ea) while its audit runs
 - 2026-11-12 12:01 Automatically (auto_advance): Started the audit of docs-guide-development at 8b30b7ea (Sampled for audit: draw 3.88 under audit_sample_percent 10 (seed 3684418736803315)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-12 12:03 Audit of docs-guide-development: complete, clean
+- 2026-11-12 12:24 Merged docs-guide-development: docs/guide/development.md: the same lint filter and load-test line as AGENTS.md (build 32244f28b05f)
