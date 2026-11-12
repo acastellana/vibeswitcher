@@ -164,7 +164,7 @@ struct HookBoundsTests {
 
     // MARK: The built hook
 
-    static let hook = Bundle(for: HookAnchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-hook")
+    static let hook = builtProducts.appendingPathComponent("vibeswitcher-hook")
 
     /// The terminal the hook started from this process records for (as its `main.swift` finds it), if any.
     static let terminal: String? = {

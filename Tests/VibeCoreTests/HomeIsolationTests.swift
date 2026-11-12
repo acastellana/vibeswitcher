@@ -137,7 +137,7 @@ struct HomeIsolationTests {
     /// its host and every session write there all the time), so only what the hook could write there is compared:
     /// `hookWrites`.
     @Test func theHookOnAScratchHomeWritesThereAndNotInTheUsersFolder() async throws {
-        let hook = Bundle(for: TestBundleAnchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-hook").path
+        let hook = builtProducts.appendingPathComponent("vibeswitcher-hook").path
         try #require(FileManager.default.isExecutableFile(atPath: hook), "build it first: swift build")
         let home = temp.url("home")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -389,11 +389,16 @@ struct HomeIsolationTests {
     static var testingHelper: String? {
         let own = CommandLine.arguments.first ?? ""
         if URL(fileURLWithPath: own).lastPathComponent == "swiftpm-testing-helper" { return own }
+        #if os(Linux)
+        // Linux's `swift test` has no helper: the bundle is an executable, started by itself with the same arguments.
+        return Bundle(for: TestBundleAnchor.self).executablePath
+        #else
         guard let swift = try? runNow("/usr/bin/xcrun", ["--find", "swift"], environment: ProcessInfo.processInfo.environment),
               swift.status == 0 else { return nil }
         let helper = URL(fileURLWithPath: swift.output.trimmingCharacters(in: .whitespacesAndNewlines))
             .deletingLastPathComponent().appendingPathComponent("../libexec/swift/pm/swiftpm-testing-helper").standardizedFileURL.path
         return FileManager.default.isExecutableFile(atPath: helper) ? helper : nil
+        #endif
     }
 
     /// Runs `path` with `arguments` to its end: its status, and its output and errors together. Awaited, the run (the

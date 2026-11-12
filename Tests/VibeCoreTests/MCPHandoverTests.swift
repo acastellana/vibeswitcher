@@ -5,7 +5,7 @@ import Testing
 private final class Anchor {}
 
 /// The built `vibeswitcher-mcp`, beside this test bundle.
-private let toolServer = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
+private let toolServer = builtProducts.appendingPathComponent("vibeswitcher-mcp").path
 
 /// A real `vibeswitcher-mcp` process on real pipes, in a scratch home, installed at `installed`, with this test as its
 /// MCP client. Its builds are scripts standing in for one: each runs the built tool server as a test build

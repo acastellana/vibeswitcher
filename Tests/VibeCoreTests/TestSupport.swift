@@ -144,6 +144,16 @@ func pause(_ seconds: TimeInterval) async {
     try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
 }
 
+/// The folder the build's products are in (the hook, the tool server), beside the test bundle. The Mac's bundle is a
+/// folder there; Linux's is one executable, and Foundation calls the folder that is in its bundle.
+let builtProducts: URL = {
+    #if os(Linux)
+    return Bundle(for: Scratch.self).bundleURL
+    #else
+    return Bundle(for: Scratch.self).bundleURL.deletingLastPathComponent()
+    #endif
+}()
+
 /// Where tests put their scratch files: `$TMPDIR` when it's set, else the user's temporary folder (Foundation's
 /// `temporaryDirectory` ignores `$TMPDIR` on macOS). scripts/test-under-load.sh points it at a private folder per run
 /// and fails when a run leaves anything there, so every scratch file a test makes goes here and is removed by it.
