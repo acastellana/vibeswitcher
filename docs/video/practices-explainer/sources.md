@@ -65,12 +65,13 @@ so the video says "since 17 October" and gives no per-hour rate.
 | Mac-wide: 10 team sessions, load 2 × cores, heavy slots cores ÷ 6, `vs-heavy`, `VS_HEAVY_CORES` | `docs/guide/project-lead.md` "Mac-wide limits" |
 | Battery hold below 50 %; usage back-off at 80 % of a limit | same, "The battery hold", "The account's usage limits" |
 | Boost: load 36, 18 sessions, 7 workers, 3 slots | same, "Boost" |
-| Model routing: Opus by default; Fable for the lead's advice, hard tasks, re-rolls, sensitive or security audits | `docs/lead/decisions.md` 2026-11-12 09:06:53 |
+| Today: the verifier runs on another model than the workers when `verifier_model` is unset (Fable, or Opus when the project runs on Fable); `verifier_model=opus` set by hand for now; a task's own `model` | `docs/process/lead-rules.md` #12; `docs/guide/project-lead.md` "How a lead plans"; `docs/lead/decisions.md` 2026-11-12 09:06:53 |
+| Shown dashed, as decided and still being built (task `each-role-gets-the`, planned): Opus the default everywhere; Fable for the lead's advice, hard tasks, re-rolls, sensitive or security audits | `docs/lead/decisions.md` 2026-11-12 09:06:53 |
 | Codex for bounded mechanical tasks; `agent: auto` picks Codex when Claude is tight (70 %, or 10 points ahead of pace) and Codex has room; Codex work always audited by Claude | `docs/guide/project-lead.md` "Codex workers", "Auto routing" |
 | Records in `docs/lead`, committed by the tool server as "Lead: decisions and progress"; workers can't edit them | `docs/guide/project-lead.md` "The records" |
 | Provenance trailers `VS-Task`, `VS-Review`, `VS-Worker-Model`, `VS-Verifier-Model`, `VS-Build`, `VS-Contract` | `docs/guide/project-lead.md` "Provenance" |
 | Receipts: time, tokens, cost, rounds, re-rolls, reruns, tests, questions | `docs/guide/project-lead.md` "The Team tab…" |
-| Review rules floor; config seal and its Accept card; push card; shell card; wallet card; question timers never on blocking or outward-facing questions | `docs/guide/project-lead.md`; `README.md` "Around the lead" |
+| Review rules floor; config seal and its Accept card; push card; shell card (installs and password prompts come this way: `docs/guide/everyday-use.md`); wallet card; question timers never on blocking or outward-facing questions | `docs/guide/project-lead.md`; `README.md` "Around the lead" |
 | Phone over Tailscale: list, screens, leads' questions and boards; replies need a separate switch | `docs/guide/phone-access.md`; `README.md` "The phone" |
 
 ## Claude Code (checked against code.claude.com docs, 2026-11-12)

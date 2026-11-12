@@ -112,7 +112,7 @@ none: "the merge's full test run is the check". audit: "a verifier must pass it 
 paths (`.claude/` `AGENTS.md` `.github/` `.env` `*.entitlements` …) · the risk check (over 400 lines outside tests ·
 deletes or rewrites files · changes permissions · spawns processes · adds locks or threads · touches test or build
 setup · removes tests · plus a small model's look) · a random 10 % sample. "Nothing can lower a review." Count: 35
-raised by the risk check · 272 of 495 merged tasks audited.
+raised by the risk check · 271 of 495 merged tasks audited.
 
 ## Frame 8: An independent verifier
 
@@ -223,11 +223,13 @@ AC power: 18 sessions, load 36, 3 slots.
 - src: compositions/s15-models.html
 - motion: comparison-split; counting-dynamic-scale
 
-Fable, judgment: "the lead's advisor · hard tasks · re-rolls · sensitive and security audits". Opus, doing: "the
-default for workers and routine work". Codex, bounded: "mechanical tasks with a tight contract · `agent: auto` picks
+Fable, judgment: "audits, by default: a model other than the workers'" (today), and, dashed as the lead's decision of
+2026-11-12 that is still being built: "the lead's advisor · hard tasks and re-rolls · sensitive and security audits".
+Opus, doing: "the workers' model in this project · routine audits, for now" (today), "the default everywhere else"
+(decided, being built). Codex, bounded: "mechanical tasks with a tight contract · `agent: auto` picks
 it when Claude is tight (a limit at 70 %, or 10 points ahead of pace) and Codex has room · always audited by a Claude
 verifier". "Verifier and worker on different models, by default." Sessions launched: Opus 175 · Fable 70 · Codex 17 ·
-Sonnet 8. Note: "routing as decided 2026-11-12".
+Sonnet 8. Note: "dashed: the lead's routing decision of 2026-11-12, being built".
 
 ## Frame 16: Memory that lives in the repo
 

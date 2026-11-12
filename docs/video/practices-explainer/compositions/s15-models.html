@@ -40,6 +40,11 @@
           font-weight: 400;
           font-size: 22px;
         }
+        .s15 .lane .roles .chip.plan {
+          border-style: dashed;
+          color: var(--muted);
+          background: transparent;
+        }
         .s15 .lane .note {
           grid-column: 2;
           font-size: 22px;
@@ -88,18 +93,18 @@
           <div class="lane l1" style="top: 260px">
             <div class="name"><div class="h3 amber">Fable</div><div class="label">judgment</div></div>
             <div class="roles">
-              <span class="chip">the lead's advisor</span>
-              <span class="chip">hard tasks</span>
-              <span class="chip">re-rolled tasks</span>
-              <span class="chip">sensitive and security audits</span>
+              <span class="chip">audits, by default: a model other than the workers'</span>
+              <span class="chip plan">the lead's advisor</span>
+              <span class="chip plan">hard tasks and re-rolls</span>
+              <span class="chip plan">sensitive and security audits</span>
             </div>
           </div>
           <div class="lane l2" style="top: 440px">
             <div class="name"><div class="h3">Opus</div><div class="label">doing</div></div>
             <div class="roles">
-              <span class="chip">the default for workers</span>
+              <span class="chip">the workers' model in this project</span>
               <span class="chip">routine audits, for now</span>
-              <span class="chip">the rest of the work</span>
+              <span class="chip plan">the default everywhere else</span>
             </div>
           </div>
           <div class="lane l3" style="top: 620px">
@@ -118,8 +123,8 @@
             <div class="row"><span class="m muted">sonnet</span><span class="num n4">0</span></div>
           </div>
           <div class="bottom">
-            <div class="body">The verifier runs on a different model from the worker, by default.</div>
-            <div class="mono">Claude is tight: a limit at 70 %, or a week 10 points ahead of pace · routing as decided 2026-11-12, docs/lead/decisions.md</div>
+            <div class="body">The verifier runs on a different model from the worker, by default. Any task can name its own model.</div>
+            <div class="mono">dashed: the lead's routing decision of 2026-11-12, being built · Claude is tight: a limit at 70 %, or a week 10 points ahead of pace</div>
           </div>
         </div>
       </div>
