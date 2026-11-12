@@ -1,6 +1,6 @@
 # VibeSwitcher 2: a node on every machine
 
-Status: draft for the user's approval (2026-11-12). Nothing here is built.
+Status: direction agreed with the user 2026-11-12; details open to correction. Nothing here is built.
 
 The user, on the start: "port VS over to Linux (currently we're in Ubuntu WSL) in a way that will not be crazy to be
 updating when changes happen to VS." On use: "running multiple project leads etc. like on the app." On the UI: "It
@@ -138,6 +138,10 @@ Any of these makes the project a failure even if it runs:
   placing node pushes the base to the working node, the working node pushes `agent/<task>` back. Contracts, reports
   and findings travel as messages. The merge gate is unchanged, since it already takes one exact checked commit, and
   its tests can themselves be placed (a Mac for a Mac project's suite).
+- **Any mix of machines.** Nothing in the design names a machine or a kind of machine. A node describes itself by
+  what it offers: its system, cores and memory, the toolchains and plugins it has, the agent accounts logged in on
+  it and their quota, whether it is on AC power, whether it is always on. Placement matches a task's needs against
+  those, so a laptop, a workstation, a home server and a rented VM are the same thing with different answers.
 - **Plugins** are of two kinds. **Platform plugins** are what one system has and another doesn't: on the Mac,
   Terminal.app, the menu bar, Spaces, dictation capture, the Keychain; on Linux, systemd, `/proc`. **Feature
   plugins** are what one user wants and another doesn't: wallet, shell. A node says which it has, and a client shows
@@ -465,10 +469,10 @@ Version 2 lives on `v2`, pushed to GitHub, and main is not touched until the use
    or option appears in every client.
 5. **A parity file**, `docs/process/platform-parity.md`: every user-facing feature, and whether each client has it.
    A lint fails when a new settings entry or card kind isn't in it, so a Mac-only feature is a recorded choice.
-6. **Landing.** `v2` reaches main when the user says it works extremely well here, and the Mac app built from the
-   branch passes its whole suite and benches on a real Mac. At that point the lints run in the Mac's own merge gate,
-   `AGENTS.md` tells the Mac's agents where platform code goes, and the branch ends. **(open)**: whether that is
-   after milestone 2, with the Mac app unchanged in behaviour, or only after milestone 5.
+6. **Landing.** `v2` reaches main only once the Mac is on version 2 (milestone 5) and the user says the whole works
+   extremely well. Until then the branch's Mac build is checked by the macOS runner; the Mac app is built and tested
+   on a real Mac at the end, as milestone 5 begins, not at each stage. At the landing the lints run in the Mac's own
+   merge gate, `AGENTS.md` tells the Mac's agents where platform code goes, and the branch ends.
 
 ## The plan
 
@@ -590,7 +594,8 @@ Done when: the user runs their leads on a headless node from a laptop and answer
 
 Milestones 3 to 6 each start with a design of their own. Milestone 5 happens on a Mac and decides, with the Mac in
 front of someone, how the native app sits on its node; it also brings the Mac's cards and
-wallet onto the plugins. The branch can land before or after it (see [The branch](#the-branch)).
+wallet onto the plugins. It begins with the first build and full test run of the branch on a real Mac, and whatever
+that finds is fixed before anything new is built there. The branch lands after it (see [The branch](#the-branch)).
 
 ### How the work is done
 
@@ -607,7 +612,7 @@ wallet onto the plugins. The branch can land before or after it (see [The branch
 | --- | --- |
 | The branch falls behind main, or merging becomes the job | Daily merges; mechanical changes only to shared files; the lints name what each merge broke. Measured: if merges take more than a fifth of the time, the user hears it |
 | A change breaks the Mac and nobody here sees it | The macOS runner on every push; only mechanical changes to Mac-compiled code |
-| The macOS runner can't run enough of the suite to mean much (keychain, GUI, load) | Found in stage 0. If so, the branch is also built and tested on the user's Mac at each stage's end |
+| The macOS runner can't run enough of the suite to mean much (keychain, GUI, load), and the real Mac only sees the branch at the end | Found in stage 0: the runner at least builds everything and runs what it can. Changes to Mac-compiled code stay mechanical, so what reaches the Mac at the end is main's own app plus small seams. Milestone 5 starts by fixing what the first real run finds |
 | Linux's Foundation behaves differently (Process, FileHandle, dates, JSON key order, URLSession) | The existing tests run on both; each difference found becomes a line in `LinuxAPILint` or a `Platform/` service |
 | OpenCombine doesn't hold up | The spike; the fallback type |
 | SwiftTerm 1.19.0 has a Linux problem | The spike; a newer pinned version, checked on the Mac by CI |
@@ -631,18 +636,20 @@ wallet onto the plugins. The branch can land before or after it (see [The branch
 - A Linux counterpart of the sandbox (`scripts/sandbox-server.sh`: run, shot, quit) so UI changes are shown, light and
   dark, as they are on the Mac.
 
+## Decided
+
+- The fleet is designed generically, for any mix of machines (2026-11-12).
+- `v2` lands on main only once the Mac is on version 2 (2026-11-12).
+- The Mac app is built and tested on a real Mac at the end, not at each stage (2026-11-12).
+- The strong mode on Linux; signing in the browser's wallet for the wallet plugin; real agents on Sonnet or smaller
+  in test runs; remote use over Tailscale, with the phone app renewed.
+
 ## Open decisions
 
-For the user, most important first:
+For the user:
 
-1. **The fleet the user has in mind**: which machines, and what should run where. It shapes milestones 3 and 4, not
-   1 and 2.
-2. **When `v2` lands on main**: after milestone 2 with the Mac app unchanged, or only once the Mac is on version 2
-   (milestone 5).
-3. **If the hosted macOS runner can't run enough of the suite**: whether the user's Mac builds and tests the branch
-   at each stage's end.
-4. **What the renewed phone app keeps** from today's (stage 8 starts by listing it).
-5. **First-version cuts**: dictation, the spoken briefing, Statistics, dev previews and freeze reports are "later".
+1. **What the renewed phone app keeps** from today's (stage 8 starts by listing it).
+2. **First-version cuts**: dictation, the spoken briefing, Statistics, dev previews and freeze reports are "later".
 
 ## Left to the builder
 
