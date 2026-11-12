@@ -2742,3 +2742,10 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 16:58 Audit of a-size-ceiling-on: complete, clean, round 1: 1 Nit open
 - 2026-11-12 17:11 Merged a-calm-mac-merge: A calm-Mac merge gets the free cores (back to about 9 min from 15) (in a batch: a-calm-mac-merge, small-non-sensitive landed on one test run) (build cb245343d3d4 with changes not committed)
 - 2026-11-12 17:11 Merged small-non-sensitive: Small, non-sensitive tasks merge on their tests and the 10% sample, without a full audit (in a batch: a-calm-mac-merge, small-non-sensitive landed on one test run) (build cb245343d3d4 with changes not committed)
+- 2026-11-12 17:11 Automatically (auto_advance): Merged a-calm-mac-merge at 64c99ed9 (its passing audit), small-non-sensitive at 03d03896 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-12 17:12 Automatically (auto_advance): Cleaned up a-calm-mac-merge (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-12 17:12 Automatically (auto_advance): Cleaned up small-non-sensitive (freed 3.1 GB of build output and temporary folders). It stays done.
+- 2026-11-12 17:12 Automatically (auto_advance): Didn't cleanup|an-animated-explainer: fatal: '/Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/an-animated-explainer' is not a working tree
+- 2026-11-12 17:25 Merged app-health-doesn-t: App health doesn't count a task named "…fail…" as an error line (no audit: review none) (in a batch: app-health-doesn-t, a-size-ceiling-on, audit-eval-on-opus landed on one test run) (build cb245343d3d4 with changes not committed)
+- 2026-11-12 17:25 Merged a-size-ceiling-on: A size ceiling on each role's prompt (in a batch: app-health-doesn-t, a-size-ceiling-on, audit-eval-on-opus landed on one test run) (build cb245343d3d4 with changes not committed)
+- 2026-11-12 17:25 Merged audit-eval-on-opus: Audit eval on Opus: does an Opus verifier find as much as Fable? (in a batch: app-health-doesn-t, a-size-ceiling-on, audit-eval-on-opus landed on one test run) (build cb245343d3d4 with changes not committed)
