@@ -215,6 +215,10 @@ public struct MergeSample: Codable, Equatable, Sendable {
     /// run it landed on passed only on its rerun); nil when they don't (a conflict, a stop) and on lines from before
     /// it was kept. `firstRun` stays the batch's shared first run.
     public var taskFirstRun: String?
+    /// The width its test run got, VS_HEAVY_CORES as vs-heavy worked it out from the cores free when it started (its
+    /// line in the run's output, `cores(in:)`); nil when no vs-heavy said one (another project's test command, a run
+    /// that stopped first) and on lines from before it was kept.
+    public var cores: Int?
 
     public init(t: String, project: String, task: String, load: [Double], waitedS: Int, slotWaitS: Int?, durationS: Int,
                 firstRun: String?, reran: [String]?, rerunWhole: Bool?, result: String) {
@@ -255,6 +259,31 @@ public struct MergeSample: Codable, Equatable, Sendable {
                   waitedS: Int(waited.rounded()), slotWaitS: slotWait.map { Int(max(0, $0).rounded()) },
                   durationS: Int(max(0, ended.timeIntervalSince(started)).rounded()), firstRun: firstRun, reran: reran,
                   rerunWhole: reran == nil ? nil : rerun.map { !$0.filtered }, result: result)
+    }
+
+    /// The width vs-heavy gave a test run, from its line in the run's output ("vs-heavy: VS_HEAVY_CORES 9 of 12
+    /// cores: …", Resources/bin/vs-heavy's `give_width`): the first such line at a line's start, which comes before
+    /// anything the run builds or tests prints (a test's output quoting one comes later). Nil when there is none.
+    public static func cores(in output: String) -> Int? {
+        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            if let match = line.prefixMatch(of: #/vs-heavy: VS_HEAVY_CORES ([0-9]+) of [0-9]+ cores: /#), let cores = Int(match.1) {
+                return cores
+            }
+        }
+        return nil
+    }
+
+    /// The width a merge's first run got (`cores(in:)`), from how its test run went, when that holds its output: a
+    /// first run that failed (a failed run that went to a rerun holds the rerun's output, so the rerun's width then) or
+    /// hung. A pass holds its commit only: its width is in the output `Worktrees.rebaseAndTest` hands its `tested`.
+    public static func cores(in check: Worktrees.Check) -> Int? {
+        switch check {
+        case .failed(let output): return cores(in: output)
+        case .passedOnRerun(_, let failed, _): return cores(in: failed)
+        case .passedRedOnBase(_, let failed, _, _): return cores(in: failed)
+        case .hung(_, _, let output, _): return cores(in: output)
+        case .passed, .conflict, .cancelled, .error: return nil
+        }
     }
 
     /// Appends it to its day's file in `folder`.

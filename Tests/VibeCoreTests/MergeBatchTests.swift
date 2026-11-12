@@ -47,6 +47,8 @@ struct MergeBatchTests: LeadTeamFixture {
         try commit(["scripts/test.sh": """
             #!/bin/bash
             echo "run $* | $(ls *.txt | tr '\\n' ' ')" >> \(RecentProjects.shellQuote(runs))
+            # As vs-heavy says the width it gave the run (`MergeSample.cores`).
+            echo "vs-heavy: VS_HEAVY_CORES 9 of 12 cores: what was free as it started (load 2.6, 0 of the other 2 slots held), at least the slot's share, 4." >&2
             if \(fails); then
               printf '%s\\n' \(Self.failure.split(separator: "\n").map { RecentProjects.shellQuote(String($0)) }.joined(separator: " "))
               exit 1
@@ -195,6 +197,8 @@ struct MergeBatchTests: LeadTeamFixture {
         #expect(lines.map(\.task) == ["add-x", "add-y", "add-z"])
         #expect(Set(lines.compactMap(\.batch)).count == 1 && lines.allSatisfy { $0.batchRuns == 1 && $0.batchTasks == 3 && $0.result == "passed" }, "\(lines)")
         #expect(lines.allSatisfy { $0.firstRun == "passed" && $0.taskFirstRun == "passed" }, "\(lines)")
+        // The width the batch's run got, on each task's line.
+        #expect(lines.allSatisfy { $0.cores == 9 }, "\(lines)")
         let progress = try String(contentsOfFile: lead.store.recordPath("progress.md"), encoding: .utf8)
         #expect(["add-x", "add-y", "add-z"].allSatisfy { progress.contains("Merged \($0): \($0) (in a batch: add-x, add-y, add-z landed on one test run)") }, "\(progress)")
         #expect(await advancing.until { reports(runtime).contains { $0.contains("as one batch, on 1 test run for 3 tasks") } }, "\(reports(runtime))")

@@ -540,7 +540,8 @@ struct MergeGateTests: LeadTeamFixture {
     /// its tests started, how long they took, and the first run's result.
     @Test func aMergeAppendsItsLineToTheMacsMergeStats() throws {
         let root = try repo()
-        try fakeSuite(root, passes: "true")
+        // Saying the width its run got, as vs-heavy does (`MergeSample.cores`).
+        try fakeSuite(root, passes: "echo \"vs-heavy: VS_HEAVY_CORES 9 of 12 cores: what was free as it started (load 2.6, 0 of the other 2 slots held), at least the slot's share, 4.\" >&2; true")
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         let stats = temp.url("stats")
@@ -556,6 +557,7 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(line.project == (root as NSString).lastPathComponent && line.task == "add-b")
         #expect(line.load.count == 3 && line.waitedS == 0 && line.slotWaitS != nil && line.durationS >= 0)
         #expect(line.firstRun == "passed" && line.result == "passed" && line.reran == nil && line.rerunWhole == nil, "\(line)")
+        #expect(line.cores == 9, "\(line)")
     }
 
     /// A first run that failed and a rerun that passed: the line says so, and which tests ran again.

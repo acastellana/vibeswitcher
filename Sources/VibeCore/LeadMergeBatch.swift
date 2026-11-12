@@ -142,6 +142,8 @@ extension LeadToolset {
         var begun: (at: Date, load: [Double])?
         var runs = 0
         var firstRun: String?
+        // The width the batch's first run got (`MergeSample.cores`).
+        var firstCores: Int?
         var stopped: String?
         // The end of a hung run's output, told once in the batch's result (not with each task it left undecided).
         var stoppedEnd: String?
@@ -160,6 +162,7 @@ extension LeadToolset {
             runs += 1
             var plan: MergeRerun.Plan?
             var tests: Int?
+            var testedCores: Int?
             // The branches' code runs from here, outside any session: the team isn't quiet (`ConfigSeal`). Unmarked, it
             // doesn't run.
             let mark: String
@@ -178,11 +181,12 @@ extension LeadToolset {
                                        plan = MergeRerun.plan(after: output, workflow: workflow)
                                        return plan?.command
                                    }, baseline: baseline(on: under, plan: { plan }, pairing: pairing),
-                                   tested: { tests = LeadReceipt.testCount($0) },
+                                   tested: { tests = LeadReceipt.testCount($0); testedCores = MergeSample.cores(in: $0) },
                                    begun: { at in
                                        load = LoadRecorder.averages()?.first
                                        if begun == nil { begun = (at, LoadRecorder.averages() ?? []) }
                                    })
+            if runs == 1 { firstCores = MergeSample.cores(in: check) ?? testedCores }
             if recorded, let plan {
                 switch check {
                 case .passedOnRerun(let tip, _, let again):
@@ -548,6 +552,7 @@ extension LeadToolset {
                 sample.batch = id
                 sample.batchTasks = gates.count
                 sample.batchRuns = runs
+                sample.cores = firstCores
                 sample.taskFirstRun = decided.result == "passed" ? "passed" : ["failed", "passed_on_rerun", "passed_red_on_base"].contains(decided.result) ? "failed" : nil
                 try? sample.append(in: folder, at: start)
             }

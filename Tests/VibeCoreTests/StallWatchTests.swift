@@ -247,7 +247,9 @@ struct StallWatchTests {
         #expect(output.contains("vs-heavy: stuck: no progress for ") && output.contains(" s (no new output and under 1 % of a core, at load 4.2 under load_threshold "), "\(output)")
         #expect(output.contains("(exit 125); last test started: stuckForever()."), "\(output)")
         #expect(output.contains("vs-heavy: its processes (pid, parent, state, CPU time, name):\n") && output.contains("/usr/bin/perl"), "\(output)")
-        #expect(output.contains("vs-heavy: its output's last 2 lines:\n    ◇ Test stuckForever() started.\n    waiting\n"), "\(output)")
+        // Its first line, the width vs-heavy gave it, then its command's.
+        #expect(output.contains("vs-heavy: its output's last 3 lines:\n    vs-heavy: VS_HEAVY_CORES ")
+                && output.contains("\n    ◇ Test stuckForever() started.\n    waiting\n"), "\(output)")
         let last = output.split(separator: "\n").last.map(String.init) ?? ""
         #expect(last.hasPrefix("vs-heavy: stuck: ended: no progress for ") && last.hasSuffix(" s (--stall), stopped with everything it started (exit 125)."), "\(output)")
         let lock = TestLock(directory: locks)

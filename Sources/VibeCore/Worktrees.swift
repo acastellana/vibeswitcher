@@ -1320,7 +1320,7 @@ public enum Worktrees {
     /// The run's header line on the cores its commands get (`TestLock.coresVariable`) holding one of `slots` slots: a
     /// hung merge's log showed no -j anywhere (2026-11-08), so whether its build was capped couldn't be read from it.
     static func coresLine(slots: Int, cores: Int = ProcessInfo.processInfo.processorCount) -> String {
-        "\(TestLock.coresVariable): \(TestLock.coreBudget(slots: slots, cores: cores)), the slot's share of \(cores) cores (\(slots) slot\(slots == 1 ? "" : "s")): builds and test runners take it as their parallelism\n"
+        "\(TestLock.coresVariable): \(TestLock.coreBudget(slots: slots, cores: cores)), the slot's share of \(cores) cores (\(slots) slot\(slots == 1 ? "" : "s")): builds and test runners take it as their parallelism, at least (a vs-heavy in the command widens it to the cores free when it starts, and says so)\n"
     }
 
     /// The first line of a rerun's output (`runChecks`' `rerun`).

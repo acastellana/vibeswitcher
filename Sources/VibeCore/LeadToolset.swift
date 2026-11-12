@@ -3650,6 +3650,8 @@ public final class LeadToolset: MCPToolset {
         var redOnBase: (tests: [String], rerun: String)?
         // The passing run's test count, for its receipt.
         var testCount: Int?
+        // The width the passing run got (`MergeSample.cores`), from its output.
+        var testedCores: Int?
         // When its commands started (the slot taken) and the load then, for the merge stats line.
         let called = Date()
         var begun: (at: Date, load: [Double])?
@@ -3666,13 +3668,14 @@ public final class LeadToolset: MCPToolset {
                                                   rerun = MergeRerun.plan(after: output, workflow: workflow)
                                                   return rerun?.command
                                               }, baseline: baseline(on: current, plan: { rerun }, pairing: pairing),
-                                              tested: { testCount = LeadReceipt.testCount($0) },
+                                              tested: { testCount = LeadReceipt.testCount($0); testedCores = MergeSample.cores(in: $0) },
                                               begun: { begun = ($0, LoadRecorder.averages() ?? []) })
         if let folder = mergeStats() {
             let start = begun?.at ?? called
-            let sample = MergeSample(check: checked, rerun: rerun, project: (root as NSString).lastPathComponent, task: slug,
+            var sample = MergeSample(check: checked, rerun: rerun, project: (root as NSString).lastPathComponent, task: slug,
                                      started: start, load: begun?.load ?? LoadRecorder.averages() ?? [], waited: waited?.after ?? 0,
                                      slotWait: begun.map { $0.at.timeIntervalSince(called) }, ended: Date())
+            sample.cores = MergeSample.cores(in: checked) ?? testedCores
             try? sample.append(in: folder, at: start)
         }
         // Its waits for the load and a slot, and its run's time, for the task's receipt (`LeadWaits`).

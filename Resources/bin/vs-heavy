@@ -14,15 +14,17 @@
 # session it starts (the app bundle's Contents/Resources/bin); merge and an audit's shared run take a slot around their
 # test command too (`TestLock` in VibeCore).
 #
-# COMMAND gets VS_HEAVY_CORES, its share of the Mac: the cores ÷ the slots, rounded up, at least 2 (4 on a 12-core Mac
-# with 3 slots). A slot is one job's room, not a whole Mac: on 2026-11-01 a merge's swift-frontend ran 9 processes at
-# ~900 % CPU and two node --test runs about 9 cores each, all inside the slots, and the load reached 62–84. Builds and
-# test runners take it as their parallelism (`swift build -j $VS_HEAVY_CORES`, `node --test
-# --test-concurrency=$VS_HEAVY_CORES`, `make -j $VS_HEAVY_CORES`); scripts/test.sh and scripts/build-app.sh do. It's the
-# share whether or not the other slots are held: a job sized to a calm Mac when it starts can't shrink when two more
-# start beside it. Under a holder (below) a VS_HEAVY_CORES already set is kept, else it's worked out the same way
-# (merge and audits give their test command theirs, `TestLock.coreBudget`). VIBESWITCHER_HEAVY_NCPU stands in for the
-# Mac's core count (tests).
+# COMMAND gets VS_HEAVY_CORES, its width: the cores free when it starts (the cores less the 1-minute load and less the
+# width each other slot held was given), at least its slot's share of the Mac (the cores ÷ the slots, rounded up, at least 2:
+# 4 on a 12-core Mac with 3 slots), so at most the whole Mac; with every slot held or the load unread, the share
+# (`give_width`, which says the width it gave on stderr). A slot is one job's room: on 2026-11-01 a merge's
+# swift-frontend ran 9 processes at ~900 % CPU and two node --test runs about 9 cores each, all inside the slots, and the
+# load reached 62–84. Builds and test runners take it as their parallelism (`swift build -j $VS_HEAVY_CORES`, `node
+# --test --test-concurrency=$VS_HEAVY_CORES`, `make -j $VS_HEAVY_CORES`); scripts/test.sh and scripts/build-app.sh do.
+# A job sized to a calm Mac when it starts can't shrink when more start beside it, but those count it (the load it
+# makes, its slot held) and get their share. Under a holder (below) the width a vs-heavy worked out for that slot is
+# kept, else it's worked out the same way, at least the share the holder gave (merge and audits give their test command
+# theirs, `TestLock.coreBudget`). VIBESWITCHER_HEAVY_NCPU stands in for the Mac's core count (tests).
 #
 # Slot 1 is a flock on $VIBESWITCHER_TEST_LOCK_DIR/test-build.lock (default /private/tmp/vibeswitcher-<uid>/), slot k
 # on test-build-k.lock beside it (an older vs-heavy, with only test-build.lock, contends for slot 1). The slot taken is
@@ -164,10 +166,89 @@ slots=$(( 10#$slots ))
 cores=$(( (ncpu + slots - 1) / slots ))
 (( cores >= 2 )) || cores=2
 
-# Under a holder of one of these very slots: it's ours already, and so is its share (its own, when it gave one).
+# Slot k's file.
+slot_file() { (( $1 == 1 )) && echo "$lock_dir/test-build.lock" || echo "$lock_dir/test-build-$1.lock"; }
+
+# give_width FLOOR SLOT: exports VS_HEAVY_CORES, the width COMMAND runs at, from what's free on the Mac as it starts:
+# the cores less the 1-minute load and less what each other slot held was given (a flock no one else has is free): the
+# width in its SLOT.cores note ("pid P cores N", while P lives), at least the share; else the share. The load alone
+# would miss a run started seconds before (the 1-minute load lags it: about 2 of a 12-wide run 10 s in), and a second
+# run beside a merge widened to 11 would get 6 more on 12 cores; so each run's width is noted beside its slot. At
+# least FLOOR (the slot's share, or the share a holder gave) and so at most the whole Mac. With every slot held, or the
+# load unread (Codex's sandbox), FLOOR. Says it on stderr ("vs-heavy: VS_HEAVY_CORES 9 of 12 cores: …"), which
+# a merge's stats line reads back (`MergeSample.cores`), and exports VIBESWITCHER_HEAVY_CORES_FOR, SLOT: a vs-heavy
+# under that slot (the suite scripts/test.sh runs) keeps the width rather than work it out again. A fixed share made a
+# merge on a calm 12-core Mac with 3 slots run on 4 cores: 15 min instead of 8 (2026-11-08 to 11-12). The share is
+# still the floor, and the load and held slots are counted when it starts, so a run beside other runs gets only what
+# they leave, and one on a loaded Mac no more than before (the load 100–225 freezes of 2026-11-08 came from three slots each a whole Mac wide).
+# Its own note, SLOT.cores, names this script's pid (COMMAND's, under a holder: it execs), so it says nothing once the
+# run is over. VIBESWITCHER_HEAVY_LOAD stands in for the load (tests).
+give_width() {
+    local floor=$1 mine=$2 files=() k said
+    # Every slot: its count's, and any other in the folder. Under a merge's or test.sh's scratch HOME, Settings' and
+    # boost's counts aren't read here (the cores ÷ 6), and a slot past that count held by another run would go uncounted.
+    for (( k = 1; k <= slots; k++ )); do files+=("$(slot_file "$k")"); done
+    for file in "$lock_dir"/test-build-[0-9]*.lock; do
+        [[ -e $file && $file =~ /test-build-([0-9]+)\.lock$ ]] && (( 10#${BASH_REMATCH[1]} > slots )) && files+=("$file")
+    done
+    [[ " ${files[*]} " == *" $mine "* ]] || files+=("$mine")
+    said=$(/usr/bin/perl -MFcntl=:flock -e '
+        my ($ncpu, $slots, $share, $floor, $given, $mine, @files) = @ARGV;
+        $slots = @files if @files > $slots;
+        my $load;
+        if ($given =~ /^[0-9]+(\.[0-9]+)?$/) { $load = $given + 0; }
+        else {
+            my $out = `/usr/sbin/sysctl -n vm.loadavg 2>/dev/null`;
+            if ($out =~ /([0-9]+(?:[.,][0-9]+)?)/) { (my $n = $1) =~ tr/,/./; $load = $n + 0; }
+        }
+        # The other slots held: a slot no one holds is flocked here for a moment (and let go); a missing file is free.
+        # Each held one takes the width its .cores note gives its run (while that pid lives), at least the share.
+        my ($others, $taken) = (0, 0);
+        for my $file (@files) {
+            next if $file eq $mine;
+            open(my $fh, "<", $file) or next;
+            if (flock($fh, LOCK_EX | LOCK_NB)) { flock($fh, LOCK_UN); close $fh; next; }
+            close $fh;
+            $others++;
+            my $given = $share;
+            if (open(my $note, "<", "$file.cores")) {
+                my $line = <$note> // "";
+                $given = $2 if $line =~ /^pid (\d+) cores (\d+)$/ && (kill(0, $1) || $!{EPERM}) && $2 > $given;
+            }
+            $taken += $given;
+        }
+        my $width = $floor;
+        if (defined $load && $others + 1 < $slots) {
+            my $free = int($ncpu - $load - $taken);
+            $width = $free if $free > $width;
+        }
+        my $why = !defined $load ? "load unread"
+                : $slots == 1 ? sprintf("load %.1f, its one slot", $load)
+                : sprintf("load %.1f, %d of the other %d slot%s held", $load, $others, $slots - 1, $slots == 2 ? "" : "s");
+        print "$width $why";
+    ' "$ncpu" "$slots" "$cores" "$floor" "${VIBESWITCHER_HEAVY_LOAD:-}" "$mine" "${files[@]}" 2> /dev/null)
+    local least="the slot's share, $cores"
+    (( floor == cores )) || least="the holder's $floor (the slot's share is $cores)"
+    if [[ $said =~ ^([0-9]+)\ (.*)$ ]]; then
+        export VS_HEAVY_CORES=${BASH_REMATCH[1]}
+        said=${BASH_REMATCH[2]}
+    else
+        export VS_HEAVY_CORES=$floor
+        said="the free cores unread"
+    fi
+    echo "vs-heavy: VS_HEAVY_CORES $VS_HEAVY_CORES of $ncpu cores: what was free as it started ($said), at least $least." >&2
+    echo "pid $$ cores $VS_HEAVY_CORES" > "$mine.cores" 2> /dev/null
+    export VIBESWITCHER_HEAVY_CORES_FOR=$mine
+}
+
+# Under a holder of one of these very slots: it's ours already. Its width is the one a vs-heavy worked out for that slot
+# (VIBESWITCHER_HEAVY_CORES_FOR names it), else worked out here, at least the share the holder gave (merge and audits
+# give their test command theirs, `TestLock.coreBudget`), else the slot's share.
 held=${VIBESWITCHER_TEST_LOCK:-}
 if [[ $held == "$lock_dir/test-build.lock" || $held == "$lock_dir"/test-build-[0-9]*.lock ]]; then
-    [[ ${VS_HEAVY_CORES:-} =~ ^[0-9]+$ ]] && (( 10#$VS_HEAVY_CORES >= 1 )) || export VS_HEAVY_CORES=$cores
+    given=${VS_HEAVY_CORES:-}
+    if [[ $given =~ ^[0-9]+$ ]] && (( 10#$given >= 1 )); then given=$(( 10#$given )); else given=""; fi
+    [[ -n $given && ${VIBESWITCHER_HEAVY_CORES_FOR:-} == "$held" ]] || give_width "${given:-$cores}" "$held"
     exec "$@"
 fi
 
@@ -175,8 +256,7 @@ mkdir -p -m 700 "$lock_dir" || { echo "vs-heavy: ended: can't make $lock_dir for
 # /private/tmp is everyone's: a folder someone else made there (or a link) isn't taken as this user's.
 [[ -O $lock_dir && ! -L $lock_dir ]] || { echo "vs-heavy: ended: $lock_dir isn't a folder of yours: the heavy-work slots can't be kept there, so it never ran (exit 123)." >&2; exit 123; }
 
-# Slot k's file, on fd 19+k while this waits.
-slot_file() { (( $1 == 1 )) && echo "$lock_dir/test-build.lock" || echo "$lock_dir/test-build-$1.lock"; }
+# Slot k's file (`slot_file`), on fd 19+k while this waits.
 fds=()
 for (( k = 1; k <= slots; k++ )); do
     file=$(slot_file "$k")
@@ -339,9 +419,11 @@ echo "pid $$" > "$lock_file.active"
 # The notes go with this run (Ctrl-C too), while the slot is still ours: only our own, so no later holder's. A kill -9
 # leaves them, naming a pid that's gone, which readers (waiters here, TestLock's) take as saying nothing.
 trap '[[ $(head -n 1 "$lock_file.holder" 2>/dev/null) == "pid $$, "* ]] && rm -f "$lock_file.holder"
-      [[ $(head -n 1 "$lock_file.active" 2>/dev/null) == "pid $$" ]] && rm -f "$lock_file.active"' EXIT
+      [[ $(head -n 1 "$lock_file.active" 2>/dev/null) == "pid $$" ]] && rm -f "$lock_file.active"
+      [[ $(head -n 1 "$lock_file.cores" 2>/dev/null) == "pid $$ cores "* ]] && rm -f "$lock_file.cores"' EXIT
 export VIBESWITCHER_TEST_LOCK=$lock_file
-export VS_HEAVY_CORES=$cores
+# Its width, from what's free now that it holds its slot (whatever the caller's environment held).
+give_width "$cores" "$lock_file"
 
 # TERM, INT and HUP go to the supervisor (one that came before it started, once it has).
 supervisor="" stopping=""
