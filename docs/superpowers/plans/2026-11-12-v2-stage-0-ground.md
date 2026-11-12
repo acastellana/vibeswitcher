@@ -282,7 +282,7 @@ git push
 **Files:**
 - Create: `docs/process/v2-linux-inventory.md`
 - Create: `docs/process/v2-branch.md`
-- Modify: `docs/superpowers/specs/2026-11-12-vibeswitcher-2-design.md` (three corrections)
+- Modify: `docs/superpowers/specs/2026-11-12-vibeswitcher-2-design.md` (one link)
 
 - [ ] **Step 1: Write `docs/process/v2-linux-inventory.md`**
 
@@ -327,17 +327,10 @@ And the rules it serves, one line each, from the design's "The branch": main is 
 settled on `v2`; a merge that breaks a runner is fixed before new work; a stale skip is removed in the merge that
 made it stale.
 
-- [ ] **Step 3: Correct the design**
+- [ ] **Step 3: Link them from the design**
 
-In `docs/superpowers/specs/2026-11-12-vibeswitcher-2-design.md`:
-
-- Stage 0's spike bullet: replace "Check that the test targets' `@_section` guard works on Linux." with the finding
-  (it compiles and is inert; the Linux guard uses `.init_array`), and move the guard itself to Stage 1's list.
-- "The portable file set", the Combine paragraph: add that OpenCombine lacks `combineLatest` and `merge` (10 call
-  sites), which the listed files get from a small extension of the project's own or lose in a rewrite of those
-  sites, decided in stage 3's plan.
-- "What exists": add the measured line "505 errors in 34 of `VibeCore`'s 171 files; 142 in 8 of `VibeHost`'s 13"
-  under the table, with a link to the inventory.
+The design (revised 2026-11-12) already carries the spike's findings. Check that its Stage 0 links
+`docs/process/v2-linux-inventory.md`, and add to its "The branch" a link to `docs/process/v2-branch.md`.
 
 - [ ] **Step 4: Check the links and commit**
 
@@ -352,7 +345,34 @@ git push
 
 ---
 
+### Task 5: A fully static build, tried
+
+Needs the user's go-ahead first: it installs Swift's static Linux SDK into the home folder (`swift sdk install`, no
+sudo), and agents install nothing by themselves.
+
+**Files:**
+- Modify: `docs/process/v2-linux-inventory.md` (the result)
+
+- [ ] **Step 1: Ask the user to install the SDK**, giving the exact `swift sdk install` command for Swift 6.4.2 from
+  swift.org's static Linux SDK page, with its checksum.
+
+- [ ] **Step 2: Build a one-file probe statically, for both architectures**
+
+In the session's scratch folder, a package with one executable that prints its version, hashes a string with
+swift-crypto and starts a child with `posix_spawn`. Build it with
+`swift build --swift-sdk x86_64-swift-linux-musl -c release` and `--swift-sdk aarch64-swift-linux-musl`.
+Expected: two binaries; `file` calls each "statically linked"; the x86_64 one runs here and prints its three lines.
+
+- [ ] **Step 3: Try SwiftTerm the same way**
+
+Add SwiftTerm 1.19.0 to the probe and build both again. Expected: it builds, or the error is recorded.
+
+- [ ] **Step 4: Record the result** in the inventory (sizes, what built, what didn't), commit and push.
+
+---
+
 ## Done when
 
 Both workflows are green on the same `v2` commit, `scripts/ci/macos-runner-skips.txt` says in writing what the
-hosted Mac can't run, and the inventory is in the repository for the stage 1 plan to be written from.
+hosted Mac can't run, and the inventory, with the static build's result, is in the repository for the stage 1
+plan to be written from.
