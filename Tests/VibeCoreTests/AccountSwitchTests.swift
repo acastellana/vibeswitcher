@@ -106,9 +106,16 @@ struct AccountSwitchTests: LeadTeamFixture {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
-        for title in ["One", "Two", "Three"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
-        for task in ["one", "two", "three"] { #expect(!call(lead, "start_worker", ["task": task]).isError) }
+        #expect(!call(lead, "configure", ["max_workers": 4]).isError)
+        // Room on the Mac for four workers and three verifiers.
+        lead.macLimits = { MacLimits(maxSessions: 8) }
+        for title in ["One", "Two", "Three", "Four"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
+        for task in ["one", "two", "three", "four"] { #expect(!call(lead, "start_worker", ["task": task]).isError) }
         #expect(lead.auditModel(lead.workflow) == "fable")
+        /// The model the last audit of `slug` was started on, as its command line says.
+        func audited(_ slug: String) -> String? {
+            runtime.spawned.last { $0.command.contains("--name 'verify-\(slug)'") }.map { LeadWorkflow.claudeModel(command: $0.command) ?? "" }
+        }
         #expect(!call(lead, "audit", ["task": "one"]).isError)
         let verifier = try #require(BoardStore(root: root).load().task("one")?.verifier)
         // The verifier, on A, stopped at the Fable limit (its transcript says so, and that it runs on A).
@@ -116,8 +123,10 @@ struct AccountSwitchTests: LeadTeamFixture {
         refusal.at = Self.now.timeIntervalSince1970
         refusal.resetsAt = Self.now.timeIntervalSince1970 + 86_400
         runtime.usageLimits[verifier] = refusal
-        let held = call(lead, "audit", ["task": "two"])
-        #expect(held.isError && held.text.contains("the fable limit"), "\(held.text)")
+        // Fable held back on A: the audit starts on Opus instead (LeadUsageFallback), Fable itself still held.
+        let moved = call(lead, "audit", ["task": "two"])
+        #expect(!moved.isError && audited("two") == "opus", "\(moved.text)")
+        #expect(lead.usageHold(model: "fable", sessions: try lead.advanceSessions())?.reached == true)
         let status = call(lead, "status").text
         #expect(status.contains("Account usage for al•••@ex•••.com (aaaa…), the account Claude Code is logged in to")
                 && status.contains("the fable limit (seven_day_overage_included): reached"), "\(status)")
@@ -138,15 +147,16 @@ struct AccountSwitchTests: LeadTeamFixture {
         // A's readings, named masked, hold nothing back.
         #expect(onB.contains("Other accounts' readings (they hold nothing back): al•••@ex•••.com (aaaa…): ")
                 && onB.contains("the fable limit (seven_day_overage_included): reached"), "\(onB)")
-        // B under its threshold: the audit starts.
+        // B under its threshold: the audit starts, on Fable (A's refusal holds nothing on B).
         statusLine(try transcript(Self.b), weekly: 40)
-        let started = call(lead, "audit", ["task": "two"])
-        #expect(!started.isError, "\(started.text)")
+        let started = call(lead, "audit", ["task": "three"])
+        #expect(!started.isError && audited("three") == "fable", "\(started.text)")
 
         // Back on A: A's hold is back, B's reading isn't A's.
         try login(Self.a, email: "alice@example.com")
         #expect(lead.usageHold(model: "fable", sessions: nil)?.reached == true)
-        #expect(call(lead, "audit", ["task": "three"]).isError)
+        let back = call(lead, "audit", ["task": "four"])
+        #expect(!back.isError && audited("four") == "opus", "\(back.text)")
         #expect(lead.usageHold(model: "sonnet", sessions: nil) == nil)
         // Until its reset, and no longer.
         let reset = Date(timeIntervalSince1970: try #require(refusal.resetsAt))
