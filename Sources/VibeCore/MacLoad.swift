@@ -52,7 +52,11 @@ public struct MacLoad: Equatable, Sendable {
     public static func steady() -> Double? { averages()?.steady }
 
     /// The cores the load is shared by.
-    public static var processors: Int { ProcessInfo.processInfo.activeProcessorCount }
+    public static var processors: Int { simulatedProcessors ?? ProcessInfo.processInfo.activeProcessorCount }
+    /// Tests only (`@testable`): the cores a test's own task reads instead, inside `$simulatedProcessors.withValue(3) { … }`,
+    /// so the rules that follow the cores are checked for any Mac here. Task-local: other tests running beside it, and
+    /// the app (which never binds it), read the machine's.
+    @TaskLocal static var simulatedProcessors: Int?
 
     /// The live workers and verifiers among `sessions` (told by their labels, see `LeadTeams.role`), by the project
     /// whose worktree they run in, leaving out those in the folder `except` (a task's own: the session about to start

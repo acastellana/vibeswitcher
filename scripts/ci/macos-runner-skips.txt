@@ -2,15 +2,10 @@
 # Found on the xcode-27 image, 2026-11-12: 3 cores, System Integrity Protection disabled.
 # "CAUSE NOT FOUND" marks a failure nobody has explained yet: it is owed an answer when the branch first runs on a Mac.
 BoostMarkTests/theMarkFollowsBoostOnAndOff  expects the boosted limits of a Mac with more cores than the runner's
-BoostTests/boostRaisesTheLimitsAndNeverLowersThem  expects the boosted limits of a Mac with more cores than the runner's
-BoostTests/theLeadsReadTheDecisionAndAStaleOneIsOff  expects the boosted limits of a Mac with more cores than the runner's
-BoostTests/theWitnessWakesTheFavoredProjectFirst  expects the boosted limits of a Mac with more cores than the runner's
 BoostWatchTests/automaticFollowsPowerAndPresenceWithinOneHeartbeat  expects the boosted limits of a Mac with more cores than the runner's
 ClaudeDictationTests  CAUSE NOT FOUND: different tests of the suite time out on each run on the runner (12 of 58, then 3 others, 2026-11-12); they drive a fake Claude's /voice through a scratch host
 EndingASessionTests/endingASessionEndsWhatItStartedOnly  the runner has System Integrity Protection off and shows another process's environment, which a Mac hides (seen in SessionStraysTests; inferred here)
 LeadRemoteTests/automaticFetchAsksTheVaultNothingBeforeItsNextFetchIsDue  CAUSE NOT FOUND: on the runner the vault is asked once more than expected (16, not 15), in both runs of 2026-11-12
-LeadToolsetTests/startWorkerAndAuditUseTheBoostedMacLimits  expects the boosted limits of a Mac with more cores than the runner's
-LeadToolsetTests/statusSaysWhetherBoostIsOnAndWhy  expects the boosted limits of a Mac with more cores than the runner's
 LoadReportScriptTests/itPrintsTheProfileAndFreezesPerLoadBucketForTheDays  scripts/load-report.sh's python3 on the runner refuses a date ending in Z (ValueError in fromisoformat)
 MCPHandoverTests/anUnsignedBuildLeavesTheOldOneServing  the runner has System Integrity Protection off and runs an unsigned build's probe; a Mac kills it (signal 9)
 SessionStraysTests/aProcessWhoseEnvironmentIsHiddenIsTheSessionsOnlyWhenItStartedIt  the runner has System Integrity Protection off and shows another process's environment, which a Mac hides
