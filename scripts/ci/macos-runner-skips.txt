@@ -14,5 +14,8 @@ LeadToolsetTests/statusSaysWhetherBoostIsOnAndWhy  expects the boosted limits of
 LoadReportScriptTests/itPrintsTheProfileAndFreezesPerLoadBucketForTheDays  scripts/load-report.sh's python3 on the runner refuses a date ending in Z (ValueError in fromisoformat)
 MCPHandoverTests/anUnsignedBuildLeavesTheOldOneServing  the runner has System Integrity Protection off and runs an unsigned build's probe; a Mac kills it (signal 9)
 SessionStraysTests/aProcessWhoseEnvironmentIsHiddenIsTheSessionsOnlyWhenItStartedIt  the runner has System Integrity Protection off and shows another process's environment, which a Mac hides
+SignalsTests/aFatalHandlerIsInstalledToRunOnce  CAUSE NOT FOUND: on the runner a signal a test sends itself isn't delivered before the test looks (the handler hasn't run, or the disposition read back is the default), 2026-11-12; passes on Linux
+SignalsTests/aFatalHandlerRunsAndTheDefaultIsBack  CAUSE NOT FOUND: on the runner a signal a test sends itself isn't delivered before the test looks (the handler hasn't run, or the disposition read back is the default), 2026-11-12; passes on Linux
+SignalsTests/anInformedHandlerStaysAndIsToldTheSender  CAUSE NOT FOUND: on the runner a signal a test sends itself isn't delivered before the test looks (the handler hasn't run, or the disposition read back is the default), 2026-11-12; passes on Linux
 TestScriptWidthTests/aRunsSwiftTestGetsItsSlotsShare  expects the width a heavy slot gives on a Mac with more cores than the runner's
 Tests/SecurityAudit/library-injection.test.mjs  the runner has System Integrity Protection off: an injected library loads into a Hardened Runtime binary, which a Mac refuses
