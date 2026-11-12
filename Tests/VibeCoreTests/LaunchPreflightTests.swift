@@ -80,6 +80,7 @@ struct LaunchPreflightTests {
         #expect(try #require(mac.preflight.check(command: "codex")).title == "Codex isn't installed.")
     }
 
+    #if canImport(Darwin)
     @Test func xcodeSelectFailingSaysToInstallTheCommandLineTools() throws {
         let mac = try make(Mac(developer: nil))
         let problem = try #require(mac.preflight.check(command: "claude"))
@@ -99,6 +100,15 @@ struct LaunchPreflightTests {
         #expect(problem.text.contains("only Apple's stub") && problem.text.contains("xcode-select --install"))
         #expect(mac.runs("git") == 0)
     }
+    #else
+    /// Linux has no developer tools to ask after (`Platform.Tools.developerToolsApply`): an xcode-select that fails,
+    /// or a developer folder with no git, isn't looked at, and git itself is run.
+    @Test func linuxAsksAfterNoDeveloperToolsAndRunsGit() throws {
+        let mac = try make(Mac(developer: nil, developerGit: false))
+        #expect(mac.preflight.check(command: "claude") == nil)
+        #expect(mac.runs("git") == 1)
+    }
+    #endif
 
     @Test func aGitThatDoesntRunSaysWhatItSaid() throws {
         let mac = try make(Mac(gitVersion: "You have not agreed to the Xcode license agreements.", gitStatus: 69))

@@ -330,6 +330,7 @@ struct MCPHandoverTests {
         await #expect(try server.texts(5) == ["B \(pid)"])
     }
 
+    #if canImport(Darwin)
     /// A build the kernel won't run (no code signature) never replaces the running one; the first result after says
     /// why, once.
     @Test func anUnsignedBuildLeavesTheOldOneServing() async throws {
@@ -355,6 +356,25 @@ struct MCPHandoverTests {
         await #expect(try server.texts(3) == ["A \(pid)"])
         #expect(server.log.contains("couldn't switch to the new build at \(server.installed): its probe was killed by signal 9; this build serves on"))
     }
+    #else
+    /// Linux kills no unsigned build: a build SIGKILL ends as it starts, as the Mac's kernel ends an unsigned one, never
+    /// replaces the running one; the first result after says why, once.
+    @Test func aBuildKilledAsItStartsLeavesTheOldOneServing() async throws {
+        let server = try ScratchToolServer(scratch)
+        defer { server.stop() }
+        try server.send(ScratchToolServer.initialize)
+        _ = try await server.reply(1)
+        let pid = server.process.processIdentifier
+        try server.install("#!/bin/sh\nkill -KILL $$\n")
+        try server.send([server.call(2, "build")])
+        let texts = try await server.texts(2)
+        #expect(texts.first == "A \(pid)")
+        #expect(texts.count == 2 && texts[1].contains("couldn't switch to the new build (its probe was killed by signal 9)"), "\(texts)")
+        try server.send([server.call(3, "build")])
+        await #expect(try server.texts(3) == ["A \(pid)"])
+        #expect(server.log.contains("couldn't switch to the new build at \(server.installed): its probe was killed by signal 9; this build serves on"))
+    }
+    #endif
 
     /// A build that fails its probe each time it's tried again is said once, not at each retry.
     @Test func aBuildRefusedAtEachRetryIsSaidOnce() async throws {
