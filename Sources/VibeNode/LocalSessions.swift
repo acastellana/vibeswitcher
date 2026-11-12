@@ -36,7 +36,8 @@ public struct LocalSession: Equatable, Sendable {
 /// The one list of the sessions on this machine, which `vibeswitcher status` reads (and the engine will): every
 /// `claude` or `codex` on a terminal (`ProcessTable`), joined with what the hooks wrote for that terminal (`HookState`,
 /// `VibePaths.stateDir`) by the terminal's name, the scan the app makes (`SessionScanner`), and resolved by
-/// `StatusRules`. No terminal title is read here, so a session without hook state is `unknown`.
+/// `StatusRules`. No terminal title is read here, so a session without hook state is `unknown`. As the app's scan does,
+/// a read removes the state files of terminals with no agent left on them, 15 s after their last write.
 public final class LocalSessions {
     /// The node's name in a session's id, until nodes have names of their own.
     public static let node = "local"
