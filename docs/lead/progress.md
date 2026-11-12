@@ -2570,3 +2570,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 10:57 Merged agents-md-run-every: AGENTS.md: run every lint, and a load test command that works on any Mac (build 32244f28b05f)
 - 2026-11-12 10:57 Automatically (auto_advance): Merged agents-md-run-every (AGENTS.md: run every lint, and a load test command that works on any Mac) into main at 7015f209, on its passing audit and the full test run.
 - 2026-11-12 10:57 Automatically (auto_advance): Cleaned up agents-md-run-every (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-12 11:55 Started a worker on docs-guide-development (auto → Claude: Claude weekly 61%, 26 points ahead of pace (limits ignored), not tight; Codex 13%)
+- 2026-11-12 11:55 Automatically (auto_advance): Started a worker on docs-guide-development (docs/guide/development.md: the same lint filter and load-test line as AGENTS.md), its after tasks done (agents-md-run-every); its agent is auto, so it went to Claude: Claude weekly 61%, 26 points ahead of pace (limits ignored), not tight; Codex 13%.
