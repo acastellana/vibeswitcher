@@ -35,6 +35,11 @@ let portableTargets: [Target] = [
     // MacOnlyTests.txt: the test files compiled only on the Mac, each with its reason (`MacOnlyTestsLintTests`).
     .testTarget(name: "VibeCoreTests", dependencies: ["VibeCore"], exclude: ["MacOnlyTests.txt"],
                 swiftSettings: testSettings),
+    // The node: the local session list (stage 1), then the engine.
+    .target(name: "VibeNode", dependencies: ["VibeCore"]),
+    // The command line, installed as `vibeswitcher` (a folder named so would be the app's on the Mac).
+    .executableTarget(name: "vibeswitcher-cli", dependencies: ["VibeNode", "VibeCore"]),
+    .testTarget(name: "VibeNodeTests", dependencies: ["VibeNode", "VibeCore"], swiftSettings: testSettings),
     // Still to come: each of `notYetPortableTargets` when it compiles on Linux (the session host: stage 2).
 ]
 // VIBE_LINUX_ALL=1 adds the portable targets that don't compile on Linux yet, only to count their errors
@@ -85,6 +90,11 @@ let package = Package(
         .testTarget(name: "VibePlatformTests", dependencies: ["VibePlatform"], exclude: ["PlatformLintPending.txt"],
                     swiftSettings: testSettings),
         .testTarget(name: "VibeCoreTests", dependencies: ["VibeCore"], exclude: ["MacOnlyTests.txt"], swiftSettings: testSettings),
+        // The node: the local session list (stage 1), then the engine.
+        .target(name: "VibeNode", dependencies: ["VibeCore"]),
+        // The command line, installed as `vibeswitcher` (a folder named so would be the app's on the Mac).
+        .executableTarget(name: "vibeswitcher-cli", dependencies: ["VibeNode", "VibeCore"]),
+        .testTarget(name: "VibeNodeTests", dependencies: ["VibeNode", "VibeCore"], swiftSettings: testSettings),
         // Depends on the host executable too: sessions are started through it (`--pty-exec`). Fixtures: terminal
         // output captured from scratch programs.
         .testTarget(name: "VibeHostTests", dependencies: ["VibeHost", "VibeCore", "vibeswitcher-host"],
