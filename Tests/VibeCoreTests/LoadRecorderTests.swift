@@ -262,7 +262,14 @@ struct LoadRecorderTests {
         #expect(costs.allSatisfy { $0 < 50 }, "\(costs)")
         // The Mac's own sources say something.
         #expect(LoadRecorder.averages()?.count == 3)
+        #if os(Linux)
+        // Linux's pressure is /proc/pressure/memory's, which a kernel without pressure stall information (WSL2's)
+        // doesn't have; its free memory and swap are always there.
+        #expect((LoadRecorder.memory()?.pressure != nil) == FileManager.default.isReadableFile(atPath: "/proc/pressure/memory"))
+        #expect(LoadRecorder.memory()?.free != nil)
+        #else
         #expect(LoadRecorder.memory()?.pressure != nil)
+        #endif
         #expect((LoadRecorder.processes()?.count ?? 0) > 1)
         #expect(LoadRecorder.cwd(getpid()) != nil)
     }

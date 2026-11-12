@@ -18,6 +18,24 @@ struct SessionStraysTests {
         return process
     }
 
+    #if os(Linux)
+    /// Linux shows a process's environment to its user unless the process isn't dumpable (a setuid or setgid
+    /// program, or one that says so with prctl): a python3 that says so and sleeps, `environment` hidden once it
+    /// printed, as Apple's sleep hides its own.
+    func hiddenSleeper(environment: [String: String]) throws -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = ["-I", "-c", "import ctypes, time\nassert ctypes.CDLL(None).prctl(4, 0, 0, 0, 0) == 0\nprint('ready', flush=True)\ntime.sleep(300)"]
+        process.currentDirectoryURL = scratchRoot
+        process.environment = environment.merging(["PATH": "/usr/bin:/bin"]) { mine, _ in mine }
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        try process.run()
+        _ = pipe.fileHandleForReading.availableData
+        return process
+    }
+    #endif
+
     func folder(_ name: String) throws -> String {
         let url = temp.url(name)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -46,11 +64,21 @@ struct SessionStraysTests {
     /// and still is that process. (Environments that can be read: `EndingASessionTests`.)
     @Test func aProcessWhoseEnvironmentIsHiddenIsTheSessionsOnlyWhenItStartedIt() throws {
         let id = UUID()
+        #if os(Linux)
+        let started = try hiddenSleeper(environment: ["VIBESWITCHER_SESSION": id.uuidString])
+        let unrelated = try hiddenSleeper(environment: ["VIBESWITCHER_SESSION": id.uuidString])
+        #else
         let started = try sleeper(environment: ["VIBESWITCHER_SESSION": id.uuidString])
         let unrelated = try sleeper(environment: ["VIBESWITCHER_SESSION": id.uuidString])
+        #endif
         defer { [started, unrelated].forEach { $0.terminate() } }
         let found = try #require(SessionStrays.descendants(of: getpid()).first { $0.pid == started.processIdentifier })
+        #if os(Linux)
+        // Linux: /proc's environ of a process that isn't dumpable can't be opened.
+        #expect(ProcessTable.environment(pid: started.processIdentifier) == nil)
+        #else
         #expect(ProcessTable.environment(pid: started.processIdentifier) == [])
+        #endif
         #expect(SessionStrays.carrying(session: id).isEmpty)
         #expect(SessionStrays.of(session: id, started: [found]) == [found])
         // A pid taken by another process since.

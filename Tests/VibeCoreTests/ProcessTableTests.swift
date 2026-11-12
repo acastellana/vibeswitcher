@@ -24,7 +24,13 @@ struct ProcessTableTests {
         }
         #expect(compared > table.count / 2)
         // Another user's processes too (launchd's children run as root and as daemons' users).
+        #if os(Linux)
+        // Linux's pid 1 is root's init (systemd, or another), named as the kernel names it.
+        let initName = try String(contentsOfFile: "/proc/1/comm", encoding: .utf8).trimmingCharacters(in: .newlines)
+        #expect(table[1]?.comm == initName)
+        #else
         #expect(table[1]?.comm == "launchd")
+        #endif
     }
 
     private func same(_ a: ProcInfo, _ b: ProcInfo) -> Bool {

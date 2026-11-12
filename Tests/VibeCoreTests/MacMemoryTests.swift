@@ -172,7 +172,13 @@ struct MacMemoryTests {
     }
 
     @Test func theMacsOwnMemoryReadsWithoutATool() {
+        #if os(Linux)
+        // Linux's pressure is /proc/pressure/memory's, which a kernel without pressure stall information (WSL2's)
+        // doesn't have: read wherever the kernel keeps it, and nil only where it doesn't.
+        #expect((MacMemory.pressureLevel() != nil) == FileManager.default.isReadableFile(atPath: "/proc/pressure/memory"))
+        #else
         #expect(MacMemory.pressureLevel() != nil)
+        #endif
         #expect(MacMemory.swapUsage() != nil)
         #expect(MacMemory.swapOuts() != nil)
     }
