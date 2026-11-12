@@ -235,10 +235,10 @@ public enum HookInstaller {
         init?(of url: URL) {
             var info = stat()
             guard stat(url.path, &info) == 0 else { return nil }
-            inode = info.st_ino
-            size = info.st_size
-            seconds = info.st_mtimespec.tv_sec
-            nanoseconds = info.st_mtimespec.tv_nsec
+            inode = Platform.Files.inode(info)
+            size = Platform.Files.byteSize(info)
+            seconds = Platform.Files.modified(info).tv_sec
+            nanoseconds = Platform.Files.modified(info).tv_nsec
         }
     }
 

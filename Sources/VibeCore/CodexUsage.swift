@@ -134,7 +134,7 @@ public struct CodexUsage: Equatable, Sendable {
     static func number(_ value: Any?) -> Double? {
         // A JSON true or false is an NSNumber too.
         guard let number = value as? NSNumber else { return nil }
-        return CFGetTypeID(number) == CFBooleanGetTypeID() ? nil : number.doubleValue
+        return Platform.isBoolean(number) ? nil : number.doubleValue
     }
 
     static func timestamp(_ text: String) -> Double? {

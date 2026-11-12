@@ -1,4 +1,3 @@
-import Security
 import Foundation
 
 /// Web Push (RFC 8030) messages to the phone: the payload is encrypted end to end for the browser
@@ -90,8 +89,8 @@ public enum WebPush {
 
     public static func randomBytes(_ count: Int) -> Data {
         var bytes = [UInt8](repeating: 0, count: count)
-        let status = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
-        precondition(status == errSecSuccess, "SecRandomCopyBytes failed")
+        var generator = SystemRandomNumberGenerator()
+        for index in bytes.indices { bytes[index] = UInt8.random(in: 0...255, using: &generator) }
         return Data(bytes)
     }
 }

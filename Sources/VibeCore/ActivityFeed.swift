@@ -108,8 +108,7 @@ public struct ActivityFeed: Equatable, Sendable {
     /// On one line.
     public static func plain(_ text: String) -> String {
         let line = text.split(whereSeparator: \.isNewline).joined(separator: " ")
-        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        var out = (try? AttributedString(markdown: line, options: options)).map { String($0.characters) } ?? line
+        var out = Platform.plainInline(line) ?? line
         // What inline parsing leaves: a leading "# ", "> ", "- ", and stray emphasis or code marks.
         out = out.replacing(#/^\s*(#{1,6}|>|[-*+])\s+/#, with: "")
         out = out.replacing(#/\*\*|__|`/#, with: "")

@@ -767,7 +767,7 @@ public enum ConfigSeal {
         switch info.st_mode & S_IFMT {
         case S_IFDIR: return nil
         case S_IFREG where info.st_size > Int64(scriptLimit):
-            return said + "big \(info.st_size) \(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec) \(info.st_ctimespec.tv_sec).\(info.st_ctimespec.tv_nsec) \(info.st_ino)"
+            return said + "big \(info.st_size) \(Platform.Files.modified(info).tv_sec).\(Platform.Files.modified(info).tv_nsec) \(Platform.Files.changed(info).tv_sec).\(Platform.Files.changed(info).tv_nsec) \(info.st_ino)"
         default:
             switch contentsDigest(path, followLink: true) {
             case .digest(let digest): return said + digest
@@ -840,7 +840,7 @@ public enum ConfigSeal {
             let shown = relative.isEmpty ? name : relative + "/" + name
             var info = stat()
             guard lstat(path, &info) == 0 else { continue }
-            let mtime = Int(info.st_mtimespec.tv_sec)
+            let mtime = Int(Platform.Files.modified(info).tv_sec)
             switch info.st_mode & S_IFMT {
             case S_IFDIR:
                 line(FolderLine(text: "d \(shown)", path: shown, mtime: mtime))

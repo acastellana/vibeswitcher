@@ -10,6 +10,6 @@ public struct MacTime {
         self.wall = wall
         self.awake = awake
     }
-    public static let real = MacTime(wall: Date.init, awake: { TimeInterval(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) / 1e9 })
+    public static let real = MacTime(wall: Date.init, awake: { Platform.Clock.awakeSeconds() })
 }
 

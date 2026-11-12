@@ -392,7 +392,7 @@ public final class LoadRecorder: @unchecked Sendable {
 
     /// The sample as of `date`, its own CPU cost measured. On the caller's thread.
     public func take(census: [HostCensus], at date: Date = Date()) -> LoadSample {
-        let started = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+        let started = Platform.Clock.threadCPUNanoseconds()
         let averages = sources.averages() ?? []
         let heavy = sources.heavy()
         var sample = LoadSample(
@@ -412,7 +412,7 @@ public final class LoadRecorder: @unchecked Sendable {
         } else {
             lastLook = nil
         }
-        sample.costMs = (Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - started) / 1e4).rounded() / 100
+        sample.costMs = (Double(Platform.Clock.threadCPUNanoseconds() - started) / 1e4).rounded() / 100
         return sample
     }
 
@@ -490,20 +490,13 @@ public final class LoadRecorder: @unchecked Sendable {
     }
 
     public static func memory() -> LoadSample.Memory? {
-        func int(_ name: String) -> Int32? {
-            var value: Int32 = 0
-            var size = MemoryLayout<Int32>.size
-            return sysctlbyname(name, &value, &size, nil, 0) == 0 ? value : nil
-        }
-        let pressure = int("kern.memorystatus_vm_pressure_level").map { level -> String in
+        let pressure = Platform.Host.memoryPressureLevel().map { level -> String in
             switch level { case 1: "normal"; case 2: "warn"; case 4: "critical"; default: "level \(level)" }
         }
-        var swap = xsw_usage()
-        var size = MemoryLayout<xsw_usage>.size
-        let swapRead = sysctlbyname("vm.swapusage", &swap, &size, nil, 0) == 0
-        let memory = LoadSample.Memory(pressure: pressure, free: int("kern.memorystatus_level").map(Int.init),
-                                       swapUsedMb: swapRead ? Int(swap.xsu_used / 1_048_576) : nil,
-                                       swapTotalMb: swapRead ? Int(swap.xsu_total / 1_048_576) : nil)
+        let swap = Platform.Host.swapUsage()
+        let memory = LoadSample.Memory(pressure: pressure, free: Platform.Host.memoryFreePercent(),
+                                       swapUsedMb: swap.map { Int($0.used / 1_048_576) },
+                                       swapTotalMb: swap.map { Int($0.total / 1_048_576) })
         return memory == LoadSample.Memory(pressure: nil, free: nil, swapUsedMb: nil, swapTotalMb: nil) ? nil : memory
     }
 

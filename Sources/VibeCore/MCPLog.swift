@@ -93,7 +93,7 @@ public final class MCPLog: @unchecked Sendable {
             let path = folder.appendingPathComponent(name).path
             var info = stat()
             guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { continue }
-            if now.timeIntervalSince1970 - TimeInterval(info.st_mtimespec.tv_sec) > age { unlink(path) }
+            if now.timeIntervalSince1970 - TimeInterval(Platform.Files.modified(info).tv_sec) > age { unlink(path) }
         }
     }
 
@@ -121,12 +121,7 @@ public final class MCPLog: @unchecked Sendable {
 
     /// The soft limit on open files, as the kernel applies it (never over kern.maxfilesperproc).
     public static func descriptorLimit() -> Int {
-        var limit = rlimit()
-        let soft = getrlimit(RLIMIT_NOFILE, &limit) == 0 ? limit.rlim_cur : rlim_t(OPEN_MAX)
-        var perProcess: Int32 = 0
-        var length = MemoryLayout<Int32>.size
-        let cap = sysctlbyname("kern.maxfilesperproc", &perProcess, &length, nil, 0) == 0 && perProcess > 0 ? rlim_t(perProcess) : soft
-        return Int(min(soft, cap))
+        Platform.Host.descriptorLimit()
     }
 
     /// The errnos worth naming in a log line.
@@ -157,19 +152,15 @@ public final class MCPLog: @unchecked Sendable {
         for number in MCPLog.fatalSignals {
             let line = "(time unknown) crashed: signal \(number) (\(String(cString: strsignal(number))))\n"
             MCPLog.crashLines[Int(number)] = strdup(line)
-            var action = sigaction()
-            action.__sigaction_u.__sa_handler = { number in
+            Platform.Signals.onFatal([number]) { number in
                 if MCPLog.crashFD >= 0, number > 0, number < 32, let line = MCPLog.crashLines[Int(number)] {
                     _ = Sys.write(MCPLog.crashFD, line, strlen(line))
                 }
                 signal(number, SIG_DFL)
                 raise(number)
             }
-            action.sa_flags = SA_RESETHAND
-            sigemptyset(&action.sa_mask)
-            sigaction(number, &action, nil)
         }
-        NSSetUncaughtExceptionHandler { exception in MCPLog.note("crashing: uncaught exception \(exception.name.rawValue)") }
+        Platform.Signals.onUncaughtException { name in MCPLog.note("crashing: uncaught exception \(name)") }
     }
 
     static let fatalSignals: [Int32] = [SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGTRAP, SIGFPE, SIGSYS]

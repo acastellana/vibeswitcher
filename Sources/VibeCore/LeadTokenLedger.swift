@@ -200,9 +200,6 @@ public enum LeadTokenLedger {
 
     /// When `file` was made (its birth time), nil when not known.
     static func born(_ file: URL) -> Double? {
-        var info = stat()
-        guard stat(file.path, &info) == 0 else { return nil }
-        let born = Double(info.st_birthtimespec.tv_sec) + Double(info.st_birthtimespec.tv_nsec) / 1e9
-        return born > 0 ? born : nil
+        Platform.Files.birthTime(file.path)
     }
 }

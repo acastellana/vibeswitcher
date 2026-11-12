@@ -150,13 +150,10 @@ pipe(&signalPipe)
 signalPipe.forEach { _ = fcntl($0, F_SETFD, FD_CLOEXEC) }
 nonisolated(unsafe) var signalPipeWriter = signalPipe[1]
 for number in [SIGTERM, SIGINT] {
-    var action = sigaction()
-    action.__sigaction_u.__sa_sigaction = { number, info, _ in
-        var said: (Int32, Int32) = (number, info?.pointee.si_pid ?? 0)
+    Platform.Signals.onSignal([number]) { number, info, _ in
+        var said: (Int32, Int32) = (number, Platform.Signals.sender(info))
         _ = withUnsafeBytes(of: &said) { write(signalPipeWriter, $0.baseAddress, $0.count) }
     }
-    action.sa_flags = SA_SIGINFO
-    sigaction(number, &action, nil)
 }
 let signals = DispatchSource.makeReadSource(fileDescriptor: signalPipe[0], queue: server.queue)
 signals.setEventHandler {

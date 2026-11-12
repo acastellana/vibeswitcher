@@ -149,7 +149,7 @@ public final class BinaryWatch: @unchecked Sendable {
     public static func identity(of path: String) -> Identity? {
         var info = stat()
         guard stat(path, &info) == 0 else { return nil }
-        let modified = TimeInterval(info.st_mtimespec.tv_sec) + TimeInterval(info.st_mtimespec.tv_nsec) / 1_000_000_000
+        let modified = TimeInterval(Platform.Files.modified(info).tv_sec) + TimeInterval(Platform.Files.modified(info).tv_nsec) / 1_000_000_000
         return Identity(modified: modified, size: Int64(info.st_size), inode: UInt64(info.st_ino))
     }
 }

@@ -1034,7 +1034,7 @@ public enum Redaction {
             for byte in word.utf8 where byte < 128 {
                 let i = Int(byte)
                 if characters[i] < 0 {
-                    characters[i] = bytes.withUnsafeBytes { memchr($0.baseAddress, Int32(byte), $0.count) != nil } ? 1 : 0
+                    characters[i] = bytes.withUnsafeBytes { buffer in buffer.baseAddress.map { memchr($0, Int32(byte), buffer.count) != nil } ?? false } ? 1 : 0
                 }
                 if characters[i] == 0 { return false }
             }

@@ -42,9 +42,7 @@ public enum DiskSpace {
         while !FileManager.default.fileExists(atPath: path), path != "/", !path.isEmpty {
             path = (path as NSString).deletingLastPathComponent
         }
-        var info = statfs()
-        guard statfs(path, &info) == 0 else { return nil }
-        return Int64(info.f_bavail) * Int64(info.f_bsize)
+        return Platform.Host.volumeFree(at: path)
     }
 
     /// What a folder (and everything in it) takes on disk; links aren't followed.
@@ -299,7 +297,7 @@ public enum SessionTemp {
             guard lstat(url.path, &info) == 0, info.st_uid == getuid(), (info.st_mode & S_IFMT) != S_IFLNK else { return false }
             let changed = ([url] + children(of: url, folders: false)).compactMap { url -> Date? in
                 var info = stat()
-                return lstat(url.path, &info) == 0 ? Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec)) : nil
+                return lstat(url.path, &info) == 0 ? Date(timeIntervalSince1970: TimeInterval(Platform.Files.modified(info).tv_sec)) : nil
             }.max() ?? now
             return now.timeIntervalSince(changed) >= handoverSettle && !isHeld(url)
         }.sorted { $0.path < $1.path }

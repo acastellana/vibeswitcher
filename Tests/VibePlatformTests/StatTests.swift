@@ -5,6 +5,12 @@ import VibePlatform
 /// `stat`'s fields under the names both systems share, and a file's birth time. Files are a test's own, in the run's
 /// scratch folder.
 struct StatTests {
+    /// A `Date()` outside a function body: on Linux it makes the compiler take `stat` from CoreFoundation's copy of the
+    /// C library's headers in this file, where a member that another module's extension gave `stat` isn't found
+    /// (Stat.swift). Nothing reads it: that this file compiles with it here is the test that what the tests below
+    /// call is found there too.
+    static let loaded = Date()
+
     static func status(_ path: String) throws -> stat {
         var info = stat()
         try #require(stat(path, &info) == 0, "stat \(path): errno \(errno)")
@@ -21,17 +27,17 @@ struct StatTests {
         let info = try Self.status(first), other = try Self.status(second)
         let after = Date().timeIntervalSince1970
 
-        let modified = Double(info.modified.tv_sec) + Double(info.modified.tv_nsec) / 1e9
+        let modified = Double(Platform.Files.modified(info).tv_sec) + Double(Platform.Files.modified(info).tv_nsec) / 1e9
         #expect(modified >= before - 2 && modified <= after + 2, "modified \(modified), written between \(before) and \(after)")
-        #expect((0..<1_000_000_000).contains(info.modified.tv_nsec))
-        #expect(info.byteSize == 1234)
-        #expect(other.byteSize == 0)
-        #expect(info.inode != other.inode)
+        #expect((0..<1_000_000_000).contains(Platform.Files.modified(info).tv_nsec))
+        #expect(Platform.Files.byteSize(info) == 1234)
+        #expect(Platform.Files.byteSize(other) == 0)
+        #expect(Platform.Files.inode(info) != Platform.Files.inode(other))
 
         // What Foundation says of the same file, which reads it by its own road.
         let attributes = try FileManager.default.attributesOfItem(atPath: first)
-        #expect((attributes[.systemFileNumber] as? NSNumber)?.uint64Value == info.inode)
-        #expect((attributes[.size] as? NSNumber)?.int64Value == info.byteSize)
+        #expect((attributes[.systemFileNumber] as? NSNumber)?.uint64Value == Platform.Files.inode(info))
+        #expect((attributes[.size] as? NSNumber)?.int64Value == Platform.Files.byteSize(info))
     }
 
     /// A file's contents changing moves both times; its mode changing moves only `changed`.
@@ -47,11 +53,13 @@ struct StatTests {
         #expect(chmod(path, 0o600) == 0)
         let moded = try Self.status(path)
 
-        #expect(moded.modified.tv_sec == written.modified.tv_sec && moded.modified.tv_nsec == written.modified.tv_nsec)
-        #expect(written.modified.tv_sec < time(nil) - 3000)
+        let modified = (before: Platform.Files.modified(written), after: Platform.Files.modified(moded))
+        let changed = (before: Platform.Files.changed(written), after: Platform.Files.changed(moded))
+        #expect(modified.after.tv_sec == modified.before.tv_sec && modified.after.tv_nsec == modified.before.tv_nsec)
+        #expect(modified.before.tv_sec < time(nil) - 3000)
         // utimes and chmod each change the inode now: `changed` isn't an hour back, and never goes back.
-        #expect(moded.changed.tv_sec > written.modified.tv_sec + 3000)
-        #expect((moded.changed.tv_sec, moded.changed.tv_nsec) >= (written.changed.tv_sec, written.changed.tv_nsec))
+        #expect(changed.after.tv_sec > modified.before.tv_sec + 3000)
+        #expect((changed.after.tv_sec, changed.after.tv_nsec) >= (changed.before.tv_sec, changed.before.tv_nsec))
     }
 
     /// The birth time is the file's own or "not known" (a file system that keeps none), never a time to come, and
@@ -67,7 +75,7 @@ struct StatTests {
 
         if let born = Platform.Files.birthTime(path) {
             #expect(born >= before - 2 && born <= after + 2, "born \(born), made between \(before) and \(after)")
-            #expect(born <= Double(info.modified.tv_sec) + Double(info.modified.tv_nsec) / 1e9 + 0.001)
+            #expect(born <= Double(Platform.Files.modified(info).tv_sec) + Double(Platform.Files.modified(info).tv_nsec) / 1e9 + 0.001)
         }
         #expect(Platform.Files.birthTime(folder.appendingPathComponent("never-made").path) == nil)
     }

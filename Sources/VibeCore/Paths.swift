@@ -257,7 +257,7 @@ public enum PrivateRepair {
     private static func newest(_ url: URL) -> Date? {
         var info = stat()
         guard lstat(url.path, &info) == 0 else { return nil }
-        var latest = Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec))
+        var latest = Date(timeIntervalSince1970: TimeInterval(Platform.Files.modified(info).tv_sec))
         if info.st_mode & S_IFMT == S_IFDIR {
             for name in (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? [] {
                 if let inner = newest(url.appendingPathComponent(name)), inner > latest { latest = inner }

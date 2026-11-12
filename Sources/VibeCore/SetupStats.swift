@@ -523,7 +523,7 @@ public final class SetupStatsCollector: @unchecked Sendable {
         var info = stat()
         guard stat(path, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { cache[path] = nil; return nil }
         let size = Int64(info.st_size)
-        let changed = Double(info.st_mtimespec.tv_sec) + Double(info.st_mtimespec.tv_nsec) / 1e9
+        let changed = Double(Platform.Files.modified(info).tv_sec) + Double(Platform.Files.modified(info).tv_nsec) / 1e9
         if let hit = cache[path], hit.size == size, hit.changed == changed { return hit.value as? T }
         counter.withLock { parsed += 1 }
         guard let value = parse(path) else { cache[path] = nil; return nil }
@@ -810,7 +810,7 @@ public final class SetupStatsCollector: @unchecked Sendable {
 // MARK: - Lenient views of the files (as the scripts read them: a field missing or of another shape is absent)
 
 private func number(_ value: Any?) -> Double? {
-    guard let value = value as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID() else { return nil }
+    guard let value = value as? NSNumber, !Platform.isBoolean(value) else { return nil }
     let double = value.doubleValue
     return double.isFinite ? double : nil
 }
@@ -1000,7 +1000,7 @@ struct RecorderLine {
         // A batched task's own first run where its line says it (`MergeSample.taskFirstRun`), else the run's: the
         // recorder writes snake_case keys (`first_run`); "firstRun" as hand-written lines have it.
         firstRun = line["task_first_run"] as? String ?? line["first_run"] as? String ?? line["firstRun"] as? String
-        if let flag = line["boost"] as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() { boost = flag.boolValue }
+        if let flag = line["boost"] as? NSNumber, Platform.isBoolean(flag) { boost = flag.boolValue }
     }
 }
 

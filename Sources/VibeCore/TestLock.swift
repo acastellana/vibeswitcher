@@ -429,7 +429,7 @@ public struct TestLock: Sendable {
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             let slots = lines.lazy.compactMap { $0.hasPrefix("slots ") ? Int($0.dropFirst("slots ".count)) : nil }.first ?? .max
             var info = stat()
-            let since = fstat(fd, &info) == 0 ? Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec)) : nil
+            let since = fstat(fd, &info) == 0 ? Date(timeIntervalSince1970: TimeInterval(Platform.Files.modified(info).tv_sec)) : nil
             let note = lines.first.flatMap { $0.isEmpty || $0.hasPrefix("slots ") ? nil : $0 }
             return Waiter(number: number, slots: slots, who: Holder(slot: 0, note: note, since: note == nil ? nil : since))
         }

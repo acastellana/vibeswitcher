@@ -248,7 +248,7 @@ extension ConfigSeal {
         var info = stat()
         let manifest = skills + "/" + syncFolder + "/" + account + "/manifest.json"
         guard lstat(manifest, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return nil }
-        return Double(info.st_mtimespec.tv_sec)
+        return Double(Platform.Files.modified(info).tv_sec)
     }
 
     /// Which team sessions ran, said no further than known. `allOutside`: no team session ran between looks.

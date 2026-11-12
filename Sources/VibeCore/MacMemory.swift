@@ -95,30 +95,16 @@ public struct MacMemory: Equatable, Sendable {
     }
 
     public static func pressureLevel() -> Pressure? {
-        var value: Int32 = 0
-        var size = MemoryLayout<Int32>.size
-        guard sysctlbyname("kern.memorystatus_vm_pressure_level", &value, &size, nil, 0) == 0 else { return nil }
-        return Pressure(rawValue: Int(value))
+        Platform.Host.memoryPressureLevel().flatMap { Pressure(rawValue: Int($0)) }
     }
 
     public static func swapUsage() -> (used: UInt64, total: UInt64)? {
-        var swap = xsw_usage()
-        var size = MemoryLayout<xsw_usage>.size
-        guard sysctlbyname("vm.swapusage", &swap, &size, nil, 0) == 0 else { return nil }
-        return (swap.xsu_used, swap.xsu_total)
+        Platform.Host.swapUsage()
     }
-
-    /// The host port, taken once: each `mach_host_self()` adds a send right.
-    private static let host = mach_host_self()
 
     /// Pages swapped out since boot (`vm_statistics64.swapouts`).
     public static func swapOuts() -> UInt64? {
-        var stats = vm_statistics64()
-        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
-        let result = withUnsafeMutablePointer(to: &stats) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { host_statistics64(host, HOST_VM_INFO64, $0, &count) }
-        }
-        return result == KERN_SUCCESS ? stats.swapouts : nil
+        Platform.Host.swapOuts()
     }
 
     /// The swap-out counter's readings of the last few minutes, Mac-wide in `~/.vibeswitcher/swap-samples.json`, so
