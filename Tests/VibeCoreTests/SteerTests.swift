@@ -37,7 +37,7 @@ struct SteerTests {
     /// and the message sealed before must still be the user's when it's taken (2026-10-19, ChatSyncTests under a
     /// TMPDIR in /private/tmp: the steer came out as "a message marked as the user's that VibeSwitcher didn't send").
     @Test func aUsersMessageStaysTheirsWhenItsFolderIsMadeByThePost() throws {
-        let root = temp.adopt(URL(fileURLWithPath: "/private/tmp/vs-steer-\(UUID().uuidString)"))
+        let root = temp.adopt(URL(fileURLWithPath: "\(Platform.Files.sharedTemporaryRoot)/vs-steer-\(UUID().uuidString)"))
         #expect(!FileManager.default.fileExists(atPath: root.path))
         try SteerInbox.post(message("use the staging database", id: "a"), tty: "ttys001", root: root)
         let taken = SteerInbox.take(tty: "ttys001", agentPid: 42, root: root)

@@ -35,7 +35,7 @@ struct SessionTempTests {
     @Test func theFolderIsShortAndEachSessionsOwn() {
         let account = "/Users/someone"
         let root = SessionTemp.root(vibeRoot: URL(fileURLWithPath: account + "/.vibeswitcher"), accountHome: account)
-        #expect(root.path == "/private/tmp/vibeswitcher-\(getuid())")
+        #expect(root.path == "\(Platform.Files.sharedTemporaryRoot)/vibeswitcher-\(getuid())")
         let deep = "/Users/someone/" + String(repeating: "very-deep/", count: 20) + ".vibeswitcher/worktrees/"
         let worker = SessionTemp.folder(cwd: deep + "a-task-with-a-long-name-indeed", name: "worker-a-task-with-a-long-name-indeed", in: root)
         #expect(worker.path.count < 60)

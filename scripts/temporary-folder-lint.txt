@@ -24,7 +24,6 @@ allow: Tests/VibeSwitcherTests/TestSupport.swift | let shortScratchRoot: String 
 # Read, never written: where the temporary folder is, to tell it apart.
 allow: Tests/VibeCoreTests/TeamSummariesTests.swift | real(NSTemporaryDirectory()) | checks the headless run's folder isn't the temporary folder; reads its path only
 allow: Tests/VibeCoreTests/DebugOutputTests.swift | DebugOutput.allowed( | paths DebugOutput.allowed is asked about (the temporary folder is one it allows); nothing is written
-allow: Tests/VibeCoreTests/SteerTests.swift | "/private/tmp/vs-steer- | on purpose: Foundation spells /private/tmp as /tmp, the bug this test pins; adopted by its Scratch and removed with it
 allow: Tests/VibeSwitcherTests/ChatSyncTests.swift | @Test(arguments: [nil, "/private/tmp"] | on purpose: a TMPDIR spelled /private/tmp (a verifier's is); the harness's files go in a Scratch folder there, removed with it
 #
 # A socket nothing listens on: the client fails to connect and makes no file.
@@ -96,8 +95,6 @@ allow: Tests/VibeCoreTests/WorktreesTests.swift | home.path + "/tmp/" | a tmp fo
 #
 # The lint's own examples, which its test writes to a scratch file of another name.
 allow: Tests/VibeCoreTests/TemporaryFolderLintTests.swift | // the lint's example | examples written to a scratch test file the lint must flag
-# SessionTemp: the user's sessions' TMPDIR root, compared and never made (the test's own go under a Scratch).
-allow: Tests/VibeCoreTests/SessionTempTests.swift | #expect(root.path == "/private/tmp/vibeswitcher- | the path SessionTemp.root names for the user's own VibeSwitcher, compared as a string; nothing is made there
 # AgentExportLint: text it reads in scripts, never a folder it opens.
 allow: Tests/VibeCoreTests/AgentExportLintTests.swift | static let scratchRoots = | the folders a script's export may write into, matched against the script's text
 allow: Tests/VibeCoreTests/AgentExportLintTests.swift | unzip -q tree.zip -d /tmp/x | a line of an example script the lint reads; nothing runs it
