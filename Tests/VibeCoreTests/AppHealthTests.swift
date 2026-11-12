@@ -473,9 +473,9 @@ struct AppHealthTests: LeadTeamFixture {
         var best = TimeInterval.infinity
         var read: (start: Date?, path: [(name: String, image: String)], spread: AppHealth.Spread?)?
         for _ in 0..<3 {
-            let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+            let start = Platform.Clock.threadCPUNanoseconds()
             read = (AppHealth.sampleStart(sample), AppHealth.busiestPath(sample: sample), AppHealth.spread(sample: sample))
-            best = min(best, TimeInterval(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1e9)
+            best = min(best, TimeInterval(Platform.Clock.threadCPUNanoseconds() - start) / 1e9)
         }
         print("SampleReadCost \(sample.utf8.count) bytes: \(String(format: "%.1f", best * 1000)) ms of CPU")
         // What it reads is what it read before.

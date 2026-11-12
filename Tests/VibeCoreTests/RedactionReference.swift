@@ -160,12 +160,25 @@ enum RedactionReference {
             }
         }
 
+        #if os(Linux)
+        // glibc's memmem takes no null pointer (an empty buffer's): nothing is found in nothing, the Mac's answer.
+        private func contains(_ word: String) -> Bool {
+            var word = word
+            return bytes.withUnsafeBytes { haystack in
+                word.withUTF8 { needle in
+                    guard let hay = haystack.baseAddress, let base = needle.baseAddress, needle.count > 0 else { return false }
+                    return memmem(hay, haystack.count, base, needle.count) != nil
+                }
+            }
+        }
+        #else
         private func contains(_ word: String) -> Bool {
             var word = word
             return bytes.withUnsafeBytes { haystack in
                 word.withUTF8 { memmem(haystack.baseAddress, haystack.count, $0.baseAddress, $0.count) != nil }
             }
         }
+        #endif
 
         private var hasBase64Run: Bool {
             bytes.withUnsafeBytes { buffer in

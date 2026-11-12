@@ -188,9 +188,9 @@ struct RedactionLeakTests {
     /// waiting doesn't add to, and the best of five runs taken in turns, so a slower core or a stall hits both alike.
     static func costs(benign: String, hostile: String) -> (benign: TimeInterval, hostile: TimeInterval) {
         func cost(_ input: String) -> TimeInterval {
-            let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+            let start = Platform.Clock.threadCPUNanoseconds()
             _ = Redaction.secrets(in: input)
-            return TimeInterval(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1e9
+            return TimeInterval(Platform.Clock.threadCPUNanoseconds() - start) / 1e9
         }
         var best = (benign: TimeInterval.infinity, hostile: TimeInterval.infinity)
         for _ in 0..<5 {

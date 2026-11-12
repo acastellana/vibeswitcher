@@ -54,6 +54,7 @@ struct PreviewCookieJarTests {
     }
 }
 
+#if canImport(Darwin)
 extension PreviewProxyTests {
     @Test func aDevServersLoginCookieStaysOnTheMacAndComesBack() async throws {
         let upstream = try FakeUpstream()
@@ -70,3 +71,4 @@ extension PreviewProxyTests {
         #expect(second.contains("Cookie: sid=SECRET"))   // the dev server still gets its session back
     }
 }
+#endif

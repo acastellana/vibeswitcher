@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -128,6 +127,7 @@ struct ProcessTableTests {
         #expect(table[getpid()] != nil && table[getppid()] != nil && table[1] != nil, "this process, its parent or launchd missing")
     }
 
+    #if canImport(Darwin)
     /// A pseudo-terminal is named as devname() names it (without its scan of /dev). One closed before it was named
     /// (some process still has it as its own) has no name, and that isn't kept: the next one opened on its number is
     /// named.
@@ -165,6 +165,7 @@ struct ProcessTableTests {
         try #require(stat(path, &node) == 0)
         return (master, node.st_rdev, (path as NSString).lastPathComponent)
     }
+    #endif
 
     /// A read past its time limit leaves its caller at the limit, told nil; while it's still stuck in the kernel the
     /// next caller is told nil at once; once it's done, reads go on.
@@ -279,8 +280,8 @@ struct ProcessTableTests {
         let terminal = try onATerminal("exec /bin/sleep 60")
         var pid: pid_t = 0
         let started = await eventually(timeout: 30) {
-            var children = [pid_t](repeating: 0, count: 4)
-            let count = children.withUnsafeMutableBytes { proc_listchildpids(terminal.processIdentifier, $0.baseAddress, Int32($0.count)) }
+            let children = Platform.Processes.children(terminal.processIdentifier)
+            let count = children.count
             guard count > 0, let info = ProcessTable.info(pid: children[0]), info.comm == "sleep", info.tty != nil else { return false }
             pid = children[0]
             return true
@@ -355,9 +356,7 @@ struct ProcessTableTests {
             var found: [pid_t] = []
             var next = [pid]
             while let parent = next.popLast() {
-                var children = [pid_t](repeating: 0, count: 256)
-                let count = children.withUnsafeMutableBytes { proc_listchildpids(parent, $0.baseAddress, Int32($0.count)) }
-                let live = children.prefix(Int(max(0, count))).filter { $0 > 0 }
+                let live = Platform.Processes.children(parent)
                 found += live
                 next += live
             }

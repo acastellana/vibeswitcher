@@ -32,8 +32,10 @@ let portableTargets: [Target] = [
     // PlatformLintPending.txt: the files still to be cleaned, read from the source tree (`PlatformLintTests`).
     .testTarget(name: "VibePlatformTests", dependencies: ["VibePlatform"], exclude: ["PlatformLintPending.txt"],
                 swiftSettings: testSettings),
-    // Still to come: VibeCoreTests (Task 12), and each of `notYetPortableTargets` when it compiles on Linux (the
-    // session host: stage 2).
+    // MacOnlyTests.txt: the test files compiled only on the Mac, each with its reason (`MacOnlyTestsLintTests`).
+    .testTarget(name: "VibeCoreTests", dependencies: ["VibeCore"], exclude: ["MacOnlyTests.txt"],
+                swiftSettings: testSettings),
+    // Still to come: each of `notYetPortableTargets` when it compiles on Linux (the session host: stage 2).
 ]
 // VIBE_LINUX_ALL=1 adds the portable targets that don't compile on Linux yet, only to count their errors
 // (scripts/ci/linux-core-errors.sh). The package's dependencies are the same with and without it, and so is
@@ -82,7 +84,7 @@ let package = Package(
         // PlatformLintPending.txt: the files still to be cleaned, read from the source tree (`PlatformLintTests`).
         .testTarget(name: "VibePlatformTests", dependencies: ["VibePlatform"], exclude: ["PlatformLintPending.txt"],
                     swiftSettings: testSettings),
-        .testTarget(name: "VibeCoreTests", dependencies: ["VibeCore"], swiftSettings: testSettings),
+        .testTarget(name: "VibeCoreTests", dependencies: ["VibeCore"], exclude: ["MacOnlyTests.txt"], swiftSettings: testSettings),
         // Depends on the host executable too: sessions are started through it (`--pty-exec`). Fixtures: terminal
         // output captured from scratch programs.
         .testTarget(name: "VibeHostTests", dependencies: ["VibeHost", "VibeCore", "vibeswitcher-host"],

@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(Darwin)
 import Network
+#endif
 import Testing
 @testable import VibeCore
 
@@ -275,6 +277,7 @@ struct PreviewGateTests {
     }
 }
 
+#if canImport(Darwin)
 /// A one-request-per-connection HTTP server for proxy tests. It records each request head, answers with
 /// `reply`, and then closes, or with `echoAfterReply` keeps echoing (an upgraded connection).
 final class FakeUpstream: @unchecked Sendable {
@@ -386,6 +389,7 @@ final class FakeUpstream: @unchecked Sendable {
         }
     }
 }
+#endif
 
 /// Runs a body the first time only, from any thread.
 final class Once: @unchecked Sendable {
@@ -411,6 +415,7 @@ func until(timeout: TimeInterval = hangGuard, _ condition: () -> Bool) async -> 
     return condition()
 }
 
+#if canImport(Darwin)
 /// Sends `request` to 127.0.0.1:`port`; returns everything received until the server closes (or the hang guard
 /// passes).
 func exchange(port: UInt16, _ request: String, timeout: TimeInterval = hangGuard) async -> Data {
@@ -700,6 +705,7 @@ struct PreviewProxyTests {
         #expect(seen.contains("Connection: Upgrade"))
     }
 }
+#endif
 
 struct AutomationAccessTests {
     @Test func macOSAnswersMapToWhatThePhoneAccessWindowShows() {

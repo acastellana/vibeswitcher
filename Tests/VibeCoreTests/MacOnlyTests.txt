@@ -1,0 +1,10 @@
+CookieJarTests.swift  the PreviewProxyTests extension (aDevServersLoginCookieStaysOnTheMacAndComesBack): the preview proxy is the Mac's (Network.framework)
+DevPreviewHardeningTests.swift  the PreviewProxyTests extension and its ResettingServer: the preview proxy is the Mac's (Network.framework)
+DevPreviewTests.swift  PreviewProxyTests and its helpers (FakeUpstream, exchange, exchangeDetailed, upgradeExchange, refusesConnections): the preview proxy is the Mac's (Network.framework)
+KeptImagesTests.swift  aLargeImageIsDownscaled: a smaller copy of an image is ImageIO's (Platform.Images.pngThumbnail is nil on Linux)
+KeychainLiveTests.swift  the login Keychain (Security.framework)
+PreferenceLedger.swift  wraps NSUserDefaults' suite initializer through the Objective-C runtime, for the files cfprefsd writes: Linux has neither
+ProcessTableTests.swift  aTerminalIsNamedByItsNumber and its openPty: TerminalNames and devname() are the Mac's
+SessionStraysTests.swift  procargsGiveTheArgumentsAndTheEnvironmentNotTheKernelsOwn: ProcessTable.parse(procargs:) reads the Mac's KERN_PROCARGS2
+StatusAccessibilityTests.swift  marksStayInsideTheirRect: StatusMark's shapes are CGPaths
+WorktreesTests.swift  signalFamilyStopsAProcessAndWhatItStartedAndNothingElse and its Exits: does not compile on Linux yet: cannot find 'kqueue', 'kevent', 'EVFILT_PROC' in scope (the test's own kqueue of process exits)

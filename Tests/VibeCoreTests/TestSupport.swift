@@ -169,7 +169,22 @@ extension Scratch {
     /// (`UserDefaults(suiteName: "x.y")`) to the real ~/Library/Preferences whatever HOME and CFFIXED_USER_HOME say,
     /// and leaves the file there after `removePersistentDomain`, so 8,012 dev.vibeswitcher.tests.<UUID>.plist and
     /// 11,000 more piled up by 2026-10-24. scripts/test.sh fails a run that adds one again (`check_preferences`).
+    #if canImport(Darwin)
     func defaults(_ prefix: String) -> UserDefaults {
         UserDefaults(suiteName: url(prefix).appendingPathComponent("defaults").path)!
     }
+    #else
+    /// Linux's: the platform's store in that same file (`Platform.settings(domain:)`, a domain that is a path).
+    func defaults(_ prefix: String) -> any SettingsStore {
+        Platform.settings(domain: url(prefix).appendingPathComponent("defaults").path)!
+    }
+    #endif
 }
+
+#if os(Linux)
+/// The label of the queue the caller runs on, under the name Swift on the Mac gives the C call: Swift's Dispatch on
+/// Linux has `DispatchQueue.label` and nothing for the current queue. libdispatch's own function, by its symbol
+/// (`queue` nil: the current queue, DISPATCH_CURRENT_QUEUE_LABEL).
+@_silgen_name("dispatch_queue_get_label")
+func __dispatch_queue_get_label(_ queue: OpaquePointer?) -> UnsafePointer<CChar>
+#endif

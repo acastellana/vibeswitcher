@@ -1022,6 +1022,7 @@ struct ShellTests {
         #expect(await eventually { kill(child, 0) != 0 })
     }
 
+    #if canImport(Darwin)
     /// E-32: `signalFamily` stops a process and what it started (its children and theirs), each matched by pid and
     /// start time; a process outside the family, or one an earlier walk names that has since been replaced, is left be.
     /// Only processes this test started are signalled. Nothing here waits on the clock: the child and grandchild say
@@ -1117,6 +1118,7 @@ struct ShellTests {
             return true
         }
     }
+    #endif
 
     /// What `signalFamily`'s test runs report on their output, one "<name> <pid>" line each: `all` is signalled once
     /// every name expected has.

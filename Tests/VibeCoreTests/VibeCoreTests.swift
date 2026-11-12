@@ -804,7 +804,6 @@ struct RedactionTests {
     }
 }
 
-import CryptoKit
 
 struct WebPushTests {
     // RFC 8291, Section 5 and Appendix A.

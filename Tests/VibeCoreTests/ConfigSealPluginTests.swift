@@ -482,11 +482,15 @@ extension ConfigSealTests {
         try handle.write(contentsOf: Data("y".utf8))
         try handle.close()
         // Set back to the nanosecond, as `touch -r` does: Foundation's Date would round it.
+        #if os(Linux)
+        let times = [info.st_atim, info.st_mtim]
+        #else
         let times = [info.st_atimespec, info.st_mtimespec]
+        #endif
         #expect(utimensat(AT_FDCWD, path, times, 0) == 0)
         var after = stat()
         #expect(lstat(path, &after) == 0)
-        #expect(after.st_mtimespec.tv_sec == info.st_mtimespec.tv_sec && after.st_mtimespec.tv_nsec == info.st_mtimespec.tv_nsec)
+        #expect(Platform.Files.modified(after).tv_sec == Platform.Files.modified(info).tv_sec && Platform.Files.modified(after).tv_nsec == Platform.Files.modified(info).tv_nsec)
         #expect(try #require(ConfigSeal.scriptDigest(path)) != before)
     }
 

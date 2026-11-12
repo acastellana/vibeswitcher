@@ -1,4 +1,6 @@
+#if canImport(Darwin)
 import CoreGraphics
+#endif
 import Foundation
 import Testing
 @testable import VibeCore
@@ -36,6 +38,7 @@ struct StatusAccessibilityTests {
         #expect(StatusMark(status: .done, paused: true) == .paused)
     }
 
+    #if canImport(Darwin)
     @Test func marksStayInsideTheirRect() {
         let rect = CGRect(x: 3, y: 5, width: 9, height: 9)
         for mark in [StatusMark.alert, .spinner, .halfFilled, .check, .smallDot, .outline, .paused] {
@@ -55,6 +58,7 @@ struct StatusAccessibilityTests {
         let up = StatusMark.alert.glyph(in: rect)!.boundingBoxOfPath, down = StatusMark.alert.glyph(in: rect, yDown: true)!.boundingBoxOfPath
         #expect(abs(up.minY - (rect.maxY - (down.maxY - rect.minY))) < 0.01)
     }
+    #endif
 
     @Test func statusTextAndBadgesMeetAA() {
         for status in [SessionStatus.needsInput, .working, .background, .done, .idle, .unknown] {

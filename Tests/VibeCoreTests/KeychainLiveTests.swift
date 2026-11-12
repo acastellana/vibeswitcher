@@ -1,3 +1,4 @@
+#if canImport(Darwin)
 import CryptoKit
 import Foundation
 import Security
@@ -52,3 +53,4 @@ struct KeychainLiveTests {
         }
     }
 }
+#endif

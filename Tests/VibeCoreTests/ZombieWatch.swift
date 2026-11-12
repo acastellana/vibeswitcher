@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 import VibeCore
@@ -41,7 +40,7 @@ struct ZombieWatch {
 
     /// The children of `pid` that ended and haven't been reaped.
     static func zombies(of pid: pid_t = getpid()) -> [pid_t] {
-        SessionStrays.children(of: pid).filter { record(of: $0).map { Int32($0.kp_proc.p_stat) } == SZOMB }
+        SessionStrays.children(of: pid).filter { record(of: $0)?.state == .zombie }
     }
 
     /// The program names of `zombies` (the kernel keeps a zombie's, though ps shows none), the commonest first:
@@ -49,21 +48,15 @@ struct ZombieWatch {
     static func names(_ zombies: [pid_t]) -> String {
         var counts: [String: Int] = [:]
         for pid in zombies {
-            let name = record(of: pid).map { info in
-                withUnsafeBytes(of: info.kp_proc.p_comm) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
-            }
+            let name = record(of: pid)?.name
             counts[name ?? "?", default: 0] += 1
         }
         let sorted = counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
         return sorted.map { "\($0.key) ×\($0.value)" }.joined(separator: ", ")
     }
 
-    private static func record(of pid: pid_t) -> kinfo_proc? {
-        var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
-        return info
+    private static func record(of pid: pid_t) -> Platform.Processes.Record? {
+        Platform.Processes.kernelRecord(pid)
     }
 
     /// The run's watch: started as the bundle loads, it looks until the runner exits.

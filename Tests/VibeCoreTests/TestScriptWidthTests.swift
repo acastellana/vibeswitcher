@@ -51,10 +51,14 @@ struct TestScriptWidthTests {
     }
 
     static var macCores: String {
+        #if os(Linux)
+        return String(sysconf(Int32(_SC_NPROCESSORS_ONLN)))
+        #else
         var cores: Int32 = 0
         var size = MemoryLayout<Int32>.size
         sysctlbyname("hw.ncpu", &cores, &size, nil, 0)
         return String(cores)
+        #endif
     }
 
     @Test func withoutASlotTheWidthIsATestACoreOrTheCallersOwn() async throws {

@@ -1,3 +1,4 @@
+#if canImport(Darwin)
 import Foundation
 import ObjectiveC
 
@@ -35,3 +36,4 @@ private let noteTheSuitesThisRunOpens: @convention(c) () -> Void = {
     openSuite = unsafeBitCast(method_getImplementation(method), to: OpenSuite.self)
     method_setImplementation(method, unsafeBitCast(openSuiteNoted, to: IMP.self))
 }
+#endif

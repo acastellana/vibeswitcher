@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(Darwin)
 import Network
+#endif
 import Testing
 @testable import VibeCore
 
@@ -98,6 +100,7 @@ struct PhonePortsTests {
     }
 }
 
+#if canImport(Darwin)
 /// A one-shot server that answers `reply` and then resets the connection (SO_LINGER 0): what the proxy
 /// sees when a dev server's connection breaks mid-answer. (Network.framework's forceCancel doesn't
 /// reliably send a reset.)
@@ -200,6 +203,7 @@ extension PreviewProxyTests {
         #expect(!result.endedWithError)
     }
 }
+#endif
 
 struct ChromeReadFailureTests {
     @Test func appleEventErrorsMapToWhatThePhoneShows() {

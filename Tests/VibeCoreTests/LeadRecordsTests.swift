@@ -232,7 +232,7 @@ struct LeadRecordsTests: LeadTeamFixture {
         var reply = [UInt8](repeating: 0, count: 4096)
         var answer = [pollfd(fd: output[0], events: Int16(POLLIN), revents: 0)]
         #expect(poll(&answer, 1, 30_000) == 1)
-        #expect(Darwin.read(output[0], &reply, reply.count) > 0)
+        #expect(Sys.read(output[0], &reply, reply.count) > 0)
         #expect(switches.get() == 0)
         // Once it ends, the switch is tried: the commit is on the branch and the vault has it as the lead's.
         release.signal()

@@ -24,6 +24,7 @@ struct SessionStraysTests {
         return url.path
     }
 
+    #if canImport(Darwin)
     @Test func procargsGiveTheArgumentsAndTheEnvironmentNotTheKernelsOwn() {
         var buffer = withUnsafeBytes(of: Int32(2)) { Array($0) }
         buffer += Array("/bin/sleep\0\0\0sleep\0300\0A=1\0VIBESWITCHER_SESSION=x\0\0\0ptr_munge=\0".utf8)
@@ -32,6 +33,7 @@ struct SessionStraysTests {
         #expect(parsed.environment == ["A=1", "VIBESWITCHER_SESSION=x"])
         #expect(ProcessTable.parse(procargs: [1, 0]).arguments.isEmpty)
     }
+    #endif
 
     @Test func insideMeansTheFolderOrUnderIt() {
         #expect(SessionStrays.isInside("/a/wt", folder: "/a/wt"))

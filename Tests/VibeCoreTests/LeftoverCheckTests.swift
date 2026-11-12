@@ -1,6 +1,6 @@
-import Darwin
 import Foundation
 import Testing
+import VibeCore
 
 /// scripts/test.sh fails a run that leaves a process of its own running (a scratch session host, a parser, a bench's
 /// app): one whose environment or arguments hold the run's scratch folder. On 2026-10-20 hosts and parsers from a run a
@@ -59,9 +59,7 @@ struct LeftoverCheckTests {
 
     /// The pids under `pid`.
     static func children(of pid: pid_t) -> [pid_t] {
-        var pids = [pid_t](repeating: 0, count: 64)
-        let count = proc_listchildpids(pid, &pids, Int32(pids.count * MemoryLayout<pid_t>.size))
-        return Array(pids.prefix(Int(max(0, count))))
+        Platform.Processes.children(pid)
     }
 
     @Test func aProcessOfTheRunLeftRunningIsEndedAndFailsTheRun() async throws {

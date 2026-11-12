@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -99,9 +98,9 @@ struct HookBoundsTests {
         }
         func cost(_ payload: [String: Any]) -> TimeInterval {
             (0..<3).map { _ in
-                let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+                let start = Platform.Clock.threadCPUNanoseconds()
                 _ = HookState.reduce(current: nil, payload: payload, agent: .claude, tty: "ttys001", agentPid: 7, now: 1)
-                return TimeInterval(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1e9
+                return TimeInterval(Platform.Clock.threadCPUNanoseconds() - start) / 1e9
             }.min()!
         }
         let small = text(10_000), big = text(5_000_000)

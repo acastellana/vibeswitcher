@@ -1,9 +1,14 @@
 import Foundation
+#if canImport(Darwin)
 import ImageIO
+#endif
 import Testing
+#if canImport(Darwin)
 import UniformTypeIdentifiers
+#endif
 @testable import VibeCore
 
+#if canImport(Darwin)
 /// A PNG of `width`×`height` pixels; with `noise`, random pixels, which don't compress (a large file).
 func testPNG(width: Int = 40, height: Int = 30, noise: Bool = false) -> Data {
     var pixels = [UInt8](repeating: 0x80, count: width * height * 4)
@@ -23,6 +28,35 @@ func loadsAsImage(_ path: String) -> Bool {
     guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil) else { return false }
     return CGImageSourceCreateImageAtIndex(source, 0, nil) != nil
 }
+#else
+/// Linux has no ImageIO: the same pixels as a PNG written by hand (8-bit RGBA, its data stored uncompressed, so every
+/// size is a large file there), and "loads" is the platform's own reading of the file.
+func testPNG(width: Int = 40, height: Int = 30, noise: Bool = false) -> Data {
+    var rows = [UInt8]()
+    for _ in 0..<height {
+        rows.append(0)
+        for _ in 0..<width { rows += (0..<3).map { _ in noise ? UInt8.random(in: 0...255) : 0x80 } + [0xFF] }
+    }
+    func bytes(_ value: UInt32) -> [UInt8] { (0..<4).map { UInt8(truncatingIfNeeded: value >> (24 - 8 * UInt32($0))) } }
+    func crc(_ data: [UInt8]) -> UInt32 {
+        ~data.reduce(~UInt32(0)) { crc, byte in (0..<8).reduce(crc ^ UInt32(byte)) { c, _ in c & 1 == 1 ? 0xEDB8_8320 ^ (c >> 1) : c >> 1 } }
+    }
+    func chunk(_ name: String, _ body: [UInt8]) -> [UInt8] { bytes(UInt32(body.count)) + Array(name.utf8) + body + bytes(crc(Array(name.utf8) + body)) }
+    var stream: [UInt8] = [0x78, 0x01], a: UInt32 = 1, b: UInt32 = 0
+    for start in stride(from: 0, to: rows.count, by: 65_535) {
+        let block = rows[start..<min(start + 65_535, rows.count)], count = UInt16(block.count)
+        stream += [start + block.count == rows.count ? 1 : 0, UInt8(count & 0xFF), UInt8(count >> 8), UInt8(~count & 0xFF), UInt8(~count >> 8)] + block
+    }
+    for byte in rows { a = (a + UInt32(byte)) % 65_521; b = (b + a) % 65_521 }
+    stream += bytes(b << 16 | a)
+    return Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] + chunk("IHDR", bytes(UInt32(width)) + bytes(UInt32(height)) + [8, 6, 0, 0, 0])
+                + chunk("IDAT", stream) + chunk("IEND", []))
+}
+
+func loadsAsImage(_ path: String) -> Bool {
+    Platform.Images.isImage(URL(fileURLWithPath: path))
+}
+#endif
 
 /// post_update and done reports keep copies of their screenshots in the project's .vibeswitcher (2026-10-25: an
 /// update's pictures pointed into a worktree auto_advance cleaned up right after the merge, and were gone).
@@ -124,6 +158,7 @@ struct KeptImagesTests: LeadTeamFixture {
         #expect(KeptImages.defaultCap == 500 << 20)
     }
 
+    #if canImport(Darwin)
     /// An image over `largest` is downscaled to a PNG that fits, not refused; one that's small enough is copied as is.
     @Test func aLargeImageIsDownscaled() throws {
         let root = try repo()
@@ -145,6 +180,7 @@ struct KeptImagesTests: LeadTeamFixture {
         #expect(try Data(contentsOf: URL(fileURLWithPath: copied)) == small)
         #expect(KeptImages.defaultLargest == 5 << 20)
     }
+    #endif
 
     /// A group is only ever a folder under the project's .vibeswitcher.
     @Test func nothingIsKeptOutsideTheProjectsFolder() throws {

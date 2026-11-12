@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import Testing
 @testable import VibeCore
@@ -20,8 +19,6 @@ struct AppProofTests {
 /// The executable a process runs.
 enum HostServerPaths {
     static func executable(of pid: pid_t) -> String? {
-        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        return String(cString: buffer)
+        Platform.Processes.executable(pid)
     }
 }

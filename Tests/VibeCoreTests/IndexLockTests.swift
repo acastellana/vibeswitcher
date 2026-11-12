@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -145,10 +144,7 @@ struct IndexLockTests {
 
 /// Whether `pid` is stopped: a SIGSTOP sent to it has taken effect, not only been sent.
 func stopped(_ pid: pid_t) -> Bool {
-    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-    var info = kinfo_proc()
-    var size = MemoryLayout<kinfo_proc>.stride
-    return sysctl(&mib, 4, &info, &size, nil, 0) == 0 && size > 0 && Int32(info.kp_proc.p_stat) == SSTOP
+    Platform.Processes.kernelRecord(pid)?.state == .stopped
 }
 
 /// A process that holds `path` open (and made it, as git makes its lock), until it's stopped.
