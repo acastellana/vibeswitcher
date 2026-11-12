@@ -577,7 +577,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
         // A Run-card shell's command ending, or its session: the asker hears how it ended (as the app's desk does).
         host.$sessions.map { $0.map { "\($0.id) \($0.commandEnd != nil) \($0.isLive)" } }.removeDuplicates().dropFirst()
-            .receive(on: RunLoop.main).sink { [weak self] _ in self?.shellDesk.refresh() }.store(in: &cancellables)
+            .receiveLatest(on: RunLoop.main).sink { [weak self] _ in self?.shellDesk.refresh() }.store(in: &cancellables)
         // A fake agent leaves with its session, as a real one does.
         host.$sessions.receiveLatest(on: RunLoop.main).sink { [weak self] sessions in
             guard let self else { return }
