@@ -49,8 +49,9 @@ struct PhoneRepliesTests {
         var error: String { json["error"] as? String ?? "" }
     }
 
-    /// A store with one Claude session on `tty`, waiting on you: in a Terminal tab, or (`window`) in the window.
-    private func store(window: Bool = false) async throws -> SessionStore {
+    /// A store with one Claude session on `tty`, waiting on input: in a Terminal tab, or (`window`) in the window, its
+    /// window session labelled `label` (a lead's "Worker: …" makes it a team member, waiting on its lead).
+    private func store(window: Bool = false, label: String = "w") async throws -> SessionStore {
         AppStatus.enabled = false
         try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
         let start = Date().addingTimeInterval(-600)
@@ -75,8 +76,8 @@ struct PhoneRepliesTests {
                                  bridge: bridge)
         store.terminalFront = { (false, nil) }
         if window {
-            store.updateHosted([HostSession(id: UUID(), tty: Self.tty, childPID: 870, cwd: dir.path, command: "claude", label: "w",
-                                            agent: "claude", title: "w", startedAt: start, cols: 80, rows: 24, exit: nil)])
+            store.updateHosted([HostSession(id: UUID(), tty: Self.tty, childPID: 870, cwd: dir.path, command: "claude", label: label,
+                                            agent: "claude", title: label, startedAt: start, cols: 80, rows: 24, exit: nil)])
         }
         let before = store.scansApplied
         store.refresh()
@@ -590,6 +591,44 @@ struct PhoneRepliesTests {
         #expect(await until { escape.value != nil })
         #expect(escape.value?.status == 200)
         #expect(wentIn() == afterReply + 1)
+    }
+
+    /// A worker waiting on its lead reads as working on the phone (`Session.shownStatus`) and is offered no menu, so the
+    /// phone's quick-reply chip doesn't hold back for its permission prompt and posts the reply. The Mac's own check
+    /// (`menuRefusal`) goes by the session's status as its hooks say it (needs input) and the screen read when the
+    /// reply's turn comes: refused, naming its lead, and nothing typed. Esc still goes.
+    @Test func aQuickReplyIsntTypedIntoAWorkersPromptThePhoneShowedAsWorking() async throws {
+        let store = try await store(window: true, label: "Worker: fix-login")
+        let worker = try #require(store.sessions.first { $0.tty == Self.tty })
+        #expect(worker.waitsOnLead && worker.status == .needsInput && worker.shownStatus == .working)
+        let (access, token, done) = try serve(store)
+        defer { done() }
+        let host = useHost(access)
+        access.readTerminalScreen = { _ in Self.menuScreen }
+        let sid = try sid(store)
+
+        // What the phone sees: working, no menu: its chip guard (`session.status === 'needsInput'`) lets the reply go.
+        let state = send(access, try request("GET", "/api/state", token: token))
+        #expect(await until { state.value != nil })
+        let row = try #require((state.value?.json["sessions"] as? [[String: Any]])?.first { $0["tty"] as? String == Self.tty })
+        #expect(row["status"] as? String == SessionStatus.working.rawValue)
+        #expect(row["menu"] == nil)
+
+        // The chip's post, as app.js sends it: refused, nothing written to the window.
+        let chip = #"{"tty":"\#(Self.tty)","sid":"\#(sid)","text":"Yes, go ahead","submit":true,"request":"q1"}"#
+        let answer = send(access, try request("POST", "/api/input", token: token, body: chip))
+        #expect(await until { answer.value != nil })
+        #expect(answer.value?.status == 409)
+        #expect(answer.value?.error == PhoneAccess.menuOpen(in: worker))
+        #expect(answer.value?.error.contains("Its lead answers it") == true)
+        #expect(host.writes.isEmpty, "nothing typed into the worker's prompt")
+
+        // Esc is how a menu is closed: it still goes.
+        let escape = send(access, try request("POST", "/api/input", token: token,
+                                              body: #"{"tty":"\#(Self.tty)","sid":"\#(sid)","key":"escape"}"#))
+        #expect(await until { escape.value != nil })
+        #expect(escape.value?.status == 200)
+        #expect(host.writes.count == 1)
     }
 
     /// With the cursor on a question's "Type something." row, text is what that row takes: you moved there on purpose.
