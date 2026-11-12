@@ -161,7 +161,8 @@ enum RedactionReference {
         }
 
         #if os(Linux)
-        // glibc's memmem takes no null pointer (an empty buffer's): nothing is found in nothing, the Mac's answer.
+        // glibc's memmem takes no null pointer (an empty buffer's): nothing is found in nothing, the Mac's answer. A
+        // branch, not a platform value: the Mac's call stays as it is, and only the C library's contract differs.
         private func contains(_ word: String) -> Bool {
             var word = word
             return bytes.withUnsafeBytes { haystack in

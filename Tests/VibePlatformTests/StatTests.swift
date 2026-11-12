@@ -62,6 +62,22 @@ struct StatTests {
         #expect((changed.after.tv_sec, changed.after.tv_nsec) >= (changed.before.tv_sec, changed.before.tv_nsec))
     }
 
+    /// `accessed` is the time the file was last read, set apart from the time it was written.
+    @Test func accessedIsTheReadTimeNotTheWriteTime() throws {
+        let folder = try TestScriptLinuxTests.scratch("stat")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let path = folder.appendingPathComponent("file").path
+        try Data("a".utf8).write(to: URL(fileURLWithPath: path))
+        let read = timeval(tv_sec: time(nil) - 7200, tv_usec: 250_000)
+        let written = timeval(tv_sec: time(nil) - 3600, tv_usec: 0)
+        #expect(utimes(path, [read, written]) == 0)
+        let info = try Self.status(path)
+
+        let accessed = Platform.Files.accessed(info), modified = Platform.Files.modified(info)
+        #expect(accessed.tv_sec == read.tv_sec && accessed.tv_nsec == 250_000_000, "accessed \(accessed)")
+        #expect(modified.tv_sec == written.tv_sec && modified.tv_nsec == 0, "modified \(modified)")
+    }
+
     /// The birth time is the file's own or "not known" (a file system that keeps none), never a time to come, and
     /// never later than the file's first write.
     @Test func birthTimeIsNilOrNotLaterThanNow() throws {

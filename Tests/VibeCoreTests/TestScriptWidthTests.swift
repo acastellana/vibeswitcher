@@ -51,6 +51,9 @@ struct TestScriptWidthTests {
     }
 
     static var macCores: String {
+        // The cores as scripts/lib/processes.sh's cpu_count counts them: sysctl's hw.ncpu on the Mac, getconf's
+        // _NPROCESSORS_ONLN where it has no sysctl. A branch, not a platform value: `MacLoad.processors` (Foundation's
+        // active cores) answers another question, the cores this process may use.
         #if os(Linux)
         return String(sysconf(Int32(_SC_NPROCESSORS_ONLN)))
         #else

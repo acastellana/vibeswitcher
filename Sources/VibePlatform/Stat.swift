@@ -34,6 +34,15 @@ extension Platform.Files {
         #endif
     }
 
+    /// When the file was last read (as the volume keeps it: Linux's `relatime` moves it at most once a day).
+    public static func accessed(_ info: stat) -> timespec {
+        #if canImport(Darwin)
+        return info.st_atimespec
+        #else
+        return info.st_atim
+        #endif
+    }
+
     /// The file's number on its volume.
     public static func inode(_ info: stat) -> UInt64 { UInt64(info.st_ino) }
 

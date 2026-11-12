@@ -482,11 +482,7 @@ extension ConfigSealTests {
         try handle.write(contentsOf: Data("y".utf8))
         try handle.close()
         // Set back to the nanosecond, as `touch -r` does: Foundation's Date would round it.
-        #if os(Linux)
-        let times = [info.st_atim, info.st_mtim]
-        #else
-        let times = [info.st_atimespec, info.st_mtimespec]
-        #endif
+        let times = [Platform.Files.accessed(info), Platform.Files.modified(info)]
         #expect(utimensat(AT_FDCWD, path, times, 0) == 0)
         var after = stat()
         #expect(lstat(path, &after) == 0)

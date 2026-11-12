@@ -150,7 +150,8 @@ struct HomeIsolationTests {
         // it has no agent above it (a test run inside a Claude session would otherwise give it that session's TTY).
         let event = #"{"hook_event_name":"UserPromptSubmit","session_id":"\#(session)","cwd":"/tmp","prompt":"hi"}"#
         #if os(Linux)
-        // util-linux's script: the file last, and the command one word after -c, run by $SHELL.
+        // util-linux's script: the file last, and the command one word after -c, run by $SHELL. A branch, not a
+        // platform value: script(1) is this test's tool, which no code under test runs.
         let script = #"SHELL=/bin/sh /usr/bin/script -q -c 'printf %s "$EVENT" | "$HOOK" claude' /dev/null </dev/null >/dev/null 2>&1 &"#
         #else
         let script = #"/usr/bin/script -q /dev/null /bin/sh -c 'printf %s "$1" | "$2" claude' sh "$EVENT" "$HOOK" </dev/null >/dev/null 2>&1 &"#
@@ -395,7 +396,8 @@ struct HomeIsolationTests {
         let own = CommandLine.arguments.first ?? ""
         if URL(fileURLWithPath: own).lastPathComponent == "swiftpm-testing-helper" { return own }
         #if os(Linux)
-        // Linux's `swift test` has no helper: the bundle is an executable, started by itself with the same arguments.
+        // Linux's `swift test` has no helper: the bundle is an executable, started by itself with the same arguments. A
+        // branch, not a platform value: it is the toolchain's layout, which no code under test asks.
         return Bundle(for: TestBundleAnchor.self).executablePath
         #else
         guard let swift = try? runNow("/usr/bin/xcrun", ["--find", "swift"], environment: ProcessInfo.processInfo.environment),
