@@ -2534,3 +2534,9 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 01:50 Merged origin/main into main: 28 commits from the remote, as a merge commit, 919879f0; the tests passed on it (build 32244f28b05f)
 - 2026-11-12 01:50 Asked the user to push main at e9b9af67 (4 commits) to origin/main
 - 2026-11-12 03:21 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-11-12 09:21 Planned remind-the-user-to: Remind the user to run /doctor prompt-audit per project (every 14 days and after a model change)
+- 2026-11-12 09:21 Started a worker on remind-the-user-to
+- 2026-11-12 09:21 Automatically (auto_advance): Started a worker on remind-the-user-to (Remind the user to run /doctor prompt-audit per project (every 14 days and after a model change)).
+- 2026-11-12 09:21 Planned agents-md-run-every: AGENTS.md: run every lint, and a load test command that works on any Mac
+- 2026-11-12 09:21 Started a worker on agents-md-run-every (auto → Claude: Claude weekly 60%, 26 points ahead of pace (limits ignored), not tight; Codex 13%)
+- 2026-11-12 09:21 Automatically (auto_advance): Started a worker on agents-md-run-every (AGENTS.md: run every lint, and a load test command that works on any Mac); its agent is auto, so it went to Claude: Claude weekly 60%, 26 points ahead of pace (limits ignored), not tight; Codex 13%.

@@ -356,3 +356,7 @@ Codex workers can't run scripts/sandbox-app.sh: the manifest compile writes ~/.c
 
 the-sandbox-app-builds showed that Codex's sandbox denies com.apple.hiservices-xpcservice, so the sandbox app can't start there even once it builds. The task was abandoned rather than merging Codex-only build paths that don't yield screenshots.
 
+## 2026-11-12 09:21:45 The periodic prompt audit is a reminder card for the user, not something leads run on their own (task remind-the-user-to). Each project's lead chat gets a card when 14 days have passed since that project's last `/doctor prompt-audit` or when its sessions' model has changed. The card offers Run now (on the user's click only), Remind me in a week, and Not for this project, with an on/off toggle and the interval in Settings › Project lead. The audit's 2026-11-12 findings for AGENTS.md (the stale lint list, and --load 24 being refused on 8 cores) go to task agents-md-run-every. The leftover worktree .claude/worktrees/fix-worker-tools, which holds an older AGENTS.md, stays until the user decides, because it may hold unmerged work.
+
+The user asked for the reminder (via wallet-manager's lead) and left the design to the lead ("do what you consider"). /doctor is a user command, and its proposed diff needs the user's eye, so the user starts each run. A model change is the second trigger because what counts as outdated depends on the model.
+
