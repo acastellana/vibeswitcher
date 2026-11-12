@@ -46,7 +46,7 @@ public enum MergeFailure {
     /// ("WEB TEST FAILED: x.mjs (exit 1)", "web tests: 2 of 3 passed; failed: x.mjs", pytest's "FAILED a.py::b"). Told
     /// here only: `TestFailures` decides what a merge reruns, and that doesn't change. A count of none is no failure.
     private static func failureLine(in text: String) -> String? {
-        text.components(separatedBy: "\n").lazy.map { $0.trimmingCharacters(in: .whitespaces) }.first { line in
+        Platform.lines(text).lazy.map { $0.trimmingCharacters(in: .whitespaces) }.first { line in
             line.range(of: #"(^|\s)FAILED(:|\s|$)|; failed:\s*\S"#, options: .regularExpression) != nil
                 && line.range(of: #"\b0 (failed|FAILED)\b"#, options: .regularExpression) == nil
         }
@@ -96,7 +96,7 @@ public enum MergeFailure {
     private static func end(ofMasked text: String) -> String? {
         var kept: [String] = []
         var total = 0
-        let lines = text.components(separatedBy: "\n").reversed().lazy
+        let lines = Platform.lines(text).reversed().lazy
             .drop(while: { $0.trimmingCharacters(in: .whitespaces).isEmpty }).filter { !isBuildWarning($0) }.prefix(endLines)
         for raw in lines {
             let plain = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
@@ -120,7 +120,7 @@ public enum MergeFailure {
     /// read the whole log) is kept when the rest is cut.
     public static func capped(_ message: String) -> String {
         guard message.count > detailLimit else { return message }
-        let last = message.components(separatedBy: "\n").last ?? ""
+        let last = Platform.lines(message).last ?? ""
         return String(message.prefix(max(0, detailLimit - last.count - 3))) + "\n…\n" + last
     }
 

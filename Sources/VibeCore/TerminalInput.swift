@@ -6,7 +6,7 @@ public enum TerminalInput {
     /// `cursor` (row in `screen`, column): when it's on the box's first line, only what's before it counts. Claude
     /// shows a dim suggestion in an empty box, with the cursor before it; typed text leaves the cursor after it.
     public static func isEmpty(_ screen: String, cursor: (row: Int, column: Int)? = nil) -> Bool {
-        let lines = screen.replacingOccurrences(of: "\u{0}", with: " ").components(separatedBy: "\n")
+        let lines = Platform.lines(screen.replacingOccurrences(of: "\u{0}", with: " "))
         let rules = lines.indices.filter { isRule(lines[$0]) }
         guard rules.count >= 2 else { return false }
         let (top, bottom) = (rules[rules.count - 2], rules[rules.count - 1])

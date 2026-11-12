@@ -8,7 +8,7 @@ public enum TrustPrompt {
         let flat = screen.replacingOccurrences(of: "\u{0}", with: " ")
         guard flat.contains("Yes, I trust this folder") || flat.contains("trust this folder") else { return false }
         let wanted = canonical(folder)
-        return flat.components(separatedBy: "\n").contains { canonical($0.trimmingCharacters(in: .whitespaces)) == wanted }
+        return Platform.lines(flat).contains { canonical($0.trimmingCharacters(in: .whitespaces)) == wanted }
     }
 
     /// The same folder however it's written: `/tmp/x` and `/private/tmp/x` are one place on macOS.
@@ -24,7 +24,7 @@ public enum TrustPrompt {
 extension TrustPrompt {
     /// The menu's cursor (❯) is on "Yes, I trust this folder".
     public static func cursorOnYes(_ screen: String) -> Bool {
-        screen.components(separatedBy: "\n").contains { line in
+        Platform.lines(screen).contains { line in
             let trimmed = line.replacingOccurrences(of: "\u{0}", with: " ").trimmingCharacters(in: .whitespaces)
             return (trimmed.hasPrefix("❯") || trimmed.hasPrefix("›") || trimmed.hasPrefix(">")) && trimmed.contains("Yes, I trust")
         }

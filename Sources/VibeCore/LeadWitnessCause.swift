@@ -340,6 +340,6 @@ extension MergeRerun {
 
     /// The cause a stopped run's `output` carries, without its prefix; nil when it carries none.
     public static func cause(in output: String) -> String? {
-        output.components(separatedBy: "\n").last { $0.hasPrefix(causePrefix) }.map { String($0.dropFirst(causePrefix.count)) }
+        Platform.lines(output).last { $0.hasPrefix(causePrefix) }.map { String($0.dropFirst(causePrefix.count)) }
     }
 }

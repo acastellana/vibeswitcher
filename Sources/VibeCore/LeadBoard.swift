@@ -1812,7 +1812,7 @@ public final class BoardStore: @unchecked Sendable {
             ? (asked.output.hasPrefix("/") ? asked.output : (root as NSString).appendingPathComponent(asked.output))
             : (root as NSString).appendingPathComponent(".git/info/exclude")
         let current = (try? String(contentsOfFile: exclude, encoding: .utf8)) ?? ""
-        guard !current.components(separatedBy: "\n").contains("/.vibeswitcher/") else { return }
+        guard !Platform.lines(current).contains("/.vibeswitcher/") else { return }
         try FileManager.default.createDirectory(atPath: (exclude as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         let line = (current.isEmpty || current.hasSuffix("\n") ? "" : "\n") + "/.vibeswitcher/\n"
         try (current + line).write(toFile: exclude, atomically: true, encoding: .utf8)

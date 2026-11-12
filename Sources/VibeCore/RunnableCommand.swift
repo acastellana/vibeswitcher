@@ -95,7 +95,7 @@ public enum RunnableCommand {
                                 scripts: URL = Script.folder) -> Runnable? {
         // The info string's first word: ```bash title="setup" is a bash block.
         let language = language?.lowercased().split(whereSeparator: \.isWhitespace).first.map(String.init)
-        let raw = code.components(separatedBy: "\n")
+        let raw = Platform.lines(code)
         if let visibleLines, raw.dropFirst(visibleLines).contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) {
             return nil
         }

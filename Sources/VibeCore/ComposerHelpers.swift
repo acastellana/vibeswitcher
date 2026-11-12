@@ -104,7 +104,7 @@ public enum SlashCatalog {
     }
 
     static func frontmatter(_ text: String) -> [String: String] {
-        let lines = text.components(separatedBy: "\n")
+        let lines = Platform.lines(text)
         guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return [:] }
         var values: [String: String] = [:]
         for line in lines.dropFirst() {
@@ -119,7 +119,7 @@ public enum SlashCatalog {
     }
 
     static func firstLine(_ text: String) -> String {
-        let line = text.components(separatedBy: "\n").first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
+        let line = Platform.lines(text).first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
         return line.trimmingCharacters(in: CharacterSet(charactersIn: "# ").union(.whitespaces))
     }
 }

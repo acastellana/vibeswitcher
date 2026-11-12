@@ -41,7 +41,7 @@ public enum MergeRerun {
     /// The rerun after `workflow`'s merge checks failed with `output`; nil when there's none.
     public static func plan(after output: String, workflow: LeadWorkflow) -> Plan? {
         guard let test = workflow.testCommand,
-              !output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker) else { return nil }
+              !Platform.lines(output).contains(LeadWorkflow.regressionMarker) else { return nil }
         let failures = TestFailures(output: output)
         var tests = failures.tests
         for name in failures.running where !tests.contains(name) { tests.append(name) }
@@ -88,7 +88,7 @@ public enum MergeRerun {
     /// passing; empty when it counts.
     public static func unshown(_ plan: Plan, rerun output: String) -> [String] {
         guard plan.filtered else { return [] }
-        let lines = output.components(separatedBy: "\n").map {
+        let lines = Platform.lines(output).map {
             $0.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
         }
         return plan.tests.filter { test in
@@ -189,7 +189,7 @@ public enum MergeRerun {
     public static func evidence(in output: String, tests: [String]) -> [String: [String]] {
         var found: [String: [String]] = [:]
         var issue: (test: String, count: Int)?
-        for raw in output.components(separatedBy: "\n") {
+        for raw in Platform.lines(output) {
             let plain = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
             let line = plain.trimmingCharacters(in: .whitespaces)
             if let (test, count) = issue {
@@ -223,7 +223,7 @@ public enum MergeRerun {
     /// `lines` with secrets masked, each cut at `evidenceWidth`, at most `evidenceLimit` of them. Masked together, so a
     /// secret an expectation spreads over lines is seen whole. Lines it gave back come back the same.
     static func capped(_ lines: [String]) -> [String] {
-        let masked = Redaction.secrets(in: lines.joined(separator: "\n")).components(separatedBy: "\n")
+        let masked = Platform.lines(Redaction.secrets(in: lines.joined(separator: "\n")))
             .map { $0.count > evidenceWidth ? String($0.prefix(evidenceWidth - 1)) + "…" : $0 }
         return masked.count > evidenceLimit
             ? masked.prefix(evidenceLimit - 1) + ["… and \(masked.count - evidenceLimit + 1) more lines."] : masked
@@ -316,7 +316,7 @@ public enum MergeRerun {
     /// once is still open: two suites may have a test of one name), and whether it's Swift Testing's.
     private static func openTests(in output: String) -> [(name: String, swiftTesting: Bool)] {
         var started: [(name: String, swiftTesting: Bool)] = [], ended: [String] = []
-        var lines = output.components(separatedBy: "\n")
+        var lines = Platform.lines(output)
         // A stall's report comes last and repeats the run's last lines: they aren't the run's a second time, and each
         // open test counted twice would make one hung test look like two that can't be told apart.
         if let report = lines.lastIndex(where: { $0.hasPrefix(StallWatch.Stall.reportStart) }) { lines.removeSubrange(report...) }
@@ -380,7 +380,7 @@ public enum MergeRerun {
         if !shown.named.isEmpty { return .testing(unfinished: shown.named) }
         if shown.unknown > 0 { return .testingUnknown(open: shown.unknown) }
         var lastBuild: String?, testedAfter = false
-        for raw in output.components(separatedBy: "\n") {
+        for raw in Platform.lines(output) {
             let line = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
             let range = NSRange(line.startIndex..., in: line)
             if buildLine.firstMatch(in: line, range: range) != nil {
@@ -435,7 +435,7 @@ public enum MergeRerun {
     /// that, the last test it started, and its processes when it was stopped.
     public static func hungLog(task: String, commit: String, command: String, after: TimeInterval, output: String,
                                stall: StallWatch.Stall? = nil) -> String {
-        let masked = Redaction.secrets(in: output).components(separatedBy: "\n")
+        let masked = Platform.lines(Redaction.secrets(in: output))
             .map { $0.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
                 .replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression) }
         let tail = masked.reversed().drop { $0.isEmpty }.prefix(hungTail).reversed()
@@ -482,7 +482,7 @@ public enum MergeRerun {
               let data = try? handle.read(upToCount: evidenceRead) else { return nil }
         // A test's lines: under its name, after a blank line, each indented four spaces.
         var lines: [String] = [], found = false, previous: String?
-        for line in String(decoding: data, as: UTF8.self).components(separatedBy: "\n") {
+        for line in Platform.lines(String(decoding: data, as: UTF8.self)) {
             if found {
                 guard line.hasPrefix("    ") else { break }
                 lines.append(String(line.dropFirst(4)))

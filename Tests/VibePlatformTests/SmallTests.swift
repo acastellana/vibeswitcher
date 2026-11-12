@@ -147,4 +147,21 @@ struct SmallTests {
         let queued = await withCheckedContinuation { done in DispatchQueue.global().async { done.resume(returning: Platform.isMainThread) } }
         #expect(!queued)
     }
+
+    /// Lines as the Mac's Foundation cuts text at "\n", on both systems: a CRLF line keeps its CR, a lone CR ends no
+    /// line, a BOM stays, an empty line and a last empty piece are kept, and a substring is cut the same.
+    @Test func linesAreCutAtEachLineFeedAsTheMacCutsThem() {
+        #expect(Platform.lines("\u{FEFF}---\r\nkey: 1\r\n\r\nnotes\rmore\n\nend\n")
+                == ["\u{FEFF}---\r", "key: 1\r", "\r", "notes\rmore", "", "end", ""])
+        #expect(Platform.lines("a\r\nb") == ["a\r", "b"])
+        #expect(Platform.lines("") == [""])
+        #expect(Platform.lines("one") == ["one"])
+        let text = "x\r\ny\r\nz"
+        #expect(Platform.lines(text[text.index(after: text.startIndex)...]) == ["\r", "y\r", "z"])
+        // At every LF, whatever follows it: a combining mark after one is no reason to keep the line whole. On the Mac
+        // this is Foundation's literal search (swift-foundation, macOS 14 on) as a review read it, not seen run there:
+        // the Mac runner is what confirms it.
+        #expect(Platform.lines("a\n\u{301}b") == ["a", "\u{301}b"])
+        #expect(Platform.lines("a\n\u{200D}b\n😀") == ["a", "\u{200D}b", "😀"])
+    }
 }

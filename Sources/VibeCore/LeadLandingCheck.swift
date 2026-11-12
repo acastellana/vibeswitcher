@@ -87,7 +87,7 @@ extension Worktrees {
             }
             let read = landing.git(["cat-file", "blob", fields[2]], in: root)
             guard read.ok else { throw Refused(failed("\(file) at \(commit.prefix(8))", read)) }
-            return Set(read.output.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+            return Set(Platform.lines(read.output).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
         }
         do {
             for (kind, archive) in guarded {

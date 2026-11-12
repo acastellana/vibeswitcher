@@ -31,8 +31,7 @@ public enum MDAlign: Equatable, Sendable { case leading, center, trailing }
 /// rules). Anything else is a paragraph.
 public enum MarkdownBlocks {
     public static func parse(_ text: String) -> [MDBlock] {
-        let lines = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
-            .components(separatedBy: "\n")
+        let lines = Platform.lines(text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n"))
         var blocks: [MDBlock] = []
         var paragraph: [String] = []
         func flush() {

@@ -370,7 +370,7 @@ extension LeadToolset {
                 return
             }
             let reason = MergeFailure.reason(in: scrubbed(output))
-            let what = output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker) ? "regression_command fails" : "Tests fail"
+            let what = Platform.lines(output).contains(LeadWorkflow.regressionMarker) ? "regression_command fails" : "Tests fail"
             // Told to this task's worker and copied to this task's worktree: each task that broke the stack has its own.
             let told = testFailure(output, slug: slug, base: base, commit: gate.commit, onto: onto, worktree: place)
             do {

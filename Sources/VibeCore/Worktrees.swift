@@ -1018,7 +1018,7 @@ public enum Worktrees {
         let read = Git.run(["log", "-1", "--format=%B", head], in: path)
         guard read.ok else { return .error("Reading \(head.prefix(8))'s message to add the merge's provenance failed: \(said(read))") }
         let keys = Set(trailers.map { $0.key.lowercased() })
-        let kept = read.output.components(separatedBy: "\n").filter { line in
+        let kept = Platform.lines(read.output).filter { line in
             guard let colon = line.firstIndex(of: ":") else { return true }
             return !keys.contains(line[..<colon].trimmingCharacters(in: .whitespaces).lowercased())
         }
@@ -1963,7 +1963,7 @@ public enum Worktrees {
     /// Where `branch` is checked out, if anywhere.
     static func checkout(of branch: String, root: String) -> String? {
         var current: String?
-        for line in Git.run(["worktree", "list", "--porcelain"], in: root).output.components(separatedBy: "\n") {
+        for line in Platform.lines(Git.run(["worktree", "list", "--porcelain"], in: root).output) {
             if line.hasPrefix("worktree ") { current = String(line.dropFirst("worktree ".count)) }
             if line == "branch refs/heads/\(branch)" { return current }
         }
@@ -2227,7 +2227,7 @@ public struct TestFailures: Equatable, Sendable {
     public init(output: String) {
         // Lines since the last issue line, while they may still be part of it.
         var started: [String] = [], ended: [String] = [], inIssue: Int?
-        for raw in output.components(separatedBy: "\n") {
+        for raw in Platform.lines(output) {
             let plain = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
             let line = plain.trimmingCharacters(in: .whitespaces)
             if let count = inIssue {

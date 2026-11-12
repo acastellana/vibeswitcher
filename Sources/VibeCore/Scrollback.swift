@@ -27,9 +27,9 @@ public enum Scrollback {
     /// `history` minus the visible `screen` at its end (Terminal's history includes the screen).
     /// Trailing spaces and blank lines are ignored when matching; with no overlap nothing is removed.
     public static func lines(history: String, screen: String) -> [String] {
-        var all = history.components(separatedBy: "\n").map { trimmedEnd($0) }
+        var all = Platform.lines(history).map { trimmedEnd($0) }
         while let last = all.last, last.isEmpty { all.removeLast() }
-        var tail = screen.components(separatedBy: "\n").map { trimmedEnd($0) }
+        var tail = Platform.lines(screen).map { trimmedEnd($0) }
         while let last = tail.last, last.isEmpty { tail.removeLast() }
         if !tail.isEmpty, all.count >= tail.count, Array(all.suffix(tail.count)) == tail {
             all.removeLast(tail.count)

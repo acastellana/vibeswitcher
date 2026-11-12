@@ -18,8 +18,8 @@ public enum LineDiff {
     static let maxCells = 2_000_000
 
     public static func lines(old: String, new: String) -> [DiffLine] {
-        let a = old.isEmpty ? [] : old.components(separatedBy: "\n")
-        let b = new.isEmpty ? [] : new.components(separatedBy: "\n")
+        let a = old.isEmpty ? [] : Platform.lines(old)
+        let b = new.isEmpty ? [] : Platform.lines(new)
         var prefix = 0
         while prefix < a.count, prefix < b.count, a[prefix] == b[prefix] { prefix += 1 }
         var suffix = 0

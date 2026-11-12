@@ -266,7 +266,7 @@ public final class LeadAdvance: @unchecked Sendable {
     /// Only successful housekeeping is FYI. Unknown outcomes and refusals still need judgement.
     static func wakes(_ text: String) -> Bool {
         if text.localizedCaseInsensitiveContains("decide") { return true }
-        let outcomes = text.components(separatedBy: "\n").filter { $0.hasPrefix("- ") }.map { String($0.dropFirst(2)) }
+        let outcomes = Platform.lines(text).filter { $0.hasPrefix("- ") }.map { String($0.dropFirst(2)) }
         guard !outcomes.isEmpty else { return true }
         return outcomes.contains { line in
             return !["Started a worker on ", "Started the audit of ", "Released ", "Cleaned up ", "Resumed after sleep: "].contains { line.hasPrefix($0) }

@@ -432,7 +432,7 @@ public enum LeadWitness {
 
     /// The permission prompt on `screen`: "Do you want to …?" over a single choice that starts with Yes.
     static func permissionMenu(_ screen: String) -> ScreenMenu? {
-        guard let menu = ScreenMenu.parse(screen.components(separatedBy: "\n")), !menu.picker, !menu.commands, menu.tabs.isEmpty,
+        guard let menu = ScreenMenu.parse(Platform.lines(screen)), !menu.picker, !menu.commands, menu.tabs.isEmpty,
               !menu.multiSelect, menu.question.contains("Do you want to"), menu.options.first?.hasPrefix("Yes") == true else { return nil }
         return menu
     }

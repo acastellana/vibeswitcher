@@ -189,7 +189,7 @@ public enum AppHealth {
     public static func hang(name: String, log: String?, sample: String?) -> Hang {
         var hang = Hang(name: name)
         if let log {
-            let lines = log.components(separatedBy: "\n")
+            let lines = Platform.lines(log)
             if let header = lines.first, header.hasPrefix("vibeswitcher-hang:") {
                 let fields = values(header)
                 hang.since = fields["since"].flatMap(Double.init).map { Date(timeIntervalSince1970: $0) }
@@ -582,7 +582,7 @@ public enum AppHealth {
 
     /// An older text crash report: its "Exception Type:" and the crashed thread's frames.
     static func legacyCrash(file: String, program: String, text: String) -> Crash? {
-        let lines = text.components(separatedBy: "\n")
+        let lines = Platform.lines(text)
         guard let type = lines.first(where: { $0.hasPrefix("Exception Type:") }) else { return nil }
         var frames: [String] = []
         if let crashed = lines.firstIndex(where: { $0.hasPrefix("Thread ") && $0.contains("Crashed") }) {

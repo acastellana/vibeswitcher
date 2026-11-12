@@ -142,7 +142,7 @@ public struct TeamMessage: Equatable, Sendable {
             guard !line.contains("\n"), let sender = sender(line) else { return nil }
             var lines: [String] = []
             var part: Part?
-            for (index, line) in piece[split.upperBound...].components(separatedBy: "\n").enumerated() {
+            for (index, line) in Platform.lines(piece[split.upperBound...]).enumerated() {
                 if index == 0, SteerReply.isPartLine(line) { part = Self.part(line) }
                 else if line == ">" { lines.append("") }
                 else if line.hasPrefix("> ") { lines.append(String(line.dropFirst(2))) }

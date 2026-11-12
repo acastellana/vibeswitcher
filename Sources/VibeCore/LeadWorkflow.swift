@@ -118,7 +118,7 @@ public struct LeadWorkflow: Equatable, Sendable {
 
     public static func parse(_ text: String) -> LeadWorkflow {
         var workflow = LeadWorkflow()
-        let lines = normalized(text).components(separatedBy: "\n")
+        let lines = Platform.lines(normalized(text))
         var body = lines[...]
         if let end = frontMatterEnd(lines) {
             for line in lines[1..<end] {
@@ -467,7 +467,7 @@ public struct LeadWorkflow: Equatable, Sendable {
 
     public static func updating(_ text: String, with changes: [(key: String, value: String)]) -> String {
         let ending = text.contains("\r\n") ? "\r\n" : "\n"
-        var lines = text.components(separatedBy: "\n")
+        var lines = Platform.lines(text)
         // A value the parser would unquote keeps its quotes.
         let written = { (value: String) -> String in
             let value = value.trimmingCharacters(in: .whitespaces)
@@ -505,7 +505,7 @@ public struct LeadWorkflow: Equatable, Sendable {
         }
         for name in ["GNUmakefile", "makefile", "Makefile"] {
             guard let text = try? String(contentsOfFile: at(name), encoding: .utf8) else { continue }
-            if normalized(text).components(separatedBy: "\n").contains(where: isTestTarget) { return "make test" }
+            if Platform.lines(normalized(text)).contains(where: isTestTarget) { return "make test" }
         }
         if files.fileExists(atPath: at("Cargo.toml")) { return "cargo test" }
         if files.fileExists(atPath: at("go.mod")) { return "go test ./..." }

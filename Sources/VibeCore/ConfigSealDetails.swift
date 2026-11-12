@@ -455,11 +455,11 @@ extension ConfigSeal {
 
     /// The difference between two texts, masked and inert.
     static func lines(before raw: String, after rawAfter: String) -> Difference {
-        let before = maskedText(raw).components(separatedBy: "\n"), after = maskedText(rawAfter).components(separatedBy: "\n")
+        let before = Platform.lines(maskedText(raw)), after = Platform.lines(maskedText(rawAfter))
         guard let steps = script(from: before, to: after) else {
             return .unavailable("It's too long to compare (over \(comparedLines) changed lines).")
         }
-        let rawScript = script(from: raw.components(separatedBy: "\n"), to: rawAfter.components(separatedBy: "\n"))
+        let rawScript = script(from: Platform.lines(raw), to: Platform.lines(rawAfter))
         let shownChanges = steps.filter { $0.0 != .same }.count
         let maskedChange = (rawScript?.filter { $0.0 != .same }.count ?? shownChanges) > shownChanges
         guard shownChanges > 0 else {

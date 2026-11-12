@@ -29,7 +29,7 @@ public enum PhoneMenu {
 
     /// `detect`, with the dialog's lines above the options.
     public static func read(screen: String, needsInput: Bool) -> Shown? {
-        var lines = Redaction.secrets(in: screen).components(separatedBy: "\n")
+        var lines = Platform.lines(Redaction.secrets(in: screen))
         while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty { lines.removeLast() }
         let bottom = Array(lines.suffix(bottomLines))
         let asking = needsInput

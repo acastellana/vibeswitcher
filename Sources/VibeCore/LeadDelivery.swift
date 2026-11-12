@@ -91,7 +91,7 @@ extension LeadDelivery {
     /// first character inverted when it paints its caret there (typing replaces them). Without `runs` only the
     /// placeholder can be told, by its wording.
     public static func box(in screen: String, runs: [ScreenRun]? = nil) -> Box {
-        let lines = screen.replacingOccurrences(of: "\u{0}", with: " ").components(separatedBy: "\n")
+        let lines = Platform.lines(screen.replacingOccurrences(of: "\u{0}", with: " "))
         let rules = lines.indices.filter { lines[$0].filter { $0 == "─" }.count >= 20 }
         let shown = { lines.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.suffix(6).joined(separator: " / ") }
         guard rules.count >= 2 else { return codexBox(lines, runs: runs) ?? .dialog(shown()) }
@@ -150,7 +150,7 @@ extension LeadDelivery {
     /// final), its rows joined by spaces; nil when there's no box or the host doesn't say what's dim.
     public static func dimText(in screen: Screen) -> String? {
         guard let runs = screen.runs else { return nil }
-        let lines = screen.text.replacingOccurrences(of: "\u{0}", with: " ").components(separatedBy: "\n")
+        let lines = Platform.lines(screen.text.replacingOccurrences(of: "\u{0}", with: " "))
         let rules = lines.indices.filter { lines[$0].filter { $0 == "─" }.count >= 20 }
         guard rules.count >= 2 else { return nil }
         let (top, bottom) = (rules[rules.count - 2], rules[rules.count - 1])

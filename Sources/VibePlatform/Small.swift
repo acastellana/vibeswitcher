@@ -46,4 +46,18 @@ extension Platform {
         return InlineMarkdown.plain(markdown)
         #endif
     }
+
+    /// `text` cut at each line feed, as the Mac's `text.components(separatedBy: "\n")` cuts it: a CRLF line keeps its
+    /// CR, a lone CR ends no line, a BOM stays on the first line, and an LF is a line's end whatever follows it. Linux's
+    /// Foundation answers that call in Swift's characters, where a CRLF is one character and no LF: a CRLF file read
+    /// as one line. So Linux cuts at each LF scalar itself, as the Mac's Foundation does (a literal search from macOS
+    /// 14 on, as a review read swift-foundation: `SmallTests.linesAreCutAtEachLineFeedAsTheMacCutsThem` is what the Mac
+    /// runner checks it against).
+    public static func lines<Text: StringProtocol>(_ text: Text) -> [String] {
+        #if canImport(Darwin)
+        return text.components(separatedBy: "\n")
+        #else
+        return String(text).unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false).map { String(String.UnicodeScalarView($0)) }
+        #endif
+    }
 }

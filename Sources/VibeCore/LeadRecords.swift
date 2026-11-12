@@ -328,7 +328,7 @@ public final class LeadRecords: @unchecked Sendable {
     static func entries(_ text: String, kind: Kind) -> (preamble: String, entries: [String]) {
         var preamble: [String] = []
         var found: [[String]] = []
-        for line in text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n") {
+        for line in Platform.lines(text.replacingOccurrences(of: "\r\n", with: "\n")) {
             if line.hasPrefix(kind.marker) { found.append([line]) }
             else if found.isEmpty { preamble.append(line) }
             else { found[found.count - 1].append(line) }
@@ -373,7 +373,7 @@ public final class LeadRecords: @unchecked Sendable {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
         guard let head = try? handle.read(upToCount: 64 * 1024) else { return nil }
-        return String(decoding: head, as: UTF8.self).components(separatedBy: "\n").lazy.compactMap { entryMonth($0) }.first
+        return Platform.lines(String(decoding: head, as: UTF8.self)).lazy.compactMap { entryMonth($0) }.first
     }
 
     /// A progress entry's month ("2026-10"); nil when `line` isn't a dated entry's first line.
@@ -385,7 +385,7 @@ public final class LeadRecords: @unchecked Sendable {
     /// A progress log's text before its first dated entry, and its dated entries (each from a dated line to the next),
     /// exactly as they are.
     static func stampedEntries(_ text: String) -> (preamble: String, entries: [String]) {
-        let lines = text.components(separatedBy: "\n")
+        let lines = Platform.lines(text)
         var preamble = ""
         var found: [String] = []
         for (index, line) in lines.enumerated() {
@@ -496,7 +496,7 @@ public final class LeadRecords: @unchecked Sendable {
     /// A decisions log's text before its first entry, and its entries (each from its `## <stamp>` heading to the next
     /// one), exactly as they are: joined, they give back the text byte for byte.
     static func rawEntries(_ text: String) -> (preamble: String, entries: [String]) {
-        let lines = text.components(separatedBy: "\n")
+        let lines = Platform.lines(text)
         var preamble = ""
         var found: [String] = []
         for (index, line) in lines.enumerated() {
@@ -515,7 +515,7 @@ public final class LeadRecords: @unchecked Sendable {
 
     /// `preamble` with `pointer` in place of its pointer line, or under its title when it has none yet.
     static func pointed(_ preamble: String, _ pointer: String) -> String {
-        var lines = preamble.components(separatedBy: "\n")
+        var lines = Platform.lines(preamble)
         if let at = lines.firstIndex(where: { $0.hasPrefix(pointerPrefix) }) {
             lines[at] = pointer
         } else if let title = lines.firstIndex(where: { $0.hasPrefix("# ") }) {

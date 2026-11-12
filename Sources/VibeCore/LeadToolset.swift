@@ -3534,7 +3534,7 @@ public final class LeadToolset: MCPToolset {
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Conflicts with \(base): the branch needs bringing up to date."))
             throw Problem(text: "\(slug) conflicts with \(base). " + Self.bringUpToDate(base))
         case .failed(let output):
-            let what = output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker) ? "regression_command fails" : "Tests fail"
+            let what = Platform.lines(output).contains(LeadWorkflow.regressionMarker) ? "regression_command fails" : "Tests fail"
             if let changed = changedMeanwhile(slug, since: task, tests: "failed") { throw changed }
             let told = testFailure(output, slug: slug, base: base, commit: commit, onto: current)
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "\(what) rebased onto \(base): \(MergeFailure.reason(in: scrubbed(output)))", detail: MergeFailure.capped(told)))
@@ -4111,7 +4111,7 @@ public final class LeadToolset: MCPToolset {
         let files = failures.errorFiles.map { file in inside.first(where: file.hasPrefix).map { String(file.dropFirst($0.count)) } ?? file }
         let touched = baseCommits(touching: files, slug: slug, base: base, commit: commit, onto: current).map { $0 + "\n" } ?? ""
         // The test command passed and the incidents' checks ran after it.
-        let regression = !setup && output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker)
+        let regression = !setup && Platform.lines(output).contains(LeadWorkflow.regressionMarker)
         let which = setup ? "init_command" : regression ? "regression_command (the checks incidents became; test_command passed)" : "test command"
         // A rerun (`MergeRerun`) failed too: its output is what's told.
         let again = output.hasPrefix(Worktrees.rerunHeader) ? ", and again on its rerun (run once, after the first run failed)" : ""

@@ -497,7 +497,7 @@ public enum SteerReply {
             else if sender.hasPrefix(leadMarker) || sender.hasPrefix(peerLeadMarker) || sender.hasPrefix(systemMarker) { fromLead = true }
             else { return nil }
             var lines: [String] = []
-            for (index, line) in part[split.upperBound...].components(separatedBy: "\n").enumerated() {
+            for (index, line) in Platform.lines(part[split.upperBound...]).enumerated() {
                 if index == 0, isPartLine(line) { lines.append(line) }
                 else if line == ">" { lines.append("") }
                 else if line.hasPrefix("> ") { lines.append(String(line.dropFirst(2))) }
@@ -519,8 +519,8 @@ public enum SteerReply {
 
     /// Every line of `text` quoted: no blank line, so no separator, can appear inside.
     static func quote(_ text: String) -> String {
-        text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
-            .components(separatedBy: "\n").map { $0.isEmpty ? ">" : "> " + $0 }.joined(separator: "\n")
+        Platform.lines(text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n"))
+            .map { $0.isEmpty ? ">" : "> " + $0 }.joined(separator: "\n")
     }
 
     /// A name inside a sender line stays on that line.

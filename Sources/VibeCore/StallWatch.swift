@@ -135,7 +135,7 @@ public struct StallWatch: Sendable {
     /// The last test `output` shows executing (`Stall.lastTest`), how many it can't tell apart (`Stall.unknownTests`),
     /// and its last `count` non-empty lines.
     static func stuck(in output: String, count: Int = MergeRerun.hungTail) -> (test: String?, unknown: Int, tail: [String]) {
-        let lines = output.components(separatedBy: "\n")
+        let lines = Platform.lines(output)
             .map { $0.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
                 .replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression) }
         let tail = Array(lines.reversed().drop { $0.isEmpty }.prefix(count).reversed())
