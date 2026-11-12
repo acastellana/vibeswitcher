@@ -276,7 +276,7 @@ public enum LeadWitness {
                     add("\(worker)|api-error-\(Int(info.apiErrorAt ?? 0))", "The worker on \(task.slug) stopped mid-task: its turn ended on an API error (\(error)). Tell it to go on with message(\(task.slug), …); it picks up where it was.")
                 } else if info.live, !info.agentQuit, let event = waiting(info, session: worker, now: now,
                                                          input: waitingText("The worker on \(task.slug)", info, now: now, advice: "Answer it with message, or ask the user if it's theirs to decide."),
-                                                         stopped: task.status == .running ? "The worker on \(task.slug) stopped without calling report\(info.diedJob.map { ": the background job it waited on (\($0.text)) has no process any more" } ?? ""). read_session to see where it is, then message it." : nil) {
+                                                         stopped: task.status == .running ? "The worker on \(task.slug) stopped without calling report\(info.diedJob.map { ": \($0.goneText)" } ?? ""). read_session to see where it is, then message it." : nil) {
                     events.append(event)
                 }
                 if info.live {
