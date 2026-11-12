@@ -479,6 +479,8 @@ struct LeadGuardRailsTests: LeadTeamFixture {
     /// /Applications). Shown on a scratch process shaped like a role's session, with pgrep (which only lists), among
     /// this test process's children only: the machine's other processes are no business of this test.
     @Test func aStrayPkillIsRefusedToEveryRole() async throws {
+        // BSD pgrep and pkill's: procps' (Linux) read an option after the pattern as that option (`-n`, the newest).
+        #if canImport(Darwin)
         let token = "vsguard-\(UUID().uuidString.prefix(8))"
         let scratch = Process()
         scratch.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -502,6 +504,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(await exited(pgrep), "pid \(pgrep.processIdentifier) still running")
         let matched = String(decoding: listed, as: UTF8.self).split(separator: "\n")
         #expect(matched.contains("\(scratch.processIdentifier)"), "-n read as a pattern matches a role's --name")
+        #endif
 
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
             let rules = LeadLaunch.deny(role, base: "main")

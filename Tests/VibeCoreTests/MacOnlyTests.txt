@@ -4,6 +4,7 @@ DevPreviewTests.swift  PreviewProxyTests and its helpers (FakeUpstream, exchange
 InstallRelaunchTests.swift  scripts/build-app.sh's install step replaces and relaunches the Mac app's bundle (pgrep -x, osascript, codesign); on Linux its script never ends, and the status read of it after the hang guard ends the whole run (Foundation traps)
 KeptImagesTests.swift  aLargeImageIsDownscaled: a smaller copy of an image is ImageIO's (Platform.Images.pngThumbnail is nil on Linux)
 KeychainLiveTests.swift  the login Keychain (Security.framework)
+LeadGuardRailsTests.swift  aStrayPkillIsRefusedToEveryRole's pgrep of a scratch process: BSD pgrep and pkill read an option after the pattern as a second pattern, the hazard it shows; procps' (Linux) read it as that option (-n, the newest). The deny rules and the brief are checked on Linux too
 PreferenceLedger.swift  wraps NSUserDefaults' suite initializer through the Objective-C runtime, for the files cfprefsd writes: Linux has neither
 PreferencesCheckTests.swift  aSuiteOpenedInThisProcessIsInTheRunsLedger: the ledger's hook is the Mac's (PreferenceLedger.swift)
 ProcessTableTests.swift  aTerminalIsNamedByItsNumber and its openPty: TerminalNames and devname() are the Mac's

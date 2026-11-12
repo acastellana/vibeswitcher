@@ -266,16 +266,23 @@ struct LeadLaunchOutsideReadsTests {
         _ = try run("git init -q -b main && mkdir sub && echo a > a && echo b > sub/b && git add a sub/b && git commit -qm a"
                     + " && echo c >> a && git commit -qam c", in: repo)
         let seal = privateDir + "/seal"
+        #if os(Linux)
+        // Linux has no /var/empty: an empty folder of the test's own, outside the worktree as that one is.
+        let empty = scratch + "/empty"
+        try FileManager.default.createDirectory(atPath: empty, withIntermediateDirectories: true)
+        #else
+        let empty = "/var/empty"
+        #endif
         // Each prints the secret when run (checked below), so each is a real way to read it.
         let leaks = [
             // The first report: --no-index, and a path outside the work tree (git then compares without it).
-            "git diff --no-index /var/empty \(privateDir)", "git diff /dev/null \(seal)", "git diff ../private/seal a",
+            "git diff --no-index \(empty) \(privateDir)", "git diff /dev/null \(seal)", "git diff ../private/seal a",
             "git diff sub/../../private/seal a", "git diff \"\(seal)\" a",
             // F1: global options before the command.
             "git -P diff /dev/null \(seal)", "git --no-pager diff --no-index /dev/null \(seal)",
             "git --literal-pathspecs diff /dev/null ../private/seal",
             // F2: a bare `..`.
-            "git diff /var/empty ..", "git diff .. /var/empty",
+            "git diff \(empty) ..", "git diff .. \(empty)",
             // F3: --stdin on diff and show (and log).
             "git diff --stdin < \(seal)", "git show --stdin < \(seal)", "git log --stdin < \(seal)",
             // F4: abbreviations and bundled short options of the flags that read a file.
@@ -306,7 +313,7 @@ struct LeadLaunchOutsideReadsTests {
                 #expect(!role.runsUnasked(command, cwd: repo), "\(role.role): \(command)")
             }
             // The deny rules still come first: --no-index is refused there before the hook is asked.
-            #expect(LeadGuardRailsTests.denied("git diff --no-index /var/empty \(privateDir)", by: role.deny))
+            #expect(LeadGuardRailsTests.denied("git diff --no-index \(empty) \(privateDir)", by: role.deny))
         }
 
         // What each role reads every day runs without a prompt: relative paths, paths absolute inside the worktree (F9),
@@ -353,12 +360,19 @@ struct LeadLaunchOutsideReadsTests {
         try Data((secret + "\n").utf8).write(to: URL(fileURLWithPath: privateDir + "/seal"))
         _ = try run("git init -q -b main && mkdir sub && echo a > a && ln -s ../private/seal inner && ln -s inner chain"
                     + " && ln -s \(privateDir) linkdir && ln -s ../a sub/up && git add -A && git commit -qm links", in: repo)
+        #if os(Linux)
+        // GNU grep goes into the links it meets as it recurses with -R; BSD grep's -S is no option of it.
+        let followingGrep = "grep -R SECRET ."
+        #else
+        let followingGrep = "grep -rS SECRET ."
+        #endif
         let leaks = ["head inner", "tail -n 3 chain", "grep -h SECRET linkdir/seal", "head \(repo)/linkdir/seal", "wc -c inner && head inner",
-                     "grep -rS SECRET .", "rg -L SECRET .", "rg --follow SECRET ."]
+                     followingGrep, "rg -L SECRET .", "rg --follow SECRET ."]
         for command in leaks {
             let out = try run(command, in: repo)
             // rg isn't on every Mac: where it's missing its forms can't leak here, and the refusals below still hold.
-            if command.hasPrefix("rg "), out.contains("rg: command not found") || out.contains("rg: not found") { continue }
+            // (Not on PATH: dash says "Permission denied" for it when a folder of PATH can't be searched.)
+            if command.hasPrefix("rg "), Platform.Tools.find("rg") == nil || out.contains("rg: command not found") || out.contains("rg: not found") { continue }
             #expect(out.contains(secret), "not a leak: \(command): \(out)")
         }
         let roles = try [LeadLaunch.Role.lead, .worker, .verifier].map { try Role($0, root: repo, temp: temp) }
@@ -376,7 +390,14 @@ struct LeadLaunchOutsideReadsTests {
         try FileManager.default.createDirectory(atPath: patches, withIntermediateDirectories: true)
         _ = try run("git init -q && ln -s \(privateDir)/seal made && ln -s \(privateDir)/seal made2 && git add made && git diff --cached > \(repo)/one.patch"
                     + " && git reset -q && git add made2 && git diff --cached > \(repo)/two.patch", in: patches)
-        let made = ["head -n 50 one.patch | git apply && head made", "head -n 50 two.patch | git apply | sort - made2"]
+        #if os(Linux)
+        // GNU sort checks that each of its files can be read before it reads its input (git apply's, still running):
+        // cat reads them in turn, as the Mac's sort does.
+        let readAfter = "cat - made2"
+        #else
+        let readAfter = "sort - made2"
+        #endif
+        let made = ["head -n 50 one.patch | git apply && head made", "head -n 50 two.patch | git apply | \(readAfter)"]
         let worker = try #require(roles.first { $0.role == .worker })
         #expect(!ReadOnlyCommand.allows(made[0], in: .init(root: repo, cwd: repo)))  // a read-only role has no git apply
         for command in made + ["head one.patch | git apply ; head made", "head one.patch | git apply -R || head made",
