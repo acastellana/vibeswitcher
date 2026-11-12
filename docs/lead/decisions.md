@@ -408,3 +408,7 @@ The user, 2026-11-12: "you need to be more proactive in getting things through".
 
 The batch split marked branches failed for problems on main. Only a fresh done report puts a review-none task back in the queue without redoing its work.
 
+## 2026-11-12 15:28:58 After a block clears with many tasks ready, the lead merges them itself in batches of up to 8 (merge with tasks), lowest-risk first, with the batch carrying test fixes (flaky-test fixes, test infrastructure) going first. auto_advance stays off for the few minutes that takes, so it doesn't fall back to one merge at a time.
+
+The user, 2026-11-12: "you need to be extremely proactive and try to make sure that everything gets to the finish line as quickly as possible." After the block, auto_advance went to merging the 14 ready tasks one at a time, about 15 min each, 3–4 h in all, where two batches take about 30–40 min.
+
