@@ -2786,3 +2786,10 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 19:45 Update: Installed at 19:45: blocked merges get noticed, and card commands report how they ended — **Live in your app since the 19:45 install.** The board is empty: nothing running, nothing waiting.
 - 2026-11-12 19:45 Update: Correction: the empty an-animated-explainer folder was not removed — The 19:45 update says I removed the empty `an-animated-explainer` folder. That's wrong: the permission check refused the removal, so the folder is still there and the repeated cleanup error continues.…
 - 2026-11-12 21:26 Fetched origin/main at f2ebe92b: main is 85 commits ahead of origin/main and 0 commits behind it
+- 2026-11-13 00:26 App health: VibeSwitcher's day, 2026-11-12, from its own logs (read by VibeSwitcher itself, no model): 0 freezes (55.3 a day over the 7 days before), 0 crashes, 1 error line. Memory now: footprint 158 MB, peak 374 MB since launch 5 h ago, -8 MB an hour since it settled at 190 MB. The last footprint relief freed nothing (205 → 205 MB): macOS returned no pages (freed memory is kept for reuse).
+- 2026-11-13 00:26 App health: VibeSwitcher's own logs show a cause that keeps coming back, grouped by cause and counted by VibeSwitcher itself (no model; lines masked and redacted). One proposed task each; one already on the board needs nothing:
+Proposed task 1: Find why dictations end with no text
+  Cause: the notice "Dictation gave no text: Something was typed in the terminal meanwhile, so VibeSwitcher left Claude's prompt box alone." (seen on 3 of the 7 days to 2026-11-12).
+  Counts by day, 2026-11-06 to 2026-11-12: 11-06 ×0, 11-07 ×0, 11-08 ×0, 11-09 ×1, 11-10 ×0, 11-11 ×1, 11-12 ×1.
+  Lines: first at 2026-11-09 17:16:39, last at 2026-11-12 17:50:25 in ~/.vibeswitcher/debug/app.log (app.log.1 once it rotated).
+  Line, masked: dictation: Claude's ended, session <id>, no text: …
