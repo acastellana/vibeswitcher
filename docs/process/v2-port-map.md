@@ -52,8 +52,8 @@ each becomes a line number and a commit when made. Lines are at `47636aaf`.
 
 | File and line | What | Why | Merge cost |
 | --- | --- | --- | --- |
-| `Sources/vibeswitcher-hook/main.swift` top (planned, stage 1 R5) | `signal(SIGPIPE, SIG_IGN)` moved above the first statement | the first host round trip (line 87) came before it | low: one line moved |
-| `Sources/vibeswitcher-mcp/main.swift` 38-44 and 153 (planned, stage 1 R5) | SIGPIPE settled after the mode dispatch, and in the read-only hook branch before its write | that branch writes stdout at line 41 | low |
+| `Sources/vibeswitcher-hook/main.swift` 11-14 at `09b8a6f8` (stage 1 R5) | `signal(SIGPIPE, SIG_IGN)` moved from the two stdout branches (lines 91 and 99 before) to the first statement | the first host round trip (`LeadVault.standard.record`, line 87 before) came before it; the Mac's writes before it were to files and to `SO_NOSIGPIPE` sockets, and git starts with every signal at its default | low: one line moved |
+| `Sources/vibeswitcher-mcp/main.swift` 41-43 and 134-140 at `09b8a6f8` (stage 1 R5) | the caught SIGPIPE handler and its source moved from after the log's start to just after the mode dispatches; the read-only hook branch ignores SIGPIPE before its answer, written with `try? write(contentsOf:)` | that branch wrote stdout at line 41, and the handover's stderr line came before the handler | low: a block moved, two lines in a branch |
 | `Sources/VibeHost/HostServer.swift` (planned, stage 2 Task 4b) | `appPrincipal` member, nil by default; two lines in `acceptAll` | the Linux app is a principal (S2-D1) | low: a member and two lines in a function main rarely changes |
 | `Sources/VibeHost/HostServer.swift` 944-960 (planned, Task 4b) | `HostProcesses.orphanParents`; `orphans(running:)` over each | an orphan on Linux goes to a subreaper, not pid 1 (S2-D6) | low |
 | `Sources/VibeHost/ClientConnection.swift` `readAvailable`, the decoder (planned, Task 7) | each chunk's sender passed to `onRead`; the decoder notes a frame's senders | per-message credentials (S2-D4) | medium: main may touch the read loop |
