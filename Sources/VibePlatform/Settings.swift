@@ -55,6 +55,23 @@ extension Platform {
     }
 }
 
+extension Platform {
+    /// VibeSwitcher's folder, where Linux keeps the settings files (`FileSettings`): `VIBESWITCHER_HOME`, else
+    /// `.vibeswitcher` in `CFFIXED_USER_HOME`, in `HOME`, in `fallbackHome`. A variable counts only when it is an
+    /// absolute path. VibeCore's rule (`VibePaths.root(environment:fallbackHome:)`) said again, this module being below
+    /// VibeCore; `SettingsRootTests` holds the two the same, on both systems. The Mac's store is `UserDefaults`, which
+    /// doesn't ask it.
+    static func settingsRoot(variable: (String) -> String?, fallbackHome: @autoclosure () -> String) -> URL {
+        func absolute(_ name: String) -> String? {
+            guard let path = variable(name), path.hasPrefix("/") else { return nil }
+            return path
+        }
+        if let own = absolute("VIBESWITCHER_HOME") { return URL(fileURLWithPath: own, isDirectory: true) }
+        let home = absolute("CFFIXED_USER_HOME") ?? absolute("HOME") ?? fallbackHome()
+        return URL(fileURLWithPath: home).appendingPathComponent(".vibeswitcher")
+    }
+}
+
 #if canImport(Darwin)
 extension UserDefaults: SettingsStore {}
 #endif

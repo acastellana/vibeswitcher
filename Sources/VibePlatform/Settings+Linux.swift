@@ -21,6 +21,12 @@ import Foundation
 /// - A `set` that can't be written (a full disk, a folder that can't be made) is kept in memory the same way, and
 ///   lasts until another process's write is read.
 /// - A value that is no property list (a URL, an object) is refused: nothing changes. `UserDefaults` raises there.
+/// - The list says its format: the key `format`, 1 (`FileSettings.format`), written with every `set`. It is the
+///   file's, not a setting: a read of it is nil and a `set` of it is refused. A list that says none is format 1, as
+///   every list was before the key (and one written by hand). A list in a newer format (a later build's, run here
+///   before this one) reads as empty, is said once in the log, and nothing writes to it: a `set` is kept in memory,
+///   for this store only, as for a file that can't be read. One whose `format` is no whole number of 1 or more is no
+///   list of settings (corrupt, above).
 ///
 /// Every method may be called from any thread.
 final class FileSettings: SettingsStore, @unchecked Sendable {
@@ -50,6 +56,8 @@ final class FileSettings: SettingsStore, @unchecked Sendable {
         case loaded(Stamp)
         /// This file is no list of settings.
         case corrupt(Stamp)
+        /// This file is a list in a newer format than `FileSettings.format`.
+        case newer(Stamp)
         /// There is something at the path, and it can't be read.
         case unreadable
     }
@@ -57,16 +65,29 @@ final class FileSettings: SettingsStore, @unchecked Sendable {
     /// A list larger than this isn't settings: it reads as unreadable.
     static let largest = 64 << 20
 
+    /// The format this build reads and writes, under `formatKey` in the list.
+    static let format = 1
+    static let formatKey = "format"
+
     let path: String
+    /// Where a line for the log goes: a list in a newer format, left as it is.
+    private let log: @Sendable (String) -> Void
     private let lock = NSLock()
     private var values: [String: Any] = [:]
     private var state = State.unread
     /// The file `values` was read from or written to, kept open (see the type's note); -1 when there is none.
     private var held: Int32 = -1
 
-    /// The settings kept in `file`. Nothing is read or made until the first read or `set`.
-    init(file: URL) {
+    /// The settings kept in `file`. Nothing is read or made until the first read or `set`. `log`: where a line about
+    /// the file goes, by default this process's stderr.
+    init(file: URL, log: @escaping @Sendable (String) -> Void = FileSettings.toStandardError) {
         path = file.path
+        self.log = log
+    }
+
+    /// `line` and a newline on stderr.
+    static func toStandardError(_ line: String) {
+        FileHandle.standardError.write(Data((line + "\n").utf8))
     }
 
     deinit {
@@ -101,6 +122,7 @@ final class FileSettings: SettingsStore, @unchecked Sendable {
     }
 
     func set(_ value: Any?, forKey key: String) {
+        if key == Self.formatKey { return }
         if let value, !PropertyListSerialization.propertyList(value, isValidFor: .binary) { return }
         lock.lock()
         defer { lock.unlock() }
@@ -110,8 +132,14 @@ final class FileSettings: SettingsStore, @unchecked Sendable {
         refresh()
         var next = values
         if let value { next[key] = value } else { next.removeValue(forKey: key) }
+        if case .newer = state {
+            values = next
+            return
+        }
+        var list = next
+        list[Self.formatKey] = Self.format
         guard state != .unreadable,
-              let data = try? PropertyListSerialization.data(fromPropertyList: next, format: .binary, options: 0) else {
+              let data = try? PropertyListSerialization.data(fromPropertyList: list, format: .binary, options: 0) else {
             values = next
             return
         }
@@ -127,7 +155,7 @@ final class FileSettings: SettingsStore, @unchecked Sendable {
             return
         }
         // As a later read of the file would have them: a number is an NSNumber whatever it was given as.
-        become(.loaded(written.stamp), Self.list(data) ?? next, holding: written.descriptor)
+        become(.loaded(written.stamp), Self.list(data).map(Self.settings) ?? next, holding: written.descriptor)
     }
 
     // MARK: Reading
@@ -146,7 +174,7 @@ final class FileSettings: SettingsStore, @unchecked Sendable {
         let there = stat(path, &info) == 0
         let code = there ? 0 : errno
         switch state {
-        case .loaded(let stamp), .corrupt(let stamp):
+        case .loaded(let stamp), .corrupt(let stamp), .newer(let stamp):
             if there, Stamp(info) == stamp { return }
         case .missing:
             if !there, code == ENOENT { return }
@@ -176,10 +204,16 @@ final class FileSettings: SettingsStore, @unchecked Sendable {
             return
         }
         // An empty file is an empty list: there is nothing in it to keep.
-        if let read = bytes.isEmpty ? [:] : Self.list(bytes) {
-            become(.loaded(Stamp(info)), read, holding: fd)
-        } else {
+        guard let read = bytes.isEmpty ? [:] : Self.list(bytes), let format = Self.format(of: read) else {
             become(.corrupt(Stamp(info)), [:], holding: fd)
+            return
+        }
+        if format > Self.format {
+            log("vibeswitcher: the settings file \(path) is in format \(format), newer than this build's "
+                + "(\(Self.format)): read as empty and left as it is")
+            become(.newer(Stamp(info)), [:], holding: fd)
+        } else {
+            become(.loaded(Stamp(info)), Self.settings(read), holding: fd)
         }
     }
 
@@ -200,6 +234,20 @@ final class FileSettings: SettingsStore, @unchecked Sendable {
     /// reads any plain text as an old-style list of one string).
     static func list(_ bytes: Data) -> [String: Any]? {
         (try? PropertyListSerialization.propertyList(from: bytes, options: [], format: nil)) as? [String: Any]
+    }
+
+    /// The format `list` is in: 1 when it says none; nil when its `format` is no whole number of 1 or more.
+    static func format(of list: [String: Any]) -> Int? {
+        guard let given = list[formatKey] else { return format }
+        guard let number = given as? Int, number >= 1 else { return nil }
+        return number
+    }
+
+    /// The settings in `list`: everything but its format.
+    static func settings(_ list: [String: Any]) -> [String: Any] {
+        var settings = list
+        settings.removeValue(forKey: formatKey)
+        return settings
     }
 
     /// Everything `fd` holds, from its start; nil when it can't be read or is longer than `limit`.
@@ -269,25 +317,12 @@ final class FileSettings: SettingsStore, @unchecked Sendable {
 
     // MARK: Where a domain is kept
 
-    /// VibeSwitcher's folder, by VibeCore's rule (`VibePaths.root`, kept in step with it by hand: this module is
-    /// below VibeCore): `VIBESWITCHER_HOME`, else `.vibeswitcher` in `CFFIXED_USER_HOME`, in `HOME`, in
-    /// `fallbackHome`. A variable counts only when it is an absolute path.
-    static func root(variable: (String) -> String?, fallbackHome: @autoclosure () -> String) -> URL {
-        func absolute(_ name: String) -> String? {
-            guard let path = variable(name), path.hasPrefix("/") else { return nil }
-            return path
-        }
-        if let own = absolute("VIBESWITCHER_HOME") { return URL(fileURLWithPath: own, isDirectory: true) }
-        let home = absolute("CFFIXED_USER_HOME") ?? absolute("HOME") ?? fallbackHome()
-        return URL(fileURLWithPath: home).appendingPathComponent(".vibeswitcher")
-    }
-
     /// The file `domain`'s settings are kept in (see `Platform.settings(domain:)`); nil for an empty domain.
     static func file(domain: String, variable: (String) -> String? = { name in getenv(name).map { String(cString: $0) } },
                      fallbackHome: @autoclosure () -> String = NSHomeDirectory()) -> URL? {
         guard !domain.isEmpty else { return nil }
         if domain.hasPrefix("/") { return URL(fileURLWithPath: domain + ".plist") }
-        let folder = root(variable: variable, fallbackHome: fallbackHome())
+        let folder = Platform.settingsRoot(variable: variable, fallbackHome: fallbackHome())
         guard domain != Platform.appSettingsDomain else { return folder.appendingPathComponent("settings.plist") }
         let plain = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-_".utf8)
         let name = domain.utf8.map { plain.contains($0) ? String(UnicodeScalar($0)) : "%" + (($0 < 16 ? "0" : "") + String($0, radix: 16, uppercase: true)) }

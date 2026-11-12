@@ -145,7 +145,73 @@ struct FileSettingsTests {
         }
         // The file is a property list any reader of them reads.
         let read = try PropertyListSerialization.propertyList(from: try #require(Self.bytes(file)), options: [], format: nil)
-        #expect(((read as? [String: Any])?.keys.sorted() ?? []) == ["bytes", "codexCommand", "count", "letAgentsOpenShells", "list", "pausedSessions"])
+        #expect(((read as? [String: Any])?.keys.sorted() ?? []) == ["bytes", "codexCommand", "count", "format", "letAgentsOpenShells", "list", "pausedSessions"])
+    }
+
+    /// The written list says its format, 1; the format is the file's, not a setting.
+    @Test func aSettingsFileCarriesItsFormat() throws {
+        let (folder, file) = try Self.scratchFile()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = FileSettings(file: file)
+        store.set("claude", forKey: "claudeCommand")
+        let read = try #require(Self.bytes(file).flatMap(FileSettings.list))
+        #expect((read["format"] as? Int) == 1)
+        #expect(read.keys.sorted() == ["claudeCommand", "format"])
+        for reader in [store, FileSettings(file: file)] {
+            #expect(reader.object(forKey: "format") == nil)
+            #expect(reader.string(forKey: "claudeCommand") == "claude")
+        }
+        // Not a setting: a set of it changes nothing.
+        let before = Self.bytes(file)
+        store.set(2, forKey: "format")
+        store.set(nil, forKey: "format")
+        #expect(Self.bytes(file) == before)
+        #expect(store.object(forKey: "format") == nil)
+
+        // A list that says no format (one written before the key, or by hand) is format 1, and says so once written.
+        try PropertyListSerialization.data(fromPropertyList: ["codexCommand": "codex"], format: .xml, options: 0).write(to: file, options: .atomic)
+        #expect(store.string(forKey: "codexCommand") == "codex")
+        store.set(true, forKey: "leadMail")
+        let again = try #require(Self.bytes(file).flatMap(FileSettings.list))
+        #expect((again["format"] as? Int) == 1 && (again["codexCommand"] as? String) == "codex" && (again["leadMail"] as? Bool) == true)
+    }
+
+    /// A list in a newer format (a later build's) reads as empty, is said in the log once, and is never written over:
+    /// a `set` lasts in the store that made it. A `format` that is no whole number of 1 or more is no list of settings.
+    @Test func aNewerFormatIsRefusedAndLeftAsItIs() throws {
+        let (folder, file) = try Self.scratchFile()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let newer = try PropertyListSerialization.data(fromPropertyList: ["format": 2, "claudeCommand": "claude --later"], format: .binary, options: 0)
+        try newer.write(to: file)
+        let lines = Shared([String]())
+        let store = FileSettings(file: file, log: { line in lines.change { $0.append(line) } })
+        #expect(store.object(forKey: "claudeCommand") == nil)
+        #expect(store.string(forKey: "claudeCommand") == nil)
+        #expect(store.object(forKey: "format") == nil)
+        store.set("claude", forKey: "claudeCommand")
+        store.set(true, forKey: "leadMail")
+        #expect(Self.bytes(file) == newer, "a write changed the newer file")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted() == ["settings.plist", "settings.plist.lock"])
+        #expect(store.string(forKey: "claudeCommand") == "claude")
+        #expect(FileSettings(file: file, log: { _ in }).object(forKey: "claudeCommand") == nil)
+        #expect(lines.get() == ["vibeswitcher: the settings file \(file.path) is in format 2, newer than this build's (1): read as empty and left as it is"])
+
+        // Put back in this build's format, it is read and written again.
+        try PropertyListSerialization.data(fromPropertyList: ["format": 1, "codexCommand": "codex"], format: .binary, options: 0).write(to: file, options: .atomic)
+        #expect(store.string(forKey: "codexCommand") == "codex")
+        #expect(store.object(forKey: "claudeCommand") == nil)
+        store.set("claude", forKey: "claudeCommand")
+        #expect(FileSettings(file: file).string(forKey: "claudeCommand") == "claude")
+        #expect(lines.get().count == 1)
+
+        for bad in ["1" as Any, 0, -1, 1.5] {
+            let corrupt = try PropertyListSerialization.data(fromPropertyList: ["format": bad, "claudeCommand": "claude"], format: .binary, options: 0)
+            try corrupt.write(to: file, options: .atomic)
+            let reader = FileSettings(file: file, log: { _ in })
+            #expect(reader.object(forKey: "claudeCommand") == nil, "format \(bad)")
+            reader.set("codex", forKey: "codexCommand")
+            #expect(Self.bytes(folder.appendingPathComponent("settings.plist.corrupt")) == corrupt, "format \(bad)")
+        }
     }
 
     @Test func theFileIsPrivateAndSoIsTheFolderMadeForIt() throws {
