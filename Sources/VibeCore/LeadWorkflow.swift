@@ -10,6 +10,11 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The checks every incident became (`regression_command:`, e.g. a bench corpus run): merge runs it after
     /// test_command, and merges only when it passes too.
     public var regressionCommand: String?
+    /// What a worker's done report runs first (`done_check_command:`; "off": nothing; empty: `LeadDoneCheck`'s default,
+    /// the lint tests and the changed files' suites): a failure refuses the report with its output (`LeadDoneCheck`).
+    public var doneCheckCommand: String?
+    /// How many minutes that check may run before it's stopped and the report goes through (`done_check_min:`).
+    public var doneCheckMinutes: Double = LeadDoneCheck.defaultMinutes
     public var workerAgent = "claude"
     /// The agent of a new task that names none (`agent_default:`): claude (the default) or auto (chosen at each start
     /// from both accounts' usage, see `UsageRouting`). Anything else reads claude. Never codex: a task goes to Codex
@@ -130,6 +135,8 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "test_command": workflow.testCommand = present
                 case "init_command": workflow.initCommand = present
                 case "regression_command": workflow.regressionCommand = present
+                case "done_check_command": workflow.doneCheckCommand = present
+                case "done_check_min": workflow.doneCheckMinutes = minutes(value) ?? LeadDoneCheck.defaultMinutes
                 case "worker_agent": workflow.workerAgent = present ?? "claude"
                 case "agent_default": workflow.agentDefault = present.flatMap(LeadTask.WorkerAgent.init(text:)).flatMap { $0 == .codex ? nil : $0 } ?? .claude
                 case "verifier_model": workflow.verifierModel = present
@@ -332,6 +339,9 @@ public struct LeadWorkflow: Equatable, Sendable {
 
     var testTimeout: TimeInterval { testTimeoutMinutes * 60 }
 
+    /// done_check_min in seconds.
+    var doneCheckTimeout: TimeInterval { doneCheckMinutes * 60 }
+
     /// stall_min in seconds; nil when it's 0 (no stall watch, only test_timeout_min).
     public var stall: TimeInterval? { stallMinutes > 0 ? stallMinutes * 60 : nil }
 
@@ -458,7 +468,7 @@ public struct LeadWorkflow: Equatable, Sendable {
         return model
     }
 
-    public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "remote", "verifier_model", "max_workers",
+    public static let configurable = ["test_command", "regression_command", "done_check_command", "done_check_min", "init_command", "base_branch", "remote", "verifier_model", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "stall_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
                                       "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "watch_app_logs", "agent_default"]
@@ -574,6 +584,13 @@ public struct LeadWorkflow: Equatable, Sendable {
     # runs it after test_command and merges only when it passes too, so a merge that brings an incident back is
     # refused. Empty: nothing more.
     regression_command:
+    # What a worker's done report runs first, in its worktree, holding a test and build slot: a failure refuses the report
+    # with its output, so the worker fixes it before the merge's run. off: nothing. Empty: the test command filtered to
+    # the lint tests (Tests/*LintTests.swift) and the suites of the files the branch changes, when the project has lint
+    # tests; else nothing. A task's own (add_task done_check) comes first.
+    done_check_command:
+    # How many minutes that check may run; past it, or when it can't start, the report goes through, saying so. Empty: 5.
+    done_check_min: 5
     # What a fresh worktree needs before work starts (install, build). Empty: nothing.
     init_command:
     # Who works: claude (Codex support comes later).

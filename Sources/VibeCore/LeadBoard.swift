@@ -883,6 +883,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The model its worker runs on, as `claude --model` takes it (add_task's and update_task's `model`: sonnet for a
     /// mechanical task, say); nil: the project's Claude command's, as before.
     public var model: String?
+    /// The command its worker's done report runs first (add_task's and update_task's `done_check`; "off": none); nil:
+    /// workflow.md's done_check_command, else `LeadDoneCheck`'s default.
+    public var doneCheck: String?
     /// The model each of its workers and verifiers was started on, by session (`claude --model`'s name; "" for Claude's
     /// default), its current members only: which model a session's usage-limit refusal holds back (see
     /// `AccountUsage.fromRefusal`), whatever the task's model or verifier_model says since.

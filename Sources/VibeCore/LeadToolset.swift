@@ -251,6 +251,10 @@ public final class LeadToolset: MCPToolset {
     /// many): the tool server sets the Mac-wide ones, every project's merges sharing them with `vs-heavy`; nil (tests
     /// that don't give scratch ones): none.
     public var testLock: TestLock?
+    /// The pre-done check's time limit in place of done_check_min (tests); nil: done_check_min's.
+    var doneCheckLimit: TimeInterval?
+    /// Whether this tool server runs in a sandbox already (`LeadDoneCheck.inSandbox`; faked in tests).
+    var alreadySandboxed: () -> Bool = { LeadDoneCheck.inSandbox() }
     /// The slots of `testLock` not set by the workflow are Settings' (`MacLimits.heavySlots`), read at each call, as
     /// for `vs-heavy`; false (tests' scratch locks): the lock's own count. The tool server sets it with the Mac-wide lock.
     public var slotsFromSettings = false
@@ -674,7 +678,7 @@ public final class LeadToolset: MCPToolset {
                                          "context": P(type: "string", description: "What a fresh worker needs to know"),
                                          "from_finding": P(type: "string", description: "A finding as status and board name it, <task>:<id> (e.g. add-b:F2)"),
                                          "review": Self.reviewProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
-                                         "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty,
+                                         "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty, "done_check": Self.doneCheckProperty,
                                          "origin": Self.originProperty]),
                 MCPToolInfo(name: "dismiss_finding", description: "Close one of a task's open audit findings with a reason (it isn't a problem, it's out of scope, the user accepted it): it no longer holds the merge back, and no verifier raises it again. An Important finding's reason must cite something that can be checked, or it's refused: a file and line (path/File.swift:123), a decision's timestamp as decisions.md has it (2026-11-07 20:08:15), or the question id of the user's answer (its full id, or question 1A2B3C4D). If the only evidence is your memory, record_decision first and cite it, or ask_user. A Nit or Pre-existing finding takes any reason.",
                             properties: ["task": task, "id": P(type: "string", description: "The finding's id (F2), or <task>:<id>"),
@@ -690,7 +694,7 @@ public final class LeadToolset: MCPToolset {
                                          "reason": P(type: "string", description: "With status kept: what holds it back (a decision, the user's word); merge names it when it refuses. With abandoned: why nothing will carry it. With removed: why it was a mistake (optional)"),
                                          "into": P(type: "string", description: "With status folded: the task (its slug) that carries this one's work"),
                                          "review": Self.reviewProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
-                                         "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty,
+                                         "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty, "done_check": Self.doneCheckProperty,
                                          "reroll": P(type: "boolean", description: "Re-roll it after audit rounds that didn't land: its worker and verifier stop, its branch is kept as archive/<slug>-<n>, its worktree goes, and a fresh worker starts from the base on a new agent/<slug>, its context given a summary of the findings and the worker's answers so far. Contract changes in the same call apply first; not with status"),
                                          "exception": P(type: "object", description: "A deviation from the contract you accept, recorded as your sealed note, an object of scope (files or a glob, as in .gitignore, from the repository's root; a string or a list), reason and evidence, each required. An audit's verifier sees the exceptions recorded before that audit started, in your notes; one recorded later isn't presented as covering an audit under way, and the result says so. It decides nothing about review: no floor, sensitive path or audit goes by it"),
                                          "accept_verdict": P(type: "boolean", description: "With exception: settle the task's verdict on its head, when it's suspect with no Important finding and its only concern is an edit outside the boundaries: the task goes on to merge with no new audit, and the record shows the verdict and who accepted what. The exception's scope must cover every file the verdict names, and it covers only those; a sensitive path isn't accepted this way (audit again, with the exception recorded). Refused for any other verdict, which is handled as ever"),
@@ -775,6 +779,8 @@ public final class LeadToolset: MCPToolset {
                             properties: ["test_command": P(type: "string", description: "The project's checks; merge runs it on each rebased branch and merges only when it passes"),
                                          "regression_command": P(type: "string", description: "The checks incidents became (e.g. a bench corpus run); merge runs it after test_command and merges only when it passes too"),
                                          "init_command": P(type: "string", description: "What a fresh worktree needs before work starts (install, build)"),
+                                         "done_check_command": P(type: "string", description: "What a worker's done report runs first, in its worktree, holding a test and build slot: a failure refuses the report with its output, so the worker fixes it. off: nothing. Empty: test_command filtered to the lint tests and the suites of the files the branch changes, when the project has lint tests (Tests/*LintTests.swift); a task's own done_check comes first"),
+                                         "done_check_min": P(type: "number", description: "Minutes that check may run; past it, or when it can't start, the report goes through, saying so (default 5)"),
                                          "base_branch": P(type: "string", description: "The branch workers start from and verified work is merged into (an existing local branch)"),
                                          "remote": P(type: "string", description: "The git remote, by its name, that fetch_remote fetches the base branch from and merge_remote merges it in from (empty: origin)"),
                                          "verifier_model": P(type: "string", description: "The verifier's model (e.g. fable, opus). Empty: audits run on another model than the workers', at least as capable (fable; opus when the workers run fable)"),
@@ -951,6 +957,10 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// add_task's and update_task's model for the task's worker.
+    static var doneCheckProperty: MCPToolInfo.Property {
+        MCPToolInfo.Property(type: "string", description: "The command its worker's done report runs first, in the worktree (a focused test run, say); a failure refuses the report with its output. off: none for this task. Not given: workflow.md's done_check_command, else the default (the lint tests and the changed files' suites). Empty (update_task): back to that")
+    }
+
     static var modelProperty: MCPToolInfo.Property {
         MCPToolInfo.Property(type: "string", description: "The model its worker runs on, as claude --model takes it (sonnet for a mechanical task, say; fable, opus). Not given: the project's Claude command's, as for every task. Empty (update_task): back to that")
     }
@@ -985,6 +995,15 @@ public final class LeadToolset: MCPToolset {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-_[]:"))
         guard text.count <= 100, text.unicodeScalars.allSatisfy({ $0.isASCII && allowed.contains($0) }) else {
             throw Problem(text: "model is one word, a model's name as claude --model takes it (sonnet, opus, fable, claude-sonnet-5-5), not “\(Self.clip(text, 60))”. Nothing was changed.")
+        }
+        return text
+    }
+
+    /// The `done_check` passed to add_task or update_task: nil when none was, "" to clear it. One line.
+    private func doneCheckArgument(_ arguments: [String: Any]) throws -> String? {
+        guard let given = arguments["done_check"], !(given is NSNull) else { return nil }
+        guard let text = (given as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.contains(where: \.isNewline) else {
+            throw Problem(text: "done_check is one line, a shell command (or off), not \(given). Nothing was changed.")
         }
         return text
     }
@@ -1059,6 +1078,7 @@ public final class LeadToolset: MCPToolset {
         let auto = try autoArgument(arguments)
         let budget = try budgetArgument(arguments)
         let model = try modelArgument(arguments).flatMap { $0.isEmpty ? nil : $0 }
+        let doneCheck = try doneCheckArgument(arguments).flatMap { $0.isEmpty ? nil : $0 }
         // Not given: workflow.md's agent_default (claude or auto, never codex).
         let agent = try agentArgument(arguments) ?? workflow.agentDefault
         // A Codex task is audited by a Claude verifier: review none isn't taken for it.
@@ -1075,6 +1095,7 @@ public final class LeadToolset: MCPToolset {
             task.autoAdvance = auto == false ? false : nil
             task.budgetMin = budget
             task.model = model
+            task.doneCheck = doneCheck
             task.agent = agent == .claude ? nil : agent
             board.tasks.append(task)
             return task
@@ -1340,7 +1361,7 @@ public final class LeadToolset: MCPToolset {
         + "by its id: fixed, open (still), or dismissed with a reason. id: leave it out for a new finding. Empty or left out: you found nothing."
 
     static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason", "into", "review", "reroll",
-                                          "after", "auto_advance", "budget_min", "model", "agent", "exception", "accept_verdict", "hold_audit"]
+                                          "after", "auto_advance", "budget_min", "model", "agent", "done_check", "exception", "accept_verdict", "hold_audit"]
 
     private func updateTask(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
@@ -1386,6 +1407,7 @@ public final class LeadToolset: MCPToolset {
         let auto = try autoArgument(arguments)
         let budget = try budgetArgument(arguments)
         let model = try modelArgument(arguments)
+        let doneCheck = try doneCheckArgument(arguments)
         let agent = try agentArgument(arguments)
         let given = try Self.exceptionArgument(arguments["exception"])
         let acceptVerdict = try Self.flagArgument(arguments, "accept_verdict") ?? false
@@ -1524,6 +1546,10 @@ public final class LeadToolset: MCPToolset {
                     board.tasks[index].model = nil
                     changed.append("model \(old) cleared (it was for \(before == .codex ? "Codex" : "Claude"); give model with agent to set one for \(agent == .codex ? "Codex" : "Claude"))")
                 }
+            }
+            if let doneCheck {
+                board.tasks[index].doneCheck = doneCheck.isEmpty ? nil : doneCheck
+                changed.append(doneCheck.isEmpty ? "done_check cleared (its done reports run the project's pre-done check)" : "done_check `\(doneCheck)`")
             }
             if let model {
                 board.tasks[index].model = model.isEmpty ? nil : model
@@ -4809,6 +4835,10 @@ public final class LeadToolset: MCPToolset {
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 0 else { throw Problem(text: "task_budget_min must be a whole number of minutes, 0 (no budget) or more.") }
                 value = String(count)
+            case "done_check_min":
+                guard !value.isEmpty else { break }
+                guard let minutes = LeadWorkflow.minutes(value) else { throw Problem(text: "done_check_min must be a number of minutes, more than 0.") }
+                value = Self.gb(minutes)
             case "test_timeout_min":
                 guard !value.isEmpty else { break }
                 guard let minutes = LeadWorkflow.minutes(value) else { throw Problem(text: "test_timeout_min must be a number of minutes, more than 0.") }
@@ -4873,6 +4903,7 @@ public final class LeadToolset: MCPToolset {
             let after = LeadWorkflow.load(from: path)
             let read: [String: String] = ["test_command": after.testCommand ?? "", "regression_command": after.regressionCommand ?? "",
                                           "init_command": after.initCommand ?? "",
+                                          "done_check_command": after.doneCheckCommand ?? "", "done_check_min": Self.gb(after.doneCheckMinutes),
                                           "base_branch": after.baseBranch ?? "", "remote": after.remote ?? "", "verifier_model": after.verifierModel ?? "",
                                           "max_workers": String(after.maxWorkers),
                                           "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
@@ -4890,6 +4921,7 @@ public final class LeadToolset: MCPToolset {
             // A limit cleared reads back as its default.
             let defaults = ["disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
                             "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes), "stall_min": Self.gb(LeadWorkflow().stallMinutes),
+                            "done_check_min": Self.gb(LeadWorkflow().doneCheckMinutes),
                             "task_budget_min": String(LeadWorkflow().taskBudgetMinutes),
                             "audit_finders": String(LeadWorkflow().auditFinders), "audit_nit_cap": String(LeadWorkflow().auditNitCap),
                             "auto_advance": String(LeadWorkflow().autoAdvance), "watch_app_logs": String(LeadWorkflow().watchAppLogs),
@@ -5094,6 +5126,8 @@ public final class LeadToolset: MCPToolset {
         // Before anything is recorded: a done that doesn't show how each check was checked doesn't count as one.
         var evidence = done ? try Self.doneEvidence(arguments, acceptance: store.load().task(slug)?.contract.acceptance ?? [], base: workflow.base) : nil
         if done { try checkLoadProof(slug, arguments) }
+        // Last of the refusals, being the slow one: the pre-done check (`LeadDoneCheck`). A failure refuses the report.
+        let checked = done ? try doneCheck(slug) : nil
         // Its screenshots as copies kept in .vibeswitcher, so board(task), the verifier and the lead still open them
         // once the worktree (where sandbox shots are) is cleaned up. Relative paths are the worktree's.
         if let given = evidence {
@@ -5191,7 +5225,8 @@ public final class LeadToolset: MCPToolset {
             }
         }
         let text = done
-            ? "The worker on \(slug) says it's done: \(summary)\n" + (stands ?? next ?? "Run audit(\(slug)); only the verifier's report counts.") + auto
+            ? "The worker on \(slug) says it's done: \(summary)\n" + (checked.map { $0 + "\n" } ?? "")
+                + (stands ?? next ?? "Run audit(\(slug)); only the verifier's report counts.") + auto
             : "The worker on \(slug) is blocked: \(summary)" + (stands.map { "\n\($0)" } ?? "")
         let told = try tellLead(text, about: "worker \(slug)")
         let kept = standing.map { " Your branch is still at \($0.commit.prefix(8)), the commit its audit covers, so that verdict stands." } ?? ""
@@ -5199,7 +5234,58 @@ public final class LeadToolset: MCPToolset {
             ? (standing == nil ? (unaudited ? "Reported. The lead's merge runs the full test suite on your branch; stay available in case it fails."
                                                           : "Reported. A verifier will check your branch; stay available for fixes.") : "Reported." + kept)
             : "Reported. The lead will get back to you." + kept
-        return MCPToolResult(text: reply + (told ? "" : Self.noLead))
+        return MCPToolResult(text: reply + (checked.map { " " + $0 } ?? "") + (told ? "" : Self.noLead))
+    }
+
+    /// Runs the pre-done check of `slug`'s done report (`LeadDoneCheck`) in its worktree, holding a test and build slot
+    /// (`heavyLock`) for at most done_check_min (`doneCheckLimit` in tests), on a scratch home, as merge runs its tests.
+    /// Throws the refusal, with the end of its output, when it fails; returns what the report and the lead are told of
+    /// it otherwise (it passed, or didn't decide: it ran too long or couldn't start, and the report goes through); nil
+    /// when none ran (none set, or a done again on the commit an earlier done reported, which ran it then).
+    /// A Codex worker's runs inside Codex's sandbox, as its own commands do (`LeadDoneCheck.sandboxed`).
+    private func doneCheck(_ slug: String) throws -> String? {
+        let workflow = self.workflow
+        guard let task = store.load().task(slug), let head = branchHead(Worktrees.branch(slug)) else { return nil }
+        if (try? vault.unaudited(root: root, task: slug))?.reported == head { return nil }
+        let worktree = Worktrees.path(root: root, slug: slug)
+        let lints = LeadPrompts.Policy.lintTests(in: worktree)
+        var suites: [String] = []
+        if (task.doneCheck ?? "").isEmpty, (workflow.doneCheckCommand ?? "").isEmpty, !lints.isEmpty {
+            let changed = Git.run(["diff", "--name-only", "--diff-filter=d", "\(workflow.base)...\(head)"], in: root).output
+                .split(whereSeparator: \.isNewline).map(String.init)
+            let tests = Git.run(["ls-tree", "-r", "--name-only", head, "--", "Tests"], in: root).output.split(whereSeparator: \.isNewline).map(String.init)
+            var sources: [String: String] = [:]
+            for path in changed where path.hasPrefix("Tests/") && path.hasSuffix(".swift") {
+                let shown = Git.run(["show", "\(head):\(path)"], in: root)
+                if shown.ok { sources[path] = shown.output }
+            }
+            suites = LeadDoneCheck.suites(changed: changed, testFiles: tests, sources: sources)
+        }
+        guard let (command, source) = LeadDoneCheck.command(task: task.doneCheck, workflow: workflow.doneCheckCommand, test: workflow.testCommand,
+                                                              lints: lints, suites: suites) else { return nil }
+        let limit = doneCheckLimit ?? workflow.doneCheckTimeout
+        let undecided = { (why: String) in LeadDoneCheck.undecidedNote(command: command, why: why) }
+        let home = vault.scratch(root: root, "done-check-\(slug)-home")
+        var run = command
+        if task.runningAgent == .codex {
+            let inside = alreadySandboxed()
+            let codex = LeadLaunch.withoutCodexFlags(runtime.codexCommand(root: root)).split(whereSeparator: \.isWhitespace).first.map(String.init) ?? "codex"
+            if !inside, let missing = runtime.preflight(command: codex) { return undecided("it couldn't start in Codex's sandbox: \(missing.description)") }
+            run = LeadDoneCheck.sandboxed(command, codex: codex, writable: LeadLaunch.codexWritableRoots(cwd: worktree, slug: slug, temporary: home.path, root: root),
+                                          alreadySandboxed: inside)
+        }
+        // No branch run to mark (`markBranchRun`, the lead's): it runs during its worker's own tool call, its session
+        // live, so the team isn't quiet and nothing it writes is sealed as the user's (`ConfigSeal`).
+        try? FileManager.default.removeItem(at: home)
+        do { try vault.ensurePrivate(home) } catch { return undecided("it couldn't start: its scratch home couldn't be made (\(error))") }
+        defer { try? FileManager.default.removeItem(at: home) }
+        let (stopped, _) = Worktrees.runChecks(setup: nil, test: run, in: worktree, home: home.path, timeout: limit, lock: heavyLock(workflow),
+                                               as: "the pre-done check of \(slug)", place: worktree)
+        switch LeadDoneCheck.outcome(stopped, limit: limit) {
+        case .passed: return "Its pre-done check passed (`\(command)`)."
+        case .failed(let output): throw Problem(text: LeadDoneCheck.refusal(command: command, source: source, output: output))
+        case .undecided(let why): return undecided(why)
+        }
     }
 
     /// report(status: over_budget): like blocked, it's no done (merge and audit don't take it), and it waits on the
@@ -6245,6 +6331,9 @@ public final class LeadToolset: MCPToolset {
                      "- test_command: " + (workflow.testCommand.map { "`\($0)`" } ?? "not set: merges run no tests"),
                      "- regression_command: " + (workflow.regressionCommand.map { "`\($0)` (merge runs it after test_command)" } ?? "not set: the incidents' checks (record_incident) run only as part of test_command"),
                      "- init_command: " + (workflow.initCommand.map { "`\($0)`" } ?? "not set" + (detectedInit.map { " (suggested from the repository: `\($0)`)" } ?? "")),
+                     "- done_check_command: " + (workflow.doneCheckCommand.map { $0.lowercased() == LeadDoneCheck.off ? "off (a done report runs no check)" : "`\($0)` (a done report runs it first; a failure refuses it)" }
+                        ?? "not set: a done report runs test_command filtered to the lint tests and the changed files' suites, when the project has lint tests")
+                        + "; done_check_min: \(Self.gb(workflow.doneCheckMinutes))",
                      "- base_branch: " + (raw.baseBranch ?? "not set: \(fallback) (the branch the lead first started on)"),
                      "- remote: " + (workflow.remote ?? "not set: \(LeadRemote.defaultRemote)") + " (fetch_remote and merge_remote sync the base branch with it; push_remote asks the user to push it there)",
                      "- verifier_model: " + (workflow.verifierModel ?? "not set: audits run on \(auditModel(workflow)), another model than the workers' (\(runtime.workerModel(root: root) ?? "Claude's default"))"),
