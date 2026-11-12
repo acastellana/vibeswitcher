@@ -7,8 +7,13 @@ Nov 17. The lead may have Fable check the ranking, so the ranking comes first. N
 
 The two units differ. **Task-hours a day** is lead time removed: the sum, over the tasks merged in a day, of the time
 each spends between being created and landing on main. Over the last 7 days that sum was **107 task-hours a day**
-(751 h over 111 merged tasks). **Merges a day** is throughput: 15.9 a day over the same 7 days. A change that saves
-task-hours makes each idea land sooner. A change that adds merges lands more ideas.
+(751 h over the 111 merged tasks that have a receipt). **Merges a day** is throughput: 130 distinct tasks merged in
+the same 7 days by progress.md, **18.6 a day**. A change that saves task-hours makes each idea land sooner. A change
+that adds merges lands more ideas.
+
+**Coverage.** 18 of those 130 merges have no row on the board or in its archive (7 on 2026-11-06, 5 on 11-07, 3 on
+11-05, 3 on 11-10), so they have no receipt. Every receipt-based figure below covers the other 112 (85%). The merge
+counts per day come from progress.md.
 
 | # | Change | Kind | Expected gain a day | How sure | Cost, risk | Contract |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -34,9 +39,10 @@ bigger tasks with verification points (a lead decision).
 ## In short
 
 - **Throughput follows planning, not capacity.** Merges per day track tasks planned per day almost one for one
-  (31/38/28 planned on 2026-11-07..09, then 32/42/24 merged; 8/4/4 planned on 2026-11-10..12, then 5/4/1 merged).
+  (31/38/28 planned on 2026-11-07..09, then 37/42/24 merged; 8/4/4 planned on 2026-11-10..12, then 8/4/1 merged).
   Over 108 sampled hours, VibeSwitcher ran 1.64 workers on average against a cap of 5 to 7, and had no worker or
-  verifier at all for 24% of them. Only on the three burst days did it reach 5 workers, for 13–24% of the time.
+  verifier at all for 24% of them. It reached 5 workers mainly on the three burst days (13–24% of samples, against
+  0–6% on the other days).
 - **A third of in-flight time is spent asleep.** Of 343 task-hours between a task's start and its merge, 114 (33%)
   fell where the load recorder has no samples: the Mac asleep, or the app not running. 44 of the 71 gap hours were
   between midnight and 08:00, and 69 gaps of 10–60 minutes fell in the day. "Held: on battery under your 10 % limit"
@@ -67,7 +73,8 @@ event trails from `docs/lead/progress.md` lines dated 2026-11-05 → 2026-11-12 
 
 | Measure (7 days) | Value | Source |
 | --- | --- | --- |
-| Tasks merged | 111 (15.9 a day); 14 days: 211 (15.1 a day) | board-archive.jsonl + board.json, `receipt.ending` |
+| Tasks merged | 130 (18.6 a day), by progress.md's "Merged X" lines; 111 of them have a receipt in the window used below | progress.md; board-archive.jsonl + board.json, `receipt.ending` |
+| Tasks merged, 14 days (receipts only) | 211 (15.1 a day), an undercount like the 7-day one | receipts |
 | Created → merged, all | median 156 min, p75 325, p90 642, mean 406; 14 days: median 123 | `receipt.endedAt − createdAt` |
 | … tasks with no `after` (77) | median 117 min, p90 415, mean 207 | same, `after` empty |
 | … chained tasks (34) | median 338 min, p90 762, mean 856 | same, `after` set |
@@ -84,7 +91,7 @@ fall in. "Asleep" is the part of each phase that fell in a gap of more than 150 
 | Waiting to start, not chained | 77 | 0 min | 48 min | 61 h | 39% | Room on the Mac, max_workers, usage holds, battery holds | receipts |
 | Worker, start → first audit (audited tasks) | 78 | 50 min | 72 min | 93 h | 17% | Counted work: median 29 min (`receipt.worked`, sleep and waits excluded). The rest is worktree init, startup, waits on the test lock, the lead or a prompt, and sleep. | progress trail + receipts |
 | Audit and rework, first audit → last pass | 78 | 15 min | 81 min | 106 h | 42% | Audit wait (median 1 min, sum 31 h), auditing (median 14 min, sum 71 h, 37 h of it from one task, tests-long-synchronous). 30 of 80 audited tasks needed a second round or more, and 1 was re-rolled. A failed verdict took a median 46 min to the next audit (n = 13 with both events, 14 h). | receipts `waits`; progress "Audit of …" |
-| Passing verdict → merged | 116 | 23 min | 37 min | 48 h | 22% | Merge test runs: median 15 min, sum 45 h. Load and slot waits: 1.6 h in all. The rest is batching, queueing and failed attempts. | progress trail; receipts `waits.merge*` |
+| Passing verdict → merged | 78 | 23 min | 37 min | 48 h | 22% | Merge test runs: median 15 min, sum 45 h. Load and slot waits: 1.6 h in all. The rest is batching, queueing and failed attempts. | progress trail; receipts `waits.merge*` |
 | Not audited, start → merged | 36 | 71 min | 158 min | 95 h | 46% | Counted work: median 27 min | progress trail + receipts |
 | Merge failure → merged (overlaps the two rows above) | 23 | 54 min | — | 26 h | — | 15 "tests fail", 5 hung, 4 "batch tests fail", 3 conflicts and 3 other refusals, over 2026-11-05..12 (30 refusals for 23 tasks) | progress "Merge of … failed", "Didn't merge" |
 | Waiting on the user (questions) | 4 questions | — | — | 0.8 h | — | 14 days: 7 questions, 3.3 h | `receipt.waitingOnUser` |
@@ -92,9 +99,10 @@ fall in. "Asleep" is the part of each phase that fell in a gap of more than 150 
 What the contract asked for, mapped to the table:
 
 - **Waiting to start:** 408 task-hours in 7 days, 85% of it in chains. That is a planning choice, not a delay.
-- **Worker time:** 77 counted hours, median 31 min a task, against a median of 50 min on the wall.
+- **Worker time:** about 77 counted hours, median 29 min a task, against a median of 50 min on the wall (audited
+  tasks).
 - **Waiting on audit:** median 1 min, but 31 h in sum: a few long waits, mostly for Mac room or the Fable limit.
-- **Audit:** 71 h, median 14 min. Without the one 37-hour outlier, it averages about 21 min a task.
+- **Audit:** 71 h, median 14 min. Per audited task (80), without the one 37-hour outlier, it averages about 21 min.
 - **Rework rounds:** 30 of 80 audited tasks; 29 failing verdicts in the progress log; fail → next audit median 46 min.
 - **Merge queue and test run:** passing verdict → merged, median 23 min. The test run alone has a median of 14.3 min
   over 91 distinct runs.
@@ -130,11 +138,11 @@ From `~/.vibeswitcher/stats/load-2026-11-05..12.jsonl`: 6,494 one-minute samples
 | Verifiers | mean 0.44 |
 | No worker and no verifier | 26.5 h (24% of sampled time) |
 | Heavy slots held | mean 0.92 of 2–3 |
-| Planned, merged per day (progress, receipts) | 11-05 8/6 · 11-06 14/0 · 11-07 31/32 · 11-08 38/42 · 11-09 28/24 · 11-10 8/5 · 11-11 4/4 · 11-12 4/1 |
+| Planned, merged per day (both from progress.md) | 11-05 8/7 · 11-06 14/7 · 11-07 31/37 · 11-08 38/42 · 11-09 28/24 · 11-10 8/8 · 11-11 4/4 · 11-12 4/1 |
 
-On 2026-11-06, 14 tasks were planned and none merged, with one merge run all day. The Fable limit was reached at 11:27
-(reset 2026-11-11 18:00), and audits ran on Fable then. That this caused the empty day is an inference from the
-timing, not a measurement.
+The Fable limit was reached 4 times in the window: 2026-11-06 11:27, 11-07 20:36, 11-09 19:55 and 11-12 09:17. Each
+time the lead moved audits by hand: verifier_model = opus 16 minutes later on 11-06, and on 11-09 audits were held
+from 20:24 to 21:46 before moving to Opus.
 
 ### Sleep and power
 
@@ -191,8 +199,8 @@ there is room (no-`after` tasks start a median of 0 min after they're planned). 
 also wait in docs/process/backlog.md: 17 tier-A and tier-B ideas from 2026-11-07, several still "idea". The lead
 plans in bursts, after the user gives direction.
 
-**Gain, and how it was estimated.** Over 2026-11-05..12, five lean days produced 16 merges between them. The three
-burst days produced 98. If each lean day ran at half a burst day's pace (about 16), the lean days would add about 60
+**Gain, and how it was estimated.** Over 2026-11-05..12, five lean days produced 27 merges between them. The three
+burst days produced 103. If each lean day ran at half a burst day's pace (about 17), the lean days would add about 58
 merges, roughly 8 a day over the 7.4 days. That is reduced to **+3 to +7 a day** because of the weekly usage limit
 (every-model usage at 80–87% on 2026-11-07, with 4 days to the reset), the Fable limit, and what the user will
 actually want. The range is a guess. Usage, not the Mac, would be the next ceiling.
@@ -328,7 +336,7 @@ Counted here, not re-proposed.
 
 | Planned work | Evidence this week | Expected gain a day | How sure |
 | --- | --- | --- | --- |
-| Fable fallback (when-fable-s-limit) and model routing (each-role-gets-the) | The Fable limit was reached 3 times (2026-11-06 11:27, 2026-11-09 19:55, 2026-11-12 09:17). 2026-11-06: 14 tasks planned, 0 merged. 2026-11-09: audits held from 20:24 to 21:46, then moved to Opus by hand. 66 of ~100 audits this week ran on Fable. | About 1 lost day in 7 avoided: **+1 to +2 merges** averaged | Estimate; the cause of 2026-11-06 is inferred |
+| Fable fallback (when-fable-s-limit) and model routing (each-role-gets-the) | The Fable limit was reached 4 times (2026-11-06 11:27, 11-07 20:36, 11-09 19:55, 11-12 09:17), each handled by hand: audits moved to Opus 16 min later on 11-06, and were held 82 min on 11-09. 66 of ~100 audits this week ran on Fable. | Holds and hand-switches avoided: **~0.5–1 task-hour**; merges about the same, since the lead switched quickly | Estimate |
 | Pre-done check that sends a worker back (a-worker-can-t-2) | 29 failing verdicts; fail → next audit median 46 min | **~1.5 task-hours**, if it halves failing verdicts | Guess on the share it catches |
 | Bigger tasks with verification points (lead decision) | Non-work time per task: median 117 min created → merged against 29 min worked, for tasks with no chain. 34 chained tasks. But tasks over an hour drew Important findings 64% of the time. | **1–3 task-hours**, from fewer audits, merges and chain links | Guess; the verification points are what keep larger tasks from losing it in rework |
 | Prompt trimming (prompts-and-agents-md) | Worker tokens 1,666 M (nearly all cache reads) for 111 merges | Tokens, so throughput when usage binds. Time not measurable. | Not estimated |
@@ -394,12 +402,14 @@ Estimates and guesses, labelled:
 
 - Measured: every number in "Where the time goes", the per-size audit yields, the merge duration step on 2026-11-08,
   and the hold and push counts.
-- Estimates (a measured base times a stated assumption): the gains of #3, #4, #5, #6 and #8, and the planned work's
-  "+1 to +2 merges" (one lost day in seven).
+- Estimates (a measured base times a stated assumption): the gains of #3, #4, #5, #6 and #8, and the Fable
+  fallback's 0.5–1 task-hour.
 - Guesses (the assumption itself isn't measured): #1's 50% recoverable, #2's "+3 to +7", #7's 10 min a pass, the
   pre-done check halving failing verdicts, and bigger tasks' 1–3 task-hours.
-- Inferences: that the Fable limit caused 2026-11-06's empty day; that the slot-width caps are the whole cause of the
-  merge slowdown; that the recorder gaps are mostly sleep.
+- Inferences: that the slot-width caps are the whole cause of the merge slowdown; that the recorder gaps are mostly
+  sleep.
+- **A gap in the records:** 18 of the week's 130 merges (14%) have no board row and so no receipt. Why they're missing
+  wasn't looked into. The receipt-based splits assume the missing 18 look like the rest.
 
 ## Ready-to-file contracts
 
@@ -442,7 +452,7 @@ approved. So the pipeline keeps working between the user's sessions, on work the
    or a rejection removes the item from the queue.
 4. status shows "queue: K approved, next: <title>" and keep_fed's value.
 5. After a week with `keep_fed: 3`, the batch retrospective reports merges per day and idle worker-hours against this
-   review's baseline (15.9 a day; no worker or verifier for 24% of sampled time).
+   review's baseline (18.6 a day by progress.md's "Merged" lines; no worker or verifier for 24% of sampled time).
 
 **Boundaries.** Sources/VibeCore/LeadAdvance.swift and LeadWorkflow.swift (sensitive: audit), LeadPrompts (the
 lead's brief), docs/guide/project-lead.md, docs/process/backlog.md's format, tests. The lead-policy side (asking the
