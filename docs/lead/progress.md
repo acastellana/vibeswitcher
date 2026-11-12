@@ -2540,3 +2540,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 09:21 Planned agents-md-run-every: AGENTS.md: run every lint, and a load test command that works on any Mac
 - 2026-11-12 09:21 Started a worker on agents-md-run-every (auto → Claude: Claude weekly 60%, 26 points ahead of pace (limits ignored), not tight; Codex 13%)
 - 2026-11-12 09:21 Automatically (auto_advance): Started a worker on agents-md-run-every (AGENTS.md: run every lint, and a load test command that works on any Mac); its agent is auto, so it went to Claude: Claude weekly 60%, 26 points ahead of pace (limits ignored), not tight; Codex 13%.
+- 2026-11-12 09:39 Automatically (auto_advance): Started the audit of agents-md-run-every at 40439113 (It touches sensitive_paths (AGENTS.md), so it's treated as audit whatever its review says).
+- 2026-11-12 09:40 Released agents-md-run-every's worker (idle since its done report on 40439113) while its audit runs
+- 2026-11-12 09:40 Automatically (auto_advance): Released agents-md-run-every's worker, idle since its done report on 40439113, while its audit runs (ended pid 21339 (Worker: AGENTS.md: run every lint, and a load test command that works on any Mac)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-12 09:40 Planned docs-guide-development: docs/guide/development.md: the same lint filter and load-test line as AGENTS.md
