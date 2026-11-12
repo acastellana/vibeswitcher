@@ -11,7 +11,8 @@ import VibeCore
 struct PromptAuditDeskTests {
     let temp = Scratch()
     let start = Date(timeIntervalSince1970: 1_800_000_000)
-    let root = "/tmp/prompt-audit-project"
+    /// A made-up project folder: only its name is used (its transcripts are in the scratch home).
+    let root = "/Users/someone/dev/prompt-audit-project"
 
     final class Clock { var now: Date; init(_ now: Date) { self.now = now } }
 
