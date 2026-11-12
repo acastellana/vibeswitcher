@@ -59,6 +59,12 @@ swiftpm_offline_dependencies() {
     common=$(git rev-parse --path-format=absolute --git-common-dir 2> /dev/null) || return 0
     main=$(dirname "$common")/.build
     [[ $main != "$(pwd -P)/.build" && -f $main/workspace-state.json && -d $main/checkouts && -d $main/repositories ]] || return 0
+    # Linux: GNU cp has no -c; its clone is --reflink (auto: a plain copy where the file system can't clone).
+    if [[ $(uname -s) == Linux ]]; then
+        mkdir -p .build && cp -R --reflink=auto "$main/repositories" "$main/checkouts" "$main/workspace-state.json" .build/ \
+            && echo "SwiftPM dependencies: the main checkout's, cloned into .build (Codex's sandbox has no network to fetch them)"
+        return
+    fi
     mkdir -p .build && cp -cR "$main/repositories" "$main/checkouts" "$main/workspace-state.json" .build/ \
         && echo "SwiftPM dependencies: the main checkout's, cloned into .build (Codex's sandbox has no network to fetch them)"
 }
