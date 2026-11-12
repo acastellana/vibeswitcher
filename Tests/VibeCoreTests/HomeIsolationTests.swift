@@ -149,7 +149,12 @@ struct HomeIsolationTests {
         // Under `script` the hook has a terminal of its own; started in the background of a shell that exits at once,
         // it has no agent above it (a test run inside a Claude session would otherwise give it that session's TTY).
         let event = #"{"hook_event_name":"UserPromptSubmit","session_id":"\#(session)","cwd":"/tmp","prompt":"hi"}"#
+        #if os(Linux)
+        // util-linux's script: the file last, and the command one word after -c, run by $SHELL.
+        let script = #"SHELL=/bin/sh /usr/bin/script -q -c 'printf %s "$EVENT" | "$HOOK" claude' /dev/null </dev/null >/dev/null 2>&1 &"#
+        #else
         let script = #"/usr/bin/script -q /dev/null /bin/sh -c 'printf %s "$1" | "$2" claude' sh "$EVENT" "$HOOK" </dev/null >/dev/null 2>&1 &"#
+        #endif
         let (status, output) = try await Self.run("/bin/sh", ["-c", script],
                                             environment: ["HOME": home.path, "PATH": "/usr/bin:/bin", "EVENT": event, "HOOK": hook])
         #expect(status == 0, "\(output)")

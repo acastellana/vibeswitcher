@@ -339,7 +339,13 @@ struct ProcessTableTests {
     private func onATerminal(_ command: String) throws -> Process {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+        #if os(Linux)
+        // util-linux's script: the file last, and the command one word after -c, run by $SHELL.
+        process.arguments = ["-q", "-c", command, "/dev/null"]
+        process.environment = ProcessInfo.processInfo.environment.merging(["SHELL": "/bin/sh"]) { $1 }
+        #else
         process.arguments = ["-q", "/dev/null", "/bin/sh", "-c", command]
+        #endif
         process.standardInput = Pipe()
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
