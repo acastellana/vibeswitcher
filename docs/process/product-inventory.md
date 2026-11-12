@@ -401,6 +401,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 
 ### Sandbox sheets (`sheet NAME`)
 - `review-floor` — ReviewFloorSection — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
+- `sleep-notice` — SleepNoticeBanner — `Sources/VibeSwitcher/Sandbox.swift`
 - `toolchain-note` — ToolchainNoteView — `Sources/VibeSwitcher/MainWindow/SessionListView.swift`
 - `new-project` — NewProjectSheet — `Sources/VibeSwitcher/MainWindow/NewProject/NewProjectSheet.swift`
 - `menu-bar` — MenuBarStrip — `Sources/VibeSwitcher/Sandbox.swift`
