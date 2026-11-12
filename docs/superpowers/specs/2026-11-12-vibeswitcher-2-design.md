@@ -239,8 +239,8 @@ only in case, and on the Mac's case-insensitive file system the two would be one
 ### The platform layer
 
 Every system call the shared code makes goes through one module, `VibePlatform`: static functions, one
-implementation per system, compiled against glibc on Linux (musl is checked by the static build, after the
-bootstrap). It knows nothing of VibeSwitcher but the settings folder's rule, which a test ties to `VibeCore`'s, so it
+implementation per system, compiled against glibc on Linux (the static build, before the bootstrap, links the Swift
+runtime statically; musl is checked after it). It knows nothing of VibeSwitcher but the settings folder's rule, which a test ties to `VibeCore`'s, so it
 builds and is tested on Linux before anything else does. Nothing outside it imports Darwin, Glibc or an Apple-only
 framework, or uses `#if os`; a lint test (`PlatformLint`) enforces that on both systems. Its exceptions:
 `Sources/VibeCore/MacOnly/`, `PlatformExport.swift`'s one exported import, and the test files listed in each test
@@ -259,8 +259,8 @@ form and the name stays as a forward. The exact functions and every call site ar
 | Sockets, HTTP listener | Network.framework | POSIX sockets (the builder may choose swift-nio, pinned) |
 | Hashing, HMAC, ChaChaPoly, P-256 | CryptoKit | swift-crypto (same API; named on both systems so `Package.resolved` matches, linked only on Linux, pinned exact) |
 | Who is on the other end of a socket | audit token, `LOCAL_PEERTOKEN` (names the last sender) | `SO_PEERCRED` and the process's start ticks at accept, then `SCM_CREDENTIALS` on every read (stage 2); `SO_PEERPIDFD` where the kernel has it (6.5 and later; this machine has 5.15) |
-| "Is this the app?" | cdhash + HMAC under a keychain key | the host's own server child, by pid and start time; see [Security](#security) |
-| What the host starts sessions and parsers from | copies of itself under `~/.vibeswitcher/host` | its own image (`/proc/self/exe`), and images held open from its start |
+| "Is this the app?" | cdhash + HMAC under a keychain key | the connections the host makes for its own server child, through a connector the child inherits; see [Security](#security) |
+| What the host starts sessions and parsers from | copies of itself under `~/.vibeswitcher/host` | sealed copies in memory of its own image and its server's, loaded and hashed at its start |
 | Secret storage | login Keychain | see [Security](#security) |
 | Settings store | `UserDefaults` | a file under `~/.vibeswitcher` |
 | Load, cores, memory, disk | `sysctl`, `host_statistics` | `/proc/loadavg`, `/proc/meminfo`, `statvfs` |
@@ -270,7 +270,7 @@ form and the name stays as a forward. The exact functions and every call site ar
 | Notifications | UserNotifications | the browser: Web Notifications while a window is open, the existing web push otherwise |
 | Login shell and PATH | `LoginShell` | the same approach; no `launchctl` |
 | The shell that runs a branch's code | `/bin/zsh -f -c` (`Worktrees.swift`) | `/bin/bash --noprofile --norc -p -c`, with `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`, `PS4`, `BASH_XTRACEFD` and `BASH_FUNC_*` taken out of its environment; this machine has no zsh |
-| Tools (`git`, a shell) | `/usr/bin/git`, `/bin/zsh` hard-coded in 16 places | found on PATH (checked at start once the node calls `Platform.Tools.missing()`) |
+| Tools (`git`, a shell) | `/usr/bin/git`, `/bin/zsh` hard-coded in 16 places | the first `git` in a folder owned by root and writable by nobody else; `claude` by the absolute path its link resolves to; checked at start (`Platform.Tools.missing()`) |
 | The sessions' environment | today's list, `en_US.UTF-8` by default | no `SSH_AUTH_SOCK`, `WSL_INTEROP` or `DBUS_SESSION_BUS_ADDRESS`; `C.UTF-8` by default |
 | Images (`LeadImages`, `MenuBarDots`) | ImageIO, CoreGraphics | `LeadImages`: size and type read from headers, no decode **(call)**; `MenuBarDots` stays Mac-only |
 
@@ -302,11 +302,13 @@ timer", and stage 3's stores remove it after the bootstrap.
 ### The node's processes
 
 - **`vibeswitcher-host`**: the PTYs, the vault, the node's key, the devices' keys, and the check of every approval.
-  The root of trust. It starts the server and owns the listening sockets, which it hands to each server it starts (by
-  number, in an environment variable, as systemd's socket activation does). On Linux the server child is the app
-  (rule 6: a principal the host created): the host records its pid and start time when it starts it, takes any
-  connection from that process as the app, checks each message's sender, and restarts it, from the image it held at
-  its own start, when it exits.
+  The root of trust. It starts the server. On Linux the server child is the app (rule 6: a principal the host
+  created): the host starts it from a sealed copy it loaded and hashed at its own start, hands it a connector, takes
+  only the connections it makes through that connector as the app, checks each message's sender, and restarts it from
+  the same copy when it exits. **Deviation, recorded:** before stage 3's listeners the server binds its own Unix
+  socket under `~/.vibeswitcher/v2/` instead of the host owning it; the cost is that nothing listens at that path
+  between the server's death and its restart, which a worker could take (the command line's check of the server
+  refuses such a listener; the security document's T9).
 - **`vibeswitcher-server`**: the stores, the lead engine, the live protocol to clients and, later, peers. It can
   crash and be restarted without a session ending or an approval being forgeable. It makes itself non-dumpable as
   its first statement.
@@ -410,19 +412,19 @@ the security architecture document (`docs/superpowers/specs/2026-11-13-v2-securi
 
 Also required: per-message credentials on the host's socket (`SCM_CREDENTIALS`), since `SO_PEERCRED` is fixed at
 connect; the host a subreaper; host and server non-dumpable; reply rights type only into confined sessions; view
-rights get masked screens; the handover's state file owned by the host; logs without tokens, codes or terminal
-text; the wallet's signing page on an origin of its own. Before the bootstrap: per-message credentials, and the
-host, its parsers and the server non-dumpable. After it: the subreaper **(call)**, inside the sandbox's own process
-namespace, because a host that reaps adopted orphans takes exit statuses from its own code that waits for its
-children by pid, and adoption alone doesn't give an orphan back its session; the handover's state in sealed memory
-instead of a file; reply rights only into confined sessions; masked screens; the logs' lint. The stage 2 plan says
-what each deferral leaves open, and the security document lists it.
+rights get masked screens; the handover's state out of a worker's reach; logs without tokens, codes or terminal
+text; the wallet's signing page on an origin of its own. Before the bootstrap: per-message credentials; the host,
+its parsers and the server non-dumpable from their exec; the handover's state and secrets in sealed memory, so there is
+no state file at all on Linux. After it: the subreaper **(call)**, inside the sandbox's own process namespace, because
+a host that reaps adopted orphans takes exit statuses from its own code that waits for its children by pid, and
+adoption alone doesn't give an orphan back its session; reply rights only into confined sessions; masked screens; the
+wallet page's own origin; the logs' lint. The stage 2 plan says what each deferral leaves open, and the security
+document lists it (S11, S12).
 
 Measured on this machine (WSL2, kernel 5.15.167): there is no Yama, so any process of the user may ptrace any
 dumpable process of the user. Until the sandbox exists, non-dumpable host, server and parser processes are what keep
-a worker out of their memory. The socket buffer limit (`net.core.wmem_max`, 212992) caps the secret a handover can
-carry through a socket; until sealed memory replaces it, a vault bigger than that makes the handover fail and the host
-stay as it was.
+a worker out of their memory. The handover's secret goes through sealed memory, so the socket buffer limit
+(`net.core.wmem_max`, 212992) no longer caps it.
 
 **The plain mode** is the same without confinement: for machines that can't sandbox, for the tests and for CI. It
 holds against a worker that slips. `vibeswitcher doctor` and the first-run page say which mode a node is in and what
@@ -548,10 +550,10 @@ stages 1 to 4 are each cut to what a lead needs first, and the rest of each is t
 
 | Stage | Before the bootstrap | After it, built by the lead |
 | --- | --- | --- |
-| 1 | The platform services a lead's path uses (processes, spawning, file watching, clocks and `stat`, load and cores, the settings store with its format, tools on PATH), swift-crypto, the hook and tool server, `scripts/test.sh` on Linux, `VibeCoreTests` green, `vibeswitcher status` as a local probe, `vibeswitcher hooks install` | Dev previews' proxy, image thumbnails, power and keep-awake, `doctor`, the adapters with their version ranges and nightly run, resources inside the binaries, format versions in every other file, the static build and the binary decision, the parity file |
-| 2 | The security architecture document; the host with PTYs, parsers, handover, per-message credentials, the server child as the app, the host, parsers and server non-dumpable, launchers and restarts from images held at start, the handover's target checked, the project allow-list | The sandbox itself (and in it the subreaper), the egress proxy, sessions identified by an inherited socket and clones for workers (both proposed, S2-D9 and S2-D10, until the user answers), the handover through sealed memory, strong mode |
+| 1 | The platform services a lead's path uses (processes, spawning, file watching, clocks and `stat`, load and cores, the settings store with its format, tools on PATH), swift-crypto, the hook and tool server, `scripts/test.sh` on Linux, `VibeCoreTests` green, `vibeswitcher status` as a local probe, `vibeswitcher hooks install` | Dev previews' proxy, image thumbnails, power and keep-awake, `doctor`, the adapters with their version ranges and nightly run, resources inside the binaries, format versions in every other file, the binary decision, the parity file (the static build moved before the bootstrap: stage 4's install) |
+| 2 | The security architecture document; the host with PTYs, parsers, handover through sealed memory, per-message credentials, the server child as the app through its connector, the host, parsers and server non-dumpable from their exec, everything the host runs from sealed copies, the handover's target checked, the project allow-list | The sandbox itself (and in it the subreaper), the egress proxy, sessions identified by an inherited socket, clones for workers, strong mode, the keeper's sealed copy, GitGuard's check against the vault (each awaiting the user's answer: [the one list](../plans/2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user)) |
 | 3 | `vibeswitcher-server` with a small versioned request/reply protocol on a Unix socket, and the command line as its client | The sessions and chats stores with snapshot and delta, the WebSocket, device keys and pairing, the terminal spike, the two-node smoke test |
-| 4 | The lead engine (a plan of its own), the merge gate, `auto_advance`, limits, `vibeswitcher lead` and answering from the command line, `vibeswitcher start`, the install step, the config seal's Linux list | The team seam with clones, boards and cards as stores, approvals as device signatures, launch rules checked against the adapters |
+| 4 | The lead engine (a plan of its own), the merge gate, `auto_advance`, limits, `vibeswitcher lead` and answering from the command line, `vibeswitcher start`, the install step with the static build, the config seal's Linux list | The team seam with clones, boards and cards as stores, approvals as device signatures, launch rules checked against the adapters |
 
 Rules 10 and 11 hold before the bootstrap only for the build's identity (the install's `build-info`) and the files
 the node adds; the rest is the lead's. Moving sessions identified by an inherited socket and clones for workers to
@@ -603,8 +605,8 @@ Before the bootstrap:
 - `vibeswitcher status`, as a local probe, and `vibeswitcher hooks install`.
 
 After it (the lead's): resources inside the binaries (rule 10); a format version in every other file the core writes
-(rule 11); the agent adapters (rule 12) and their nightly run; `vibeswitcher doctor`; the static build and the
-binary decision.
+(rule 11); the agent adapters (rule 12) and their nightly run; `vibeswitcher doctor`; the binary decision. (The static
+build is before the bootstrap now, in stage 4's install.)
 
 Done when: `scripts/test.sh` is green on Ubuntu for the core, and `vibeswitcher status` shows a real session going
 from working to needs-you to done.
@@ -617,14 +619,16 @@ Before the bootstrap ([plan](../plans/2026-11-13-v2-stage-2-session-host.md)):
   requirements above, in the detail a builder needs, each saying whether it is needed before the bootstrap.
 - PTYs and session start, the parsers, the replay buffers, handover; a session's terminal named as the process table
   names it.
-- The host's socket with per-message credentials; the server child as the app; the host, parsers and server
-  non-dumpable; what the host executes held from its start; the project allow-list; the plain mode.
+- The host's socket with per-message credentials; the server child as the app, through its connector; the host,
+  parsers and server non-dumpable from their exec; what the host executes run from sealed copies loaded at its start;
+  the handover through sealed memory; the project allow-list; the plain mode.
 - `VibeHostTests` and the security audit's tests pass on Linux, with the new ones; the lead's tool server lists its
   tools under a host.
 
-After it (the lead's): sessions identified by an inherited socket (proposed, S2-D9, until the user answers); the
-sandbox and the clone for team sessions; the egress proxy; the subreaper; the handover through sealed memory; strong
-mode; `vibeswitcher attach ID`.
+After it (the lead's): sessions identified by an inherited socket (S2-D9); the sandbox and the clone for team
+sessions; the egress proxy; the subreaper; strong mode; the keeper's sealed copy and GitGuard's check against the
+vault; `vibeswitcher attach ID` (the security document's S12; the user is asked once, in
+[the one list](../plans/2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user)).
 
 Done when, before the bootstrap: a `claude` session under the host survives its client quitting, a handover and a
 killed parser. After it: from inside a confined session, another session's screen, the node's state and the host's
@@ -654,8 +658,8 @@ sessions surviving a server restart; and the terminal spike meets its budget in 
 Before the bootstrap:
 
 - The lead engine, rebuilt from the app's code ([outline](../plans/2026-11-13-v2-bootstrap-path.md#the-engine)).
-- The tool server's keeper, the merge gate, `auto_advance` on file watches, the node's limits, the config seal's
-  Linux list.
+- The merge gate, `auto_advance` on file watches, the node's limits, the config seal's Linux list. The tool server's
+  keeper as it is (its sealed copy after the bootstrap).
 - `vibeswitcher lead FOLDER --goal "…"`, and answering a lead's question from the command line; `vibeswitcher start`
   and the install step.
 - End-to-end runs with real agents on scratch repositories, on Sonnet or smaller.
@@ -729,7 +733,7 @@ of the branch on a real Mac; what that finds is fixed before anything new is bui
 | A machine can't sandbox | The plain mode, said plainly; signed approvals hold everywhere |
 | Linux's Foundation behaves differently | The existing tests run on both; each difference becomes a test or a `VibePlatform` service |
 | `--build-system native` is deprecated in Swift 6.4 | The toolchain is pinned; checked at each toolchain bump |
-| musl isn't checked until the static build (after the bootstrap) | The static build job and the hook timing run, when they come |
+| musl isn't checked before the bootstrap (the install's static build links the Swift runtime against glibc) | A musl build job and the hook timing run, after the bootstrap |
 | Hosted-Mac failures with no cause found, in new platform code | Each skip carries the experiment that will find its cause, and `docs/process/v2-mac-tasks.md` lists it for the real Mac; at most two pushes go to one before Linux work goes on |
 | No Yama on WSL2: any of the user's processes may ptrace another | The host, its parsers and the server non-dumpable; the sandbox after the bootstrap |
 | The engine, rebuilt from `LeadController`, misses or changes something the app does | The app's tests ported as the engine's spec; the port ledger |
@@ -780,13 +784,10 @@ For the user:
 1. **Pre-releases for other people from `v2`** (stage 8), before the branch lands, or nothing public until then.
 2. **What the renewed phone app keeps** from today's (stage 7 starts by listing it).
 3. **First-version cuts**: dictation, the spoken briefing, Statistics, dev previews and freeze reports are "later".
-4. **The stage 2 plan's decisions marked "the user confirms"** (the Linux app principal and what it leaves open before
-   the sandbox, chiefly that a worker can restart the host into its own code and can act as any session; the vault
-   in memory, with one `config accept` after every host restart; the subreaper deferred; the handover's file kept,
-   checked by its hash; sessions by inherited socket and clones after the bootstrap; the project allow-list; the
-   sessions' environment), and how the node starts (`Restart=no`) and stays up on WSL (a measurement only the user
-   can make). Put once, together, as [the bootstrap path](../plans/2026-11-13-v2-bootstrap-path.md#what-the-user-is-asked)
-   says.
+4. **Before the bootstrap:** the decisions of the security architecture and the plans, and what only the user can do
+   on the machine, are one list:
+   [Decisions awaiting the user](../plans/2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user). Its answers
+   are recorded here, under Decided, before stage 2's Task 2.
 
 ## Left to the builder
 
@@ -794,7 +795,8 @@ For the user:
 - The rendering library and terminal emulator, after the spike.
 - The change-stream type in `VibeNode`.
 - How the generated wire types are produced.
-- The sandbox's mechanism (bubblewrap, or the namespaces directly), within what [Security](#security) requires.
+- The sandbox's mechanism, within what [Security](#security) requires: the namespaces directly, through
+  `CVibePlatform`'s shim (bubblewrap isn't installed here, and agents install nothing; the security document's S12).
 - The binary decision: one binary or several, from stage 1's static build and the hook's start-up time, after the
   bootstrap. Whichever it is, the host never trusts its server by the executable's identity.
 - The order of slices inside each stage, and their contracts.

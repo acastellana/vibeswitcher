@@ -2,9 +2,11 @@
 
 Status: draft, written for stage 2's Task 1 ([plan](../plans/2026-11-13-v2-stage-2-session-host.md#task-1-the-security-architecture-document)).
 Attacked by four reviewers on 2026-11-13 and revised; their findings and the answers are in
-[Answers to the attack review](#answers-to-the-attack-review). **Stage 2's Task 2 doesn't start until the review record
-of Task 1, Step 3 is written, the plan takes [the changes it needs](#changes-the-stage-2-plan-needs), and the user's
-answers to [the decisions](#awaiting-the-user) are recorded in the design's Decided section (Step 4).**
+[Answers to the attack review](#answers-to-the-attack-review). Revised again in the consolidation of 2026-11-13 to take
+the plans' changes back (the engine plan's request table and journal, the bootstrap path's unit and switch rule, the
+stage 2 plan's keeper and GitGuard moves, now decisions 18 and 19). **Stage 2's Task 2 doesn't start until the
+review record of Task 1, Step 3 is written, the plan takes [the changes it needs](#changes-the-stage-2-plan-needs), and
+the user's answers to [the decisions](#awaiting-the-user) are recorded in the design's Decided section (Step 5).**
 
 This is the document the host's port is built against. It takes the design's five security requirements
 ([design, Security](2026-11-12-vibeswitcher-2-design.md#security)) and the stage 2 plan's decisions (S2-D1 to S2-D13)
@@ -19,7 +21,9 @@ review's security findings ([record](../../process/reviews/v2-design-review-2026
 the code. Code references are at `6a590784` unless a line says otherwise.
 
 Lines marked **(call)** are the author's choices; each can be overruled. Lines marked **The user confirms** are put to
-the user once, with the bootstrap path's questions ([Decisions](#decisions)).
+the user once, in the bootstrap path's
+[Decisions awaiting the user](../plans/2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user), the one list;
+"decision N" here is its tag DN.
 
 ## Reading this document
 
@@ -134,7 +138,7 @@ attack checks it.
 
 **Tests to write:** `SecurityDocumentLintTests.everyNamedTestExists`, `everySectionSaysWhatItDoesNotPromise`,
 `everySectionSaysWhenItIsNeeded` (Task 1). E1: `StartCommandTests.startRefusesWhileInteropIsOnUnlessTold`,
-`statusSaysPlainModeAndInterop`.
+`NodeFactsTests.statusSaysPlainModeAndInterop`.
 
 ## Principals: who may do what, and how the host knows
 
@@ -171,7 +175,7 @@ the Mac the audit token changes; S5).
 | --- | --- | --- | --- |
 | **The app**: the host's server child | the connections the host made for it through its inherited connector (S2) | everything `.app` may (below) | it *is* the server |
 | **The user at the command line** | on the server's socket: same uid, and the "user's voice" rule (S3) | doesn't connect (rule 2); if a process of the user does, it is `.unknown` | the requests S3 lists |
-| **A session with a role** (lead, worker, verifier) | ancestry or terminal, at accept (S4); the role is the vault's, bound by the lead's grant | its own session and those it started; a lead its team; the vault by role | `status`, `questions`; nothing else |
+| **A session with a role** (lead, worker, verifier) | ancestry or terminal, at accept (S4); the role is the vault's, bound by the lead's grant | its own session and those it started; a lead its team; the vault by role | `status`, `questions`; and from the lead's tool server only, `question.post`, `question.revise`, `question.withdraw`, each carrying the host's `.lead` seal (the engine's EN-D10) |
 | **A session without a role** | as above | its own session and those it started; the vault as a session that holds nothing | `status`, `questions`; nothing else |
 | **An unknown local process** (same uid, in no session) | none of the above | metadata and the vault's open reads only | `status`, `questions`; the user's-voice requests if it passes S3's rule |
 | **Another user** | `SO_PEERCRED` uid | closed at accept | closed at accept |
@@ -215,12 +219,15 @@ the Mac the audit token changes; S5).
   hooks; never its lead's terminal, a verdict, or another team; on Linux no `spawn`.
 - **Verifier.** `submitVerdict` (or its ballot) for the task it audits, only from its tool server: what its Bash runs
   is branch code, no session's (`BranchCode.prefixVariable`, `VerifierBranchCodeHostTests`); on Linux no `spawn`.
-- **Any of them, on the server's socket:** `status` and `questions` only.
+- **Any of them, on the server's socket:** `status` and `questions`; the lead's tool server also posts its questions
+  (`question.post`, `question.revise`, `question.withdraw`), taken only with the host's valid `.lead` seal over the
+  post, from the session the vault binds to the lead role, not under a `BranchCode` runner (EN-D10).
 - **A worker that tries, before the sandbox:** acts as any session, the lead and the verifiers included, by ptrace of
   that session's agent or tool server and `pidfd_getfd` of its descriptors (both dumpable, no Yama). It also has routes
   that need no ptrace and work on a machine where Yama restricts it: a launch file the lead wrote for a role (the
-  prompt, while it is still a file), the lead's accepted git hooks copy between GitGuard's check and git's run, and a
-  build renamed over `vibeswitcher-mcp` that the tool servers switch to in place (S9, S10). So it can call the lead's
+  prompt, while it is still a file), the lead's accepted git hooks copy and its record, rewritten together (no check
+  before the bootstrap, decision 19), and a file written over a running tool server's `vibeswitcher-mcp` in its
+  commit's folder, which its `BinaryWatch` switches to or its keeper restarts (decision 18) (S9, S10). So it can call the lead's
   tools (`start_worker`, `merge`, the vault's lead requests) and cast a verifier's pass. Verdicts and merges are guard
   rails on Linux before the sandbox. Not promised; S11.
 
@@ -287,8 +294,10 @@ socket's path is ever the app.
 - When the child exits: the connector closes, every app connection becomes `.unknown`, the child is reaped, and it is
   started again with a fresh connector after 1 s, doubling to 30 s, reset after 10 minutes up. While it runs the host
   doesn't exit idle.
-- The server's first statements: close the inherited image descriptor, harden (already non-dumpable from its exec; kept
-  for a build that runs from a readable file), check `TracerPid` and exit if traced, then settle SIGPIPE. **(call)** The
+- The server's first statements, in the order the engine plan's E1 fixes: close the inherited image descriptor, harden
+  (already non-dumpable from its exec; kept for a build that runs from a readable file), exit if traced, mark the
+  connector close-on-exec, settle SIGPIPE; then its root, its host socket's check and git, and only then the
+  connector's registration. **(call)** The
   server never execs: a lint refuses `execve`, `Platform.Spawn.replaceProcess` and `BinaryWatch` in
   `vibeswitcher-server`.
 - **(call)** **The host keeps its path.** The user's host watches its socket's folder (`FolderWatch+Linux`) and, at
@@ -301,7 +310,8 @@ socket's path is ever the app.
   journal. The command line reads `journalctl --user -u vibeswitcher-node` itself (with systemd's own start and stop
   lines and `systemctl --user show -p Result,ExecMainStatus,ExecMainStartTimestamp`) and shows starts, stops and
   server restarts that no `vibeswitcher start` or `stop` entry explains, and how the previous host ended (signal,
-  OOM, exit code), until the user acknowledges them (`status --ack`). What the server says about itself is no
+  OOM, exit code), until the user acknowledges them (`status --ack`, a journal entry the command line writes, never a
+  server request). What the server says about itself is no
   mitigation once the server is seized; the journal is. Task 8 (stderr lines); E1 and E8 (the command line).
 - The Mac is unchanged: `identify` still asks `AppCode.runs` (cdhash) and the app's HMAC proof; there is no connector
   there.
@@ -401,18 +411,26 @@ question text is still the lead's (S1, item 3).
 app-only write) before it is acted on, and a restarted server takes answers and holds only from there, asking again
 for anything it can't find. Nothing in a file the server or the engine keeps is taken as the user's answer.
 
-Every request the socket takes, with the voice it needs; anything not listed is refused:
+Every request the socket takes, with the voice it needs; anything not listed is refused. The engine plan's
+[protocol](../plans/2026-11-13-v2-engine.md#the-protocol) has the same list with each request's arguments. "Typed" is
+the code the command line asks for on its terminal: checked by the server where the request names a card, by the
+command line alone where it doesn't (a guard rail):
 
-| Request | Voice | Why |
-| --- | --- | --- |
-| `status`, `questions` | anyone of the uid | reads; no secret in them |
-| `start` (through the server, once it runs), `stop` | the user's | ends or starts every session |
-| `status --ack` | the user's | clears the mark of a start or restart the user didn't make |
-| `lead FOLDER --goal …` | the user's | opens an app session, whose git commands `isYours` treats as the user's; refused on a fresh vault until `config accept` and `base accept` are done (S7) |
-| `answer CARD TEXT`, `hold ID` | the user's, typed | the user's answer to the lead, an approval included, bound to the card's id |
-| `config held`, then `config accept ID`; `base accept` | the user's, typed | takes held config or a base move as the user's (S7) |
-| `hooks install`, `hooks remove` | the user's, typed | written as the app (`vault.appWrite`), so sealed as the user's |
-| any later request that changes state | the user's, typed | until signed approvals |
+| Request | Voice | Typed | Why |
+| --- | --- | --- | --- |
+| `status`, `questions` | anyone of the uid | no | reads; no secret in them |
+| `start` (once the node runs: it prints S11 once), `stop` | the user's | `stop` | ends or starts every session |
+| `lead FOLDER --goal …` | the user's | yes | opens an app session, whose git commands `isYours` treats as the user's; refused on a fresh vault until `config accept` and `base accept` are done (S7) |
+| `answer CARD TEXT`, `hold CARD` | the user's | yes (the card's) | the user's answer to the lead, an approval included, bound to the card's id |
+| `config held`, `base show FOLDER [--from COMMIT]` | the user's | no | change nothing; each makes the card the next request takes |
+| `config accept CARD`, `base accept CARD`, `base keep CARD` | the user's | yes (the card's) | takes held config or a base move as the user's (S7) |
+| `hooks install`, `hooks remove` | the user's | yes | written as the app (`vault.appWrite`), so sealed as the user's |
+| `build.switch` (`switch`, `rollback`) | the user's | yes | hands the host over to another installed build (S8; the bootstrap path's step 8) |
+| `question.post`, `question.revise`, `question.withdraw` | the lead's tool server, with the host's `.lead` seal | no | the lead's questions, never read from the board |
+| any later request that changes state | the user's | yes | until signed approvals |
+
+`status --ack` and `start`'s acknowledgment of S11 are not requests: the command line writes each to the journal
+itself, after its own typed code (the engine's EN-D15), so a seized server can't clear them.
 
 Each accepted user's-voice request is written to the journal by the command line (ids and hashes only: the journal is
 readable by the `adm` group, so no answer text, goal or screen content goes there) and shown by `status`, with its
@@ -441,7 +459,7 @@ process that a process of the user can't change.
   shell for the user's keys). Any of these can send the user's "no" as yes, or turn it into `config accept`.
 - WSL interop, while it is on: `wsl.exe` starts a process in `/init.scope`. `ssh localhost`, if an ssh server runs.
 - A worker can replace the command line itself: `~/.vibeswitcher/v2/builds/<commit>/bin/vibeswitcher` is the user's
-  file, and running it by absolute path (the bootstrap path's question 6) only defeats PATH.
+  file, and running it by absolute path (the bootstrap path's machine steps) only defeats PATH.
 - A worker that restarted the unit with its own files is the server, and the check above passes.
 - The text of the lead's questions: a turned lead asks what it likes. Only the card's facts are the engine's.
 
@@ -455,16 +473,16 @@ Acceptable only on VibeSwitcher's own repository, with interop off, until stage 
 **Held by:** planned: the engine plan task E1, E4, E6.
 
 **Tests to write:** E1: `theServerIsNotDumpable`, `anUnknownRequestIsAnsweredNotFatal`,
-`statusThroughTheServerMatchesTheProbe`, `aSessionsProcessCannotStopTheNode`, `anUnlistedRequestIsRefused`,
-`anAcceptedAnswerIsShownByStatus`, `aRequestFromAnotherSenderOnTheServersSocketIsRefused`,
+`statusThroughTheServerListsWhatTheProbeLists`, `aSessionsProcessCannotStopTheNode`, `anUnlistedRequestIsRefused`,
+`anAcceptedRequestIsShownByStatus`, `aRequestFromAnotherSenderOnTheServersSocketIsRefused`,
 `theServersSocketIsTheUsersAlone`, `theCommandLineRefusesAServerThatIsntTheHostsChild`,
 `theCommandLineRefusesADumpableListener`, `anAnswerFromTheNodesCgroupIsRefused`,
 `anAnswerFromATransientUserUnitIsRefused`, `aPeerWhoseCgroupCantBeReadIsNotTheUser`,
 `aPeerWhoseEnvironmentCantBeReadIsNotTheUser`, `aStateChangeWithNoTerminalIsRefused`. E4:
 `aSessionsProcessCannotStartALead`, `aLeadIsRefusedOnAFreshVaultUntilAccepted`. E6:
 `anAnswerFromASessionsProcessIsRefused`, `anAnswerFromAProcessCarryingASessionMarkerIsRefused`,
-`anAnswerFromBranchCodeIsRefused`, `anApprovalCardIsBuiltFromGitAndTheVault`, `aQuestionWrittenToTheBoardIsNotShown`,
-`anAnswerWrittenToTheServersFilesIsNotTakenAfterARestart`. Step 8: `aSessionsProcessCannotInstallHooks`.
+`anAnswerFromBranchCodeIsRefused`, `anApprovalCardIsBuiltFromGitAndTheVault`, `aQuestionWrittenToTheBoardIsNotShown`.
+E8: `anAnswerWrittenToTheServersFilesIsNotTakenAfterARestart`. Step 8: `aSessionsProcessCannotInstallHooks`.
 
 ## S4. Session identity
 
@@ -478,8 +496,11 @@ Acceptable only on VibeSwitcher's own repository, with interop off, until stage 
   Merge's, audits' and init's runs start the wrapper in a POSIX session of its own (`Worktrees.swift:401`). **A
   verifier's commands don't, today**: `BranchCode.runPrefix` execs the wrapper with no `setsid`, so a command that
   double-forks without `setsid` keeps the verifier's terminal and the terminal rule names the verifier. **(call)** On
-  Linux, `runPrefix` calls `setsid()` before its exec (Task 10, measured against Claude Code's timeout and interrupt in
-  Task 12); the Mac is unchanged and gets a line in `docs/process/v2-mac-tasks.md`.
+  Linux, `runPrefix` starts the command as a new child in a POSIX session of its own (`Platform.Spawn`, group
+  `.ownSession`), waits for it, exits with its status and passes SIGTERM, SIGINT and SIGHUP on to its process group
+  (stage 2's Task 10c: `setsid()` in place would fail with `EPERM` in a caller that already leads its process group).
+  A SIGKILL to the waiting process can't be passed on; whether Claude Code's timeout and interrupt still end the
+  command is measured in Task 12. The Mac is unchanged and gets a line in `docs/process/v2-mac-tasks.md`.
 - **(call, new; Task 6)** **A session's terminal is its own from the start.** On Linux the launcher exits 127 when
   `TIOCSCTTY` fails or `tcgetsid(0)` isn't its pid (today `PTYSpawn.swift:16` ignores the result), and the host counts
   a session live only once `TIOCGSID` on the master names the launcher's pid. Otherwise an escaped worker that ran
@@ -529,11 +550,11 @@ that need no ptrace.
   mode is after the bootstrap (S12).
 - Whatever a session's program passes its descriptors to is that session, as its descendants are today.
 
-**Before the bootstrap:** yes (today's rule on Linux, with the terminal, token and `setsid` fixes); no (the session
-connector).
+**Before the bootstrap:** yes (today's rule on Linux, with the terminal, token and own-session fixes); no (the
+session connector).
 
-**Built in:** stage 2, Tasks 4b, 5 and 6; `runPrefix`'s `setsid` in Task 10; the connector after the bootstrap, with
-the sandbox.
+**Built in:** stage 2, Tasks 4b, 5 and 6; `runPrefix`'s own session in Task 10; the connector after the bootstrap,
+with the sandbox.
 
 **Held by:** `LeadVaultHostTests.aWorkersShellCantGiveAVerdictSealAsTheUserOrTypeIntoTheLead`,
 `LeadVaultHostTests.aWorkerCanReadItselfButCannotReadOrTypeIntoItsLeadOrAnotherProject`,
@@ -546,7 +567,8 @@ the sandbox.
 `aProcessOnTheSessionsTerminalIsThatSessions`, `theHookStateFileOfASessionIsDirectlyInState`,
 `aProcessThatTookASessionsTerminalFirstIsNotThatSession`, `aLauncherThatCantTakeItsTerminalExits`,
 `aReusedProgramPidIsNotTheSession`, `anAncestorYoungerThanItsChildBreaksTheChain`. Task 10:
-`VerifierBranchCodeHostTests.anEscapedVerifierCommandWithoutSetsidIsNobodys`. With the connector:
+`VerifierBranchCodeHostTests.anEscapedVerifierCommandWithoutSetsidIsNobodys`,
+`BranchCodeTests.aCommandGetsItsOwnSessionWhenItsCallerLeadsAGroup`. With the connector:
 `aConnectorConnectionIsItsSession`, `branchCodeHasNoConnector`, `theConnectorSurvivesAHandover`, and the measurement
 `claudePassesTheConnectorToItsToolServerAndHooks`.
 
@@ -555,7 +577,8 @@ the sandbox.
 **Decision.** S2-D4. The host's listener has `SO_PASSCRED` (`Platform.Sockets.enableCredentials`) before its first
 accept (in `start()` and `start(restoring:)`), so every accepted connection carries senders from its first byte; the
 host's ends of connector connections get it at creation. Each read is `Platform.Sockets.receive`, which stops where
-the sender changes, so one read never holds two senders' bytes. The rule, `HostServer.senderKeepsIdentity(accepted:sender:)`:
+the sender changes, so one read never holds two senders' bytes. The rule, `SenderCheck.keepsIdentity(accepted:sender:)`
+(stage 2's Task 7, a `V2/` file reached by one hook from `onRead`; `checkPeer` keeps its body):
 
 - a sender whose token is the accepted one (for an app connection, the server child's) keeps the connection's
   identity;
@@ -721,18 +744,21 @@ of a lead seeds the floor from `workflow.md` with `onlyIfUnset` (`LeadVault.swif
 the branch is at. So on Linux, **(call, extended)**:
 
 - `LeadVault.Book.holdsFirstLook` covers every record: the home seal, the main checkout's seal, the guarded settings
-  (an unrecorded key is held, not recorded) and the floor (none is seeded from `workflow.md` on a fresh vault). It is
-  kept in the vault's state, so a handover before the first look keeps it; it is true when the vault holds no restored
-  secrets (`main.swift` on Linux), false by default (the Mac is unchanged).
+  (an unrecorded key is held, not recorded) and the floor (none is recorded, from `workflow.md` or anyone, while
+  its root is held). **Each root is held until the user's accept for that root** (the app's `checkConfig(root:shown:)`
+  with the card's hashes), so a second project's first look is never sealed by the first one's accept; the home seal
+  is held until the first accept. It is kept in the vault's state, so a handover before the first look keeps it; it
+  is true when the vault holds no restored secrets (`main.swift` on Linux), false by default (the Mac is unchanged).
 - **The user accepts in two steps.** `vibeswitcher config held` lists everything held, each with its change time
   (ctime, which `touch` can't set back), size, hash prefix and, where a previous accept is known, what changed
   (below); a guarded key shows its value (the `test_command` text, the `merge_policy`); the floor shows the values
-  `workflow.md` proposes. It prints an id bound to those hashes. `config accept ID` seals exactly those; anything
-  changed since is held again.
+  `workflow.md` proposes. It prints a card bound to those hashes. `config accept CARD` seals exactly those (anything
+  changed since is held again), and only then records the floor shown (the engine's EN-D7).
 - **`lead` is refused on a fresh vault until `config accept` and `base accept` are done.** The lead's own start is
   otherwise never held, so a lead started first would load a planted hook or settings before anything was accepted.
-- **`base accept` shows what moved**: `git log <last accepted head>..<now>` for the lead's branch, or from a head the
-  user names.
+- **`base show FOLDER [--from COMMIT]` shows what moved**: `git log <from>..<now>` for the lead's base, from the head
+  the user names, else the head the vault records, else (after a host restart, when the vault lost it) the snapshot's
+  head marked unverified. `base accept CARD` records the head that card showed.
 - **A diff aid, not a lock**: an unsealed "last accepted" snapshot under `~/.vibeswitcher/v2` (hashes, guarded values,
   the floor, each lead's last head), written at each accept. It turns "everything is new" into "these three changed";
   a worker can rewrite it, so the user reads the values, not just the marks.
@@ -756,8 +782,9 @@ time: before a worker or verifier starts, after a merge's tests, at accept).
 state); the engine plan's E4 (`lead` refused), E8 (the restart path, `config held`/`accept`, `base accept`, the
 snapshot); strong mode after the bootstrap.
 
-**The user confirms:** that a host restart ends the lead's team state, and that after every host restart the user runs
-`config held`, `config accept ID` and `base accept`, reading the values, before starting the lead again.
+**The user confirms:** decision 3: a host restart ends the lead's team state, and after every host restart the user
+runs `config held`, `config accept CARD`, `base show FOLDER [--from COMMIT]` and `base accept CARD`, reading the values,
+before starting the lead again.
 
 **Held by:** `VaultHandoverTests.grantsVerdictsAndSealsSurviveAHandoverAndAWorkerIsStillRefused`,
 `KeychainLintTests.onlyTheKeyStoresCallTheKeychain`; planned: stage 2 plan task 10.
@@ -765,10 +792,11 @@ snapshot); strong mode after the bootstrap.
 **Tests to write:** Task 10: `ConfigSealFirstLookTests.aVaultThatHoldsItsFirstLookHoldsEveryHomeFile`,
 `aVaultThatDoesntSealsItsFirstLookAsToday`, `aFreshVaultHoldsChangedGuardedSettings`,
 `aFreshVaultHoldsTheCheckoutsGitHooks`, `aFreshVaultSeedsNoFloorFromWorkflow`,
-`aVaultHandedOverBeforeItsFirstLookStillHoldsIt`. E4: `aLeadIsRefusedOnAFreshVaultUntilAccepted`. E8:
+`aVaultHandedOverBeforeItsFirstLookStillHoldsIt`, `aRootsAcceptLetsItsFloorBeRecordedAndHoldsTheNext`. E4: `aLeadIsRefusedOnAFreshVaultUntilAccepted`. E8:
 `aHostRestartSaysTheTeamIsGone`, `aHostRestartHoldsWorkersUntilTheConfigIsAccepted`,
 `aStartTheUserDidntMakeIsShownUntilAcknowledged`, `configAcceptSealsOnlyWhatItShowed`,
-`configHeldShowsChangeTimesSizesAndHashes`, `baseAcceptAfterARestartShowsWhatMoved`.
+`configHeldShowsChangeTimesSizesAndHashes`, `baseAcceptAfterARestartShowsWhatMoved`,
+`configAcceptRecordsTheFloorWorkflowProposes`.
 
 ## S8. The handover
 
@@ -787,9 +815,10 @@ memory and writes no file.
   no hash is needed. The state holds every session's output ring and pending input (`HostedSession.saved`), which is
   why it must not be a file.
 - **The handover target and the new server image** are sealed copies too (S9): the host loads the target once,
-  checks its hash against its build's `build-info`, and probes and execs that copy; it loads the same build's
-  `vibeswitcher-server` the same way and passes it with the state. The new image restarts the server from it once
-  idle, so after a switch the host and the server are the same commit.
+  checks its hash against its build's `build-info`, and probes and execs that copy; in the user's host (an install
+  root) it loads the same build's `vibeswitcher-server` the same way and passes it with the state. The new image
+  restarts the server from it once idle when its hash differs from the running server's, so after a switch the host
+  and the server are the same commit. A scratch host carries no server copy, and its server runs on.
 - **The fallback** is the old image's sealed copy (S9), with the same descriptors and the same `--handover` path. It
   reads the state and the secrets as the new image would have. `goBack` today re-runs the fallback with the same path
   and, when that fails too, unlinks it and exits, hanging up every session (`main.swift:92-102`); with sealed memory
@@ -836,8 +865,8 @@ task 8, task 9.
 
 **Tests to write:** Task 8: `aForgedServerChildInTheStateIsNotTheApp`, `aSwitchBringsTheNewBuildsServer`. Task 9:
 `HandoverLinuxTests.aHandoverWritesNoFile`, `theStateAndSecretsAreSealed`,
-`aFallbackAfterAFailedRestoreKeepsTheVault`, `aFallbackAfterAFailedRestoreKeepsEverySession`,
-`theUsersHostIgnoresTestSecretFlags`, `aDowngradeIsRefused`, `aFreshHostRemovesAStaleStateFile`. Step 8:
+`aFallbackAfterAFailedRestoreKeepsTheVault`, `aFallbackAfterAFailedRestoreKeepsEverySession`, `aDowngradeIsRefused`,
+`aFreshHostRemovesAStaleStateFile`; `HostHardeningTests.theUsersHostIgnoresTestSecretFlags`. Step 8:
 `aSwitchWhileAWorkerRunsIsRefused`.
 
 ## S9. What the host executes
@@ -862,7 +891,9 @@ task 8, task 9.
   its kin from root-owned `/lib`. The unit and the host's children get `SWIFT_BACKTRACE=enable=no`, so a crash
   doesn't start `swift-backtrace` from the toolchain.
 - **The tool server's keeper** (`MCPKeeper`, which restarts a killed tool server from `Bundle.main.executablePath`,
-  the file on disk, `vibeswitcher-mcp/main.swift:27`) restarts it from a sealed copy it made at its own start.
+  the file on disk, `vibeswitcher-mcp/main.swift:27`) keeps doing so until the sandbox (decision 18; S12 item 14): a
+  copy breaks the five places `vibeswitcher-mcp` reads its own path, and before the sandbox a worker that can write
+  the install folder can ptrace the tool server anyway (T1). The seal watches the install folder.
 - In the user's host (`HostServer.Config.installRoot` = `~/.vibeswitcher/v2/builds`), a handover target must be inside
   the install folder and match the SHA-256 recorded for it in that build's `build-info`
   (`{"format":1,"commit":…,"binaries":{…},"swift":…,"resolved":…}`, a newer format refused), checked on the sealed
@@ -877,11 +908,16 @@ task 8, task 9.
     host exit ends every session, as the vault's loss already ends every team; `TimeoutStopSec=` set. The comment
     "Sessions outlive the host either way" (`main.swift:146`) is the Mac's;
   - `UnsetEnvironment=LD_PRELOAD LD_AUDIT LD_LIBRARY_PATH GCONV_PATH BASH_ENV ENV VIBESWITCHER_HOME
-    CFFIXED_USER_HOME SWIFT_BACKTRACE`, then `Environment=SWIFT_BACKTRACE=enable=no`, so `systemctl --user
-    set-environment` can't reach the host's start; `start` and `status` compare `systemctl --user show-environment`
-    with the expected set and name anything extra;
-  - `Environment=HOME=…` and `Environment="PATH=/usr/local/bin:/usr/bin:/bin:<folder of the resolved claude>"`,
-    quoted, with no `/mnt/` folder;
+    CFFIXED_USER_HOME` and `Environment=SWIFT_BACKTRACE=enable=no`, so `systemctl --user set-environment` can't reach
+    the host's start. `SWIFT_BACKTRACE` is not in `UnsetEnvironment=`: systemd applies that line after `Environment=`,
+    and a name there removes the unit's own assignment too (`systemd.exec(5)`); a test refuses a name in both. `start`
+    and `status` compare `systemctl --user show-environment` with the expected set and name anything extra;
+  - `Environment=HOME=…` and `Environment="PATH=/usr/local/bin:/usr/bin:/bin:<swiftly's bin>:<node's bin>"`, quoted,
+    with no `/mnt/` folder: team sessions run with this PATH and no startup file (S10), so it holds what workers build
+    and test with. The two last folders are the user's, so every worker can write them: they are named in the unit,
+    on the seal's list and in S11 item 10 (decisions 12 and 17). `claude` is not on it: every lead and role runs the absolute
+    path `~/.local/bin/claude` resolves to at its start (the engine's EN-D13), since that folder holds files named by
+    version only;
   - the user's host takes `VibePaths.root` from `getpwuid`, never from `VIBESWITCHER_HOME`, when started with `--node`
     (`ownsLaunchers` compares two paths derived from that same root today, `main.swift:32-34`);
   - the host raises its children's `oom_score_adj` (sessions and their agents +500), so the kernel's OOM killer picks
@@ -890,11 +926,11 @@ task 8, task 9.
   PATH (`Tools.swift:7-15`), while the Mac's is `/usr/bin/git`. On Linux it becomes the first `git` in a folder owned
   by root and writable by nobody else, up the whole path; the host and the server refuse to start without one. The
   command line runs `/usr/bin/systemctl` by its path.
-- **(call)** **The tool server switches only to the build the user switched to.** Today a tool server watches its own
-  binary (`BinaryWatch`, `MCPServer.swift:58`) and, once a probe passes, replaces itself in place with whatever is
-  there. On Linux in the user's node it switches only when `<prefix>/current` names another commit whose `build-info`
-  lists the file's hash, and it runs the sealed copy it hashed. A guard rail against a rename over the file a running
-  tool server would switch to.
+- **A running tool server keeps its build across a switch.** A tool server runs from
+  `<prefix>/<commit>/bin/vibeswitcher-mcp` and its `BinaryWatch` (`MCPServer.swift:58`) watches that path; an install
+  writes another commit's folder, so the watched file never changes and a running tool server never switches. Only
+  tool servers started after a switch (whose MCP config names the new `--node-root`) run the new commit. What would
+  set `BinaryWatch` off is a write over the old commit's file, which the seal watches (the bootstrap path, step 8).
 - **The install** (the bootstrap path's steps 8 and 10) builds from a clean, detached `git worktree add` of a commit on
   `origin/v2` that both CI runners passed (it refuses a dirty tree), with a toolchain the user installed outside
   `$HOME` (root's, decision 12) and a fresh package cache, records `swift --version` and `Package.resolved`'s hash in
@@ -926,8 +962,9 @@ what it needs.
 **Before the bootstrap:** yes (sealed copies, the static build, the unit as above).
 
 **Built in:** stage 2, Task 3 (sealed copies), Task 8 (the server from its copy), Task 9 (launcher, fallback, target
-check, `build-info`, `--node`, `--node-root`), Task 10 (`Platform.Tools.git`); Task 11 (the keeper); the bootstrap
-path's step 8 (the unit, the install script, the static build, the seal's list, the tool server's switch).
+check, `build-info`, `--node`, `--node-root`), Task 10 (`Platform.Tools.git`); the engine's E4 (`claude` by its
+resolved path); the bootstrap path's step 8 (the unit, the install script, the static build, the seal's list, the
+tool server across a switch). The keeper's copy: after the bootstrap (S12 item 14).
 
 **Held by:** `MCPHandoverTests.aBuildReplacedDuringItsProbeIsNeverExecutedUnprobed`; planned: stage 2 plan task 3,
 task 8, task 9.
@@ -937,15 +974,17 @@ task 8, task 9.
 `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`. Task 9:
 `HostHardeningTests.aSessionStartedAfterTheHostsFileWasReplacedRunsThisBuild`,
 `aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`,
-`anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` (reads `/proc/<pid>/maps` of the host, server and parser),
-`HandoverLinuxTests.aHandoverToAPathInsideAWorktreeIsRefused`, `aHandoverToABuildOutsideTheInstallFolderIsRefused`,
-`aHandoverWhoseHashDiffersFromTheRecordIsRefused`, `aTargetRenamedOverAfterItsCheckIsNotWhatRuns`,
-`aHandoverToAnInstalledBuildIsAllowed`, `aHostWhoseImageDiffersFromItsBuildInfoDoesNotStart`,
-`aNewerBuildInfoFormatIsRefused`, `aScratchHostWithNoInstallRootHandsOverAsToday`,
-`theNodesRootIsNeverFromTheEnvironment`. Task 10: `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`. Task 11:
-`MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts`. Step 8: `StartCommandTests` (the unit written,
-`Restart=no`, `KillMode`, `UnsetEnvironment`, the PATH, the commit's folder), a write to each folder of the seal's
-Linux list held, `anInstallFromADirtyTreeIsRefused`, `aToolServerSwitchesOnlyToTheBuildTheUserSwitchedTo`.
+`theNodesRootIsNeverFromTheEnvironment`; `HandoverLinuxTests.aHandoverToAPathInsideAWorktreeIsRefused`,
+`aHandoverToABuildOutsideTheInstallFolderIsRefused`, `aHandoverWhoseHashDiffersFromTheRecordIsRefused`,
+`aTargetRenamedOverAfterItsCheckIsNotWhatRuns`, `aHandoverToAnInstalledBuildIsAllowed`,
+`aHostWhoseImageDiffersFromItsBuildInfoDoesNotStart`, `aNewerBuildInfoFormatIsRefused`,
+`aScratchHostWithNoInstallRootHandsOverAsToday`. Task 10: `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`.
+E4: `LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath`. Step 8: `StartCommandTests` (the unit written,
+`Restart=no`, `KillMode`, `UnsetEnvironment`, the PATH, the commit's folder), `noNameIsBothUnsetAndAssigned`, a write
+to each folder of the seal's Linux list held, `InstallTests.anInstallFromADirtyTreeIsRefused`,
+`anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` (also reads `/proc/<pid>/maps` of the installed host, server
+and a parser), `aRunningToolServerKeepsItsBuildAcrossASwitch`, `aToolServerStartedAfterASwitchIsTheNewBuilds`. After
+the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts`.
 
 ## S10. The sessions' environment
 
@@ -975,9 +1014,11 @@ Linux list held, `anInstallFromADirtyTreeIsRefused`, `aToolServerSwitchesOnlyToT
   on the seal's list as a detector.
 - **The lead's accepted git hooks.** GitGuard runs the lead's git with `core.hooksPath` set to its accepted copy under
   `~/.vibeswitcher/lead/git-hooks/<key>/copy` (`Git.swift:77, 341-353`), which any worker can write; a hook placed
-  there runs under the lead's tool server and is the lead's to the host. On Linux GitGuard checks the copy against the
-  hashes the vault recorded at accept before each run, and refuses on a mismatch; the race between check and git's run
-  stays (S11).
+  there runs under the lead's tool server and is the lead's to the host. Its accepted record (`accepted.json`) sits
+  beside the copy, so a worker that rewrites one rewrites both: a check against it would hold nothing. Before the
+  bootstrap there is no run-time check (decision 19): the seal's Linux list watches the folder, a detector at points in
+  time (S11 item 7). After it, the accepted hashes move into the vault and GitGuard checks the copy against them before
+  each run (S12 item 15).
 
 **(call) Linux's deny rules**, a platform answer added to `LeadLaunch.deny` for **every role, the lead included** (one
 Non-seam edit; `LeadLaunch.swift` goes in Task 10's files): `strace`, `ltrace`, `gdbserver`, `perf`; `systemctl
@@ -1010,8 +1051,9 @@ Most of these are guard rails; the inline launch settings close a route that nee
 
 **Before the bootstrap:** yes.
 
-**Built in:** stage 2, Task 10 (names, plain shell, spawn's env, deny rules, inline launch settings, GitGuard's
-check); Task 12 (the measurements).
+**Built in:** stage 2, Task 10 (names, plain shell, spawn's env, deny rules, inline launch settings); the bootstrap
+path's step 8 (the seal's list, the hooks folder on it); Task 12 (the measurements). GitGuard's check: after the
+bootstrap (S12 item 15).
 
 **The user confirms:** decision 9 (the gpg-agent's ssh support off or no key cached, WSLg off, during the bootstrap).
 
@@ -1021,8 +1063,8 @@ check); Task 12 (the measurements).
 `aLinuxSessionGetsNoRuntimeDir`, `aTeamSessionRunsNoShellStartupFile`, `aSpawnAddingALoaderVariableIsRefused`,
 `aSessionsProgramStartsWithSIGPIPEAtItsDefault`, `ToolsTests.theLocaleASessionGetsIsInstalled`, `theMacsListIsTodays`,
 `LeadLaunchTests.aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh`, `theLeadOnLinuxGetsTheTracerRules`,
-`theMacsDenyRulesAreTodays`, `aRolesLaunchSettingsAreInlineOnLinux`, `GitGuardTests.aChangedHooksCopyIsRefused`.
-Task 12: `RealClaudeTests.whatClaudesBashToolSourcesIsMeasured`, `aVerifierCommandInItsOwnSessionStillTimesOut`.
+`theMacsDenyRulesAreTodays`, `aRolesLaunchSettingsAreInlineOnLinux`. After the bootstrap:
+`GitGuardTests.aChangedHooksCopyIsRefused`. Task 12: `RealClaudeTests.whatClaudesBashToolSourcesIsMeasured`, `aVerifierCommandInItsOwnSessionStillTimesOut`.
 
 ## S11. What plain mode doesn't promise on Linux
 
@@ -1063,8 +1105,12 @@ against it. Each line says what reduces it now, if anything.
    or `pidfd_getfd` of its descriptors, puts it inside that session. So it can call the lead's tools or cast a
    verifier's ballot: verdicts and merges are guard rails. S4.
 7. Routes into a role that need no ptrace: a role's prompt file while it is still a file (S10); the lead's accepted
-   hooks copy, swapped between GitGuard's check and git's run; a build renamed over `vibeswitcher-mcp` that a running
-   tool server switches to (reduced by the switch rule, S9); branch code rewriting its bash wrapper's argv (S4).
+   hooks copy and its `accepted.json`, rewritten together, which the seal's Linux list detects at points in time (no
+   check before the bootstrap, decision 19); a file written over a running tool server's `vibeswitcher-mcp` in its
+   commit's folder, which its `BinaryWatch` switches to or its keeper restarts (decision 18; the seal watches the
+   install folder, and an install never writes there, S9); branch code rewriting its bash wrapper's argv (S4); and
+   `board.json` naming a worker's session as the lead, which would receive the user's answers but for the engine
+   delivering only to the session the vault binds to the lead role (EN-D14).
 8. A worker can replace what every agent runs (the hook, the agents' settings and hooks, `claude`'s versions, the shell
    startup files Claude Code's Bash tool sources, folders on the PATH). The seal detects it at its next look and holds
    workers and merges; a change swapped in and restored between two looks is missed; a host restart resets the seal to
@@ -1146,8 +1192,9 @@ against it. Each line says what reduces it now, if anything.
     answer text, goal or screen content goes there. Records in `docs/lead-v2/` are the user's files and a worker's to
     edit; merge takes the base's copy.
 29. Delivery records for steer messages (`<tty>.delivered`, `handedOver`) are outside the seal: a worker that copies
-    the user's earlier sealed message back into the lead's inbox gets it delivered again, verified as the user's,
-    until E6 consumes `.user` message ids in the vault on Linux.
+    the user's earlier sealed message back into the lead's inbox gets it delivered again, verified as the user's.
+    From the engine's E6, a `.user` seal verifies false once the server retired it or 15 minutes after it was made
+    (EN-D11), so a replay is delivered at most once, inside that window; signed approvals close it.
 30. Until the handover through sealed memory is built (Task 9), nothing; after it, no handover state on disk. A stale
     Mac-format file is removed by a fresh host (S8).
 
@@ -1233,6 +1280,14 @@ the unreadable images and the static build, which the plan had here, are before 
     Closes 13 to 15 and 17 for approvals.
 12. **Signed releases** (stage 8). Closes the replacement half of 3 for installs.
 13. **The support matrix rows** say which mode each environment gets.
+14. **The tool server's keeper restarts it from a copy it made** (decision 18), with the install folder read-only in
+    the sandbox: a `0555` copy (the keeper is dumpable), with the file's real path passed to the five places
+    `vibeswitcher-mcp` reads its own. Closes the keeper half of 7.
+15. **GitGuard's accepted hooks recorded in the vault** and checked before each run (decision 19). Narrows the hooks
+    half of 7 to the race between check and run.
+16. **The design's requirements no list carried** (decision 20): reply rights type only into confined sessions; view
+    rights get masked screens; the wallet's signing page on an origin of its own (stages 3 and 4, where rights and
+    the wallet's page exist).
 
 **Why.** Confinement is what turns S11 from a list of what a worker can do into a list of what a confined worker
 can't, and it needs the bootstrap's lead to build it.
@@ -1264,7 +1319,7 @@ a worker that tries; every row is refused or caught for a worker that slips unle
 | T3 | worker | edit the unit, its drop-ins or the install folder, then restart the host | works | `UnsetEnvironment=`; commit-folder `ExecStart`; start check vs `build-info` (slip); seal; journal shows the unexplained start | sandbox; signed releases |
 | T4 | worker | kill the host | works (DoS; every session and the vault lost) | `Restart=no`; the extended first look; `lead` refused until `config accept` and `base accept`; journal says how it ended | strong mode's key file |
 | T5 | worker | kill the server; seize the restarted child before it hardens | refused † (sealed `0111` copy, if measured) | non-dumpable from exec | holds † |
-| T6 | worker | rename a build over `vibeswitcher-mcp`; tool servers switch to it, or the keeper restarts it | switch: works (guard rail); keeper: refused | switch only to `current` with a matching hash; keeper's sealed copy | sandbox (install folder read-only) |
+| T6 | worker | write over a running tool server's `vibeswitcher-mcp` in its commit's folder; its `BinaryWatch` switches to it, or its keeper restarts it | works, caught at the seal's next look | installs never write a running commit's folder; the seal watches the install folder | sandbox (install folder read-only); keeper's copy (S12 item 14) |
 | T7 | worker | replace the hook, the agents' settings, `claude`, shell startup files, a PATH folder | works, caught at the seal's next look (swap-and-restore missed) | config seal holds workers and merges | sandbox |
 | T8 | worker | bind its own socket at the host's path | fools sessions for seconds; the server never sees it | host binds the path again (folder watch); server's connector | sandbox (no `~/.vibeswitcher`) |
 | T9 | worker | bind its own socket at the server's path, directly or from a program it had the host spawn | refused † | the command line's check (non-dumpable listener, the unit's cgroup, child of `MainPID`); `spawn` only from the app and a lead | holds †, short of T3 |
@@ -1287,7 +1342,7 @@ a worker that tries; every row is refused or caught for a worker that slips unle
 | T26 | branch code | merge's tests or an audit's run do any of the above; a patched toolchain passes every test | works | no session's to the host; root-owned toolchain for installs | sandbox for test runs |
 | T27 | worker | `LD_PRELOAD` and its kin into the host | refused for the unit's start | `UnsetEnvironment=`; static build | holds for the host; works for anything else the manager starts |
 | T28 | worker | fill the host's client slots; `SIGSTOP` the host | works (DoS) for sessions | app's connector connections uncounted | — |
-| T29 | worker | write a role's launch files, the lead's hooks copy | launch settings: refused (inline); prompt file and hooks copy: works, narrowed | inline settings; GitGuard's hash check (race); seal detects | sandbox |
+| T29 | worker | write a role's launch files, the lead's hooks copy | launch settings: refused (inline); prompt file and hooks copy: works | inline settings; the seal detects the hooks folder at its next look | sandbox; GitGuard's check against the vault (S12 item 15) |
 | T30 | worker | get a host or server crash dump | refused † | non-dumpable; `suid_dumpable` 0 | holds † |
 | T31 | another user | connect to the host's or the server's socket | refused † | uid at accept; 0600 in 0700 | holds † (interop's sockets are 0777) |
 | T32 | another user | read command lines of the user's processes | works | none (no `hidepid`); nothing secret in them | not promised |
@@ -1299,7 +1354,7 @@ a worker that tries; every row is refused or caught for a worker that slips unle
 | T38 | worker | get a genuine approval for its commit through a card it wrote on the board | refused | cards built from git and the vault, bound to their id | holds |
 | T39 | worker | open a window on the Windows desktop asking for a password | works while WSLg is on | decision 9 | sandbox |
 | T40 | worker | reach Windows-side localhost services (mirrored networking) | works | none | egress proxy |
-| T41 | worker | replay a sealed message of the user's into the lead's inbox | works until E6 | none | E6 (ids consumed in the vault) |
+| T41 | worker | replay a sealed message of the user's into the lead's inbox | works until E6; from E6, at most once within a seal's 15 minutes | E6: a `.user` seal verifies false once retired or after 15 minutes (EN-D11) | signed approvals |
 | T42 | worker | take a new session's terminal before its launcher does | refused (Task 6) | launcher checks `TIOCSCTTY`; host checks `TIOCGSID` | holds |
 
 ## The Mac and Linux
@@ -1325,7 +1380,7 @@ a worker that tries; every row is refused or caught for a worker that slips unle
 | git | `/usr/bin/git` | the first `git` in a root-owned folder | S9 |
 | The user's answers | the app's window | the command line, by the user's-voice rule with the cgroup check and a typed word | S3 |
 | A socket squatted at the host's path | the app trusts any host there, and gives its key to one that says it holds none (`enrollApp`) | the server never uses the path; sessions as on the Mac until the host binds again | a line for `docs/process/v2-mac-tasks.md`; not changed from here |
-| A verifier's commands | the wrapper isn't in a session of its own (`runPrefix`) | `setsid` before the exec | a line for `docs/process/v2-mac-tasks.md` |
+| A verifier's commands | the wrapper isn't in a session of its own (`runPrefix`) | a new child in a session of its own, waited for, signals passed on (a SIGKILL can't be) | a line for `docs/process/v2-mac-tasks.md` |
 | Signals | any process of the user | the same | DoS on both |
 
 ## What proves each promise
@@ -1346,9 +1401,9 @@ are written in the task named.
 | No descriptor leaks into a child | `CloseOnExecLintTests.noBareSocketAcceptOrOpen`, `HostServerTests.aSpawnDuringAnAcceptInheritsNoConnection` | Task 4a |
 | A parser types only replies | `ParserReplyTests.*` | Task 9 |
 | Nothing secret in argv or environment | `HostHardeningTests.nothingSecretIsInTheHostsArgumentsOrEnvironment` | Task 9 |
-| Nothing the host runs comes from a file changed after it loaded it, or from a folder the user can write | `ProcessSelfTests.aSealedCopyRunsAfterItsFileIsRewrittenInPlace`; `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`; `HostHardeningTests.aSessionStartedAfterTheHostsFileWasReplacedRunsThisBuild`, `aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`, `anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite`; `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts` | Tasks 3, 8, 9, 11 |
+| Nothing the host runs comes from a file changed after it loaded it, or from a folder the user can write | `ProcessSelfTests.aSealedCopyRunsAfterItsFileIsRewrittenInPlace`; `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`; `HostHardeningTests.aSessionStartedAfterTheHostsFileWasReplacedRunsThisBuild`, `aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`; `InstallTests.anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` | Tasks 3, 8, 9; step 8 |
 | The user's host hands over only to an installed build whose hash matches, and runs what it checked | `HandoverLinuxTests.aHandoverToAPathInsideAWorktreeIsRefused`, `aTargetRenamedOverAfterItsCheckIsNotWhatRuns` and the five beside them | Task 9 |
-| A handover writes no file and keeps the vault on fallback | `HandoverLinuxTests.aHandoverWritesNoFile`, `theStateAndSecretsAreSealed`, `aFallbackAfterAFailedRestoreKeepsTheVault`, `aFallbackAfterAFailedRestoreKeepsEverySession`, `aDowngradeIsRefused`, `theUsersHostIgnoresTestSecretFlags`; `HostHandoverStateTests.aStateOfAnotherFormatIsRefused` (now) | Tasks 8, 9 |
+| A handover writes no file and keeps the vault on fallback | `HandoverLinuxTests.aHandoverWritesNoFile`, `theStateAndSecretsAreSealed`, `aFallbackAfterAFailedRestoreKeepsTheVault`, `aFallbackAfterAFailedRestoreKeepsEverySession`, `aDowngradeIsRefused`; `HostHardeningTests.theUsersHostIgnoresTestSecretFlags`; `HostHandoverStateTests.aStateOfAnotherFormatIsRefused` (now) | Tasks 8, 9 |
 | No switch while a worker or verifier runs, until measured | `aSwitchWhileAWorkerRunsIsRefused` | step 8 |
 | A fresh memory vault takes nothing as baseline a worker could write | `ConfigSealFirstLookTests.*`; E4's `aLeadIsRefusedOnAFreshVaultUntilAccepted`; E8's `configAcceptSealsOnlyWhatItShowed`, `baseAcceptAfterARestartShowsWhatMoved` | Task 10, E4, E8 |
 | Sessions get no agent socket, interop, bus or runtime dir, and run no startup file | `SessionEnvironmentTests.*` | Task 10 |
@@ -1356,7 +1411,8 @@ are written in the task named.
 | A role's launch settings aren't files | `LeadLaunchTests.aRolesLaunchSettingsAreInlineOnLinux` | Task 10 |
 | A spawn outside the allow-list is refused, and the check runs no git | `ProjectAllowListTests.*` | Task 10 |
 | Only the user's voice changes state through the server; escapes are refused | E1's, E4's, E6's and step 8's tests (S3) | engine plan |
-| The tool server switches only to the build the user switched to | `aToolServerSwitchesOnlyToTheBuildTheUserSwitchedTo` | step 8 |
+| A running tool server keeps its build across a switch; one started after it runs the new build | `aRunningToolServerKeepsItsBuildAcrossASwitch`, `aToolServerStartedAfterASwitchIsTheNewBuilds` | step 8 |
+| Every lead and role runs the file `claude` resolves to, never one found on PATH or named by a writable setting | `LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath`, `RoleProgramTests.aWorkersProgramIsTheLeadsResolvedClaudeNotTheSettings` | E4 |
 | A fresh `--app-executable` grants nothing; the server child's stand-in grants nothing to others | `host-access.test.mjs`, with its Linux case | Tasks 5b, 8 |
 | The document stays true to the tests | `SecurityDocumentLintTests.*` | Task 1 |
 
@@ -1368,71 +1424,11 @@ All of these can be written on Linux. Six run only in the macos job: `theMacsApp
 
 ### Awaiting the user
 
-Put once, together with the bootstrap path's questions ([What the user is asked](../plans/2026-11-13-v2-bootstrap-path.md#what-the-user-is-asked)).
-Each has the recommendation; the answers go into the design's Decided section before Task 2.
-
-1. **S2-D1, the app on Linux, and the residual list (S2, S11).** Recommended: accept that until signed approvals the
-   app is the host's server child, reached through its inherited connector, and accept S11's list in full while the
-   only project is VibeSwitcher's own and interop is off. The list is longer than the plan's: it adds the routes into
-   a role that need no ptrace (S10), the parser's reply loop, the user's own shell and Claude Code as the user's
-   voice, the scratch host with no list, and the turned lead or verifier (S1).
-2. **New: nothing one step from root during the bootstrap (S1, S11 items 1 and 2).** Recommended: the user sets
-   `[interop] enabled=false` and `appendWindowsPath=false`, and `[automount] enabled=false`, in `/etc/wsl.conf`, then
-   runs `wsl --shutdown`; doesn't use `sudo` in this distribution while a team runs (or sets
-   `Defaults timestamp_timeout=0`); keeps Docker's daemon off. Cost: no Windows programs and no `/mnt/c` from Linux
-   for the bootstrap's length (links aren't opened in the Windows browser; files cross through the Windows side's
-   `\\wsl$`). Without interop off, plain mode on this machine has no lock at all, and `start` refuses unless told
-   `--interop-is-on`. If the user keeps automount on, the seal watches `.wslconfig` and the Startup folder as a
-   detector and `status` reports a `kernel=` line.
-3. **S2-D3, the vault in memory only (S7), with the extended first look.** Recommended: accept that a host restart
-   ends the team, and that after every host restart the user runs `config held`, `config accept ID` and `base accept`,
-   reading the values shown, before starting the lead again.
-4. **S2-D6, no subreaper before the bootstrap (S3), now with the cgroup rule.** Recommended: accept. Escapes from a
-   session are refused; what remains is ptrace of the user's own shell and the user's own Claude Code (decision 14).
-5. **S2-D8, changed: the handover through sealed memory before the bootstrap (S8).** Recommended: accept. It replaces
-   "the state file checked by its hash", removes the file (forging, spoiling, reading and stale copies), and keeps the
-   vault on a fallback.
-6. **No switch of builds while a worker or verifier runs, until Task 3's measurement passes (S8).** Recommended:
-   accept. It costs switching between tasks rather than during them.
-7. **S2-D9, sessions identified by an inherited socket after the bootstrap (S4).** Recommended: accept, with the
-   measurement of whether Claude Code and Codex pass a descriptor through, and the sandbox's pid namespace as the
-   fallback. (The server child gets its connector before the bootstrap, S2.)
-8. **S2-D10, clones for workers after the bootstrap.** Recommended: accept.
-9. **S2-D12, the sessions' environment (S10), corrected.** Leaving the agent's variables out doesn't keep a session
-   from the user's ssh agent here: the socket is at a fixed path. Recommended: during the bootstrap the user turns off
-   the gpg-agent's ssh support (or keeps no key cached: `gpgconf --kill gpg-agent` before a team starts), and sets
-   `guiApplications=false` under `[wsl2]` in `.wslconfig` so no session can open a window on the Windows desktop.
-10. **S2-D11, the project allow-list (S11).** Recommended: accept `~/.vibeswitcher/v2/projects`, its one line written by
-    the user for the bootstrap clone, removed when the user marks stage 6 passed; knowing that a worker can forge a
-    worktree pair and run a scratch host with no list.
-11. **New: the GitHub credential (S11 item 18, T36).** Any session can push to `main`, the Mac app's branch, with the
-    `gh` token git uses. Recommended: before the bootstrap, replace it with a fine-grained token that reads this
-    repository only (or log `gh` out and push with a credential typed at push time); add a ruleset on `main`, `v2` and
-    tags requiring a pull request; the roles are denied `gh` (S10).
-12. **New: what the install builds with (S9).** Recommended: the user installs a Swift toolchain outside `$HOME`
-    (root's, for example under `/opt`) for installs only; installs use the static standard library, a fresh package
-    cache, and a clean worktree of a commit both CI runners passed. Workers keep the user's toolchain for their own
-    builds and tests, which stay guard rails (S11 item 10).
-13. **New: the review floor for the bootstrap clone (S1, T34).** Recommended: the user sets, as the app would, a floor
-    of `audit_finders` 2 with verifiers on a model other than the workers', and `merge_policy: ask_sensitive` with
-    `sensitive_paths` covering `.github/**`, `scripts/ci/**`, `scripts/install-node.sh`, `Package.swift`,
-    `Package.resolved`, `Sources/VibeHost/**`, `Sources/VibePlatform/**` and this document.
-14. **New: the user's own Claude Code (S3, T37).** Recommended: the user adds deny rules to the Claude Code that
-    supervises the bootstrap for `vibeswitcher answer`, `config accept`, `base accept`, `hooks install`, `start`,
-    `stop` and `status --ack`, and for edits under `~/.vibeswitcher/v2/projects`; these requests are the user's to
-    type.
-15. **New: Codex workers off until measured (S10).** Recommended: `VIBESWITCHER_CODEX_WORKERS=0` in the lead's
-    session until a measurement shows Codex's sandbox engaging on this kernel.
-16. **The real-agent config folder (the bootstrap path's question 1), narrowed.** Recommended: the user passes
-    `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR` on the command line of each gated run, never in a shell startup file, so no
-    gate's or audit's test run starts real agents.
-17. **How the node starts (S9; the bootstrap path, question 3).** Recommended: a user unit, started and not enabled,
-    `Restart=no`, `ExecStart` on the commit's folder with `--node`, `KillMode=control-group`, `UnsetEnvironment=` as
-    listed, an explicit root-owned PATH, `SWIFT_BACKTRACE=enable=no`; and the user accepts that a host exit, for any
-    reason, ends every session.
-
-The bootstrap path's other questions (the WSL measurement, the allow-list line, running the command line by its
-absolute path) stand as that document asks them.
+The decisions this document puts to the user (decisions 1 to 17, and 18 to 20 for the keeper, GitGuard's check and
+S12's new items), each with its recommendation, its cost and what a different answer changes, are in **one list**:
+the bootstrap path's [Decisions awaiting the user](../plans/2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user),
+with what only the user can do on the machine beside them. "Decision N" in this document is that list's tag DN. The
+answers go into the design's Decided section before stage 2's Task 2.
 
 ### The author's calls the user doesn't need to confirm
 
@@ -1449,14 +1445,15 @@ New here, each **(call)**:
   typed word; cards built by the engine; answers at rest in the vault (S3).
 - The command line checks that the server it reached is non-dumpable, in the unit's cgroup and the unit's host's child
   (S3).
-- The launcher's terminal check, token-matched session programs, ancestry start ticks, `setsid` in `runPrefix` on
-  Linux (S4).
+- The launcher's terminal check, token-matched session programs, ancestry start ticks, branch code in a session of
+  its own on Linux (S4).
 - Sealed `0111` copies for every image the host starts; close-on-exec from creation; the parser's reply grammar;
   unreadable means the host only by pid and start ticks (S6).
 - The extended first look, the two-step accept, `lead` refused until accepted, the snapshot (S7).
-- The static build and the unit's lines; git and systemctl from root's folders; the keeper's sealed copy; the clean
-  install (S9).
-- Plain shells, spawn's env filter, inline launch settings, GitGuard's check, Linux deny rules for every role (S10).
+- The static build and the unit's lines; git and systemctl from root's folders; the clean install; leads and roles
+  run `claude` by its resolved path (S9). (The keeper's copy and GitGuard's check, once calls here, are decisions 18
+  and 19.)
+- Plain shells, spawn's env filter, inline launch settings, Linux deny rules for every role (S10).
 
 ## Changes the stage 2 plan needs
 
@@ -1479,8 +1476,8 @@ file; every change keeps the Mac's code paths as they are (a platform answer or 
 | A switch brings the new build's server image, checked against that build's `build-info` | Tasks 8, 9 | S8, S9 |
 | The launcher exits 127 when it can't take its terminal; the host checks `TIOCGSID`; session programs matched by token; ancestry start ticks; a reaped session is not live | Tasks 4a, 6 | S4 |
 | `holdsFirstLook` covers the checkout seal, guarded settings and floor, and is kept in the vault's state | Task 10 | S7 |
-| Linux sessions start with `bash --noprofile --norc`; `XDG_RUNTIME_DIR` not passed; Linux deny rules for every role, the lead included, with `gh`; inline launch settings; GitGuard's hash check; `runPrefix` calls `setsid` on Linux; `Platform.Tools.git` from root-owned folders; `LeadLaunch.swift`, `Git.swift`, `Worktrees.swift` and `Tools.swift` added to Task 10's files, with the edit kind named | Task 10 | S9, S10 |
-| The keeper restarts the tool server from a sealed copy | Task 11 | S9 |
+| Linux sessions start with `bash --noprofile --norc`; `XDG_RUNTIME_DIR` not passed; Linux deny rules for every role, the lead included, with `gh`; inline launch settings; GitGuard's hash check (moved after the bootstrap, decision 19); `runPrefix` runs the command in a session of its own on Linux (a new child, waited for); `Platform.Tools.git` from root-owned folders; `LeadLaunch.swift`, `Git.swift`, `Worktrees.swift` and `Tools.swift` added to Task 10's files, with the edit kind named | Task 10 | S9, S10 |
+| The keeper restarts the tool server from a sealed copy (moved after the bootstrap, decision 18) | Task 11 | S9 |
 | Measurements: what Claude Code's Bash tool sources; a verifier command in its own session still times out | Task 12 | S10 |
 | The test shim sends explicit `SCM_CREDENTIALS` and can do it inside a user and pid namespace of its own | Task 3 | S5 |
 | `Platform.Sockets.receive`'s comment corrected (pid reuse); `checkPeer`'s comment made the Mac's | Task 7 | S5, Principals |
@@ -1496,14 +1493,14 @@ file; every change keeps the Mac's code paths as they are (a platform answer or 
   `start` refusing with interop on, `status`'s plain-mode line and interop, automount and `kernel=` reports, the
   comparison of the manager's environment. E4: `lead` refused on a fresh vault until accepted. E6: approval cards built
   from git and the vault and bound to their id, questions from the lead's tool server and not from `board.json`,
-  answers at rest in the vault, `.user` message ids consumed on Linux. E8: the restart path's `config held` and
-  `config accept ID`, `base accept` with its log, the snapshot, no floor seeded on a fresh vault, the restart notice
-  listing what was reset and how the host ended.
+  answers at rest in the vault, `.user` seals expiring after 15 minutes or once retired (EN-D11). E8: the restart
+  path's `config held` and `config accept CARD`, `base show` and `base accept CARD`, the snapshot, no floor seeded on
+  a fresh vault, the restart notice listing what was reset and how the host ended.
 - The bootstrap path. Step 8: the unit's lines (S9), `--node` and `--node-root`, the static build, the clean install
   from a pushed commit with a root-owned toolchain, `build-info`'s `swift` and `resolved`, the seal's Linux list as in
   S9 (and `.wslconfig` and the Startup folder while `/mnt/c` is mounted), the rule on switches until measured, the
-  server image on a switch. The questions: add decisions 2, 9, 11 to 16; narrow question 1 as decision 16 says;
-  `~/.local/bin` is not first on this PATH, so the seal's list doesn't call it so.
+  server image on a switch. The questions: now the one list in the bootstrap path; `~/.local/bin` is not first on
+  this PATH, so the seal's list doesn't call it so.
 
 ## Answers to the attack review
 
@@ -1567,7 +1564,7 @@ root's folders only (the unit's PATH is what `start` captures, which is why S9 w
    that record.
 3. The stage 2 plan takes [the changes it needs](#changes-the-stage-2-plan-needs); the engine plan and the bootstrap
    path take theirs.
-4. The user's answers to [the decisions above](#awaiting-the-user) are recorded in the design's Decided section (Step
-   4).
+4. The user's answers to [the decisions](#awaiting-the-user) are recorded in the design's Decided section (Step
+   5).
 5. `SecurityDocumentLintTests` passes (Step 5).
 6. Only then does Task 2 start. A finding or an answer that changes a decision changes the stage 2 plan first.

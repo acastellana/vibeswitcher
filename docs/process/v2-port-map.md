@@ -7,6 +7,12 @@ step.
 
 Seeded 2026-11-13 from `47636aaf`, with the files the lead engine replaces (the outline is in
 [the bootstrap path](../superpowers/plans/2026-11-13-v2-bootstrap-path.md#the-engine)). Line counts are at that commit.
+Filled in 2026-11-13 from [the engine plan](../superpowers/plans/2026-11-13-v2-engine.md) (read at `4485b65a`; the
+app's files are unchanged since `47636aaf`): each row names the task that makes it `ported`, the parts of the app's
+files that wait, the helpers copied and the tests ported. The planned Non-seam rows were rewritten the same day from
+the stage 2 plan as revised by the security document (its Task 1 Step 4), and redone in the consolidation of
+2026-11-13 against the stage 2 plan's tasks as they now stand (the rows marked *after the bootstrap* wait on decisions
+18 and 19 of [the one list](../superpowers/plans/2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user)).
 
 ## How it is kept
 
@@ -23,22 +29,101 @@ Seeded 2026-11-13 from `47636aaf`, with the files the lead engine replaces (the 
 
 ## Files the engine replaces
 
-| App file | Lines | What replaces it in `VibeNode` | Status |
-| --- | --- | --- | --- |
-| `Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift` | 2,295 | `LeadEngine` and its parts: start (807-1117), questions (1118-1207), delivery and holding (1208-1252), wake and typing (1335-1468), refresh and witness (1469-1585, 1813-1988), telling a session (1989-2015). Rotation (2084-2287), replaced-lead routing (1253-1334), the watches (1586-1774), app health (1775-1812) and the alerts (2024-2083) are after the bootstrap or become cards | owed |
-| `Sources/VibeSwitcher/MainWindow/Lead/ConfigHolds.swift` | 167 | `ConfigHoldStore`: a held config change as a card, accepted from the command line | owed |
-| `Sources/VibeSwitcher/MainWindow/Lead/BaseMoves.swift` | 245 | `BaseMoveStore`: a moved base as a card, accepted from the command line | owed |
-| `Sources/VibeSwitcher/MainWindow/Lead/PushRequests.swift` | 105 | `PushRequestStore`. Before the bootstrap it lists a request and refuses to push; the bootstrap's lead has no remote | owed |
-| `Sources/VibeSwitcher/MainWindow/Lead/RoleSweep.swift` | 78 | `RoleSweep` in the engine, on `HostLink` | owed |
-| `Sources/VibeSwitcher/MainWindow/Lead/PromptDecline.swift` | 55 | `PromptDecline` in the engine, on `HostLink` | owed |
-| `Sources/VibeSwitcher/MainWindow/Lead/AllDoneWatch.swift` | 67 | the engine's all-done note, as text in `status` | owed |
-| `Sources/VibeSwitcher/HostClient.swift` | 1,259 | `HostLink`: connection, welcome and events (152-500), requests and spawn (656-761), input units (1046-1177), screens, history, kill and remove (1214-1252). Starting, replacing and handing over the host (183-221, 293-366, 539-655) are the node's `start` and install, not the engine's; attach, resize and direct keys (762-1045, 1178-1213) are a client's | owed |
-| `Sources/VibeSwitcher/SessionStore.swift` | 523 | `NodeSessions`, grown from stage 1's `LocalSessions`: refresh and apply (202-264, 298-452), details (481-503), the state folder's watch (504-523). Terminal.app tabs, Spaces, pausing, renaming and the ledger stay the Mac's | owed |
-| `Sources/VibeSwitcher/Heartbeat.swift` | 81 | the engine's refresh timer (3 s; replaced by store events in stage 3, see the design's VibeNode section) | owed |
-| `Sources/VibeSwitcher/AppDelegate.swift`, `HookSetup` and `HookBinary` only (1160-1245) | 86 | `vibeswitcher hooks install|remove` (stage 1) and the install step, sealed through the engine | owed |
+The engine plan's [Where each duty goes](../superpowers/plans/2026-11-13-v2-engine.md#where-each-duty-goes) has
+every function of these files with its lines; the rows here are what the ledger tracks. `LeadController.swift` has a
+row per part, so each task can mark its own; together the rows cover the file.
+
+| App file | Lines | What replaces it in `VibeNode` | Task | Status |
+| --- | --- | --- | --- | --- |
+| `Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift`: starting | 22-125, 340-366, 547-552, 701-741, 801-914, 952-958, 995-1116, 1450-1460, 2024-2062 (of 2,295) | `LeadEngine.startLead`, `NodePreflight`, `LeadStore`, `BoardFiles`: `vibeswitcher lead FOLDER --goal … [--take-head] [--replace]`; the first-commit offer and the outdated host become refusals | E4 | owed |
+| `LeadController.swift`: questions and timers | 743-769, 1118-1201 | `Answers`, `CardStore`: `questions`, `answer`, `hold`; approval cards built from git and the vault; every user's-voice request recorded in the vault first | E6 | owed |
+| `LeadController.swift`: delivery, holding, wake, typing, telling a session | 6-20, 1203-1251, 1331-1448, 1462-1467, 1984-2013, 2287-2295 | `Delivery`, `Wake`, `EngineState`; to the lead the vault binds; held messages at rest with their action ids | E5 | owed |
+| `LeadController.swift`: refresh, the witness and the room watch | 215-338, 1469-1582, 1698-1717, 1804-1982, 2015-2022 | `Refresh`, `Witness`, `RoomWatch`, with `TeamReading` and `WitnessWork` copied | E7 | owed |
+| `LeadController.swift`: restarts | 915-950 (the rebind), 960-993 | `Restarts`: the server restart (rebind, held messages, questions) and the host restart (team gone, `config held`/`accept`, `base accept`) | E8 | owed |
+| `LeadController.swift`: the controller's state and `init` | 368-510, 553-699 | each part goes with the duty it serves (the engine plan's table); what serves a view or a waiting duty goes with that | E4 to E8 | owed |
+| `LeadController.swift`: what waits | 127-213, 511-545, 795-799, 1253-1329, 1584-1697, 1718-1777, 1779-1802, 2083-2283 | not before the bootstrap: the watches other than room (heavy slots and jobs, power, toolchain, policy), the account watch and `nudgeLeads`, rotation, `seeAllDone`, routing input typed into a replaced lead (stage 5's client), app health | after the bootstrap | owed |
+| `LeadController.swift`: view only | 771-793, 2064-2081 (and the view state inside 370-400: decisions, records folders, mail, team rows, summaries) | not needed: the window's state and its alerts; errors and `status` notices instead | | not needed |
+| `Sources/VibeSwitcher/MainWindow/Lead/ConfigHolds.swift` | 167 | `ConfigHoldStore`: `config held` (change times, sizes, hashes, the floor proposed) then `config accept CARD`, sealing exactly what was shown | E6, E8 | owed |
+| `Sources/VibeSwitcher/MainWindow/Lead/BaseMoves.swift` | 245 | `BaseMoveStore`: a moved base as a card, `base show [--from]`, `base accept`, `base keep`. The window's typed `!` lines (79-86, 119-126) wait for a composer (stage 5) | E6, E8 | owed |
+| `Sources/VibeSwitcher/MainWindow/Lead/PushRequests.swift` | 105 | not before the bootstrap: `push_remote` needs `workflow.md`'s remote, and the bootstrap clone has none | after the bootstrap | owed |
+| `Sources/VibeSwitcher/MainWindow/Lead/RoleSweep.swift` | 78 | `RoleSweep` in the engine, on `HostLink` | E7 | owed |
+| `Sources/VibeSwitcher/MainWindow/Lead/PromptDecline.swift` | 55 | `PromptDecline` in the engine, on `HostLink` | E7 | owed |
+| `Sources/VibeSwitcher/MainWindow/Lead/AllDoneWatch.swift` | 67 | not before the bootstrap: the mark and its summary are for display | after the bootstrap | owed |
+| `Sources/VibeSwitcher/HostClient.swift` | 1,259 | `HostLink`: connection, welcome and events (368-525), requests, held requests and spawn (652-760), input units (1046-1163), screens, history, kill and remove (1214-1250); the host's notes. Starting, replacing, handing over and reaping the host (183-221, 293-366, 527-650) are the node's `start`, `stop` and install (the bootstrap path's step 8), not the engine's; the app's proof (92-113, 244-291) has no Linux form; attach, raw and paced input, direct keys and resize (762-1045, 1166-1212) are a client's | E2 | owed |
+| `Sources/VibeSwitcher/SessionStore.swift` | 523 | `NodeSessions`, grown from stage 1's `LocalSessions`: refresh and apply (202-264, 297-450), details (481-501), the state folder's watch (503-522), the quiet sessions' screens (`HostClient` 1252-1258). Terminal.app tabs, Spaces, presence, attention, nudges, pausing, renaming and the ledger stay the Mac's | E3 | owed |
+| `Sources/VibeSwitcher/Heartbeat.swift` | 81 | `NodeClock`: the engine's 3 s refresh, the 2 s scan and the room watch's 60 s (replaced by store events in stage 3, see the design's VibeNode section) | E0 | owed |
+| `Sources/VibeSwitcher/AppDelegate.swift`, `HookSetup` and `HookBinary` only (1160-1245) | 86 | `vibeswitcher hooks install|remove` (stage 1) and the install step, sealed through the server (`hooks.install`, the user's voice) | bootstrap step 8 | owed |
+| `Sources/VibeSwitcher/PhoneLeads.swift` | 177 | not before the bootstrap: the phone's leads and answers are stage 7's. `id(root:)` (52-55) is copied for project ids | E0 (the copy) | owed |
+| `Sources/VibeSwitcher/ProjectFolderStart.swift` | | the first-commit question: `lead` refuses instead ("make a first commit") | E4 | not needed |
+| `Sources/VibeSwitcher/KeepAwake.swift`, `TeamActivity.swift` | | keep-awake is after the bootstrap (nothing to hold awake on WSL); App Nap is the Mac's | after the bootstrap | owed |
 
 Not replaced (view or Mac-only): `LeadViews`, `TeamViews`, `TeamRows`, `TeamSummaryModel`, `LeadMailViews`,
 `BoardBench`, `TeamChurnBench`.
+
+## Copied from the app
+
+Pure helpers and test helpers copied into `v2`-only files, each kept in step with its source at every merge as the
+rows above are.
+
+| From | Lines | To | Task |
+| --- | --- | --- | --- |
+| `LeadController.swift` `LeadFiles` (with `Stamp` read through `Platform.Files`) | 22-107 | `Sources/VibeNode/Stores/BoardFiles.swift` | E4 |
+| `LeadController.swift` `LeadNames` | 340-366 | `Sources/VibeNode/Stores/BoardFiles.swift` | E4 |
+| `LeadController.swift` `StartPlan`, `plan(hostState:running:holdsRole:fromUser:)` | 869-888 | `Sources/VibeNode/Engine/LeadStart.swift` | E4 |
+| `LeadController.swift` `SessionDelivery` | 2287-2295 | `Sources/VibeNode/Engine/Delivery.swift` | E5 |
+| `LeadController.swift` `TeamReading` | 215-272 | `Sources/VibeNode/Engine/TeamReading.swift` | E7 |
+| `LeadController.swift` `WitnessWork` | 274-338 | `Sources/VibeNode/Engine/WitnessWork.swift` | E7 |
+| `LeadController.swift` `sender(_:)` | 2015-2022 | `Sources/VibeNode/Engine/Witness.swift` | E7 |
+| `HostClient.swift` `unitGap` and `pieces(of:)` | 1068; 1099 on | `Sources/VibeNode/Host/HostLink.swift` | E2 |
+| `PhoneLeads.swift` `id(root:)` | 52-55 | `Sources/VibeNode/NodeIds.swift` | E0 |
+| `Tests/VibeSwitcherTests/FakeClaude.swift` (with a launcher so the process table sees it as Claude, Claude's own arguments taken and skipped, files per terminal, and a new `mcp` op) | 1-1070 | `Tests/VibeNodeTests/FakeClaude.swift` | E0 |
+| `Tests/VibeSwitcherTests/ChatSyncTests.swift` `Harness`, its non-view parts (the launch, `tell`, the agent's state, `hookTakes`; not the pane, chat or sync) | 636-853 | `Tests/VibeNodeTests/NodeHarness.swift` | E0 |
+
+## Tests the engine ports
+
+The app's test cases, ported into `VibeNodeTests` as the engine's spec. A case not ported says why. Every app test
+file that tests a file in [Files the engine replaces](#files-the-engine-replaces) has a row.
+
+| App test file | Ported as | Not ported, and why | Task |
+| --- | --- | --- | --- |
+| `HeartbeatTests` | `NodeClockTests`: both cases | | E0 |
+| `HostClientReplyTimerTests` | `HostLinkTests.anOldTimerDoesntErrorTheRequestHoldingItsNumberOnTheNewConnection`, `anOldTimerDoesntEndAUnitOnTheNewConnection` (the paced-piece case, on units) | | E2 |
+| `HostClientHandoverTests` | `HostLinkTests.requestsAskedWhileTheLinkReconnectsGoOutOnTheNewConnection`, `otherRequestsKeepTheirTimersDuringAReconnect` | the handover's outcome, its logging and the probe's wait: step 8's (switching builds) | E2, step 8 |
+| `HostClientReapTests` | step 8's `StartCommandTests` (the no-systemd `stop`) | the server never starts a host | step 8 |
+| `HostClientPlanTests`, `HostClientSlowStartTests`, `HostClientSlowProbeTests` | step 8's start and switch of builds | the server never starts, replaces or hands over a host (EN-D12) | step 8 |
+| `HostRestartTests` | step 8: `aHostThatHandsOverKeepsSessionsWithoutAsking`, `anyOtherSaysHowManySessionsInAllProjectsItEndsAndAsksFirst` | the menu bar, Settings and drawing: view | step 8 |
+| `HostProofRefusedTests` | | the app's proof: none on Linux (S2) | |
+| `InputUnitDeliveryTests` | `HostLinkTests.theEnginesUnitsAndTheToolServersAtOnceGoInWhole`, `aHostWithoutInputUnitsIsRefused` | `aPasteBehindAnotherClientsHeldUnitGoesInWhole`: paced pastes are a client's | E2 |
+| `PasteDeliveryTests` | `HostLinkTests.aLongMessageGoesInWholeOnceTheProgramReads`, `aUnitIntoASessionThatEndsIsConfirmedNotDelivered` | the three others (keys, the composer's Enter, keys into a missing session): a client's | E2 |
+| `ComposerDeliveryTests` | `HostLinkTests.threeClientsUnitsDontInterleave`, `aUnitStoppedByItsGateSendsNoEnterAndTheNextOneStillGoes`, `aGateAnsweredLaterHoldsTheNextUnitAndARefusedOneSendsNoEnter`; `WakeTests.afterTheAgentExitsToAShellNothingIsTypedIntoIt`, `aWakeIsNotTypedIntoADraftOrAnOpenPrompt`, `aWakeStartingWithADigitIsTextNotAnOptionKey` | the outbox, its "late" flag and put-back, `!` commands, images, the card keys: the composer's (stage 5) | E2, E5 |
+| `SessionStoreTests` | `NodeSessionsTests`: seven cases (the hook event, no change, background shells, the unread table, the two agent-quit rules, team members) | presence and Spaces, Terminal and the ledger: the Mac's | E3 |
+| `AgentQuitTests` | `NodeSessionsTests.anAgentWaitingOnABackgroundCommandHasNotQuit` (its three setups) | | E3 |
+| `LeadStartsHostTests` | `ServerCheckTests.theCommandLineWithNoNodeSaysSoNotConnectionRefused`; `LeadStartTests.aStartWhileTheLinkConnectsWaitsForIt` | `aLeadStartedWithNoHostRunningStartsTheHostFirst`: the host always runs under its server | E1, E4 |
+| `ProjectFolderStartTests` | `LeadStartTests.aMissingClaudeOrGitIsNamed` (`theControllersStartSaysWhatsMissingAndStartsNoLead`) | the rest (the folder chooser, presets, the first-commit offer and its commit, installing Claude Code): `lead` refuses a folder with no commit, and agents install nothing | E4 |
+| `LeadFilesTests` | `BoardFilesTests`: six cases; `WitnessTests.theWitnessReadsWhatItReadBefore` | | E4, E7 |
+| `LeadRelaunchTests` | `LeadStartTests.aStartAskedBeforeTheHostsWelcomeWaitsForItsSessions`, `aNewLeadWhileOneRunsIsRefusedWithoutReplaceAndTheOldOneIsSentToTheNewOne`; `RestartTests.aLeadRunningAtServerStartKeepsItsRoleAndNoNewLeadStarts`, `aServerRestartLeavesTheUsersLogAlone` | | E4, E8 |
+| `ReplacedLeadRoutingTests` | `LeadStartTests.aStartReadsWhichLeadHoldsTheRoleOffTheEngineQueue`; `DeliveryTests.aMessageForTheLeadReadsItsBoardOffTheEngineQueue`, `heldMessagesKeepTheOrderTheyWereSentIn`; `WakeTests.aWakeReadsTheBoardOffTheEngineQueue`, `aFlushReadsTheBoardOffTheEngineQueue`; `WitnessOffEngineQueueTests.theRefreshReadsWhichLeadHoldsTheRoleOffTheEngineQueue` | `whatsTypedIntoAReplacedLeadGoesToTheLiveLeadAsTheUsers`, `aReplacedLeadWithNoTranscriptLeavesNoFileAndAPlainStart`: routing typed input into a replaced lead is a client's (stage 5) | E4, E5, E7 |
+| `SteerInboxReadOffMainTests` | `DeliveryTests.theInboxReadsRunOffTheEngineQueue` | the strip's two cases: view | E5 |
+| `LeadApprovalAnswerTests` | `ApprovalCardTests`: all three | | E6 |
+| `LeadChatQuestionTests` | `QuestionCardTests.closedQuestionsAreListedWithWhatBecameOfALateAnswer` | the chat's placement is a view's | E6 |
+| `ConfigHoldsTests` | `ConfigHoldStoreTests`: all six (the verbatim card as inert printed text) | | E6 |
+| `BaseMovesTests` | `BaseMoveStoreTests`: eight cases | the five about `!` lines sent from the window: no composer before stage 5 | E6 |
+| `WitnessOffMainTests` | `WitnessOffEngineQueueTests`: both | | E7 |
+| `RoleSweepTests` | `RoleSweepTests`: all three | | E7 |
+| `StuckVerifierPromptTests` | `StuckVerifierPromptTests`: all five | | E7 |
+| `RoomWatchTests` | `RoomWatchTests.roomWatchReadsSleepRecoveryOffTheEngineQueueAndKeepsAnExpiredPendingWait` | | E7 |
+| `AllDoneWatchTests` | | after the bootstrap, with `AllDoneWatch.swift` | after the bootstrap |
+| `KeepAwakeTests`, `TeamActivityTests` | | keep-awake after the bootstrap; App Nap is the Mac's | after the bootstrap |
+| `LeadRotationTests` | | rotation, after the bootstrap | after the bootstrap |
+| `AppHealthWatcherTests` | | app health, after the bootstrap | after the bootstrap |
+| `BoostWatchTests`, `BoostMarkTests` | | the watches, after the bootstrap; the mark is view | after the bootstrap |
+| `SteerOffMainTests` | | the composer's outbox: a client's (stage 5) | |
+| `EndedFoldTests`, `ProgramStatusShownTests`, `TeamChurnTests` | | the sidebar, the header and the team pane: view | |
+| `PromptActionsTests` | | a notification's prompt actions: the Mac's notifications (stage 5's client) | |
+| `TerminalAnswerTests` | | answering a mirrored terminal's prompt key by key: a client's (stage 5) | |
+
+The engine's own change to a `v2` test: `Tests/VibeNodeTests/StatusCommandTests.swift` (stage 1's) runs `status
+--probe`, its assertions kept, once `status` goes through the server (engine E1).
 
 ## Merges
 
@@ -48,20 +133,45 @@ Not replaced (view or Mac-only): `LeadViews`, `TeamViews`, `TeamRows`, `TeamSumm
 ## Non-seam edits
 
 Rows marked *planned* are the ones the plans expect, listed before they are made so an executor doesn't stop to ask;
-each becomes a line number and a commit when made. Lines are at `47636aaf`.
+each becomes a line number and a commit when made. Lines are at `47636aaf` where given. The kind is stage 2's
+numbering (its Global Constraints); calls switched to `VibePlatform` (kind 1), types spelled through the platform
+(kind 2) and blocks moved (kind 3) get no row.
 
 | File and line | What | Why | Merge cost |
 | --- | --- | --- | --- |
 | `Sources/vibeswitcher-hook/main.swift` 11-14 at `09b8a6f8` (stage 1 R5) | `signal(SIGPIPE, SIG_IGN)` moved from the two stdout branches (lines 91 and 99 before) to the first statement | the first host round trip (`LeadVault.standard.record`, line 87 before) came before it; the Mac's writes before it were to files and to `SO_NOSIGPIPE` sockets, and git starts with every signal at its default | low: one line moved |
 | `Sources/vibeswitcher-mcp/main.swift` 41-43 and 134-140 at `09b8a6f8` (stage 1 R5) | the caught SIGPIPE handler and its source moved from after the log's start to just after the mode dispatches; the read-only hook branch ignores SIGPIPE before its answer, written with `try? write(contentsOf:)` | that branch wrote stdout at line 41, and the handover's stderr line came before the handler | low: a block moved, two lines in a branch |
-| `Sources/VibeHost/HostServer.swift` (planned, stage 2 Task 4b) | `appPrincipal` member, nil by default; two lines in `acceptAll` | the Linux app is a principal (S2-D1) | low: a member and two lines in a function main rarely changes |
-| `Sources/VibeHost/HostServer.swift` 944-960 (planned, Task 4b) | `HostProcesses.orphanParents`; `orphans(running:)` over each | an orphan on Linux goes to a subreaper, not pid 1 (S2-D6) | low |
+| `Sources/VibeHost/HostServer.swift` 944-960 (planned, stage 2 Task 4b1) | `HostProcesses.orphanParents`; `orphans(running:)` over each | an orphan on Linux goes to a subreaper, not pid 1 (S2-D6) | low |
+| `Sources/VibeHost/HostServer.swift` `acceptAll`, `checkPeer`, `authorized` (planned, Task 4b2; kinds 4, 5) | the connector's clients registered beside the accepted ones; `maxClients` counts accepted clients only; `checkPeer` skips its `SO_PEERCRED` form for a connector client; `.spawn` in `authorized` under `Config.spawnNeedsLead` (false by default) | the app on Linux is the connector's connections (S2-D1); only the app and a lead spawn on Linux | medium: `authorized` and `acceptAll` change on main |
+| `Sources/VibeCore/HostConnection.swift` (planned, Task 4b2; kind 5) | the connector registry (`register(connector:for:)`, `unregister(path:)`, `connector(for:)`, empty by default) and `init(…, viaConnector: Bool = true)`; a connection reached through a connector sets `held = nil` whatever its `appKey` (82, 125-136, 265-277) | a registered path is reached only through its connector, never by path (S2-D1); a connector connection gets no challenge, so a request held for a proof would wait forever | medium: `HostConnection`'s init is used throughout |
+| `Sources/VibeHost/HostStart.swift`, `open("/dev/null", O_RDONLY)` (16) (planned, Task 4a) | `O_CLOEXEC` added | close-on-exec from creation (S6) | low: one flag |
+| `Sources/VibeHost/SessionParser.swift` `runIfAsked` (57-61), `ParserLink.start` (planned, Task 4a) | the host passes `--host-pid N`; the parser exits when `getppid()` isn't N, not only when it is 1 | a parser whose host is gone is reparented to the user's systemd on Linux, not pid 1 | low |
 | `Sources/VibeHost/ClientConnection.swift` `readAvailable`, the decoder (planned, Task 7) | each chunk's sender passed to `onRead`; the decoder notes a frame's senders | per-message credentials (S2-D4) | medium: main may touch the read loop |
-| `Sources/VibeHost/HostServer.swift` `checkPeer` (642-654), `start()`, `start(restoring:)` (planned, Task 7) | `checkPeer(client, sender:)`; `senderKeepsIdentity`; `enableCredentials` on the listener | per-message credentials (S2-D4) | medium: signature change |
-| `Sources/VibeHost/HostServer.swift` `tidy` (895-904) (planned, Task 8) | one line: a running server child keeps the host from idling | S2-D1 | low |
-| `Sources/VibeHost/HostHandover.swift` `State`, `write`, `read`, `SecretChannel` (planned, Tasks 8 and 9) | `serverChild` and `ownImageFD` (optional fields); the state's hash through the secret channel on Linux; `read` checks it | S2-D8, S2-D7 | medium: the handover's format and channel are shared with every Mac build |
-| `Sources/VibeHost/HostServer.swift` `Config`, `handOver(to:)` (700), `.spawn` (planned, Tasks 9 and 10) | `installRoot`, `projectAllowList` (nil by default); one hook line each | S2-D7, S2-D11 | low |
-| `Sources/vibeswitcher-host/main.swift` (planned, Tasks 5a, 8, 9, 10) | `--test-app-pid` (scratch only); `--server`; the restore check; `HostHardening.atStart`; launcher from the own image; the fallback from the held image (line 85); `installRoot`, `--install-root` (scratch only); the test secret flags only for a scratch host (142-143) and stripped; `projectAllowList`; `holdsFirstLook` | S2-D1, D3, D5, D7, D8, D11 | medium: main.swift changes with every host feature |
-| `Sources/VibeCore/LeadVault.swift` `Book`, around 1366, and `ConfigSeal.swift` (planned, Task 10) | `holdsFirstLook`, false by default | a memory vault must not seal what a worker left before a restart (S2-D3) | medium: the seal's logic is busy on main |
+| `Sources/VibeHost/HostServer.swift` `onRead` (280), `start()`, `start(restoring:)` (planned, Task 7; kind 4) | one hook from `onRead` into `checkSender(_ client:, sender:)` in a `V2/` file, with the pure rule `SenderCheck.keepsIdentity(accepted:sender:)`, for accepted and connector clients alike; `checkPeer`'s body and signature unchanged (its comment made the Mac's); `enableCredentials` on the listener and on the host's end of each connector connection | per-message credentials (S2-D4) | low: one hook line and two calls |
+| `Sources/VibeHost/PTYSpawn.swift` `execIfLaunched`, `Sources/VibeHost/HostedSession.swift` (the program's token, the live rule, the reaped rule), `HostServer.swift` `session(of:)`, `Config.launcherTestDelay` (planned, Task 6b; kinds 4, 5) | one hook each into `Sources/VibeHost/V2/SessionIdentityChecks.swift`; `HostedSession.programToken`; the delay nil by default | a session's terminal is its own from the start; programs matched by token (S4) | medium: `HostedSession` and `session(of:)` change on main |
+| `Sources/VibeHost/HostServer.swift` `tidy` (895-904) (planned, Task 8a; kind 4) | one line: a running server child keeps the host from idling | S2-D1 | low |
+| `Sources/VibeHost/HostHandover.swift` `State` (planned, Tasks 5a, 8b and 9c; kind 6) | `testAppConnector: TestAppConnector?` (the descriptor and the test's pid, 5a), `serverChild: ServerChildRecord?` (8b), `images: HandoverImages?` (9c), their descriptors in `descriptors` | the test's connector, the server child and the sealed images across a handover (S2-D8) | medium: the handover's format is shared with every Mac build; optional fields keep it readable |
+| `Sources/VibeHost/HostHandover.swift` `write`, `probe`, `takeSecrets` (planned, Task 9c; kind 4) | one hook each into `Sources/VibeHost/V2/HandoverMemory.swift`: on Linux the state and secrets in sealed memory, no file | the handover through sealed memory (S8) | medium: the handover's code changes on main |
+| `Sources/VibeHost/HostServer.swift` `serve()`, `Config.watchesItsPath` (planned, Task 8b; kinds 4, 5) | one hook into `Sources/VibeHost/V2/HostPathWatch.swift`, active only for the user's host | the host binds its path again when squatted (S2) | low |
+| `Sources/VibeCore/HostProtocol.swift`, `HostServer.swift` (planned, Task 8b; kind 7) | `HostRequest.hostNotes`, `HostEvent.hostNotes(HostNotes)`, `HostProtocol.Capability.hostNotes`; app only | the server shows what the host saw (S2) | low: a new case and its capability |
+| `Sources/VibeHost/HostServer.swift`, `Sources/vibeswitcher-host/main.swift` (planned, Task 8b) | one stderr line each for the host's start, the server child's exits and restarts, refused app connections and replaced paths | the journal records what the server can't unwrite (S2) | low |
+| `Sources/VibeCore/ProcessTable.swift` (the host's executable and cwd), `Sources/VibeCore/SessionStrays.swift` (environments), `HostServer.executable(of:)`, `HostProcesses` (planned, Task 9a; kind 5) | each reader takes an unreadable process as "unknown, still running", and as the host only when a hook the host sets (`HostHardening.isOurs`, nil by default) says so | unreadable means the host only by token (S2-D5) | medium: four readers, each one line |
+| `Sources/VibeHost/HostServer.swift` `Config.launcherImage`, `PTYSpawn.spawn`, `ParserLink.start`, `PTYSpawn.execIfLaunched`, `SessionParser.runIfAsked` (planned, Task 9b; kinds 4, 5) | the launcher image kept in the child; the inherited image closed first; the launcher's `oom_score_adj` raised on Linux | the host runs its sealed copies (S6, S9) | medium: spawn paths change on main |
+| `Sources/VibeHost/HostServer.swift` `handOver(to:)` (700-758), `Config.installRoot` (planned, Tasks 9c and 9d; kinds 4, 5) | one hook: on Linux the target loaded as a sealed copy, probed and exec'd from it; one line asking `HandoverTarget.check` when `installRoot` is set (nil by default) | the handover's target is a checked, installed build (S8, S9) | medium |
+| `Sources/VibeHost/HostedSession.swift` `startParser` (`link.onReply`, 226-229), `deliver` (planned, Task 9e; kind 4) | one hook each into `Sources/VibeHost/V2/ParserReplies.swift`, Linux only | a parser's bytes reach a session only as a reply (S6) | low |
+| `Sources/VibeHost/HostServer.swift`, `.spawn` (planned, Tasks 10a and 10d; kinds 4, 5) | one hook into `Sources/VibeHost/V2/SpawnEnvironment.swift` (a non-app spawn naming a refused variable is refused); one into `Sources/VibeHost/V2/ProjectAllowList.swift`, active only when `Config.projectAllowList` is set (nil by default) | the sessions' environment (S10); the project allow-list (S2-D11) | low |
+| `Sources/VibeCore/LeadLaunch.swift` `deny(_:base:records:)` (118-124), `prepare` (311-) (planned, Task 10b) | `Platform.Tools.roleDenyRules` appended for every role, `debuggers` for the lead where `leadGetsTracerRules`; with `roleSettingsInline`, settings and MCP config on `claude`'s command line as JSON | the roles' launch on Linux (S10) | medium: `prepare` changes on main |
+| `Sources/VibeCore/Git.swift` GitGuard (77, 341-353) (*after the bootstrap*, decision 19; kind 4) | one hook: the hooks copy hashed and compared with the hashes the vault recorded at accept, before each guarded run | a changed hooks copy is refused (S10, S12 item 15) | low |
+| `Sources/VibeCore/Worktrees.swift` `BranchCode.runPrefix` (188-) (planned, Task 10c; kind 4) | one hook into a `V2/` file, where `Platform.Tools.branchCodeGetsOwnSession`: the command started through `Platform.Spawn` with `.ownSession` as a new child, waited for, its status passed on, SIGTERM, SIGINT and SIGHUP sent on to its group | a verifier's commands in a POSIX session of their own (S4); `setsid()` in place fails with `EPERM` for a group leader | low |
+| `Sources/VibeCore/LeadVault.swift` `Book.holdsFirstLook`, `Book.firstLookAccepted`, the `Book`'s handlers `.setGuarded` (1033-1043) and `.setReviewFloor` (1045-1048); `ConfigSeal.swift` (the home seal's and the main checkout's first look) (planned, Task 10e; kinds 5, 6) | both fields false or empty by default and kept in the vault's serialized state; while a root's first look is held, `.setGuarded` records no unrecorded rail from a caller other than the app and `.setReviewFloor(onlyIfUnset:)` records nothing; the app's accept of that root (`checkKey` with shown hashes) ends its hold; the first look holds what it sees. The client callers (`LeadVaultGuarded.changedSettings`, `LeadVault.startLead`) are not edited | a memory vault must not seal what a worker left before a restart (S2-D3) | medium: the vault's handlers and the seal's logic are busy on main |
+| `Sources/VibeCore/MCPKeeper.swift` `run(executable:arguments:)` (*after the bootstrap*, decision 18; kind 4) | one hook: a copy of the tool server made at the keeper's start, every restart from it, the file's path passed to `vibeswitcher-mcp/main.swift`'s five sites | the keeper restarts what it checked (S9, S12 item 14) | low, plus the five sites |
+| `Sources/vibeswitcher-host/main.swift` `inherited` (27), `Sources/VibeHost/HostedSession.swift` `arguments` (117-120), `:129`, `:152`, `SessionParser.swift` `ParserLink.start`'s environment (planned, Task 10a; kinds 3, 4) | the sessions' environment from `Platform.Tools.sessionEnvironmentNames` and `sessionEnvironmentFixed`; `arguments` forwarded to `sessionShellArguments`; the default locale from the platform; `PTYSpawn.spawn(… executable: shell …)` instead of `args[0]`; the parsers' fixed environment gains `sessionEnvironmentFixed` | the sessions' environment and plain shell (S10) | medium: `HostedSession` changes on main |
+| `Sources/vibeswitcher-host/main.swift` (planned, stage 2 Tasks 4c, 5a, 8a, 8b, 9a to 9d, 10a, 10d, 10e) | `config.spawnNeedsLead` on Linux (4c); `--test-app-pid` and `--test-app-connector`, scratch only, one hook into `Sources/VibeHost/V2/TestAppPrincipal.swift` (5a); `--server` (8a); the restored server record checked (8b); `HostHardening.atStart` first, test flags taken only when `!ownsLaunchers` and stripped (9a); on Linux the launcher from the own sealed copy, no launcher copies, `--node`, `--node-root`, `--image-path` (9b); `goBack` through the sealed copy, a stale state file removed (9c); `installRoot` (9d); the sessions' environment from the platform's list (10a); `projectAllowList` (10d); `holdsFirstLook` (10e) | S2-D1, D3, D5, D7, D8, D11, D12 | medium: main.swift changes with every host feature |
+| `Sources/vibeswitcher-host/main.swift` (planned, engine E6; kind 4) | one hook: `--test-user-seal-life SECONDS`, scratch only (refused by the user's host), carried across a scratch host's handovers like `--hold-first-look`. The server's arguments are stage 2's Task 8a's (`--root` or `--node`, `--node-root`), and its test flags go through `--server-arg` | the vault's `.user` seal life in tests (the engine plan's EN-D11) | low: one line |
+| `Sources/vibeswitcher-mcp/main.swift` `command(_:root:)` (240-248) (planned, engine E4; kind 4) | one hook into `Sources/VibeCore/V2/RoleProgram.swift`: on Linux, with `VIBESWITCHER_CLAUDE` set, the Claude command is that path and the settings and launch presets aren't read | workers and verifiers run the `claude` the lead's start resolved, not a program a worker-writable setting names (the engine plan's EN-D13) | low |
+| `Package.swift` (planned, stage 2 Tasks 4c and 5a; engine E0 and E1) | `VibeHost`, `vibeswitcher-host` and `VibeHostTests` into the portable targets (4c, 5a); `vibeswitcher-server` (E1); `VibeNodeTests` depends on `VibeHost`, `vibeswitcher-host` (E0), `vibeswitcher-server`, `vibeswitcher-cli`, `vibeswitcher-mcp`, `vibeswitcher-hook` (E1) | the host on Linux; the engine's scratch hosts run the built products | medium: main adds targets |
 | `Sources/VibeCore/LeadGateBuild.swift` 41-55 (planned, bootstrap step 8) | `ServerBuild` reads `build-info` where there is no app bundle | merge receipts name the build | low |
 | `Sources/VibeCore/ConfigSeal.swift` 306-315 (planned, bootstrap step 8) | one hook: the platform's extra home files, empty on the Mac | the config seal's Linux list | low |
+| `Sources/VibeCore/LeadToolset.swift` `askUser` (4494), `reviseQuestion` (4543), `withdrawQuestion` (4565) (planned, engine E6; kind 4) | one line each into `Sources/VibeCore/V2/NodeQuestionPost.swift`, which does nothing where `Platform.CodeIdentity.isAvailable` (the Mac) or where `<root>/v2/server.sock` doesn't exist | questions reach the server from the lead's tool server, never from `board.json` (the security document's S3) | low: three lines in tools main changes often |
+| `Sources/VibeCore/HostProtocol.swift`, `Sources/VibeHost/HostServer.swift` `authorized` and the request switch (planned, engine E6; kinds 7, 4) | `HostRequest.vaultV2(LeadVaultV2.Request)`, `HostEvent.vaultV2(LeadVaultV2.Reply)`, `HostProtocol.Capability.vaultV2` (listed only on Linux); app only; one hook line into `Sources/VibeHost/V2/VaultV2Handler.swift`, which refuses on the Mac | user actions and `.user` seals at rest in the vault (S3, T41; the engine plan's EN-D11) | low: a new case and its capability, as `hostNotes` |
+| `Sources/VibeCore/LeadVault.swift`, the book's saved state, `case .seal`, `case .verify` (979) (planned, engine E6; kinds 6, 4) | `v2: LeadVaultV2.Book?` (optional); one hook line in each case into `Sources/VibeCore/V2/LeadVaultV2.swift`, Linux only: a `.user` seal's id and time recorded; a retired or expired `.user` id verifies false | T41 narrowed to a seal's 15 minutes (the engine plan's EN-D11) | medium: the vault's handler is busy on main; a case added there on main is a textual conflict only |
