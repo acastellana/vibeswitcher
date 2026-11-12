@@ -173,6 +173,8 @@ enum SettingsCatalog {
         Entry("ai-summaries", "Summarize what each agent is doing with AI", "The Team tab describes each agent's work in plain words, written by a small Claude model.", keywords: ["haiku", "team tab", "plain words"]),
         Entry("lead-rotation", "Start a fresh lead session", "When a lead's session has grown long, starts a new one so it keeps working with a clear context.", keywords: ["rotation", "context", "compact"]),
         Entry("lead-mail", "Let project leads message each other", "Lets one project's lead send messages to another's; every message shows in the Team tab.", keywords: ["tell_lead", "mail", "between leads"]),
+        Entry("prompt-audit", "Remind me to run a prompt audit", "Shows a card in each project's lead chat to run /doctor prompt-audit, after the interval below or when its model changes.", keywords: ["doctor", "prompt-audit", "CLAUDE.md", "model change"]),
+        Entry("prompt-audit-days", "Days between prompt audits", "How many days after a project's last prompt audit its reminder shows (14 by default).", keywords: ["doctor", "interval", "reminder"], parent: "prompt-audit"),
     ]) + entries(.lead, "Working policy", [
         Entry("working-policy", "Working policy", "The rules every project's lead, workers and verifiers get in their prompts.", keywords: ["rules", "prompt", "policy.md", "instructions"]),
     ]) + entries(.lead, "Review rules floor", [

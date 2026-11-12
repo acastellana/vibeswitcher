@@ -82,6 +82,15 @@ final class Preferences: ObservableObject {
     /// key in the app's defaults at each call (`LeadMail.isOn`): unset, it's on.
     @Published var leadRotation: LeadRotationMode { didSet { defaults.set(leadRotation.rawValue, forKey: "leadRotation") } }
     @Published var leadMail: Bool { didSet { defaults.set(leadMail, forKey: LeadMail.enabledKey) } }
+    /// Remind me to run /doctor prompt-audit in each project (`PromptAudit`), every `promptAuditDays` and after a model change.
+    @Published var promptAuditReminders: Bool { didSet { defaults.set(promptAuditReminders, forKey: PromptAudit.enabledKey) } }
+    @Published var promptAuditDays: Int {
+        didSet {
+            let kept = min(max(promptAuditDays, PromptAudit.intervalRange.lowerBound), PromptAudit.intervalRange.upperBound)
+            if kept != promptAuditDays { promptAuditDays = kept; return }
+            defaults.set(kept, forKey: PromptAudit.intervalKey)
+        }
+    }
     /// Keep the Mac from idle sleep while a lead's team works (see `KeepAwake`).
     @Published var keepAwake: KeepAwakeMode { didSet { defaults.set(keepAwake.rawValue, forKey: "keepAwake") } }
     /// On battery, the lead's witness tells it to hold new starts, audits and merges only below this charge, in %
@@ -176,6 +185,8 @@ final class Preferences: ObservableObject {
         aiSummaries = defaults.bool(forKey: "aiSummaries")
         leadRotation = LeadRotationMode(rawValue: defaults.string(forKey: "leadRotation") ?? "") ?? .context
         leadMail = LeadMail.isOn(defaults)
+        promptAuditReminders = PromptAudit.isOn(defaults)
+        promptAuditDays = PromptAudit.intervalDays(defaults)
         keepAwake = KeepAwakeMode(rawValue: defaults.string(forKey: "keepAwake") ?? "") ?? .onPower
         batteryHoldBelow = PowerWatch.clamp(defaults.integer(forKey: "batteryHoldBelow"))
         briefingLanguage = defaults.string(forKey: "briefingLanguage").flatMap(BriefingLanguage.named)?.code ?? BriefingLanguage.preferred().code

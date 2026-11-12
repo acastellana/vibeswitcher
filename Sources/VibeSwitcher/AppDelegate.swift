@@ -74,6 +74,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     }()
     /// Ends the shells Run cards opened once their command went well and nobody uses them, and the sidebar's Close
     /// Finished Shells… (`ShellTidier`).
+    /// The reminders to run /doctor prompt-audit, one per project a lead runs in, as a card in its lead's chat.
+    private lazy var promptAudit: PromptAuditDesk = {
+        let desk = PromptAuditDesk()
+        desk.roots = { [weak self] in self.map { Array($0.leadController.boards.keys) } ?? [] }
+        return desk
+    }()
     private lazy var shellTidier: ShellTidier = {
         let tidier = ShellTidier()
         tidier.sessions = { [weak self] in self?.hostClient.sessions ?? [] }
@@ -240,6 +246,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         walletDesk.start()
         shellDesk.start()
         shellTidier.start()
+        // Settings › Project lead: the reminders on or off, and their interval.
+        preferences.$promptAuditReminders.combineLatest(preferences.$promptAuditDays)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] on, days in
+                self?.promptAudit.enabled = on
+                self?.promptAudit.intervalDays = days
+            }
+            .store(in: &cancellables)
+        promptAudit.start()
+        // A lead started in a project not looked at yet: looked at now (first seen, so no card for an interval).
+        leadController.$boards
+            .map { Set($0.keys) }
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.promptAudit.refresh() }
+            .store(in: &cancellables)
         // A peer or Passage path chosen in Settings › Wallet: the cards redraw now (Send comes back on waiting ones),
         // not at the next look. After the change lands (@Published sends before it does). The path only once typing
         // paused (`WalletPeerList.typed`): a half-typed one is never run.
@@ -802,7 +825,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         if mainWindow == nil {
             let controller = MainWindowController(store: store, host: hostClient, model: windowModel, actions: windowActions,
                                                   leads: leadController, briefing: briefing, dictation: dictation, wallet: walletDesk,
-                                                  boost: boostWatch, shells: shellDesk)
+                                                  boost: boostWatch, shells: shellDesk, promptAudit: promptAudit)
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
             controller.onBoostMark = { [weak self] in self?.showSettings(tab: .performance, reveal: .boost) }
             controller.onStatistics = { [weak self] in self?.showStatistics() }
@@ -998,6 +1021,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         phoneAccess.shutdown()
         walletDesk.close()
         shellDesk.close()
+        promptAudit.close()
         shellTidier.close()
         // Script blocks written for Run and not run yet.
         RunnableCommand.Script.removeAll()
