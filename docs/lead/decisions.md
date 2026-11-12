@@ -388,3 +388,23 @@ The user's answer to A4977A3E (2026-11-12). Fable's check of the speed review: t
 
 audit-eval-on-opus, 2026-11-12, on the same 14 cases, prompt and REVIEW.md as the Fable baseline. Opus found 7 of 14 by substance, 6 of them as Important, against Fable's 6 and 4, at $13.75 against $53 and in 93 min against 161. It missed only the symlink escape that needed a probe, which Fable had caught as a Nit. One run each, so the difference is within noise, but there's no sign Opus is worse for routine audits.
 
+## 2026-11-12 11:32:16 Nothing the lead records (dismiss reasons, decisions, contracts, updates, progress) names the user's other projects. Say "another project".
+
+2026-11-12 10:57: a dismiss reason named one, it went into docs/lead/progress.md, and PrivateNamesLint, which scans every tracked file including docs/lead/, then fails every merge's full suite until the line is fixed.
+
+## 2026-11-12 12:16:33 a-calm-mac-merge's timing check (median calm-Mac merge at or under 10 min, against 15) is the lead's to read from merges-*.jsonl after it merges, together with check 4's freezes per hour, in the next retrospective, instead of the worker holding the Mac quiet for 45 minutes.
+
+With 6–8 sessions running, no calm window was available, and holding all work for a measurement costs more than reading the merges' own recorded runs, which now carry their core width.
+
+## 2026-11-12 13:46:12 max_workers lowered from 5 to 4 (2026-11-12). Fewer tasks at once while merges are backed up; the lead raises it again once merges flow and the calm-Mac merge change is measured.
+
+With 7–10 sessions the Mac sat at load 50–100 for hours, all 3 test slots were held 45–55 min each, and full suites took twice as long. Running more at once made each task slower, not the batch faster.
+
+## 2026-11-12 13:47:49 The lead watches the merge pipeline itself on every wake, until merges-never-sit-blocked does it for them. If a task has been ready to merge for 20 minutes or more, find the cause at once (main red, a records check, slots, load, gate) and act: file the fix as the top task, correct a misblamed branch, tell the user what's needed from them in one line. Never just report that merges are waiting.
+
+The user, 2026-11-12: "you need to be more proactive in getting things through". Merges sat blocked for about 2 h 45 min while the lead kept describing the block instead of clearing it.
+
+## 2026-11-12 14:37:03 After the 2026-11-12 block cleared: tasks failed by the block (main's lint line, the flaky DevPreviewTests) get their workers to re-report done, so they rejoin the merge queue. prompts-and-agents-md's failure was real (AGENTS.md's new lint filter form broke ProjectMapTests) and went back to a worker.
+
+The batch split marked branches failed for problems on main. Only a fresh done report puts a review-none task back in the queue without redoing its work.
+

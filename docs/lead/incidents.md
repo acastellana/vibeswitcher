@@ -151,3 +151,17 @@ Evidence: 2026-11-09, twice. audit-exceptions-are-a (16:33) and the-sandbox-s-ph
 Task: the-sandbox-s-phone
 Check: task turn-this-incident-into-17 turns it into a check that runs before merge.
 
+## 2026-11-12 12:05:59 Workers' background test jobs vanish mid-run: the worker waits on a job that no longer has a process, its turn ends, and the witness reports "stopped without calling report". Three times in about 40 minutes on 2026-11-12, on a heavily loaded Mac (load 90–100, 10 sessions).
+
+Evidence: Witness reports: fix-the-flaky-test-22, "Measure the stress failure rate under load after the fix", started 11:26; small-non-sensitive, "Add tamper test and run focused tests", started 11:46; small-non-sensitive, "Run tamper test against board-only judgement", started 12:04. Each was "has no process any more". The cause isn't known yet. Candidates: the stall killer (stall_min) or vs-heavy ending a run waiting for a slot, test-under-load.sh refusing on a loaded Mac and exiting, or Claude Code's background-task handling.
+
+Task: small-non-sensitive
+Check: task turn-this-incident-into-18 turns it into a check that runs before merge.
+
+## 2026-11-12 13:47:44 Every merge was blocked for about 2 h 45 min. A lead record named one of the user's other projects, PrivateNamesLint failed on it at every merge, and the fix couldn't be committed while merges ran. The batch split also blamed a docs-only branch for failures on main.
+
+Evidence: docs/lead/progress.md line 2603, committed in 5d597f5d at 10:57 from a dismiss_finding reason. Merges failed with PrivateNamesLintTests.noFileNamesTheUsersOtherProjects. The user fixed the text at about 13:45, and the records commit waited for the running merge. audit-eval-on-opus (docs only) was marked failed for DevPreviewTests plus the lint (setback at 13:22). The user: "why so much stuck?" and "you need to be more proactive in getting things through".
+
+Task: merges-never-sit-blocked
+Check: task turn-this-incident-into-19 turns it into a check that runs before merge.
+
