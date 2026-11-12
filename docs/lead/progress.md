@@ -2759,3 +2759,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 17:45 Update: Installed at 17:45: faster merges on a calm Mac, and small tasks skip their audit — **Live in your app since the 17:45 install** (built from main with everything merged today).
 - 2026-11-12 18:07 Released merges-never-sit-blocked's worker (idle since its done report on 42e7a908) while its audit runs
 - 2026-11-12 18:07 Automatically (auto_advance): Started the audit of merges-never-sit-blocked at 42e7a908 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-12 18:13 Audit of merges-never-sit-blocked: incomplete, clean, round 1: 3 Important open, 4 Nit open
+- 2026-11-12 18:14 Started a worker on merges-never-sit-blocked
+- 2026-11-12 18:14 Automatically (auto_advance): Sent merges-never-sit-blocked's worker the open Important findings merges-never-sit-blocked:F1, merges-never-sit-blocked:F2, merges-never-sit-blocked:F3 from its audit at 42e7a908 (in a new worker: its last one was released during the audit).
