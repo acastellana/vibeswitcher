@@ -75,7 +75,7 @@ public enum DiskSpace {
 /// folder's path, each character that isn't a letter or digit made a dash>`, one subfolder per session (its
 /// scratchpad, its background commands' output). They outlive the sessions.
 public enum ClaudeScratch {
-    public static var root: URL { URL(fileURLWithPath: "/private/tmp/claude-\(getuid())", isDirectory: true) }
+    public static var root: URL { URL(fileURLWithPath: "\(Platform.Files.sharedTemporaryRoot)/claude-\(getuid())", isDirectory: true) }
 
     /// Claude's longest folder name; a longer one is cut there and given a hash of the whole.
     static let longest = 200
@@ -130,7 +130,7 @@ public enum SessionTemp {
 
     static func root(vibeRoot: URL, accountHome: String) -> URL {
         VibePaths.isAccountRoot(vibeRoot, accountHome: accountHome)
-            ? URL(fileURLWithPath: "/private/tmp/vibeswitcher-\(getuid())", isDirectory: true)
+            ? URL(fileURLWithPath: "\(Platform.Files.sharedTemporaryRoot)/vibeswitcher-\(getuid())", isDirectory: true)
             : vibeRoot.appendingPathComponent("tmp", isDirectory: true)
     }
 
@@ -281,7 +281,7 @@ public enum SessionTemp {
     /// session's is): `vsho-XXXXXXXX` and `vsho-state-XXXXXXXX`. A run that's killed leaves them (6 held 275 MB on
     /// 2026-10-22). Only the user's own VibeSwitcher sweeps them (`handoverRoot` is nil for a scratch one).
     public static var handoverRoot: URL? {
-        VibePaths.isAccountRoot(VibePaths.root, accountHome: VibePaths.accountHome) ? URL(fileURLWithPath: "/private/tmp", isDirectory: true) : nil
+        VibePaths.isAccountRoot(VibePaths.root, accountHome: VibePaths.accountHome) ? URL(fileURLWithPath: Platform.Files.sharedTemporaryRoot, isDirectory: true) : nil
     }
 
     /// How long a handover test's folder stays untouched before it's taken as outliving its run: no test runs that

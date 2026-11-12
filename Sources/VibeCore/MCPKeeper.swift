@@ -226,7 +226,7 @@ public enum MCPKeeper {
             _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
             _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         }
-        _ = fcntl(input[1], F_SETNOSIGPIPE, 1)
+        Platform.Sockets.noSigPipe(input[1])
         return (Child(pid: pid, input: input[1], output: output[0]), nil)
     }
 
@@ -274,7 +274,7 @@ public enum MCPKeeper {
     public static func run(executable: String, arguments: [String], restarts: Restarts = Restarts(),
                            input clientIn: Int32 = STDIN_FILENO, output clientOut: Int32 = STDOUT_FILENO) -> Int32 {
         signal(SIGPIPE, SIG_IGN)
-        _ = fcntl(clientOut, F_SETNOSIGPIPE, 1)
+        Platform.Sockets.noSigPipe(clientOut)
         for fd in [clientIn, clientOut] { _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) }
         let events = Events()
         var restarts = restarts

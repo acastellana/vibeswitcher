@@ -503,7 +503,7 @@ public final class LoadRecorder: @unchecked Sendable {
     /// The Mac-wide heavy slots (`TestLock`'s folder and count as vs-heavy finds them) and who holds them.
     public static func heavySlots() -> (slots: Int, holders: [TestLock.Holder]) {
         let environment = ProcessInfo.processInfo.environment
-        let lock = TestLock(directory: environment[TestLock.directoryVariable] ?? "/private/tmp/vibeswitcher-\(getuid())",
+        let lock = TestLock(directory: environment[TestLock.directoryVariable] ?? "\(Platform.Files.sharedTemporaryRoot)/vibeswitcher-\(getuid())",
                             slots: TestLock.slotCount(environment))
         return (lock.slots, lock.holders())
     }

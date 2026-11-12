@@ -142,7 +142,7 @@ public struct TestLock: Sendable {
     /// The Mac-wide slots (`slotCount` of them); nil when this process runs under a holder of one already
     /// (`heldVariable` names it).
     public static func standard(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> TestLock? {
-        let lock = TestLock(directory: environment[directoryVariable] ?? "/private/tmp/vibeswitcher-\(getuid())", slots: slotCount(environment))
+        let lock = TestLock(directory: environment[directoryVariable] ?? "\(Platform.Files.sharedTemporaryRoot)/vibeswitcher-\(getuid())", slots: slotCount(environment))
         return environment[heldVariable].map(lock.isSlot) == true ? nil : lock
     }
 
@@ -398,7 +398,7 @@ public struct TestLock: Sendable {
         let number = max(given, ticketNumbers().max() ?? 0) + 1
         let text = Array("\(number)\n".utf8)
         guard ftruncate(queue, 0) == 0, pwrite(queue, text, text.count, 0) == text.count else { return nil }
-        let fd = open(ticketPath(number), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW | O_EXLOCK, 0o600)
+        let fd = Platform.Files.createLocked(ticketPath(number), mode: 0o600)
         guard fd >= 0 else { return nil }
         let line = Array("\(note)\nslots \(slots)\n".utf8)
         _ = write(fd, line, line.count)

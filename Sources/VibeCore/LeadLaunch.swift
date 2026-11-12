@@ -294,7 +294,7 @@ public enum LeadLaunch {
             guard fstatat(dir, "memory", &info, AT_SYMLINK_NOFOLLOW) == 0 else { continue }
             for tries in 1...100 {
                 let name = "memory.set-aside-\(stamp)" + (tries > 1 ? "-\(tries)" : "")
-                if renameatx_np(dir, "memory", dir, name, UInt32(RENAME_EXCL)) == 0 {
+                if Platform.Files.renameExclusive(in: dir, from: "memory", to: name) == 0 {
                     moved.append((folder as NSString).appendingPathComponent(name))
                     break
                 }

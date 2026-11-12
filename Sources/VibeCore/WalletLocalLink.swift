@@ -120,7 +120,7 @@ public struct WalletLocalLink: WalletTransport {
         let parts = VibePaths.walletLocalTransportParts + [name]
         for (index, part) in parts.enumerated() {
             let last = index == parts.count - 1
-            let next = openat(current, part, (last && events ? O_EVTONLY : O_RDONLY) | O_NOFOLLOW | O_DIRECTORY | O_CLOEXEC)
+            let next = openat(current, part, (last && events ? Platform.Files.eventsOnly : O_RDONLY) | O_NOFOLLOW | O_DIRECTORY | O_CLOEXEC)
             let problem = errno
             close(current)
             guard next >= 0 else {
@@ -247,7 +247,7 @@ public struct WalletLocalLink: WalletTransport {
         }
         beforeRename(temporary)
         // Renamed only where nothing has the name: never over another file.
-        if renameatx_np(to.descriptor, temporary, to.descriptor, name, UInt32(RENAME_EXCL)) == 0 { return .sent }
+        if Platform.Files.renameExclusive(in: to.descriptor, from: temporary, to: name) == 0 { return .sent }
         let why = errno
         unlinkat(to.descriptor, temporary, 0)
         guard why == EEXIST else { return .peerNotListening(Self.notRunning("can't rename in \(Self.toName): \(String(cString: strerror(why)))")) }

@@ -49,7 +49,7 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == ReadOnlyCommand
 // at its default) and on stdout.
 if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == UsageStatusLine.argument {
     signal(SIGPIPE, SIG_IGN)
-    _ = fcntl(STDOUT_FILENO, F_SETNOSIGPIPE, 1)
+    Platform.Sockets.noSigPipe(STDOUT_FILENO)
     // Claude Code stopping it: heard by your command's runner, which stops your command too, never left running.
     for stop in UsageStatusLine.stopSignals { signal(stop, SIG_IGN) }
     let input = (try? FileHandle.standardInput.readToEnd()) ?? Data()

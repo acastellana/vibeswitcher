@@ -645,7 +645,7 @@ public final class MCPServer: @unchecked Sendable {
     public func serve(input: Int32 = STDIN_FILENO, output: Int32 = STDOUT_FILENO) {
         // A reader that has gone (a closed client) makes a write fail, not kill this process with SIGPIPE: an ending
         // server's cancelled calls still answer.
-        _ = fcntl(output, F_SETNOSIGPIPE, 1)
+        Platform.Sockets.noSigPipe(output)
         let writing = NSLock()
         let respond: (Data) -> Void = { reply in
             let line = Array(reply + Data([0x0A]))
