@@ -35,11 +35,22 @@ struct ShellDeskTests {
         /// What the desk asked `later` to run, and when: tests fire these themselves, never wait.
         var timers: [(after: TimeInterval, run: () -> Void)] = []
         var names = [ShellDeskTests.session.uuidString.lowercased(): "Example agent"]
+        /// The host's sessions, as the app's client has them.
+        var sessions: [HostSession] = []
+    }
+
+    /// The Run card's shell as the host lists it: live, and how its command ended (nil: still running).
+    static func shellSession(_ end: CommandEnd?, live: Bool = true, title: String = "") -> HostSession {
+        var session = HostSession(id: shell, tty: "ttys009", childPID: 4242, cwd: "/work/example", command: "eval", label: "Shell: Local test",
+                                  agent: nil, title: title, startedAt: created, cols: 120, rows: 36, exit: live ? nil : .init(status: 0, at: created))
+        session.commandEnd = end
+        return session
     }
 
     func desk(_ seen: Seen, clock: Clock, folder: URL) -> ShellDesk {
         let desk = ShellDesk(folder: folder, now: { clock.now }, log: { _ in })
         desk.sessionNames = { seen.names }
+        desk.hostSessions = { seen.sessions }
         desk.verifyStamps = { try WalletTestStamps.verify($0) }
         desk.deliver = { session, text, then in
             seen.told.append((session, text))
@@ -118,10 +129,16 @@ struct ShellDeskTests {
         await refreshed(restarted)
         #expect(seen.launched.count == 1 && seen.told.count == 1, "\(seen.told.map(\.text))")
         #expect(restarted.cards.first?.state == .started(name: "Shell: Local test", auto: false))
-        // Dismissed: gone.
+        // Dismissed: gone, its files kept until its command's end is told; then they go too.
         await acted(restarted, .dismiss, request.id)
         #expect(restarted.cards.isEmpty)
-        #expect(ShellAsk.filed(in: folder).requests.isEmpty)
+        #expect(ShellAsk.filed(in: folder).requests.map(\.id) == [request.id])
+        seen.sessions = [Self.shellSession(CommandEnd(ok: true, status: 0, startedAt: Self.created, at: Self.created, tail: "ok", cut: false))]
+        await refreshed(restarted)
+        // Told, then its files go at the next look.
+        #expect(await until { seen.told.count == 2 })
+        #expect(await until { ShellAsk.filed(in: folder).requests.isEmpty })
+        #expect(restarted.cards.isEmpty && seen.told.count == 2)
     }
 
     /// Fires the oldest pending timer asked for `after` seconds, once.
@@ -275,6 +292,94 @@ struct ShellDeskTests {
         await acted(desk, .run, request.id)
         #expect(desk.cards.first?.state == .failed("No such folder: /work/example"))
         #expect(seen.told.first?.text.contains("didn't start (No such folder: /work/example)") == true)
+    }
+
+    /// The user's report (2026-11-12): the lead only heard "started" while the command had failed. Once the host shows
+    /// the command ended, the asking session gets one message with the request's id, the exit status and the output's
+    /// last lines; never again, whatever looks again, a restart included.
+    @Test func aFailedCommandIsToldToTheAskerOnceWithItsStatusAndLastLines() async throws {
+        let folder = temp.url("shells"), seen = Seen(), clock = Clock()
+        let desk = desk(seen, clock: clock, folder: folder)
+        let request = try file(folder, command: "bash -c git log -1 --oneline && scripts/build-app.sh --install")
+        await refreshed(desk)
+        await acted(desk, .run, request.id)
+        #expect(await until { ShellAsk.answer(request.id, in: folder)?.told == true })
+        #expect(seen.told.count == 1)
+        // Running: nothing more.
+        seen.sessions = [Self.shellSession(nil)]
+        await refreshed(desk)
+        #expect(seen.told.count == 1)
+
+        let usage = "usage: git [-v | --version] [-h | --help] [-C <path>]\n           <command> [<args>]"
+        seen.sessions = [Self.shellSession(CommandEnd(ok: false, status: 1, startedAt: Self.created, at: Self.created.addingTimeInterval(1),
+                                                      tail: usage, cut: false))]
+        await refreshed(desk)
+        #expect(await until { ShellAsk.answer(request.id, in: folder)?.endTold == true })
+        #expect(seen.told.count == 2, "\(seen.told.map(\.text))")
+        let told = try #require(seen.told.last)
+        #expect(told.session == Self.session.uuidString.lowercased())
+        #expect(told.text.contains("Shell request \(request.id)") && told.text.contains("FAILED: the command exited with status 1"), "\(told.text)")
+        #expect(told.text.contains(usage), "\(told.text)")
+        for _ in 0..<3 { await refreshed(desk) }
+        await refreshed(self.desk(seen, clock: clock, folder: folder))
+        #expect(seen.told.count == 2)
+    }
+
+    /// Exit 0: one message saying it succeeded. The shell then stays open as an interactive shell (its title changes,
+    /// it's used): nothing more is sent. And the card leaving by itself before the end doesn't lose it.
+    @Test func aSucceededCommandIsToldOnceAndTheOpenShellAfterSendsNothing() async throws {
+        let folder = temp.url("shells"), seen = Seen(), clock = Clock()
+        let desk = desk(seen, clock: clock, folder: folder)
+        let request = try file(folder)
+        await refreshed(desk)
+        await acted(desk, .run, request.id)
+        #expect(await until { seen.timers.contains { $0.after == Self.tidy } })
+        fire(seen, after: Self.tidy)
+        #expect(await until { desk.cards.isEmpty })
+        #expect(desk.cards.isEmpty && seen.told.count == 1)
+
+        let end = CommandEnd(ok: true, status: 0, startedAt: Self.created, at: Self.created.addingTimeInterval(95), tail: "42 passed", cut: false)
+        seen.sessions = [Self.shellSession(end)]
+        await refreshed(desk)
+        #expect(await until { seen.told.count == 2 })
+        #expect(seen.told.last?.text.contains("succeeded: the command exited with status 0 after 1m") == true, "\(seen.told.map(\.text))")
+        #expect(seen.told.last?.text.contains("42 passed") == true)
+        #expect(await until { ShellAsk.filed(in: folder).requests.isEmpty })
+        for title in ["vim notes.txt", "zsh", ""] {
+            seen.sessions = [Self.shellSession(end, title: title)]
+            await refreshed(desk)
+        }
+        seen.sessions = [Self.shellSession(end, live: false)]
+        await refreshed(desk)
+        #expect(seen.told.count == 2 && desk.cards.isEmpty)
+    }
+
+    /// Fail closed: the shell ended before its command said how it ended (it ran `exit`, or was closed), or isn't the
+    /// host's any more: the asker hears that its status and output weren't captured. A shell the host doesn't list yet
+    /// just after it started isn't called gone.
+    @Test func aShellThatEndedFirstSaysNothingWasCaptured() async throws {
+        let folder = temp.url("shells"), seen = Seen(), clock = Clock()
+        let desk = desk(seen, clock: clock, folder: folder)
+        let request = try file(folder), other = try file(folder, command: "make gone")
+        seen.sessions = [Self.shellSession(nil)]
+        await refreshed(desk)
+        await acted(desk, .run, request.id)
+        #expect(await until { seen.told.count == 1 })
+        seen.sessions = [Self.shellSession(nil, live: false)]
+        await refreshed(desk)
+        #expect(await until { seen.told.count == 2 })
+        #expect(seen.told.last?.text.contains("ended (its shell exited with status 0) before the command said how it ended") == true)
+        #expect(seen.told.last?.text.contains("weren't captured") == true)
+
+        desk.launch = { _, then in then(.success((UUID(), "Shell: Local test"))) }
+        await acted(desk, .run, other.id)
+        #expect(await until { seen.told.count == 3 })
+        await refreshed(desk)
+        #expect(seen.told.count == 3, "not listed yet just after it started: not gone")
+        clock.now = clock.now.addingTimeInterval(ShellDesk.startingFor + 1)
+        await refreshed(desk)
+        #expect(await until { seen.told.count == 4 })
+        #expect(seen.told.last?.text.contains("is gone from VibeSwitcher") == true, "\(seen.told.map(\.text))")
     }
 }
 
