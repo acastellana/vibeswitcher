@@ -28,7 +28,7 @@ struct KeychainLintTests {
     /// The Keychain is called from two places only: the app's key store and the host's vault key.
     @Test func onlyTheKeyStoresCallTheKeychain() {
         #expect(Self.files(in: "Sources", matching: #"\bSec(Item|Keychain)\w*\("#)
-            == ["Sources/VibeCore/LeadVaultAppProof.swift", "Sources/VibeHost/VaultStorage.swift"])
+            == ["Sources/VibeCore/MacOnly/AppProof+Keychain.swift", "Sources/VibeHost/VaultStorage.swift"])
     }
 
     /// The app's Keychain store is made by the app alone (its one client); every other client, a default one too, has

@@ -390,7 +390,7 @@ public enum GitGuard {
         let quote = { (word: String) in "'" + word.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         let command = (BranchCode.wrapper + [hook]).map(quote).joined(separator: " ") + " \"$@\""
         let session = #"use POSIX (); my $pid = fork; defined $pid or die "fork: $!\n"; if (!$pid) { POSIX::setsid(); POSIX::close($_) for 3 .. 255; exec { $ARGV[0] } @ARGV; POSIX::_exit(127); } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8);"#
-        let unset = Platform.Tools.branchShellStartupVariables
+        let unset = Platform.Tools.branchShellVariablesAScriptUnsets
         return "#!/bin/sh\n# VibeSwitcher: the hook the lead accepted, run as branch code (GitGuard.shim).\n"
             + (unset.isEmpty ? "" : "unset \(unset.joined(separator: " "))\n")
             + "if [ -x /usr/bin/perl ]; then exec /usr/bin/perl -e \(quote(session)) \(command); fi\n"

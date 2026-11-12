@@ -193,7 +193,7 @@ struct ToolsTests {
         #else
         #expect(passed == environment)
         #endif
-        #expect(Set(environment.keys).subtracting(passed.keys) == Set(Platform.Tools.branchShellStartupVariables))
+        #expect(Set(environment.keys).subtracting(passed.keys).isSubset(of: Set(Platform.Tools.branchShellStartupVariables)))
         #expect(Platform.Tools.branchEnvironment([:]) == [:])
 
         func said(in environment: [String: String]) throws -> String {
@@ -206,9 +206,68 @@ struct ToolsTests {
             return try SpawnTests.output(of: spawn).output
         }
         #expect(try said(in: passed) == "ok\n")
+        // The branch shell itself ignores the variable too (bash -p), filtered or not.
+        #expect(try said(in: environment) == "ok\n")
+    }
+
+    /// Every way an environment makes a bash run something before its command, or in a command's place: a startup
+    /// file (`BASH_ENV`), xtrace turned on from outside with a `PS4` that runs a command (`SHELLOPTS`), and an
+    /// exported function named as the command (`BASH_FUNC_echo%%`). The branch shell takes none of them, and the
+    /// branch's environment carries none on to a bash started below it. The last check is why: a bash without -p,
+    /// given the same environment, runs all three.
+    @Test func noVariableMakesTheBranchShellRunSomethingElse() throws {
+        let folder = try TestScriptLinuxTests.scratch("tools-hostile")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let startup = folder.appendingPathComponent("startup")
+        try Self.write("touch \(folder.path)/by-startup\n", to: startup)
+        let hostile = ["HOME": folder.path, "PATH": "/usr/bin:/bin", "KEPT": "1",
+                       "BASH_ENV": startup.path, "ENV": startup.path,
+                       "SHELLOPTS": "xtrace", "PS4": "$(touch \(folder.path)/by-trace)+ ",
+                       "BASHOPTS": "extdebug", "BASH_XTRACEFD": "2",
+                       "BASH_FUNC_echo%%": "() { touch \(folder.path)/by-function; builtin echo hijacked; }"]
+        func run(_ arguments: [String], in environment: [String: String]) throws -> String {
+            var spawn = Platform.Spawn(executable: arguments[0], arguments: arguments)
+            spawn.environment = environment.map { "\($0.key)=\($0.value)" }
+            spawn.directory = folder.path
+            spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+            spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+            return try SpawnTests.output(of: spawn).output
+        }
+        func left() -> [String] {
+            ["by-startup", "by-trace", "by-function"].filter { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
+        }
+        let passed = Platform.Tools.branchEnvironment(hostile)
         #if os(Linux)
-        // Why: with the variable left in, the file is read.
-        #expect(try said(in: environment) == "polluted\nok\n")
+        #expect(passed == ["HOME": folder.path, "PATH": "/usr/bin:/bin", "KEPT": "1"])
+        // The branch shell, even with the environment as it came.
+        #expect(try run(Platform.Tools.branchShell + ["-c", "echo ok"], in: hostile) == "ok\n")
+        #expect(left() == [])
+        // A plain bash below it, with the branch's environment.
+        #expect(try run(["/bin/bash", "-c", "echo ok"], in: passed) == "ok\n")
+        #expect(left() == [])
+        // Why: a plain bash with the environment as it came.
+        #expect(try run(["/bin/bash", "-c", "echo ok"], in: hostile) == "hijacked\n")
+        #expect(left() == ["by-startup", "by-trace", "by-function"])
+        #else
+        #expect(passed == hostile)
+        #endif
+    }
+
+    /// The hook shim unsets these in a `/bin/sh` script, and on some systems sh is bash, where unsetting a read-only
+    /// variable (SHELLOPTS, BASHOPTS) is an error that ends the script: the list holds neither, and a bash run as sh
+    /// gets past the line.
+    @Test func theVariablesAScriptUnsetsDontEndABashRunAsSh() throws {
+        let names = Platform.Tools.branchShellVariablesAScriptUnsets
+        #expect(!names.contains("SHELLOPTS") && !names.contains("BASHOPTS"))
+        #if os(Linux)
+        #expect(names == ["BASH_ENV", "ENV", "PS4", "BASH_XTRACEFD"])
+        var spawn = Platform.Spawn(executable: "/bin/bash", arguments: ["/bin/bash", "--posix", "-c", "unset \(names.joined(separator: " ")); echo past"])
+        spawn.environment = ["PATH=/usr/bin:/bin", "SHELLOPTS=posix"]
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+        #expect(try SpawnTests.output(of: spawn).output == "past\n")
+        #else
+        #expect(names == [])
         #endif
     }
 
@@ -217,7 +276,7 @@ struct ToolsTests {
         #expect(Platform.Tools.isExecutableFile(shell), "\(shell)")
         #if os(Linux)
         #expect(shell == "/bin/bash")
-        #expect(Platform.Tools.branchShell == ["/bin/bash", "--noprofile", "--norc"])
+        #expect(Platform.Tools.branchShell == ["/bin/bash", "--noprofile", "--norc", "-p"])
         #else
         #expect(shell == "/bin/zsh")
         #expect(Platform.Tools.branchShell == ["/bin/zsh", "-f"])

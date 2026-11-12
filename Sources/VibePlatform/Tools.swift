@@ -28,27 +28,54 @@ extension Platform {
             #if canImport(Darwin)
             return ["/bin/zsh", "-f"]
             #else
-            return ["/bin/bash", "--noprofile", "--norc"]
+            // -p: bash then takes no function from the environment and ignores SHELLOPTS, BASHOPTS, BASH_ENV and ENV
+            // there, the ways an environment makes a bash run something before its command (zsh -f has none).
+            return ["/bin/bash", "--noprofile", "--norc", "-p"]
             #endif
         }
 
-        /// The variables of an environment that name a file `branchShell` reads as it starts, whatever its options.
-        /// The Mac: none (zsh `-f` reads no file a variable names). Linux: `BASH_ENV`, whose file bash reads before a
-        /// `-c` command, and `ENV`, the same for a bash started as sh.
+        /// The variables of an environment through which a bash runs something before its command, or as it traces
+        /// one: `BASH_ENV` and `ENV` name a file it reads, `SHELLOPTS` and `BASHOPTS` turn options on (xtrace among
+        /// them), and under xtrace `PS4` is expanded, commands in it run, before each command, to `BASH_XTRACEFD`.
+        /// `branchShell` ignores them itself (`-p`); they are taken out as well so that a bash the branch's code starts
+        /// in turn doesn't get them from here. The Mac: none (zsh `-f` has no such variable).
         public static var branchShellStartupVariables: [String] {
             #if canImport(Darwin)
             return []
             #else
-            return ["BASH_ENV", "ENV"]
+            return ["BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "PS4", "BASH_XTRACEFD"]
+            #endif
+        }
+
+        /// Those of `branchShellStartupVariables` a shell script can `unset` in whatever shell `/bin/sh` is: not
+        /// `SHELLOPTS` and `BASHOPTS`, which are read-only in a bash, where unsetting one is an error that ends a
+        /// script run as sh. Left in, those two can only turn options on in a bash started further down; with `PS4`
+        /// and `BASH_XTRACEFD` gone, tracing runs nothing and writes to stderr.
+        public static var branchShellVariablesAScriptUnsets: [String] {
+            branchShellStartupVariables.filter { $0 != "SHELLOPTS" && $0 != "BASHOPTS" }
+        }
+
+        /// What the name of an exported bash function starts with in an environment (`BASH_FUNC_name%%`): a bash
+        /// that isn't started with `-p` defines each as it starts, and one named as a command the branch's code runs
+        /// would run in its place. The Mac: nil.
+        public static var branchShellFunctionPrefix: String? {
+            #if canImport(Darwin)
+            return nil
+            #else
+            return "BASH_FUNC_"
             #endif
         }
 
         /// The environment a branch's code is started with, made of `environment`: the same without
-        /// `branchShellStartupVariables`, so the branch shell reads no startup file there either. The Mac: `environment`
-        /// as it is. What the shell starts has the same environment, so none of it reads such a file.
+        /// `branchShellStartupVariables` and without exported functions (`branchShellFunctionPrefix`). The Mac:
+        /// `environment` as it is.
         public static func branchEnvironment(_ environment: [String: String]) -> [String: String] {
             let dropped = branchShellStartupVariables
-            return dropped.isEmpty ? environment : environment.filter { !dropped.contains($0.key) }
+            let functions = branchShellFunctionPrefix
+            if dropped.isEmpty && functions == nil { return environment }
+            return environment.filter { entry in
+                !dropped.contains(entry.key) && !(functions.map { entry.key.hasPrefix($0) } ?? false)
+            }
         }
 
         /// The login shell for a user whose `SHELL` isn't set. As a login shell (`-l`) zsh reads ~/.zprofile, and
