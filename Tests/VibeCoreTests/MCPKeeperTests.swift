@@ -60,7 +60,7 @@ struct MCPKeeperTests {
 
         // The restart is in the keeper's log, with how the server ended.
         let log = server.mcpLog(server.process.processIdentifier)
-        #expect(log.contains("keeper: the tool server was killed by signal 9 (Killed: 9); starting it again (restart 1 of 5 within 60 s); 1 call in hand answered with an error"), "\(log)")
+        #expect(log.contains("keeper: the tool server was killed by signal 9 (\(String(cString: strsignal(SIGKILL)))); starting it again (restart 1 of 5 within 60 s); 1 call in hand answered with an error"), "\(log)")
         #expect(log.contains("keeper: started the tool server again, pid \(second), the client's initialize replayed"), "\(log)")
     }
 
@@ -182,6 +182,6 @@ struct MCPKeeperTests {
 
     @Test func aServersEndInWords() {
         #expect(MCPKeeper.describe(status: 3 << 8) == "exited with status 3")
-        #expect(MCPKeeper.describe(status: SIGKILL) == "was killed by signal 9 (Killed: 9)")
+        #expect(MCPKeeper.describe(status: SIGKILL) == "was killed by signal 9 (\(String(cString: strsignal(SIGKILL))))")
     }
 }

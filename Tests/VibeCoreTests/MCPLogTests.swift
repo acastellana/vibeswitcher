@@ -33,10 +33,11 @@ import Testing
             return done.wait(timeout: .now() + hangGuard) == .success
         }
         // The signal source is registered with the kernel on a pool thread: a signal before that is caught by the empty
-        // handler and lost, so it's sent again until serve has returned.
+        // handler and lost, so it's sent again until serve has returned. Sent to the process, as another's kill sends
+        // it: raise() sends it to this thread alone, which Linux's dispatch source (a signalfd) never reads.
         let deadline = Date().addingTimeInterval(hangGuard)
         repeat {
-            raise(signal)
+            kill(getpid(), signal)
             if done.wait(timeout: .now() + 0.2) == .success { return true }
         } while Date() < deadline
         return false
