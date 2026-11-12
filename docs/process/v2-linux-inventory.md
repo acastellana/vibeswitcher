@@ -95,3 +95,16 @@ hosted runner. What it asks of the code:
 - **Ubuntu 24.04**: the image's own Swift is used when it is `.swift-version`'s, else swiftly installs that version.
 - The Mac suite on the runner: how long it takes and what it can't run are in
   [the skip list](../../scripts/ci/macos-runner-skips.txt) and below, once the first runs are in.
+
+## State at the end of stage 1 (2026-11-13)
+
+- **Builds on Linux:** `VibePlatform`, `VibeCore`, `VibeNode`, the hook (`vibeswitcher-hook`), the tool server
+  (`vibeswitcher-mcp`) and the command line (`vibeswitcher-cli`, installed as `vibeswitcher`).
+- **The Linux suite** (`bash scripts/test.sh`, on this 24-core machine): 2,801 tests in 345 suites passed, with 1
+  known issue.
+- **`VibeHost` still doesn't build on Linux**, nor `vibeswitcher-host`: it is stage 2's
+  ([its plan](../superpowers/plans/2026-11-13-v2-stage-2-session-host.md)). `scripts/ci/linux-core-errors.sh` counts
+  its errors (142 in 8 files at `dbbeecbe`).
+- **What remains of stage 1** ([its plan](../superpowers/plans/2026-11-12-v2-stage-1-core-on-linux.md#remaining-work-revised-2026-11-13)):
+  R10, a real Claude Code session from working to needs-you to done, which waits for the user's Claude Code config
+  folder; and R3's confirmation that every `v2 linux` and `v2 macos` job is green on one commit.

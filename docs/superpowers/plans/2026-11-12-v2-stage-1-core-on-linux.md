@@ -74,6 +74,8 @@ Each is the author's call and can be overruled before its task starts.
 
 ### Task 1: The module, the manifest on Linux, the lint
 
+**Commits:** `9fc9c6eb`, `253116b8`, `6f6a7f55`.
+
 **Files:**
 - Create: `Sources/VibePlatform/Platform.swift`, `Sources/VibePlatform/Libc.swift`
 - Create: `Sources/CVibePlatform/include/CVibePlatform.h`, `Sources/CVibePlatform/shim.c`
@@ -87,12 +89,12 @@ Each is the author's call and can be overruled before its task starts.
 - Produces: `PlatformLintPending.txt`, one path a line, the files still breaking the lint's rule. Every later task
   removes the files it cleans.
 
-- [ ] **Step 1: The manifest.** `Package.swift` keeps today's targets on macOS and adds `VibePlatform` (depended on by
+- [x] **Step 1: The manifest.** `Package.swift` keeps today's targets on macOS and adds `VibePlatform` (depended on by
   `VibeCore`) and `VibePlatformTests`. Under `#if os(Linux)` the package's targets are only the portable ones that
   compile so far: `CVibePlatform`, `VibePlatform`, `VibePlatformTests`; swift-crypto is a dependency there. The list
   is one array, `portableTargets`, with a comment saying which task adds what.
 
-- [ ] **Step 2: The lint, failing first.** `PlatformLintTests.noSystemCodeOutsideThePlatform`: for every `.swift`
+- [x] **Step 2: The lint, failing first.** `PlatformLintTests.noSystemCodeOutsideThePlatform`: for every `.swift`
   under `Sources/VibeCore` (not `MacOnly/`), `Sources/VibeHost`, `Sources/vibeswitcher-host`, `-hook`, `-mcp`, a line
   matching `^\s*(@_exported\s+)?import\s+(Darwin|Glibc|Musl|CryptoKit|Security|Network|CoreGraphics|ImageIO|UniformTypeIdentifiers|AppKit|SwiftUI|Combine|IOKit)\b`
   or `^\s*#(if|elseif)\s+.*\b(os|canImport)\(` is a violation unless the file is in `PlatformLintPending.txt`
@@ -102,26 +104,28 @@ Each is the author's call and can be overruled before its task starts.
   (Task 2), so this once: `VIBESWITCHER_HOME=$(mktemp -d) swift test --build-system native --filter PlatformLintTests`.
   Expected: both pass; delete a line from the list and the first fails naming that file.
 
-- [ ] **Step 3: The shim and `Libc.swift`.** The header declares, under `#define _GNU_SOURCE`, what Decision 2 lists
+- [x] **Step 3: The shim and `Libc.swift`.** The header declares, under `#define _GNU_SOURCE`, what Decision 2 lists
   and nothing else. `Libc.swift` is the one place with the three-way libc import, `@_exported` inside the module only.
 
-- [ ] **Step 4: The test target's home guard.** `Tests/VibePlatformTests/TestSupport.swift` carries the same
+- [x] **Step 4: The test target's home guard.** `Tests/VibePlatformTests/TestSupport.swift` carries the same
   `refuseTheAccountRoot` guard as `Tests/VibeCoreTests/TestSupport.swift`, with the section name chosen by system:
   `__DATA,__mod_init_func` on the Mac, `.init_array` on Linux, and on Linux it also ignores SIGPIPE. Test
   `TestHomeGuardTests.theGuardRan` asserts `homeGuardRan == true`. Shown failing: with the Mach-O name on Linux the
   test fails.
 
-- [ ] **Step 5: `PlatformExport.swift`** in `VibeCore`: `@_exported import VibePlatform`.
+- [x] **Step 5: `PlatformExport.swift`** in `VibeCore`: `@_exported import VibePlatform`.
 
-- [ ] **Step 6: Both systems.** Linux: `swift build --build-system native` and the two test classes pass. Push; `v2
+- [x] **Step 6: Both systems.** Linux: `swift build --build-system native` and the two test classes pass. Push; `v2
   macos` builds and its suite is as green as before; `v2 linux` gains a step `swift build --build-system native
   --force-resolved-versions` in place of the SwiftTerm-only build.
 
-- [ ] **Step 7: Commit** ("v2: VibePlatform, the Linux manifest, PlatformLint").
+- [x] **Step 7: Commit** ("v2: VibePlatform, the Linux manifest, PlatformLint").
 
 ---
 
 ### Task 2: The scripts on Linux
+
+**Commits:** `b445bf0a`, `438b1270`.
 
 **Files:**
 - Modify: `scripts/lib/processes.sh`, `scripts/test.sh`, `Resources/bin/vs-heavy`
@@ -131,33 +135,35 @@ Each is the author's call and can be overruled before its task starts.
 - Produces: `bash scripts/test.sh [swift test options]` works on Linux: scratch home, build, tests, web tests,
   leftover check. Every later task's test commands use it.
 
-- [ ] **Step 1: Failing tests** (Linux only, skipped on the Mac with `.enabled(if:)`):
+- [x] **Step 1: Failing tests** (Linux only, skipped on the Mac with `.enabled(if:)`):
   `theLeftoverCheckFindsAProcessOfTheRun` starts `sleep 300` with a mark in its environment, runs `scripts/test.sh
   --leftovers MARK`, expects exit 1, the process named and ended; `vsHeavyRunsACommandInASlot` runs
   `Resources/bin/vs-heavy --as test true` with a scratch `TMPDIR`, expects exit 0 inside 10 s;
   `vsHeavyGivesItsShareOfTheCores` runs `vs-heavy bash -c 'echo $VS_HEAVY_CORES'`, expects a whole number from 1 to
   the machine's cores.
 
-- [ ] **Step 2: `processes()`** on Linux: `ps axwwe -o pid=,ppid=,stat=,command=` (procps), the same four columns.
+- [x] **Step 2: `processes()`** on Linux: `ps axwwe -o pid=,ppid=,stat=,command=` (procps), the same four columns.
   The libproc fallback stays the Mac's.
 
-- [ ] **Step 3: `vs-heavy`**, each Mac command given a Linux form chosen by `uname`: cores from `nproc`; the load from
+- [x] **Step 3: `vs-heavy`**, each Mac command given a Linux form chosen by `uname`: cores from `nproc`; the load from
   `/proc/loadavg`; the two `ps` reads with procps' columns (`lstart` has the same format in procps; `etime` too); the
   lock folder under `/tmp` where there is no `/private/tmp`. Nothing else in it changes.
 
-- [ ] **Step 4: `scripts/test.sh`** on Linux: `real_preferences` is empty and both preference checks are skipped with
+- [x] **Step 4: `scripts/test.sh`** on Linux: `real_preferences` is empty and both preference checks are skipped with
   one line saying so; `CFFIXED_USER_HOME` is still exported; the security audit's tests are skipped until Task 12 adds
   the host ("no host on Linux yet"), the web tests run.
 
-- [ ] **Step 5: Run.** `bash scripts/test.sh` on Linux: `VibePlatformTests` pass, `web tests: 7 of 7 passed`, the
+- [x] **Step 5: Run.** `bash scripts/test.sh` on Linux: `VibePlatformTests` pass, `web tests: 7 of 7 passed`, the
   leftover check runs (no "skipped" line). `v2 linux` runs `bash scripts/test.sh` in place of its web-only step. The
   Mac run is unchanged: `scripts/test.sh`'s Mac path differs by no line that runs there (review the diff for it).
 
-- [ ] **Step 6: Commit** ("v2: scripts/test.sh, vs-heavy and the leftover check on Linux").
+- [x] **Step 6: Commit** ("v2: scripts/test.sh, vs-heavy and the leftover check on Linux").
 
 ---
 
 ### Task 3: Libc names, imports, crypto
+
+**Commits:** `923a43b9`.
 
 **Files:**
 - Create: `Sources/VibePlatform/Sys.swift`; Test: `Tests/VibePlatformTests/SysTests.swift`
@@ -168,22 +174,24 @@ Each is the author's call and can be overruled before its task starts.
 - Produces: `public enum Sys` exactly as recon §1.1 (`read`, `write`, `close`, `pipe`, `kill`, `open`, `connect`,
   `listen`, `truncate`).
 
-- [ ] **Step 1: Failing test** `SysTests.aPipeCarriesBytesAndClosesTwice`: `Sys.pipe`, `Sys.write` 3 bytes,
+- [x] **Step 1: Failing test** `SysTests.aPipeCarriesBytesAndClosesTwice`: `Sys.pipe`, `Sys.write` 3 bytes,
   `Sys.read` returns the same 3, `Sys.close` returns 0 and then −1.
-- [ ] **Step 2: Implement `Sys`**, each a one-line forward to libc.
-- [ ] **Step 3: Switch the 51 call sites** (`Darwin.x(` to `Sys.x(`), delete the 21 `import Darwin` lines, add the
+- [x] **Step 2: Implement `Sys`**, each a one-line forward to libc.
+- [x] **Step 3: Switch the 51 call sites** (`Darwin.x(` to `Sys.x(`), delete the 21 `import Darwin` lines, add the
   exported crypto import to `PlatformExport.swift` and delete the 18 `import CryptoKit` lines. If Decision 4's first
   form doesn't compile on the Mac runner, use its fallback and restore the 18 lines.
-- [ ] **Step 4: Measure.** `scripts/ci/linux-core-errors.sh` (create it: builds `VibeCore` on Linux with
+- [x] **Step 4: Measure.** `scripts/ci/linux-core-errors.sh` (create it: builds `VibeCore` on Linux with
   `VIBE_LINUX_ALL=1`, which the manifest reads to include every portable target, with
   `-Xswiftc -continue-building-after-errors`; prints the error count and the count per file). Expected: no "no such
   module" and no "cannot find 'Darwin'" left. Record the count in the commit message.
-- [ ] **Step 5: Lint list.** Remove from `PlatformLintPending.txt` every file this cleaned; the lint passes.
-- [ ] **Step 6: Push; both workflows green; commit** ("v2: libc through Sys, one crypto import").
+- [x] **Step 5: Lint list.** Remove from `PlatformLintPending.txt` every file this cleaned; the lint passes.
+- [x] **Step 6: Push; both workflows green; commit** ("v2: libc through Sys, one crypto import").
 
 ---
 
 ### Task 4: `stat` fields and the small ones
+
+**Commits:** `c23a5c3a`, `865e57ef`, `7f958a95`.
 
 **Files:**
 - Create: `Sources/VibePlatform/Stat.swift`, `Small.swift`, `Signals.swift`; Test: `StatTests.swift`, `SmallTests.swift`
@@ -197,20 +205,22 @@ Each is the author's call and can be overruled before its task starts.
   `Platform.Files.birthTime(_:) -> Double?`; `Platform.isBoolean(_:)`; `Platform.plainInline(_:)`;
   `Platform.Signals.onFatal(_:_:)`, `onUncaughtException(_:)`.
 
-- [ ] **Step 1: Failing tests.** `StatTests.modifiedFollowsAWrite` (write a file, `stat`, `modified.tv_sec` within 2 s
+- [x] **Step 1: Failing tests.** `StatTests.modifiedFollowsAWrite` (write a file, `stat`, `modified.tv_sec` within 2 s
   of now; `byteSize` equals the bytes written; two files have different `inode`). `birthTimeIsNilOrNotLaterThanNow`.
   `SmallTests.aJSONTrueIsABooleanAndAOneIsNot` (through `JSONSerialization`, on both systems).
   `plainInlineDropsEmphasisAndLinks`: `"**a** [b](http://x) `c`"` gives `"a b c"`.
-- [ ] **Step 2: Implement.** On Linux `birthTime` uses `statx` through the shim and returns nil where the filesystem
+- [x] **Step 2: Implement.** On Linux `birthTime` uses `statx` through the shim and returns nil where the filesystem
   doesn't record it. `plainInline` on the Mac is the existing `AttributedString(markdown:)` call moved; on Linux a
   small stripper for emphasis, code spans and links, returning nil for anything it doesn't recognise as inline.
-- [ ] **Step 3: Switch the call sites**, including the three the compiler hid (recon §0): `ConfigSeal.swift:771`,
+- [x] **Step 3: Switch the call sites**, including the three the compiler hid (recon §0): `ConfigSeal.swift:771`,
   `TestLock.swift:433`, `DiskSpace.swift:303`. `WebPush`'s random bytes become `SystemRandomNumberGenerator` on both.
-- [ ] **Step 4: Measure, lint list, push, both green, commit** ("v2: stat fields, signals and the small ones").
+- [x] **Step 4: Measure, lint list, push, both green, commit** ("v2: stat fields, signals and the small ones").
 
 ---
 
 ### Task 5: Clocks and the host
+
+**Commits:** `c23a5c3a`, `865e57ef`.
 
 **Files:**
 - Create: `Sources/VibePlatform/Clock.swift`, `Host.swift`; Test: `ClockTests.swift`, `HostTests.swift`
@@ -220,21 +230,25 @@ Each is the author's call and can be overruled before its task starts.
 - Produces: `Platform.Clock.awakeSeconds()`, `threadCPUNanoseconds()`; `Platform.Host.memoryPressureLevel()`,
   `memoryFreePercent()`, `swapUsage()`, `swapOuts()`, `volumeFree(at:)`, `descriptorLimit()` (recon §1.4, §1.5).
 
-- [ ] **Step 1: Failing tests.** `awakeSecondsNeverGoesBack` (1,000 reads, non-decreasing, positive).
+- [x] **Step 1: Failing tests.** `awakeSecondsNeverGoesBack` (1,000 reads, non-decreasing, positive).
   `threadCPUGrowsWithWork`. `volumeFreeOfTheScratchFolderIsPositive`. `descriptorLimitIsAtLeast256`.
   `swapUsageIsNilOrUsedNotOverTotal`. `memoryPressureIsNilOrOneTwoOrFour`.
-- [ ] **Step 2: Implement.** The Mac's are the existing bodies moved. Linux: `CLOCK_MONOTONIC`,
+- [x] **Step 2: Implement.** The Mac's are the existing bodies moved. Linux: `CLOCK_MONOTONIC`,
   `CLOCK_THREAD_CPUTIME_ID`, `/proc/meminfo`, `/proc/vmstat`, `/proc/pressure/memory` (nil where the file is absent,
   as on this machine), `statvfs`, `getrlimit`.
-- [ ] **Step 3: Switch the call sites** (recon §1.4, §1.5).
-- [ ] **Step 4: Measure, lint list, push, both green, commit** ("v2: clocks and host statistics").
+- [x] **Step 3: Switch the call sites** (recon §1.4, §1.5).
+- [x] **Step 4: Measure, lint list, push, both green, commit** ("v2: clocks and host statistics").
 
 ---
 
 ### Task 6: Sockets and files
 
-**Files:**
-- Create: `Sources/VibePlatform/Sockets.swift`, `Files.swift`; Test: `SocketsTests.swift`, `FilesTests.swift`
+**Commits:** `915893ee`, `ad2036c4`, `30c182bf`, `47636aaf`; the missing test in R5 (`fbd11963`).
+
+**Files:** (corrected 2026-11-13 from what was built)
+- Create: `Sources/VibePlatform/Sockets.swift`, `Sockets+Darwin.swift`, `Sockets+Linux.swift`; `FilesExclusive.swift`,
+  `FilesExclusive+Linux.swift` (`renameExclusive`), `FilesExclusive+Link.swift` (`createLocked`'s make, flock and
+  link, on both systems since `47636aaf`); Test: `SocketsTests.swift`, `FilesExclusiveTests.swift`
 - Modify: `UnixSocket.swift`, `AccountUsage.swift`, `MCPKeeper.swift`, `MCPServer.swift`,
   `Sources/vibeswitcher-mcp/main.swift`, `LeadLaunch.swift`, `WalletLocalLink.swift`, `TestLock.swift`,
   `LoadRecorder.swift`, `DiskSpace.swift`
@@ -243,14 +257,14 @@ Each is the author's call and can be overruled before its task starts.
 - Produces: `Platform.Sockets` and `Platform.PeerToken` as recon §1.7; `Platform.Files.renameExclusive(in:from:to:)`,
   `createLocked(_:mode:)`, `eventsOnly`, `sharedTemporaryRoot` as recon §1.8.
 
-- [ ] **Step 1: Failing tests.** `SocketsTests`: `aPeersUIDAndPIDAreThisProcesss` (a connected Unix pair);
+- [x] **Step 1: Failing tests.** `SocketsTests`: `aPeersUIDAndPIDAreThisProcesss` (a connected Unix pair);
   `aPathOverTheLimitIsRefused` (104 bytes on the Mac, 108 on Linux, measured from `sun_path`);
   `writingToAClosedPeerReturnsAnErrorNotASignal` (after `noSigPipe`, a write returns −1 with `EPIPE`; the test
   process is still alive to say so). `FilesTests`: `renameExclusiveRefusesAnExistingTarget` (−1, `EEXIST`, the source
   still there), for a file and for a folder; `createLockedIsNeverSeenUnlocked`: 8 threads loop "open the ticket name,
   try `flock` non-blocking" for 2 s while the main thread creates 200 tickets with `createLocked`; no thread ever
   gets the lock on a live ticket. `sharedTemporaryRootExistsAndIsWritable`.
-- [ ] **Step 2: Implement.** Linux `createLocked`: create under a name that doesn't start `ticket-`, `flock` it,
+- [x] **Step 2: Implement.** Linux `createLocked`: create under a name that doesn't start `ticket-`, `flock` it,
   `link` it to the wanted name, unlink the first (recon §1.8). `renameExclusive`: `renameat2(RENAME_NOREPLACE)`; on
   `EINVAL` (a filesystem without it) `link` then `unlink` for a file, and for a folder the existing error.
   `noSigPipe` does nothing on Linux, which has no switch per descriptor: there a process ignores SIGPIPE as a whole.
@@ -258,12 +272,14 @@ Each is the author's call and can be overruled before its task starts.
   `everyExecutableSettlesSIGPIPEBeforeItsFirstWrite`, reads each executable's `main.swift` and fails when none of
   `signal(SIGPIPE`, `Platform.Signals` or `MCPLog.install` comes before its first socket or pipe use.
   `peerToken` on Linux: pid, uid and the pid's start ticks read once at accept.
-- [ ] **Step 3: Switch the call sites** (recon §1.7, §1.8), the five `/private/tmp` lines included.
-- [ ] **Step 4: Measure, lint list, push, both green, commit** ("v2: sockets, peers, exclusive files").
+- [x] **Step 3: Switch the call sites** (recon §1.7, §1.8), the five `/private/tmp` lines included.
+- [x] **Step 4: Measure, lint list, push, both green, commit** ("v2: sockets, peers, exclusive files").
 
 ---
 
 ### Task 7: Spawning
+
+**Commits:** `37e9ec75`, `ffd4068d`.
 
 **Files:**
 - Create: `Sources/VibePlatform/Spawn.swift`; Test: `SpawnTests.swift`
@@ -273,7 +289,7 @@ Each is the author's call and can be overruled before its task starts.
 - Produces: `Platform.Spawn` exactly as recon §1.2 (`Stdio`, `Group`, `SignalDefaults`, `start()`,
   `replaceProcess()`). `VibeHost`'s four sites use it in stage 2.
 
-- [ ] **Step 1: Failing tests**, each run on both systems, the child being `/bin/sh -c` with a short script:
+- [x] **Step 1: Failing tests**, each run on both systems, the child being `/bin/sh -c` with a short script:
   `aChildSeesOnlyTheDescriptorsItWasGiven` (the parent opens 5 extra descriptors; with `keep: []` the child's
   `ls /proc/self/fd` or `/dev/fd` lists 0, 1, 2 and the listing's own; with `keep: [n]` also `n`);
   `stdoutAndStderrGoWhereTheyWereSent` (pipe, path, `/dev/null`, `sameAsStdin`);
@@ -284,19 +300,21 @@ Each is the author's call and can be overruled before its task starts.
   `.only([SIGTERM])` the child still ignores SIGUSR1, with `.all` it dies of it);
   `replaceProcessKeepsOnlyWhatItWasTold` (a helper mode of the test binary execs `/bin/sh` and reports its
   descriptors).
-- [ ] **Step 2: Implement.** The Mac's is the existing calls moved behind the struct. Linux: non-optional attribute
+- [x] **Step 2: Implement.** The Mac's is the existing calls moved behind the struct. Linux: non-optional attribute
   and action types, `sigfillset`, `POSIX_SPAWN_SETSID` from the shim, `addchdir_np`, and for "nothing else open"
   `posix_spawn_file_actions_addclosefrom_np(3)` where the libc has it, else a close for each entry of `/proc/self/fd`
   not kept. `replaceProcess` on Linux: reset handlers and mask, mark what isn't kept close-on-exec, `execve`, undo
   all of it on failure.
-- [ ] **Step 3: Switch the five `VibeCore` sites** per the table in recon §1.2. `AccountUsage.runCommand`'s body waits
+- [x] **Step 3: Switch the five `VibeCore` sites** per the table in recon §1.2. `AccountUsage.runCommand`'s body waits
   for Task 9.
-- [ ] **Step 4: Measure** (the 74 `posix_spawn` errors are gone), **lint list, push, both green, commit** ("v2: one
+- [x] **Step 4: Measure** (the 74 `posix_spawn` errors are gone), **lint list, push, both green, commit** ("v2: one
   spawn for every site").
 
 ---
 
 ### Task 8: Processes and terminals
+
+**Commits:** `b22f4b8d`, `71e8aed5`, `30c182bf`.
 
 **Files:**
 - Create: `Sources/VibePlatform/Processes.swift`, `Processes+Darwin.swift`, `Processes+Linux.swift`, `Terminals.swift`
@@ -310,7 +328,7 @@ Each is the author's call and can be overruled before its task starts.
 - `ProcessTable` keeps every name its tests call (`record`, `info`, `cwd`, `names`, `holdsForeground`,
   `residentBytes`, `readArguments`, `environment`), each now a short map of the platform's answer.
 
-- [ ] **Step 1: Failing tests.** `ProcStatParseTests` (Linux), on fixture lines:
+- [x] **Step 1: Failing tests.** `ProcStatParseTests` (Linux), on fixture lines:
   `aNameWithSpacesAndParenthesesIsParsedFromTheLastParenthesis` (`1234 (a b) c)) S 1 1234 …` gives name `a b) c)`,
   state sleeping, ppid 1); `aZombieIsAZombie`; `startIsBootPlusTicks`. `ProcessesTests` (both systems):
   `thisProcessIsInTheTable`; `itsRecordNamesItsParentAndOwner` (`ppid == getppid()`, `uid == getuid()`);
@@ -320,42 +338,48 @@ Each is the author's call and can be overruled before its task starts.
   `twoReadsOfOneProcesssStartAreEqual`; `cpuSecondsGrowForABusyChild`;
   `openFilesNamesAFileTheChildHolds`. `TerminalsTests`: `/dev/ttys009` is `ttys009`, `/dev/pts/3` is `ttypts3`,
   `/dev/tty` is `tty`.
-- [ ] **Step 2: Move the Mac's reads** from `ProcessTable.swift` and `TerminalNames` into `Processes+Darwin.swift`,
+- [x] **Step 2: Move the Mac's reads** from `ProcessTable.swift` and `TerminalNames` into `Processes+Darwin.swift`,
   unchanged in body, and make `ProcessTable`'s kept names forward to them. Push here: the Mac suite's
   `ProcessTableTests` and `SessionDetectionTests` green is this step's proof.
-- [ ] **Step 3: The Linux reads** from `/proc` (recon §1.3): `btime` read once a process; a `(deleted)` suffix on
+- [x] **Step 3: The Linux reads** from `/proc` (recon §1.3): `btime` read once a process; a `(deleted)` suffix on
   `exe` stripped and reported by a second function, `executableWasReplaced(_:) -> Bool`.
-- [ ] **Step 4: Switch the other ten files' blocks** to the one call each.
-- [ ] **Step 5: Measure** (the 177 process-inspection errors are gone), **lint list, push, both green, commit** ("v2:
+- [x] **Step 4: Switch the other ten files' blocks** to the one call each.
+- [x] **Step 5: Measure** (the 177 process-inspection errors are gone), **lint list, push, both green, commit** ("v2:
   the process table through the platform").
 
 ---
 
 ### Task 9: Watching
 
-**Files:**
-- Create: `Sources/VibePlatform/FolderWatch.swift`, `PipeCommand.swift`; Test: `FolderWatchTests.swift`,
-  `PipeCommandTests.swift`
+**Commits:** `d013c359`, `9aef7377`.
+
+**Files:** (corrected 2026-11-13 from what was built)
+- Create: `Sources/VibePlatform/FolderWatch.swift`, `PipeCommand.swift`, each with `+Darwin` and `+Linux`; Test:
+  `FolderWatchTests.swift`, `PipeCommandTests.swift`
+- Create, built here rather than in stage 2: `Sources/VibePlatform/ProcessExit.swift`, `ProcessExit+Darwin.swift`,
+  `ProcessExit+Linux.swift`; Test: `ProcessExitTests.swift`
 - Modify: `LeadAdvance.swift`, `WalletLocalLink.swift`, `AccountUsage.swift`
 
 **Interfaces:**
 - Produces: `Platform.FolderWatch` (`init?(path:)`, `init?(descriptor:)`, `wait()`, `deliver(on:_:)`, `stop()`,
   `Change`), `Platform.pipeCommand(_:input:patience:stopSignals:) -> Data` as recon §1.9. `ProcessExit` is stage 2's.
 
-- [ ] **Step 1: Failing tests.** `aNewFileInTheFolderIsAnEntriesChange`; `aRenameIntoTheFolderIsOne`;
+- [x] **Step 1: Failing tests.** `aNewFileInTheFolderIsAnEntriesChange`; `aRenameIntoTheFolderIsOne`;
   `aWriteInsideAnExistingFileIsNotOne` (no change within 300 ms, waited on a semaphore with that timeout);
   `removingTheFolderIsFolderGone`; `stopEndsAWaitInProgress` (`wait()` returns nil);
   `aBurstOfTwentyCreationsIsAtLeastOneChangeAndThenQuiet`. `pipeCommandReturnsWhatTheCommandPrinted` (`cat` with
   input); `aCommandThatIgnoresItsInputAndExitsIsNotAHang`; `aCommandOverItsPatienceIsStoppedAndGivesNothing`.
-- [ ] **Step 2: Implement.** The Mac's are the kqueue code and `runCommand`'s body, moved. Linux: inotify with the
+- [x] **Step 2: Implement.** The Mac's are the kqueue code and `runCommand`'s body, moved. Linux: inotify with the
   masks in recon §1.9, drained before answering; `init?(path:)` returns nil when `inotify_add_watch` fails (9p),
   which callers already treat as "can't be watched". `pipeCommand` with `poll` on the pipes and the child's exit.
-- [ ] **Step 3: Switch the call sites.**
-- [ ] **Step 4: Measure, lint list, push, both green, commit** ("v2: folder watching and piped commands").
+- [x] **Step 3: Switch the call sites.**
+- [x] **Step 4: Measure, lint list, push, both green, commit** ("v2: folder watching and piped commands").
 
 ---
 
 ### Task 10: Settings and tools
+
+**Commits:** `47714160`, `0bfdfc38`, `30c182bf`, `9fd05f05`.
 
 **Files:**
 - Create: `Sources/VibePlatform/Settings.swift`, `Tools.swift`; Test: `SettingsTests.swift`, `ToolsTests.swift`
@@ -367,49 +391,59 @@ Each is the author's call and can be overruled before its task starts.
 - Produces: `protocol SettingsStore` and `Platform.settings(domain:)` as recon §1.12; `Platform.Tools.git`,
   `branchShell`, `loginShell`, `find(_:path:)`, `missing()` as recon §1.13.
 
-- [ ] **Step 1: Failing tests.** `SettingsTests` (against a store at a scratch path): a string, a bool, a date inside a
+- [x] **Step 1: Failing tests.** `SettingsTests` (against a store at a scratch path): a string, a bool, a date inside a
   dictionary and a removal each survive a second store opened on the same file; the file's mode is 0600; a write is
   atomic (the file is never seen half-written by a reader looping during 200 writes).
   `ToolsTests`: `gitIsAnAbsolutePathToAnExecutable`; `branchShellStartsAShellThatReadsNoStartupFile` (run it with
   `-c 'echo ok'` under a HOME whose startup files print "polluted": the output is `ok`);
   `findReturnsNilForAToolThatIsNowhere`; `theRunnerCheckAndTheWrapperAgree` (`BranchCode.isRunner` on the argv
   `BranchCode.wrapper` builds is true).
-- [ ] **Step 2: Implement.** On the Mac: `UserDefaults` conforms; `git` is `/usr/bin/git`; `branchShell` is
+- [x] **Step 2: Implement.** On the Mac: `UserDefaults` conforms; `git` is `/usr/bin/git`; `branchShell` is
   `["/bin/zsh", "-f"]`: today's values. On Linux: a property list at `VibePaths`' folder `/settings.plist`, written
   whole and renamed into place; `git` the first on PATH, found once; `branchShell` `["/bin/bash", "--noprofile",
   "--norc"]`; `loginShell` `/bin/bash`.
 - [ ] **Step 3: Switch the sites** (recon §1.12, §1.13). The Mac-only tool checks (`xcode-select`, `xcrun`, `pkgutil`:
   `ToolchainWatch`, `ToolInstall`, `LaunchPreflight`) answer "not applicable" on Linux through one
   `Platform.Tools.hasDeveloperTools() -> Bool?` (nil on Linux), and their callers skip on nil.
-- [ ] **Step 4: Measure, lint list, push, both green, commit** ("v2: the settings store and tools on PATH").
+- [x] **Step 4: Measure, lint list, push, both green, commit** ("v2: the settings store and tools on PATH").
 
 ---
 
 ### Task 11: What only the Mac has
 
-**Files:**
+**Commits:** `47714160`, `dbbeecbe`.
+
+**Files:** (corrected 2026-11-13 from what was built)
 - Move (`git mv`): `Sources/VibeCore/PreviewProxy.swift` to `Sources/VibeCore/MacOnly/PreviewProxy.swift`
-- Create: `Sources/VibeCore/MacOnly/AppProof+Keychain.swift`, `StatusMark+Paths.swift`, `KeptImages+ImageIO.swift`
-- Create: `Sources/VibePlatform/Images.swift`; Test: `ImagesTests.swift`
+- Create: `Sources/VibeCore/MacOnly/AppProof+Keychain.swift`, `StatusMark+Paths.swift`. Also in `MacOnly`:
+  `ProcessTable+Procargs.swift` (made in Task 8's `71e8aed5`). No `KeptImages+ImageIO.swift`: `KeptImages` asks
+  `Platform.Images.Source`
+- Create: `Sources/VibePlatform/Images.swift`, `Images+Darwin.swift`; Test: `ImagesTests.swift`
+- Kept, not deleted: `scripts/ci/linux-core-errors.sh`, which now counts `VibeHost`'s errors (Step 3)
 - Modify: `LeadVaultAppProof.swift`, `MenuBarDots.swift`, `LeadImages.swift`, `SessionOrdering.swift`, `Package.swift`
 
 **Interfaces:**
 - Produces: `Platform.Images.pixelSize(of:) -> (width: Int, height: Int)?`, `pngThumbnail(of:maxSide:) -> Data?`.
 - Produces: `VibeCore` in the Linux manifest's `portableTargets`.
 
-- [ ] **Step 1: Failing tests.** `ImagesTests.pixelSizeReadsPNGJPEGGIFAndWebPHeaders` (four fixtures a few hundred
+- [x] **Step 1: Failing tests.** `ImagesTests.pixelSizeReadsPNGJPEGGIFAndWebPHeaders` (four fixtures a few hundred
   bytes each, written by the test); `aTruncatedFileIsNil`; on Linux `pngThumbnail` is nil.
-- [ ] **Step 2: Move.** Each `MacOnly` file is wrapped whole in `#if canImport(Darwin)`. The Keychain types,
+- [x] **Step 2: Move.** Each `MacOnly` file is wrapped whole in `#if canImport(Darwin)`. The Keychain types,
   `StatusMark.body(in:)` and `glyph(in:)`, and the ImageIO thumbnail leave their files as blocks and nothing else in
   those files changes.
-- [ ] **Step 3: `VibeCore` builds on Linux.** `swift build --build-system native --target VibeCore` exits 0 with no
+- [x] **Step 3: `VibeCore` builds on Linux.** `swift build --build-system native --target VibeCore` exits 0 with no
   error. Add it to `portableTargets`; `scripts/ci/linux-core-errors.sh` is deleted, and `PlatformLintPending.txt` is
   empty for `Sources/VibeCore`.
-- [ ] **Step 4: Push; both green** (`v2 linux` now builds the core); **commit** ("v2: VibeCore builds on Linux").
+- [x] **Step 4: Push; both green** (`v2 linux` now builds the core); **commit** ("v2: VibeCore builds on Linux").
 
 ---
 
 ### Task 12: The core's tests on Linux
+
+**Commits:** `b37f0ef5`, `a599becd`, `676cc112`, `31e109f8`, `2e2d3c83`, `3485345f`, `f48cc714`, `47636aaf`; the
+core-test fixes (2026-11-13): `b3df5134`, `6c894e43`, `11b5c945`, `51bba39e`, `1143dad8`, `4d8fb1e6`, `d914f986`,
+`80229777`, `3c53fbcf`, `a219d6b1`, `9b21b884`, `37e03148`, `86b3391a`, `4adac450`, `0b11eebb`, `578741a4`,
+`9c77316a`, `a5499162`, `bbfa9d19`, `db68bf65`; then R1.
 
 **Files:**
 - Modify: `Tests/VibeCoreTests/TestSupport.swift` (the guard's Linux form), `Package.swift` (the test target on Linux)
@@ -422,20 +456,20 @@ Each is the author's call and can be overruled before its task starts.
   (wrapped whole in `#if canImport(Darwin)`); a lint test fails when a wrapped file isn't listed or a listed one
   isn't wrapped.
 
-- [ ] **Step 1: Compile.** Add `VibeCoreTests` to the Linux manifest. The 29 test files with Darwin-only code (recon
+- [x] **Step 1: Compile.** Add `VibeCoreTests` to the Linux manifest. The 29 test files with Darwin-only code (recon
   §4) each get the smallest change that compiles: a call through `VibePlatform` where one exists (`Clock`, `stat`,
   `Sys`), or the file listed Mac-only when what it tests is Mac-only (`KeychainLiveTests`, `DevPreview*Tests`,
   `StatusAccessibilityTests`, `PreferenceLedger`).
-- [ ] **Step 2: The guard.** `TestSupport.swift`'s two initializers in `.init_array` on Linux, SIGPIPE ignored there,
+- [x] **Step 2: The guard.** `TestSupport.swift`'s two initializers in `.init_array` on Linux, SIGPIPE ignored there,
   `Scratch.defaults` on a file-backed store. `HomeIsolationTests` passes on Linux; shown failing with the Mach-O
   section name.
-- [ ] **Step 3: Run and sort.** `bash scripts/test.sh` on Linux. Every failing test is one of three, decided in this
+- [x] **Step 3: Run and sort.** `bash scripts/test.sh` on Linux. Every failing test is one of three, decided in this
   order: the platform's Linux form is wrong (fix it, with a `VibePlatformTests` test that fails first); the test
   assumes the Mac where the code doesn't (a path under `/private`, `zsh`, a `ttysNNN` name, "Killed: 9"): the test
   takes the value from the platform; the thing tested is the Mac's: listed Mac-only with its reason. Work by suite,
   largest first. Stop and report if more than a tenth of the 236 files would be listed, or if a failure shows a
   change in the Mac's behaviour.
-- [ ] **Step 4: Foundation's differences**, tested first because sizes and pruning depend on them (recon §6):
+- [x] **Step 4: Foundation's differences**, tested first because sizes and pruning depend on them (recon §6):
   `totalFileAllocatedSize` and `creationDate` on Linux. Where one is nil, the code asks `stat` through the platform.
 - [ ] **Step 5: `platform-parity.md`**: the count of test files that run on both, and each Mac-only one with its
   reason.
@@ -445,23 +479,27 @@ Each is the author's call and can be overruled before its task starts.
 
 ### Task 13: The hook, the tool server, `vibeswitcher status`
 
-**Files:**
-- Create: `Sources/vibeswitcher/main.swift`, `Sources/vibeswitcher/Status.swift`
-- Modify: `Package.swift` (the three executables on Linux), `HookInstaller.swift` call sites if any remain
-- Test: `Tests/VibeCoreTests/StatusCommandTests.swift`
+**Commits:** `dbbeecbe` (the hook and the tool server build on Linux); then R5, R8a, R8b and R9.
+
+**Files:** (corrected 2026-11-13 from what was built)
+- Create: `Sources/vibeswitcher-cli/main.swift`, `Status.swift`, `Hooks.swift` (installed as `vibeswitcher`; see
+  "Changes to the plan's text"); `Sources/VibeNode/LocalSessions.swift`
+- Modify: `Package.swift` (the hook, the tool server and `vibeswitcher-cli` on Linux; `vibeswitcher-host` is stage
+  2's)
+- Test: `Tests/VibeNodeTests/StatusCommandTests.swift`, `HooksCommandTests.swift`, `ToolServerSmokeTests.swift`
 
 **Interfaces:**
 - Produces: the executable `vibeswitcher` with `status [--json]`: one line a session (terminal, agent, project
   folder, status word, since when), from `ProcessTable`, the hook state files and `StatusRules`; exit 0.
   `--json` prints an array of `{terminal, agent, cwd, status, since}`.
 
-- [ ] **Step 1: Failing test** `StatusCommandTests.aFakeSessionIsListedWithItsStatus`: with a scratch home, a fake
+- [x] **Step 1: Failing test** `StatusCommandTests.aFakeSessionIsListedWithItsStatus`: with a scratch home, a fake
   agent process (`FakeClaude`'s approach: a script named `claude` on a pty) and a hook state file written for its
   terminal saying "needs you", `status --json` lists one session with that status and that folder.
-- [ ] **Step 2: Build the three executables on Linux**; fix what is left (`F_SETNOSIGPIPE` in `vibeswitcher-mcp`, the
+- [x] **Step 2: Build the three executables on Linux**; fix what is left (`F_SETNOSIGPIPE` in `vibeswitcher-mcp`, the
   `sigaction` line in `vibeswitcher-host` through `Platform.Signals`). `vibeswitcher-host` itself only has to compile
   here; it runs in stage 2.
-- [ ] **Step 3: Implement `status`.**
+- [x] **Step 3: Implement `status`.**
 - [ ] **Step 4: A real session.** In a scratch home (`VIBESWITCHER_HOME`), install the hook for a throwaway Claude
   Code config folder (`CLAUDE_CONFIG_DIR`), start `claude --model sonnet -p "say hi"` there, and watch `vibeswitcher
   status` go from working to done. Never against the user's own `~/.claude`. Record what the hook wrote.
@@ -567,17 +605,19 @@ If that workflow ends with one of these unfixed, it comes back here as part of R
 
 ### R1: What the core-test fixes leave (Task 12 Step 3)
 
+**Commits:** `260ce8c7`, `24aa1605`, `19a825ad`, `fcb2f6ed`.
+
 **Files:** test files as found; `Tests/VibeCoreTests/MacOnlyTests.txt`; `Tests/VibePlatformTests/MacOnlyTestsLintTests.swift`;
 `ConfigSealPluginTests.swift`, `HomeIsolationTests.swift`, `RedactionReference.swift`, `TestScriptWidthTests.swift`.
 
-- [ ] **Step 1: One run after the fixes land.** `bash scripts/test.sh --filter VibeCoreTests` on Linux. Every failure
+- [x] **Step 1: One run after the fixes land.** `bash scripts/test.sh --filter VibeCoreTests` on Linux. Every failure
   that isn't one of A to P is sorted in the plan's order (the platform's Linux form wrong, with a failing
   `VibePlatformTests` test first; the test assumes the Mac; the thing tested is the Mac's, listed with its reason). A
   run that ends on a signal with no failing test named is R2's collision: R2 first, and that run isn't a baseline.
-- [ ] **Step 2: The stop rule as a fraction.** `MacOnlyTestsLintTests.fewerThanATenthOfATargetsFilesAreMacOnly`
+- [x] **Step 2: The stop rule as a fraction.** `MacOnlyTestsLintTests.fewerThanATenthOfATargetsFilesAreMacOnly`
   counts the target's `.swift` files and the list's lines, so the threshold doesn't go stale (236 files today, not
   237).
-- [ ] **Step 3: Values from the platform.** The four files that branch on `#if os(Linux)` inside a test body take the
+- [x] **Step 3: Values from the platform.** The four files that branch on `#if os(Linux)` inside a test body take the
   `Platform` value where one exists (`Platform.Tools.loginShell`, `Platform.Terminals.name(devicePath:)`,
   `Platform.Files.sharedTemporaryRoot`). A branch stays only where no platform value can exist, with a comment saying
   why. Skip any file the core-test fixes already changed this way.
@@ -585,6 +625,8 @@ If that workflow ends with one of these unfixed, it comes back here as part of R
 **Done when:** every `VibeCoreTests` file runs green on Linux or is listed with its reason, and the lint holds.
 
 ### R2: Signal tests that step on each other (both systems)
+
+**Commits:** `aa9eee06`, `b8911886`.
 
 **Files:** `Tests/VibePlatformTests/TestSupport.swift`, `Tests/VibeCoreTests/TestSupport.swift` (a `SignalTestLock`
 each), `SignalsTests.swift`, `PipeCommandTests.swift`, `Tests/VibeCoreTests/MCPLogTests.swift`,
@@ -607,7 +649,7 @@ give each suite its own, so the suites are serialized against each other instead
 
 - [ ] **Step 1: Show it.** Run `bash scripts/test.sh --filter 'SignalsTests|PipeCommandTests|MCPLogTests'` twenty
   times on Linux and record the failures and any run that ends on a signal. This is the "without the fix" evidence.
-- [ ] **Step 2: The lock.** `SignalTestLock.held(_ body: () async throws -> T) async rethrows -> T` in each target's
+- [x] **Step 2: The lock.** `SignalTestLock.held(_ body: () async throws -> T) async rethrows -> T` in each target's
   `TestSupport.swift`: `flock(LOCK_EX)` on `<scratch home>/signal-tests.lock`, opened anew for each use. A flock
   belongs to the open file description, so two opens in one process exclude each other, and the two test targets
   need no shared module. **The wait is off the cooperative pool:** `held` takes the flock on a dispatch thread and
@@ -617,11 +659,11 @@ give each suite its own, so the suites are serialized against each other instead
   test per suite waits. Every `SignalsTests` test, every `PipeCommandTests` test that passes a non-empty
   `stopSignals` or sends a signal to the test process, and `MCPLogTests`' SIGUSR2 test take it for their whole body
   (they become `async`).
-- [ ] **Step 3: MCPLogTests puts SIGUSR2 back.** That test is cause N of the core-test fixes (`raise` reaching a
+- [x] **Step 3: MCPLogTests puts SIGUSR2 back.** That test is cause N of the core-test fixes (`raise` reaching a
   thread libdispatch doesn't watch), which the core-test workflow is changing: this step starts from its fix once it
   has landed, and re-reads the test before editing it. It saves the disposition before `serve` and restores it in a
   `defer` once `serve` has returned (its signal source stays registered; nothing sends SIGUSR2 after it).
-- [ ] **Step 4: A lint, narrow.** `SignalsTests.everyTestThatHandlesTheseSignalsHoldsTheLock`: in `Tests/**/*.swift`,
+- [x] **Step 4: A lint, narrow.** `SignalsTests.everyTestThatHandlesTheseSignalsHoldsTheLock`: in `Tests/**/*.swift`,
   a file that changes a disposition (`signal(`, `sigaction(`, `onFatal`, `onSignal`, `stop(on:`, a non-empty
   `stopSignals:`) or sends a signal to its own process (`raise(`, `pthread_kill`, `kill -… $PPID`) for SIGURG,
   SIGWINCH or SIGUSR2 must mention `SignalTestLock`. `Sources/` and `Tests/Tools/*.py` aren't read: the host's
@@ -636,13 +678,15 @@ says what was seen.
 
 ### R3: CI that fits, then everything green on one commit
 
+**Commits:** `47dab092`, `6a590784`, and the records commit (R12) for Step 3.
+
 **Files:** `.github/workflows/v2-linux.yml`, `scripts/ci/macos-runner-skips.txt`, `docs/process/v2-branch.md`,
 `docs/process/v2-mac-tasks.md`.
 
 Corrected from the draft: nothing is left to push (the draft read `origin/v2` as `9fd05f05`), and the current evidence
 is the runs on `47636aaf`.
 
-- [ ] **Step 1: Split the Linux workflow** as `47636aaf` split the Mac's: jobs `platform`
+- [x] **Step 1: Split the Linux workflow** as `47636aaf` split the Mac's: jobs `platform`
   (`bash scripts/test.sh --filter VibePlatformTests`) and `core` (`--filter VibeCoreTests`), each with
   `timeout-minutes: 90` and the workflow check first; `scripts/ci/check-workflows.sh` passes. This is the first commit
   of this list, pushed only when no run someone is waiting on is in progress. (The suite took 12.5 minutes on this
@@ -651,7 +695,7 @@ is the runs on `47636aaf`.
   `-app` into a scratch folder and compare them with 43260865049. `LoadHarnessTests.itsBuildRunsOnItsSlotsShareOfTheCores`:
   its Linux side is cause A; for the Mac, read `b445bf0a` and `438b1270` for any line that runs there. A test that
   starts and never ends in the platform job is a bug to fix with a hang guard that names it, not a skip.
-- [ ] **Step 3: The time box.** A Mac-only failure in new platform code gets at most two pushes of investigation. Then
+- [x] **Step 3: The time box.** A Mac-only failure in new platform code gets at most two pushes of investigation. Then
   it is listed in `macos-runner-skips.txt` with the experiment that will find its cause, and in
   `docs/process/v2-mac-tasks.md`, and Linux work goes on. Write this rule into `v2-branch.md`. This step **creates**
   `docs/process/v2-mac-tasks.md` (a heading and its first lines), since R2 and this step write into it before R12;
@@ -661,6 +705,8 @@ is the runs on `47636aaf`.
 is green apart from listed skips, each with its cause or its experiment, on one commit.
 
 ### R5: No process dies of SIGPIPE before it settles it (Task 6's missing test, and a bug it hides)
+
+**Commits:** `fbd11963`, `f9bcfa78`.
 
 **Files:** `Sources/VibePlatform/Sockets.swift`, `Sockets+Linux.swift`, `Sockets+Darwin.swift`;
 `Sources/VibeCore/HostConnection.swift` (the writes at lines 71 and 411), `Sources/VibeCore/UnixSocket.swift`;
@@ -675,17 +721,17 @@ SIGPIPE settings at lines 51 and 153. Corrected from the draft: a lint that comp
 `main.swift` misses the hook's write (no pattern matches `LeadVault.standard.record`) and matches `case .write(` by
 accident, so the fix is made where the write is.
 
-- [ ] **Step 1: Failing test.** `SocketsTests.aSocketWriteToAGonePeerFailsWithEPIPEAndTheProcessLives`: a helper mode
+- [x] **Step 1: Failing test.** `SocketsTests.aSocketWriteToAGonePeerFailsWithEPIPEAndTheProcessLives`: a helper mode
   of the test binary writes through `Platform.Sockets.send(_:_:_:)` to a peer that has closed, and exits 0 having
   seen `EPIPE`. Both test targets ignore SIGPIPE from `.init_array` as they load
   (`Tests/VibePlatformTests/TestSupport.swift:50`, `Tests/VibeCoreTests/TestSupport.swift:38`), and a helper mode runs
   after that, so the helper's first act is `signal(SIGPIPE, SIG_DFL)`, and it asserts the disposition before writing.
   On the Mac the socket gets `noSigPipe(socket:)` first, as the code's sockets do. Shown failing on Linux with
   `Sys.write` in its place: the record says the helper died of SIGPIPE (status 141 or signal 13).
-- [ ] **Step 2: `Platform.Sockets.send(fd, bytes, count) -> Int`**: `send(…, MSG_NOSIGNAL)` on Linux; `write(2)` on
+- [x] **Step 2: `Platform.Sockets.send(fd, bytes, count) -> Int`**: `send(…, MSG_NOSIGNAL)` on Linux; `write(2)` on
   the Mac, whose sockets carry `SO_NOSIGPIPE`. Switch `HostConnection`'s two writes and `UnixSocket`'s socket writes
   to it (calls switched to `VibePlatform`; the Mac's behaviour is the same).
-- [ ] **Step 3: The executables settle it after their mode dispatch, before their first write.** Corrected from an
+- [x] **Step 3: The executables settle it after their mode dispatch, before their first write.** Corrected from an
   earlier draft of this step, which asked for `signal(SIGPIPE, …)` as the first statement: `vibeswitcher-host` runs
   three mode dispatches first (`PTYSpawn.execIfLaunched`, `SessionParser.runIfAsked`, `HostHandover.probeIfAsked`,
   lines 9-13) and settles SIGPIPE at line 15, and it must: the launcher execs the session's program, and an ignored
@@ -706,10 +752,12 @@ accident, so the fix is made where the write is.
 
 ### R7: The settings file's folder is the core's, and the file says its format
 
+**Commits:** `97659e21`.
+
 **Files:** `Sources/VibePlatform/Settings+Linux.swift` (it copies `VibePaths.root`'s rules by hand, lines 270-283).
 Tests: `Tests/VibePlatformTests/SettingsTests.swift`, `Tests/VibeCoreTests/SettingsRootTests.swift`.
 
-- [ ] **Step 1: Failing tests.** `SettingsRootTests.thePlatformsRootIsTheCoresRoot`: over injected environments
+- [x] **Step 1: Failing tests.** `SettingsRootTests.thePlatformsRootIsTheCoresRoot`: over injected environments
   (with `VIBESWITCHER_HOME`, with `CFFIXED_USER_HOME`, and with `HOME` only), `VibePaths.root(environment:fallbackHome:)`
   (`Paths.swift:19`) equals VibePlatform's `Settings` `root(variable:fallbackHome:)` (`Settings+Linux.swift:275`,
   internal, so through `@testable import VibePlatform`). The process environment is never changed: tests run in
@@ -717,7 +765,7 @@ Tests: `Tests/VibePlatformTests/SettingsTests.swift`, `Tests/VibeCoreTests/Setti
   `SettingsTests.aSettingsFileCarriesItsFormat` (the written file has `"format": 1`) and
   `aNewerFormatIsRefusedAndLeftAsItIs` (a file with `"format": 2` reads as empty, and a write leaves it as it was, with
   a log line; rule 11).
-- [ ] **Step 2: Implement.** Nothing changes on the Mac, where `UserDefaults` is the store.
+- [x] **Step 2: Implement.** Nothing changes on the Mac, where `UserDefaults` is the store.
 
 The file has no users yet, so its format costs nothing now and a migration later. Its scope (rule 9: this node's
 setting or the user's everywhere) comes with `VibeNode`'s settings catalog after the bootstrap.
@@ -725,6 +773,8 @@ setting or the user's everywhere) comes with `VibeNode`'s settings catalog after
 **Done when:** the three pass on Linux; the Mac runs the root test.
 
 ### R8a: The node's first module, and `vibeswitcher status`
+
+**Commits:** `ce4a467e`, `e9909f53`, `148592a8`, `6a590784`.
 
 **Files:**
 - Create: `Sources/VibeNode/LocalSessions.swift`: the one session list the status command, and later the engine,
@@ -744,18 +794,18 @@ setting or the user's everywhere) comes with `VibeNode`'s settings catalog after
   `id` being `local:<terminal>`. It reads files directly, as a local probe; stage 3's protocol client replaces it, and
   its output may change until then (rule 1's `id` and `node` are there from the start).
 
-- [ ] **Step 1: Failing tests.** `FakeClaude` is the app's, so the fake is built here: a script named `claude` started
+- [x] **Step 1: Failing tests.** `FakeClaude` is the app's, so the fake is built here: a script named `claude` started
   on a pty with `script` (util-linux's form on Linux, BSD's on the Mac, as `3485345f` does).
   `StatusCommandTests.aFakeSessionIsListedWithItsStatus` (with a scratch home and a hook state file for its terminal
   saying needs-you, `status --json` lists exactly that session, with that status, that `cwd`, and on Linux a terminal
   starting `ttypts`); `aSessionWithNoStateFileIsListedByTheTableAlone`; `theJSONCarriesFormatNodeAndId`. Tests find
   the binary under its build name, `vibeswitcher-cli`.
-- [ ] **Step 2: A guard against the collision.** `PlatformLintTests.noTwoTrackedPathsDifferOnlyInCase`: every path
+- [x] **Step 2: A guard against the collision.** `PlatformLintTests.noTwoTrackedPathsDifferOnlyInCase`: every path
   prefix of every `git ls-files` path (each folder as well as each file), lowercased, has no duplicate among the
   distinct prefixes. Comparing whole file paths alone would miss `Sources/vibeswitcher/Run.swift` beside
   `Sources/VibeSwitcher/main.swift`, whose folders are still one on the Mac. Shown failing on a scratch tree holding
   `Sources/vibeswitcher/Run.swift`.
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
 - [ ] **Step 4: The Mac.** The app job builds from a clean checkout on the commit, which shows the new targets don't
   touch the app's build.
 
@@ -763,6 +813,8 @@ setting or the user's everywhere) comes with `VibeNode`'s settings catalog after
 and PlatformLint covers the two new folders.
 
 ### R8b: `vibeswitcher hooks install|remove`
+
+**Commits:** `6eea76a6`.
 
 **Files:** Create `Sources/vibeswitcher-cli/Hooks.swift`; Test: `Tests/VibeNodeTests/HooksCommandTests.swift`.
 
@@ -775,14 +827,16 @@ and PlatformLint covers the two new folders.
 It doesn't seal the write through the vault: there is no host on Linux yet. Through the install step, the engine
 seals it (the bootstrap path, milestone 7). This replaces the app's `HookSetup` and `HookBinary` (port map).
 
-- [ ] **Step 1: Failing tests.** `installWritesOurHandlersIntoTheConfigFolderGiven` (with `CLAUDE_CONFIG_DIR` set to a
+- [x] **Step 1: Failing tests.** `installWritesOurHandlersIntoTheConfigFolderGiven` (with `CLAUDE_CONFIG_DIR` set to a
   scratch folder, its `settings.json` has the nine Claude events pointing at `<scratch home>/bin/vibeswitcher-hook`,
   and the scratch `HOME/.claude` is untouched); `installCopiesBothBinariesExecutable`; `removeLeavesTheUsersOwnHandlers`.
-- [ ] **Step 2: Implement.**
+- [x] **Step 2: Implement.**
 
 **Done when:** the three pass on Linux and on the Mac.
 
 ### R9: The tool server answers on Linux, without a host
+
+**Commits:** `75b402bc`.
 
 **Files:** `Tests/VibeNodeTests/ToolServerSmokeTests.swift`.
 
@@ -791,7 +845,7 @@ Corrected from the draft: the tool server learns its role by asking the session 
 host, `tools/list` is empty for up to two minutes, so the lead's tools can't be listed here. Nor is `auto_advance` a
 tool: it is a setting of `add_task`, `update_task` and `configure`.
 
-- [ ] `theToolServerAnswersWithNoHost`: start the built `vibeswitcher-mcp` (found as `676cc112`'s helpers find the
+- [x] `theToolServerAnswersWithNoHost`: start the built `vibeswitcher-mcp` (found as `676cc112`'s helpers find the
   build's products) with a scratch home. Over stdio, `initialize` answers within 10 s; `tools/list` answers, with an
   empty list; its stderr has "the session host can't be asked yet, or its session holds no role yet; asking again".
   Shown failing by pointing it at a missing binary.
@@ -802,6 +856,8 @@ The full check, the lead's tools listed and one call served, is stage 2's
 **Done when:** it passes on Linux and on the Mac.
 
 ### R10: A real Claude Code session goes from working to needs-you to done
+
+**Commits:** none yet (waits for the user's Claude Code config folder).
 
 **Files:** `Tests/VibeNodeTests/RealClaudeStatusTests.swift`, `docs/process/v2-linux-inventory.md`.
 
@@ -839,10 +895,12 @@ variable, `bash scripts/test.sh` skips it, saying why.
 
 ### R12: Records
 
+**Commits:** the records commit (2026-11-13).
+
 **Files:** fill in `docs/process/v2-mac-tasks.md` (created in R3); modify this plan, `docs/process/v2-stage1-recon.md`,
 `docs/process/v2-branch.md`.
 
-- [ ] **`v2-mac-tasks.md`**: each change to the Mac's behaviour made on `v2`, with its commit and what to check on a
+- [x] **`v2-mac-tasks.md`**: each change to the Mac's behaviour made on `v2`, with its commit and what to check on a
   real Mac: `ffd4068d` (no `setpgroup(0)` in `Shell.Spawned`); `71e8aed5` (`ProcessTable.record` for any user, the uid
   checks in its five callers, `LoadRecorder` leaving out zombies with two calls per process); `9aef7377`
   (`LeadAdvance` gets no thread when kevent fails; `WalletFolderWatch` fails at creation when descriptors run out);
@@ -852,13 +910,13 @@ variable, `bash scripts/test.sh` skips it, saying why.
   `Package.resolved` pinning swift-crypto and swift-asn1 for the Mac; the three Darwin costs and the two replaced
   oracles (R13); the runner's limits (SIP off, 3 cores, no Keychain prompts); and the benches the design's anti-goal
   measures by (`--perf`, the UI bench, the freeze count), none of which a hosted runner runs.
-- [ ] **This plan:** tick the done steps; a "Commits:" line under each task; correct the Files lines of Task 6
+- [x] **This plan:** tick the done steps; a "Commits:" line under each task; correct the Files lines of Task 6
   (`FilesExclusive.swift`, `+Linux`, `+Link`), Task 9 (`ProcessExit*.swift` built here), Task 11 (`Images+Darwin.swift`;
   `ProcessTable+Procargs.swift` in `MacOnly`; `linux-core-errors.sh` kept, for `VibeHost`) and Task 13
   (`vibeswitcher-cli`).
-- [ ] **The recon:** a line at the top of §0 and §1: "Superseded where it names `Platform/Darwin/` and
+- [x] **The recon:** a line at the top of §0 and §1: "Superseded where it names `Platform/Darwin/` and
   `Platform/Linux/`: the code is one module, `Sources/VibePlatform`."
-- [ ] **`v2-branch.md`:** at each merge, a target main adds is mirrored into `Package.swift`'s Linux list; push only
+- [x] **`v2-branch.md`:** at each merge, a target main adds is mirrored into `Package.swift`'s Linux list; push only
   with every `v2` job green, under R3's time box; the jobs' new names; the port map's merge step
   (`docs/process/v2-port-map.md`).
 

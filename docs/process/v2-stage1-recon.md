@@ -4,6 +4,8 @@ Read-only research on branch `v2`. Marks: **[V]** verified by reading the code, 
 
 ## 0. What the plan should know first
 
+Superseded where it names `Platform/Darwin/` and `Platform/Linux/`: the code is one module, `Sources/VibePlatform`.
+
 - **The 34 files are not the whole edit set [V].** 21 files `import Darwin` (7 outside the 34: `ConfigSealCommands`, `HostConnection`, `Steer`, `LeadVault`, `LeadMail`, `LeadBoard`, `LeadBoardArchive`); 51 `Darwin.`-qualified calls sit in 13 files (5 outside the 34: `LeadToolset` ×4, `HostConnection` ×3, `LeadBoardArchive` ×2, `FlakeLedger`, `PassageLink`); 18 files `import CryptoKit`; `SessionOrdering.swift` imports CoreGraphics. About 45 files get at least an import-line edit.
 - **The error list hides errors [V].** The compiler stops at the first error in an expression or closure: `ConfigSeal.swift:771` also uses `st_ctimespec` (×2), `TestLock.swift:433` uses `st_mtimespec` inside the closure that failed at 420, and `DiskSpace.swift:303` ("unable to type-check") is a `st_mtimespec`.
 - **Terminal names break two path rules on Linux [V].** `VibePaths.stateFile(tty:)` (`Paths.swift:146`) makes `state/<tty>.json`, and `SteerInbox.file` (`Steer.swift:74`) refuses any name that isn't `tty` + letters and digits. Linux's `pts/3` fails both. Proposed: the platform gives a slash-free name (`ttypts3`); a decision for you.
@@ -12,6 +14,8 @@ Read-only research on branch `v2`. Marks: **[V]** verified by reading the code, 
 - **For Mac-only files, move the whole file** (`git mv` into `Platform/Darwin/`, wrapped in `#if`): git's rename detection then carries main's daily edits into it. Splitting a file makes every later edit from main to a moved block a hand merge.
 
 ## 1. Proposed services
+
+Superseded where it names `Platform/Darwin/` and `Platform/Linux/`: the code is one module, `Sources/VibePlatform`.
 
 Layout: `Platform/Platform.swift` (`public enum Platform {}` and neutral types), `Platform/Darwin/<Service>+Darwin.swift` (existing code moved), `Platform/Linux/<Service>+Linux.swift` (`#if canImport(Glibc) import Glibc #elseif canImport(Musl) import Musl`). Static functions, not protocol objects: the process table is read 1,500 times a poll, and the existing closure seams already serve the tests. No type named `Platform` or `Sys` exists today [V].
 
