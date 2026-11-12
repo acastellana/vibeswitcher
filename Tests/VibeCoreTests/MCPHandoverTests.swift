@@ -81,9 +81,17 @@ final class ScratchToolServer {
         try install("#!/bin/sh\nVIBESWITCHER_MCP_TEST_BUILD=\(build) exec '\(toolServer)' \"$@\"\n")
     }
 
+    /// The file is written by a child, not by this process: Linux refuses to run a file any process holds open for
+    /// writing ("Text file busy"), and a child another test starts holds a copy of this process's descriptors from its
+    /// fork to its exec. Written here, one forked during the write failed the server's start (`process.run()`,
+    /// NSCocoaErrorDomain 256) or its switch to the new build, now and then in a full run. The child is the platform's
+    /// piped command, which waits for it itself: a Foundation `Process` that ends at once was at times never reaped.
     func install(_ script: String, mode: Int = 0o755) throws {
         let next = dir.appendingPathComponent("next").path
-        FileManager.default.createFile(atPath: next, contents: Data(script.utf8), attributes: [.posixPermissions: mode])
+        let quoted = "'" + next.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
+        let wrote = Platform.pipeCommand("cat > \(quoted) && chmod \(String(mode, radix: 8)) \(quoted) && echo written",
+                                         input: Data(script.utf8), patience: 30, stopSignals: [])
+        #expect(String(decoding: wrote, as: UTF8.self) == "written\n", "writing \(next)")
         #expect(rename(next, installed) == 0)
     }
 
