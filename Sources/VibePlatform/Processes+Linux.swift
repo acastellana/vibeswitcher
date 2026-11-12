@@ -290,6 +290,9 @@ extension Platform.Processes {
             }
         }
 
+        /// A child is a fork of its parent until it execs: PF_FORKNOEXEC, and its parent's name, cmdline and exe.
+        static let childrenStartAsCopies = true
+
         /// What a file of strings each ended by a NUL holds (cmdline, environ). A last one without its NUL counts.
         static func strings(_ bytes: [UInt8], keepingEmpty: Bool) -> [String] {
             var bytes = bytes[...]

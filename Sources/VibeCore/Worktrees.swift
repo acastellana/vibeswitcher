@@ -2204,22 +2204,7 @@ public struct IndexLock: Equatable, Sendable, CustomStringConvertible {
 
     /// Whether the process has the file at `path` open.
     private static func opens(_ pid: Int32, _ path: String) -> Bool {
-        let stride = MemoryLayout<proc_fdinfo>.stride
-        let needed = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
-        guard needed > 0 else { return false }
-        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(needed) / stride + 8)
-        let got = fds.withUnsafeMutableBytes { proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count)) }
-        guard got > 0 else { return false }
-        for fd in fds.prefix(Int(got) / stride) where fd.proc_fdtype == UInt32(PROX_FDTYPE_VNODE) {
-            var info = vnode_fdinfowithpath()
-            let size = Int32(MemoryLayout<vnode_fdinfowithpath>.size)
-            guard proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDVNODEPATHINFO, &info, size) == size else { continue }
-            let open = withUnsafePointer(to: &info.pvip.vip_path) {
-                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
-            }
-            if open == path { return true }
-        }
-        return false
+        Platform.Processes.openFiles(pid).contains(path)
     }
 }
 

@@ -508,36 +508,22 @@ public final class LoadRecorder: @unchecked Sendable {
         return (lock.slots, lock.holders())
     }
 
-    /// Mach time units to seconds (the task info's CPU times are in them on Apple silicon).
-    private static let machSeconds: Double = {
-        var info = mach_timebase_info_data_t()
-        mach_timebase_info(&info)
-        return Double(info.numer) / Double(info.denom) / 1e9
-    }()
-
     /// Every process of this user's whose records can be read: pid, parent, group, name and CPU time (one
     /// PROC_PIDTASKALLINFO each). Another user's process is left out (its CPU time can't be read).
     public static func processes() -> [LoadProcess]? {
         guard let pids = ProcessTable.allPids() else { return nil }
         var found: [LoadProcess] = []
         found.reserveCapacity(pids.count)
-        let size = Int32(MemoryLayout<proc_taskallinfo>.size)
+        let me = geteuid()
         for pid in pids {
-            var info = proc_taskallinfo()
-            guard proc_pidinfo(pid, PROC_PIDTASKALLINFO, 0, &info, size) == size else { continue }
-            let comm = withUnsafeBytes(of: info.pbsd.pbi_comm) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
-            let cpu = Double(info.ptinfo.pti_total_user + info.ptinfo.pti_total_system) * machSeconds
-            found.append(LoadProcess(pid: pid, ppid: Int32(info.pbsd.pbi_ppid), pgid: Int32(info.pbsd.pbi_pgid), comm: comm, cpuSeconds: cpu))
+            // Only this user's, and none that has ended: the Mac gives the CPU time of no other, and no system counts one here.
+            guard case .brief(let info) = Platform.Processes.brief(pid), info.uid == me, info.state != .zombie,
+                  let cpu = Platform.Processes.cpuSeconds(pid) else { continue }
+            found.append(LoadProcess(pid: pid, ppid: info.ppid, pgid: info.pgid, comm: info.name, cpuSeconds: cpu))
         }
         return found
     }
 
     /// A process's current folder; nil when it can't be read (another user's, or gone).
-    public static func cwd(_ pid: Int32) -> String? {
-        var info = proc_vnodepathinfo()
-        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
-        let path = withUnsafeBytes(of: info.pvi_cdir.vip_path) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
-        return path.isEmpty ? nil : path
-    }
+    public static func cwd(_ pid: Int32) -> String? { Platform.Processes.cwd(pid) }
 }

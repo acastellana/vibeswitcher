@@ -33,10 +33,7 @@ public enum ProcessTable {
     // Both lookups below are slow enough to dominate a snapshot of ~1,500 processes if repeated every
     // poll: devname() scans /dev on every call, and argv needs a sysctl per process. Their answers
     // never change for a given device / process, so they're cached.
-    static let terminalNames = TerminalNames()
     static let argumentCache = ArgumentCache(read: readArguments)
-
-    static func ttyName(_ device: dev_t) -> String? { terminalNames.name(device) }
 
     public static func snapshot() -> [Int32: ProcInfo] { trySnapshot() ?? [:] }
 
@@ -92,15 +89,7 @@ public enum ProcessTable {
     }
 
     /// Every pid but the kernel's; nil when the list couldn't be read.
-    static func allPids() -> [pid_t]? {
-        let count = proc_listallpids(nil, 0)
-        guard count > 0 else { return nil }
-        // Room for processes started meanwhile.
-        var pids = [pid_t](repeating: 0, count: Int(count) + 64)
-        let listed = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
-        guard listed > 0 else { return nil }
-        return pids.prefix(Int(listed)).filter { $0 > 0 }
-    }
+    static func allPids() -> [pid_t]? { Platform.Processes.allPids() }
 
     /// `undecided`: an exec'd process whose argv couldn't be read yet, to be told again after a pause (`retry`); its
     /// info is as it would be in the table if it stays so (`identityUnknown`).
@@ -111,51 +100,26 @@ public enum ProcessTable {
     /// from the kernel's record of that one process (sysctl KERN_PROC_PID); which agent it is from its name or argv. A
     /// zombie, or one on its way out, has ended.
     static func record(_ pid: pid_t, arguments: ArgumentCache) -> Record {
-        let ppid: Int32
-        let uid: uid_t
-        let comm: String
-        let device: dev_t
-        let start: timeval
-        var full = proc_bsdinfo()
-        let fullSize = Int32(MemoryLayout<proc_bsdinfo>.size)
-        if proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &full, fullSize) == fullSize {
-            if full.pbi_status == SZOMB || full.pbi_flags & UInt32(PROC_FLAG_INEXIT) != 0 { return .gone }
-            ppid = Int32(full.pbi_ppid)
-            uid = full.pbi_uid
-            // Its records' `comm` are cut at 15 characters; the kernel's is its name (`p_name`, cut at 31) cut at 16.
-            let name = text(full.pbi_name)
-            comm = name.isEmpty ? String(decoding: text(full.pbi_comm), as: UTF8.self) : String(decoding: name.prefix(Int(MAXCOMLEN)), as: UTF8.self)
-            device = dev_t(bitPattern: full.e_tdev)
-            start = timeval(tv_sec: Int(full.pbi_start_tvsec), tv_usec: Int32(full.pbi_start_tvusec))
-        } else if errno == ESRCH {
-            return .gone
-        } else {
-            var short = proc_bsdshortinfo()
-            let shortSize = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, shortSize) == shortSize else {
-                return errno == ESRCH ? .gone : kernelRecord(pid)
-            }
-            if short.pbsi_status == SZOMB || short.pbsi_flags & UInt32(PROC_FLAG_INEXIT) != 0 { return .gone }
-            ppid = Int32(short.pbsi_ppid)
-            uid = short.pbsi_uid
-            var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-            var kinfo = kinfo_proc()
-            var size = MemoryLayout<kinfo_proc>.stride
-            guard sysctl(&mib, 4, &kinfo, &size, nil, 0) == 0 else {
-                return errno == ESRCH ? .gone : .found(unread(pid, ppid: ppid, comm: String(decoding: text(short.pbsi_comm), as: UTF8.self)))
-            }
-            guard size > 0 else { return .gone }
-            comm = String(decoding: text(kinfo.kp_proc.p_comm), as: UTF8.self)
-            device = kinfo.kp_eproc.e_tdev
-            start = kinfo.kp_proc.p_un.__p_starttime
+        let read: Platform.Processes.Record
+        switch Platform.Processes.record(pid) {
+        case .gone: return .gone
+        case .unreadable: return .found(unread(pid))
+        case .partial(let ppid, let name): return .found(unread(pid, ppid: ppid, comm: name))
+        case .record(let record): read = record
         }
-        let tty = ttyName(device)
+        if read.state == .zombie || read.exiting { return .gone }
+        guard let uid = read.uid else { return kernelRecord(pid, read) }
+        let ppid = read.ppid
+        let comm = read.name
+        let start = read.start
+        let tty = read.terminal
         // Only the user's own processes' argv can be read (another user's isn't an agent of theirs unless named one).
         let readable = uid == geteuid() ? arguments : nil
         let info = { (agent: Agent?, unknown: Bool) in
             ProcInfo(pid: pid, ppid: ppid, tty: tty, comm: comm, startTime: date(start), agent: agent,
                      identityUnknown: unknown)
         }
+        if isCopy(read) { return .found(info(nil, false)) }
         switch identify(pid: pid, start: start.tv_sec, comm: comm, tty: tty, arguments: readable) {
         case .agent(let found): return .found(info(found, false))
         case .none: return .found(info(nil, false))
@@ -193,23 +157,26 @@ public enum ProcessTable {
     /// Where a process whose argv couldn't be read is: ended (or ending), a fork that hasn't exec'd, exec'd, or its
     /// short record couldn't be read either.
     private static func settled(_ pid: pid_t) -> Progress {
-        var short = proc_bsdshortinfo()
-        let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, size) == size else { return errno == ESRCH ? .gone : .unread }
-        if short.pbsi_status == SZOMB || short.pbsi_flags & UInt32(PROC_FLAG_INEXIT) != 0 { return .gone }
-        return short.pbsi_flags & UInt32(PROC_FLAG_EXEC) == 0 ? .forked : .execd
+        switch Platform.Processes.brief(pid) {
+        case .gone: return .gone
+        case .unreadable: return .unread
+        case .brief(let short):
+            if short.state == .zombie || short.exiting { return .gone }
+            return short.execd ? .execd : .forked
+        }
+    }
+
+    /// Whether a process is still the copy of its parent that every program starts as where the system makes one
+    /// so (`Platform.Processes.childrenStartAsCopies`: Linux, never the Mac): until its exec its name and argv are
+    /// its parent's, and it's told by neither, as a fork that hasn't exec'd is in `record`.
+    private static func isCopy(_ record: Platform.Processes.Record) -> Bool {
+        Platform.Processes.childrenStartAsCopies && !record.execd
     }
 
     /// A process whose short record couldn't be read, from the kernel's record of it (sysctl KERN_PROC_PID): its owner
     /// isn't checked, so one on a terminal is unknown; nothing read, it's there and nothing more is known.
-    private static func kernelRecord(_ pid: pid_t) -> Record {
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-        var kinfo = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        guard sysctl(&mib, 4, &kinfo, &size, nil, 0) == 0 else { return errno == ESRCH ? .gone : .found(unread(pid)) }
-        guard size > 0 else { return .gone }
-        if kinfo.kp_proc.p_stat == SZOMB || kinfo.kp_proc.p_flag & P_WEXIT != 0 { return .gone }
-        let info = makeInfo(kinfo)
+    private static func kernelRecord(_ pid: pid_t, _ record: Platform.Processes.Record) -> Record {
+        let info = makeInfo(record)
         return .found(ProcInfo(pid: pid, ppid: info.ppid, tty: info.tty, comm: info.comm, startTime: info.startTime, agent: nil,
                                identityUnknown: info.tty != nil))
     }
@@ -217,11 +184,6 @@ public enum ProcessTable {
     /// A process there whose terminal and start time couldn't be read.
     private static func unread(_ pid: pid_t, ppid: Int32 = 0, comm: String = "") -> ProcInfo {
         ProcInfo(pid: pid, ppid: ppid, tty: nil, comm: comm, startTime: .distantPast, agent: nil, identityUnknown: true)
-    }
-
-    /// A fixed-size C string field's bytes, up to its NUL or its end.
-    private static func text<Field>(_ field: Field) -> [UInt8] {
-        withUnsafeBytes(of: field) { bytes in Array(bytes.prefix { $0 != 0 }) }
     }
 
     private static func date(_ start: timeval) -> Date {
@@ -234,22 +196,15 @@ public enum ProcessTable {
         guard let pids = allPids() else { return nil }
         var names: [Int32: String] = [:]
         for pid in pids {
-            var info = proc_bsdshortinfo()
-            let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
             // Gone meanwhile.
-            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &info, size) == size else { continue }
-            names[pid] = withUnsafePointer(to: &info.pbsi_comm) {
-                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN) + 1) { String(cString: $0) }
-            }
+            guard case .brief(let info) = Platform.Processes.brief(pid) else { continue }
+            names[pid] = info.name
         }
         return names
     }
 
     public static func info(pid: Int32) -> ProcInfo? {
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-        var proc = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        guard sysctl(&mib, 4, &proc, &size, nil, 0) == 0, size > 0 else { return nil }
+        guard let proc = Platform.Processes.kernelRecord(pid) else { return nil }
         return makeInfo(proc)
     }
 
@@ -257,33 +212,15 @@ public enum ProcessTable {
     /// prompt (a job it runs in the foreground has a group of its own, which holds the terminal meanwhile). nil: no
     /// such process, or it has no terminal.
     public static func holdsForeground(pid: Int32) -> Bool? {
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-        var proc = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        guard sysctl(&mib, 4, &proc, &size, nil, 0) == 0, size > 0, proc.kp_eproc.e_tdev != -1 else { return nil }
-        let tpgid = proc.kp_eproc.e_tpgid
-        guard tpgid > 0 else { return nil }
-        return tpgid == proc.kp_eproc.e_pgid
+        guard let proc = Platform.Processes.kernelRecord(pid), let tpgid = proc.foregroundGroup else { return nil }
+        return tpgid == proc.pgid
     }
 
     /// Resident memory of a process we own, in bytes.
-    public static func residentBytes(pid: Int32) -> Int64? {
-        var info = proc_taskinfo()
-        let size = Int32(MemoryLayout<proc_taskinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &info, size) == size else { return nil }
-        return Int64(info.pti_resident_size)
-    }
+    public static func residentBytes(pid: Int32) -> Int64? { Platform.Processes.residentBytes(pid) }
 
     /// Current working directory of a process we own.
-    public static func cwd(pid: Int32) -> String? {
-        var info = proc_vnodepathinfo()
-        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
-        let path = withUnsafePointer(to: &info.pvi_cdir.vip_path) {
-            $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
-        }
-        return path.isEmpty ? nil : path
-    }
+    public static func cwd(pid: Int32) -> String? { Platform.Processes.cwd(pid) }
 
     /// Ancestors of `pid`, nearest first (excluding pid itself and launchd). `info` reads a process (tests give a table).
     public static func ancestors(of pid: Int32, limit: Int = 32, info: (Int32) -> ProcInfo? = { info(pid: $0) }) -> [ProcInfo] {
@@ -311,16 +248,14 @@ public enum ProcessTable {
         return current == 1 ? chain : nil
     }
 
-    static func makeInfo(_ kinfo: kinfo_proc) -> ProcInfo {
-        var proc = kinfo.kp_proc
-        let comm = withUnsafePointer(to: &proc.p_comm) {
-            $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN) + 1) { String(cString: $0) }
-        }
-        let tty = ttyName(kinfo.kp_eproc.e_tdev)
-        let start = proc.p_un.__p_starttime
+    static func makeInfo(_ proc: Platform.Processes.Record) -> ProcInfo {
+        let comm = proc.name
+        let tty = proc.terminal
+        let start = proc.start
         let startTime = Date(timeIntervalSince1970: Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)
-        return ProcInfo(pid: proc.p_pid, ppid: kinfo.kp_eproc.e_ppid, tty: tty, comm: comm, startTime: startTime,
-                        agent: agent(pid: proc.p_pid, start: start.tv_sec, comm: comm, tty: tty, arguments: argumentCache))
+        return ProcInfo(pid: proc.pid, ppid: proc.ppid, tty: tty, comm: comm, startTime: startTime,
+                        agent: isCopy(proc) ? nil
+                            : agent(pid: proc.pid, start: start.tv_sec, comm: comm, tty: tty, arguments: argumentCache))
     }
 
     /// Which agent a process is. Claude Code runs as a versioned binary (`~/.local/share/claude/versions/2.1.282`),
@@ -366,80 +301,11 @@ public enum ProcessTable {
     /// A process's argv as it is now, read each time (no cache): empty when it can't be read.
     public static func commandLine(pid: Int32) -> [String] { readArguments(pid: pid) }
 
-    static func readArguments(pid: Int32) -> [String] { procargs(pid: pid).map { parse(procargs: $0).arguments } ?? [] }
+    static func readArguments(pid: Int32) -> [String] { Platform.Processes.arguments(pid) }
 
     /// The environment a process was started with (what it set later isn't there): nil when it can't be read (another
     /// user's, a zombie).
-    public static func environment(pid: Int32) -> [String]? { procargs(pid: pid).map { parse(procargs: $0).environment } }
-
-    /// The kernel's record of a process's argv and environment (KERN_PROCARGS2): only the user's own processes give it.
-    static func procargs(pid: Int32) -> [UInt8]? {
-        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
-        var size = 0
-        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
-        var buffer = [UInt8](repeating: 0, count: size)
-        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
-        return Array(buffer.prefix(size))
-    }
-
-    /// Layout: argc (int32), exec path, NUL padding, argv[0] … argv[argc-1], the environment up to an empty string,
-    /// then the kernel's own (`ptr_munge=`, `executable_file=`…).
-    static func parse(procargs buffer: [UInt8]) -> (arguments: [String], environment: [String]) {
-        let size = buffer.count
-        guard size > MemoryLayout<Int32>.size else { return ([], []) }
-        let argc = buffer.withUnsafeBytes { $0.loadUnaligned(as: Int32.self) }
-        var index = MemoryLayout<Int32>.size
-        while index < size, buffer[index] != 0 { index += 1 }   // exec path
-        while index < size, buffer[index] == 0 { index += 1 }   // padding
-        func next() -> String {
-            let begin = index
-            while index < size, buffer[index] != 0 { index += 1 }
-            defer { index += 1 }
-            return String(decoding: buffer[begin..<index], as: UTF8.self)
-        }
-        var arguments: [String] = []
-        while arguments.count < argc, index < size { arguments.append(next()) }
-        var environment: [String] = []
-        while index < size {
-            let entry = next()
-            if entry.isEmpty { break }
-            environment.append(entry)
-        }
-        return (arguments, environment)
-    }
-}
-
-/// Terminals' names by device. A pseudo-terminal's is its number's (`ttys` and three digits, as the kernel names them),
-/// checked with one stat: devname() scans /dev, 1 to 54 ms a device at load 176, where 116 devices cost a read 0.1 to
-/// 0.5 s, mostly closed terminals some process still has as its own, each a scan of all of /dev for nothing. A name
-/// found is kept (a device's never changes); a closed one's absence isn't: its number is the next one opened's.
-final class TerminalNames: @unchecked Sendable {
-    private let lock = NSLock()
-    private var names: [dev_t: String] = [:]
-    /// Pseudo-terminals' major device number, once one has been named.
-    private var ptyMajor: Int32?
-
-    func name(_ device: dev_t) -> String? {
-        guard device != -1 else { return nil }
-        lock.lock(); defer { lock.unlock() }
-        if let cached = names[device] { return cached }
-        let major = Int32(truncatingIfNeeded: UInt32(bitPattern: device) >> 24 & 0xff)
-        let pty = String(format: "ttys%03d", device & 0xffffff)
-        var node = stat()
-        if stat("/dev/" + pty, &node) == 0, node.st_mode & S_IFMT == S_IFCHR, node.st_rdev == device {
-            ptyMajor = major
-            names[device] = pty
-            return pty
-        }
-        // A closed pseudo-terminal.
-        if major == ptyMajor { return nil }
-        // Another device (or no pseudo-terminal named yet).
-        guard let raw = devname(device, S_IFCHR) else { return nil }
-        let name = String(cString: raw)
-        guard name != "??" else { return nil }
-        names[device] = name
-        return name
-    }
+    public static func environment(pid: Int32) -> [String]? { Platform.Processes.environment(pid) }
 }
 
 /// argv per process, read once: it needs a sysctl per process, too slow to repeat for every process on every poll.

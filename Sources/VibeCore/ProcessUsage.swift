@@ -50,37 +50,19 @@ extension ProcessTable {
     /// Its own reads (not the table's): a late table read doesn't hold this one up, nor the other way round.
     static let usageReads = BoundedReads()
 
-    /// Seconds per tick of `proc_taskinfo`'s CPU times (mach absolute time).
-    static let cpuTick: Double = {
-        var timebase = mach_timebase_info_data_t()
-        mach_timebase_info(&timebase)
-        return Double(timebase.numer) / Double(max(1, timebase.denom)) / 1e9
-    }()
-
     /// One process's CPU use; nil when it's gone, a zombie, or not the user's.
     public static func usage(of pid: Int32) -> ProcUsage? {
-        var info = proc_bsdinfo()
-        let infoSize = Int32(MemoryLayout<proc_bsdinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, infoSize) == infoSize, info.pbi_status != SZOMB else { return nil }
-        var task = proc_taskinfo()
-        let taskSize = Int32(MemoryLayout<proc_taskinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, taskSize) == taskSize else { return nil }
-        let name = withUnsafeBytes(of: info.pbi_name) { Array($0.prefix { $0 != 0 }) }
-        let comm = withUnsafeBytes(of: info.pbi_comm) { Array($0.prefix { $0 != 0 }) }
-        return ProcUsage(pid: pid, ppid: Int32(info.pbi_ppid), pgid: Int32(info.pbi_pgid), uid: info.pbi_uid,
-                         cpu: Double(task.pti_total_user + task.pti_total_system) * cpuTick,
-                         started: Date(timeIntervalSince1970: Double(info.pbi_start_tvsec) + Double(info.pbi_start_tvusec) / 1_000_000),
-                         name: String(decoding: (name.isEmpty ? comm : Array(name.prefix(Int(MAXCOMLEN)))), as: UTF8.self))
+        // Only the user's own: the Mac reads no other's whole record or CPU time, and no system counts one here.
+        guard case .record(let info) = Platform.Processes.record(pid), let uid = info.uid, uid == geteuid(),
+              info.state != .zombie, let cpu = Platform.Processes.cpuSeconds(pid) else { return nil }
+        return ProcUsage(pid: pid, ppid: info.ppid, pgid: info.pgid, uid: uid,
+                         cpu: cpu,
+                         started: Date(timeIntervalSince1970: Double(info.start.tv_sec) + Double(info.start.tv_usec) / 1_000_000),
+                         name: info.name)
     }
 
     /// The folder a process works in (its current directory); nil when it can't be read (gone, or another user's).
-    public static func cwd(of pid: Int32) -> String? {
-        var info = proc_vnodepathinfo()
-        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
-        let path = withUnsafeBytes(of: info.pvi_cdir.vip_path) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
-        return path.isEmpty ? nil : path
-    }
+    public static func cwd(of pid: Int32) -> String? { Platform.Processes.cwd(pid) }
 
     /// What a process was started as, by name: its argv[0]'s last path component ("node", "qemu-system-aarch64"), never
     /// its arguments; nil when its argv can't be read (gone, or another user's), or when its argv[0] was rewritten into

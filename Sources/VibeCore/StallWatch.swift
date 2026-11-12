@@ -162,12 +162,8 @@ public struct StallWatch: Sendable {
         let me = getuid()
         var all: [Int32: (ppid: Int32, pgid: Int32, state: String, name: String)] = [:]
         for pid in pids {
-            var info = proc_bsdinfo()
-            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-            guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_uid == me else { continue }
-            let name = withUnsafeBytes(of: info.pbi_name) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
-            let comm = withUnsafeBytes(of: info.pbi_comm) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
-            all[pid] = (Int32(info.pbi_ppid), Int32(info.pbi_pgid), state(info.pbi_status), name.isEmpty ? comm : name)
+            guard case .record(let info) = Platform.Processes.record(pid), info.uid == me else { continue }
+            all[pid] = (info.ppid, info.pgid, state(info.state), info.longName)
         }
         var family: [Int32] = all[root] == nil ? [] : [root], index = 0
         while index < family.count {
@@ -176,27 +172,21 @@ public struct StallWatch: Sendable {
             index += 1
         }
         if let group { family += all.filter { $0.value.pgid == group && !family.contains($0.key) }.keys.sorted() }
-        var timebase = mach_timebase_info_data_t()
-        mach_timebase_info(&timebase)
-        let seconds = Double(timebase.numer) / Double(max(1, timebase.denom)) / 1e9
         return family.compactMap { pid in
             guard let record = all[pid] else { return nil }
-            var task = proc_taskinfo()
-            let size = Int32(MemoryLayout<proc_taskinfo>.size)
-            let cpu = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, size) == size
-                ? Double(task.pti_total_user + task.pti_total_system) * seconds : 0
+            let cpu = Platform.Processes.cpuSeconds(pid) ?? 0
             return Member(pid: pid, ppid: record.ppid, state: record.state, cpu: cpu, name: record.name)
         }
     }
 
-    private static func state(_ status: UInt32) -> String {
-        switch Int32(status) {
-        case SIDL: return "starting"
-        case SRUN: return "running"
-        case SSLEEP: return "sleeping"
-        case SSTOP: return "stopped"
-        case SZOMB: return "zombie"
-        default: return "?"
+    private static func state(_ status: Platform.Processes.State) -> String {
+        switch status {
+        case .starting: return "starting"
+        case .running: return "running"
+        case .sleeping: return "sleeping"
+        case .stopped: return "stopped"
+        case .zombie: return "zombie"
+        case .unknown: return "?"
         }
     }
 

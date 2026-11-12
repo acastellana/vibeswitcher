@@ -31,9 +31,8 @@ public enum SessionStrays {
     /// VibeSwitcher's executable for one of its tools (the tool server, the session host): the one beside this
     /// process's own, as the app's bundle holds them.
     public static var appBesideThisProgram: String? {
-        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(getpid(), &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        return URL(fileURLWithPath: String(cString: buffer)).deletingLastPathComponent().appendingPathComponent("VibeSwitcher").path
+        guard let program = Platform.Processes.executable(getpid()) else { return nil }
+        return URL(fileURLWithPath: program).deletingLastPathComponent().appendingPathComponent("VibeSwitcher").path
     }
 
     /// The session's processes: those carrying its id, and those of `started` (what its program started, see
@@ -81,9 +80,8 @@ public enum SessionStrays {
     /// Whether `pid` runs the program at `executable` (a path with its symlinks resolved, as the kernel names a
     /// process's program).
     static func runs(_ pid: pid_t, executable: String) -> Bool {
-        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return false }
-        return String(cString: buffer) == executable
+        guard let program = Platform.Processes.executable(pid) else { return false }
+        return program == executable
     }
 
     /// What `pid` started that runs now, their children too, the user's only: to be found before it's asked to end
@@ -101,13 +99,7 @@ public enum SessionStrays {
     }
 
     /// The processes `pid` started that run now.
-    public static func children(of pid: pid_t) -> [pid_t] {
-        let count = proc_listchildpids(pid, nil, 0)
-        guard count > 0 else { return [] }
-        var pids = [pid_t](repeating: 0, count: Int(count) + 16)
-        let listed = pids.withUnsafeMutableBytes { proc_listchildpids(pid, $0.baseAddress, Int32($0.count)) }
-        return Array(pids.prefix(Int(max(0, listed)))).filter { $0 > 0 }
-    }
+    public static func children(of pid: pid_t) -> [pid_t] { Platform.Processes.children(pid) }
 
     /// The user's processes whose working folder is `folder` or inside it.
     public static func inside(folder: String, user: uid_t = geteuid()) -> [Found] {
@@ -159,9 +151,9 @@ public enum SessionStrays {
     }
 
     private static func record(_ pid: pid_t) -> (uid: uid_t, group: pid_t, start: UInt64)? {
-        var info = proc_bsdinfo()
-        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_status != SZOMB else { return nil }
-        return (info.pbi_uid, pid_t(info.pbi_pgid), info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+        // Only the user's own: the Mac reads no other's whole record, and every caller here asks for this user's.
+        guard case .record(let info) = Platform.Processes.record(pid), let uid = info.uid, uid == geteuid(),
+              info.state != .zombie else { return nil }
+        return (uid, info.pgid, UInt64(info.start.tv_sec) * 1_000_000 + UInt64(info.start.tv_usec))
     }
 }

@@ -139,6 +139,13 @@ extension Platform {
         /// anyone may know; Linux: `record`'s two reads without its terminal's name).
         public static func brief(_ pid: pid_t) -> BriefRead { System.brief(pid) }
 
+        /// Whether every program this system starts is first a copy of the process that starts it. Linux: a child is
+        /// made by fork and only then execs, so each new process reads for a moment as its parent in its name,
+        /// arguments and program, with `execd` false, and a reader of the table tells nothing from those until
+        /// `execd`. The Mac starts a program in one step (posix_spawn); only a process that forks by itself has
+        /// such a copy there, read as it always was.
+        public static var childrenStartAsCopies: Bool { System.childrenStartAsCopies }
+
         /// The arguments a process was started with, its program's name first. Empty: they can't be read (gone, a
         /// zombie, a process being set up; on the Mac another user's; on Linux a kernel thread).
         public static func arguments(_ pid: pid_t) -> [String] { System.arguments(pid) }

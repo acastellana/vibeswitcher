@@ -335,36 +335,16 @@ public struct OpenPaths: Sendable {
         var paths = Set<String>()
         let me = getuid()
         for pid in pids {
-            var short = proc_bsdshortinfo()
-            let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, size) == size, short.pbsi_uid == me else { continue }
+            guard case .brief(let short) = Platform.Processes.brief(pid), short.uid == me else { continue }
             if let cwd = ProcessTable.cwd(pid: pid) { paths.insert(cwd) }
-            var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-            if proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 { paths.insert(String(cString: buffer)) }
+            if let program = Platform.Processes.executable(pid) { paths.insert(program) }
             paths.formUnion(files(of: pid))
         }
         return OpenPaths(paths: paths)
     }
 
     /// The files and folders `pid` has open.
-    static func files(of pid: pid_t) -> [String] {
-        let stride = MemoryLayout<proc_fdinfo>.stride
-        let needed = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
-        guard needed > 0 else { return [] }
-        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(needed) / stride + 8)
-        let got = fds.withUnsafeMutableBytes { proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count)) }
-        guard got > 0 else { return [] }
-        return fds.prefix(Int(got) / stride).compactMap { fd in
-            guard fd.proc_fdtype == UInt32(PROX_FDTYPE_VNODE) else { return nil }
-            var info = vnode_fdinfowithpath()
-            let size = Int32(MemoryLayout<vnode_fdinfowithpath>.size)
-            guard proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDVNODEPATHINFO, &info, size) == size else { return nil }
-            let path = withUnsafePointer(to: &info.pvip.vip_path) {
-                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
-            }
-            return path.isEmpty ? nil : path
-        }
-    }
+    static func files(of pid: pid_t) -> [String] { Platform.Processes.openFiles(pid) }
 
     /// Whether any of them is `url` or in it (by its resolved path: realpath's, as the kernel's, where Foundation's
     /// drops /private).

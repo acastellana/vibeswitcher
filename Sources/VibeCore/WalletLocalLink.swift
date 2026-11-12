@@ -179,9 +179,7 @@ public struct WalletLocalLink: WalletTransport {
             throw Failure(description: "\(listeningName) doesn't hold a process id")
         }
         // Running (not a zombie) as this user, by the process table: a process id used again by someone else's isn't it.
-        var info = proc_bsdinfo()
-        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_status != SZOMB, info.pbi_uid == owner else {
+        guard case .record(let info) = Platform.Processes.record(pid), info.state != .zombie, info.uid == owner else {
             throw Failure(description: "the process \(listeningName) names, \(pid), isn't running")
         }
         return pid

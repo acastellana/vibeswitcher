@@ -106,17 +106,7 @@ public final class MCPLog: @unchecked Sendable {
     }
 
     public static func openDescriptors(pid: Int32 = getpid()) -> Int? {
-        let stride = MemoryLayout<proc_fdinfo>.stride
-        var room = max(Int(proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)), 64 * stride)
-        // It may have grown between the two asks: a full buffer is asked again with more room.
-        for _ in 0..<3 {
-            var buffer = [UInt8](repeating: 0, count: room)
-            let got = buffer.withUnsafeMutableBytes { proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count)) }
-            guard got > 0 else { return nil }
-            if Int(got) < room { return Int(got) / stride }
-            room *= 2
-        }
-        return nil
+        Platform.Processes.openDescriptorCount(pid)
     }
 
     /// The soft limit on open files, as the kernel applies it (never over kern.maxfilesperproc).

@@ -446,10 +446,10 @@ public final class WalletCourier: @unchecked Sendable {
 
         /// The process's start time, unless it's gone or a zombie.
         static func start(of pid: Int32) -> Start? {
-            var info = proc_bsdinfo()
-            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-            guard pid > 0, proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_status != SZOMB else { return nil }
-            return Start(seconds: info.pbi_start_tvsec, microseconds: info.pbi_start_tvusec)
+            // Only the user's own: the Mac reads no other's whole record, where its start was read from.
+            guard pid > 0, case .record(let info) = Platform.Processes.record(pid), info.uid == geteuid(),
+                  info.state != .zombie else { return nil }
+            return Start(seconds: UInt64(info.start.tv_sec), microseconds: UInt64(info.start.tv_usec))
         }
 
         static func save(pid: Int32, executable: String, in folder: URL, log: (String) -> Void) {

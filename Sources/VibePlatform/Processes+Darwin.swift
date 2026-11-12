@@ -117,6 +117,9 @@ extension Platform.Processes {
                                 execd: short.pbsi_flags & UInt32(PROC_FLAG_EXEC) != 0))
         }
 
+        /// A program is started in one step (posix_spawn), never seen as a copy of the process that started it.
+        static let childrenStartAsCopies = false
+
         /// The terminal's foreground group, when the process has a terminal (its device isn't -1) and the terminal
         /// such a group.
         private static func foregroundGroup(device: dev_t, group: Int32) -> Int32? {

@@ -210,15 +210,10 @@ public struct TestLock: Sendable {
             family += table.values.filter { $0.ppid == parent && $0.pid != parent && !family.contains($0.pid) }.map(\.pid)
             index += 1
         }
-        var timebase = mach_timebase_info_data_t()
-        mach_timebase_info(&timebase)
-        let seconds = Double(timebase.numer) / Double(max(1, timebase.denom)) / 1e9
         var cpu: [pid_t: Double] = [:]
         for pid in family.dropFirst() {
-            var info = proc_taskinfo()
-            let size = Int32(MemoryLayout<proc_taskinfo>.size)
-            guard proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &info, size) == size else { continue }
-            cpu[pid] = Double(info.pti_total_user + info.pti_total_system) * seconds
+            guard let seconds = Platform.Processes.cpuSeconds(pid) else { continue }
+            cpu[pid] = seconds
         }
         return cpu
     }
@@ -469,10 +464,9 @@ public struct TestLock: Sendable {
 
     /// When process `pid` started, in seconds since 1970; nil when it can't be told (it's gone).
     static func startTime(of pid: pid_t) -> TimeInterval? {
-        var info = proc_bsdinfo()
-        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
-        return TimeInterval(info.pbi_start_tvsec) + TimeInterval(info.pbi_start_tvusec) / 1e6
+        // Only the user's own: the Mac reads no other's whole record, where its start was read from.
+        guard case .record(let info) = Platform.Processes.record(pid), info.uid == geteuid() else { return nil }
+        return TimeInterval(info.start.tv_sec) + TimeInterval(info.start.tv_usec) / 1e6
     }
 
     /// The project and task a run in `directory` is for: in a worktree of VibeSwitcher's
