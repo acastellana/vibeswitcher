@@ -110,7 +110,7 @@
           K.rise(tl, ".s01 .sub", 1.4);
           K.rise(tl, ".s01 .foot", 2.4);
           K.rise(tl, ".s01 .yard-label", 2.0);
-          window.__timelines["s01-title"] = tl;
+          window.__timelines["s01-title"] = K.fit(tl, 10, 10.4);
         })();
       </script>
     </template>

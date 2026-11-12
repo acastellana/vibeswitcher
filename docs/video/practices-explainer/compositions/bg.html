@@ -51,11 +51,12 @@
       </div>
       <script>
         (function () {
+          const T = 411.7; // the film's length (tools/captions.py keeps it in step with index.html)
           const tl = gsap.timeline({ paused: true });
-          // The glow drifts slowly across the whole film and breathes (finite repeats over 342 s).
-          tl.fromTo(".bgc .glow", { x: 0, y: 0 }, { x: -760, y: 120, duration: 171, ease: "sine.inOut", yoyo: true, repeat: 1 }, 0);
-          tl.fromTo(".bgc .glow", { scale: 0.9 }, { scale: 1.12, duration: 6, ease: "sine.inOut", yoyo: true, repeat: 56 }, 0);
-          tl.set({}, {}, 342);
+          // The glow drifts slowly across the whole film and breathes (finite repeats over T).
+          tl.fromTo(".bgc .glow", { x: 0, y: 0 }, { x: -760, y: 120, duration: T / 2, ease: "sine.inOut", yoyo: true, repeat: 1 }, 0);
+          tl.fromTo(".bgc .glow", { scale: 0.9 }, { scale: 1.12, duration: 6, ease: "sine.inOut", yoyo: true, repeat: Math.max(0, Math.floor(T / 6) - 1) }, 0);
+          tl.set({}, {}, T);
           window.__timelines["bg"] = tl;
         })();
       </script>

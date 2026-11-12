@@ -130,7 +130,7 @@
           K.rise(tl, ".s04 .side .p2", 12.0);
           K.rise(tl, ".s04 .side .p3", 13.8);
           tl.to(".s04 .side .pt", { borderLeftColor: "#f0a63a", duration: 0.4, stagger: 1.8 }, 10.4);
-          window.__timelines["s04-contract"] = tl;
+          window.__timelines["s04-contract"] = K.fit(tl, 18, 18);
         })();
       </script>
     </template>

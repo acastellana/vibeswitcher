@@ -106,7 +106,7 @@
             tl.fromTo(r.querySelector(".b"), { opacity: 0, x: 30 }, { opacity: 1, x: 0, duration: 0.6, ease: "expo.out" }, at + 0.8);
           });
           K.rise(tl, ".s18 .note", 18.4);
-          window.__timelines["s18-compare"] = tl;
+          window.__timelines["s18-compare"] = K.fit(tl, 24, 32.5);
         })();
       </script>
     </template>

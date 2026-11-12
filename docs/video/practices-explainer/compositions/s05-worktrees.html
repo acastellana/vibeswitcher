@@ -116,7 +116,7 @@
             tl.to(sel, { x: end - 120, duration: 9.5, ease: "sine.inOut" }, at + 0.4);
           });
           K.slide(tl, ".s05 .fact", 5.0, { stagger: 1.4, x: -24 });
-          window.__timelines["s05-worktrees"] = tl;
+          window.__timelines["s05-worktrees"] = K.fit(tl, 18, 21.1);
         })();
       </script>
     </template>

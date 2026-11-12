@@ -149,7 +149,7 @@
           K.rise(tl, ".s03 .why .mono", 11.5);
           // the lead's card pulses once as "asks you only what's yours" lands
           tl.to(".s03 .lead", { scale: 1.03, duration: 0.4, ease: "power2.out", yoyo: true, repeat: 1 }, 10.0);
-          window.__timelines["s03-structure"] = tl;
+          window.__timelines["s03-structure"] = K.fit(tl, 20, 27);
         })();
       </script>
     </template>

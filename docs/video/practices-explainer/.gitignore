@@ -6,3 +6,4 @@ out/
 # scaffold notes written by `hyperframes init`; kept out of the repository (they would be agent instructions)
 AGENTS.md
 CLAUDE.md
+__pycache__/

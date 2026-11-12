@@ -104,7 +104,7 @@
             K.pop(tl, k, at, { from: 0.86 });
             tl.fromTo(k, { borderColor: "#f0a63a" }, { borderColor: "#3a352d", duration: 1.2 }, at + 0.3);
           });
-          window.__timelines["s17-controls"] = tl;
+          window.__timelines["s17-controls"] = K.fit(tl, 20, 22.2);
         })();
       </script>
     </template>
