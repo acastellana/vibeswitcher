@@ -188,6 +188,9 @@ struct MergeBatchTests: LeadTeamFixture {
         #expect(tasks.map { $0.merged?.onto } == [before, tasks[0].merged?.commit, tasks[1].merged?.commit])
         #expect(tasks[2].merged?.commit == Git.run(["rev-parse", "main"], in: root).output)
         #expect(tasks.allSatisfy { $0.merged?.batch == ["add-x", "add-y", "add-z"] && $0.receipt?.commits == 1 })
+        // The batch lands the tasks (done on the board), then appends their stats lines one by one, in the same pass:
+        // wait for all three, not just the board.
+        #expect(await advancing.until { ((try? mergeLines(stats)) ?? []).count >= 3 }, "\(String(describing: try? mergeLines(stats)))")
         let lines = try mergeLines(stats)
         #expect(lines.map(\.task) == ["add-x", "add-y", "add-z"])
         #expect(Set(lines.compactMap(\.batch)).count == 1 && lines.allSatisfy { $0.batchRuns == 1 && $0.batchTasks == 3 && $0.result == "passed" }, "\(lines)")
