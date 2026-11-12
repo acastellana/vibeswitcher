@@ -661,7 +661,8 @@ public enum ConfigSeal {
     static let maxNamed = 200
 
     /// A named script bigger than this (an interpreter's binary a command names, not a script) is told by its size,
-    /// times (ctime too: a shell can set mtime back, not ctime) and inode, not read.
+    /// times (ctime too: a shell can set mtime back, not ctime) and inode, not read; where ctime is coarse (Linux), read
+    /// and hashed too (`scriptDigest`).
     static let scriptLimit = 8 << 20
 
     /// An enabled plugin's install at `root`, its version folder ("" or missing: "absent"), as parts: its manifest (`.claude-plugin/plugin.json`), its hooks
@@ -767,6 +768,9 @@ public enum ConfigSeal {
         switch info.st_mode & S_IFMT {
         case S_IFDIR: return nil
         case S_IFREG where info.st_size > Int64(scriptLimit):
+            // Where ctime is as coarse as the kernel's tick (Linux), a patch in the tick of the last change keeps it:
+            // the contents are hashed there too.
+            if Platform.Files.changeTimeIsCoarse, case .digest(let digest) = contentsDigest(path, followLink: true) { said += digest + " " }
             return said + "big \(info.st_size) \(Platform.Files.modified(info).tv_sec).\(Platform.Files.modified(info).tv_nsec) \(Platform.Files.changed(info).tv_sec).\(Platform.Files.changed(info).tv_nsec) \(info.st_ino)"
         default:
             switch contentsDigest(path, followLink: true) {

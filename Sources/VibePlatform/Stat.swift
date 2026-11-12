@@ -55,6 +55,17 @@ extension Platform.Files {
         #endif
     }
 
+    /// Whether two changes to a file close together can leave its ctime (`changed`) the same. Linux stamps it from the
+    /// kernel's tick (its coarse clock: 1 to 10 ms, 10 ms on WSL2's kernel), so a file patched in the tick of its last
+    /// change, its mtime set back, reads unchanged by size, times and inode; the Mac's APFS stamps it to the nanosecond.
+    public static var changeTimeIsCoarse: Bool {
+        #if canImport(Darwin)
+        return false
+        #else
+        return true
+        #endif
+    }
+
     /// When the file at `path` was made (the file a link leads to), in seconds since 1970; nil when it can't be read
     /// or isn't known. The Mac's `stat` has it. On Linux it is asked with `statx`, and a file system that keeps none
     /// (tmpfs, 9p, /proc) reads nil.
