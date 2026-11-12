@@ -160,6 +160,10 @@ extension Platform { public enum Host {
 
 ### 1.6 `stat` fields
 
+**Superseded (2026-11-12):** the `extension stat` below can't be used from another module on Linux (each C module
+holds its own copy of glibc's `stat`, and a file may see CoreFoundation's first). The functions are
+`Platform.Files.modified(_:)`, `changed(_:)`, `inode(_:)`, `byteSize(_:)`, taking the `stat`.
+
 ```swift
 extension stat {                                   // in Platform/
     public var modified: timespec { get }          // st_mtimespec | st_mtim

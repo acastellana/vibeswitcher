@@ -191,7 +191,9 @@ Each is the author's call and can be overruled before its task starts.
   `Redaction.swift`, `MCPLog.swift` (recon §1.10, §1.11)
 
 **Interfaces:**
-- Produces: `extension stat { modified, changed: timespec; inode: UInt64; byteSize: Int64 }`;
+- Produces: `Platform.Files.modified(_:)`, `changed(_:)` (a `stat`'s `timespec`s), `inode(_:)`, `byteSize(_:)`. Not an
+  `extension stat`: on Linux each C module reads glibc's headers into itself, a file can meet CoreFoundation's copy of
+  `stat` first, and an extension recorded under Glibc's copy is then not found (found when the call sites were switched);
   `Platform.Files.birthTime(_:) -> Double?`; `Platform.isBoolean(_:)`; `Platform.plainInline(_:)`;
   `Platform.Signals.onFatal(_:_:)`, `onUncaughtException(_:)`.
 
