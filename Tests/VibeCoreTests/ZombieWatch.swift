@@ -84,3 +84,8 @@ struct ZombieWatch {
 /// Runs as the test bundle loads: the run's zombie watch (see `ZombieWatch`).
 @_used @_section("__DATA,__mod_init_func")
 private let watchTheRunsZombies: @convention(c) () -> Void = { ZombieWatch.start() }
+#if os(Linux)
+// ELF's name for the section of initializers (see TestSupport.swift).
+@_used @_section(".init_array")
+private let watchTheRunsZombiesOnLinux: @convention(c) () -> Void = { watchTheRunsZombies() }
+#endif

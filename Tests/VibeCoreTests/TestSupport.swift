@@ -28,6 +28,20 @@ private let fakeTheDisk: @convention(c) () -> Void = {
     }
 }
 
+#if os(Linux)
+// The section that holds initializers is named by the object format: Mach-O's name, above, is accepted on Linux and
+// never run there, and ELF's doesn't compile on the Mac. So on Linux the same two run from ELF's. A write to a pipe or
+// socket whose reader has gone is then an error (EPIPE) for the test that made it, not the end of the whole run: the
+// Mac's code asks that of each descriptor (SO_NOSIGPIPE, F_SETNOSIGPIPE), which Linux doesn't have.
+@_used @_section(".init_array")
+private let refuseTheAccountRootOnLinux: @convention(c) () -> Void = {
+    signal(SIGPIPE, SIG_IGN)
+    refuseTheAccountRoot()
+}
+@_used @_section(".init_array")
+private let fakeTheDiskOnLinux: @convention(c) () -> Void = { fakeTheDisk() }
+#endif
+
 /// How long a wait may go on before the test calls it hung. Every wait ends as soon as what it waits for happens;
 /// This counts awake time through `MacTime`, so a sleep cannot exhaust a wait at the wake.
 /// This is only a guard, sized for a Mac running several suites at once (load 100+), never a measure of speed.
