@@ -86,7 +86,7 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|PlatformLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
 ```
 
 | Lint | What it catches |
@@ -98,6 +98,7 @@ bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|D
 | `ElapsedTimeLint` | A correctness test judging an elapsed time against a bare number (`took < 0.05`, `Date().timeIntervalSince(x) < 5`): it judges the order of events, a baseline from the same test, or it's a `.perf` bench; the short allow list is in `ElapsedTimeLintTests.swift`. |
 | `HomePathLint` | A path under the home folder worked out once per process. |
 | `KeychainLint` | A test that can reach the real keychain. |
+| `PlatformLint` | A libc or Apple-only import, or an `#if os(`/`canImport(`, in the portable targets outside `VibePlatform` and `VibeCore/MacOnly`; or a file on its pending list (`Tests/VibePlatformTests/PlatformLintPending.txt`) that no longer has one. |
 | `PreferencesLint` | A test that makes a defaults suite in the real `~/Library/Preferences`. |
 | `PrivateNamesLint` | A mention of the user's other projects (the list is in the test); write a stand-in, `project-b` or `project-c`. |
 | `PrivateWriteLint` | A file under `~/.vibeswitcher` or a project's `.vibeswitcher/` written without `VibePaths.writePrivate` (0600). |
