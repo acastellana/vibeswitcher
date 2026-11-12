@@ -137,4 +137,14 @@ struct SmallTests {
         #expect(Platform.plainInline(brackets) == brackets)
     }
     #endif
+
+    /// The main actor's work is the main thread's on both systems (on Linux the test runner is in `dispatchMain()`, and
+    /// libdispatch runs the main queue on a thread of its own); a thread of its own and a global queue's aren't.
+    @MainActor @Test func theMainActorIsOnTheMainThreadAndOtherThreadsAreNot() async {
+        #expect(Platform.isMainThread)
+        let thread = await withCheckedContinuation { done in Thread.detachNewThread { done.resume(returning: Platform.isMainThread) } }
+        #expect(!thread)
+        let queued = await withCheckedContinuation { done in DispatchQueue.global().async { done.resume(returning: Platform.isMainThread) } }
+        #expect(!queued)
+    }
 }

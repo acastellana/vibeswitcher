@@ -2103,7 +2103,7 @@ public struct IndexLock: Equatable, Sendable, CustomStringConvertible {
         // made again meanwhile is looked at anew.
         for _ in 0..<3 {
             guard let before = file(path) else { return nil }
-            let holding = Thread.isMainThread ? .unknown : look(path, checkout: checkout, timeLimit: timeLimit, search: search)
+            let holding = Platform.isMainThread ? .unknown : look(path, checkout: checkout, timeLimit: timeLimit, search: search)
             guard let after = file(path) else { return nil }
             guard after.inode == before.inode else { continue }
             var lock = IndexLock(path: path, checkout: checkout, size: after.size, modified: after.modified, inode: after.inode)

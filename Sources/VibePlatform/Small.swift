@@ -11,6 +11,28 @@ extension Platform {
         CFGetTypeID(number) == CFBooleanGetTypeID()
     }
 
+    /// Whether the caller runs on the main thread, or as the main queue's work (the main actor's with it) wherever that
+    /// runs. The Mac: `Thread.isMainThread`. On Linux a process in `dispatchMain()` (vibeswitcher-host, the test runner)
+    /// has its first thread end there, and libdispatch runs the main queue on a thread of its own, where
+    /// `Thread.isMainThread` says false.
+    public static var isMainThread: Bool {
+        #if canImport(Darwin)
+        return Thread.isMainThread
+        #else
+        return Thread.isMainThread || DispatchQueue.getSpecific(key: mainQueueKey) != nil
+        #endif
+    }
+
+    #if !canImport(Darwin)
+    /// Set on the main queue as it is first read (dispatch_queue_set_specific takes effect at once): only the main
+    /// queue's work reads it back.
+    nonisolated(unsafe) private static let mainQueueKey: DispatchSpecificKey<Bool> = {
+        let key = DispatchSpecificKey<Bool>()
+        DispatchQueue.main.setSpecific(key: key, value: true)
+        return key
+    }()
+    #endif
+
     /// `markdown`, one line of inline markdown, as its words: emphasis, code spans and links without their marks, a
     /// link without its address. A block's mark (a leading "# ", "> ", "- ") isn't inline markdown and stays. nil when
     /// it can't be parsed. On the Mac it is Foundation's parser (`AttributedString(markdown:)`, inline only,
