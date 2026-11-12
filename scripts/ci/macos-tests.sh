@@ -51,7 +51,8 @@ for skip in ${skips[@]+"${skips[@]}"} ${files[@]+"${files[@]}"}; do echo "  $ski
 # Whether scripts/test.sh's output ($1) shows that only listed node tests failed.
 only_listed_failed() {
     local log=$1 failed file listed known
-    grep -qE '^✔ Test run with [0-9]+ tests? .*passed' "$log" || { echo "judge: no passing Swift test run in the output"; return 1; }
+    # "✔ Test run with 224 tests in 54 suites passed after …"; the mark differs when the run had known issues.
+    grep -qE '^[^ ]+ Test run with [0-9]+ tests? in [0-9]+ suites? passed' "$log" || { echo "judge: no passing Swift test run in the output"; return 1; }
     if grep -qE '^(✘ |error: |vs-heavy: .*stopping it|LEFTOVER PROCESSES|PREFERENCE FILES LEFT|PREFERENCES CHANGED|WEB TEST FAILED: Tests/Web/)' "$log"; then
         echo "judge: a failure that isn't a listed node test:"
         grep -E '^(✘ |error: |vs-heavy: .*stopping it|LEFTOVER PROCESSES|PREFERENCE FILES LEFT|PREFERENCES CHANGED|WEB TEST FAILED: Tests/Web/)' "$log" | head -20
