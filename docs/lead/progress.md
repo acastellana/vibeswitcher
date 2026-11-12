@@ -2562,3 +2562,16 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 09:55 Automatically (auto_advance): Started the audit of where-development at bbe60add (The risk check raised it to audit: it changes 522 lines outside tests, over risk_lines (400)).
 - 2026-11-12 09:55 Released where-development's worker (idle since its done report on bbe60add) while its audit runs
 - 2026-11-12 09:55 Automatically (auto_advance): Released where-development's worker, idle since its done report on bbe60add, while its audit runs (ended pid 67565 (Worker: Where development through VibeSwitcher loses time, and what would speed it up most (a Fable review))): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-12 09:57 Audit of when-fable-s-limit: complete, clean, round 1: 1 Nit open
+- 2026-11-12 09:59 Audit of where-development: complete, clean, round 1: 2 Nit open
+- 2026-11-12 10:12 Raised an-animated-explainer to audit (the risk check, at 95bc6738): it changes 3583 lines outside tests, over risk_lines (400)
+- 2026-11-12 10:12 Automatically (auto_advance): an-animated-explainer is audited, not merged: it changes 3583 lines outside tests, over risk_lines (400) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-12 10:14 Planned the-explainer-video-gets: The explainer video gets an ElevenLabs voiceover, with captions
+- 2026-11-12 10:14 Released an-animated-explainer's worker (idle since its done report on 95bc6738) while its audit runs
+- 2026-11-12 10:14 Automatically (auto_advance): Started the audit of an-animated-explainer at 95bc6738 (Its review is audit. (audited: it changes 3583 lines outside tests, over risk_lines (400), as the risk check found.)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-12 10:16 Automatically (auto_advance): Started the audit of a-worker-can-t-2 at ff64f9c2 (Its review is audit).
+- 2026-11-12 10:16 Released a-worker-can-t-2's worker (idle since its done report on ff64f9c2) while its audit runs
+- 2026-11-12 10:16 Automatically (auto_advance): Released a-worker-can-t-2's worker, idle since its done report on ff64f9c2, while its audit runs (ended pid 75055 (Worker: A worker can't report done while its focused tests or lints fail)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-12 10:17 Audit of an-animated-explainer: complete, clean
+- 2026-11-12 10:20 Merged when-fable-s-limit: When Fable's limit runs out, workers and audits fall back to Opus, and return to Fable at the reset (in a batch: when-fable-s-limit, where-development landed on one test run) (build b26422310962)
+- 2026-11-12 10:20 Merged where-development: Where development through VibeSwitcher loses time, and what would speed it up most (a Fable review) (in a batch: when-fable-s-limit, where-development landed on one test run) (build b26422310962)
