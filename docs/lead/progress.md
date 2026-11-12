@@ -2533,3 +2533,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 00:32 Merged origin/main into main: 4 commits from the remote, as a merge commit, 77e673c3; the tests passed on it (build 1a6db7550ddd)
 - 2026-11-12 01:50 Merged origin/main into main: 28 commits from the remote, as a merge commit, 919879f0; the tests passed on it (build 32244f28b05f)
 - 2026-11-12 01:50 Asked the user to push main at e9b9af67 (4 commits) to origin/main
+- 2026-11-12 03:21 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
