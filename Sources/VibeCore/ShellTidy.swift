@@ -20,17 +20,41 @@ public enum ShellTidy {
     /// The `app` of the launch line's own reports: another program's status in the same shell isn't the command's end.
     public static let app = "vs-shell"
 
-    /// How every Run-card shell's launch line starts: the command, given in a variable (`ShellAsk.spawnRequest`).
-    static let launchLine = "eval \"$\(ShellAsk.commandVariable)\""
+    /// The command, given in a variable (`ShellAsk.spawnRequest`): how launch lines from before `start` began.
+    static let evalLine = "eval \"$\(ShellAsk.commandVariable)\""
+
+    /// The `id` of the start report: a task's record, which the host's status of the session leaves out.
+    static let startID = "command"
+
+    /// What the launch line prints first: the command starts here (OSC 7501, a task's record, so the session's own
+    /// status doesn't change). The host keeps what's printed from here to `report` (`CommandCapture`), and nothing
+    /// the shell printed before it (what its startup files say).
+    static let start = "printf '\\033]7501;state=working:app=\(app):id=\(startID)\\007'"
+
+    /// How every Run-card shell's launch line starts: the start report, then the command.
+    static let launchLine = "\(start); \(evalLine)"
 
     /// What the launch line runs after the command: tells the terminal how it ended (OSC 7501, ended by BEL, which
-    /// zsh's, bash's and fish's printf all write from this one spelling). `&&` and `||`, not `$?`: fish has none.
-    static let report = "&& printf '\\033]7501;state=done:app=\(app)\\007' || printf '\\033]7501;state=error:app=\(app)\\007'"
+    /// zsh's, bash's and fish's printf all write from this one spelling), its exit status in `exit`. `&&` and `||`,
+    /// not `$?`, which fish refuses to parse: `$status` is the status in zsh and fish, `$PIPESTATUS` in bash (its
+    /// first command's, the only one), and each is empty in the others; a status the host can't read as 0–255 is
+    /// reported as not known (`CommandCapture.classify`).
+    static let report = "&& printf '\\033]7501;state=done:app=\(app):exit=0\\007' "
+        + "|| printf '\\033]7501;state=error:app=\(app):exit=%s%s\\007' \"$status\" \"$PIPESTATUS\""
+
+    /// The report of launch lines from before statuses were reported.
+    static let earlierReport = "&& printf '\\033]7501;state=done:app=\(app)\\007' || printf '\\033]7501;state=error:app=\(app)\\007'"
 
     /// Started by a Run card: its launch line is `ShellAsk.spawnRequest`'s, this build's or an earlier one's (which
-    /// said nothing of how the command ended).
+    /// said nothing of the command's start, nor of how it ended).
     public static func opened(_ session: HostSession) -> Bool {
-        session.agent == nil && session.command?.hasPrefix(launchLine) == true
+        session.agent == nil && (session.command?.hasPrefix(launchLine) == true || session.command?.hasPrefix(evalLine) == true)
+    }
+
+    /// A Run-card shell whose launch line reports the command's start and end: the host captures its outcome
+    /// (`CommandCapture`).
+    public static func reportsOutcome(_ session: HostSession) -> Bool {
+        session.agent == nil && session.command?.hasPrefix(launchLine) == true && session.command?.contains(report) == true
     }
 
     public struct Ending: Equatable, Sendable {
@@ -70,7 +94,7 @@ public enum ShellTidy {
     public static func finished(_ sessions: [HostSession], idle: (HostSession) -> Bool = ShellTidy.idle) -> [HostSession] {
         sessions.filter { session in
             guard session.isLive, opened(session) else { return false }
-            if session.command?.contains(report) == true, ending(of: session) == nil { return false }
+            if session.command?.contains(report) == true || session.command?.contains(earlierReport) == true, ending(of: session) == nil { return false }
             return idle(session)
         }
     }

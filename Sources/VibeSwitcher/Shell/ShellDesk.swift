@@ -9,7 +9,9 @@ import VibeCore
 /// card records that. Run starts an ordinary New Shell session (`launch`, with `ShellAsk.spawnRequest`). A request
 /// unanswered for 30 minutes expires. What became of each (started, with the new session's name; declined; expired;
 /// couldn't start) goes to the asking session as a message (`deliver`), again at a later look until it reached it or the
-/// session is gone.
+/// session is gone. Once a started shell's command ends (the host's `HostSession.commandEnd`, in `hostSessions`), the
+/// asker gets one more message, with its exit status and the last lines of its output (`ShellAsk.ending`); its card
+/// may leave before that (its files stay until it's told).
 ///
 /// Run follows the chat's one Run rule (`RunOutcome`, `RunRefusal`, `RunShown`): it ends in ran, or in a "Not run: …"
 /// line that the card shows (`refused`) and its button's tooltip says, never in a bare sound. What it doesn't share is
@@ -73,6 +75,8 @@ final class ShellDesk: ObservableObject {
     var sessionNames: () -> [String: String] = { [:] }
     /// Which of these stamps carry the host's seal (off the main thread).
     var verifyStamps: ([WalletStamp]) throws -> [Bool] = { $0.map { _ in false } }
+    /// The host's sessions (main thread): where a started shell's command end shows.
+    var hostSessions: () -> [HostSession] = { [] }
     /// Tells the asking session what became of its request (main thread).
     var deliver: (_ session: String, _ text: String, _ then: @escaping (SessionDelivery) -> Void) -> Void = { _, _, then in then(.notYet) }
     /// Starts the request's shell session and selects it in the window (main thread); hears its id and name, or why not.
@@ -93,6 +97,7 @@ final class ShellDesk: ObservableObject {
     /// On main: requests seen this run (one first seen while `atOnce` is on starts then), and messages under way.
     private var seen: Set<String> = []
     private var telling: Set<String> = []
+    private var tellingEnd: Set<String> = []
     /// Which Run of its card each `refused` line is for: an earlier one's timer doesn't clear a later one's.
     private var refusals: [String: Int] = [:]
     /// Runs `clear` once a refusal has shown long enough (main thread); tests fire it themselves.
@@ -200,7 +205,13 @@ final class ShellDesk: ObservableObject {
         case .dismiss:
             guard !card.isOpen, card.state != .starting else { return then() }
             work.async { [self] in
-                ShellAsk.remove(id, in: folder)
+                // Its command's end not yet told: the card goes, the files stay until it is.
+                if var answer = ShellAsk.answer(id, in: folder), answer.awaitsEnd {
+                    answer.dismissed = true
+                    do { try ShellAsk.record(answer, for: id, in: folder) } catch { log("couldn't record \(id): \(error)") }
+                } else {
+                    ShellAsk.remove(id, in: folder)
+                }
                 DispatchQueue.main.async { [self] in refresh(then: then) }
             }
         }
@@ -241,7 +252,12 @@ final class ShellDesk: ObservableObject {
             if let answer, answer != ShellAsk.answer(request.id, in: folder) {
                 do { try ShellAsk.record(answer, for: request.id, in: folder) } catch { log("couldn't record \(request.id): \(error)") }
             }
-            if let answer, answer.told, time.timeIntervalSince1970 - answer.at > Self.keptFor {
+            // Dismissed, its end told: nothing more to show or tell.
+            if let answer, answer.dismissed == true, !answer.awaitsEnd {
+                ShellAsk.remove(request.id, in: folder)
+                continue
+            }
+            if let answer, answer.told, !answer.awaitsEnd, time.timeIntervalSince1970 - answer.at > Self.keptFor {
                 ShellAsk.remove(request.id, in: folder)
                 continue
             }
@@ -252,6 +268,7 @@ final class ShellDesk: ObservableObject {
 
     private func draw(_ found: [(ShellRequest, ShellAsk.Answer?)], names: [String: String], time: Date) {
         var drawn: [Card] = []
+        let sessions = found.contains { $0.1?.awaitsEnd == true } ? hostSessions() : []
         for (request, answer) in found {
             let firstSight = seen.insert(request.id).inserted
             if answer == nil, firstSight, atOnce(), time.timeIntervalSince(request.created) < Self.atOnceWithin,
@@ -260,7 +277,8 @@ final class ShellDesk: ObservableObject {
                 start(request, auto: true)
             }
             if let answer, !answer.told, answer.state != .starting { tell(request, answer) }
-            guard let asker = names[request.session] else { continue }
+            if let answer { tellEnd(request, answer, sessions: sessions, time: time) }
+            guard let asker = names[request.session], answer?.dismissed != true else { continue }
             let state: Card.State
             switch answer?.state {
             case nil: state = .waiting(until: request.expiresAt)
@@ -326,7 +344,7 @@ final class ShellDesk: ObservableObject {
                         log("\(request.id) started as \(shell.id)")
                         if !auto { userRan(request, time) }
                         answer(request, ShellAsk.Answer(state: .started, at: now(), auto: auto, shell: shell.id.uuidString.lowercased(),
-                                                        name: shell.name)) { done(.ran) }
+                                                        name: shell.name, endTold: false)) { done(.ran) }
                     case .failure(let why):
                         log("\(request.id) didn't start: \(why)")
                         answer(request, ShellAsk.Answer(state: .failed, at: now(), auto: auto, why: why.description)) {
@@ -346,6 +364,30 @@ final class ShellDesk: ObservableObject {
                 do { try ShellAsk.record(answer, for: request.id, in: folder) } catch { log("couldn't record \(request.id): \(error)") }
             }
             DispatchQueue.main.async { [self] in refresh(then: then) }
+        }
+    }
+
+    /// Once the asker heard that its shell started: tells it how the command ended, once (`ShellAsk.ending`), when the
+    /// host's sessions (`sessions`, not empty) show it ended, or that the shell ended or went first. A shell the host
+    /// doesn't list yet just after it started isn't called gone.
+    private func tellEnd(_ request: ShellRequest, _ answer: ShellAsk.Answer, sessions: [HostSession], time: Date) {
+        guard answer.awaitsEnd, answer.told, !sessions.isEmpty, !tellingEnd.contains(request.id) else { return }
+        let session = answer.shell.flatMap(UUID.init(uuidString:)).flatMap { id in sessions.first { $0.id == id } }
+        if session == nil, time.timeIntervalSince1970 - answer.at < Self.startingFor { return }
+        guard let text = ShellAsk.ending(request, answer, session: session) else { return }
+        tellingEnd.insert(request.id)
+        deliver(request.session, text) { [self] delivery in
+            tellingEnd.remove(request.id)
+            guard delivery != .notYet else { return }
+            let end = session?.commandEnd
+            log("\(request.id) ended: " + (end.map { $0.ok ? "status 0" : "failed, status \($0.status.map(String.init) ?? "not known")" } ?? "not captured")
+                + (delivery == .ended ? "; its asker's session ended, so no one is told" : "; told"))
+            work.async { [self] in
+                guard var now = ShellAsk.answer(request.id, in: folder), now.awaitsEnd else { return }
+                now.endTold = true
+                try? ShellAsk.record(now, for: request.id, in: folder)
+                DispatchQueue.main.async { [self] in refresh() }
+            }
         }
     }
 

@@ -427,6 +427,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             guard let self else { return then(.notYet) }
             leads.tell(text, from: .system("from New Shell"), session: id, then: then)
         }
+        desk.hostSessions = { [weak self] in self?.host.sessions ?? [] }
         desk.atOnce = { [weak self] in self?.preferences.letAgentsOpenShells ?? false }
         desk.launch = { [weak self] request, then in
             guard let self else { return then(.failure(ShellAsk.Refusal("the sandbox is quitting"))) }
@@ -574,6 +575,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 self?.model.update(sessions: sessions, hosted: hosted, table: table, hostAnswered: state != .connecting)
             }
             .store(in: &cancellables)
+        // A Run-card shell's command ending, or its session: the asker hears how it ended (as the app's desk does).
+        host.$sessions.map { $0.map { "\($0.id) \($0.commandEnd != nil) \($0.isLive)" } }.removeDuplicates().dropFirst()
+            .receive(on: RunLoop.main).sink { [weak self] _ in self?.shellDesk.refresh() }.store(in: &cancellables)
         // A fake agent leaves with its session, as a real one does.
         host.$sessions.receiveLatest(on: RunLoop.main).sink { [weak self] sessions in
             guard let self else { return }

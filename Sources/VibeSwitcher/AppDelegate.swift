@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             return WalletDesk.names(hosted: hostClient.sessions.filter(\.isLive), rows: windowModel.allRows)
         }
         desk.verifyStamps = { try LeadVault.standard.verifyWallet($0) }
+        desk.hostSessions = { [weak self] in self?.hostClient.sessions ?? [] }
         desk.deliver = { [weak self] session, text, then in
             guard let id = UUID(uuidString: session) else { return then(.ended) }
             guard let self else { return then(.notYet) }
@@ -252,7 +253,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .store(in: &cancellables)
         // The host's sessions known, or changed: cards of the sessions it runs show, by the window's names.
         hostClient.$sessions
-            .map { $0.map { "\($0.id) \($0.label) \($0.title)" } }
+            // A Run-card shell's command ending, or its session: the asker hears how it ended.
+            .map { $0.map { "\($0.id) \($0.label) \($0.title) \($0.commandEnd != nil) \($0.isLive)" } }
             .removeDuplicates()
             .dropFirst()
             .receive(on: DispatchQueue.main)
