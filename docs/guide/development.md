@@ -86,7 +86,7 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|PreferencesLint|PrivateNamesLint|PhoneMainSyncLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
 ```
 
 | Lint | What it catches |
@@ -108,7 +108,7 @@ bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|D
 ## Tests under load
 
 ```sh
-scripts/test-under-load.sh --load 24 -r 3 -f 'NewTests'
+scripts/test-under-load.sh --load $((2 * $(getconf _NPROCESSORS_ONLN))) -r 3 -f 'NewTests'
 scripts/test-under-load.sh --load 8 -- swift test --filter SomeTest
 ```
 
