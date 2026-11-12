@@ -2708,3 +2708,16 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 16:29 Flaky in the batch check-whether-a-phone, prompts-and-agents-md, each-role-gets-the, a-failed-merge-run: headlessAnswersQueriesOnlyWhenNoClient(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
 - 2026-11-12 16:29 Started a worker on merges-never-sit-blocked
 - 2026-11-12 16:30 Started a worker on a-size-ceiling-on (auto → Claude: Claude weekly 20%, 7 points ahead of pace, not tight; Codex 24%)
+- 2026-11-12 16:39 Raised audit-eval-on-opus to audit (the risk check, at a793c3eb): headless Claude said raise: The task runs a paid, four-hour eval with network access, and the diff only edits a docs file; the work itself touches no code, so the review level is fine, but the run spends $80 and runs long…
+- 2026-11-12 16:39 Workflow: auto_advance = `true`
+- 2026-11-12 16:39 Automatically (auto_advance): Didn't cleanup|an-animated-explainer: fatal: '/Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/an-animated-explainer' is not a working tree
+- 2026-11-12 16:39 Automatically (auto_advance): audit-eval-on-opus is audited, not merged: headless Claude said raise: The task runs a paid, four-hour eval with network access, and the diff only edits a docs file; the work itself touches no code, so the review level is fine, but the run spends $80 and runs long… (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-12 16:39 Update: Merged and installed: 12 tasks after the block, including model routing and faster merges — **Landed on main and installed at 16:38** (main at e0692549, two batch merges):
+- 2026-11-12 16:39 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
+Error lines in app.log within 10 min, by kind: role sweep: failed ×1
+Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
+- 2026-11-12 16:39 Planned app-health-doesn-t: App health doesn't count a task named "…fail…" as an error line
+- 2026-11-12 16:40 Started a worker on app-health-doesn-t (auto → Claude: Claude weekly 21%, 8 points ahead of pace, not tight; Codex 24%)
+- 2026-11-12 16:40 Automatically (auto_advance): Started a worker on app-health-doesn-t (App health doesn't count a task named "…fail…" as an error line); its agent is auto, so it went to Claude: Claude weekly 21%, 8 points ahead of pace, not tight; Codex 24%.
+- 2026-11-12 16:40 Released audit-eval-on-opus's worker (idle since its done report on a793c3eb) while its audit runs
+- 2026-11-12 16:40 Automatically (auto_advance): Started the audit of audit-eval-on-opus at a793c3eb (Its review is audit. (audited: headless Claude said raise: The task runs a paid, four-hour eval with network access, and the diff only edits a docs file; the work itself touches no code, so the review level is fine, but the run spends $80 and runs long…, as the risk check found.)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
