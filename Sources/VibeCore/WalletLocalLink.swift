@@ -274,7 +274,7 @@ public struct WalletLocalLink: WalletTransport {
         defer { closedir(listing) }
         var names: [String] = []
         while let entry = readdir(listing) {
-            let name = withUnsafePointer(to: &entry.pointee.d_name) { $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) } }
+            let name = withUnsafePointer(to: &entry.pointee.d_name) { $0.withMemoryRebound(to: CChar.self, capacity: Int(PATH_MAX)) { String(cString: $0) } }
             if !name.hasPrefix(".") { names.append(name) }
         }
         let folder = fromFolder
@@ -336,7 +336,8 @@ public struct WalletLocalLink: WalletTransport {
         let folder = try open(Self.fromName, events: true)
         let descriptor = dup(folder.descriptor)
         guard descriptor >= 0 else { throw Failure(description: "\(Self.fromName) can't be watched: \(String(cString: strerror(errno)))") }
-        return WalletFolderWatch(descriptor: descriptor, heard: heard)
+        guard let watch = WalletFolderWatch(descriptor: descriptor, heard: heard) else { throw Failure(description: "\(Self.fromName) can't be watched") }
+        return watch
     }
 }
 
@@ -345,24 +346,25 @@ public struct WalletLocalLink: WalletTransport {
 final class WalletFolderWatch: WalletListening, @unchecked Sendable {
     static let pause: TimeInterval = 1
     private let queue = DispatchQueue(label: "dev.vibeswitcher.wallet-folder-watch", qos: .utility)
-    private let source: DispatchSourceFileSystemObject
+    private let source: Platform.FolderWatch
     // On `queue`:
     private var last: DispatchTime?
     private var pending = false
     private let lock = NSLock()
     private var running: Bool
 
-    /// Takes over `descriptor` (a folder opened for events), closed when the watch stops.
-    init(descriptor: Int32, heard: @escaping @Sendable () -> Void) {
-        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: [.write, .rename, .delete, .revoke], queue: queue)
+    /// Takes over `descriptor` (a folder opened for events), closed when the watch stops; nil (and closed) when it
+    /// can't be watched.
+    init?(descriptor: Int32, heard: @escaping @Sendable () -> Void) {
+        guard let source = Platform.FolderWatch(descriptor: descriptor) else { return nil }
         self.source = source
         running = true
-        source.setEventHandler { [weak self] in
+        source.deliver(on: queue) { [weak self] change in
             guard let self else { return }
             // The folder itself gone or moved: what's watched is no longer `from-wm`.
-            if !source.data.intersection([.rename, .delete, .revoke]).isEmpty {
+            if change.contains(.folderGone) {
                 self.lock.withLock { self.running = false }
-                source.cancel()
+                source.stop()
                 return heard()
             }
             let now = DispatchTime.now()
@@ -380,8 +382,6 @@ final class WalletFolderWatch: WalletListening, @unchecked Sendable {
                 heard()
             }
         }
-        source.setCancelHandler { close(descriptor) }
-        source.resume()
     }
 
     var process: (pid: Int32, executable: String)? { nil }
@@ -393,7 +393,7 @@ final class WalletFolderWatch: WalletListening, @unchecked Sendable {
             defer { running = false }
             return running
         }
-        if was { source.cancel() }
+        if was { source.stop() }
     }
 
     deinit { stop(grace: 0) }

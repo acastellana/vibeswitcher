@@ -105,9 +105,9 @@ public final class LeadAdvance: @unchecked Sendable {
     /// land can't keep the turn. `resting` is the pass's own copy, read by passes only.
     private var rest: Set<String> = []
     private var resting: Set<String> = []
-    /// The folder watch's way to end (its thread waits on the folder and on this pipe), and the lock it holds while it
-    /// runs (see `running`).
-    private var stopWrite: Int32 = -1
+    /// The folder watch (its thread waits on it; `stop()` ends the wait), and the lock it holds while it runs (see
+    /// `running`).
+    private var watch: Platform.FolderWatch?
     private var runningLock: FileLock?
     /// What the next report to the lead says, a line per step.
     private var lines: [String] = []
@@ -178,33 +178,13 @@ public final class LeadAdvance: @unchecked Sendable {
         guard let lead = owner else { return }
         try? lead.store.prepare()
         runningLock = FileLock.attempt(Self.runningLock(lead.store))
-        let fd = open(lead.store.folder, O_EVTONLY)
-        let queue = kqueue()
-        var pipes: [Int32] = [-1, -1]
-        if fd >= 0, queue >= 0, pipe(&pipes) == 0 {
-            for end in pipes { _ = fcntl(end, F_SETFD, FD_CLOEXEC) }
-            _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
-            _ = fcntl(queue, F_SETFD, FD_CLOEXEC)
-            var changes = [kevent(ident: UInt(fd), filter: Int16(EVFILT_VNODE), flags: UInt16(EV_ADD | EV_CLEAR),
-                                  fflags: UInt32(NOTE_WRITE | NOTE_RENAME | NOTE_DELETE), data: 0, udata: nil),
-                           kevent(ident: UInt(pipes[0]), filter: Int16(EVFILT_READ), flags: UInt16(EV_ADD), fflags: 0, data: 0, udata: nil)]
-            _ = kevent(queue, &changes, Int32(changes.count), nil, 0, nil)
-            stopWrite = pipes[1]
-            let stopRead = pipes[0]
+        if let watch = Platform.FolderWatch(path: lead.store.folder) {
+            self.watch = watch
             Thread.detachNewThread { [weak self] in
-                var event = kevent()
-                while true {
-                    let count = kevent(queue, nil, 0, &event, 1, nil)
-                    if count < 0 && errno == EINTR { continue }
-                    if count < 0 || event.filter == Int16(EVFILT_READ) { break }
+                while watch.wait() != nil {
                     self?.trigger()
                 }
-                close(queue)
-                close(fd)
-                close(stopRead)
             }
-        } else {
-            for descriptor in [fd, queue] + pipes where descriptor >= 0 { close(descriptor) }
         }
         trigger()
     }
@@ -214,15 +194,13 @@ public final class LeadAdvance: @unchecked Sendable {
         lock.lock()
         stopped = true
         while wait && (busy || !merging.isEmpty) { lock.wait() }
-        let write = stopWrite
-        stopWrite = -1
+        let watch = self.watch
+        self.watch = nil
         let held = runningLock
         runningLock = nil
         lock.unlock()
         held?.release()
-        guard write >= 0 else { return }
-        _ = Sys.write(write, [UInt8(1)], 1)
-        close(write)
+        watch?.stop()
     }
 
     /// A pass is due: one runs now, or once the one under way is done.
