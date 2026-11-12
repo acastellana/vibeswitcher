@@ -2752,3 +2752,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 17:25 Automatically (auto_advance): Cleaned up audit-eval-on-opus (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-12 17:25 Automatically (auto_advance): Cleaned up app-health-doesn-t; ended pid 8479 (Worker: App health doesn't count a task named "…fail…" as an error line) (freed 0 MB of build output and temporary folders). It stays done.
 - 2026-11-12 17:25 Automatically (auto_advance): Didn't cleanup|a-size-ceiling-on: error: branch 'agent/a-size-ceiling-on' not found
+- 2026-11-12 17:41 Planned a-vs-shell-command: A vs-shell command's outcome reaches the agent that asked: exit status and the end of its output (review audit)
+- 2026-11-12 17:41 Started a worker on a-vs-shell-command
+- 2026-11-12 17:41 Automatically (auto_advance): Started a worker on a-vs-shell-command (A vs-shell command's outcome reaches the agent that asked: exit status and the end of its output).
+- 2026-11-12 17:45 Automatically (auto_advance): Didn't cleanup|an-animated-explainer: fatal: '/Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/an-animated-explainer' is not a working tree
+- 2026-11-12 17:45 Update: Installed at 17:45: faster merges on a calm Mac, and small tasks skip their audit — **Live in your app since the 17:45 install** (built from main with everything merged today).
