@@ -376,3 +376,15 @@ The Claude Code team's talk (2026-11-12): today's models run for hours and verif
 
 2026-11-12: the an-animated-explainer worker ran `npx hyperframes init` as the skill said, and it installed two new skills into ~/.claude/skills plus symlinks into other agents' folders. The config seal caught it, but every new worker, audit and merge was held until the user ruled. My brief allowed "project-local npx" without checking what init writes.
 
+## 2026-11-12 10:33:35 Supersedes the earlier 2026-11-12 "tasks get bigger" decision: keep tasks under about 30 min of work where the change allows, and batch only parts that share files and would otherwise conflict or wait. Also: when gate or lead commits on main wait uninstalled and nothing is in flight, the lead files one install card saying how many commits and what they fix, instead of waiting for the user to ask.
+
+Fable's check of the speed review (2026-11-12) measured the opposite of the talk's advice for this project: tasks with over an hour of work needed a second audit round 59% of the time, against 18% for tasks under 30 min, and extra rounds are the largest in-flight cost (about 95 task-hours in 7 days, an upper bound). Merged work also waits a median of up to 4.5 h for an install, and most merges change the lead's own machinery, which runs from the installed app.
+
+## 2026-11-12 10:41:54 Small tasks merge without an audit: a task whose worker worked under 30 minutes, touching no sensitive or strict path, not flagged by the risk check, not Codex's work, and not marked security or irreversible, merges on its done report, the pre-done check and the merge's full suite, plus the existing 10% audit sample. The lead files such tasks review none, and VibeSwitcher applies the rule at done for tasks filed audit only for size or caution (task small-tasks-merge).
+
+The user's answer to A4977A3E (2026-11-12). Fable's check of the speed review: tasks under 30 minutes of work took 42% of the week's verifier spend ($220 of $526), and 5 of 49 had an Important finding. The pre-done check and the full suite now catch much of what audits caught on small changes.
+
+## 2026-11-12 10:56:35 Routine audits move to Opus, and security and sensitive-path audits stay on Fable. Sequence: verifier_model is fable now, only for audits-settle-their's six remaining eval cases. Once that run ends, the lead sets verifier_model=opus, and each-role-gets-the routes sensitive and security audits to Fable. The review floor already allows any verifier model (the user lowered it on 2026-11-11), so the user doesn't need to change anything.
+
+audit-eval-on-opus, 2026-11-12, on the same 14 cases, prompt and REVIEW.md as the Fable baseline. Opus found 7 of 14 by substance, 6 of them as Important, against Fable's 6 and 4, at $13.75 against $53 and in 93 min against 161. It missed only the symlink escape that needed a probe, which Fable had caught as a Nit. One run each, so the difference is within noise, but there's no sign Opus is worse for routine audits.
+

@@ -2575,3 +2575,33 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 10:17 Audit of an-animated-explainer: complete, clean
 - 2026-11-12 10:20 Merged when-fable-s-limit: When Fable's limit runs out, workers and audits fall back to Opus, and return to Fable at the reset (in a batch: when-fable-s-limit, where-development landed on one test run) (build b26422310962)
 - 2026-11-12 10:20 Merged where-development: Where development through VibeSwitcher loses time, and what would speed it up most (a Fable review) (in a batch: when-fable-s-limit, where-development landed on one test run) (build b26422310962)
+- 2026-11-12 10:20 Automatically (auto_advance): Merged when-fable-s-limit at 18ab538d (its passing audit), where-development at f670db60 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-12 10:20 Automatically (auto_advance): Cleaned up when-fable-s-limit (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-12 10:20 Automatically (auto_advance): Cleaned up where-development (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-11-12 10:21 Started a worker on each-role-gets-the
+- 2026-11-12 10:21 Automatically (auto_advance): Started a worker on each-role-gets-the (Each role gets the model that suits it: Opus by default, Fable as advisor at decision points, Fable for re-rolls and sensitive audits), its after tasks done (when-fable-s-limit).
+- 2026-11-12 10:21 Started a worker on fable-checks-the-speed
+- 2026-11-12 10:21 Automatically (auto_advance): Started a worker on fable-checks-the-speed (Fable checks the speed review's ranking), its after tasks done (where-development).
+- 2026-11-12 10:21 Update: Fable's limit no longer stops work: workers and audits fall back to Opus — **What changed (when-fable-s-limit, merged at 18ab538d):** once Claude refuses a request at the Fable limit on the logged-in account, new workers and audits start on Opus. A worker halted mid-task is …
+- 2026-11-12 10:24 Audit of a-worker-can-t-2: complete, clean, round 1: 3 Nit open
+- 2026-11-12 10:33 Planned a-calm-mac-merge: A calm-Mac merge gets the free cores (back to about 9 min from 15) (review audit)
+- 2026-11-12 10:33 Planned a-failed-merge-run: A failed merge run reruns only the tests it names, on the branch and on main (review audit)
+- 2026-11-12 10:33 Planned sleep-shows-its-cost: Sleep shows its cost: the digest, status and a wake notice say what the Mac's sleep paused
+- 2026-11-12 10:37 Started a worker on a-calm-mac-merge
+- 2026-11-12 10:37 Automatically (auto_advance): Started a worker on a-calm-mac-merge (A calm-Mac merge gets the free cores (back to about 9 min from 15)).
+- 2026-11-12 10:37 Started a worker on a-failed-merge-run
+- 2026-11-12 10:37 Automatically (auto_advance): Started a worker on a-failed-merge-run (A failed merge run reruns only the tests it names, on the branch and on main).
+- 2026-11-12 10:37 Started a worker on sleep-shows-its-cost
+- 2026-11-12 10:37 Automatically (auto_advance): Started a worker on sleep-shows-its-cost (Sleep shows its cost: the digest, status and a wake notice say what the Mac's sleep paused).
+- 2026-11-12 10:37 Released prompts-and-agents-md's worker (idle since its done report on 53e0c437) while its audit runs
+- 2026-11-12 10:37 Automatically (auto_advance): Started the audit of prompts-and-agents-md at 53e0c437 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-12 10:42 Planned small-non-sensitive: Small, non-sensitive tasks merge on their tests and the 10% sample, without a full audit (review audit)
+- 2026-11-12 10:42 Started a worker on small-non-sensitive
+- 2026-11-12 10:42 Automatically (auto_advance): Started a worker on small-non-sensitive (Small, non-sensitive tasks merge on their tests and the 10% sample, without a full audit).
+- 2026-11-12 10:56 Workflow: verifier_model = `fable`
+- 2026-11-12 10:57 Audit of prompts-and-agents-md: complete, clean, round 1: 1 Nit open
+- 2026-11-12 10:57 Dismissed prompts-and-agents-md:F1: The event is real, and it's recorded in the lead's memory, not the repository: a phone-input test once typed into the real genswap session and broke its open question. The rule's wording stands.
+- 2026-11-12 10:58 Merged a-worker-can-t-2: A worker can't report done while its focused tests or lints fail (in a batch: a-worker-can-t-2, an-animated-explainer landed on one test run) (build b26422310962)
+- 2026-11-12 10:58 Merged an-animated-explainer: An animated explainer video: the engineering practices VibeSwitcher makes possible, compared with using Claude on its own (in a batch: a-worker-can-t-2, an-animated-explainer landed on one test run) (build b26422310962)
+- 2026-11-12 10:58 Flaky in the batch a-worker-can-t-2, an-animated-explainer: releasedWhenItGoes(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-12 10:58 Planned fix-the-flaky-test-22: releasedWhenItGoes() flaked 3 times within 7 days
