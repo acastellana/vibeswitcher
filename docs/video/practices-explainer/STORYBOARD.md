@@ -7,7 +7,8 @@ audience: developers who drive Claude Code (or Codex) sessions by hand
 mode: autonomous
 ---
 
-Every number is from `sources.md`. Scenes are sub-compositions in `compositions/`, mounted back to back in
+Narrated cut: each scene's length below is the silent cut's. `tools/captions.py` now stretches each scene to fit its
+voice (`NARRATION.md`), never shorter, so the film runs 6:52. Every number is from `sources.md`. Scenes are sub-compositions in `compositions/`, mounted back to back in
 `index.html`. Each fades in over 0.4 s and out over 0.4 s, with hard cuts between scenes. The kicker in the top-left
 (`NN / NAME`) numbers the chapters.
 

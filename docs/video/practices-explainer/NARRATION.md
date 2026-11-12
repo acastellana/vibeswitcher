@@ -9,8 +9,17 @@ idea behind each scene, while the screen carries the detail (names, fields, thre
 
 Why George: the project's ElevenLabs key may only call text-to-speech, so the account's voices couldn't be listed
 (`GET /v1/voices` answers 401, `voices_read` missing), and the voice wasn't picked from a listing. George is the voice
-ElevenLabs' own quickstart uses with `eleven_v4`, a calm, warm, measured narrator, which suits a technical
-walk-through. ElevenLabs' model guide recommends `eleven_v4` (or `eleven_multilingual_v2`) for video narration.
+ElevenLabs' own quickstart uses with `eleven_v4` (its voice-description pages weren't reachable). On the opening sample
+he reads at a measured pace, about 130 words a minute, with every word clear in transcription, which suits a technical
+walk-through. Whether the voice is as warm as wanted is for a human ear to judge. ElevenLabs' model guide recommends `eleven_v4` (or `eleven_multilingual_v2`) for video narration.
+
+**Characters used:** 5,075 for the 19 scene files, plus 458 for a probe, the opening sample and a speed test, so
+5,533 in all. The account's quota couldn't be read (`GET /v1/user/subscription` needs `user_read`), and no call was
+refused. **Voice length:** 6:20 of speech in a 6:52 film. The model ignores `voice_settings.speed` (1.0, 1.1 and 1.2
+gave the same length), so the voice keeps its natural pace, about 130 words a minute.
+
+The opening was sampled first and transcribed with whisper (`small.en` and `base.en`): "VibeSwitcher", "worktree" and
+"Codex" come through as written.
 
 `tools/voice.py` reads each scene's text below (the lines starting with `>`), asks for one audio file per scene and
 keeps the character timings that the captions are built from: `assets/voice/sNN.mp3` and `assets/voice/sNN.json`.

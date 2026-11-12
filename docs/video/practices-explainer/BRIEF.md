@@ -7,9 +7,9 @@ destination: youtube
 aspect: 1920x1080
 language: en
 audience: developers who already use Claude Code (or Codex) and drive one or a few sessions by hand
-length: about 5.5 minutes
+length: about 7 minutes (6:52 narrated; the silent cut was 5:42)
 angle: explainer, process walk-through with the project's own numbers
-narration: no
+narration: yes (ElevenLabs, see NARRATION.md)
 ---
 
 ## Intent
@@ -30,9 +30,10 @@ work. It's more charming but less thorough, and the contract asks for thorough.
 
 ## Customizations
 
-- On-screen text carries everything, with no narration. So no voiceover, no captions track and no music. A silent piece
-  can be read at any pace and paused, and no TTS or music provider (or sign-in) is needed. Decided autonomously, per
-  the contract ("Narration or on-screen text is your call").
+- Narrated (user, 2026-11-12: "use elevenlabs for the voices"). An ElevenLabs voice explains each scene, the screen
+  keeps the detail, and captions carry every word. Still no music. The script, voice and model are in `NARRATION.md`;
+  `tools/voice.py` voices it, and `tools/captions.py` fits the scene lengths, the voice track and the captions to it.
+  The silent cut (5:42) had on-screen text only, decided autonomously per the first contract.
 - Real numbers count up where they make a point. Each one is listed in `sources.md`.
 
 ## Notes
