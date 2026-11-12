@@ -1,6 +1,151 @@
 <!doctype html>
-<html><head><meta charset="UTF-8" /></head><body><template>
-<style>#root{position:absolute;inset:0;}</style>
-<div id="root" data-composition-id="s07-review" data-width="1920" data-height="1080"><div class="stage"><div class="kicker">stub s07-review</div></div></div>
-<script>(function(){const tl=gsap.timeline({paused:true});tl.set({}, {}, 18);window.__timelines["s07-review"]=tl;})();</script>
-</template></body></html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s07 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s07 .yard {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 1920px;
+          height: 1080px;
+        }
+        .s07 .tl {
+          position: absolute;
+          font-size: 26px;
+          line-height: 1.3;
+        }
+        .s07 .tl b {
+          font-family: var(--mono);
+          font-weight: 700;
+        }
+        .s07 .car {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 96px;
+          height: 36px;
+          border-radius: 8px;
+          background: var(--panel2);
+          border: 3px solid var(--accent);
+        }
+        .s07 .cols {
+          position: absolute;
+          left: 120px;
+          top: 610px;
+          width: 1680px;
+          display: grid;
+          grid-template-columns: 1fr 1.25fr 1fr;
+          gap: 28px;
+        }
+        .s07 .col {
+          padding: 22px 28px;
+        }
+        .s07 .col .h3 {
+          font-size: 30px;
+          margin-bottom: 12px;
+        }
+        .s07 .col .li {
+          font-size: 22px;
+          line-height: 1.36;
+          color: var(--muted);
+        }
+        .s07 .col .li.mono {
+          color: var(--fg);
+        }
+        .s07 .tally {
+          position: absolute;
+          left: 1240px;
+          top: 150px;
+          width: 560px;
+          text-align: right;
+        }
+        .s07 .tally .num {
+          font-size: 64px;
+          color: var(--accent);
+        }
+        .s07 .tally .t {
+          font-size: 22px;
+          color: var(--muted);
+          font-family: var(--mono);
+        }
+      </style>
+      <div id="root" data-composition-id="s07-review" data-width="1920" data-height="1080">
+        <div class="stage s07">
+          <div class="kicker">06 / Who gets audited</div>
+          <div class="head h2">Two review levels.</div>
+          <div class="tally">
+            <div class="num"><span class="n1">0</span><span class="muted"> / </span><span class="n2">0</span></div>
+            <div class="t">merged tasks that were audited</div>
+          </div>
+          <svg class="yard" viewBox="0 0 1920 1080" aria-hidden="true">
+            <path class="rail in" pathLength="1" d="M 120 420 L 520 420" />
+            <path class="rail up" pathLength="1" d="M 520 420 C 600 420 600 330 680 330 L 1800 330" />
+            <path class="rail dn" pathLength="1" d="M 520 420 C 600 420 600 510 680 510 L 1800 510" />
+            <path class="rail-hot divert" pathLength="1" d="M 880 330 C 960 330 960 510 1040 510" />
+          </svg>
+          <div class="tl t-none" style="left: 700px; top: 268px"><b>none</b> <span class="muted">· the merge's full test run is the check</span></div>
+          <div class="tl t-audit" style="left: 700px; top: 528px"><b class="amber">audit</b> <span class="muted">· a verifier must pass it first</span></div>
+          <div class="car ca"></div>
+          <div class="cols">
+            <div class="col card k1">
+              <div class="h3">Sensitive paths</div>
+              <div class="li mono">.claude/ · .mcp.json · CLAUDE.md · AGENTS.md · .github/ · .env · *.entitlements · *.pem</div>
+              <div class="li" style="margin-top: 10px">always audited</div>
+            </div>
+            <div class="col card k2">
+              <div class="h3">The risk check</div>
+              <div class="li">over 400 changed lines outside tests · deletes or rewrites files or data · changes permissions · spawns processes · adds locks or threads · touches the test or build setup · removes tests · and a small Claude model's look at the diff</div>
+            </div>
+            <div class="col card k3">
+              <div class="h3">A random sample</div>
+              <div class="li">10 % of the rest, drawn once per task</div>
+              <div class="li" style="margin-top: 14px; color: var(--fg)">These can only raise a review. Nothing lowers one.</div>
+            </div>
+          </div>
+          <div class="foot">35 tasks were raised to audit by the risk check</div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s07");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 18);
+          K.rise(tl, ".s07 .head", 0.3);
+          K.draw(tl, ".s07 .in", 0.6, 0.6);
+          K.draw(tl, ".s07 .up, .s07 .dn", 1.1, 0.9);
+          K.rise(tl, ".s07 .t-none", 1.8, { y: 12 });
+          K.rise(tl, ".s07 .t-audit", 2.2, { y: 12 });
+          // a car heads for the "none" track, and a diverter throws it onto the audit track
+          tl.fromTo(".s07 .ca", { opacity: 0, x: 120, y: 402 }, { opacity: 1, x: 160, y: 402, duration: 0.3 }, 3.0);
+          tl.to(".s07 .ca", { x: 440, duration: 0.8, ease: "power1.in" }, 3.3);
+          tl.to(".s07 .ca", { x: 600, y: 312, duration: 0.5, ease: "none" }, 4.1);
+          tl.to(".s07 .ca", { x: 800, duration: 0.5, ease: "none" }, 4.6);
+          K.draw(tl, ".s07 .divert", 4.4, 0.4);
+          tl.to(".s07 .ca", { x: 960, y: 492, duration: 0.6, ease: "none" }, 5.1);
+          tl.to(".s07 .ca", { x: 1600, duration: 1.4, ease: "power2.out" }, 5.7);
+          K.rise(tl, ".s07 .k1", 6.2, { y: 40 });
+          K.rise(tl, ".s07 .k2", 7.6, { y: 40 });
+          K.rise(tl, ".s07 .k3", 9.4, { y: 40 });
+          K.rise(tl, ".s07 .tally", 11.0);
+          K.count(tl, S.querySelector(".n1"), 272, 11.2, 1.6);
+          K.count(tl, S.querySelector(".n2"), 495, 11.2, 1.6);
+          K.rise(tl, ".s07 .foot", 13.0);
+          window.__timelines["s07-review"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

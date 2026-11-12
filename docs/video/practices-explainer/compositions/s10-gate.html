@@ -1,6 +1,154 @@
 <!doctype html>
-<html><head><meta charset="UTF-8" /></head><body><template>
-<style>#root{position:absolute;inset:0;}</style>
-<div id="root" data-composition-id="s10-gate" data-width="1920" data-height="1080"><div class="stage"><div class="kicker">stub s10-gate</div></div></div>
-<script>(function(){const tl=gsap.timeline({paused:true});tl.set({}, {}, 16);window.__timelines["s10-gate"]=tl;})();</script>
-</template></body></html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s10 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s10 .yard {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 1920px;
+          height: 1080px;
+        }
+        .s10 .sig {
+          position: absolute;
+          top: 300px;
+          width: 380px;
+        }
+        .s10 .lamp {
+          width: 46px;
+          height: 46px;
+          border-radius: 50%;
+          background: var(--stop);
+          border: 4px solid var(--panel2);
+          margin-left: 2px;
+        }
+        .s10 .post {
+          width: 8px;
+          height: 120px;
+          margin-left: 21px;
+          background: var(--line);
+        }
+        .s10 .step {
+          margin-top: 50px;
+        }
+        .s10 .step .n {
+          font-family: var(--mono);
+          font-weight: 700;
+          font-size: 24px;
+          color: var(--accent);
+          margin-bottom: 8px;
+        }
+        .s10 .step .d {
+          font-size: 27px;
+          line-height: 1.34;
+          width: 350px;
+        }
+        .s10 .car {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 110px;
+          height: 40px;
+          border-radius: 9px;
+          background: var(--accent);
+        }
+        .s10 .stamp {
+          position: absolute;
+          left: 120px;
+          top: 880px;
+          width: 1680px;
+          padding: 22px 30px;
+          border: 3px solid var(--go);
+          border-radius: 14px;
+          font-family: var(--display);
+          font-size: 34px;
+          color: var(--go);
+          letter-spacing: -0.01em;
+        }
+        .s10 .stamp .muted {
+          font-family: var(--body);
+          font-size: 26px;
+          letter-spacing: 0;
+          margin-left: 12px;
+        }
+      </style>
+      <div id="root" data-composition-id="s10-gate" data-width="1920" data-height="1080">
+        <div class="stage s10">
+          <div class="kicker">09 / The merge gate</div>
+          <div class="head h2">Nothing reaches your branch untested.</div>
+          <svg class="yard" viewBox="0 0 1920 1080" aria-hidden="true">
+            <path class="rail main" pathLength="1" d="M 100 444 L 1820 444" />
+          </svg>
+          <div class="car c1"></div>
+          <div class="sig g1" style="left: 160px">
+            <div class="lamp"></div>
+            <div class="post"></div>
+            <div class="step">
+              <div class="n">1 · the exact commit</div>
+              <div class="d">Take exactly the commit that was checked.</div>
+            </div>
+          </div>
+          <div class="sig g2" style="left: 580px">
+            <div class="lamp"></div>
+            <div class="post"></div>
+            <div class="step">
+              <div class="n">2 · rebase</div>
+              <div class="d">Onto the lead's branch, in a worktree no agent works in.</div>
+            </div>
+          </div>
+          <div class="sig g3" style="left: 1000px">
+            <div class="lamp"></div>
+            <div class="post"></div>
+            <div class="step">
+              <div class="n">3 · the full suite</div>
+              <div class="d">Setup, then the tests, then any regression command.</div>
+            </div>
+          </div>
+          <div class="sig g4" style="left: 1420px">
+            <div class="lamp"></div>
+            <div class="post"></div>
+            <div class="step">
+              <div class="n">4 · fast-forward</div>
+              <div class="d">The branch moves to exactly what was tested.</div>
+            </div>
+          </div>
+          <div class="stamp">Never a merge commit. Never a force.<span class="muted">Any merge can be undone by one revert commit.</span></div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s10");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 16);
+          K.rise(tl, ".s10 .head", 0.3);
+          K.draw(tl, ".s10 .main", 0.6, 1.0);
+          K.rise(tl, ".s10 .sig", 1.0, { stagger: 0.2, y: 30 });
+          // the car stops at each red signal; each turns green and lets it on
+          tl.fromTo(".s10 .c1", { opacity: 0, x: 40, y: 424 }, { opacity: 1, x: 60, y: 424, duration: 0.3 }, 2.0);
+          const xs = [60, 470, 890, 1310, 1900];
+          for (let i = 0; i < 4; i++) {
+            const at = 2.4 + i * 1.9;
+            tl.to(".s10 .g" + (i + 1) + " .lamp", { backgroundColor: "#7ccf8e", duration: 0.25 }, at + 0.6);
+            tl.fromTo(".s10 .g" + (i + 1) + " .lamp", { scale: 1 }, { scale: 1.25, duration: 0.2, yoyo: true, repeat: 1, ease: "power2.out" }, at + 0.6);
+            tl.to(".s10 .c1", { x: xs[i + 1] - (i === 3 ? 0 : 0), duration: 1.0, ease: i === 3 ? "power2.in" : "power2.inOut" }, at + 0.85);
+          }
+          K.pop(tl, ".s10 .stamp", 10.8, { from: 0.94 });
+          window.__timelines["s10-gate"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

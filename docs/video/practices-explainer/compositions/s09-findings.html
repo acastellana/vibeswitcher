@@ -1,6 +1,167 @@
 <!doctype html>
-<html><head><meta charset="UTF-8" /></head><body><template>
-<style>#root{position:absolute;inset:0;}</style>
-<div id="root" data-composition-id="s09-findings" data-width="1920" data-height="1080"><div class="stage"><div class="kicker">stub s09-findings</div></div></div>
-<script>(function(){const tl=gsap.timeline({paused:true});tl.set({}, {}, 18);window.__timelines["s09-findings"]=tl;})();</script>
-</template></body></html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s09 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s09 .sev {
+          position: absolute;
+          left: 120px;
+          top: 260px;
+          width: 1680px;
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 28px;
+        }
+        .s09 .sev .card {
+          padding: 20px 28px;
+        }
+        .s09 .sev .k {
+          font-family: var(--mono);
+          font-weight: 700;
+          font-size: 26px;
+          margin-bottom: 8px;
+        }
+        .s09 .sev .d {
+          font-size: 25px;
+          line-height: 1.32;
+        }
+        .s09 .loop {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 1920px;
+          height: 1080px;
+        }
+        .s09 .loop path {
+          fill: none;
+          stroke: var(--accent);
+          stroke-width: 4;
+        }
+        .s09 .loop .grey {
+          stroke: var(--line);
+        }
+        .s09 .stn {
+          position: absolute;
+          font-family: var(--mono);
+          font-weight: 700;
+          font-size: 23px;
+          padding: 10px 18px;
+          border-radius: 10px;
+          background: var(--panel);
+          border: 2px solid var(--line);
+          color: var(--fg);
+        }
+        .s09 .cap {
+          position: absolute;
+          left: 1060px;
+          top: 470px;
+          width: 740px;
+          font-size: 27px;
+          line-height: 1.36;
+        }
+        .s09 .cap .mono {
+          font-size: 22px;
+        }
+        .s09 .nums {
+          position: absolute;
+          left: 120px;
+          top: 790px;
+          width: 1680px;
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 24px;
+        }
+        .s09 .nums .num {
+          font-size: 76px;
+          line-height: 1;
+        }
+        .s09 .nums .t {
+          font-size: 22px;
+          line-height: 1.3;
+          color: var(--muted);
+          margin-top: 10px;
+        }
+      </style>
+      <div id="root" data-composition-id="s09-findings" data-width="1920" data-height="1080">
+        <div class="stage s09">
+          <div class="kicker">08 / Findings, rounds, re-rolls</div>
+          <div class="head h2">Each finding has a weight.</div>
+          <div class="sev">
+            <div class="card s1" style="border-color: var(--stop)">
+              <div class="k stop">Important</div>
+              <div class="d">blocks the merge until it's fixed, or dismissed with a reason</div>
+            </div>
+            <div class="card s2">
+              <div class="k amber">Nit</div>
+              <div class="d">never blocks, and never becomes a task by itself</div>
+            </div>
+            <div class="card s3">
+              <div class="k muted">Pre-existing</div>
+              <div class="d">was there before; never fails the task</div>
+            </div>
+          </div>
+          <svg class="loop" viewBox="0 0 1920 1080" aria-hidden="true">
+            <path class="l1" pathLength="1" d="M 230 524 L 470 524" />
+            <path class="l2" pathLength="1" d="M 510 552 C 510 650 175 650 175 552" />
+            <path class="l3" pathLength="1" d="M 552 524 L 820 524" />
+          </svg>
+          <div class="stn st1" style="left: 120px; top: 498px">audit</div>
+          <div class="stn st2" style="left: 470px; top: 498px">fix</div>
+          <div class="stn st3" style="left: 820px; top: 498px; border-color: var(--stop)">round 3?</div>
+          <div class="cap">
+            <div class="c1">A re-audit checks only the open findings. After <span class="amber">2 failed rounds</span> there's no third: the lead re-plans, asks you, or <span class="amber">re-rolls</span>.</div>
+            <div class="c2 mono muted" style="margin-top: 12px">re-roll: a fresh worker from the base · old branch kept as archive/&lt;task&gt;-&lt;n&gt;</div>
+          </div>
+          <div class="nums">
+            <div><div class="num go n1">0</div><div class="t">passed their first audit</div></div>
+            <div><div class="num n2">0</div><div class="t">needed another round</div></div>
+            <div><div class="num stop n3">0</div><div class="t">Important findings fixed before merge</div></div>
+            <div><div class="num n4">0</div><div class="t">dismissed, each with a reason</div></div>
+            <div><div class="num amber n5">0</div><div class="t">re-rolls</div></div>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s09");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 18);
+          K.rise(tl, ".s09 .head", 0.3);
+          K.rise(tl, ".s09 .s1", 0.9, { y: 30 });
+          K.rise(tl, ".s09 .s2", 1.9, { y: 30 });
+          K.rise(tl, ".s09 .s3", 2.9, { y: 30 });
+          K.pop(tl, ".s09 .st1", 4.2, { from: 0.7 });
+          K.draw(tl, ".s09 .l1", 4.5, 0.5);
+          K.pop(tl, ".s09 .st2", 4.9, { from: 0.7 });
+          K.draw(tl, ".s09 .l2", 5.3, 0.7);
+          // the loop runs twice, then the third round is refused
+          tl.fromTo(".s09 .st1", { borderColor: "#3a352d" }, { borderColor: "#f0a63a", duration: 0.3, yoyo: true, repeat: 3 }, 6.0);
+          K.draw(tl, ".s09 .l3", 7.4, 0.5);
+          K.pop(tl, ".s09 .st3", 7.8, { from: 0.7 });
+          tl.to(".s09 .st3", { textDecoration: "line-through", color: "#ef7a68", duration: 0.01 }, 8.6);
+          K.rise(tl, ".s09 .c1", 7.0);
+          K.rise(tl, ".s09 .c2", 9.0);
+          K.rise(tl, ".s09 .nums > div", 10.4, { stagger: 0.25 });
+          K.count(tl, S.querySelector(".n1"), 191, 10.6, 1.4);
+          K.count(tl, S.querySelector(".n2"), 81, 10.85, 1.4);
+          K.count(tl, S.querySelector(".n3"), 82, 11.1, 1.4);
+          K.count(tl, S.querySelector(".n4"), 15, 11.35, 1.2);
+          K.count(tl, S.querySelector(".n5"), 2, 11.6, 0.8);
+          window.__timelines["s09-findings"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

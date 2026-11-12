@@ -1,6 +1,201 @@
 <!doctype html>
-<html><head><meta charset="UTF-8" /></head><body><template>
-<style>#root{position:absolute;inset:0;}</style>
-<div id="root" data-composition-id="s08-verifier" data-width="1920" data-height="1080"><div class="stage"><div class="kicker">stub s08-verifier</div></div></div>
-<script>(function(){const tl=gsap.timeline({paused:true});tl.set({}, {}, 20);window.__timelines["s08-verifier"]=tl;})();</script>
-</template></body></html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s08 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s08 .left {
+          position: absolute;
+          left: 120px;
+          top: 290px;
+          width: 760px;
+        }
+        .s08 .pt {
+          font-size: 29px;
+          line-height: 1.34;
+          margin-bottom: 28px;
+          padding-left: 22px;
+          border-left: 4px solid var(--go);
+        }
+        .s08 .pt .muted {
+          display: block;
+          font-size: 23px;
+          margin-top: 4px;
+        }
+        .s08 .wires {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 1920px;
+          height: 1080px;
+        }
+        .s08 .wires path {
+          fill: none;
+          stroke: var(--line);
+          stroke-width: 3;
+        }
+        .s08 .build {
+          position: absolute;
+          left: 1080px;
+          top: 250px;
+          width: 620px;
+          text-align: center;
+          padding: 18px 20px;
+        }
+        .s08 .build .mono {
+          font-size: 23px;
+        }
+        .s08 .finder {
+          position: absolute;
+          top: 420px;
+          width: 230px;
+          height: 150px;
+          padding: 14px;
+          border-radius: 16px;
+          border: 3px solid var(--go);
+          background: var(--panel);
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          text-align: center;
+        }
+        .s08 .finder .k {
+          font-family: var(--mono);
+          font-weight: 700;
+          font-size: 20px;
+          color: var(--go);
+          margin-bottom: 6px;
+        }
+        .s08 .finder .d {
+          font-size: 21px;
+          line-height: 1.25;
+        }
+        .s08 .votes {
+          position: absolute;
+          left: 1000px;
+          top: 640px;
+          width: 800px;
+        }
+        .s08 .vrow {
+          display: grid;
+          grid-template-columns: 70px 200px 1fr;
+          align-items: center;
+          gap: 18px;
+          padding: 10px 0;
+          border-top: 2px solid var(--line);
+          font-size: 24px;
+        }
+        .s08 .vrow .id {
+          font-family: var(--mono);
+          font-weight: 700;
+        }
+        .s08 .pips {
+          display: flex;
+          gap: 10px;
+        }
+        .s08 .pip {
+          width: 34px;
+          height: 34px;
+          border-radius: 50%;
+          border: 3px solid var(--line);
+        }
+        .s08 .pip.on {
+          background: var(--stop);
+          border-color: var(--stop);
+        }
+        .s08 .rule {
+          position: absolute;
+          left: 1000px;
+          top: 900px;
+          width: 800px;
+          font-family: var(--mono);
+          font-size: 21px;
+          color: var(--muted);
+          line-height: 1.4;
+        }
+      </style>
+      <div id="root" data-composition-id="s08-verifier" data-width="1920" data-height="1080">
+        <div class="stage s08">
+          <div class="kicker">07 / An independent verifier</div>
+          <div class="head h2">Someone else checks the work.</div>
+          <div class="left">
+            <div class="pt p1">Read-only. Works from the contract, not the worker's story.</div>
+            <div class="pt p2">Runs real commands and tries to break it.</div>
+            <div class="pt p3">On a different model from the worker, by default.</div>
+            <div class="pt p4">Reads REVIEW.md from the base branch<span class="muted">so a worker can't edit its own audit</span></div>
+          </div>
+          <svg class="wires" viewBox="0 0 1920 1080" aria-hidden="true">
+            <path pathLength="1" d="M 1390 330 C 1390 380 1135 380 1135 420" />
+            <path pathLength="1" d="M 1390 330 L 1390 420" />
+            <path pathLength="1" d="M 1390 330 C 1390 380 1645 380 1645 420" />
+          </svg>
+          <div class="build card">
+            <div class="mono">one build and test run · its logs to every finder</div>
+          </div>
+          <div class="finder f1" style="left: 1020px">
+            <div class="k">finder 1</div>
+            <div class="d">contract and acceptance</div>
+          </div>
+          <div class="finder f2" style="left: 1275px">
+            <div class="k">finder 2</div>
+            <div class="d">bugs and regressions</div>
+          </div>
+          <div class="finder f3" style="left: 1530px">
+            <div class="k">finder 3</div>
+            <div class="d">security or the tests</div>
+          </div>
+          <div class="votes">
+            <div class="vrow r1">
+              <span class="id">F1</span>
+              <span class="pips"><span class="pip a"></span><span class="pip b"></span><span class="pip c"></span></span>
+              <span class="stop">open: blocks the merge</span>
+            </div>
+            <div class="vrow r2">
+              <span class="id">F2</span>
+              <span class="pips"><span class="pip a"></span><span class="pip b"></span><span class="pip"></span></span>
+              <span class="stop">open: blocks the merge</span>
+            </div>
+            <div class="vrow r3">
+              <span class="id">F3</span>
+              <span class="pips"><span class="pip a"></span><span class="pip"></span><span class="pip"></span></span>
+              <span class="muted">unconfirmed: doesn't block</span>
+            </div>
+          </div>
+          <div class="rule">audit_finders: 1 to 3 · raised by most finders → open · on strict_paths, every Important finding holds</div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s08");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 20);
+          K.rise(tl, ".s08 .head", 0.3);
+          K.slide(tl, ".s08 .pt", 1.0, { stagger: 1.5, x: -30 });
+          K.rise(tl, ".s08 .build", 6.4);
+          K.draw(tl, ".s08 .wires path", 7.0, 0.6, { stagger: 0.15 });
+          K.pop(tl, ".s08 .finder", 7.4, { stagger: 0.25, from: 0.7 });
+          K.rise(tl, ".s08 .vrow", 9.2, { stagger: 0.3, y: 16 });
+          // votes land one finder at a time
+          const on = { backgroundColor: "#ef7a68", borderColor: "#ef7a68", duration: 0.25 };
+          tl.to(".s08 .r1 .pip.a, .s08 .r2 .pip.a, .s08 .r3 .pip.a", on, 10.4);
+          tl.to(".s08 .r1 .pip.b, .s08 .r2 .pip.b", on, 11.0);
+          tl.to(".s08 .r1 .pip.c", on, 11.6);
+          tl.fromTo(".s08 .vrow span:last-child", { opacity: 0 }, { opacity: 1, duration: 0.4, stagger: 0.3 }, 12.4);
+          K.rise(tl, ".s08 .rule", 14.0);
+          window.__timelines["s08-verifier"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>
