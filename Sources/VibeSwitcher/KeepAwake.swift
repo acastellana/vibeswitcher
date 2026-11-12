@@ -126,9 +126,12 @@ final class KeepAwake: ObservableObject {
     }
 
     /// Runs `then` on the main thread once every hold and release asked for so far has ended and `held` says so (for
-    /// tests).
+    /// tests). Holds `self` weakly, taken here on main: a block holding it strongly on the queue let go of it only when
+    /// that thread got to, which on a loaded Mac came after `then` had run and the test had let `self` go, so its
+    /// `deinit` asked for the release after the test's own wait (releasedWhenItGoes, 3 merges' runs in November 2026).
     func settled(then: @escaping () -> Void) {
-        assertions.settled { DispatchQueue.main.async { self.publish(); then() } }
+        let publish: () -> Void = { [weak self] in self?.publish() }
+        assertions.settled { DispatchQueue.main.async { publish(); then() } }
     }
 
     /// The assertions, held and released on a serial queue of their own: like the power source's read (see
