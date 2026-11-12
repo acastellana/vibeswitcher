@@ -404,7 +404,22 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The task's model is board.json's, which any session of the team can write, so it only adds a model to keep the
     /// audit off, never takes the workers' off that list: a worker started on the workers' model that writes another
     /// as its task's still gets an audit on neither (fable, else opus, else sonnet; Claude's default counts as opus).
-    public func auditModel(workerModel: String?, taskModel: String? = nil) -> String {
+    ///
+    /// `heldBack`: a model family Claude refuses now (fable, see `AccountUsage.fableHeldBack`; the workers then run on
+    /// opus, which `workerModel` says). A choice of that family goes to the most capable model that isn't it and that
+    /// the floor allows: opus, or with a floor that keeps audits off the workers' opus, the next one down.
+    public func auditModel(workerModel: String?, taskModel: String? = nil, heldBack: String? = nil) -> String {
+        let chosen = unheldAuditModel(workerModel: workerModel, taskModel: taskModel)
+        guard let heldBack, LeadReviewFloor.sameModel(chosen, heldBack) else { return chosen }
+        let different = floor?.verifierDifferent == true
+        let workers = LeadReviewFloor.workersModel(workerModel)
+        return ["fable", "opus", "sonnet"].first { model in
+            !LeadReviewFloor.sameModel(model, heldBack)
+                && (!different || (!LeadReviewFloor.sameModel(model, workers) && !LeadReviewFloor.sameModel(model, taskModel)))
+        } ?? "sonnet"
+    }
+
+    private func unheldAuditModel(workerModel: String?, taskModel: String?) -> String {
         let different = floor?.verifierDifferent == true
         if let verifierModel, !verifierModel.isEmpty {
             if !different { return verifierModel }

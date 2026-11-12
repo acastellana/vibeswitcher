@@ -290,8 +290,11 @@ public enum LeadWitness {
             for verifier in task.status == .review && task.evidence == nil ? task.awaitedVerifiers : [] {
                 guard !noTools.contains(verifier), !advanced.contains(verifier), let info = seen[verifier], !gaveVerdict(info, on: task) else { continue }
                 if info.live, !info.agentQuit, let limit = info.usageLimit {
+                    // Fable's alone: the next audit goes on another model (`LeadToolset.auditModel`), no wait for the reset.
+                    let fable = LeadUsageFallback.fableOnly(limit, model: LeadUsageFallback.launchedModel(task, verifier))
                     add(usageLimitKey(verifier, limit), "The verifier on \(task.slug) stopped mid-audit at the account's usage limit: \(limitText(limit)). "
-                        + "It gives no verdict until then. Tell the user; audit(\(task.slug)) again after the reset.")
+                        + (fable ? "It gives no verdict. Fable is held back until then, so audit(\(task.slug)) again now: it starts on another model."
+                            : "It gives no verdict until then. Tell the user; audit(\(task.slug)) again after the reset."))
                 } else if info.live, !info.agentQuit, let error = info.apiError {
                     add("\(verifier)|api-error-\(Int(info.apiErrorAt ?? 0))", "The verifier on \(task.slug) stopped mid-audit: its turn ended on an API error (\(error)). Tell the user, or audit again.")
                 } else if !info.live || info.agentQuit {
@@ -496,7 +499,7 @@ public enum LeadWitness {
     }
 
     /// A usage-limit stop is told once: by its session and when the line was written.
-    private static func usageLimitKey(_ session: String, _ limit: UsageLimit) -> String {
+    static func usageLimitKey(_ session: String, _ limit: UsageLimit) -> String {
         "\(session)|usage-limit-\(Int(limit.at ?? limit.resetsAt ?? 0))"
     }
 

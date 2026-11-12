@@ -321,7 +321,9 @@ struct WitnessWork {
         if let recoveryRoot {
             // This initializer runs on the boards' queue. Never lock/read the ledger or write a nudge on main.
             let recovering = LeadSleepRecovery.enqueue(sleepInterruptions, root: recoveryRoot)
-            messages = messages.filter { !$0.keys.contains(where: recovering.contains) }
+            // Workers Fable's refusal halted: the lead's loop starts each again on Opus; told by it, not here.
+            let moving = LeadUsageFallback.enqueue(LeadUsageFallback.halts(board: board, seen: seen), root: recoveryRoot)
+            messages = messages.filter { !$0.keys.contains(where: recovering.contains) && !$0.keys.contains(where: moving.contains) }
         }
         step?("stuckPrompts")
         stuckPrompts = LeadWitness.stuckPrompts(board: board, seen: seen, now: now, advanced: advanced).filter { !told($0.key) }

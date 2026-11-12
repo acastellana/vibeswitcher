@@ -1951,9 +1951,13 @@ public final class LeadToolset: MCPToolset {
     /// the next counts, so calls at once can't go past max_workers (or start two workers on one task).
     /// `when` (an automatic start, see `LeadAdvance`): whether the task is still due, asked in that one-at-a-time lock.
     /// `warned` (an automatic start): given the overlap warning (see `LeadOverlap`) of a start that went ahead.
+    /// `replacing` (a worker Fable's refusal halted, see `LeadUsageFallback`): that live worker is ended once every
+    /// check has passed, and the new one takes its place; `note` goes to the new one's first message.
     private func startWorker(_ slug: String, recover: Bool = false, overrideUsage: Bool = false, when: ((LeadTask) -> Bool)? = nil,
-                             warned: ((String) -> Void)? = nil) throws -> MCPToolResult {
-        try exclusively("start-worker") { try startWorkerAlone(slug, recover: recover, overrideUsage: overrideUsage, when: when, warned: warned) }
+                             warned: ((String) -> Void)? = nil, replacing: String? = nil, note: String? = nil) throws -> MCPToolResult {
+        try exclusively("start-worker") {
+            try startWorkerAlone(slug, recover: recover, overrideUsage: overrideUsage, when: when, warned: warned, replacing: replacing, note: note)
+        }
     }
 
     // MARK: The account's usage (see `AccountUsage`)
@@ -2016,6 +2020,14 @@ public final class LeadToolset: MCPToolset {
         lines.append("Next auto task → \(route.agent.rawValue) (\(route.why))" + (planned.map { ", \($0.slug) first" } ?? "")
                      + (workflow.agentDefault == .auto ? "; agent_default is auto, so new tasks that name no agent are auto." : "."))
         return lines
+    }
+
+    /// The account's usage as kept, while it holds Fable back now (`AccountUsage.fableHeldBack`, by `usageClock`); nil
+    /// while it doesn't. `sessions`: the team's, whose refusals are kept first (see `accountUsage`).
+    func fableFallback(sessions: [LeadSessionInfo]? = nil) -> AccountUsage? {
+        let now = usageClock()
+        let usage = accountUsage(sessions: sessions, now: now)
+        return usage.fableHeldBack(now: now) == nil ? nil : usage
     }
 
     /// The limit that holds back a session on `model` now, if any (see `AccountUsage.hold`).
@@ -2117,7 +2129,8 @@ public final class LeadToolset: MCPToolset {
         return try body()
     }
 
-    private func startWorkerAlone(_ slug: String, recover: Bool, overrideUsage: Bool, when: ((LeadTask) -> Bool)?, warned: ((String) -> Void)?) throws -> MCPToolResult {
+    private func startWorkerAlone(_ slug: String, recover: Bool, overrideUsage: Bool, when: ((LeadTask) -> Bool)?, warned: ((String) -> Void)?,
+                                  replacing: String? = nil, note: String? = nil) throws -> MCPToolResult {
         let board = try store.read()
         guard let task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
         // Held, or no longer due, since the automatic step looked: not started, and nothing said.
@@ -2128,7 +2141,7 @@ public final class LeadToolset: MCPToolset {
         }
         // One worker per worktree: two sessions editing the same files would undo each other.
         let sessions = try hostSessions("whether \(slug)'s worker still runs isn't known; no worker was started")
-        if let worker = task.worker, sessions.contains(where: { $0.id == worker && $0.live }) {
+        if let worker = task.worker, worker != replacing, sessions.contains(where: { $0.id == worker && $0.live }) {
             throw Problem(text: "\(slug)'s worker is still running. Send it what to do with message, or stop_worker first.")
         }
         // A running task whose worker ended without reporting (killed, crashed) starts again as it is.
@@ -2157,7 +2170,16 @@ public final class LeadToolset: MCPToolset {
         // A Codex worker runs on the Codex account: Claude's limits don't hold it back.
         let codex = agent == .codex
         let launchModel = route?.agent == .codex ? nil : task.model
-        let model = codex ? launchModel : workerModel(for: task)
+        var model = codex ? launchModel : workerModel(for: task)
+        // Fable held back (Claude refused it, `AccountUsage.fableHeldBack`): a worker meant for Fable starts on Opus,
+        // its task's own model unchanged, so the next start after the reset is on Fable again.
+        var runModel = launchModel
+        var heldFable: AccountUsage.Limit?
+        if !codex, let usage = fableFallback(sessions: sessions), usage.startModel(model, now: usageClock()) != model {
+            heldFable = usage.fableHeldBack(now: usageClock())
+            runModel = AccountUsage.fallbackModel
+            model = runModel
+        }
         let routed = route.map { " (auto → \($0.why))" } ?? ""
         if !codex, !overrideUsage, let refusal = usageRefusal(model: model, sessions: sessions, not: "Not started", what: "start_worker(\(slug))",
                                                               instead: codexWorkers ? Self.usageInstead(slug) : Self.modelInstead(slug), codex: slug) {
@@ -2236,10 +2258,22 @@ public final class LeadToolset: MCPToolset {
         briefed.model = launchModel
         // Told, never held: the start goes ahead whatever this says.
         let overlap = overlapWarning(briefed)
+        // The halted worker it replaces goes now, every check passed: marked stopped first, so its end is no news.
+        if let replacing, let halted = sessions.first(where: { $0.id == replacing && $0.live }) {
+            try store.update { board in
+                guard let index = board.taskIndex(slug), board.tasks[index].worker == replacing else { return }
+                board.tasks[index].stopped = replacing
+            }
+            let ended = try end([halted], refused: "\(slug)'s halted worker wasn't ended")[0]
+            if ended.failure != nil {
+                throw Problem(text: "No worker started: \(slug)'s halted worker wasn't ended (\(ended.said)). If the host keeps refusing, tell the user.")
+            }
+        }
         let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(briefed.title)", trust: true,
                                  prompt: LeadPrompts.worker(task: briefed, root: root, workflow: workflow),
-                                 start: "Start on your task (it's in your instructions)." + finish + " Call progress at each milestone. When done, call report.",
-                                 model: launchModel, branch: base, agent: agent)
+                                 start: (note.map { $0 + " " } ?? "") + "Start on your task (it's in your instructions)." + finish
+                                    + " Call progress at each milestone. When done, call report.",
+                                 model: runModel, branch: base, agent: agent)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             // A failed task started again is a new round of work; its setback stays to say why.
@@ -2269,7 +2303,8 @@ public final class LeadToolset: MCPToolset {
         try? store.appendProgress("Started a worker on \(slug)\(routed)")
         let recovered = merging.map { "Its worktree is in the middle of a merge, which the worker was told to finish (start_worker with recover: true aborts it instead): \($0) " }
             ?? stuck.map { "Aborted the \($0.kind.rawValue) its worktree was stuck in; it's back on \($0.branch) at \($0.head.prefix(8)). " } ?? ""
-        let runsOn = (codex ? ", Codex" : "") + (launchModel.map { ", on \($0)" } ?? "")
+        let runsOn = (codex ? ", Codex" : "") + (runModel.map { ", on \($0)" } ?? "")
+            + (heldFable.map { " in Fable's place: " + AccountUsage.fallbackText($0) } ?? "")
         let audited = codex ? " " + Self.codexStartNote : ""
         let why = route.map { " Its agent is auto, so it went to \($0.why)." } ?? ""
         if let overlap { warned?(overlap) }
@@ -2622,6 +2657,8 @@ public final class LeadToolset: MCPToolset {
         }
         let finders = workflow.findersInForce
         if let refusal = macRefusal(mac, not: "No verifier started", what: "audit(\(slug))", need: finders) { throw Problem(text: refusal) }
+        // The team's refusals kept first: one at the Fable limit moves the audit to another model (`auditModel`).
+        _ = accountUsage(sessions: sessions)
         // Near one of the account's usage limits on the audits' model: a verifier started now would stop mid-audit at it.
         if !overrideUsage, let refusal = usageRefusal(model: auditModel(workflow, task: task), sessions: sessions, not: "Not audited, no verifier started",
                                                       what: "audit(\(slug))", instead: "audit on another model (configure verifier_model, e.g. opus)") {
@@ -2802,8 +2839,15 @@ public final class LeadToolset: MCPToolset {
 
     /// The model this project's audits run on: verifier_model, or another than the workers' (see `LeadWorkflow.auditModel`).
     /// `task`: the task audited, whose own model (add_task's model) counts as the workers' under the floor.
+    /// While Fable is held back (`AccountUsage.fableHeldBack`), the workers' model and the task's are the ones their
+    /// sessions start on (opus in Fable's place), and the audit goes on the most capable model that isn't Fable and that
+    /// the floor allows.
     func auditModel(_ workflow: LeadWorkflow, task: LeadTask? = nil) -> String {
-        workflow.auditModel(workerModel: runtime.workerModel(root: root), taskModel: task?.model)
+        let workers = runtime.workerModel(root: root)
+        guard let usage = fableFallback() else { return workflow.auditModel(workerModel: workers, taskModel: task?.model) }
+        let now = usageClock()
+        return workflow.auditModel(workerModel: usage.startModel(workers, now: now), taskModel: usage.startModel(task?.model, now: now),
+                                   heldBack: AccountUsage.heldBackFamily)
     }
 
     /// " The worktree has 3 untracked files (12.0 KB), leftovers …: path (size), …", or "" for none.
@@ -6373,6 +6417,12 @@ extension LeadToolset {
 
     func advanceStart(_ slug: String, when: @escaping (LeadTask) -> Bool, warned: ((String) -> Void)? = nil) throws -> MCPToolResult {
         try startWorker(slug, when: when, warned: warned)
+    }
+    /// A worker Fable's refusal halted (`halted`), ended and started again in its worktree on the model Fable's place
+    /// takes (see `LeadUsageFallback`), told why with `note`: only while the task still has that worker, running.
+    func advanceReplace(_ slug: String, halted: String, note: String) throws -> MCPToolResult {
+        try startWorker(slug, when: { [.running, .failed].contains($0.status) && $0.worker == halted && $0.stopped != halted },
+                        replacing: halted, note: note)
     }
     func advanceAudit(_ slug: String, restarting head: String? = nil) throws -> MCPToolResult { try audit(slug, restart: head != nil, expectedHead: head) }
     /// `locked`: called once the merge holds its locks and is past its refusals, about to wait for its tests.

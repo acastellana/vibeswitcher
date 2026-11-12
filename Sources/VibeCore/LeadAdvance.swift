@@ -296,7 +296,10 @@ public final class LeadAdvance: @unchecked Sendable {
     }
 
     private func tell(_ report: [String]) {
-        let text = "VibeSwitcher moved finished work on by itself (auto_advance):\n" + report.map { "- " + $0 }.joined(separator: "\n")
+        // While Fable is held back, every report says so (the switch's own line says it already).
+        let held = lead.fableFallback()?.fableHeldBack(now: lead.usageClock()).map(AccountUsage.fallbackText)
+        let fable = held.flatMap { line in report.contains { $0.hasPrefix(line) } ? nil : "\n" + line + "." } ?? ""
+        let text = "VibeSwitcher moved finished work on by itself (auto_advance):\n" + report.map { "- " + $0 }.joined(separator: "\n") + fable
             + "\nThe judgement calls stay yours: holds (update_task kept or blocked), re-plans, questions to the user, and post_update for a merge the user would notice."
         _ = try? lead.advanceTell(text)
     }
@@ -369,6 +372,7 @@ public final class LeadAdvance: @unchecked Sendable {
             return (workflow, try? lead.vault.changedSettings(workflow, root: lead.root))
         }) else { return }
         resumeAfterSleep()
+        followFable()
         guard workflow.autoAdvance else { return }
         // Off as the lead set it, whatever a worker wrote into workflow.md since.
         if let changed, changed.contains(where: { $0.key == "auto_advance" }) {
@@ -491,6 +495,59 @@ public final class LeadAdvance: @unchecked Sendable {
                     return "Resumed after sleep: sent \(event.slug)'s worker one go-on message."
                 } catch {
                     try? recovery.release(event)
+                    throw error
+                }
+            }
+        }
+    }
+
+    /// Fable held back or not (see `LeadUsageFallback`), whatever auto_advance says: the lead told once at each switch,
+    /// a look again armed just after the reset (nothing in the project's folder changes then), and each worker Fable's
+    /// refusal halted started again on Opus in its worktree, once per halt.
+    private func followFable() {
+        let fallback = LeadUsageFallback.Store(root: lead.root)
+        let sessions = try? lead.advanceSessions()
+        let held = lead.fableFallback(sessions: sessions)?.fableHeldBack(now: lead.usageClock())
+        if let held {
+            let ends = AccountUsage.ends(held)
+            lock.lock()
+            let arm = wakes.insert("fable|\(Int(ends))").inserted
+            lock.unlock()
+            if arm {
+                let root = lead.root
+                lead.usageWake(Date(timeIntervalSince1970: ends + 1)) { LeadAdvance.nudge(root: root) }
+            }
+        }
+        if (try? fallback.switched(to: held.map(AccountUsage.ends))) == true {
+            did(held.map { AccountUsage.fallbackText($0) + ". Claude refused Fable at its usage limit, so new workers and audits that would run on Fable start on Opus "
+                    + "(audits under a floor that keeps them off the workers' model, on the next one down), and a worker Fable's refusal halted "
+                    + "starts again on Opus in its worktree. At the reset they're back on Fable by themselves; nothing for you to set." }
+                ?? "Fable is back: its usage limit reset, so new workers and audits run on Fable again (sessions already on Opus go on there).")
+        }
+        guard let pending = try? fallback.pending(), !pending.isEmpty else { return }
+        for halt in pending {
+            let task = lead.store.load().task(halt.slug)
+            let info = sessions?.first { $0.id == halt.session }
+            let current = [.running, .failed].contains(task?.status ?? .done) && task?.worker == halt.session && task?.stopped != halt.session
+                && info.map { $0.live && $0.usageLimit != nil } == true
+            guard let allowed = try? fallback.claim(halt, now: lead.usageClock().timeIntervalSince1970, attempting: current && held != nil) else { continue }
+            guard current else { continue }
+            guard held != nil else {
+                try? fallback.release(halt)
+                continue
+            }
+            guard allowed else {
+                try? fallback.release(halt)
+                once("fable|\(halt.key)", "The worker on \(halt.slug) stopped at Fable's limit again after two moves to Opus in an hour; it needs you (read_session(\(halt.slug)) to see why).")
+                continue
+            }
+            step("restart|\(halt.slug)") {
+                do {
+                    _ = try lead.advanceReplace(halt.slug, halted: halt.session, note: LeadUsageFallback.note(held))
+                    return "Moved \(halt.slug)'s worker to Opus: Fable's limit halted it mid-task, so it started again on Opus in its worktree, "
+                        + "told to carry on where it was."
+                } catch {
+                    try? fallback.release(halt)
                     throw error
                 }
             }

@@ -145,6 +145,36 @@ public struct AccountUsage: Equatable, Sendable {
         }
     }
 
+    // MARK: Fable held back: workers and audits on Opus
+
+    /// The model new workers and audits start on in Fable's place while Claude refuses Fable (`fableHeldBack`).
+    public static let fallbackModel = "opus"
+    /// The family the fallback replaces.
+    public static let heldBackFamily = "fable"
+
+    /// The refusal that holds Fable back at `now` on the active account: a limit Claude refused a request at, for Fable
+    /// only (a refusal for every model holds Opus back too, so no other model helps), still before its reset; the one
+    /// that resets last when several do. Never a percentage reading: only what Claude actually refused. Nil when none.
+    /// The user's answer of 2026-11-12: fall back to Opus automatically, back to Fable at the reset.
+    public func fableHeldBack(now: Date = Date()) -> Limit? {
+        current(now: now).limits.filter { $0.reached && $0.model == Self.heldBackFamily }
+            .max { ($0.resetsAt ?? $0.at + Self.untimed) < ($1.resetsAt ?? $1.at + Self.untimed) }
+    }
+
+    /// The model a session meant for `model` (as `claude --model` names it; nil: Claude's default, not known) starts on
+    /// at `now`: `fallbackModel` when it's Fable and Fable is held back (`fableHeldBack`), else `model` as it is.
+    public func startModel(_ model: String?, now: Date = Date()) -> String? {
+        Self.family(model) == Self.heldBackFamily && fableHeldBack(now: now) != nil ? Self.fallbackModel : model
+    }
+
+    /// When a held-back limit stops holding (its reset, or for one with no reset time, when it's no longer believed).
+    public static func ends(_ limit: Limit) -> Double { limit.resetsAt ?? limit.at + untimed }
+
+    /// "Fable held back until Nov 13, 09:00: workers and audits on Opus", for status and auto_advance's reports.
+    public static func fallbackText(_ limit: Limit) -> String {
+        "Fable held back until \(UsageLimit.resetText(ends(limit))): workers and audits on Opus"
+    }
+
     /// The model family a model name is of: fable, opus, sonnet or haiku when it names one ("claude-fable-5-1",
     /// "opus[1m]"), else the name itself, lowercased; nil for none.
     public static func family(_ model: String?) -> String? {
@@ -202,6 +232,10 @@ public struct AccountUsage: Equatable, Sendable {
             line += ". Other accounts' readings (they hold nothing back): " + accounts.map { account in
                 name(of: account) + ": " + others.filter { $0.account == account }.map(\.text).joined(separator: "; ")
             }.joined(separator: " — ")
+        }
+        if let held = fableHeldBack(now: now) {
+            line += ". " + Self.fallbackText(held) + " (new workers and audits that would run on Fable start on Opus, a worker Fable's refusal halted "
+                + "starts again on Opus in its worktree; at the reset they're back on Fable)"
         }
         return line
             + (ignored ? ". The user set Ignore usage limits in Settings › Performance: start_worker, audit and auto_advance start at any share of a limit, "
