@@ -65,7 +65,33 @@ The executables, type-checked against stubs: `vibeswitcher-hook` 0, `vibeswitche
 - Mac dependencies that only show at run time, counted by search and not compiled: `osascript` (4 lines), `Library/`
   paths (12), `/Applications` (7), `UserDefaults` (7), `/usr/bin/git` and `/bin/zsh` (16).
 
+## A fully static build works
+
+Tried 2026-11-12 with Swift's static Linux SDK 0.1.0 for 6.4.2 (musl), on a probe that prints a version, hashes with
+swift-crypto 3.15.1, starts a child with `posix_spawn` and feeds a headless SwiftTerm 1.19.0 terminal:
+
+| Build | Result | Size |
+| --- | --- | --- |
+| `--swift-sdk x86_64-swift-linux-musl -c release` | builds; "statically linked"; runs here, all four lines right | 152 MB, 58 MB stripped |
+| `--swift-sdk aarch64-swift-linux-musl -c release` | builds; "statically linked"; not run (no ARM machine here) | 152 MB |
+| the same probe against glibc, for comparison | builds and runs | 14.5 MB, plus the Swift runtime it needs installed |
+
+So a node can ship as binaries with nothing to install beside them, for both architectures, from this machine or a
+hosted runner. What it asks of the code:
+
+- The platform layer has to compile against musl as well as glibc: `#if canImport(Glibc)` … `#elseif
+  canImport(Musl)`, never a bare `import Glibc`. The spike's 89 `Darwin.`-qualified calls become unqualified or go
+  through `Platform/`.
+- Most of the size is Foundation and its Unicode data, and each static binary carries its own copy. Four binaries
+  that size is 230 MB stripped, so the release is one binary that acts by the name it's called under (`vibeswitcher`,
+  `-host`, `-hook`, `-mcp`, `-server`), or the small ones (the hook runs on every agent event) avoid Foundation.
+  Decided in stage 1's plan, with the hook's start-up time measured both ways.
+- SwiftPM puts cross-built products in `.build/out/Products/Release-staticlinux-<arch>/`.
+
 ## The hosted runners
 
-Filled in as stage 0 finds it: the macOS runner's Xcode and Swift, how long the Mac suite takes there, and how many
-tests it can't run ([the list](../../scripts/ci/macos-runner-skips.txt)).
+- **macOS**: the `xcode-27` image (macOS 27.0.1, arm64) has Xcode 27.2 and Swift 6.4.2, the Xcode the Mac that builds
+  main uses. `macos-26` stops at Xcode 26.6. The whole package builds there in about 3 minutes.
+- **Ubuntu 24.04**: the image's own Swift is used when it is `.swift-version`'s, else swiftly installs that version.
+- The Mac suite on the runner: how long it takes and what it can't run are in
+  [the skip list](../../scripts/ci/macos-runner-skips.txt) and below, once the first runs are in.
