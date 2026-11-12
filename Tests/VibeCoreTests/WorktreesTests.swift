@@ -1022,7 +1022,6 @@ struct ShellTests {
         #expect(await eventually { kill(child, 0) != 0 })
     }
 
-    #if canImport(Darwin)
     /// E-32: `signalFamily` stops a process and what it started (its children and theirs), each matched by pid and
     /// start time; a process outside the family, or one an earlier walk names that has since been replaced, is left be.
     /// Only processes this test started are signalled. Nothing here waits on the clock: the child and grandchild say
@@ -1039,7 +1038,11 @@ struct ShellTests {
         // them would exit by itself, 143, the moment they were stopped, maybe before its own TERM landed.
         let started = Reports(["child", "grandchild"])
         let output = Pipe()
+        #if canImport(Darwin)
         let shell = Process()
+        #else
+        let shell = Child()
+        #endif
         shell.executableURL = URL(fileURLWithPath: "/bin/sh")
         shell.arguments = ["-c", """
             sh -c 'echo child $$; exec sleep \(Self.childRuns)' &
@@ -1050,7 +1053,11 @@ struct ShellTests {
         shell.standardOutput = output
         try shell.run()
         started.read(output.fileHandleForReading)
+        #if canImport(Darwin)
         let outsider = try Process.run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["\(Self.childRuns)"])
+        #else
+        let outsider = try Child.run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["\(Self.childRuns)"])
+        #endif
         defer {
             for process in [shell, outsider] where process.isRunning { kill(process.processIdentifier, SIGKILL) }
             for pid in started.pids.values where getpgid(pid) == shell.processIdentifier { kill(pid, SIGKILL) }
@@ -1085,6 +1092,7 @@ struct ShellTests {
         #expect(await offPool { exits.wait(for: [other.pid], within: stopsWithin) } && exits.ended[other.pid] == SIGKILL)
     }
 
+    #if canImport(Darwin)
     /// Processes' exits, through a kqueue of the test's own: a watch is the kernel's when `watch` returns, and `wait`
     /// takes the exits on the calling thread. A DispatchSource's handlers run on a global queue, which the suite's other
     /// tests keep busy: under load they ran 4 to 56 s late, and Process, whose status comes from such a source, as late.
@@ -1116,6 +1124,101 @@ struct ShellTests {
                 }
             }
             return true
+        }
+    }
+    #else
+    /// Processes' exits, through a descriptor of each (`pidfd_open`) the test polls itself: Linux's form of the Mac's
+    /// kqueue above, for the same reason (no DispatchSource, so no handler late on a busy global queue). A watch is the
+    /// kernel's when `watch` returns, and `wait` takes the exits on the calling thread. A pidfd reads as ready from the
+    /// process's exit on, collected or not, as the kqueue's NOTE_EXIT fires; the wait status of a child of this process,
+    /// which NOTE_EXITSTATUS gives there, is `waitpid`'s here, so `Exits` collects the children it is told are its own
+    /// (`Child`, never Foundation's Process, which collects its own as they end).
+    final class Exits {
+        /// The processes watched and not seen to end: each one's descriptor, and whether it's this process's own child.
+        private var watched: [Int32: (descriptor: Int32, ownChild: Bool)] = [:]
+        /// The processes seen to end: each one's wait status (as `waitpid` gives it) when it's this process's own child
+        /// watched as one, else 0.
+        private(set) var ended: [Int32: Int32] = [:]
+
+        deinit { for watch in watched.values { close(watch.descriptor) } }
+
+        /// Watches `pid`; false when it has ended already or can't be watched. Only a parent may ask for the status.
+        func watch(_ pid: Int32, ownChild: Bool = false) -> Bool {
+            let descriptor = vibe_pidfd_open(pid, 0)
+            guard descriptor >= 0 else { return false }
+            var now = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+            guard poll(&now, 1, 0) == 0 else {
+                close(descriptor)
+                return false
+            }
+            watched[pid] = (descriptor, ownChild)
+            return true
+        }
+
+        /// Waits until all of `pids` have ended, or `limit` has passed; whether they all have.
+        func wait(for pids: Set<Int32>, within limit: TimeInterval) -> Bool {
+            let deadline = MacTime.real.awake() + limit
+            while !pids.isSubset(of: ended.keys) {
+                let left = deadline - MacTime.real.awake()
+                guard left > 0 else { return false }
+                let waiting = Array(watched)
+                var descriptors = waiting.map { pollfd(fd: $0.value.descriptor, events: Int16(POLLIN), revents: 0) }
+                guard poll(&descriptors, nfds_t(descriptors.count), Int32(min((left * 1000).rounded(.up), 60_000))) > 0 else { continue }
+                for (index, ready) in descriptors.enumerated() where ready.revents != 0 {
+                    let (pid, watch) = (waiting[index].key, waiting[index].value)
+                    var status: Int32 = 0
+                    if watch.ownChild {
+                        while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+                    }
+                    close(watch.descriptor)
+                    watched[pid] = nil
+                    ended[pid] = status
+                }
+            }
+            return true
+        }
+    }
+
+    /// A program this test starts as Foundation's Process does (a process group of its own, its output into the pipe
+    /// given), and leaves for `Exits` to collect: Foundation's Process on Linux collects its own as they end, and a
+    /// child collected is one whose wait status nobody can read any more. What's left of it is killed and collected as
+    /// it goes.
+    final class Child {
+        var executableURL: URL?
+        var arguments: [String] = []
+        var currentDirectoryURL: URL?
+        var standardOutput: Pipe?
+        private(set) var processIdentifier: Int32 = 0
+
+        static func run(_ url: URL, arguments: [String]) throws -> Child {
+            let child = Child()
+            child.executableURL = url
+            child.arguments = arguments
+            try child.run()
+            return child
+        }
+
+        func run() throws {
+            let path = try #require(executableURL).path
+            var program = Platform.Spawn(executable: path, arguments: [path] + arguments)
+            program.directory = currentDirectoryURL?.path
+            program.group = .ownGroup
+            if let standardOutput { program.stdout = .descriptor(standardOutput.fileHandleForWriting.fileDescriptor) }
+            processIdentifier = try program.start().get()
+            try standardOutput?.fileHandleForWriting.close()
+        }
+
+        /// Not collected yet (running, or ended and waiting for its parent): a signal reaches it and no other process.
+        var isRunning: Bool {
+            var info = siginfo_t()
+            return processIdentifier > 0 && waitid(P_PID, id_t(processIdentifier), &info, WEXITED | WNOHANG | WNOWAIT) == 0
+        }
+
+        deinit {
+            guard isRunning else { return }
+            kill(processIdentifier, SIGKILL)
+            var status: Int32 = 0
+            while waitpid(processIdentifier, &status, 0) < 0, errno == EINTR {}
         }
     }
     #endif

@@ -9,4 +9,3 @@ PreferencesCheckTests.swift  aSuiteOpenedInThisProcessIsInTheRunsLedger: the led
 ProcessTableTests.swift  aTerminalIsNamedByItsNumber and its openPty: TerminalNames and devname() are the Mac's
 SessionStraysTests.swift  procargsGiveTheArgumentsAndTheEnvironmentNotTheKernelsOwn: ProcessTable.parse(procargs:) reads the Mac's KERN_PROCARGS2
 StatusAccessibilityTests.swift  marksStayInsideTheirRect: StatusMark's shapes are CGPaths
-WorktreesTests.swift  signalFamilyStopsAProcessAndWhatItStartedAndNothingElse and its Exits: does not compile on Linux yet: cannot find 'kqueue', 'kevent', 'EVFILT_PROC' in scope (the test's own kqueue of process exits)
