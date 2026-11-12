@@ -28,6 +28,13 @@
 #   <side>/hold   while it exists every send from this side is unreachable (exit 4): the other Mac is away
 # Each call is logged to <side>/calls, one line of its arguments.
 set -uo pipefail
+# Linux: GNU stat spells the Mac's `stat -f FORMAT` as `stat -c` with its own letters (%z is %s).
+if [[ $(uname) == Linux ]]; then
+    stat() {
+        [[ $1 == -f ]] || { command stat "$@"; return; }
+        command stat -c "${2//%z/%s}" "${@:3}"
+    }
+fi
 
 DEV_PEER=de0e2e01
 VAULT_PEER=0a1b2c3d

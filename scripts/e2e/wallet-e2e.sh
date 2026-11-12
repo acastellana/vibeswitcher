@@ -74,6 +74,14 @@
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 source scripts/lib/scratch.sh
+# Linux: GNU stat spells the Mac's `stat -f FORMAT` as `stat -c` with its own letters (%Lp is %a, %z is %s, %u is %u).
+if [[ $(uname) == Linux ]]; then
+    stat() {
+        [[ $1 == -f ]] || { command stat "$@"; return; }
+        local format=${2//%Lp/%a}
+        command stat -c "${format//%z/%s}" "${@:3}"
+    }
+fi
 
 repo=$(pwd -P)
 wm=$HOME/dev/wallet-manager
