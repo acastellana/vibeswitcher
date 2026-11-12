@@ -1,5 +1,6 @@
 // What Swift can't reach through Glibc's or Musl's module on Linux, because the C library shows it only under
-// `_GNU_SOURCE` or has no wrapper for it: renameat2, statx, struct ucred, pidfd_open, ptsname_r, POSIX_SPAWN_SETSID.
+// `_GNU_SOURCE` or has no wrapper for it: renameat2, statx, struct ucred, pidfd_open, ptsname_r, POSIX_SPAWN_SETSID;
+// and what C reaches only through macros: siginfo_t's fields, a message's control data.
 // Imported only by VibePlatform (its Libc.swift).
 //
 // Each is here under a name of its own, and shim.c, compiled under `_GNU_SOURCE`, ties it to the system's. This header
@@ -29,6 +30,13 @@ struct vibe_ucred {
     uid_t uid;
     gid_t gid;
 };
+
+// recvmsg(2) on a Unix socket, with who sent what it read: the credentials the kernel put on those bytes as they were
+// sent (SCM_CREDENTIALS), which it does while the receiving socket has SO_PASSCRED. What recvmsg returns (-1 and
+// errno); `sender->pid` is 0 when the bytes came with none. Here because a message's control data is walked with
+// macros (CMSG_FIRSTHDR, CMSG_NXTHDR, CMSG_DATA), which Swift doesn't see. Descriptors a peer sends along (SCM_RIGHTS)
+// are closed, never kept.
+ssize_t vibe_receive_credentials(int fd, void *buffer, size_t length, struct vibe_ucred *sender);
 
 // pidfd_open(2): glibc has it from 2.36, musl not at all. -1 and errno, as the call.
 int vibe_pidfd_open(pid_t pid, unsigned int flags);
