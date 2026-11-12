@@ -30,11 +30,59 @@ private let connectWhenAsked: @convention(c) () -> Void = { connectIfAsked() }
 private let connectWhenAsked: @convention(c) () -> Void = { connectIfAsked() }
 #endif
 
+/// The test binary's helper mode, for `aSocketWriteToAGonePeerFailsWithEPIPEAndTheProcessLives`: started again with
+/// `SocketsTests.gonePeerVariable` set, this binary puts SIGPIPE back at its default before any test of its own (the
+/// bundle ignores it as it loads, TestSupport.swift: an executable that hasn't settled it yet is the case), lets it in
+/// on this thread, says so, writes through `Platform.Sockets.send` to a socket whose peer has closed, says what that
+/// returned, and exits 0. Killed by SIGPIPE, it says nothing after its first line.
+private func writeToAGonePeerIfAsked() {
+    guard getenv(SocketsTests.gonePeerVariable) != nil else { return }
+    func say(_ text: String) {
+        let line = text + "\n"
+        _ = write(STDOUT_FILENO, line, line.utf8.count)
+    }
+    signal(SIGPIPE, SIG_DFL)
+    var pipeSignal = sigset_t(), mask = sigset_t()
+    sigemptyset(&pipeSignal)
+    sigaddset(&pipeSignal, SIGPIPE)
+    pthread_sigmask(SIG_UNBLOCK, &pipeSignal, nil)
+    pthread_sigmask(SIG_SETMASK, nil, &mask)
+    var now = sigaction()
+    sigaction(SIGPIPE, nil, &now)
+    guard SignalsTests.handler(now) == nil, sigismember(&mask, SIGPIPE) == 0 else {
+        say("SIGPIPE isn't at its default here")
+        _exit(4)
+    }
+    var ends: [Int32] = [-1, -1]
+    guard socketpair(AF_UNIX, Platform.Sockets.stream, 0, &ends) == 0 else {
+        say("no socket pair: errno \(errno)")
+        _exit(5)
+    }
+    // As the code's sockets are (UnixSocket.configure): the Mac's switch; nothing on Linux.
+    Platform.Sockets.noSigPipe(socket: ends[0])
+    close(ends[1])
+    say("SIGPIPE at its default")
+    errno = 0
+    let sent = Platform.Sockets.send(ends[0], "x", 1)
+    let code = errno
+    say(sent == -1 && code == EPIPE ? "EPIPE" : "sent \(sent), errno \(code)")
+    _exit(0)
+}
+
+#if os(Linux)
+@_used @_section(".init_array")
+private let writeToAGonePeerWhenAsked: @convention(c) () -> Void = { writeToAGonePeerIfAsked() }
+#else
+@_used @_section("__DATA,__mod_init_func")
+private let writeToAGonePeerWhenAsked: @convention(c) () -> Void = { writeToAGonePeerIfAsked() }
+#endif
+
 /// `Platform.Sockets`: an address and its limit, a write to a peer that has gone, and who is at the other end. The
 /// sockets are a test's own, in the run's scratch folder; a child is the test binary itself or `/bin/sh`, and is
 /// reaped.
 struct SocketsTests {
     static let connectVariable = "VIBE_SOCKETS_TEST_CONNECT"
+    static let gonePeerVariable = "VIBE_SOCKETS_TEST_GONE_PEER"
 
     struct Failure: Error { var what: String }
 
@@ -351,6 +399,22 @@ struct SocketsTests {
         Platform.Sockets.noSigPipe(-1)
         Platform.Sockets.noSigPipe(socket: -1)
         Platform.Sockets.noSigPipe(socket: ends[1])
+    }
+
+    /// A write through `Platform.Sockets.send` to a socket whose peer has gone fails with EPIPE, and the process lives,
+    /// with SIGPIPE at its default: the hook's round trip to a session host that went mid-write (a handover, a
+    /// restart), made before the hook has settled SIGPIPE. In the test binary's helper mode (`writeToAGonePeerIfAsked`),
+    /// a process of its own: the test bundle ignores SIGPIPE.
+    @Test func aSocketWriteToAGonePeerFailsWithEPIPEAndTheProcessLives() throws {
+        // The helper never gets as far as a test; one that did would not start another.
+        try #require(getenv(Self.gonePeerVariable) == nil)
+        let binary = try #require(Bundle.main.executablePath)
+        var spawn = Platform.Spawn(executable: binary, arguments: ProcessInfo.processInfo.arguments)
+        spawn.environment = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" } + ["\(Self.gonePeerVariable)=1"]
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        let ended = try SpawnTests.output(of: spawn)
+        #expect(ended.output == "SIGPIPE at its default\nEPIPE\n", "\(ended)")
+        #expect(ended.signal == nil && ended.exit == 0, "\(ended)")
     }
 
     // MARK: Who sent the bytes

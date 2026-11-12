@@ -8,6 +8,10 @@
 import Foundation
 import VibeCore
 
+// A reader gone (the session host mid-handover, the agent closing the pipe) makes a write fail, never ends the hook
+// unseen: settled before its first write (the host's round trip below), as every executable does (PlatformLintTests).
+// What it starts gets SIGPIPE at its default (`Platform.Spawn`'s defaults).
+signal(SIGPIPE, SIG_IGN)
 // The agent waits on every hook: VibeSwitcher's own work on an event takes a second at most (its locks and the host
 // get one each), and past 3 s (an input that never ends, a stuck disk) the hook leaves, quietly, rather than hold the
 // turn (docs/eval/open-2026-10-19.md, R4).
@@ -88,7 +92,6 @@ for (root, step) in GitMoves.steps(for: payload) { try? LeadVault.standard.recor
 
 // A session VibeSwitcher started hears, as it starts, that it can ask for a transaction (vs-wallet).
 if agent == .claude, let note = SessionNote.output(payload: payload, environment: ProcessInfo.processInfo.environment) {
-    signal(SIGPIPE, SIG_IGN)
     try? FileHandle.standardOutput.write(contentsOf: note)
 }
 
@@ -96,7 +99,6 @@ if agent == .claude, let note = SessionNote.output(payload: payload, environment
 // thread's hooks take them (a subagent's would put them in its context instead), and a message is marked delivered
 // only once its reply is written: a closed pipe leaves it waiting rather than lost.
 if agent == .claude, let pid = agentPid {
-    signal(SIGPIPE, SIG_IGN)
     SteerReply.answer(payload, tty: tty, agentPid: pid) { (try? FileHandle.standardOutput.write(contentsOf: $0)) != nil }
 }
 exit(0)

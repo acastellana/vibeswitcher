@@ -28,6 +28,12 @@ extension Platform.Sockets {
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
     }
 
+    /// Writes `count` bytes from `bytes` to the socket `fd`: write(2), as the Mac's code always wrote to its sockets.
+    /// They carry `SO_NOSIGPIPE` (`noSigPipe(socket:)`, which UnixSocket gives each), so a peer gone is EPIPE.
+    public static func send(_ fd: Int32, _ bytes: UnsafeRawPointer?, _ count: Int) -> Int {
+        Sys.write(fd, bytes, count)
+    }
+
     /// The user id of the process at the other end.
     public static func peerUID(_ fd: Int32) -> uid_t? {
         var uid: uid_t = 0

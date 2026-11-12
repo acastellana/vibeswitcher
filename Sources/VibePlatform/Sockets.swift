@@ -8,6 +8,9 @@ extension Platform {
     /// - `noSigPipe(_:)` and `noSigPipe(socket:)`: a write to this descriptor whose reader has gone is an error
     ///   (EPIPE), not SIGPIPE. The Mac asks it of each descriptor, a socket by its own option and anything else by
     ///   fcntl. Linux has no switch per descriptor and both do nothing there: a process settles SIGPIPE as a whole.
+    /// - `send(_:_:_:) -> Int`: a write to a socket that raises no SIGPIPE when the peer has gone, whatever the process
+    ///   has settled: EPIPE. Linux says so on each write (`MSG_NOSIGNAL`); the Mac's sockets carry `SO_NOSIGPIPE`
+    ///   (`noSigPipe(socket:)`), so its write is write(2).
     /// - `peerUID(_:) -> uid_t?`, `peerPID(_:) -> pid_t?`: the user and the process at the other end.
     /// - `peerToken(_:) -> PeerToken?`: the process at the other end, in a form that tells it from a later one of the
     ///   same pid (`Platform.PeerToken`, each system's own).

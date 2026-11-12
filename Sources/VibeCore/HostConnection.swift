@@ -68,7 +68,7 @@ public final class HostConnection: @unchecked Sendable {
     /// `patience`: how long to retry a refused connect (see `UnixSocket.connect`); the app's own connection, made on
     /// the main thread, doesn't wait.
     public convenience init(path: String, queue: DispatchQueue, appKey: SymmetricKey? = HostConnection.appKey, patience: TimeInterval = 0) throws {
-        try self.init(path: path, queue: queue, appKey: appKey, patience: patience, write: { Sys.write($0, $1, $2) })
+        try self.init(path: path, queue: queue, appKey: appKey, patience: patience, write: { Platform.Sockets.send($0, $1, $2) })
     }
 
     init(path: String, queue: DispatchQueue, appKey: SymmetricKey?, patience: TimeInterval = 0, write: @escaping Write,

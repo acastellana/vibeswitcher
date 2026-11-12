@@ -32,6 +32,14 @@ extension Platform.Sockets {
     /// Nothing, as `noSigPipe(_:)`.
     public static func noSigPipe(socket fd: Int32) {}
 
+    /// Writes `count` bytes from `bytes` to the socket `fd`, as write(2) does (what it returns; with -1, `errno` as it
+    /// left it), with no SIGPIPE when the peer has gone (`MSG_NOSIGNAL`): EPIPE, whatever the process does with the
+    /// signal. A process that writes to the session host before it has settled SIGPIPE (the hook) lives through a
+    /// host that went mid-write (a handover, a restart).
+    public static func send(_ fd: Int32, _ bytes: UnsafeRawPointer?, _ count: Int) -> Int {
+        socketSend(fd, bytes, count)
+    }
+
     /// What the kernel kept of the process that connected (or made the pair) when it did: `SO_PEERCRED`. A socket
     /// that isn't connected answers too, with pid 0 and user -1.
     static func peerCredentials(_ fd: Int32) -> vibe_ucred? {
@@ -89,5 +97,10 @@ extension Platform.Sockets {
         guard count > 0 else { return (count, nil) }
         return (count, token(pid: sender.pid, uid: sender.uid))
     }
+}
+
+// The C library's send(2), under a name `Platform.Sockets` doesn't have: inside it a bare `send` is its own.
+@inline(__always) private func socketSend(_ fd: Int32, _ bytes: UnsafeRawPointer?, _ count: Int) -> Int {
+    send(fd, bytes, count, Int32(MSG_NOSIGNAL))
 }
 #endif

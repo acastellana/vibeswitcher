@@ -38,7 +38,9 @@ if let at = CommandLine.arguments.dropFirst().firstIndex(of: MCPKeeper.flag) {
 if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == ReadOnlyCommand.hookArgument {
     if let options = ReadOnlyCommand.hookOptions(Array(CommandLine.arguments.dropFirst(2))),
        let answer = ReadOnlyCommand.hookAnswer(FileHandle.standardInput.readDataToEndOfFile(), root: options.root, writes: options.writes) {
-        FileHandle.standardOutput.write(answer)
+        // Claude Code gone before it reads the answer: the write fails and the hook exits 0, never ends on SIGPIPE.
+        signal(SIGPIPE, SIG_IGN)
+        try? FileHandle.standardOutput.write(contentsOf: answer)
     }
     exit(0)
 }
@@ -129,6 +131,14 @@ if CommandLine.arguments.count == 7, CommandLine.arguments[1] == "--verifier-pro
 // A build switching to this one asks first whether it takes the session (see `MCPHandover`).
 if CommandLine.arguments.count == 2, CommandLine.arguments[1] == MCPHandover.probeFlag { MCPHandover.answerProbe() }
 
+// A write to a pipe or socket whose reader has gone fails (EPIPE) instead of ending the process unseen: noted, and
+// served on. Caught, not ignored: what a call starts gets SIGPIPE at its default. Settled before the first write after
+// the mode dispatches above (the handover's line on stderr), as every executable does (PlatformLintTests).
+signal(SIGPIPE) { _ in }
+let brokenPipes = DispatchSource.makeSignalSource(signal: SIGPIPE, queue: .global())
+brokenPipes.setEventHandler { MCPLog.note("SIGPIPE: a write to a pipe or socket whose reader had gone (it fails with EPIPE; serving on)") }
+brokenPipes.resume()
+
 // The MCP session the build before handed over, when this process ran it a moment ago (the client goes on, with no
 // new initialize). The role isn't in it: the toolset asks the session host, as at a fresh start.
 let handover = MCPHandover.take()
@@ -148,12 +158,6 @@ atexit { MCPLog.note("exiting: \(MCPLog.descriptors())") }
 // This process's build, read now (`ServerBuild.running` is read once): an install replacing the bundle later must not
 // pass for the code this process runs, which the merges' receipts name and status compares with the base.
 MCPLog.note("source: build \(ServerBuild.running?.label ?? "none (not in an app bundle)")")
-// A write to a pipe or socket whose reader has gone fails (EPIPE) instead of ending the process unseen: noted, and
-// served on. Caught, not ignored: what a call starts gets SIGPIPE at its default.
-signal(SIGPIPE) { _ in }
-let brokenPipes = DispatchSource.makeSignalSource(signal: SIGPIPE, queue: .global())
-brokenPipes.setEventHandler { MCPLog.note("SIGPIPE: a write to a pipe or socket whose reader had gone (it fails with EPIPE; serving on)") }
-brokenPipes.resume()
 
 /// For MCPHandoverTests: a server with no host behind it whose tools say which build answers.
 /// `VIBESWITCHER_MCP_TEST_BUILD` names the build (a script standing in for one sets it), `VIBESWITCHER_MCP_TEST_BINARY`
