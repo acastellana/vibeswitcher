@@ -201,7 +201,7 @@ public struct MergeSample: Codable, Equatable, Sendable {
     public var reran: [String]?
     /// Whether the rerun ran the whole test command, nil when there was no rerun.
     public var rerunWhole: Bool?
-    /// "passed", "passed_on_rerun", "failed", "hung", "conflict", "cancelled" or "error".
+    /// "passed", "passed_on_rerun", "passed_red_on_base" (its rerun failed on tests red on the base too, and it landed), "failed", "hung", "conflict", "cancelled" or "error".
     public var result: String
     /// A batched merge's (merge_batching, see `LeadToolset.mergeBatch`): the batch's id, shared by its tasks' lines;
     /// how many tasks it started with; and how many test runs it took in all (reruns not counted), on each of its
@@ -241,6 +241,7 @@ public struct MergeSample: Codable, Equatable, Sendable {
         switch check {
         case .passed: (firstRun, result) = ("passed", "passed")
         case .passedOnRerun: (firstRun, result) = ("failed", "passed_on_rerun")
+        case .passedRedOnBase: (firstRun, result) = ("failed", "passed_red_on_base")
         case .failed(let output):
             firstRun = "failed"
             result = "failed"

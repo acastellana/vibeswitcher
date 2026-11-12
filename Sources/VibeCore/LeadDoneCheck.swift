@@ -107,7 +107,7 @@ public enum LeadDoneCheck {
     /// The outcome of `runChecks`' result for a check limited to `limit`.
     static func outcome(_ stopped: Worktrees.Check?, limit: TimeInterval) -> Outcome {
         switch stopped {
-        case nil, .passed?, .passedOnRerun?: return .passed
+        case nil, .passed?, .passedOnRerun?, .passedRedOnBase?: return .passed
         case .failed(let output)?: return .failed(tail(output))
         case .hung(_, let after, _, let stall)?:
             return .undecided(stall == nil ? "it ran past its \(Worktrees.duration(limit)) limit and was stopped"

@@ -336,7 +336,7 @@ public enum LeadRemote {
         case .hung(let command, let after, let output, let stall)?: return .hung(command: command, after: after, output: output, stall: stall)
         case .cancelled?: return .cancelled
         case .error(let text)?: return .error(text)
-        case .passed?, .passedOnRerun?, .conflict?: return .error("unexpected")
+        case .passed?, .passedOnRerun?, .passedRedOnBase?, .conflict?: return .error("unexpected")
         }
     }
 

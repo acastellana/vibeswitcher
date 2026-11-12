@@ -4,14 +4,20 @@ import Foundation
 /// merge again by hand: each such retry built and ran the whole suite in a fresh worktree, and a worker was often sent
 /// back first. Now, when the test command fails, the failing tests run once more in the same worktree (its build
 /// already made), holding the same slot of the test lock; if they pass, the merge goes ahead and each is recorded as a
-/// flake (`FlakeLedger.recordFlakes`). If they fail again, the merge is refused with the rerun's output, as before. Never
-/// more than one rerun. Then, record only, the failing tests run once on the base (`baseline`): the merge's rerun
-/// goes in the flake ledger with that pairing (`LeadRerunRecord`).
+/// flake (`FlakeLedger.recordFlakes`). Never more than one rerun.
+///
+/// When a filtered rerun fails, the tests it still fails (`redOnBranch`) run once on the base (`baseline`). Green
+/// there: the branch's failure, and the merge is refused with the rerun's output, as before. Red there too
+/// (`excused`): broken or flaky before the branch, so they don't send it back. The rest of its checks ran on the
+/// branch first without them (`rest`: the test command skipping them, then regression_command), and passed: the merge
+/// goes ahead and each such test gets a task to fix it, or a note in the open task that names it. On 2026-11-06 and
+/// 11-07 two branches were sent back for AccountUsage date tests that were red on main. Either way the rerun goes in
+/// the flake ledger with the base's result (`LeadRerunRecord`).
 ///
 /// What runs again: the failing tests only when the test command takes `swift test`'s options last (`filterable`:
 /// this repository's `bash scripts/test.sh`, or `swift test` itself), as `--filter` patterns; else (any other command,
 /// a failure naming no test, more than `filterLimit` of them, or a run that crashed or was stopped partway, so the rest
-/// of the suite never ran) the whole test command. Then regression_command, as
+/// of the suite never ran: `finished`) the whole test command. Then regression_command, as
 /// merge always runs it: it's never skipped. No rerun after a build error (the output names errors and no test), nor
 /// after regression_command fails: the incidents' checks aren't retried.
 public enum MergeRerun {
@@ -43,16 +49,17 @@ public enum MergeRerun {
         guard let test = workflow.testCommand,
               !output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker) else { return nil }
         let failures = TestFailures(output: output)
+        let ranToEnd = finished(output)
         var tests = failures.tests
-        for name in failures.running where !tests.contains(name) { tests.append(name) }
+        if !ranToEnd { for name in failures.running where !tests.contains(name) { tests.append(name) } }
         // A build that failed fails again. (A crash that left tests unfinished isn't one, named or not.)
         if tests.isEmpty, failures.unfinished.isEmpty, !failures.errors.isEmpty { return nil }
         var again = workflow
         let patterns = tests.map(pattern)
-        // A run that crashed or was stopped (tests started and never ended) never ran the rest of the suite: it all
-        // runs again, so nothing merges that only part of the suite checked.
-        let filtered = filterable(test) && !tests.isEmpty && tests.count <= filterLimit && !patterns.contains(nil)
-            && failures.unfinished.isEmpty
+        // A run that crashed or was stopped (tests started and never ended, and the run never said it was over) never
+        // ran the rest of the suite: it all runs again, so nothing merges that only part of the suite checked. One
+        // that ran to its end and named its failing tests reruns just them, whatever start lines its output left open.
+        let filtered = filterable(test) && !tests.isEmpty && tests.count <= filterLimit && !patterns.contains(nil) && ranToEnd
         if filtered {
             again.testCommand = test.trimmingCharacters(in: .whitespacesAndNewlines) + " --filter "
                 + RecentProjects.shellQuote(patterns.compactMap { $0 }.joined(separator: "|"))
@@ -100,6 +107,86 @@ public enum MergeRerun {
         }
     }
 
+    // MARK: Ran to its end
+
+    /// Swift Testing's closing line: "✘ Test run with 547 tests in 80 suites failed after 190.1 seconds with 1 issue."
+    private static let runEnd = try! NSRegularExpression(pattern: #"^\S{1,2} Test run with \d+ tests?\b.* (passed|failed) after "#)
+
+    /// Whether a failed run's `output` ran to its end: no test it started was left unfinished, or Swift Testing's
+    /// closing line came after the last test started, with no fatal error after it, and its output shows as many issue
+    /// lines as that line counts (one glued to a test's own output would leave a failure unnamed). A crash or a stop
+    /// ends the output with tests started and no closing line: the rest of the suite never ran (`plan` reruns it all).
+    /// A run that ended and named its failing tests reruns just them, whatever start lines its output left open: a
+    /// parameterized test's cases print their start ("◇ Test case passing 2 arguments … started.") and no end when they
+    /// pass, so a whole suite's run leaves hundreds open.
+    public static func finished(_ output: String) -> Bool {
+        guard !TestFailures(output: output).unfinished.isEmpty else { return true }
+        var ended = false, counted = 0, issues = 0
+        for raw in output.components(separatedBy: "\n") {
+            let line = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+            if runEnd.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil {
+                ended = true
+                counted = line.range(of: #" with (\d+) issues?\b"#, options: .regularExpression)
+                    .flatMap { Int(line[$0].split(separator: " ")[1]) } ?? 0
+            } else if TestFailures.swiftTesting(line, " started.", marks: ["◇"]) != nil || line.contains("Fatal error: ") {
+                ended = false
+            } else if TestFailures.swiftTesting(line, " recorded an issue") != nil || TestFailures.swiftTesting(line, " recorded a known issue") != nil {
+                issues += 1
+            }
+        }
+        return ended && issues >= counted
+    }
+
+    // MARK: Red on the branch, then on the base
+
+    /// What this repository's scripts/test.sh says of what the Swift tests left behind, after they ran: a rest of the
+    /// checks that runs no Swift test (`rest`) can't see it again, so a run that says it excuses nothing.
+    static let suiteMarkers = ["LEFTOVER PROCESSES:", "PREFERENCE FILES LEFT:", "PREFERENCES CHANGED:"]
+
+    /// The tests a failed filtered rerun of `plan` still fails, when its failure is theirs alone: it ran to its end
+    /// (`finished`), named each failing test among `plan`'s, each started once (a name two suites share could excuse
+    /// one suite's test by the other's red on the base), showed each other of `plan`'s passing, wrote no error that
+    /// names no test, and never reached regression_command (which runs only once the tests pass); and neither it nor
+    /// the `first` run says the Swift tests left processes or preferences behind (`suiteMarkers`). Nil otherwise (a
+    /// whole rerun, a crash, a filter that matched nothing, a regression_command that failed): the failure stands.
+    public static func redOnBranch(_ plan: Plan, first: String, rerun output: String) -> [String]? {
+        guard plan.filtered, !output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker), finished(output),
+              !suiteMarkers.contains(where: { first.contains($0) || output.contains($0) }) else { return nil }
+        let failures = TestFailures(output: output)
+        guard !failures.tests.isEmpty, failures.errors.isEmpty, failures.tests.allSatisfy(plan.tests.contains) else { return nil }
+        var starts: [String: Int] = [:]
+        for raw in output.components(separatedBy: "\n") {
+            let line = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+            if let name = TestFailures.swiftTesting(line, " started.", marks: ["◇"]) { starts[name, default: 0] += 1 }
+        }
+        guard failures.tests.allSatisfy({ starts[$0, default: 0] <= 1 }) else { return nil }
+        var others = plan
+        others.tests = plan.tests.filter { !failures.tests.contains($0) }
+        guard unshown(others, rerun: output).isEmpty else { return nil }
+        return failures.tests
+    }
+
+    /// The rest of a merge's checks without `tests` (`redOnBranch`'s): the test command with them both filtered and
+    /// skipped, so no Swift test runs and all else it checks does (this repository's web and security tests, its
+    /// leftover processes and preferences), then regression_command. A failing test red on the base too mustn't let
+    /// anything else that failed through. Nil when the test command takes no filter or a test has no pattern.
+    public static func rest(without tests: [String], workflow: LeadWorkflow) -> String? {
+        guard let test = workflow.testCommand, filterable(test), !tests.isEmpty else { return nil }
+        let patterns = tests.compactMap(pattern)
+        guard patterns.count == tests.count else { return nil }
+        let quoted = RecentProjects.shellQuote(patterns.joined(separator: "|"))
+        var again = workflow
+        again.testCommand = test.trimmingCharacters(in: .whitespacesAndNewlines) + " --filter \(quoted) --skip \(quoted)"
+        return again.mergeChecks
+    }
+
+    /// Whether the base's run of the failing tests (`baseline`) failed each of `tests` too.
+    public static func excused(_ tests: [String], base run: Worktrees.Baseline.Run) -> Bool {
+        guard !tests.isEmpty, case .ran(false, let output) = run else { return false }
+        let failed = TestFailures(output: output).tests
+        return tests.allSatisfy(failed.contains)
+    }
+
     // MARK: The paired base run
 
     /// What a merge's paired base run (`Worktrees.Baseline`) found, for its rerun's record: heard on the run's thread,
@@ -123,20 +210,23 @@ public enum MergeRerun {
         }
     }
 
-    /// The paired base run of `plan`'s failing tests on `commit`: run only for a filtered rerun (a whole one isn't
-    /// run twice), and skipped while `overLoad` says the Mac is over load_threshold (its words for why). Its result
-    /// goes to `pairing`; nothing else.
-    public static func baseline(commit: String, plan: @escaping () -> Plan?, overLoad: @escaping () -> String?, pairing: Pairing) -> Worktrees.Baseline {
-        Worktrees.Baseline(commit: commit, command: { _ in
+    /// The base run of `plan`'s failing tests on `commit`, after a filtered rerun that failed (a whole one isn't run
+    /// twice): its result goes to `pairing`. Never skipped for the Mac's load, as it was while it only fed the ledger:
+    /// a skipped one would send back a branch for a test red on the base. With the rest of `workflow`'s checks run on the branch first without the tests the rerun still
+    /// failed (`redOnBranch`, `rest`), and passing, a base run that fails each of them too (`excused`) lets the merge go
+    /// ahead (`Worktrees.Check.passedRedOnBase`).
+    public static func baseline(commit: String, plan: @escaping () -> Plan?, workflow: LeadWorkflow, pairing: Pairing) -> Worktrees.Baseline {
+        Worktrees.Baseline(commit: commit, rest: { first, rerun in
+            guard let plan = plan(), let red = redOnBranch(plan, first: first, rerun: rerun),
+                  let command = rest(without: red, workflow: workflow) else { return nil }
+            return (red, command)
+        }, command: { _ in
             guard let plan = plan() else { return nil }
             guard let command = plan.baseCommand else {
                 pairing.note(.skipped, "a whole rerun isn't run on the base")
                 return nil
             }
-            if let why = overLoad() {
-                pairing.note(.skipped, why)
-                return nil
-            }
+            // Not skipped over load_threshold: it decides the merge now, and it's a few tests.
             return command
         }, heard: { run in
             guard let plan = plan() else { return }
@@ -166,12 +256,12 @@ public enum MergeRerun {
     public static let unnamed = "(the test command, naming no test)"
 
     /// What a merge whose rerun passed records as flaky, from its failed run's `output`: the tests it named failing,
-    /// and `unnamed` for a crash or a stop (or a failure naming no test). Never the tests a crash left unfinished: they
+    /// and `unnamed` for a crash or a stop (`finished`), or a failure naming no test. Never the tests a crash left unfinished: they
     /// were only running beside it. On 2026-10-30 one crash logged every test then running, 200 and more, and with two
     /// misread earlier runs that was a third flake for six tests that had never failed (fix-the-flaky-test-7..12).
     public static func flakes(in output: String) -> [String] {
         let failures = TestFailures(output: output)
-        return failures.tests + (failures.tests.isEmpty || !failures.unfinished.isEmpty ? [unnamed] : [])
+        return failures.tests + (failures.tests.isEmpty || !finished(output) ? [unnamed] : [])
     }
 
     // MARK: Evidence
@@ -518,6 +608,21 @@ public enum MergeRerun {
         let merges = flakes.map(\.task)
         return "Flake ledger: \(test) flaked \(merges.count) times within \(Int(LeadBoard.flakeWindow / 86_400)) days (failed its first run and passed its rerun in the merges of \(merges.joined(separator: ", "))); no task was planned to fix it, as this one names it."
             + quoted(flakes, root: root)
+    }
+
+    /// The task planned for `test`, red on the base: it failed a merge's run, its rerun and the same run on the base,
+    /// so the merge went ahead without it (`Worktrees.Check.passedRedOnBase`). `context` says where and quotes its lines.
+    static func redOnBaseContract(test: String, workflow: LeadWorkflow, context: String) -> LeadContract {
+        let base = workflow.base
+        let tests = workflow.testCommand.map { "`\($0)` passes" } ?? "The project's tests pass"
+        return LeadContract(
+            goal: "\(test) passes on \(base) again: it fails there, so merges go ahead without it and nothing checks what it tests.",
+            acceptance: ["Say why it fails on \(base) (a date or clock it depends on, the Mac's state, a change that broke it), with the evidence",
+                         "If it's a real bug, fix the code; if it's the test, it waits on the real event it checks (a file, a reply, a semaphore, an injected clock), never a fixed sleep or a wall-clock window",
+                         "It passes repeatedly under load (scripts/test-under-load.sh when the project has it)",
+                         tests],
+            boundaries: ["The test and what it checks; nothing else changes unless it's the bug"],
+            context: context)
     }
 
     /// The task planned once `test` flaked `LeadBoard.flakeLimit` times within `LeadBoard.flakeWindow`: `flakes` (in

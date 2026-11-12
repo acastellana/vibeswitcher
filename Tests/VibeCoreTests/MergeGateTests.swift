@@ -62,6 +62,67 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(!alone.filtered && alone.tests == ["crashed()"] && alone.command == "{\nbash scripts/test.sh\n} && {\necho '\(LeadWorkflow.regressionMarker)'\nmake corpus\n}")
     }
 
+    /// A run that ran to its end (Swift Testing's closing line after its last start) and named its failing tests
+    /// reruns just them, whatever start lines its output left open: at least 10 of 16 long "unfinished" lists in the
+    /// week to 2026-11-12 weren't crashes, and each reran the whole suite.
+    @Test func aRunThatRanToItsEndRerunsItsNamedTestsWhateverItLeftOpen() throws {
+        var workflow = LeadWorkflow()
+        workflow.testCommand = "bash scripts/test.sh"
+        let open = (1...300).map { "◇ Test queued\($0)() started." }.joined(separator: "\n")
+        let output = open + "\n" + Self.failure.replacingOccurrences(of: "2 tests failed", with: "2 tests in 1 suite failed")
+        #expect(MergeRerun.finished(output))
+        let plan = try #require(MergeRerun.plan(after: output, workflow: workflow))
+        #expect(plan.filtered && plan.tests == ["flaky()"], "\(plan)")
+        #expect(MergeRerun.flakes(in: output) == ["flaky()"])
+        // A start after the closing line, or a fatal error, is a crash: whole.
+        #expect(!MergeRerun.finished(output + "\n◇ Test late() started."))
+        #expect(!MergeRerun.finished(output + "\nFatal error: boom"))
+        #expect(MergeRerun.plan(after: output + "\n◇ Test late() started.", workflow: workflow)?.filtered == false)
+        // Fewer issue lines than the closing line counts: one went unnamed (glued to a test's output), so whole.
+        #expect(!MergeRerun.finished(open + "\n✘ Test flaky() failed after 0.01 seconds with 1 issue.\n✘ Test run with 2 tests failed after 0.02 seconds with 2 issues."))
+        // No closing line at all, with tests open: crashed.
+        #expect(MergeRerun.plan(after: open + "\n✘ Test flaky() failed after 0.010 seconds with 1 issue.", workflow: workflow)?.filtered == false)
+    }
+
+    /// Which tests a failed filtered rerun may have excused by the base: its named failures alone.
+    @Test func onlyARerunFailingOnItsNamedTestsAloneCanBeExcused() throws {
+        var workflow = LeadWorkflow()
+        workflow.testCommand = "bash scripts/test.sh"
+        workflow.regressionCommand = "make corpus"
+        let first = Self.failure + "\n✘ Test other() failed after 0.1 seconds with 1 issue."
+        let plan = try #require(MergeRerun.plan(after: first, workflow: workflow))
+        #expect(plan.tests == ["flaky()", "other()"])
+        let passedOther = "✔ Test other() passed after 0.1 seconds.\n" + Self.failure
+        #expect(MergeRerun.redOnBranch(plan, first: first, rerun: passedOther) == ["flaky()"])
+        // other() neither failed nor passed (no filter matched it): nothing is excused.
+        #expect(MergeRerun.redOnBranch(plan, first: first, rerun: Self.failure) == nil)
+        // A crash, an error naming no test, a test it wasn't for, regression_command: none is.
+        #expect(MergeRerun.redOnBranch(plan, first: first, rerun: passedOther + "\n◇ Test late() started.\nFatal error: x") == nil)
+        #expect(MergeRerun.redOnBranch(plan, first: first, rerun: passedOther + "\nerror: Exited with unexpected signal code 5") == nil)
+        #expect(MergeRerun.redOnBranch(plan, first: first, rerun: passedOther + "\n✘ Test stranger() failed after 0.1 seconds.") == nil)
+        #expect(MergeRerun.redOnBranch(plan, first: first, rerun: "✔ Test flaky() passed after 0.1 seconds.\n✔ Test other() passed after 0.1 seconds.\n\(LeadWorkflow.regressionMarker)\ncase 3 failed") == nil)
+        // Two suites' tests of one name (both started): one's red on the base mustn't excuse the other's.
+        let twice = "◇ Test flaky() started.\n◇ Test flaky() started.\n◇ Test other() started.\n" + passedOther
+        #expect(MergeRerun.redOnBranch(plan, first: first, rerun: twice) == nil)
+        #expect(MergeRerun.redOnBranch(plan, first: first, rerun: "◇ Test flaky() started.\n◇ Test other() started.\n" + passedOther) == ["flaky()"])
+        // What the Swift tests left behind, said in the first run or the rerun: the rest of the checks can't see it.
+        for marker in ["LEFTOVER PROCESSES: the run left these running", "PREFERENCE FILES LEFT: the run added 1", "PREFERENCES CHANGED: the run changed"] {
+            #expect(MergeRerun.redOnBranch(plan, first: first + "\n" + marker, rerun: passedOther) == nil, "\(marker)")
+            #expect(MergeRerun.redOnBranch(plan, first: first, rerun: passedOther + "\n" + marker) == nil, "\(marker)")
+        }
+        // A whole rerun isn't.
+        var whole = plan
+        whole.filtered = false
+        #expect(MergeRerun.redOnBranch(whole, first: first, rerun: passedOther) == nil)
+        // The rest of the checks: the test command with them filtered and skipped, then regression_command.
+        #expect(MergeRerun.rest(without: ["flaky()"], workflow: workflow) == "{\nbash scripts/test.sh --filter '/flaky\\(\\)(/|$)' --skip '/flaky\\(\\)(/|$)'\n} && {\necho '\(LeadWorkflow.regressionMarker)'\nmake corpus\n}")
+        // The base excuses them only when it failed each one.
+        #expect(MergeRerun.excused(["flaky()"], base: .ran(ok: false, output: Self.failure)))
+        #expect(!MergeRerun.excused(["flaky()", "other()"], base: .ran(ok: false, output: Self.failure)))
+        #expect(!MergeRerun.excused(["flaky()"], base: .ran(ok: true, output: "✔ Test flaky() passed after 0.1 seconds.")))
+        #expect(!MergeRerun.excused(["flaky()"], base: .hung) && !MergeRerun.excused(["flaky()"], base: .unchecked("x")) && !MergeRerun.excused([], base: .ran(ok: false, output: "")))
+    }
+
     @Test func anotherCommandRerunsWholeAndSomeFailuresDontRerun() throws {
         var workflow = LeadWorkflow()
         workflow.testCommand = "make test"
@@ -247,14 +308,14 @@ struct MergeGateTests: LeadTeamFixture {
         let flake = try #require(ledger(root).flakes.first)
         #expect(ledger(root).flakes.count == 1 && flake.test == "flaky()" && flake.task == "add-b" && flake.commit == board.task("add-b")?.merged?.commit)
         #expect(flake.filtered == false && board.flakes == nil, "\(flake)")
-        // A whole rerun isn't run again on the base: recorded, unpaired.
+        // A rerun that passed runs nothing on the base: recorded, unpaired.
         let rerun = try #require(ledger(root).reruns.first)
         #expect(ledger(root).reruns.count == 1 && rerun.task == "add-b" && rerun.passed && !rerun.filtered && rerun.tests == ["flaky()"], "\(rerun)")
-        #expect(rerun.base == .skipped && rerun.baseNote == "a whole rerun isn't run on the base", "\(rerun)")
+        #expect(rerun.base == nil && rerun.baseCommit == nil && rerun.redOnBase == nil, "\(rerun)")
         let status = lead.call("status", [:]).text
-        #expect(status.contains("Merge reruns in the last 7 days (record only, nothing here decides a merge): 1 merge went to a rerun, 1 passed it. "
+        #expect(status.contains("Merge reruns in the last 7 days: 1 merge went to a rerun, 1 passed it. "
                                 + "Filtered reruns (the failing tests only): none ran; whole reruns: 1 of 1 passed (100%). "
-                                + "The failing tests run once on the base: branch red/base green (the branch's) 0, red on the base too (flaky) 0, not paired 1"), "\(status)")
+                                + "The failing tests run once on the base: branch red/base green (the branch's) 0, red on the base too 0, not paired 1"), "\(status)")
         #expect(status.contains("Flaky tests in the last 7 days (1 flake: each failed a merge's test run, passed its rerun"), "\(status)")
         #expect(status.contains("flaky() ×1 (add-b)"), "\(status)")
         let log = vault.scratch(root: root, "add-b/merge-test.log")
@@ -331,10 +392,10 @@ struct MergeGateTests: LeadTeamFixture {
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
         #expect(merged.text.contains("the rerun of those tests passed"), "\(merged.text)")
-        // The rerun, then the same filtered run once on the base (main), where it passes: the branch's, record only.
-        #expect(ran() == ["run ", #"run --filter /flaky\(\)(/|$)"#, #"run --filter /flaky\(\)(/|$)"#])
+        // The rerun alone, in seconds: it passed, so nothing runs on the base (main).
+        #expect(ran() == ["run ", #"run --filter /flaky\(\)(/|$)"#])
         let rerun = try #require(ledger(root).reruns.first)
-        #expect(rerun.filtered && rerun.passed && rerun.base == .green && rerun.baseCommit == BoardStore(root: root).load().task("add-b")?.merged?.onto, "\(rerun)")
+        #expect(rerun.filtered && rerun.passed && rerun.base == nil && rerun.redOnBase == nil, "\(rerun)")
         #expect(ledger(root).flakes.first?.filtered == true)
     }
 
@@ -356,17 +417,20 @@ struct MergeGateTests: LeadTeamFixture {
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(merged.isError)
         #expect(merged.text.contains("didn't show flaky() passing"), "\(merged.text)")
-        #expect(ran().count == 3)
-        // On the base the filter runs nothing either: no pairing.
-        #expect(ledger(root).reruns.map(\.passed) == [false] && ledger(root).reruns.first?.base == .absent, "\(ledger(root).reruns)")
+        // It exited 0: nothing runs on the base.
+        #expect(ran().count == 2)
+        #expect(ledger(root).reruns.map(\.passed) == [false] && ledger(root).reruns.first?.base == nil, "\(ledger(root).reruns)")
         #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
         #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
         #expect(ledger(root).flakes.isEmpty)
     }
 
+    /// Branch red and main green: the branch's failure, sent back as before. The rest of the checks pass without
+    /// flaky() (it isn't run there: filtered and skipped), and main passes it.
     @Test func aRunThatFailsTwiceIsRefusedWithTheRerunsOutputAndRerunsOnce() throws {
         let root = try repo()
-        try fakeSuite(root, passes: "false")
+        // b.txt is the branch's: flaky() fails with it, passes on main.
+        try fakeSuite(root, passes: "[[ ! -e b.txt ]] || [[ \"$*\" == *--skip* ]]")
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         configure(lead, ["test_command": "bash scripts/test.sh"])
@@ -377,14 +441,84 @@ struct MergeGateTests: LeadTeamFixture {
         let lines = merged.text.components(separatedBy: "\n")
         #expect(lines.first == "The test command fails on add-b rebased onto main, and again on its rerun (run once, after the first run failed).", "\(merged.text)")
         #expect(lines.dropFirst().first == "Failing tests (1): flaky()")
-        // Then once on the base, where it fails too (red on the base: flaky, or broken before the branch). Record only.
-        #expect(ran() == ["run ", #"run --filter /flaky\(\)(/|$)"#, #"run --filter /flaky\(\)(/|$)"#])
+        // The rerun, the rest of the checks without flaky(), then flaky() once on the base, where it passes.
+        #expect(ran() == ["run ", #"run --filter /flaky\(\)(/|$)"#, #"run --filter /flaky\(\)(/|$) --skip /flaky\(\)(/|$)"#, #"run --filter /flaky\(\)(/|$)"#])
         let saved = try String(contentsOf: vault.scratch(root: root, "add-b/merge-test.log"), encoding: .utf8)
         #expect(saved.hasPrefix(Worktrees.rerunHeader), "\(saved.prefix(300))")
         #expect(!saved.contains("record only"), "the base run's output isn't the merge's")
         let board = BoardStore(root: root).load()
         #expect(board.task("add-b")?.status == .failed && ledger(root).flakes.isEmpty)
-        #expect(ledger(root).reruns.map(\.passed) == [false] && ledger(root).reruns.first?.base == .red, "\(ledger(root).reruns)")
+        #expect(ledger(root).reruns.map(\.passed) == [false] && ledger(root).reruns.first?.base == .green, "\(ledger(root).reruns)")
+        #expect(ledger(root).reruns.first?.filtered == true && ledger(root).reruns.first?.redOnBase == nil)
+        #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
+        #expect(!board.tasks.contains { $0.title.hasPrefix("Fix the test") })
+    }
+
+    /// Red on the branch and on main: not the branch's. The rest of its checks (regression_command too) pass without
+    /// the test, so the merge goes ahead, a task is planned to fix the test, and the ledger records it. A second merge
+    /// that meets it notes that task instead of planning another.
+    @Test func aTestRedOnTheBaseTooDoesntSendTheBranchBack() throws {
+        let root = try repo()
+        // flaky() fails wherever it runs; the rest of the checks (it filtered and skipped) pass.
+        try fakeSuite(root, passes: "[[ \"$*\" == *--skip* ]]")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let regression = temp.url("regression.log").path
+        configure(lead, ["test_command": "bash scripts/test.sh", "regression_command": "echo ran >> \(RecentProjects.shellQuote(regression))"])
+        try audited(lead, runtime, root: root)
+
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(ran() == ["run ", #"run --filter /flaky\(\)(/|$)"#, #"run --filter /flaky\(\)(/|$) --skip /flaky\(\)(/|$)"#, #"run --filter /flaky\(\)(/|$)"#])
+        // regression_command ran once, in the rest of the checks: never skipped.
+        #expect(try String(contentsOfFile: regression, encoding: .utf8) == "ran\n")
+        #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
+        let board = BoardStore(root: root).load()
+        #expect(board.task("add-b")?.status == .done)
+        let fix = try #require(board.tasks.first { $0.title == "Fix the test flaky(), red on main" })
+        #expect(fix.status == .planned && fix.origin == "flake")
+        #expect(fix.contract.context.contains("failed add-b's merge run, its rerun, and the same run on main"), "\(fix.contract.context)")
+        #expect(fix.contract.context.contains("✘ Test flaky() recorded an issue"), "\(fix.contract.context)")
+        #expect(merged.text.contains("Its rerun failed on flaky(), which failed on main"), "\(merged.text)")
+        #expect(merged.text.contains("flaky(): planned \(fix.slug) to fix it."), "\(merged.text)")
+        // Not a flake: it never passed.
+        #expect(ledger(root).flakes.isEmpty, "\(ledger(root).flakes)")
+        let rerun = try #require(ledger(root).reruns.first)
+        #expect(rerun.filtered && !rerun.passed && rerun.base == .red && rerun.redOnBase == ["flaky()"], "\(rerun)")
+        #expect(rerun.baseCommit == board.task("add-b")?.merged?.onto)
+        #expect(board.task("add-b")?.receipt?.mergeReruns == 1)
+        let status = lead.call("status", [:]).text
+        #expect(status.contains("Filtered reruns (the failing tests only): 0 of 1 passed (0%); whole reruns: none ran. "
+                                + "The failing tests run once on the base: branch red/base green (the branch's) 0, red on the base too 1 (1 merged on it, each such test given a task to fix it)."), "\(status)")
+
+        // The next merge meets it too: noted in the open fix task, no second task.
+        try audited(lead, runtime, root: root, slug: "add-c", files: ["c2.txt": "sea\n"])
+        let again = lead.call("merge", ["task": "add-c"])
+        #expect(!again.isError, "\(again.text)")
+        let after = BoardStore(root: root).load()
+        #expect(after.tasks.filter { $0.title.hasPrefix("Fix the test") }.count == 1)
+        #expect(after.task(fix.slug)?.contract.context.contains("failed add-c's merge run") == true)
+        #expect(again.text.contains("flaky(): noted in the open task \(fix.slug), which names it."), "\(again.text)")
+        #expect(ledger(root).reruns.map(\.redOnBase) == [["flaky()"], ["flaky()"]])
+    }
+
+    /// Red on main too, but something else failed on the branch (the rest of the checks, here regression_command):
+    /// the failure stands, whatever main says.
+    @Test func aTestRedOnTheBaseExcusesNothingElseThatFailed() throws {
+        let root = try repo()
+        try fakeSuite(root, passes: "[[ \"$*\" == *--skip* ]]")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        configure(lead, ["test_command": "bash scripts/test.sh", "regression_command": "[[ ! -e b.txt ]]"])
+        try audited(lead, runtime, root: root)
+
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(merged.isError, "\(merged.text)")
+        #expect(ran().count == 4, "\(ran())")
+        let board = BoardStore(root: root).load()
+        #expect(board.task("add-b")?.status == .failed)
+        #expect(!board.tasks.contains { $0.title.hasPrefix("Fix the test") })
+        #expect(ledger(root).reruns.first?.base == .red && ledger(root).reruns.first?.redOnBase == nil, "\(ledger(root).reruns)")
         #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
     }
 
@@ -456,11 +590,12 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(line.firstRun == "failed" && line.result == "failed" && line.reran == ["flaky()"] && line.rerunWhole == false, "\(line)")
     }
 
-    /// The paired base run is skipped, and said so, while the Mac is over load_threshold; the merge goes ahead as
-    /// before.
-    @Test func thePairedBaseRunIsSkippedOverLoadThreshold() throws {
+    /// The base run decides the merge now, so it isn't skipped while the Mac is over load_threshold (it was while it
+    /// only fed the ledger): a test red on main doesn't send the branch back because the Mac was busy.
+    @Test func theBaseRunIsntSkippedOverLoadThreshold() throws {
         let root = try repo()
-        try fakeSuite(root, passes: "[[ \"$*\" == *--filter* ]]")
+        // flaky() fails wherever it runs: only the base's run could excuse it.
+        try fakeSuite(root, passes: "[[ \"$*\" == *--skip* ]]")
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         lead.macLimits = { MacLimits(maxSessions: 6, loadThreshold: 24) }
@@ -472,9 +607,10 @@ struct MergeGateTests: LeadTeamFixture {
 
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
-        #expect(ran() == ["run ", #"run --filter /flaky\(\)(/|$)"#])
+        #expect(ran() == ["run ", #"run --filter /flaky\(\)(/|$)"#, #"run --filter /flaky\(\)(/|$) --skip /flaky\(\)(/|$)"#, #"run --filter /flaky\(\)(/|$)"#])
         let rerun = try #require(ledger(root).reruns.first)
-        #expect(rerun.passed && rerun.base == .skipped && rerun.baseNote == "the Mac's load (50) was over load_threshold (24)", "\(rerun)")
+        #expect(!rerun.passed && rerun.base == .red && rerun.baseNote == nil && rerun.redOnBase == ["flaky()"], "\(rerun)")
+        #expect(BoardStore(root: root).load().task("add-b")?.status == .done)
     }
 
     /// A fix-the-flaky-test task's merge records the test it fixed (fixedBy); the next flake of that test tells the
@@ -590,9 +726,12 @@ struct MergeGateTests: LeadTeamFixture {
                          LeadRerunRecord(task: "c", commit: "3", at: now - 3, tests: ["x()"], filtered: true, passed: false, base: .green),
                          LeadRerunRecord(task: "d", commit: "4", at: now - 4, tests: ["y()"], filtered: false, passed: false, base: .skipped),
                          LeadRerunRecord(task: "old", commit: "5", at: now - 8 * 86_400, tests: ["y()"], filtered: false, passed: true)]
-        #expect(ledger.rerunLine(now: now) == "Merge reruns in the last 7 days (record only, nothing here decides a merge): 4 merges went to a rerun, 2 passed it. "
+        #expect(ledger.rerunLine(now: now) == "Merge reruns in the last 7 days: 4 merges went to a rerun, 2 passed it. "
                 + "Filtered reruns (the failing tests only): 2 of 3 passed (67%); whole reruns: 0 of 1 passed (0%). "
-                + "The failing tests run once on the base: branch red/base green (the branch's) 2, red on the base too (flaky) 1, not paired 1 (skipped, hung, or tests the base lacks).")
+                + "The failing tests run once on the base: branch red/base green (the branch's) 2, red on the base too 1, not paired 1 (passed its rerun, skipped, hung, or tests the base lacks).")
+        // A merge that went ahead on tests red on the base too is counted.
+        ledger.reruns.append(LeadRerunRecord(task: "e", commit: "6", at: now - 5, tests: ["z()"], filtered: true, passed: false, base: .red, redOnBase: ["z()"]))
+        #expect(ledger.rerunLine(now: now)?.contains("red on the base too 2 (1 merged on it, each such test given a task to fix it), not paired 1") == true, "\(ledger.rerunLine(now: now) ?? "")")
         #expect(FlakeLedger().rerunLine(now: now) == nil)
     }
 

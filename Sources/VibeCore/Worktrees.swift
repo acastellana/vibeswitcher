@@ -501,6 +501,10 @@ public enum Worktrees {
         /// The test command failed, and its rerun (`Rerun`) passed on this commit: the first run's output, then the
         /// rerun's. Whether that's a pass is the caller's to judge (`MergeRerun.unshown`).
         case passedOnRerun(commit: String, failed: String, rerun: String)
+        /// The test command failed, its filtered rerun failed too, and the tests it still failed failed on the base
+        /// (`Baseline`), while the rest of the checks passed on this commit without them: the first run's output, the
+        /// rerun's, and the base run's. Red before the branch, so not the branch's (`MergeRerun.redOnBranch`).
+        case passedRedOnBase(commit: String, failed: String, rerun: String, base: String)
         /// A command failed; all of its output (a rerun's starts with `Worktrees.rerunHeader`).
         case failed(String)
         /// Rebasing onto main conflicted; the rebase was undone.
@@ -946,7 +950,7 @@ public enum Worktrees {
     /// merge, its records the base's and the remote's by union (`landAsMerge`).
     /// With `trailers`, the commit that lands ends with them (`stamp`): the merge's provenance.
     /// With `rerun`, a failing test command may run once more (see `runChecks`): `passedOnRerun` when that passes;
-    /// then `baseline`, record only. `tested` hears the passing test command's output (the rerun's, when that's what passed), for its test count.
+    /// when it fails, `baseline` (`passedRedOnBase` when the base fails its tests too). `tested` hears the passing test command's output (the rerun's, when that's what passed), for its test count.
     public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
                                      scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout,
                                      lock: TestLock?, records: String? = nil, remote: String? = nil, trailers: [Trailer] = [],
@@ -981,11 +985,23 @@ public enum Worktrees {
         let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
                                            as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root, rerun: rerun, baseline: baseline, begun: begun)
         if let stopped { return stopped }
+        return passing(outputs, commit: tested, tested: output)
+    }
+
+    /// How a run whose checks passed (`runChecks`' `outputs`) ended on `commit`: `passed`, `passedOnRerun`, or
+    /// `passedRedOnBase` when a base run is among them. `tested` hears the passing test command's output, for its test
+    /// count: the first run's when the base excused it, since that ran the whole suite.
+    static func passing(_ outputs: [(name: String, output: String)], commit: String, tested output: ((String) -> Void)?) -> Check {
+        let named = { (name: String) in outputs.last { $0.name == name }?.output }
+        if let base = named(baseStep), let first = named("test command"), let again = named("rerun") {
+            output?(first)
+            return .passedRedOnBase(commit: commit, failed: first, rerun: again, base: base)
+        }
         if let last = outputs.last, last.name != "init_command" { output?(last.output) }
         if let again = outputs.last, again.name == "rerun", let first = outputs.dropLast().last {
-            return .passedOnRerun(commit: tested, failed: first.output, rerun: again.output)
+            return .passedOnRerun(commit: commit, failed: first.output, rerun: again.output)
         }
-        return .passed(tested)
+        return .passed(commit)
     }
 
     /// Puts the worktree at `path`'s detached HEAD, `commit`, on top of `base`: rebased, or squashed into one commit
@@ -1139,7 +1155,7 @@ public enum Worktrees {
         }
 
         /// Runs `setup` and `test` (as `rebaseAndTest` does, in a scratch home made empty first) on the stack's first
-        /// `count` commits: `passed` with the commit tested, `passedOnRerun`, `failed`, `hung`, `cancelled`, `error`.
+        /// `count` commits: `passed` with the commit tested, `passedOnRerun`, `passedRedOnBase`, `failed`, `hung`, `cancelled`, `error`.
         public func test(prefix count: Int, setup: String?, test: String?, timeout: TimeInterval, lock: TestLock?,
                          rerun: ((String) -> String?)?, baseline: Baseline? = nil, tested output: ((String) -> Void)? = nil,
                          begun: ((Date) -> Void)? = nil) -> Check {
@@ -1150,11 +1166,7 @@ public enum Worktrees {
             let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
                                                as: "VibeSwitcher's batch merge test of \(tip.prefix(8))", place: root, rerun: rerun, baseline: baseline, begun: begun)
             if let stopped { return stopped }
-            if let last = outputs.last, last.name != "init_command" { output?(last.output) }
-            if let again = outputs.last, again.name == "rerun", let first = outputs.dropLast().last {
-                return .passedOnRerun(commit: tip, failed: first.output, rerun: again.output)
-            }
-            return .passed(tip)
+            return passing(outputs, commit: tip, tested: output)
         }
 
         /// The worktree at `commit`, whatever a run left changed or new in it (its ignored build output stays).
@@ -1267,15 +1279,21 @@ public enum Worktrees {
         case .hung(let command, let after, let output, let stall): return .hung(command: command, after: after, output: output, stall: stall)
         case .cancelled: return .cancelled
         case .error(let text): return .error(text)
-        case .passed, .passedOnRerun, .conflict: return .error("unexpected")
+        case .passed, .passedOnRerun, .passedRedOnBase, .conflict: return .error("unexpected")
         }
     }
 
-    /// A merge's paired base run (`runChecks`): after the rerun, the failing tests once on the base the branch was
-    /// rebased onto, so a branch's red test can be told from a flaky one (red on the base too). Record only.
+    /// A merge's base run (`runChecks`): after a rerun that failed, the failing tests once on the base the branch was
+    /// rebased onto, so a branch's red test can be told from one red before it (red on the base too). Red on both,
+    /// with the rest of the checks passing on the branch without them (`rest`), the merge goes ahead
+    /// (`Check.passedRedOnBase`); else the rerun's failure stands.
     public struct Baseline {
         /// The base's commit.
         public var commit: String
+        /// Given the first run's and the failed rerun's outputs: the tests it still failed, when they may be excused by the base
+        /// (`MergeRerun.redOnBranch`), and the command that runs the rest of the checks on the branch without them
+        /// (`MergeRerun.rest`); nil: nothing is excused.
+        public var rest: ((_ first: String, _ rerun: String) -> (tests: [String], command: String)?)?
         /// Given the first run's failing output, the command to run on `commit`; nil: none runs (the caller notes why).
         public var command: (String) -> String?
         /// Hears how it went, when a command was given.
@@ -1290,8 +1308,10 @@ public enum Worktrees {
             case unchecked(String)
         }
 
-        public init(commit: String, command: @escaping (String) -> String?, heard: @escaping (Run) -> Void) {
+        public init(commit: String, rest: ((_ first: String, _ rerun: String) -> (tests: [String], command: String)?)? = nil, command: @escaping (String) -> String?,
+                    heard: @escaping (Run) -> Void) {
             self.commit = commit
+            self.rest = rest
             self.command = command
             self.heard = heard
         }
@@ -1305,6 +1325,12 @@ public enum Worktrees {
 
     /// The first line of a rerun's output (`runChecks`' `rerun`).
     public static let rerunHeader = "Rerun once, after the first run failed (its failing tests when they can be picked out, else all of it):\n"
+    /// The name of the step that runs the rest of the checks on the branch without the tests its rerun still failed
+    /// (`Baseline.rest`), and the first line of its output.
+    static let restStep = "rest of the checks"
+    public static let restHeader = "The rest of the checks, without the tests the rerun still failed (they run on the base next):\n"
+    /// The name `runChecks` gives the base run's output when the base excused the rerun's failure.
+    static let baseStep = "base"
 
     /// Runs `setup` then `test` (each when given) in `path` with HOME, CFFIXED_USER_HOME and TMPDIR in `home` (made
     /// here, removed by the caller), as merge and an audit's shared run do. `stopped`: nil when every command passed,
@@ -1317,9 +1343,12 @@ public enum Worktrees {
     /// (`MergeRerun`: the failing tests again), in the same worktree and home, holding the same slot: its output,
     /// named "rerun", decides. It's never asked again, whatever the rerun does. `begun` hears when the commands start
     /// (the slot taken): the merge's stats line times the run from there (`MergeSample`).
-    /// After a rerun, `baseline` runs its command once on its commit, in the same worktree and home, holding the same
-    /// slot, with the same timeout: record only (`Baseline`). Its result changes nothing returned here; a cancel during
-    /// it is a cancel.
+    /// After a rerun that failed, `baseline` runs its command once on its commit, in the same worktree and home, holding
+    /// the same slot, with the same timeout (`Baseline`); a cancel during it is a cancel. When the rerun's failure is its
+    /// named tests' alone (`Baseline.rest`), the rest of the checks run first on the branch without them (named
+    /// `restStep`): when that passes and the base fails each of them too, the run passes with the base's output last
+    /// (named `baseStep`: `passedRedOnBase`); else the rerun's failure stands (with the rest's after it, when that
+    /// failed). After a rerun that passed, nothing runs on the base.
     static func runChecks(setup: String?, test: String?, in path: String, home: String, timeout: TimeInterval,
                           lock: TestLock? = nil, as holder: String = "VibeSwitcher's test run", place: String? = nil,
                           rerun: ((String) -> String?)? = nil, baseline: Baseline? = nil, begun: ((Date) -> Void)? = nil,
@@ -1366,13 +1395,17 @@ public enum Worktrees {
         var steps = [("init_command", setup), ("test command", test)][...]
         // The first run's failure, once a rerun is planned: what the baseline pairs with.
         var firstFailure: String?
-        /// The baseline's run after the rerun; true when it was cancelled.
-        func pairOnBase() -> Bool {
-            guard let baseline, let failed = firstFailure, let command = baseline.command(failed) else { return false }
+        // The rerun's failure, and the tests it still failed while the rest of the checks run without them.
+        var rerunFailure: String?
+        var excusing: [String] = []
+        /// The base run after a rerun that failed: how it went (nil when none ran: the caller noted why), or cancelled.
+        func pairOnBase() -> (cancelled: Bool, run: Baseline.Run?) {
+            guard let baseline, let failed = firstFailure, let command = baseline.command(failed) else { return (false, nil) }
             let moved = Git.run(["checkout", "-q", "-f", "--detach", baseline.commit], in: path)
             guard moved.ok else {
-                baseline.heard(.unchecked("the base \(baseline.commit.prefix(8)) couldn't be checked out: \(said(moved))"))
-                return cancel?.isCancelled == true
+                let run = Baseline.Run.unchecked("the base \(baseline.commit.prefix(8)) couldn't be checked out: \(said(moved))")
+                baseline.heard(run)
+                return (cancel?.isCancelled == true, run)
             }
             Git.run(["clean", "-q", "-f", "-d"], in: path)
             var env = ["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"]
@@ -1385,9 +1418,10 @@ public enum Worktrees {
             let run = Shell.run(executable: "/bin/zsh", args: ["-lc", "export HOME=\(RecentProjects.shellQuote(home))\n" + command], in: path, env: env,
                                 timeout: timeout, interleaved: true, branchCode: true, watch: lock?.watch, time: time)
             stop?()
-            if run.cancelled || cancel?.isCancelled == true { return true }
-            baseline.heard(run.stall != nil || run.timedOut ? .hung : .ran(ok: run.ok, output: run.output))
-            return false
+            if run.cancelled || cancel?.isCancelled == true { return (true, nil) }
+            let result: Baseline.Run = run.stall != nil || run.timedOut ? .hung : .ran(ok: run.ok, output: run.output)
+            baseline.heard(result)
+            return (false, result)
         }
         while let (name, command) = steps.popFirst() {
             guard let command, !command.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
@@ -1414,7 +1448,7 @@ public enum Worktrees {
             // A run stopped for making no progress says so first, then what it was stuck on, after its output.
             // Stopped at test_timeout_min, it says how long it had been silent: a crawl keeps writing, a stuck one doesn't.
             let silent = run.stall == nil ? run.quiet.map { "\n\n" + MergeRerun.quietNote($0) } : nil
-            var said = (name == "rerun" ? rerunHeader : "") + header + run.output + (run.stall.map { "\n\n" + $0.report } ?? silent ?? "")
+            var said = (name == "rerun" ? rerunHeader : name == restStep ? restHeader : "") + header + run.output + (run.stall.map { "\n\n" + $0.report } ?? silent ?? "")
             if run.timedOut, !run.cancelled {
                 let stopped = time.wall(), window = stopped.timeIntervalSince(clocks.wall)
                 said += "\n\n" + MergeRerun.causeNote(stall: run.stall, quiet: run.quiet, slept: max(0, window - (time.awake() - clocks.awake)), window: window,
@@ -1434,10 +1468,33 @@ public enum Worktrees {
                     steps.append(("rerun", again))
                     continue
                 }
-                if name == "rerun", pairOnBase() { return (.cancelled, outputs) }
+                if name == "rerun" {
+                    // The tests it still failed may be red on the base too: the rest of the checks run first, without
+                    // them, so nothing else that failed goes through on the base's word.
+                    if let first = firstFailure, let (tests, command) = baseline?.rest?(first, failed) {
+                        rerunFailure = failed
+                        excusing = tests
+                        steps.append((restStep, command))
+                        continue
+                    }
+                    if pairOnBase().cancelled { return (.cancelled, outputs) }
+                    return (.failed(failed), outputs)
+                }
+                if name == restStep, let rerunFailure {
+                    if pairOnBase().cancelled { return (.cancelled, outputs) }
+                    return (.failed(rerunFailure + "\n\n" + failed), outputs)
+                }
                 return (.failed(failed), outputs)
             }
-            if name == "rerun", pairOnBase() { return (.cancelled, outputs) }
+            if name == restStep, let rerunFailure {
+                let paired = pairOnBase()
+                if paired.cancelled { return (.cancelled, outputs) }
+                // Red on the base too: not the branch's, and the merge goes ahead (`Check.passedRedOnBase`).
+                guard let run = paired.run, MergeRerun.excused(excusing, base: run), case .ran(_, let output) = run else {
+                    return (.failed(rerunFailure), outputs)
+                }
+                outputs.append((baseStep, output))
+            }
         }
         return (nil, outputs)
     }
@@ -1487,7 +1544,7 @@ public enum Worktrees {
             outcome = .hung(command, after: after, stall: said.isEmpty ? nil : said)
         case .cancelled: outcome = .cancelled
         case .error(let text): outcome = .error(text)
-        case .passed, .passedOnRerun, .conflict: outcome = .error("unexpected")
+        case .passed, .passedOnRerun, .passedRedOnBase, .conflict: outcome = .error("unexpected")
         }
         if case .cancelled = outcome { return AuditRun(outcome: outcome, logs: files) }
         try? VibePaths.writePrivate(Data((outcome.text + "\n").utf8), to: logs.appendingPathComponent("run.txt"))

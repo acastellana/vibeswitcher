@@ -3645,6 +3645,9 @@ public final class LeadToolset: MCPToolset {
         let tested: String
         var rerun: MergeRerun.Plan?
         var flaked: (plan: MergeRerun.Plan, failed: String)?
+        // Its rerun failed on tests that failed on the base too (`Worktrees.Check.passedRedOnBase`): they, and the
+        // rerun's output (their failing lines).
+        var redOnBase: (tests: [String], rerun: String)?
         // The passing run's test count, for its receipt.
         var testCount: Int?
         // When its commands started (the slot taken) and the load then, for the merge stats line.
@@ -3684,6 +3687,9 @@ public final class LeadToolset: MCPToolset {
             case .passedOnRerun(_, _, let again):
                 recordRerun(plan, task: slug, commit: commit, base: current, passed: MergeRerun.unshown(plan, rerun: again).isEmpty,
                             load: begun?.load.first, pairing: pairing)
+            case .passedRedOnBase(_, let failed, let again, _):
+                recordRerun(plan, task: slug, commit: commit, base: current, passed: false, load: begun?.load.first, pairing: pairing,
+                            redOnBase: MergeRerun.redOnBranch(plan, first: failed, rerun: again) ?? [])
             case .failed:
                 recordRerun(plan, task: slug, commit: commit, base: current, passed: false, load: begun?.load.first, pairing: pairing)
             default: break
@@ -3691,7 +3697,7 @@ public final class LeadToolset: MCPToolset {
         }
         // What its tests wrote outside the worktree (the agents' config) holds the merge, whatever they said.
         switch checked {
-        case .passed, .passedOnRerun: try checkConfig(not: "Not merged: \(slug)'s tests passed, and after them")
+        case .passed, .passedOnRerun, .passedRedOnBase: try checkConfig(not: "Not merged: \(slug)'s tests passed, and after them")
         default: break
         }
         switch checked {
@@ -3712,6 +3718,16 @@ public final class LeadToolset: MCPToolset {
             tested = commit
             _ = saveMergeLog(failed + "\n" + again, slug: slug)
             flaked = (plan, failed)
+        case .passedRedOnBase(let commit, let failed, let again, let onBase):
+            // Only `runChecks` decides this, on the rerun's tests (`MergeRerun.redOnBranch`) and the base's run.
+            guard let plan = rerun, let red = MergeRerun.redOnBranch(plan, first: failed, rerun: again) else {
+                throw Problem(text: "Not merged: \(slug)'s rerun failed and the base excused it, but no rerun of named tests was planned.")
+            }
+            tested = commit
+            _ = saveMergeLog(failed + "\n" + again + "\n" + onBase, slug: slug)
+            redOnBase = (red, again)
+            // What failed the first run and passed the rerun is a flake, as on any rerun.
+            if MergeRerun.flakes(in: failed).contains(where: { !red.contains($0) }) { flaked = (plan, failed) }
         case .cancelled:
             // Stopped by the caller: nothing is known about the work, and the task stays as it was.
             throw Problem(text: "The merge of \(slug) was cancelled; nothing was merged, and \(slug) stays as it was.")
@@ -3784,7 +3800,8 @@ public final class LeadToolset: MCPToolset {
             // A head the vault didn't take doesn't stop the board's record: the merge has happened, and a merge run
             // again on a board that doesn't say so would record an empty one. Said when it's done, below.
             let unrecorded = recordLanding(base: base, from: current, to: tested, with: slug)
-            let flakes = flaked.map { MergeRerun.flakes(in: $0.failed) } ?? []
+            // Not the tests red on the base too: they failed the rerun as well, and get a task of their own below.
+            let flakes = (flaked.map { MergeRerun.flakes(in: $0.failed) } ?? []).filter { !(redOnBase?.tests.contains($0) ?? false) }
             // Each flaky test's failure lines, where every session can read them (the merge's log is in the vault).
             let flakeLines = flaked.map { MergeRerun.evidence(in: $0.failed, tests: flakes) } ?? [:]
             // One moment for the file's day and the ledger's entry.
@@ -3795,6 +3812,7 @@ public final class LeadToolset: MCPToolset {
             let build = runningBuild()?.label
             let brought = Int(Git.run(["rev-list", "--count", "\(current)..\(tested)"], in: root).output)
             let flakePlan: FlakePlan
+            var redPlan: [(test: String, slug: String, noted: Bool)] = []
             do { flakePlan = try store.update { board -> FlakePlan in
                 guard let index = board.taskIndex(slug) else { return FlakePlan() }
                 board.tasks[index].status = .done
@@ -3802,9 +3820,12 @@ public final class LeadToolset: MCPToolset {
                                                              regression: workflow.regressionCommand.map { _ in true }, audited: audited ? nil : false,
                                                              branchHead: commit)
                 board.tasks[index].receipt = LeadReceipt(board.tasks[index], ending: .merged, questions: board.questions, usage: usage,
-                                                         tests: workflow.testCommand == nil ? nil : testCount, mergeReruns: flaked == nil ? 0 : 1,
+                                                         tests: workflow.testCommand == nil ? nil : testCount, mergeReruns: flaked == nil && redOnBase == nil ? 0 : 1,
                                                          commits: brought)
                 board.tasks[index].receipt?.build = build
+                if let redOnBase {
+                    redPlan = planRedOnBaseFixes(&board, tests: redOnBase.tests, rerun: redOnBase.rerun, slug: slug, onto: current, workflow: workflow)
+                }
                 return planFlakeFixes(&board, flakes: flakes, slug: slug, commit: tested, at: flakedAt, logged: Set(flakeLines.keys),
                                       log: flakeLog, load: begun?.load.first, filtered: flaked?.plan.filtered, workflow: workflow)
             } } catch {
@@ -3814,6 +3835,7 @@ public final class LeadToolset: MCPToolset {
             }
             let planned = flakePlan.planned
             sendFlakeNotes(flakePlan)
+            sendFlakeNotes(FlakePlan(planned: redPlan))
             // A fix-the-flaky-test task (or an open one a due flake was noted in) merging fixes its test.
             noteFlakeFixes([(slug, tested)])
             // Nothing ran: say so, it isn't a pass.
@@ -3852,6 +3874,7 @@ public final class LeadToolset: MCPToolset {
                     + tellRecurrences(flakePlan.recurred, slug: slug)
                     + ")"
             }
+            if let redOnBase { flakeNote += tellRedOnBase(redOnBase.tests, planned: redPlan, slug: slug, base: base, onto: current) }
             let caughtUp = tellToCatchUp(merged: slug, from: current, to: tested, base: base)
             archiveFinished(force: false)
             let staleNote = gate.staleAccepted.map { " (Its passing audit \($0.stale.text): merged on it with your reason, in the progress log.)" } ?? ""
@@ -3950,21 +3973,54 @@ public final class LeadToolset: MCPToolset {
 
     /// Records a merge run that went to a rerun (`plan`), in the flake ledger: whether it passed, and the paired base
     /// run (`pairing`). Record only.
-    func recordRerun(_ plan: MergeRerun.Plan, task: String, commit: String, base: String, passed: Bool, load: Double?, pairing: MergeRerun.Pairing) {
+    func recordRerun(_ plan: MergeRerun.Plan, task: String, commit: String, base: String, passed: Bool, load: Double?, pairing: MergeRerun.Pairing,
+                     redOnBase: [String]? = nil) {
         let paired = pairing.result
         let record = LeadRerunRecord(task: task, commit: commit, at: Date().timeIntervalSince1970, tests: plan.tests, filtered: plan.filtered,
-                                     passed: passed, load: load, baseCommit: paired == nil ? nil : base, base: paired?.base, baseNote: paired?.note)
+                                     passed: passed, load: load, baseCommit: paired == nil ? nil : base, base: paired?.base, baseNote: paired?.note,
+                                     redOnBase: redOnBase)
         try? flakeLedger.append(record)
     }
 
-    /// The paired base run of a merge's failing tests on `base` (`MergeRerun.baseline`), skipped while the Mac is over
-    /// load_threshold.
+    /// A task to fix each of `tests`, which failed `slug`'s merge run, its rerun (`rerun`, its output) and the same run on
+    /// `base` at `onto`, so the merge went ahead without them (`Worktrees.Check.passedRedOnBase`); or, when an open task
+    /// names one already (a fix planned by an earlier merge, a flake's), a note in that task's context. Called under
+    /// the board's lock: an audit under way on a noted task hears of it once the board is written (`sendFlakeNotes`).
+    func planRedOnBaseFixes(_ board: inout LeadBoard, tests: [String], rerun: String, slug: String, onto: String,
+                            workflow: LeadWorkflow) -> [(test: String, slug: String, noted: Bool)] {
+        let base = workflow.base
+        let lines = MergeRerun.evidence(in: rerun, tests: tests)
+        return tests.map { test in
+            let said = "Merge rerun: \(test) failed \(slug)'s merge run, its rerun, and the same run on \(base) (\(onto.prefix(8))), so it's red on \(base) and didn't send \(slug) back: the merge went ahead without it."
+                + (lines[test].map { "\nIts failing lines in the rerun (secrets masked):\n" + $0.map { "    " + $0 }.joined(separator: "\n") } ?? "")
+            if let open = board.openTask(naming: test), let index = board.taskIndex(open.id) {
+                Self.appendContext(said, to: &board.tasks[index])
+                return (test, open.slug, true)
+            }
+            let title = "Fix the test " + Self.clip(test, 60) + ", red on " + base
+            var fix = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title,
+                               contract: MergeRerun.redOnBaseContract(test: test, workflow: workflow, context: said))
+            fix.origin = LeadTask.Origin.flake.rawValue
+            board.tasks.append(fix)
+            return (test, fix.slug, false)
+        }
+    }
+
+    /// What a merge that went ahead on `tests` red on `base` too says, and the progress log: which task fixes each.
+    func tellRedOnBase(_ tests: [String], planned: [(test: String, slug: String, noted: Bool)], slug: String, base: String, onto: String) -> String {
+        let names = Self.clip(tests.joined(separator: ", "), 300)
+        try? store.appendProgress("Red on \(base) in \(slug)'s merge: \(names) failed its run, its rerun, and the same run on \(base) (\(onto.prefix(8))); merged without them")
+        for (test, fix, noted) in planned {
+            try? store.appendProgress((noted ? "Noted in \(fix)'s context (an open task naming it; no new task)" : "Planned \(fix)") + ": \(test) is red on \(base)")
+        }
+        return " (Its rerun failed on \(names), which failed on \(base) (\(onto.prefix(8))) too, and the rest of its checks passed without them: red before the branch, so it merged. Recorded in the flake ledger. "
+            + planned.map { test, fix, noted in noted ? "\(test): noted in the open task \(fix), which names it." : "\(test): planned \(fix) to fix it." }.joined(separator: " ")
+            + ")"
+    }
+
+    /// The base run of a merge's failing tests on `base` after its rerun failed (`MergeRerun.baseline`).
     func baseline(on base: String, plan: @escaping () -> MergeRerun.Plan?, pairing: MergeRerun.Pairing) -> Worktrees.Baseline {
-        MergeRerun.baseline(commit: base, plan: plan, overLoad: { [self] in
-            let limit = macLimits().loadLimit
-            guard let load = runtime.steadyLoad(), load > limit else { return nil }
-            return "the Mac's load (\(MacLoad.number(load))) was over load_threshold (\(MacLoad.number(limit)))"
-        }, pairing: pairing)
+        MergeRerun.baseline(commit: base, plan: plan, workflow: workflow, pairing: pairing)
     }
 
     /// The base moves only through merges and reverts: anything else that moved it from where the vault last saw it

@@ -649,7 +649,7 @@ public final class SetupStatsCollector: @unchecked Sendable {
                                    cores: samples.last?.cores)
         }
         if let merges {
-            mac.merges = MergeRate(recorded: merges.count, landed: merges.filter { ["passed", "passed_on_rerun"].contains($0.result) }.count,
+            mac.merges = MergeRate(recorded: merges.count, landed: merges.filter { ["passed", "passed_on_rerun", "passed_red_on_base"].contains($0.result) }.count,
                                    hours: window.hours())
         }
         if let samples {
