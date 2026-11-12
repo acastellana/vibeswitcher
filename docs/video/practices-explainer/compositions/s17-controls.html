@@ -1,6 +1,112 @@
 <!doctype html>
-<html><head><meta charset="UTF-8" /></head><body><template>
-<style>#root{position:absolute;inset:0;}</style>
-<div id="root" data-composition-id="s17-controls" data-width="1920" data-height="1080"><div class="stage"><div class="kicker">stub s17-controls</div></div></div>
-<script>(function(){const tl=gsap.timeline({paused:true});tl.set({}, {}, 20);window.__timelines["s17-controls"]=tl;})();</script>
-</template></body></html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s17 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s17 .grid {
+          position: absolute;
+          left: 120px;
+          top: 250px;
+          width: 1680px;
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 24px;
+        }
+        .s17 .key {
+          padding: 22px 26px;
+          height: 330px;
+        }
+        .s17 .key .k {
+          font-family: var(--mono);
+          font-weight: 700;
+          font-size: 21px;
+          color: var(--accent);
+          letter-spacing: 0.04em;
+          margin-bottom: 10px;
+        }
+        .s17 .key .h3 {
+          font-size: 31px;
+          margin-bottom: 12px;
+        }
+        .s17 .key .d {
+          font-size: 23px;
+          line-height: 1.36;
+          color: var(--muted);
+        }
+        .s17 .key.wide {
+          grid-column: span 2;
+        }
+      </style>
+      <div id="root" data-composition-id="s17-controls" data-width="1920" data-height="1080">
+        <div class="stage s17">
+          <div class="kicker">15 / You keep the keys</div>
+          <div class="head h2">What stays yours.</div>
+          <div class="grid">
+            <div class="key card">
+              <div class="k">settings › project lead</div>
+              <div class="h3">Review rules floor</div>
+              <div class="d">The lead can tighten its rules, and loosen them only down to your floor.</div>
+            </div>
+            <div class="key card">
+              <div class="k">workflow</div>
+              <div class="h3">Sensitive and strict paths</div>
+              <div class="d">What is always audited, and where every Important finding holds the merge.</div>
+            </div>
+            <div class="key card">
+              <div class="k">merge policy</div>
+              <div class="h3">Approvals</div>
+              <div class="d">"Approve &lt;commit&gt;" covers that exact commit. A timer never counts as yes.</div>
+            </div>
+            <div class="key card">
+              <div class="k">push card</div>
+              <div class="h3">Only you push</div>
+              <div class="d">Your click sends that exact commit, as a fast-forward, never forced.</div>
+            </div>
+            <div class="key card">
+              <div class="k">shell · wallet cards</div>
+              <div class="h3">You press Run, or Send</div>
+              <div class="d">An agent asks for a shell or a transaction: nothing runs or leaves the Mac until you click. Shells can be allowed in Settings.</div>
+            </div>
+            <div class="key card">
+              <div class="k">config seal</div>
+              <div class="h3">Your config stays yours</div>
+              <div class="d">If the agents' settings, hooks or shell files change while the team runs, nothing starts or merges until you Accept.</div>
+            </div>
+            <div class="key card wide">
+              <div class="k">phone · over tailscale</div>
+              <div class="h3">From anywhere</div>
+              <div class="d">Your sessions, the leads' questions and boards, a spoken briefing, notifications. Replies and answers need their own switch.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s17");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 20);
+          K.rise(tl, ".s17 .head", 0.3);
+          const keys = S.querySelectorAll(".key");
+          keys.forEach((k, i) => {
+            const at = 0.9 + i * 1.7;
+            K.pop(tl, k, at, { from: 0.86 });
+            tl.fromTo(k, { borderColor: "#f0a63a" }, { borderColor: "#3a352d", duration: 1.2 }, at + 0.3);
+          });
+          window.__timelines["s17-controls"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

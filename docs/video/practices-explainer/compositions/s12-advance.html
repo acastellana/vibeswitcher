@@ -1,6 +1,111 @@
 <!doctype html>
-<html><head><meta charset="UTF-8" /></head><body><template>
-<style>#root{position:absolute;inset:0;}</style>
-<div id="root" data-composition-id="s12-advance" data-width="1920" data-height="1080"><div class="stage"><div class="kicker">stub s12-advance</div></div></div>
-<script>(function(){const tl=gsap.timeline({paused:true});tl.set({}, {}, 16);window.__timelines["s12-advance"]=tl;})();</script>
-</template></body></html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s12 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s12 .rows {
+          position: absolute;
+          left: 120px;
+          top: 250px;
+          width: 1680px;
+        }
+        .s12 .row {
+          display: grid;
+          grid-template-columns: 640px 70px 1fr;
+          align-items: center;
+          height: 64px;
+          border-top: 2px solid var(--line);
+        }
+        .s12 .ev {
+          font-family: var(--mono);
+          font-size: 24px;
+          color: var(--muted);
+        }
+        .s12 .ar {
+          font-family: var(--mono);
+          font-size: 26px;
+          color: var(--accent);
+        }
+        .s12 .act {
+          font-size: 27px;
+          color: var(--fg);
+        }
+        .s12 .hold {
+          position: absolute;
+          left: 120px;
+          top: 810px;
+          width: 1680px;
+          font-size: 29px;
+        }
+        .s12 .policy {
+          position: absolute;
+          left: 120px;
+          top: 890px;
+          display: flex;
+          gap: 18px;
+          align-items: center;
+        }
+        .s12 .policy .label {
+          margin-right: 8px;
+        }
+      </style>
+      <div id="root" data-composition-id="s12-advance" data-width="1920" data-height="1080">
+        <div class="stage s12">
+          <div class="kicker">10 / It moves on its own</div>
+          <div class="head h2"><span class="code" style="font-family: var(--mono)">auto_advance</span>: no waiting for the lead's turn.</div>
+          <div class="rows">
+            <div class="row"><span class="ev">a review-none task reports done</span><span class="ar">→</span><span class="act">merge it (unless the risk check raises it)</span></div>
+            <div class="row"><span class="ev">an audit task reports done</span><span class="ar">→</span><span class="act">start its audit</span></div>
+            <div class="row"><span class="ev">a clean verdict</span><span class="ar">→</span><span class="act">merge it</span></div>
+            <div class="row"><span class="ev">Important findings open</span><span class="ar">→</span><span class="act">back to the worker, once per verdict</span></div>
+            <div class="row"><span class="ev">a verifier ended without a verdict</span><span class="ar">→</span><span class="act">retry it once</span></div>
+            <div class="row"><span class="ev">a merge failed</span><span class="ar">→</span><span class="act">send the worker its output</span></div>
+            <div class="row"><span class="ev">a task merged</span><span class="ar">→</span><span class="act">clean up its worktree and sessions</span></div>
+            <div class="row"><span class="ev">everything in a task's after list is done</span><span class="ar">→</span><span class="act">start it, if the Mac has room</span></div>
+          </div>
+          <div class="hold">It never moves a task the lead holds: <span class="amber">kept, blocked, failed, folded or abandoned.</span></div>
+          <div class="policy">
+            <span class="label">merge policy</span>
+            <span class="chip p1">auto</span>
+            <span class="chip p2">ask_sensitive</span>
+            <span class="chip p3">ask_all</span>
+            <span class="body muted" style="font-size: 25px; margin-left: 10px">what waits for your approval: none, sensitive paths, or every merge</span>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s12");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 16);
+          K.rise(tl, ".s12 .head", 0.3);
+          const rows = S.querySelectorAll(".row");
+          rows.forEach((r, i) => {
+            const at = 1.0 + i * 0.85;
+            tl.fromTo(r.querySelector(".ev"), { opacity: 0, x: -30 }, { opacity: 1, x: 0, duration: 0.4, ease: "power3.out" }, at);
+            tl.fromTo(r.querySelector(".ar"), { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.3, ease: "power2.out" }, at + 0.25);
+            tl.fromTo(r.querySelector(".act"), { opacity: 0, x: 30 }, { opacity: 1, x: 0, duration: 0.45, ease: "expo.out" }, at + 0.4);
+            tl.fromTo(r, { borderTopColor: "#f0a63a" }, { borderTopColor: "#3a352d", duration: 0.8 }, at);
+          });
+          K.rise(tl, ".s12 .hold", 8.6);
+          K.rise(tl, ".s12 .policy .label", 10.2, { y: 10 });
+          K.pop(tl, ".s12 .policy .chip", 10.4, { stagger: 0.25 });
+          K.rise(tl, ".s12 .policy .body", 11.3, { y: 10 });
+          window.__timelines["s12-advance"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

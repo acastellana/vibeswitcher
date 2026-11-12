@@ -1,6 +1,99 @@
 <!doctype html>
-<html><head><meta charset="UTF-8" /></head><body><template>
-<style>#root{position:absolute;inset:0;}</style>
-<div id="root" data-composition-id="s19-close" data-width="1920" data-height="1080"><div class="stage"><div class="kicker">stub s19-close</div></div></div>
-<script>(function(){const tl=gsap.timeline({paused:true});tl.set({}, {}, 14);window.__timelines["s19-close"]=tl;})();</script>
-</template></body></html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s19 .when {
+          position: absolute;
+          left: 120px;
+          top: 150px;
+          font-family: var(--mono);
+          font-size: 26px;
+          color: var(--muted);
+        }
+        .s19 .grid {
+          position: absolute;
+          left: 120px;
+          top: 220px;
+          width: 1680px;
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 34px 40px;
+        }
+        .s19 .cell {
+          border-top: 3px solid var(--line);
+          padding-top: 18px;
+        }
+        .s19 .cell .num {
+          font-size: 104px;
+          line-height: 1;
+        }
+        .s19 .cell .t {
+          font-size: 25px;
+          line-height: 1.3;
+          color: var(--muted);
+          margin-top: 10px;
+        }
+        .s19 .end {
+          position: absolute;
+          left: 120px;
+          top: 720px;
+          width: 1680px;
+        }
+        .s19 .end .h1 {
+          font-size: 76px;
+        }
+        .s19 .end .h1 .amber {
+          color: var(--accent);
+        }
+        .s19 .foot {
+          bottom: 56px;
+        }
+      </style>
+      <div id="root" data-composition-id="s19-close" data-width="1920" data-height="1080">
+        <div class="stage s19">
+          <div class="kicker">The record</div>
+          <div class="when">this repository, 17 October to 12 November 2026</div>
+          <div class="grid">
+            <div class="cell"><div class="num n1">0</div><div class="t">tasks planned</div></div>
+            <div class="cell"><div class="num go n2">0</div><div class="t">merged, each tested at the gate</div></div>
+            <div class="cell"><div class="num amber n3">0</div><div class="t">audited by an independent verifier</div></div>
+            <div class="cell"><div class="num stop n4">0</div><div class="t">Important findings fixed before merge</div></div>
+            <div class="cell"><div class="num n5">0</div><div class="t">worker-hours on receipts</div></div>
+            <div class="cell"><div class="num go n6">0</div><div class="t">reverts</div></div>
+          </div>
+          <div class="end">
+            <div class="h1"><div>You decide what to build.</div><div class="amber">The system runs the process.</div></div>
+          </div>
+          <div class="foot">every number and claim: sources.md, beside this video</div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s19");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 14);
+          K.rise(tl, ".s19 .when", 0.4);
+          K.rise(tl, ".s19 .cell", 0.8, { stagger: 0.3 });
+          K.count(tl, S.querySelector(".n1"), 549, 1.0, 1.6);
+          K.count(tl, S.querySelector(".n2"), 495, 1.3, 1.6);
+          K.count(tl, S.querySelector(".n3"), 272, 1.6, 1.6);
+          K.count(tl, S.querySelector(".n4"), 82, 1.9, 1.4);
+          K.count(tl, S.querySelector(".n5"), 154, 2.2, 1.4);
+          tl.fromTo(".s19 .n6", { scale: 0.5 }, { scale: 1, duration: 0.6, ease: "back.out(2.4)" }, 2.6);
+          K.rise(tl, ".s19 .end .h1 > div:first-child", 5.6, { y: 40, d: 0.7 });
+          K.rise(tl, ".s19 .end .h1 > div:last-child", 6.6, { y: 40, d: 0.7 });
+          K.rise(tl, ".s19 .foot", 8.0);
+          window.__timelines["s19-close"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

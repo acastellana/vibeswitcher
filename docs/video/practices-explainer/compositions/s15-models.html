@@ -1,6 +1,149 @@
 <!doctype html>
-<html><head><meta charset="UTF-8" /></head><body><template>
-<style>#root{position:absolute;inset:0;}</style>
-<div id="root" data-composition-id="s15-models" data-width="1920" data-height="1080"><div class="stage"><div class="kicker">stub s15-models</div></div></div>
-<script>(function(){const tl=gsap.timeline({paused:true});tl.set({}, {}, 18);window.__timelines["s15-models"]=tl;})();</script>
-</template></body></html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s15 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s15 .lane {
+          position: absolute;
+          left: 120px;
+          width: 1280px;
+          height: 170px;
+          display: grid;
+          grid-template-columns: 250px 1fr;
+          align-items: center;
+          border-top: 2px solid var(--line);
+        }
+        .s15 .lane .name .h3 {
+          font-size: 44px;
+        }
+        .s15 .lane .name .label {
+          margin-top: 6px;
+        }
+        .s15 .lane .roles {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+        }
+        .s15 .lane .roles .chip {
+          font-weight: 400;
+          font-size: 22px;
+        }
+        .s15 .lane .note {
+          grid-column: 2;
+          font-size: 22px;
+          color: var(--muted);
+          margin-top: -24px;
+        }
+        .s15 .count {
+          position: absolute;
+          left: 1480px;
+          top: 270px;
+          width: 320px;
+        }
+        .s15 .count .row {
+          display: flex;
+          justify-content: space-between;
+          align-items: baseline;
+          padding: 12px 0;
+          border-top: 2px solid var(--line);
+        }
+        .s15 .count .num {
+          font-size: 54px;
+        }
+        .s15 .count .m {
+          font-family: var(--mono);
+          font-size: 24px;
+        }
+        .s15 .bottom {
+          position: absolute;
+          left: 120px;
+          top: 840px;
+          width: 1680px;
+        }
+        .s15 .bottom .body {
+          font-size: 30px;
+        }
+        .s15 .bottom .mono {
+          margin-top: 12px;
+          font-size: 21px;
+          color: var(--muted);
+        }
+      </style>
+      <div id="root" data-composition-id="s15-models" data-width="1920" data-height="1080">
+        <div class="stage s15">
+          <div class="kicker">13 / The right model for each role</div>
+          <div class="head h2">Judgment, doing, and bounded work.</div>
+          <div class="lane l1" style="top: 260px">
+            <div class="name"><div class="h3 amber">Fable</div><div class="label">judgment</div></div>
+            <div class="roles">
+              <span class="chip">the lead's advisor</span>
+              <span class="chip">hard tasks</span>
+              <span class="chip">re-rolled tasks</span>
+              <span class="chip">sensitive and security audits</span>
+            </div>
+          </div>
+          <div class="lane l2" style="top: 440px">
+            <div class="name"><div class="h3">Opus</div><div class="label">doing</div></div>
+            <div class="roles">
+              <span class="chip">the default for workers</span>
+              <span class="chip">routine audits, for now</span>
+              <span class="chip">the rest of the work</span>
+            </div>
+          </div>
+          <div class="lane l3" style="top: 620px">
+            <div class="name"><div class="h3 info">Codex</div><div class="label">bounded</div></div>
+            <div class="roles">
+              <span class="chip">mechanical tasks, tight contracts</span>
+              <span class="chip">agent: auto, when Claude is tight</span>
+              <span class="chip">always audited by Claude</span>
+            </div>
+          </div>
+          <div class="count">
+            <div class="label" style="margin-bottom: 10px">sessions launched (workers and verifiers)</div>
+            <div class="row"><span class="m">opus</span><span class="num n1">0</span></div>
+            <div class="row"><span class="m amber">fable</span><span class="num amber n2">0</span></div>
+            <div class="row"><span class="m info">codex</span><span class="num info n3">0</span></div>
+            <div class="row"><span class="m muted">sonnet</span><span class="num n4">0</span></div>
+          </div>
+          <div class="bottom">
+            <div class="body">The verifier runs on a different model from the worker, by default.</div>
+            <div class="mono">Claude is tight: a limit at 70 %, or a week 10 points ahead of pace · routing as decided 2026-11-12, docs/lead/decisions.md</div>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s15");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 18);
+          K.rise(tl, ".s15 .head", 0.3);
+          [".l1", ".l2", ".l3"].forEach((l, i) => {
+            const at = 1.0 + i * 2.4;
+            K.slide(tl, ".s15 " + l + " .name", at, { x: -30 });
+            K.slide(tl, ".s15 " + l + " .chip", at + 0.4, { stagger: 0.3, x: 60 });
+          });
+          K.rise(tl, ".s15 .count", 8.6);
+          K.count(tl, S.querySelector(".n1"), 175, 8.9, 1.4);
+          K.count(tl, S.querySelector(".n2"), 70, 9.1, 1.4);
+          K.count(tl, S.querySelector(".n3"), 17, 9.3, 1.2);
+          K.count(tl, S.querySelector(".n4"), 8, 9.5, 1.0);
+          K.rise(tl, ".s15 .bottom .body", 11.0);
+          K.rise(tl, ".s15 .bottom .mono", 12.4);
+          window.__timelines["s15-models"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

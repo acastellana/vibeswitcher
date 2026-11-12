@@ -1,6 +1,144 @@
 <!doctype html>
-<html><head><meta charset="UTF-8" /></head><body><template>
-<style>#root{position:absolute;inset:0;}</style>
-<div id="root" data-composition-id="s14-limits" data-width="1920" data-height="1080"><div class="stage"><div class="kicker">stub s14-limits</div></div></div>
-<script>(function(){const tl=gsap.timeline({paused:true});tl.set({}, {}, 22);window.__timelines["s14-limits"]=tl;})();</script>
-</template></body></html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s14 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s14 .cols {
+          position: absolute;
+          left: 120px;
+          top: 250px;
+          width: 1680px;
+          display: grid;
+          grid-template-columns: 1fr 1fr 1.25fr;
+          gap: 28px;
+        }
+        .s14 .col {
+          padding: 24px 30px;
+          height: 600px;
+        }
+        .s14 .col .k {
+          font-family: var(--mono);
+          font-weight: 700;
+          font-size: 24px;
+          color: var(--accent);
+          margin-bottom: 6px;
+        }
+        .s14 .col .h3 {
+          font-size: 34px;
+          margin-bottom: 18px;
+        }
+        .s14 .bar {
+          position: relative;
+          height: 16px;
+          border-radius: 8px;
+          background: var(--panel2);
+          margin: 6px 0 22px 0;
+          overflow: hidden;
+        }
+        .s14 .bar .fill {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 100%;
+          height: 100%;
+          background: var(--accent);
+          transform-origin: left center;
+        }
+        .s14 .li {
+          font-size: 23px;
+          line-height: 1.34;
+          margin-bottom: 12px;
+        }
+        .s14 .li .mono {
+          color: var(--accent);
+          font-size: 21px;
+        }
+        .s14 .li.dim {
+          color: var(--muted);
+        }
+        .s14 .boost {
+          position: absolute;
+          left: 120px;
+          top: 890px;
+          width: 1680px;
+          font-size: 27px;
+          padding: 18px 28px;
+          border: 2px dashed var(--accent);
+          border-radius: 14px;
+        }
+        .s14 .boost b {
+          font-family: var(--mono);
+          color: var(--accent);
+        }
+      </style>
+      <div id="root" data-composition-id="s14-limits" data-width="1920" data-height="1080">
+        <div class="stage s14">
+          <div class="kicker">12 / A shared Mac, a finite account</div>
+          <div class="head h2">Budgets, stalls and limits.</div>
+          <div class="cols">
+            <div class="col card c1">
+              <div class="k">time</div>
+              <div class="h3">A budget per task</div>
+              <div class="bar"><div class="fill f1"></div></div>
+              <div class="li">120 min of working time by default</div>
+              <div class="li dim">waiting on you, the lead or a test slot doesn't count</div>
+              <div class="li">Reached: commit what works, say what's missing, propose the next step</div>
+              <div class="li dim">Nothing is killed. The lead extends it, re-plans or drops it.</div>
+            </div>
+            <div class="col card c2">
+              <div class="k">attention</div>
+              <div class="h3">The witness</div>
+              <div class="bar"><div class="fill f2"></div></div>
+              <div class="li">silent for 15 min while "working"</div>
+              <div class="li">idle 10 min without reporting</div>
+              <div class="li">stuck at a compaction 5 min</div>
+              <div class="li">a message unread 5 min</div>
+              <div class="li dim">→ the lead hears, with the cause</div>
+            </div>
+            <div class="col card c3">
+              <div class="k">capacity · every project on the Mac</div>
+              <div class="h3">Mac-wide limits</div>
+              <div class="bar"><div class="fill f3"></div></div>
+              <div class="li">10 team sessions, all projects together</div>
+              <div class="li">load above 2 × cores: start nothing</div>
+              <div class="li">builds and full suites take turns: <span class="mono">vs-heavy</span>, cores ÷ 6 slots</div>
+              <div class="li">on battery below 50 %: pause new work</div>
+              <div class="li">at 80 % of a usage limit: start nothing new on that model</div>
+            </div>
+          </div>
+          <div class="boost"><b>Boost</b> &nbsp;on, or only while you're away on AC power: 18 sessions, load 36, 7 workers a project, 3 slots</div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s14");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 22);
+          K.rise(tl, ".s14 .head", 0.3);
+          [".c1", ".c2", ".c3"].forEach((c, i) => {
+            const at = 0.9 + i * 4.2;
+            K.rise(tl, ".s14 " + c, at, { y: 40 });
+            tl.fromTo(".s14 " + c + " .fill", { scaleX: 0 }, { scaleX: [0.75, 0.6, 0.8][i], duration: 1.6, ease: "power2.out" }, at + 0.4);
+            K.rise(tl, ".s14 " + c + " .li", at + 0.6, { stagger: 0.55, y: 12 });
+          });
+          // at the threshold the bars turn from amber to red: the limit holds
+          tl.to(".s14 .fill", { backgroundColor: "#ef7a68", duration: 0.4, stagger: 0.3 }, 14.2);
+          K.rise(tl, ".s14 .boost", 15.6);
+          window.__timelines["s14-limits"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

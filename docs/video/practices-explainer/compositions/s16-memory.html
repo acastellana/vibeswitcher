@@ -1,6 +1,162 @@
 <!doctype html>
-<html><head><meta charset="UTF-8" /></head><body><template>
-<style>#root{position:absolute;inset:0;}</style>
-<div id="root" data-composition-id="s16-memory" data-width="1920" data-height="1080"><div class="stage"><div class="kicker">stub s16-memory</div></div></div>
-<script>(function(){const tl=gsap.timeline({paused:true});tl.set({}, {}, 16);window.__timelines["s16-memory"]=tl;})();</script>
-</template></body></html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s16 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s16 .folder {
+          position: absolute;
+          left: 120px;
+          top: 260px;
+          width: 800px;
+          padding: 26px 34px;
+        }
+        .s16 .folder .path {
+          font-family: var(--mono);
+          font-weight: 700;
+          font-size: 28px;
+          color: var(--accent);
+          margin-bottom: 14px;
+        }
+        .s16 .file {
+          display: grid;
+          grid-template-columns: 1fr auto;
+          align-items: baseline;
+          padding: 14px 0;
+          border-top: 2px solid var(--line);
+        }
+        .s16 .file .f {
+          font-family: var(--mono);
+          font-size: 26px;
+        }
+        .s16 .file .f .muted {
+          display: block;
+          font-family: var(--body);
+          font-size: 22px;
+          margin-top: 4px;
+        }
+        .s16 .file .num {
+          font-size: 58px;
+        }
+        .s16 .notes {
+          position: absolute;
+          left: 120px;
+          top: 770px;
+          width: 800px;
+        }
+        .s16 .notes .li {
+          font-size: 26px;
+          line-height: 1.36;
+          margin-bottom: 8px;
+        }
+        .s16 .commit {
+          position: absolute;
+          left: 1000px;
+          top: 260px;
+          width: 800px;
+          padding: 26px 34px;
+          font-family: var(--mono);
+          font-size: 23px;
+          line-height: 1.6;
+        }
+        .s16 .commit .subj {
+          color: var(--fg);
+          font-weight: 700;
+          margin-bottom: 12px;
+        }
+        .s16 .commit .tr {
+          color: var(--muted);
+          white-space: pre;
+        }
+        .s16 .commit .tr b {
+          color: var(--accent);
+          font-weight: 700;
+        }
+        .s16 .receipt {
+          position: absolute;
+          left: 1000px;
+          top: 770px;
+          width: 800px;
+        }
+        .s16 .receipt .label {
+          margin-bottom: 12px;
+        }
+        .s16 .receipt .chips {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+        .s16 .receipt .chip {
+          font-weight: 400;
+          font-size: 22px;
+        }
+      </style>
+      <div id="root" data-composition-id="s16-memory" data-width="1920" data-height="1080">
+        <div class="stage s16">
+          <div class="kicker">14 / Memory that lives in the repository</div>
+          <div class="head h2">The lead remembers why.</div>
+          <div class="folder card">
+            <div class="path">docs/lead/</div>
+            <div class="file"><span class="f">decisions.md<span class="muted">each decision with its reasons</span></span><span class="num n1">0</span></div>
+            <div class="file"><span class="f">progress.md<span class="muted">what happened, line by line</span></span><span class="num n2">0</span></div>
+            <div class="file"><span class="f">incidents.md<span class="muted">what went wrong, and its check</span></span><span class="num n3">0</span></div>
+          </div>
+          <div class="notes">
+            <div class="li">Committed by the tool server. Workers can't edit it.</div>
+            <div class="li amber">A new lead starts by reading it.</div>
+          </div>
+          <div class="commit card">
+            <div class="subj">A slept-through window ends where the Mac last woke</div>
+            <div class="tr"><b>VS-Task:</b> <span class="t1"></span></div>
+            <div class="tr"><b>VS-Review:</b> <span class="t2"></span></div>
+            <div class="tr"><b>VS-Worker-Model:</b> <span class="t3"></span></div>
+            <div class="tr"><b>VS-Verifier-Model:</b> <span class="t4"></span></div>
+            <div class="tr"><b>VS-Build:</b> <span class="t5"></span></div>
+            <div class="tr"><b>VS-Contract:</b> <span class="t6"></span></div>
+          </div>
+          <div class="receipt">
+            <div class="label">and a receipt for every task</div>
+            <div class="chips">
+              <span class="chip">working time</span><span class="chip">tokens</span><span class="chip">cost</span><span class="chip">audit rounds</span><span class="chip">re-rolls</span><span class="chip">merge reruns</span><span class="chip">tests</span><span class="chip">your waits</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s16");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 16);
+          K.rise(tl, ".s16 .head", 0.3);
+          K.rise(tl, ".s16 .folder", 0.8, { y: 36 });
+          K.slide(tl, ".s16 .file", 1.2, { stagger: 0.4, x: -24 });
+          K.count(tl, S.querySelector(".n1"), 221, 1.4, 1.4);
+          K.count(tl, S.querySelector(".n2"), 4716, 1.8, 1.6);
+          K.count(tl, S.querySelector(".n3"), 21, 2.2, 1.0);
+          K.rise(tl, ".s16 .notes .li", 3.6, { stagger: 0.9 });
+          K.rise(tl, ".s16 .commit", 5.4, { y: 36 });
+          K.rise(tl, ".s16 .commit .subj", 5.8, { y: 10 });
+          const tr = ["a-task-s-time", "audit (pass at 5f7bd5e61bee)", "fable", "opus", "26dbfeb490a2…", "7ee5b24f0686b0fd"];
+          tr.forEach((t, i) => {
+            K.rise(tl, ".s16 .commit .tr:nth-of-type(" + (i + 2) + ")", 6.2 + i * 0.55, { y: 6, d: 0.25 });
+            K.type(tl, S.querySelector(".t" + (i + 1)), t, 6.3 + i * 0.55, 0.45);
+          });
+          K.rise(tl, ".s16 .receipt .label", 10.4);
+          K.pop(tl, ".s16 .receipt .chip", 10.7, { stagger: 0.15, from: 0.8 });
+          window.__timelines["s16-memory"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

@@ -1,6 +1,141 @@
 <!doctype html>
-<html><head><meta charset="UTF-8" /></head><body><template>
-<style>#root{position:absolute;inset:0;}</style>
-<div id="root" data-composition-id="s13-incidents" data-width="1920" data-height="1080"><div class="stage"><div class="kicker">stub s13-incidents</div></div></div>
-<script>(function(){const tl=gsap.timeline({paused:true});tl.set({}, {}, 18);window.__timelines["s13-incidents"]=tl;})();</script>
-</template></body></html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s13 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s13 .inc,
+        .s13 .chk {
+          position: absolute;
+          top: 270px;
+          width: 700px;
+          height: 380px;
+          padding: 28px 34px;
+        }
+        .s13 .inc {
+          left: 120px;
+          border-color: var(--stop);
+        }
+        .s13 .chk {
+          left: 1100px;
+          border-color: var(--go);
+        }
+        .s13 .meta {
+          font-family: var(--mono);
+          font-size: 21px;
+          color: var(--muted);
+          margin-bottom: 14px;
+        }
+        .s13 .k {
+          font-family: var(--mono);
+          font-weight: 700;
+          font-size: 26px;
+          margin-bottom: 12px;
+        }
+        .s13 .d {
+          font-size: 28px;
+          line-height: 1.36;
+        }
+        .s13 .mid {
+          position: absolute;
+          left: 820px;
+          top: 420px;
+          width: 280px;
+          text-align: center;
+        }
+        .s13 .mid .chip {
+          font-size: 22px;
+          padding: 6px 12px;
+        }
+        .s13 .mid svg {
+          display: block;
+          width: 280px;
+          height: 40px;
+          margin-top: 10px;
+        }
+        .s13 .mid path {
+          fill: none;
+          stroke: var(--accent);
+          stroke-width: 4;
+        }
+        .s13 .nums {
+          position: absolute;
+          left: 120px;
+          top: 720px;
+          width: 1680px;
+          display: grid;
+          grid-template-columns: 1fr 1fr 1.3fr;
+          gap: 28px;
+          border-top: 2px solid var(--line);
+          padding-top: 30px;
+        }
+        .s13 .nums .num {
+          font-size: 88px;
+          line-height: 1;
+        }
+        .s13 .nums .t {
+          font-size: 24px;
+          line-height: 1.32;
+          color: var(--muted);
+          margin-top: 12px;
+          width: 470px;
+        }
+      </style>
+      <div id="root" data-composition-id="s13-incidents" data-width="1920" data-height="1080">
+        <div class="stage s13">
+          <div class="kicker">11 / Incidents become checks</div>
+          <div class="head h2">A mistake happens once.</div>
+          <div class="card inc">
+            <div class="meta">docs/lead/incidents.md · 2026-11-06</div>
+            <div class="k stop">Incident</div>
+            <div class="d">Hung test runs held a Mac-wide test slot, and the merge gate, for 30 to 60 minutes at 0 % CPU. Five times in two days.</div>
+          </div>
+          <div class="mid">
+            <span class="chip">turn-this-incident-into-10</span>
+            <svg viewBox="0 0 280 40" aria-hidden="true"><path pathLength="1" d="M 10 20 L 262 20 M 246 8 L 264 20 L 246 32" /></svg>
+          </div>
+          <div class="card chk">
+            <div class="meta">merged · audited · in every merge since</div>
+            <div class="k go">Check: stall_min</div>
+            <div class="d">A run with no new output, under 1 % of a core for 10 minutes, is stopped, and the last test it started is named.</div>
+          </div>
+          <div class="nums">
+            <div><div class="num stop n1">0</div><div class="t">incidents recorded</div></div>
+            <div><div class="num go n2">0</div><div class="t">of them turned into a check task</div></div>
+            <div><div class="num amber"><span class="n3">0</span><span class="muted"> / 52</span></div><div class="t">of the lead's rules enforced by a check or test, not by memory</div></div>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s13");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 18);
+          K.rise(tl, ".s13 .head", 0.3);
+          K.slide(tl, ".s13 .inc", 0.9, { x: -40 });
+          K.rise(tl, ".s13 .inc .d", 1.4, { y: 12 });
+          K.pop(tl, ".s13 .mid .chip", 4.6, { from: 0.7 });
+          K.draw(tl, ".s13 .mid path", 5.0, 0.7, { ease: "power2.out" });
+          K.slide(tl, ".s13 .chk", 5.6, { x: 40 });
+          K.rise(tl, ".s13 .chk .d", 6.1, { y: 12 });
+          K.rise(tl, ".s13 .nums > div", 10.0, { stagger: 0.4 });
+          K.count(tl, S.querySelector(".n1"), 21, 10.2, 1.2);
+          K.count(tl, S.querySelector(".n2"), 21, 10.6, 1.2);
+          K.count(tl, S.querySelector(".n3"), 33, 11.0, 1.2);
+          window.__timelines["s13-incidents"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>
