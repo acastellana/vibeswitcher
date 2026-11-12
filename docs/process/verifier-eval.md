@@ -210,19 +210,22 @@ by place. When a prompt change is measured against this baseline, read the findi
   one test bundle, and today's toolchain builds one per target. It comes from replaying old commits on a new toolchain,
   and those verifiers couldn't do the under-load check.
 
-### 2026-11-09, --all (audits-settle-their), partial: 6 of 12 cases scored, checklist auto, model fable. Not a comparable baseline
+### 2026-11-09 and 2026-11-12, --all (audits-settle-their): 12 of 12 cases, checklist auto, model fable
 
 The prompt with a doubt settled, the invariant named and walked, callers read before an Important finding and additions
-nobody asked for named, with the three new REVIEW.md lines (passed with `--guide`). The account hit its Fable usage limit
-(HTTP 429) 6 minutes into a-base-branch-the, and every later case failed in about a second. **All three clean cases are
-among the six, so this run says nothing about false alarms.** As the script printed it:
+nobody asked for named, with this branch's REVIEW.md (blob a1729417, its three new lines on skipped states, passed with
+`--guide`). It ran in two parts into one folder. On 2026-11-09 the account hit its Fable usage limit (HTTP 429) six
+minutes into a-base-branch-the, after six cases had been scored. On 2026-11-12, with the prompt and REVIEW.md unchanged,
+the six unscored cases ran again one by one into the same folder (`--out`, each capped at what was left of $80; the
+first's stream says `claude-fable-5-2`), and `--summary` gave the 12-case total. The six failed attempts are kept in
+the run folder's `limit-hit-20261109/`. Claude Code moved from 2.1.319 to 2.1.322 between the two parts. As the script
+printed it:
 
 ```
-verifier eval, --all, checklist auto, Claude Code 2.1.319, REVIEW.md a1729417
-bugs found: 6 of 10 (3 as Important) in 6 bug cases
-false alarms: 0 Important finding(s) on 0 clean cases
-tokens: 13729584; cost: $25.64; 121 min
-not scored (claude ended with an error, in no total above): a-base-branch-the, finished-work-lands, steadier-merge-gate, the-lead-s-rules, the-phone-shows-needs, every-task-gets-a; they spent $2.91
+verifier eval, --all, checklist auto, Claude Code 2.1.319, 2.1.322, REVIEW.md a1729417
+bugs found: 10 of 14 (7 as Important) in 9 bug cases
+false alarms: 2 Important finding(s) on 3 clean cases
+tokens: 26710474; cost: $43.22; 182 min
 per case:
   a-fix-s-regression: 2 of 3 found (1 as Important), $4.15, 2 permission denial(s)
   a-slash-command-that: 0 of 1 found (0 as Important), $4.41, 0 permission denial(s)
@@ -230,37 +233,89 @@ per case:
   ending-a-session-ends: 1 of 3 found (1 as Important), $5.93, 2 permission denial(s)
   memory-the-host-parser: 1 of 1 found (1 as Important), $3.91, 2 permission denial(s)
   lead-record-commits: 1 of 1 found (0 as Important), $3.15, 1 permission denial(s)
+  a-base-branch-the: 2 of 2 found (2 as Important), $2.25, 0 permission denial(s)
+  finished-work-lands: 1 of 1 found (1 as Important), $3.99, 2 permission denial(s)
+  steadier-merge-gate: 1 of 1 found (1 as Important), $2.08, 0 permission denial(s)
+  the-lead-s-rules: clean, 0 Important finding(s), $4.16, 0 permission denial(s)
+  the-phone-shows-needs: clean, 1 Important finding(s) (false alarm), $1.52, 0 permission denial(s)
+  every-task-gets-a: clean, 1 Important finding(s) (false alarm), $3.58, 0 permission denial(s)
 ```
+
+With the $2.91 the 429'd attempt spent, the whole eval cost $46.13.
 
 | Case | By place, baseline → now | What the findings say |
 |---|---|---|
-| a-fix-s-regression | 2 → 2, Important 1 → 1 | F1 and F2 both found as Important at :69, each run in a scratch folder (the baseline didn't report F2; 2026-11-01 had it). F3 by a Nit at :69, `Unresolved:` partway through its evidence, its probe refused by the verifier's own rules, and weighed down. The Nit matched by place at :76 is something else (the `..` denies being broad). |
+| a-fix-s-regression | 2 → 2, Important 1 → 1 | F1 and F2 both found as Important at :69, each run in a scratch folder (the baseline didn't report F2; 2026-11-01 had it). F3 by a Nit at :69, `Unresolved:` partway through its evidence, its probe refused by the verifier's own rules, and played down. The Nit matched by place at :76 is something else (the `..` denies being broad). |
 | a-slash-command-that | 0 → 0 | Missed. Its one Important (:191) and a Nit on `unreadFooter` are elsewhere. |
 | the-briefing-uses | 1 → 1, Important 0 → 0 | By place only, as before: the Nit at :540 says each return to General reads the key again. Missed in substance. |
 | ending-a-session-ends | 1 → 1, Important 0 → 1 | By place only: the Important at :65 is a fixed 6 s wait passing vacuously under load, not F2's `terminationReason`. F1 and F3 missed. |
 | memory-the-host-parser | 1 → 1, Important 1 → 1 | Found as Important at :634, naming the callers that reach it. |
 | lead-record-commits | 0 → 1, Important 0 → 0 | Found in substance at :788, within scoring distance now, but filed **Pre-existing** ("unchanged from main") though the branch adds that function and the verifier's own stated invariant is the one it breaks. |
+| a-base-branch-the | 1 → 2, Important 1 → 2 | F1 as Important, from PrivateWriteLint, as before. **F2 found in substance as Important for the first time in four runs**: a team commit whose PostToolUse isn't recorded yet leaves `move.team` nil, so a typed `! git` within 30 s takes it as the user's. It names the guards read (`move.team`, `move.waiting`, the 30 s and used-once limits), the one test (which records the team's PostToolUse before the look) and the contract line it breaks. |
+| finished-work-lands | 0 → 1, Important 0 → 1 | Found as Important in substance, as in the baseline, now at :307 itself, so it scores. It names review(), LeadAdvance.merge, LeadToolset.merge and configure's lock as read, and the test that only flips the switch between passes. A second Important (a hung merge retried on every pass) isn't a known bug. |
+| steadier-merge-gate | 1 → 1, Important 1 → 1 | **Found in substance as Important for the first time in four runs** (the baseline's match was by place only): a crashed run's unfinished tests become the rerun's `--filter`, so the tests that never started never run. It names LeadToolset.merge `.passedOnRerun` and the test that asserts the crashed test goes into the filter. REVIEW.md's new line is this bug. |
+| the-lead-s-rules | clean → clean | No false alarm: 5 Nits. |
+| the-phone-shows-needs | clean, 0 → 1 Important | **Counted as a false alarm, and it may be a real bug.** The status row now carries `shownStatus`, so a worker waiting on its lead shows `working`, and app.js's quick-reply guard (`session.status === 'needsInput'`) no longer holds a chip back: tapping one types text and Enter into the worker's open permission prompt. Main still has both lines unchanged (PhoneAccess.swift:723, app.js:1234), and the server's input route doesn't check either. Not run, only read. A real bug, not a false alarm, if a phone user can open a worker's session and tap a chip. |
+| every-task-gets-a | clean, 0 → 1 Important | **A false alarm on a fact.** It says the price table's Sonnet 5.5 cache read ($0.20) doubles the source's $0.10, quoting the claude-api skill it loaded in the run, which does say $0.10. The copy of that skill on this Mac (marketplaces/anthropic-agent-skills/skills/claude-api/SKILL.md) says $0.20, as the code does, and so did the table's source when the task ran. The doubt rule worked as written: it settled the doubt from a source and raised it. The source was wrong or out of date. |
 
-**By substance, the same six cases only.** Baseline 4 of 10 found, 2 as Important; this run 5 of 10, 3 as Important. The one
-difference is a-fix-s-regression F2, which 2026-11-01 had as Important too, so it may be the run's luck.
+**Three runs, by substance** (one reader's judgment; the baseline's from its own entry above, Opus's as the lead gave it
+from audit-eval-on-opus, the 2026-11-12 run of main's prompt):
 
-**By class, the 14 known bugs.** Baseline: 4 found as Important (a-fix F1, memory, a-base F1, finished-work), 1 found with
-weak evidence (a-fix F3, its probe denied), 1 found and given too little weight (lead-record), 8 missed. This run, 10 bugs
-in six cases: 3 found as Important (a-fix F1 and F2, memory), 1 weak evidence (a-fix F3, unchanged), 1 too little weight
-(lead-record, unchanged and now labelled worse), 5 missed. The class that moved is missed → found, by one bug. Too little
-weight, the class the doubt rule aims at, didn't move: of the four bugs that rule was scored on, 1 is Important in
-substance (a-fix F1), as in the baseline, so +0 against a target of +2. Fairly non-blocking: a-fix F3 is arguable, as it
-needs a branch that tracks a symlink, and the board did fix it as Important. lead-record isn't: the contract says the base's
-records are kept exactly.
+| | Found | As Important | False alarms on 3 clean cases |
+|---|---|---|---|
+| Baseline, main's prompt, Fable (2026-11-09) | 6 of 14 | 4 | 0 |
+| Main's prompt, Opus (2026-11-12) | 7 of 14 | 6 | not given here |
+| This prompt, Fable | 9 of 14 | 7 | 2 by the script; 1 clearly false, 1 contestable |
 
-**Whether the prompt's lines were followed.** Six of six summaries name an invariant. Four of the five Important findings
-that aren't lint output name the callers, guards or tests read. One Nit of 28 findings starts `Unresolved:`, in the form
-asked for, and one has it partway through. Three Nits quote the closest contract line and none of those was raised to
-Important. There is no eval case for unrequested additions, and no done report in the eval, so the routine-calls exception
-wasn't exercised.
+By the script's score: 7 → 10 of 14 found, 4 → 7 as Important, false alarms 0 → 2. The numbers in the rest of this entry are by substance.
 
-**What this can't say.** The state-bug target (2 of 3) has one of three scored: lead-record-commits found, the other two not
-run. The 0-Important target has no clean case. It's one partial sample. REVIEW.md's hindsight: a-fix-s-regression and
-a-slash-command-that as in the baseline's note, and lead-record-commits now as well, since this branch's "clean but not
-conflicted" line is that bug. The same goes for steadier-merge-gate and a-base-branch-the F2 once they run. A gap the run
-shows: the doubt rule closes Nit as a parking place but not Pre-existing, which never fails the task.
+**By class, the 14 known bugs.**
+
+| Bug | Baseline | This run |
+|---|---|---|
+| a-fix F1 (`--remote`/`--exec`) | Important | Important |
+| a-fix F2 (`--add-file`) | missed | Important |
+| a-fix F3 (symlinked folder) | weak evidence (Nit, probe denied) | weak evidence (Nit, probe denied) |
+| a-slash-command-that | missed | missed |
+| the-briefing-uses | missed | missed |
+| ending F1, F2, F3 | missed | missed |
+| memory-the-host-parser | Important | Important |
+| lead-record-commits | too little weight (Nit) | too little weight (Pre-existing) |
+| a-base F1 (lint) | Important | Important |
+| a-base F2 (team move in flight) | missed | Important |
+| finished-work-lands | Important (out of place) | Important |
+| steadier-merge-gate | missed | Important |
+
+Baseline: 4 Important, 1 weak evidence, 1 too little weight, 8 missed. This run: 7 Important, 1 weak evidence, 1 too
+little weight, 5 missed. **The class that moved is missed → found as Important, by three bugs.** Two of the three
+(a-base F2, steadier-merge-gate) are the bugs this branch's REVIEW.md lines were written from. The third (a-fix F2) was
+found as Important on 2026-11-01 too, so it may be one run's luck. The too-little-weight and weak-evidence classes didn't
+move. Fairly non-blocking of these: a-fix F3 arguably, as it needs a branch that tracks a symlink, though the board fixed
+it as Important. lead-record-commits isn't: the contract says the base's records are kept exactly.
+
+**Against the targets.**
+- The four Nit-only bugs as Important (a-fix F1 and F3, the-briefing-uses, ending F2), target 2 more than the baseline:
+  1 → 1, so **+0, not met**. The doubt rule didn't lift the bugs it was aimed at. a-fix F1 was Important in both runs.
+  F3 is still a played-down Nit with its probe denied. The other two are still missed, not parked.
+- The three state bugs, target at least 2 found: **3 of 3 found in substance, 2 as Important, met**, with the
+  hindsight below. lead-record-commits is found but filed Pre-existing, which never holds a merge.
+- 0 Important on clean cases: **not met**, 2 by the script. every-task-gets-a's is false (a stale source quoted
+  faithfully). the-phone-shows-needs' may be a real bug the clean label didn't know of. The lead should decide, as it
+  decides whether that case stays clean.
+
+**Whether the prompt's lines were followed.** 12 of 12 summaries name an invariant. Of the 9 Important findings in the
+six cases run on 2026-11-12, 8 name the callers, guards or tests read, and the ninth is lint output. Four Nits are
+`Unresolved:`, three of them in the form asked for (the deciding fact and the command or record that settles it: two
+about acceptance checks only a done report shows, one in the-briefing-uses), and one has it partway through (a-fix F3).
+**Unrequested additions:** there's no eval case for them, so only false alarms can be checked. every-task-gets-a has three
+"edit outside the boundaries" Nits (Worktrees.swift, BatchSummary.swift, Sandbox.swift), and none was raised to
+Important. The eval has no done report, so whether the rule stays quiet on routine calls a worker listed wasn't tested.
+Five Nits in the bug cases quote the closest contract line, and all of them stayed Nits.
+
+**What this can't say.** It's one run of each case. REVIEW.md's hindsight now covers six of the nine bug cases:
+a-fix-s-regression, a-slash-command-that and finished-work-lands from the baseline's note, plus steadier-merge-gate,
+a-base-branch-the (F2) and lead-record-commits, whose bugs are this branch's three new lines. Those six cases' scores
+say less about a new bug of the same kind, and two of this run's three gains are among them. The gap the run shows: the
+doubt rule closes Nit as a parking place but not Pre-existing (lead-record-commits), which never fails the task. The
+Pre-existing sentence is a separate, later change. The new rule also raised a fact it settled from a stale source
+(every-task-gets-a). Cost per scored case fell from $4.45 in the baseline to $3.60.
