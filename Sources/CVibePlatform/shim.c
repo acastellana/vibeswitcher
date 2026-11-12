@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,5 +51,9 @@ int vibe_birth_time(int dirfd, const char *path, int flags, struct timespec *bir
 
 int vibe_ptsname_r(int fd, char *buffer, size_t length) {
     return ptsname_r(fd, buffer, length);
+}
+
+pid_t vibe_signal_sender(const void *info) {
+    return ((const siginfo_t *)info)->si_pid;
 }
 #endif

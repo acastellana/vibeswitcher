@@ -39,5 +39,10 @@ int vibe_ptsname_r(int fd, char *buffer, size_t length);
 // POSIX_SPAWN_SETSID, for posix_spawnattr_setflags.
 #define VIBE_POSIX_SPAWN_SETSID 0x80
 
+// siginfo_t's si_pid, the process that sent a signal: `info` is the siginfo_t a handler installed with SA_SIGINFO is
+// given. In glibc and in musl `si_pid` is a macro over unions each names its own way, and Swift imports no such
+// macro. The pointer is untyped so that this header needs no <signal.h>.
+pid_t vibe_signal_sender(const void *info);
+
 #endif
 #endif
