@@ -2785,3 +2785,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 19:45 Automatically (auto_advance): Didn't cleanup|an-animated-explainer: fatal: '/Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/an-animated-explainer' is not a working tree
 - 2026-11-12 19:45 Update: Installed at 19:45: blocked merges get noticed, and card commands report how they ended — **Live in your app since the 19:45 install.** The board is empty: nothing running, nothing waiting.
 - 2026-11-12 19:45 Update: Correction: the empty an-animated-explainer folder was not removed — The 19:45 update says I removed the empty `an-animated-explainer` folder. That's wrong: the permission check refused the removal, so the folder is still there and the repeated cleanup error continues.…
+- 2026-11-12 21:26 Fetched origin/main at f2ebe92b: main is 85 commits ahead of origin/main and 0 commits behind it
