@@ -189,7 +189,10 @@ struct ImagesTests {
             #else
             let made = try #require(thumbnail)
             let size = Platform.Images.headerSize(of: try Self.write(Array(made), "thumbnail-\(side).png", in: folder))
-            #expect(max(size?.width ?? 0, size?.height ?? 0) == side, "\(Self.text(size))")
+            // ImageIO keeps the longer side at most `side`, and may make it smaller (a JPEG is decoded at 1/2, 1/4 or 1/8
+            // of its size where that is enough: 9x6 at most 3 came out 2x1 on the Mac): what KeptImages needs is "no larger".
+            let longer = max(size?.width ?? 0, size?.height ?? 0)
+            #expect(longer >= 1 && longer <= side, "\(Self.text(size))")
             #endif
         }
         // What is no image: by its path, and opened (when it opens at all).

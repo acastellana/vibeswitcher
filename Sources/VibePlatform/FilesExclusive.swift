@@ -26,11 +26,7 @@ extension Platform.Files {
     /// The Mac's open(2) makes and locks in one call (`O_EXLOCK`). Linux has none: the file is made under another
     /// name, locked, and only then given this one (FilesExclusive+Linux.swift).
     public static func createLocked(_ path: String, mode: mode_t) -> Int32 {
-        #if canImport(Darwin)
-        return open(path, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW | O_EXLOCK, mode)
-        #else
-        return createLockedByLink(path, mode: mode)
-        #endif
+        createLockedByLink(path, mode: mode)
     }
 
     /// open(2)'s access mode for a folder opened only to be watched, or to open what is in it: the Mac's

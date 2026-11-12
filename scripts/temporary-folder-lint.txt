@@ -101,3 +101,9 @@ allow: Tests/VibeCoreTests/SessionTempTests.swift | #expect(root.path == "/priva
 # AgentExportLint: text it reads in scripts, never a folder it opens.
 allow: Tests/VibeCoreTests/AgentExportLintTests.swift | static let scratchRoots = | the folders a script's export may write into, matched against the script's text
 allow: Tests/VibeCoreTests/AgentExportLintTests.swift | unzip -q tree.zip -d /tmp/x | a line of an example script the lint reads; nothing runs it
+# VibePlatform's tests: paths in strings that nothing opens.
+allow: Tests/VibePlatformTests/FilesExclusiveTests.swift | #expect(root == "/tmp") | compares the shared temporary root's name; nothing is opened
+allow: Tests/VibePlatformTests/FilesExclusiveTests.swift | #expect(root == "/private/tmp") | compares the shared temporary root's name; nothing is opened
+allow: Tests/VibePlatformTests/SettingsTests.swift | store.set(URL(fileURLWithPath: "/tmp"), forKey: "place") | a URL, a value no property list holds, that the store must refuse; nothing is opened
+allow: Tests/VibePlatformTests/SocketsTests.swift | Platform.Sockets.unixAddress("/tmp/s") | builds an address and reads its bytes; no socket is made
+allow: Tests/VibePlatformTests/SocketsTests.swift | Array("/tmp/s".utf8) | the bytes that address holds; no socket is made
