@@ -174,6 +174,6 @@ struct MacSleepLimitsTests {
             #expect(await hasLooked(clock, run))
         }
         #expect(await exited(run), "pid \(run.processIdentifier) still running")
-        #expect(run.terminationStatus == 124 && text(output).contains("vs-heavy: quiet: no progress for 11 min ("), "\(text(output))")
+        #expect(run.terminationStatus == 125 && text(output).contains("vs-heavy: quiet: no progress for 11 min ("), "\(text(output))")
     }
 }

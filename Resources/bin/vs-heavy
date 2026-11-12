@@ -53,7 +53,7 @@
 #
 # Nor does a run that makes no progress keep it until then (five test runs sat at 0 % CPU for 30–60 min holding a slot
 # and the merge queue, 2026-11-05 and 06, one at load 4.2 on 12 cores): --stall TIME (VIBESWITCHER_HEAVY_STALL, else
-# 10 min; "0" or "off": never) ends COMMAND's group the same way, exit 124, once it has gone that long with no progress
+# 10 min; "0" or "off": never) ends COMMAND's group the same way, exit 125, once it has gone that long with no progress
 # while the Mac's 1-minute load is under load_threshold (mac-limits.json's loadThreshold, else twice the cores; raised
 # while boosted; VIBESWITCHER_HEAVY_LOAD stands in for the load, tests): no new output, its group under 1 % of a core,
 # no new process in it. A loaded Mac starving it isn't a hang: while the load is at or above the threshold, its
@@ -64,6 +64,12 @@
 # --stall is off and only --timeout ends it. Stopping it, it says so first ("no progress for 10 min …; last test
 # started: X"), then its processes (pid, parent, state, CPU seconds, name: the kernel's records, no debugger) and,
 # from a file, its output's last 60 lines.
+#
+# However it stops a run early, its last line says so once the run's tree is gone, so whoever reads the output reads why
+# rather than wait on a run that's over: "vs-heavy: WHAT: ended: WHY (exit N)." Each way out has its own status: 124
+# past --timeout, 125 at --stall, 128 + the signal when it was sent one (or 143 when this script went), and 123 when no
+# slot could be taken (the lock folder unusable: COMMAND never ran). On 2026-11-12 workers took jobs for gone that
+# were running on (Claude Code had moved them to the background at their 10 min timeout): the output says which.
 #
 # COMMAND gets VIBESWITCHER_TEST_LOCK naming the slot: a vs-heavy under one that holds any of this folder's slots (a
 # test script the merge's test command runs, a suite under a wrapped build) runs its command at once rather than wait
@@ -165,16 +171,16 @@ if [[ $held == "$lock_dir/test-build.lock" || $held == "$lock_dir"/test-build-[0
     exec "$@"
 fi
 
-mkdir -p -m 700 "$lock_dir" || { echo "vs-heavy: can't make $lock_dir for the heavy-work slots" >&2; exit 1; }
+mkdir -p -m 700 "$lock_dir" || { echo "vs-heavy: ended: can't make $lock_dir for the heavy-work slots, so it never ran (exit 123)." >&2; exit 123; }
 # /private/tmp is everyone's: a folder someone else made there (or a link) isn't taken as this user's.
-[[ -O $lock_dir && ! -L $lock_dir ]] || { echo "vs-heavy: $lock_dir isn't a folder of yours: the heavy-work slots can't be kept there" >&2; exit 1; }
+[[ -O $lock_dir && ! -L $lock_dir ]] || { echo "vs-heavy: ended: $lock_dir isn't a folder of yours: the heavy-work slots can't be kept there, so it never ran (exit 123)." >&2; exit 123; }
 
 # Slot k's file, on fd 19+k while this waits.
 slot_file() { (( $1 == 1 )) && echo "$lock_dir/test-build.lock" || echo "$lock_dir/test-build-$1.lock"; }
 fds=()
 for (( k = 1; k <= slots; k++ )); do
     file=$(slot_file "$k")
-    eval "exec $(( 19 + k ))>> \"\$file\"" || { echo "vs-heavy: can't open $file" >&2; exit 1; }
+    eval "exec $(( 19 + k ))>> \"\$file\"" || { echo "vs-heavy: ended: can't open $file, so it never ran (exit 123)." >&2; exit 123; }
     fds+=("$(( 19 + k )):$file")
 done
 
@@ -297,7 +303,10 @@ taken=$(/usr/bin/perl -MFcntl=:DEFAULT,:flock -MPOSIX=strftime -e '
     leave();
     printf STDERR "vs-heavy: %s: took the test and build lock (slot %d of %d) after %d s.\n", $what, $got, $n, time - $start if $said ne "";
     print $got;
-' "$what" "$$" "$PWD" "${fds[@]}") || { echo "vs-heavy: couldn't take a slot of the test and build lock" >&2; exit 1; }
+' "$what" "$$" "$PWD" "${fds[@]}") || {
+    echo "vs-heavy: $what: ended: couldn't take a slot of the test and build lock (in $lock_dir), so it never ran (exit 123)." >&2
+    exit 123
+}
 
 # Keeps the slot taken on fd 9 and lets go of the others' fds.
 lock_file=$(slot_file "$taken")
@@ -397,7 +406,9 @@ done
     }
     # Either side may run first: the group is made before anything is sent to it.
     POSIX::setpgid($child, $child);
-    my ($start, $status, $timedOut) = (now(), undef, 0);
+    # Why it was stopped, said again as its last line once its tree is gone (its own output may follow the first
+    # word of it), and the status it exits with.
+    my ($start, $status, $timedOut, $ended) = (now(), undef, 0, undef);
     # The user'\''s own processes, from ps: pid => [parent, group, CPU seconds, start (lstart)]; undef when it did not
     # answer in 5 s.
     sub table {
@@ -492,7 +503,7 @@ done
         my $min = $idle >= 60 ? int($idle / 60 + 0.5) . " min" : int($idle + 0.5) . " s";
         my $at = defined $load ? sprintf("at load %.1f under load_threshold %s", $load, $loadLimit + 0) : "load unread";
         binmode(STDERR, ":utf8");
-        print STDERR "vs-heavy: $what: no progress for $min (no new output and under 1 % of a core, $at): stopping it, with everything it started (exit 124); "
+        print STDERR "vs-heavy: $what: no progress for $min (no new output and under 1 % of a core, $at): stopping it, with everything it started (exit 125); "
             . (defined $test ? "last test started: $test"
                : $unknown ? "$unknown tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can'\''t say which of them were running"
                : "no test in its output started and never finished") . ".\n";
@@ -508,12 +519,12 @@ done
         if (waitpid($child, WNOHANG) == $child) { $status = $?; last; }
         if (!defined $stop && (getppid() == 1 || !kill(0, $script))) {
             print STDERR "vs-heavy: $what: vs-heavy (pid $script) went: stopping it.\n";
-            $stop = "TERM";
+            ($stop, $ended) = ("TERM", "vs-heavy (pid $script) went, so it was stopped");
         }
         if (!defined $stop && now() - $start >= $limit) {
             my $past = $limit % 60 ? "$limit s" : $limit / 60 . " min";
             print STDERR "vs-heavy: $what: ran past $past (--timeout): stopping it, with everything it started (exit 124).\n";
-            ($stop, $timedOut) = ("TERM", 1);
+            ($stop, $timedOut, $ended) = ("TERM", 124, "ran past $past (--timeout), stopped with everything it started");
         }
         last if defined $stop;
         if (now() >= $next) {
@@ -538,8 +549,10 @@ done
             $next = now() + $every;
             # Judged only at a look, on what that look saw.
             if ($stall > 0 && now() - $progressed >= $stall) {
-                report(now() - $progressed, $loaded);
-                ($stop, $timedOut) = ("TERM", 1);
+                my $idle = now() - $progressed;
+                report($idle, $loaded);
+                my $min = $idle >= 60 ? int($idle / 60 + 0.5) . " min" : int($idle + 0.5) . " s";
+                ($stop, $timedOut, $ended) = ("TERM", 125, "no progress for $min (--stall), stopped with everything it started");
                 last;
             }
         }
@@ -562,8 +575,10 @@ done
             }
             select(undef, undef, undef, 0.05);
         }
-        exit 124 if $timedOut;
-        exit 128 + ({TERM => 15, INT => 2, HUP => 1}->{$stop});
+        my $code = $timedOut || 128 + ({TERM => 15, INT => 2, HUP => 1}->{$stop});
+        $ended //= "stopped by SIG$stop sent to vs-heavy";
+        print STDERR "vs-heavy: $what: ended: $ended (exit $code).\n";
+        exit $code;
     }
     exit($status & 127 ? 128 + ($status & 127) : $status >> 8);
 ' "$$" "$what" "$timeout" "$lock_file.active" "${VIBESWITCHER_HEAVY_SAMPLE:-60}" "$stall" "$load_limit" "${VIBESWITCHER_HEAVY_LOAD:-}" "$@" <&0 &

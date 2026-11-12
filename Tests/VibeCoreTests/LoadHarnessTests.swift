@@ -108,6 +108,9 @@ import Testing
         return pids.filter { kill($0, 0) == 0 }.count
     }
 
+    /// The last line it said.
+    static func lastLine(_ output: String) -> String { output.split(separator: "\n").last.map(String.init) ?? "" }
+
     /// Readings under every threshold.
     let idle = ["FAKE_LOAD": "0.5", "FAKE_MEMORY": "80", "FAKE_DISK_GB": "100"]
 
@@ -159,16 +162,19 @@ import Testing
 
     @Test func aMacAlreadyLoadedIsRefusedSayingWhatToWaitFor() async throws {
         let run = try await harness(["--load", "2", "--check-only"], fake: idle.merging(["FAKE_LOAD": "\(2 * cores).5"]) { $1 })
-        #expect(run.status != 0)
+        // A busy Mac's refusal has its own status (75, try again later) and is its last line: not a test failure.
+        #expect(run.status == 75, "\(run.output)")
         #expect(run.output.contains("already loaded"), "\(run.output)")
+        #expect(Self.lastLine(run.output).hasPrefix("not starting: the Mac is already loaded") && Self.lastLine(run.output).hasSuffix("then run this again (exit 75)."), "\(run.output)")
         #expect(run.output.contains("Wait until the first of `uptime`'s load averages is under \(2 * cores)"), "\(run.output)")
     }
 
     @Test func memoryUnderTheFloorIsRefused() async throws {
         let low = idle.merging(["FAKE_MEMORY": "24"]) { $1 }
         let run = try await harness(["--check-only"], fake: low)
-        #expect(run.status != 0)
+        #expect(run.status == 75, "\(run.output)")
         #expect(run.output.contains("under the floor of 25 %"), "\(run.output)")
+        #expect(Self.lastLine(run.output).hasSuffix("(exit 75)."), "\(run.output)")
         await #expect(try harness(["--memory-floor", "20", "--check-only"], fake: low).status == 0)
     }
 
@@ -201,7 +207,7 @@ import Testing
     @Test func fakeReadingsNeverStartLoad() async throws {
         let pids = temp.url("load-pids")
         let run = try await harness(["--load", "1", "--max-load", "0.01", "--wait", "0", "--pid-file", pids.path, "--", "true"], fake: ["FAKE_LOAD": "0"])
-        #expect(run.status != 0)
+        #expect(run.status == 75, "\(run.output)")
         #expect(run.output.contains("already loaded"), "\(run.output)")
         #expect(!FileManager.default.fileExists(atPath: pids.path))
     }
@@ -291,9 +297,11 @@ import Testing
         let late = temp.url("late-pids")
         try "\(2 * cores + 1)".write(to: load, atomically: true, encoding: .utf8)
         let gaveUp = try await harness(["--load", "2", "--wait", "1", "--pid-file", late.path, "--", "true"], fake: fake)
-        #expect(gaveUp.status != 0)
+        // Refused under vs-heavy too: its status and last line come out as the run's.
+        #expect(gaveUp.status == 75, "\(gaveUp.output)")
         // Whether it said it waits first depends on how soon vs-heavy handed over, on a busy Mac after the second.
         #expect(gaveUp.output.contains("already loaded"), "\(gaveUp.output)")
+        #expect(Self.lastLine(gaveUp.output).hasSuffix("then run this again (exit 75)."), "\(gaveUp.output)")
         #expect(!FileManager.default.fileExists(atPath: late.path))
     }
 

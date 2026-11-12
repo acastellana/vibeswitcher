@@ -346,6 +346,9 @@ struct TestLockTests {
         #expect(Date().timeIntervalSince(started) < 30, "it waited for the sleep")
         #expect(lines(url("hung.out").path).joined().contains("vs-heavy: hung: ran past 1 s (--timeout): stopping it, with everything it started (exit 124)."),
                 "\(lines(url("hung.out").path))")
+        // Its last line says what ended it, once its tree is gone: what a worker reads instead of waiting on it.
+        #expect(lines(url("hung.out").path).last == "vs-heavy: hung: ended: ran past 1 s (--timeout), stopped with everything it started (exit 124).",
+                "\(lines(url("hung.out").path))")
         let sleep = try #require(pid(in: sleeper))
         #expect(await eventually { kill(sleep, 0) != 0 })
         #expect(TestLock(directory: locks).holders().isEmpty)
@@ -360,6 +363,33 @@ struct TestLockTests {
         let bad = try Self.runVsHeavy(["--timeout", "soon", "/usr/bin/true"], lockDirectory: locks, output: url("bad.out").path)
         #expect(await exited(bad), "pid \(bad.processIdentifier) still running")
         #expect(bad.terminationStatus == 2)
+    }
+
+    /// When no slot can be taken (the line can't be kept in the lock folder), vs-heavy gives up without running its
+    /// command, its last line saying so, with a status of its own (123), not the 1 a test failure gives.
+    @Test func vsHeavyThatCantTakeASlotSaysSoLastAndExits123() async throws {
+        let locks = url("heavy-locks").path, ran = url("ran").path
+        // The line's lock file can't be opened: a folder in its place.
+        try FileManager.default.createDirectory(atPath: locks + "/queue.lock", withIntermediateDirectories: true)
+        let run = try Self.runVsHeavy(["--as", "blocked", "/bin/sh", "-c", "echo ran > \(RecentProjects.shellQuote(ran))"],
+                                      lockDirectory: locks, output: url("blocked.out").path)
+        #expect(await exited(run), "pid \(run.processIdentifier) still running")
+        #expect(run.terminationStatus == 123, "\(lines(url("blocked.out").path))")
+        #expect(lines(url("blocked.out").path).last == "vs-heavy: blocked: ended: couldn't take a slot of the test and build lock (in \(locks)), so it never ran (exit 123).",
+                "\(lines(url("blocked.out").path))")
+        #expect(!FileManager.default.fileExists(atPath: ran), "its command ran")
+    }
+
+    /// Sent TERM (how workers stop what they started), its last line says that's what ended it.
+    @Test func vsHeavyStoppedByASignalSaysSoLast() async throws {
+        let locks = url("heavy-locks").path, started = url("started").path
+        let run = try Self.runVsHeavy(["--as", "long", "/bin/sh", "-c", "touch \(RecentProjects.shellQuote(started)); exec sleep 60"],
+                                      lockDirectory: locks, output: url("long.out").path)
+        #expect(await eventually { FileManager.default.fileExists(atPath: started) })
+        kill(run.processIdentifier, SIGTERM)
+        #expect(await exited(run), "pid \(run.processIdentifier) still running")
+        #expect(run.terminationStatus == 128 + SIGTERM)
+        #expect(lines(url("long.out").path).last == "vs-heavy: long: ended: stopped by SIGTERM sent to vs-heavy (exit 143).", "\(lines(url("long.out").path))")
     }
 
     /// Past its timeout a hung run's whole tree ends (its group, and what it started in a group of its own), and nothing

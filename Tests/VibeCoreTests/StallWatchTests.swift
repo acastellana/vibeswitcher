@@ -222,8 +222,8 @@ struct StallWatchTests {
     @Test func vsHeavyNamesNoTestWhenSeveralMayBeQueued() async throws {
         let stuck = "$| = 1; print \"\\x{25C7} Test one() started.\\n\\x{25C7} Test two() started.\\n\\x{25C7} Test three() started.\\n\"; sleep \(Int(hangGuard))"
         let (status, output, _) = try await vsHeavy(["--as", "stuck", "--stall", "2s", "/usr/bin/perl", "-CS", "-e", stuck], load: "4.2", name: "queued")
-        #expect(status == 124, "\(output)")
-        #expect(output.contains("(exit 124); 3 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running."), "\(output)")
+        #expect(status == 125, "\(output)")
+        #expect(output.contains("(exit 125); 3 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running."), "\(output)")
         #expect(!output.contains("last test started"), "\(output)")
     }
 
@@ -235,18 +235,21 @@ struct StallWatchTests {
         return (run.terminationStatus, (try? String(contentsOfFile: out, encoding: .utf8)) ?? "", locks)
     }
 
-    /// The incident under vs-heavy: silent at 0 % CPU after starting a test, it's stopped at --stall (exit 124, as
-    /// past --timeout), saying the test, its processes and its output's tail, and the slot is let go.
+    /// The incident under vs-heavy: silent at 0 % CPU after starting a test, it's stopped at --stall (exit 125, its own:
+    /// past --timeout is 124), saying the test, its processes and its output's tail, and the slot is let go. Its last
+    /// line says what ended it, after the tail (2026-11-12: workers waited on runs they couldn't tell were over).
     @Test func vsHeavyStopsARunThatMakesNoProgressAndLetsGoOfItsSlot() async throws {
         let stuck = "$| = 1; print \"\\x{25C7} Test stuckForever() started.\\n\"; print \"waiting\\n\"; sleep \(Int(hangGuard))"
         let started = Date()
         let (status, output, locks) = try await vsHeavy(["--as", "stuck", "--stall", "2s", "/usr/bin/perl", "-CS", "-e", stuck], load: "4.2", name: "stuck")
-        #expect(status == 124, "\(output)")
+        #expect(status == 125, "\(output)")
         #expect(Date().timeIntervalSince(started) < hangGuard)
         #expect(output.contains("vs-heavy: stuck: no progress for ") && output.contains(" s (no new output and under 1 % of a core, at load 4.2 under load_threshold "), "\(output)")
-        #expect(output.contains("(exit 124); last test started: stuckForever()."), "\(output)")
+        #expect(output.contains("(exit 125); last test started: stuckForever()."), "\(output)")
         #expect(output.contains("vs-heavy: its processes (pid, parent, state, CPU time, name):\n") && output.contains("/usr/bin/perl"), "\(output)")
         #expect(output.contains("vs-heavy: its output's last 2 lines:\n    ◇ Test stuckForever() started.\n    waiting\n"), "\(output)")
+        let last = output.split(separator: "\n").last.map(String.init) ?? ""
+        #expect(last.hasPrefix("vs-heavy: stuck: ended: no progress for ") && last.hasSuffix(" s (--stall), stopped with everything it started (exit 125)."), "\(output)")
         let lock = TestLock(directory: locks)
         #expect(lock.holders().isEmpty)
         guard case .held(let held, _, _) = lock.acquire(as: "next", timeout: 5) else { Issue.record("the slot stayed held"); return }
@@ -255,7 +258,7 @@ struct StallWatchTests {
         let set = try TestLockTests.runVsHeavy(["sleep", "\(Int(hangGuard))"], lockDirectory: locks, output: temp.url("set.out").path,
                                               environment: [TestLock.sampleVariable: "0.1", "VIBESWITCHER_HEAVY_LOAD": "1", TestLock.stallVariable: "2s"])
         #expect(await exited(set), "pid \(set.processIdentifier) still running")
-        #expect(set.terminationStatus == 124)
+        #expect(set.terminationStatus == 125)
         let off = try await vsHeavy(["--stall", "off", "sleep", "1"], load: "1", name: "off")
         #expect(off.status == 0, "\(off.output)")
         let bad = try await vsHeavy(["--stall", "soon", "true"], load: "1", name: "bad")
@@ -300,7 +303,7 @@ struct StallWatchTests {
         let run = try TestLockTests.runVsHeavy(["--stall", "2s", "/bin/sh", "-c", helper], lockDirectory: locks, output: out,
                                                environment: [TestLock.sampleVariable: "0.1", "VIBESWITCHER_HEAVY_LOAD": "1"])
         #expect(await exited(run), "pid \(run.processIdentifier) still running")
-        #expect(run.terminationStatus == 124, "\((try? String(contentsOfFile: out, encoding: .utf8)) ?? "")")
+        #expect(run.terminationStatus == 125, "\((try? String(contentsOfFile: out, encoding: .utf8)) ?? "")")
         let pid = try #require((try? String(contentsOfFile: mark, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
         defer { kill(pid, SIGKILL) }
         #expect(kill(pid, 0) != 0, "the helper outlived its run")
