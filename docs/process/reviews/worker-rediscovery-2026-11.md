@@ -18,13 +18,19 @@ future worker, which a board kept by past workers can't do as well.
 - **All** worker sessions of this project in the 7 days to 2026-11-13 18:30, no sampling. In that window, this
   repository's worktrees have 324 Claude Code sessions: **151 worker sessions**, 170 verifier sessions and 3 others
   (one-off command runs). The worker sessions are the ones whose first prompt starts the task.
-- **150 worker sessions were read**, covering **119 tasks** (some tasks had a second worker, for rework or after a
-  restart). The one left out is this task's own session, which reads the others' output and would count it twice.
+- **150 worker sessions were read**, covering **119 tasks** (some tasks had a second worker, for rework, after a
+  restart, or a Codex worker besides the Claude one). The one left out is this task's own session, which reads the
+  others' output and would count it twice.
+- **Left out: Codex workers.** The lead sent 14 tasks' workers to Codex in the window (progress.md). Codex keeps no
+  Claude Code transcript, so 12 of those tasks have no worker session here at all: about 9% of the window's 131 worker
+  tasks. The figures below cover the 119 Claude-run tasks only. Nothing suggests Codex workers hit the traps more or
+  less often.
 - Worker time in the sample: **7,167 worker-minutes (119.5 hours)**. That is each session's time between its events,
   with any gap over 10 minutes counted as 10 minutes, so waiting on the lead, the user or a busy Mac isn't counted as
   work.
 - Only this repository's sessions were read: the session folders of worktrees under this repository's
-  `.vibeswitcher/worktrees`, plus `docs/lead/progress.md` for dates. No other project's sessions were opened.
+  `.vibeswitcher/worktrees`. `docs/lead/progress.md` was read by hand for the Codex count and for when main was red.
+  No other project's sessions were opened.
 
 ## Method
 
@@ -44,7 +50,9 @@ python3 -I scripts/worker-rediscovery.py --days 14  # another window
   (writing it) to the first call of another kind after the burst (the recovery). For a failed lint, the time runs to
   the next lint run that doesn't fail the same way, or to the next report or ask_lead, whichever comes first. For a
   merge conflict, it runs from the conflicted `git merge` to the commit that resolves it. Every gap is capped at 10
-  minutes and every hit at 30 minutes.
+  minutes and every hit at 30 minutes (60 for a merge conflict; the longest seen was 24). A conflicted merge that was
+  aborted rather than committed (2 cases) isn't timed.
+- **The window** always ends when the script runs, so a rerun later counts a later week.
 - **A repeat** is a hit in any task except the first task to hit that category. The first hit is the discovery a tip
   would have come from, so it isn't counted as avoidable.
 - **"Said today"** checks whether today's AGENTS.md or the worker brief (`Sources/VibeCore/LeadWorkflow.swift`) already
@@ -52,7 +60,8 @@ python3 -I scripts/worker-rediscovery.py --days 14  # another window
 
 Limits. The timings are lower bounds. A refused command often costs a few seconds of tool time plus the model's
 rethink, and only the gaps between events are counted. The re-test after a merge conflict isn't counted, and neither
-is the lead's side of a conflict (a failed merge attempt, an audit that had to wait). Categories that no regular
+is the lead's side of a conflict (a failed merge attempt, an audit that had to wait). Bucket (c) counts conflicts
+only: duplicated work between concurrent tasks without a conflict wasn't measured. Categories that no regular
 expression catches, such as a worker reading the same long file other workers read to learn the same thing, aren't
 counted. Even if every per-hit time were twice as long, (a) + (c) would be 6.0%. That case is covered in the verdict.
 
