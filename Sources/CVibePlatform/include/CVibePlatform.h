@@ -63,4 +63,5 @@ pid_t vibe_signal_sender(const void *info);
 // __linux__ guard), and the module's umbrella has no header it leaves out (-Wincomplete-umbrella).
 #include "CVibePlatform_terminals.h"
 #include "CVibePlatform_self.h"
+#include "CVibePlatform_sealed.h"
 #endif

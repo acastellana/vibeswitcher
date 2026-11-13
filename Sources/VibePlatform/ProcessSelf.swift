@@ -13,7 +13,8 @@ extension Platform {
     ///
     /// The Mac's forms do nothing and say nothing (`harden()` false, the reads nil): its processes are kept from each
     /// other by the system's own rules (no `task_for_pid` without an entitlement), and the Mac's path keeps today's
-    /// behaviour. The systems' own calls are in ProcessSelf+Linux.swift and ProcessSelf+Darwin.swift.
+    /// behaviour. The systems' own calls are in ProcessSelf+Linux.swift and ProcessSelf+Darwin.swift. The images it
+    /// starts, sealed in-memory copies, are in SealedCopy.swift.
     public enum ProcessSelf {
         /// Makes this process non-dumpable (`PR_SET_DUMPABLE 0`) and gives it no core file (`RLIMIT_CORE 0`, soft and
         /// hard); true when both held. For the first statements of a program that holds what no other process of the
