@@ -2807,3 +2807,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 18:56 Automatically (auto_advance): Released measure-how-often's worker, idle since its done report on 8d5e655c, while its audit runs (ended pid 21592 (Worker: Measure how often workers repeat the same search or pitfall)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-13 18:56 Planned every-worker-is-told: Every worker is told once when main is red (review audit)
 - 2026-11-13 18:59 Audit of measure-how-often: complete, clean, round 1: 4 Nit open
+- 2026-11-13 19:19 Pipeline held: measure-how-often ready to merge with none landing; cause: every test slot held
+- 2026-11-13 19:23 Merged measure-how-often: Measure how often workers repeat the same search or pitfall (build a0474fa83c82)
