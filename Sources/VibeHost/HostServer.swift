@@ -118,7 +118,7 @@ public final class HostServer {
     private var acceptSource: DispatchSourceRead?
     private var housekeeping: DispatchSourceTimer?
     /// The watch on `Config.owner`.
-    private var ownerWatch: DispatchSourceProcess?
+    private var ownerWatch: (any Platform.Cancellable)?
     private var lastBusy = Date()
     private var stopped = false
     /// A `shutdown` was accepted: the host stops in a moment and starts nothing more.
@@ -194,10 +194,7 @@ public final class HostServer {
 
     /// See `Config.owner`.
     private func watch(owner: pid_t) {
-        let source = DispatchSource.makeProcessSource(identifier: owner, eventMask: .exit, queue: queue)
-        source.setEventHandler { [weak self] in self?.ownerGone(owner) }
-        source.resume()
-        ownerWatch = source
+        ownerWatch = Platform.ProcessExit.watch(owner, queue: queue) { [weak self] in self?.ownerGone(owner) }
         // Gone before the watch began: no exit comes.
         queue.async { if Sys.kill(owner, 0) != 0, errno == ESRCH { self.ownerGone(owner) } }
     }
@@ -660,7 +657,7 @@ public final class HostServer {
     /// another's. A worker's branch's code that merge, an audit or init_command runs from a session (the lead's tool
     /// server, see `BranchCode`) is no session's: anything below its wrapper, short of a session started under it
     /// (a test suite's own host's), isn't the session above it, nor any by terminal.
-    func identify(_ token: audit_token_t?) -> LeadVault.Caller {
+    func identify(_ token: Platform.PeerToken?) -> LeadVault.Caller {
         guard let token, token.pid > 1, ProcessTable.ancestry(of: token.pid) != nil else { return .unknown }
         if let session = session(of: token.pid) { return .session(session) }
         if let app = config.appExecutable, AppCode.runs(token, executable: app) { return .app }
@@ -688,11 +685,8 @@ public final class HostServer {
         return nil
     }
 
-    static func executable(of pid: pid_t) -> String? {
-        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        return String(cString: buffer)
-    }
+    /// The file `pid`'s program was started from (see `Platform.Processes.executable`).
+    static func executable(of pid: pid_t) -> String? { Platform.Processes.executable(pid) }
 
     /// Re-executes as `executable`, keeping every session (see `HostHandover`). The new build is probed first (off the
     /// queue, so the sessions carry on meanwhile); then, on the queue, the sessions are saved as they are at that moment
@@ -941,22 +935,62 @@ enum HostProcesses {
         return arguments.count >= 2 && arguments[1] == "--parse-session"
     }
 
-    /// The user's processes running `executable` whose parent is launchd: their own parent ended. Only launchd's
-    /// children are looked at (a few hundred, not the whole table), each one's path only when it's the user's.
+    /// The processes an orphan of this host's is given as its parent: launchd (pid 1) on the Mac, as always. On
+    /// Linux pid 1 and the subreaper above this host, if any (the user's systemd, on this machine), which takes an
+    /// orphan there before pid 1 does: the host is no subreaper itself before the bootstrap (the stage 2 plan's
+    /// S2-D6), so where its own orphans go is where its sessions' do. Found once, the first time it's asked
+    /// (`probeOrphanParent`), as the parent the kernel gives an orphan of a probe of the host's own.
+    static let orphanParents: Set<pid_t> = Platform.CodeIdentity.isAvailable ? [1] : Set([1] + [probeOrphanParent()].compactMap { $0 })
+
+    /// The parent an orphan of this process is given: a shell started here starts `sleep` in the background and ends,
+    /// and the sleep's parent then is the answer; the sleep is ended. nil when the probe couldn't run or read it.
+    static func probeOrphanParent() -> pid_t? {
+        var ends: [Int32] = [-1, -1]
+        guard Sys.pipeClosedOnExec(&ends) == 0 else { return nil }
+        // The sleep's own output isn't the pipe, so the pipe ends with the shell.
+        var spawn = Platform.Spawn(executable: "/bin/sh", arguments: ["/bin/sh", "-c", "sleep 30 < /dev/null > /dev/null 2>&1 & echo $!"])
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.stdout = .descriptor(ends[1])
+        spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+        spawn.environment = ["PATH=/usr/bin:/bin"]
+        spawn.keep = []
+        let started = spawn.start()
+        Sys.close(ends[1])
+        defer { Sys.close(ends[0]) }
+        guard case .success(let shell) = started else { return nil }
+        var output: [UInt8] = []
+        var buffer = [UInt8](repeating: 0, count: 64)
+        while output.count < 64 {
+            let count = Sys.read(ends[0], &buffer, buffer.count)
+            if count > 0 { output += buffer[0..<count] } else if count < 0, errno == EINTR { continue } else { break }
+        }
+        var status: Int32 = 0
+        while waitpid(shell, &status, 0) < 0, errno == EINTR {}
+        // The shell has exited (collected), so the sleep was given its new parent.
+        guard let sleeper = pid_t(String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)),
+              sleeper > 1, case .record(let record) = Platform.Processes.record(sleeper) else { return nil }
+        // Its own (the one just started, 30 s from ending), whether or not it has become `sleep` yet.
+        if record.uid == geteuid() { Sys.kill(sleeper, SIGKILL) }
+        return record.ppid > 0 && record.ppid != shell ? record.ppid : nil
+    }
+
+    /// The user's processes running `executable` whose parent is one an orphan has (`orphanParents`): their own
+    /// parent ended. Only those parents' children are looked at (a few hundred, not the whole table), each one's path
+    /// only when it's the user's.
     static func orphans(running executable: String) -> [pid_t] {
         let target = URL(fileURLWithPath: executable).resolvingSymlinksInPath().path
-        return children(of: 1).filter { pid in
-            var short = proc_bsdshortinfo()
-            let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, size) == size else { return false }
-            return isOrphan(parent: pid_t(short.pbsi_ppid), uid: short.pbsi_uid, running: target) { HostServer.executable(of: pid) }
+        let parents = orphanParents
+        return parents.sorted().flatMap { children(of: $0) }.filter { pid in
+            guard case .brief(let brief) = Platform.Processes.brief(pid) else { return false }
+            return isOrphan(parent: brief.ppid, uid: brief.uid, running: target, parents: parents) { HostServer.executable(of: pid) }
         }
     }
 
     /// Whether a process with this parent and uid, running what `path` says (asked last), is an orphan of `target`'s
-    /// (a resolved path): launchd its parent, the user's, and exactly that file.
-    static func isOrphan(parent: pid_t, uid: uid_t, running target: String, user: uid_t = geteuid(), path: () -> String?) -> Bool {
-        guard parent == 1, uid == user, let path = path() else { return false }
+    /// (a resolved path): its parent one of `parents` (launchd on the Mac), the user's, and exactly that file.
+    static func isOrphan(parent: pid_t, uid: uid_t, running target: String, parents: Set<pid_t> = orphanParents, user: uid_t = geteuid(),
+                         path: () -> String?) -> Bool {
+        guard parents.contains(parent), uid == user, let path = path() else { return false }
         return URL(fileURLWithPath: path).resolvingSymlinksInPath().path == target
     }
 }

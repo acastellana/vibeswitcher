@@ -10,7 +10,7 @@ final class ClientConnection {
 
     let fd: Int32
     /// The process that connected, as it ran when the host accepted it (see `HostServer.identify`).
-    var peer: audit_token_t?
+    var peer: Platform.PeerToken?
     /// Who that process is to the lead's vault, told when the host accepted it; `.unknown` for good once anything
     /// else sends on the connection.
     var caller: LeadVault.Caller = .unknown
