@@ -168,6 +168,11 @@ extension Platform.Processes {
             let fd = open(path, O_RDONLY | O_CLOEXEC)
             guard fd >= 0 else { return .failure(Platform.Errno(code: errno)) }
             defer { close(fd) }
+            return contents(of: fd)
+        }
+
+        /// The same, of a file already open, read from where it stands to its end.
+        static func contents(of fd: Int32) -> Result<[UInt8], Platform.Errno> {
             var bytes: [UInt8] = []
             var failure: Int32 = 0
             withUnsafeTemporaryAllocation(of: UInt8.self, capacity: 4096) { chunk in
@@ -412,6 +417,56 @@ extension Platform.Processes {
             guard fields.count >= 2, let size = Int64(String(decoding: fields[0], as: UTF8.self)), size > 0,
                   let resident = Int64(String(decoding: fields[1], as: UTF8.self)) else { return nil }
             return resident * Int64(pageSize)
+        }
+    }
+}
+#endif
+
+#if os(Linux)
+// A process known by its pid alone: its token, and whether it is dumpable. Each reads its files through one
+// descriptor on its /proc folder, which stays the process's own: should it end and its number be given to another
+// process meanwhile, a read through it fails (ENOENT, ESRCH) rather than read the other's.
+extension Platform.Processes.System {
+    static func token(_ pid: pid_t) -> Platform.PeerToken? {
+        guard let process = Folder(pid), let line = process.statLine(), !line.isThread, let uid = process.effectiveUser() else { return nil }
+        return Platform.PeerToken(pid: pid, uid: uid, startTicks: line.startTicks)
+    }
+
+    static func isDumpable(_ pid: pid_t) -> Bool? {
+        guard let process = Folder(pid), let line = process.statLine(), !line.isThread, !line.isZombie,
+              let uid = process.effectiveUser() else { return nil }
+        var node = stat()
+        guard fstatat(process.descriptor, "fd", &node, 0) == 0 else { return nil }
+        if node.st_uid == uid { return true }
+        return node.st_uid == 0 ? false : nil
+    }
+
+    /// A descriptor on /proc/<pid>, closed when this goes.
+    final class Folder {
+        let descriptor: Int32
+
+        init?(_ pid: pid_t) {
+            guard pid > 0 else { return nil }
+            descriptor = open("/proc/\(pid)", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+            guard descriptor >= 0 else { return nil }
+        }
+
+        deinit { close(descriptor) }
+
+        /// One of its files, whole; nil when it can't be read, or reads empty (the process ended as it was opened).
+        func contents(_ name: String) -> [UInt8]? {
+            let fd = openat(descriptor, name, O_RDONLY | O_CLOEXEC)
+            guard fd >= 0 else { return nil }
+            defer { close(fd) }
+            guard case .success(let bytes) = Platform.Processes.System.contents(of: fd), !bytes.isEmpty else { return nil }
+            return bytes
+        }
+
+        func statLine() -> Platform.Processes.StatLine? { contents("stat").flatMap { Platform.Processes.StatLine(bytes: $0) } }
+
+        /// Its effective user, from its status, which anyone reads whether or not it is dumpable.
+        func effectiveUser() -> uid_t? {
+            contents("status").flatMap { Platform.ProcessSelf.effectiveUser(fromStatus: String(decoding: $0, as: UTF8.self)) }
         }
     }
 }

@@ -188,3 +188,25 @@ extension Platform {
         public static func residentBytes(_ pid: pid_t) -> Int64? { System.residentBytes(pid) }
     }
 }
+
+extension Platform.Processes {
+    /// A token for the process `pid` as it runs now, made as `Platform.Sockets.peerToken` makes one for the process at
+    /// the other end of a connection, and compared with it by `sameImage(as:)`: for a process this one knows by its
+    /// pid alone (a child, a server it started, a pid recorded in a file). Linux: its pid, its effective user and when
+    /// it started (/proc/<pid>/stat and status, read through one descriptor on its folder, so both are of the same
+    /// process); nil when it has gone, or the number is a thread's. The Mac: nil, since an audit token can't be had
+    /// for another process without privileges.
+    ///
+    /// The process's owner is read from its status, not from its folder's owner, which is root while the process is
+    /// non-dumpable: a hardened process's token is its peer token too.
+    public static func token(_ pid: pid_t) -> Platform.PeerToken? { System.token(pid) }
+
+    /// Whether the process `pid` is dumpable, as another process of its user can tell: Linux, true when its
+    /// /proc/<pid>/fd is its own effective user's, false when that is root's while its user isn't root (the kernel
+    /// gives a non-dumpable process's entries to root); nil when it can't be read (gone, a zombie, a thread's
+    /// number). The Mac: nil.
+    ///
+    /// Any process may make itself non-dumpable, so an unreadable process is no one in particular: only its pid and
+    /// start (`token`) tell it is the session host, a parser or the server (the security architecture document's S6).
+    public static func isDumpable(_ pid: pid_t) -> Bool? { System.isDumpable(pid) }
+}

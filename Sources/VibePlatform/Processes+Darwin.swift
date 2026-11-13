@@ -277,3 +277,14 @@ extension Platform.Processes {
     }
 }
 #endif
+
+#if canImport(Darwin)
+extension Platform.Processes.System {
+    /// nil: an audit token is had only for the process at the other end of a connection (`LOCAL_PEERTOKEN`), not for
+    /// another pid without privileges (`task_name_for_pid` needs root).
+    static func token(_ pid: pid_t) -> Platform.PeerToken? { nil }
+
+    /// nil: the Mac has no dumpable state another process can read.
+    static func isDumpable(_ pid: pid_t) -> Bool? { nil }
+}
+#endif

@@ -2,6 +2,13 @@ import Foundation
 import Testing
 import VibePlatform
 
+// Whether this is Linux, for the traits of the tests of tokens: the Mac has none for a pid.
+#if os(Linux)
+private let onLinux = true
+#else
+private let onLinux = false
+#endif
+
 /// `Platform.Processes` on the system the tests run on: this process, and children the tests start, each ended and
 /// collected before its test returns. A test waits for what it checks (a child's end, a number that grows), asking
 /// again every few milliseconds, never for a time.
@@ -697,4 +704,88 @@ struct ProcessesTests {
         #expect(checked > 0, "none of \(threads.count) threads lasted")
     }
     #endif
+
+    // MARK: Tokens
+
+    /// The token of a process this one didn't connect to, by its pid alone: on Linux the peer token of a connection
+    /// it makes, and not the same image as a later process's. A helper (the test binary started again,
+    /// `SocketsTests.connector`) connects; a second one is started after the first is reaped.
+    @Test(.enabled(if: onLinux, "Linux's tokens; the Mac has none for a pid"))
+    func aPidsTokenIsItsPeerToken() throws {
+        let folder = try SocketsTests.socketFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let path = folder.appendingPathComponent("s").path
+        let listener = try SocketsTests.listener(at: path)
+        defer { Sys.close(listener) }
+
+        /// A helper connected, its byte read: its pid, its token by pid, and its connection's peer token.
+        func connected() throws -> (pid: pid_t, token: Platform.PeerToken?, peer: Platform.PeerToken?, served: Int32) {
+            let child = try SocketsTests.connector(to: path)
+            let served: Int32
+            do { served = try SocketsTests.accepted(from: listener) } catch {
+                kill(child, SIGKILL)
+                _ = SpawnTests.ended(child)
+                throw error
+            }
+            var byte: UInt8 = 0
+            #expect(Sys.read(served, &byte, 1) == 1)
+            return (child, Processes.token(child), Platform.Sockets.peerToken(served), served)
+        }
+
+        let first = try connected()
+        let token = try #require(first.token)
+        #expect(token == first.peer)
+        #expect(token.pid == first.pid)
+        #expect(token.uid == geteuid())
+        #expect(token.sameImage(as: try #require(Processes.token(first.pid))))
+        // Its connection's end closed, the helper ends; reaped, its pid has no token, or (given again meanwhile)
+        // another process's.
+        Sys.close(first.served)
+        #expect(SpawnTests.ended(first.pid).exit == 0)
+        if let again = Processes.token(first.pid) { #expect(!token.sameImage(as: again)) }
+
+        let second = try connected()
+        defer {
+            Sys.close(second.served)
+            _ = SpawnTests.ended(second.pid)
+        }
+        let next = try #require(second.token)
+        #expect(next == second.peer)
+        #expect(!token.sameImage(as: next))
+        #expect(!next.sameImage(as: token))
+
+        // This process's own, as the other end of its own connection names it.
+        let own = try #require(Processes.token(getpid()))
+        #expect(own.pid == getpid())
+        let pair = try SocketsTests.Pair()
+        defer { pair.close() }
+        #expect(Platform.Sockets.peerToken(pair.served) == own)
+        // No number of a process: none.
+        #expect(Processes.token(0) == nil)
+        #expect(Processes.token(-1) == nil)
+    }
+
+    /// A thread's number is no process's: it has no token, and no dumpable state.
+    @Test(.enabled(if: onLinux, "Linux's /proc, where a thread's number answers as a process's"))
+    func aThreadsNumberHasNoToken() throws {
+        let threads = try FileManager.default.contentsOfDirectory(atPath: "/proc/self/task").compactMap { pid_t($0) }.filter { $0 != getpid() }
+        var checked = 0
+        for thread in threads {
+            let token = Processes.token(thread)
+            let dumpable = Processes.isDumpable(thread)
+            guard FileManager.default.fileExists(atPath: "/proc/self/task/\(thread)") else { continue }
+            checked += 1
+            #expect(token == nil, "thread \(thread)")
+            #expect(dumpable == nil, "thread \(thread)")
+        }
+        #expect(checked > 0, "none of \(threads.count) threads lasted")
+    }
+
+    /// The Mac has no token for a pid (an audit token can't be had for another process without privileges), and
+    /// reads no other process's dumpable state.
+    @Test(.enabled(if: !onLinux, "the Mac's forms; Linux's are tested above"))
+    func thereIsNoTokenForAPidOnTheMac() {
+        #expect(Processes.token(getpid()) == nil)
+        #expect(Processes.isDumpable(getpid()) == nil)
+    }
 }
