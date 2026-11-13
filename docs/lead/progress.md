@@ -2586,3 +2586,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-13 18:36 Automatically fetched origin/main at 2404fe5e: 87 commits from the other Mac at origin/main (2404fe5ef41ade6e65f37acbdf1bb2d4aabc330f): merge_remote would stop: merging origin/main into main conflicts in AGENTS.md. It never picks a side for code: ask the user to resolve it (or plan a task that does).
 - 2026-11-13 18:39 Started a worker on merge-github-s-main-2
 - 2026-11-13 18:39 Automatically (auto_advance): Started a worker on merge-github-s-main-2 (Merge GitHub's main (2404fe5e) from the other Mac, resolving AGENTS.md).
+- 2026-11-13 19:19 Planned macsleeplimitstests: MacSleepLimitsTests.vsHeavysStallStillStopsARunSilentInAwakeTime fails under load
