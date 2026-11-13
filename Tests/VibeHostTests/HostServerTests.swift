@@ -18,11 +18,12 @@ final class TestHost {
     /// `appExecutable`: by default this test process's own binary, so its clients are the app (they answer the
     /// challenge too).
     /// `holdsKey: false`: a host that holds no app key yet (one handed over from a build before keys).
-    /// `submittedGrace`, `housekeeping`, `capabilities`, `inputUnitHold`: the config's (see `HostServer.Config`).
+    /// `submittedGrace`, `housekeeping`, `capabilities`, `inputUnitHold`, `spawnNeedsLead`: the config's (see
+    /// `HostServer.Config`).
     init(build: Int = 42, vault: LeadVault.Book? = nil, appExecutable: String? = HostServer.executable(of: getpid()), log: String? = nil,
          holdsKey: Bool = true, submittedGrace: TimeInterval = HostServer.submittedGrace, housekeeping: TimeInterval? = nil,
          capabilities: [String] = HostServer.capabilities, inputUnitHold: TimeInterval = InputOrder.holdLimit,
-         maxSessions: Int = 256) throws {
+         maxSessions: Int = 256, spawnNeedsLead: Bool = false) throws {
         lock = socket + ".lock"
         var config = HostServer.Config(socketPath: socket, lockPath: lock, shell: "/bin/sh",
                                        launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: build)
@@ -40,6 +41,7 @@ final class TestHost {
         if let housekeeping { config.housekeepingInterval = housekeeping }
         config.capabilities = capabilities
         config.inputUnitHold = inputUnitHold
+        config.spawnNeedsLead = spawnNeedsLead
         server = HostServer(config: config)
         try server.start()
         readyAt = Date()
@@ -63,9 +65,10 @@ final class TestClient {
     /// Answers the host's challenge with its app key (the app's client); `asApp: false`, it doesn't (another process).
     convenience init(_ host: TestHost, asApp: Bool = true) throws { try self.init(socket: host.socket, appKey: asApp ? host.appKey : nil) }
 
-    init(socket: String, appKey: SymmetricKey? = nil) throws {
+    /// `viaConnector: false`: by the socket's path even where a connector is registered for it (see `HostConnector`).
+    init(socket: String, appKey: SymmetricKey? = nil, viaConnector: Bool = true) throws {
         try queue.sync {
-            connection = try HostConnection(path: socket, queue: queue, appKey: appKey)
+            connection = try HostConnection(path: socket, queue: queue, appKey: appKey, viaConnector: viaConnector)
             connection.onEvent = { [weak self] e in self?.with { $0.events.append(e) } }
             connection.onOutput = { [weak self] id, data in self?.with { $0.output[id, default: Data()].append(data) } }
             connection.onClose = { [weak self] in self?.with { $0.closed = true } }

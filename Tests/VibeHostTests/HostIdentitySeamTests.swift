@@ -7,7 +7,13 @@ import Testing
 /// Mac the app is still the app's code (`Platform.CodeIdentity`'s cdhash check, moved) that proves its key; on Linux,
 /// where an orphan is given to the subreaper above the host and not to pid 1, the orphan sweep looks at that parent's
 /// children too (`HostProcesses.orphanParents`), and never at a tool server whose agent still runs.
+///
+/// And (Task 4b2) the app on Linux: the connections the host makes through an app connector, for the process it
+/// expects (a helper here, `AppConnectorHelper`; the server child from Task 8a), never one made through the
+/// socket's path; and who may spawn where only leads may (`Config.spawnNeedsLead`).
 @Suite(hostTestLimit) struct HostIdentitySeamTests {
+    let temp = Scratch()
+
     /// A stand-in for the tool server in `folder`: `sleep`'s program under the tool server's name, so it waits as a
     /// tool server does and ends on SIGTERM.
     static func toolServerStandIn(in folder: String) throws -> String {
@@ -168,5 +174,242 @@ import Testing
         #expect(served.isRunning && Self.parent(of: served.processIdentifier) == getpid())
         #expect(!notes().contains("pid \(served.processIdentifier)"), "\(notes())")
         #expect(!HostProcesses.orphans(running: toolServer).contains(served.processIdentifier))
+    }
+
+    // MARK: The app's connector (Task 4b2)
+
+    /// A host for the connector's tests: a vault, a log, and the test runner as its `appExecutable` (as `TestHost`
+    /// sets it), with no connector but the test's own (Task 5a's stand-in, when it comes, is left out of these).
+    func connectorHost() throws -> (host: TestHost, log: String, dir: String) {
+        let dir = try Self.folder()
+        let log = dir + "/host.log"
+        return (try TestHost(vault: LeadVault.Book(), log: log), log, dir)
+    }
+
+    static func said(_ log: String) -> String { (try? String(contentsOfFile: log, encoding: .utf8)) ?? "" }
+
+    /// A helper the host expects asks for a connection, says hello and asks what only the app may: its first event is
+    /// the welcome, not a challenge, and both requests are answered.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac's app proves itself by its code"))
+    func aConnectorConnectionIsTheAppWithNoChallenge() throws {
+        let (host, _, dir) = try connectorHost()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let connector = try #require(host.server.openAppConnector(expecting: nil, requireNonDumpable: false, onDumpable: nil))
+        defer {
+            host.server.closeAppConnector(connector)
+            Sys.close(connector)
+        }
+        let helper = try AppConnectorHelper.Running.start(connector: connector)
+        defer { helper.end() }
+        let token = try #require(Platform.Processes.token(helper.pid))
+        host.server.setAppConnectorSender(token, for: connector)
+
+        #expect(try helper.ask("ask") == "connected")
+        try helper.send(1, .hello(protocolVersion: HostProtocol.version, app: "test"))
+        let first = try helper.event()
+        guard case .welcome = first.event, first.replyTo == 1 else {
+            Issue.record("its first event: \(first)")
+            return
+        }
+        try helper.send(2, .census)
+        let census = try helper.reply(to: 2)
+        guard case .census = census else {
+            Issue.record("the census: \(census)")
+            return
+        }
+        try helper.send(3, .vault(.issue(role: .lead, root: dir + "/repo", task: nil, auditing: nil)))
+        let issued = try helper.reply(to: 3)
+        guard case .vault(.grant) = issued else {
+            Issue.record("a lead's grant: \(issued)")
+            return
+        }
+    }
+
+    /// On a host with a connector open, a client by the socket's path that answers the challenge with the host's app
+    /// key, from the test runner (the host's `appExecutable`), is refused every request only the app may make: Linux
+    /// has no code identity, so nothing by path is the app.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's rule; the Mac's app proves itself by its code"))
+    func noConnectionByPathIsTheAppOnLinux() async throws {
+        let (host, _, dir) = try connectorHost()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let connector = try #require(host.server.openAppConnector(expecting: Platform.Processes.token(getpid()), requireNonDumpable: false,
+                                                                  onDumpable: nil))
+        defer {
+            host.server.closeAppConnector(connector)
+            Sys.close(connector)
+        }
+        let byPath = try TestClient(socket: host.socket, appKey: host.appKey, viaConnector: false)
+        let requests: [HostRequest] = [
+            .census,
+            .spawn(SpawnRequest(cwd: dir, command: keepRunning, env: [:], cols: 80, rows: 24, keepShell: false, label: "Test", agent: nil)),
+            .vault(.issue(role: .lead, root: dir + "/repo", task: nil, auditing: nil)),
+            .handover(executable: HostServer.executable(of: getpid()) ?? "/bin/sh"),
+            .shutdown,
+        ]
+        let seqs = requests.map { byPath.send($0) }
+        #expect(await eventually { seqs.allSatisfy { byPath.reply(to: $0) != nil } })
+        for (request, seq) in zip(requests, seqs) {
+            switch byPath.reply(to: seq) {
+            case .error(let reason)?: #expect(reason == HostProtocol.unauthorized, "\(request): \(reason)")
+            case .vault(.refused)?: break
+            case let other: Issue.record("\(request) by path: \(String(describing: other))")
+            }
+        }
+    }
+
+    /// A child of the helper the host expects writes the byte: no connection comes back, and the host's log says
+    /// why; the helper's own request is still answered after it.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
+    func aConnectorRequestFromAnotherSenderMakesNoConnection() async throws {
+        let (host, log, dir) = try connectorHost()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let connector = try #require(host.server.openAppConnector(expecting: nil, requireNonDumpable: false, onDumpable: nil))
+        defer {
+            host.server.closeAppConnector(connector)
+            Sys.close(connector)
+        }
+        let helper = try AppConnectorHelper.Running.start(connector: connector)
+        defer { helper.end() }
+        let token = try #require(Platform.Processes.token(helper.pid))
+        host.server.setAppConnectorSender(token, for: connector)
+
+        #expect(try helper.ask("child-ask") == "sent 0")
+        // The child named, or (ended and reaped before the host read its byte) no one: refused either way.
+        let refusal = "refused an app connection through connector \(connector): a request from "
+        #expect(await eventually { Self.said(log).contains(refusal) }, "\(Self.said(log))")
+        #expect(Self.said(log).contains("not pid \(helper.pid)"), "\(Self.said(log))")
+        #expect(try helper.ask("pending") == "none")
+        #expect(!Self.said(log).contains("app connection made"), "\(Self.said(log))")
+        // Its own request, after: answered.
+        #expect(try helper.ask("ask") == "connected")
+        #expect(await eventually { Self.said(log).contains("app connection made through connector \(connector) for pid \(helper.pid)") })
+    }
+
+    /// Where the host asks for a non-dumpable sender, a dumpable one (this test binary, as the helper) is refused, said
+    /// in the log, and handed to `onDumpable` (the server child's end, Task 8a): no connection is made.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
+    func aDumpableSenderGetsNoConnection() async throws {
+        let (host, log, dir) = try connectorHost()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let lock = NSLock()
+        var dumpable: [pid_t] = []
+        func ended() -> [pid_t] {
+            lock.lock()
+            defer { lock.unlock() }
+            return dumpable
+        }
+        let connector = try #require(host.server.openAppConnector(expecting: nil, requireNonDumpable: true) { pid in
+            lock.lock()
+            dumpable.append(pid)
+            lock.unlock()
+        })
+        defer {
+            host.server.closeAppConnector(connector)
+            Sys.close(connector)
+        }
+        let helper = try AppConnectorHelper.Running.start(connector: connector)
+        defer { helper.end(killing: true) }
+        let token = try #require(Platform.Processes.token(helper.pid))
+        host.server.setAppConnectorSender(token, for: connector)
+
+        // No answer comes to it: the helper waits in its request until it is ended.
+        try helper.tell("ask")
+        #expect(await eventually { ended() == [helper.pid] }, "\(ended())")
+        #expect(Self.said(log).contains("pid \(helper.pid) is dumpable"), "\(Self.said(log))")
+        #expect(!Self.said(log).contains("app connection made"), "\(Self.said(log))")
+    }
+
+    /// Through a connector (this process's own, registered for the host's socket), with the app's key given and no
+    /// hello sent, a request only the app may make is answered: nothing is held for a proof the host never asks.
+    /// (The plan names a `sessions` request; there is none: `census` is the app-only request that answers at once.)
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
+    func aConnectorConnectionHoldsNoRequestForAProof() async throws {
+        let host = try TestHost()
+        let connector = try #require(host.server.openAppConnector(expecting: Platform.Processes.token(getpid()), requireNonDumpable: false,
+                                                                  onDumpable: nil))
+        HostConnection.register(connector: connector, for: host.socket)
+        defer {
+            HostConnection.unregister(path: host.socket)
+            host.server.closeAppConnector(connector)
+            Sys.close(connector)
+        }
+        let app = try TestClient(socket: host.socket, appKey: host.appKey)
+        let seq = app.send(.census)
+        #expect(await eventually { app.reply(to: seq) != nil })
+        guard case .census? = app.reply(to: seq) else {
+            Issue.record("the census: \(String(describing: app.reply(to: seq)))")
+            return
+        }
+        #expect(!app.hasEvent { if case .challenge = $0 { return true } else { return false } })
+    }
+
+    // MARK: Who may spawn (Task 4b2)
+
+    let spawnRoot = "/Users/you/dev/spawn-rule-repo"
+
+    /// A scratch folder for sessions to start in.
+    func spawnFolder() throws -> String {
+        let dir = temp.url("spawn").path
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Where only leads may spawn, a session's process holding no role is refused.
+    @Test func aSessionWithoutTheLeadRoleCantSpawnWhereOnlyLeadsMay() async throws {
+        let host = try TestHost(vault: LeadVault.Book(), spawnNeedsLead: true)
+        let app = try TestClient(host)
+        let cwd = try spawnFolder()
+        let courier = try Courier(temp.url("courier").path, socket: host.socket)
+        let session = try await app.spawn(courier.command, cwd: cwd)
+        defer { _ = app.send(.kill(id: session.id)) }
+
+        let answers = try await courier.send([.spawn(SpawnRequest(cwd: cwd, command: keepRunning, env: [:], cols: 80, rows: 24,
+                                                                  keepShell: false, label: "Test", agent: nil))])
+        #expect(answers[2] == .error(HostProtocol.unauthorized), "\(answers)")
+    }
+
+    /// Where only leads may spawn, the session the vault binds to the lead role starts a session; one it binds to a
+    /// worker's role there can't.
+    @Test func aLeadCanSpawnWhereOnlyLeadsMay() async throws {
+        let book = LeadVault.Book()
+        let host = try TestHost(vault: book, spawnNeedsLead: true)
+        let app = try TestClient(host)
+        let cwd = try spawnFolder()
+        let leadCourier = try Courier(temp.url("lead").path, socket: host.socket)
+        let workerCourier = try Courier(temp.url("worker").path, socket: host.socket)
+        let lead = try await app.spawn(leadCourier.command, cwd: cwd)
+        var started: [UUID] = [lead.id]
+        defer { for id in started { _ = app.send(.kill(id: id)) } }
+        guard case .grant(let grant) = book.answer(.issue(role: .lead, root: spawnRoot, task: nil, auditing: nil), from: .app) else {
+            throw CancellationError()
+        }
+        #expect(book.answer(.bind(grant: grant, root: spawnRoot, session: lead.id.uuidString), from: .app) == .ok)
+
+        let worker = try await leadCourier.spawn(workerCourier.command, cwd: cwd)
+        started.append(worker.id)
+        let asLead = LeadVault.Caller.session(lead.id.uuidString)
+        guard case .grant(let workerGrant) = book.answer(.issue(role: .worker, root: spawnRoot, task: "t", auditing: nil), from: asLead) else {
+            throw CancellationError()
+        }
+        #expect(book.answer(.bind(grant: workerGrant, root: spawnRoot, session: worker.id.uuidString), from: asLead) == .ok)
+        let answers = try await workerCourier.send([.spawn(SpawnRequest(cwd: cwd, command: keepRunning, env: [:], cols: 80, rows: 24,
+                                                                        keepShell: false, label: "Test", agent: nil))])
+        #expect(answers[2] == .error(HostProtocol.unauthorized), "\(answers)")
+    }
+
+    /// Without the rule (every host but the user's on Linux), a session's process with no role starts a session, as
+    /// always.
+    @Test func aHostWithoutTheRuleSpawnsAsToday() async throws {
+        let host = try TestHost(vault: LeadVault.Book())
+        let app = try TestClient(host)
+        let cwd = try spawnFolder()
+        let courier = try Courier(temp.url("courier").path, socket: host.socket)
+        let session = try await app.spawn(courier.command, cwd: cwd)
+        var started: [UUID] = [session.id]
+        defer { for id in started { _ = app.send(.kill(id: id)) } }
+
+        let child = try await courier.spawn(keepRunning, cwd: cwd)
+        started.append(child.id)
+        #expect(child.isLive)
     }
 }

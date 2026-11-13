@@ -57,6 +57,9 @@ public final class HostServer {
         /// The process this host ends with (`--exit-with`, a bench's): once it's gone, every session is ended and the
         /// host exits, however it went (SIGKILL too). Nil: none, as for the app's host, which outlives the app.
         public var owner: pid_t?
+        /// Only the app and a live session the vault binds to the lead role may `spawn` (the user's host on Linux, the
+        /// security architecture document's S2). False: any live session may, as always.
+        public var spawnNeedsLead = false
 
         /// Where a handover leaves the sessions for the next build: beside the lock, so a scratch host's stays its own.
         public var handoverPath: String { lockPath + ".handover" }
@@ -131,6 +134,9 @@ public final class HostServer {
     /// Per session, its input from every client in order (see `InputOrder`).
     private var inputOrders: [UUID: InputOrder] = [:]
     private var handingOver = false
+    /// The app's connectors, by the number of the end `openAppConnector` gave out (see V2/AppConnector.swift): none
+    /// on the Mac.
+    var appConnectors: [Int32: AppConnector] = [:]
 
     public init(config: Config) {
         self.config = config
@@ -234,6 +240,7 @@ public final class HostServer {
             self.acceptSource?.cancel()
             self.housekeeping?.cancel()
             self.ownerWatch?.cancel()
+            self.closeAppConnectors()
             self.clients.values.forEach { $0.close() }
             self.clients = [:]
             for session in self.sessions.values {
@@ -249,7 +256,7 @@ public final class HostServer {
         if DispatchQueue.getSpecific(key: Self.queueKey) != nil { work() } else { queue.sync(execute: work) }
     }
 
-    private static let queueKey = DispatchSpecificKey<Bool>()
+    static let queueKey = DispatchSpecificKey<Bool>()
 
     private func acceptAll() {
         while true {
@@ -259,7 +266,8 @@ public final class HostServer {
                 Sys.close(fd)
                 continue
             }
-            guard clients.count < max(1, config.maxClients) else {
+            // The app's connections through its connector don't count: full slots never lock it out.
+            guard clients.values.filter({ !$0.viaConnector }).count < max(1, config.maxClients) else {
                 Sys.close(fd)
                 continue
             }
@@ -271,20 +279,39 @@ public final class HostServer {
             case .app: client.runsAppCode = true
             case let caller: client.caller = caller
             }
-            let key = ObjectIdentifier(client)
-            client.onRead = { [weak self, weak client] in
-                guard let self, let client else { return }
-                self.checkPeer(client)
-            }
-            client.onFrame = { [weak self, weak client] kind, payload in
-                guard let self, let client else { return }
-                self.handle(kind, payload, from: client)
-            }
-            client.onClose = { [weak self] in self?.dropClient(key) }
-            clients[key] = client
+            add(client)
             client.send(HostEventEnvelope(replyTo: nil, event: .challenge(client.challenge, keyless: appKey == nil)))
             client.start()
         }
+    }
+
+    /// A client served from now on: its reads, its requests and its end.
+    private func add(_ client: ClientConnection) {
+        let key = ObjectIdentifier(client)
+        client.onRead = { [weak self, weak client] in
+            guard let self, let client else { return }
+            self.checkPeer(client)
+        }
+        client.onFrame = { [weak self, weak client] kind, payload in
+            guard let self, let client else { return }
+            self.handle(kind, payload, from: client)
+        }
+        client.onClose = { [weak self] in self?.dropClient(key) }
+        clients[key] = client
+    }
+
+    /// A connection the host made for the app through its connector (see `openAppConnector`), on `fd`, its other end
+    /// handed to `peer`: the app's from its first byte, sent no challenge (it gets the welcome when it says hello).
+    /// Nil once the host has stopped. On `queue`.
+    func addAppClient(fd: Int32, peer: Platform.PeerToken) -> ClientConnection? {
+        guard !stopped else { return nil }
+        let client = ClientConnection(fd: fd, queue: queue, peerPID: peer.pid)
+        client.peer = peer
+        client.caller = .app
+        client.viaConnector = true
+        add(client)
+        client.start()
+        return client
     }
 
     /// The key the app proves itself with: the vault's, or (a host that keeps none) the configured or enrolled one.
@@ -374,7 +401,10 @@ public final class HostServer {
             // A census is counts only (see `HostCensus`): nothing in it reaches a session.
             if caller == .app { return true }
             guard case .session(let id) = caller, let id = UUID(uuidString: id) else { return false }
-            return sessions[id]?.info.isLive == true
+            guard sessions[id]?.info.isLive == true else { return false }
+            // Where only leads may: the session the vault binds to a team's lead role (`leads` of itself).
+            if case .spawn = request, config.spawnNeedsLead { return config.vault?.leads(id.uuidString, caller: caller) == true }
+            return true
         case .shutdown, .handover:
             return caller == .app
         case .attach(let id, _, _), .detach(let id), .input(let id, _, _), .inputUnit(let id, _, _),
@@ -637,7 +667,8 @@ public final class HostServer {
     /// connector forks a child to write and execs the app's binary (or anything else), the token names the child,
     /// or the new image. Anything but the process accepted makes the connection nobody's.
     private func checkPeer(_ client: ClientConnection) {
-        guard client.caller != .unknown || client.runsAppCode else { return }
+        // A pair the host made names the host itself for good: a connector's connection isn't checked this way.
+        guard !client.viaConnector, client.caller != .unknown || client.runsAppCode else { return }
         if let accepted = client.peer, let now = UnixSocket.peerToken(client.fd), now.sameImage(as: accepted) { return }
         log("pid \(client.peer?.pid ?? 0) is no longer the one sending on its connection: it's no one to the vault now")
         client.caller = .unknown
