@@ -35,6 +35,25 @@ struct SysTests {
         #expect(code == EBADF)
     }
 
+    /// Both ends close-on-exec from the call that made them (the Mac: right after it), and a pipe as `pipe` makes one.
+    @Test func aPipeIsClosedOnExec() throws {
+        var ends: [Int32] = [-1, -1]
+        try #require(Sys.pipeClosedOnExec(&ends) == 0, "errno \(errno)")
+        defer { ends.forEach { Sys.close($0) } }
+        #expect(fcntl(ends[0], F_GETFD) & FD_CLOEXEC != 0)
+        #expect(fcntl(ends[1], F_GETFD) & FD_CLOEXEC != 0)
+        #expect(Sys.write(ends[1], "vs", 2) == 2)
+        var received = [UInt8](repeating: 0, count: 8)
+        #expect(Sys.read(ends[0], &received, received.count) == 2)
+        #expect(Array(received.prefix(2)) == Array("vs".utf8))
+        // Room for fewer than two: refused, nothing made.
+        var short: [Int32] = [-1]
+        errno = 0
+        #expect(Sys.pipeClosedOnExec(&short) == -1)
+        #expect(errno == EINVAL)
+        #expect(short == [-1])
+    }
+
     @Test func aFileIsOpenedWithItsModeAndCutShort() throws {
         let folder = try TestScriptLinuxTests.scratch("sys-file")
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -71,7 +90,8 @@ struct SysTests {
     }
 
     @Test func aSocketListensIsConnectedToAndAccepts() throws {
-        let folder = try TestScriptLinuxTests.scratch("sys-socket")
+        // A folder whose socket path fits, under a long TMPDIR too (scripts/test-under-load.sh gives one).
+        let folder = try SocketsTests.socketFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
         let path = folder.appendingPathComponent("s").path
         var address = sockaddr_un()

@@ -18,6 +18,24 @@ extension Platform {
             let flat = String(name.filter { $0 != "/" })
             return flat.hasPrefix("tty") ? flat : "tty" + flat
         }
+
+        /// A pseudo-terminal this process made (`open(rows:cols:)`): both its ends, the slave's path, and the name the
+        /// terminal is known by (`name(devicePath:)` of that path). Each system's calls are in Terminals+Darwin.swift
+        /// and Terminals+Linux.swift, under the same names: `open`, `devicePath(master:)`, `makeControlling`,
+        /// `launcherOpenFlags`, `controllingSession`, `session(ofMaster:)` and `size`.
+        public struct PseudoTerminal: Sendable {
+            public var master: Int32
+            public var slave: Int32
+            public var devicePath: String
+            public var name: String
+
+            public init(master: Int32, slave: Int32, devicePath: String, name: String) {
+                self.master = master
+                self.slave = slave
+                self.devicePath = devicePath
+                self.name = name
+            }
+        }
     }
 }
 

@@ -417,6 +417,74 @@ struct SocketsTests {
         #expect(ended.signal == nil && ended.exit == 0, "\(ended)")
     }
 
+    // MARK: Made close-on-exec
+
+    static func closedOnExec(_ fd: Int32) -> Bool { fcntl(fd, F_GETFD) & FD_CLOEXEC != 0 }
+
+    static func type(of fd: Int32) -> Int32? {
+        var type: Int32 = -1
+        var size = socklen_t(MemoryLayout<Int32>.size)
+        return getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &size) == 0 ? type : nil
+    }
+
+    /// Both ends of a pair are close-on-exec from the call that made them (the Mac: right after it), and are of the
+    /// type asked.
+    @Test(arguments: [Platform.Sockets.stream, Platform.Sockets.seqpacket])
+    func aPairIsClosedOnExecFromItsMaking(type: Int32) throws {
+        let (one, other) = try #require(Platform.Sockets.pair(type: type))
+        defer { [one, other].forEach { Sys.close($0) } }
+        #expect(Self.closedOnExec(one) && Self.closedOnExec(other))
+        #expect(Self.type(of: one) == type && Self.type(of: other) == type)
+        // Connected to each other.
+        #expect(Platform.Sockets.send(one, "x", 1) == 1)
+        var byte: UInt8 = 0
+        #expect(Sys.read(other, &byte, 1) == 1 && byte == UInt8(ascii: "x"))
+    }
+
+    /// What the server child's connector relies on: each send is one message, read whole and alone.
+    @Test func aSeqpacketPairKeepsMessageBoundaries() throws {
+        let (one, other) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+        defer { [one, other].forEach { Sys.close($0) } }
+        #expect(Platform.Sockets.send(one, "a", 1) == 1)
+        #expect(Platform.Sockets.send(one, "b", 1) == 1)
+        var buffer = [UInt8](repeating: 0, count: 16)
+        #expect(Sys.read(other, &buffer, buffer.count) == 1 && buffer[0] == UInt8(ascii: "a"))
+        #expect(Sys.read(other, &buffer, buffer.count) == 1 && buffer[0] == UInt8(ascii: "b"))
+    }
+
+    @Test(arguments: [Platform.Sockets.stream, Platform.Sockets.seqpacket])
+    func aSocketIsClosedOnExecFromItsMaking(type: Int32) throws {
+        let fd = Platform.Sockets.makeSocket(type: type)
+        try #require(fd >= 0, "errno \(errno)")
+        defer { Sys.close(fd) }
+        #expect(Self.closedOnExec(fd))
+        #expect(Self.type(of: fd) == type)
+    }
+
+    @Test func anAcceptedConnectionIsClosedOnExecFromItsMaking() throws {
+        let folder = try Self.socketFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let path = folder.appendingPathComponent("s").path
+        let listener = try Self.listener(at: path)
+        defer { Sys.close(listener) }
+        let client = try Self.client(of: path)
+        defer { Sys.close(client) }
+        // The connection waits in the listener's queue: the accept finds it there and doesn't block.
+        let served = Platform.Sockets.accept(listener)
+        try #require(served >= 0, "errno \(errno)")
+        defer { Sys.close(served) }
+        #expect(Self.closedOnExec(served))
+        #expect(Platform.Sockets.send(client, "x", 1) == 1)
+        var byte: UInt8 = 0
+        #expect(Sys.read(served, &byte, 1) == 1 && byte == UInt8(ascii: "x"))
+        // Nothing waiting, on a listener that doesn't block: -1 and EAGAIN, as accept(2).
+        _ = fcntl(listener, F_SETFL, fcntl(listener, F_GETFL) | O_NONBLOCK)
+        errno = 0
+        let none = Platform.Sockets.accept(listener)
+        let code = errno
+        #expect(none == -1 && code == EAGAIN, "\(none), errno \(code)")
+    }
+
     // MARK: Who sent the bytes
 
     /// On both systems: bytes read come with the process that sent them, here this one.
