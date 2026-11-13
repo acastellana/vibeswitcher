@@ -2838,3 +2838,6 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 20:30 Automatically (auto_advance): Merged every-worker-is-told (Every worker is told once when main is red) into main at e8d07039, on its passing audit and the full test run.
 - 2026-11-13 20:30 Automatically (auto_advance): Cleaned up every-worker-is-told (freed 2.5 GB of build output and temporary folders). It stays done.
 - 2026-11-13 21:02 Automatically (auto_advance): Didn't cleanup|an-animated-explainer: fatal: '/Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/an-animated-explainer' is not a working tree
+- 2026-11-13 21:12 Planned design-a-team-of: Design: a team of workers on one task, with a shared board
+- 2026-11-13 21:12 Started a worker on design-a-team-of
+- 2026-11-13 21:12 Automatically (auto_advance): Started a worker on design-a-team-of (Design: a team of workers on one task, with a shared board).
