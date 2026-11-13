@@ -262,15 +262,41 @@ public enum LeadLaunch {
     /// them every teammate's post delivered into one. Each member's worktree (the integrator's is the task's own, the
     /// others' `<slug>--<name>`) by its path as given and as resolved, and the task's own worktree whatever its team
     /// says: the audit stays independent of what the members told each other (docs/lead/decisions.md, 2026-11-13;
-    /// team-on-one-task-design.md, 4). The folder itself and everything in it, `~` being the session's own home, where
-    /// Claude Code keeps them. Read rules hold Grep and Glob too; a shell read outside the worktree isn't one the
+    /// team-on-one-task-design.md, 4). `~` is the session's own home, where Claude Code keeps them; `home` is where
+    /// they're listed from. Read rules hold Grep and Glob too; a shell read outside the worktree isn't one the
     /// verifier's hook lets run (`hooks`). None for a plain task: its rules stay `deny(.verifier)`'s.
-    public static func memberTranscripts(root: String, slug: String, team: [LeadTeamMember]?) -> [String] {
+    ///
+    /// A member's folder is denied whole, but for one of `cwd`'s, where the verifier itself starts (the task's own
+    /// worktree, the integrator's): Claude Code keeps the verifier's own session there too, and a tool result over
+    /// about 30 KB (a team's `git diff main...HEAD`) is saved to `<folder>/<its session>/tool-results/` for it to Read
+    /// back. There, every session's transcript (`*.jsonl`, the verifier's own included) and every entry already in the
+    /// folder at its launch (earlier sessions' folders: the integrator's tool results, subagents, memory) are denied;
+    /// only the verifier's own session's folder, made after this, isn't. An entry whose name a rule can't hold as it is
+    /// denies that folder whole.
+    public static func memberTranscripts(root: String, slug: String, team: [LeadTeamMember]?, cwd: String? = nil,
+                                         home: String = VibePaths.home) -> [String] {
         guard let team, !team.isEmpty else { return [] }
+        func spellings(_ path: String) -> [String] {
+            var found = [path, URL(fileURLWithPath: path).resolvingSymlinksInPath().path]
+            // As the kernel resolves it, `/private` kept (Foundation drops it): Claude Code names the folder after that.
+            if let real = realpath(path, nil) { found.append(String(cString: real)); free(real) }
+            return found
+        }
+        func name(_ path: String) -> String { (claudeProjectFolder(path, home: home) as NSString).lastPathComponent }
+        let own = Set((cwd.map(spellings) ?? []).map(name))
         let worktrees = [Worktrees.path(root: root, slug: slug)] + team.map(\.worktree)
-        let spellings = worktrees.flatMap { [$0, URL(fileURLWithPath: $0).resolvingSymlinksInPath().path] }
-        let folders = Set(spellings.map { claudeProjectFolder($0, home: "~") }).sorted()
-        return folders.flatMap { ["Read(\($0))", "Read(\($0)/**)"] }
+        let names = Set(worktrees.flatMap(spellings).map(name)).sorted()
+        let safe = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        return names.flatMap { folder -> [String] in
+            let rule = "~/.claude/projects/\(folder)"
+            let whole = ["Read(\(rule))", "Read(\(rule)/**)"]
+            guard own.contains(folder) else { return whole }
+            let listed = (home as NSString).appendingPathComponent(".claude/projects/\(folder)")
+            let entries = ((try? FileManager.default.contentsOfDirectory(atPath: listed)) ?? []).sorted()
+            guard entries.allSatisfy({ $0.unicodeScalars.allSatisfy(safe.contains) }) else { return whole }
+            // `memory*` too: `setAsideMemory`, after this, renames one.
+            return ["Read(\(rule)/*.jsonl)", "Read(\(rule)/memory*)", "Read(\(rule)/memory*/**)"] + entries.flatMap { ["Read(\(rule)/\($0))", "Read(\(rule)/\($0)/**)"] }
+        }
     }
 
     /// The members of the task `task` (its slug or id) on the board of `root`, or nil: a plain task, or none on the
@@ -371,7 +397,7 @@ public enum LeadLaunch {
         // A team task's verifier is also denied its members' transcripts, its team as the board has it: a board that
         // can't be read starts no verifier, rather than one without those rules (none yet is an empty board).
         var rules = deny(role, base: branch, records: records)
-        if role == .verifier, let task { rules += memberTranscripts(root: root, slug: task, team: try team(root: root, task: task)) }
+        if role == .verifier, let task { rules += memberTranscripts(root: root, slug: task, team: try team(root: root, task: task), cwd: cwd) }
         var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch) + evidenceReads(role, root: root, task: task),
                                                        "deny": rules]]
         var env = environment(role)

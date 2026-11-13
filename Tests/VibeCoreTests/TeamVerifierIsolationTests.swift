@@ -55,13 +55,17 @@ extension LeadFindingsToolTests {
         let workflow = LeadWorkflow.load(from: (root as NSString).appendingPathComponent(".vibeswitcher/workflow.md"))
         let base = LeadLaunch.deny(.verifier, base: "main", records: workflow.recordsDir)
         #expect(Array(deny.prefix(base.count)) == base)
-        for member in team {
+        for member in team.dropFirst() {
             let folder = LeadLaunch.claudeProjectFolder(member.worktree, home: "~")
             #expect(folder.hasPrefix("~/.claude/projects/-"))
             #expect(deny.contains("Read(\(folder)/**)"), "\(member.name): \(deny.suffix(8))")
             #expect(deny.contains("Read(\(folder))"))
         }
-        #expect(Set(deny.dropFirst(base.count)).count == team.count * 2, "\(deny.suffix(8))")
+        // The integrator's folder is the verifier's own too (it starts in the task's worktree): its transcripts are
+        // denied, not the folder whole, where its own large tool results are kept for it to read.
+        let own = LeadLaunch.claudeProjectFolder(team[0].worktree, home: "~")
+        #expect(deny.contains("Read(\(own)/*.jsonl)"), "\(deny.suffix(8))")
+        #expect(!deny.contains("Read(\(own)/**)") && !deny.contains("Read(\(own))"))
     }
 
     @Test func aPlainTasksVerifierKeepsTodaysRules() throws {
@@ -113,7 +117,11 @@ struct TeamVerifierLaunchTests {
 
         let verifier = try deny(try prepare(.verifier, root: root, task: "journeys"))
         #expect(Array(verifier.prefix(today.count)) == today)
-        #expect(Set(verifier.dropFirst(today.count)) == Set(folders.flatMap { ["Read(\($0))", "Read(\($0)/**)"] }))
+        // Its cwd is the task's worktree, the integrator's: that folder's transcripts, the others' folders whole.
+        let own = folders[0]
+        #expect(Set(verifier.dropFirst(today.count))
+                == Set(folders.dropFirst().flatMap { ["Read(\($0))", "Read(\($0)/**)"] }
+                       + ["Read(\(own)/*.jsonl)", "Read(\(own)/memory*)", "Read(\(own)/memory*/**)"]))
 
         // A plain task's verifier, and a team task's worker, keep today's rules exactly.
         #expect(try deny(try prepare(.verifier, root: root, task: "plain")) == today)
@@ -131,6 +139,36 @@ struct TeamVerifierLaunchTests {
         for path in [team[1].worktree, LeadTeam.worktree(root: real, slug: "journeys", member: "ui", index: 1)] {
             #expect(rules.contains("Read(\(LeadLaunch.claudeProjectFolder(path, home: "~"))/**)"), "\(path): \(rules)")
         }
+    }
+
+    /// The verifier's own folder (its cwd's, the integrator's): every transcript and every entry there at its launch
+    /// is denied, so a session folder made after it (the verifier's own, with its saved tool results) stays readable.
+    @Test func inItsOwnFolderTheVerifierIsDeniedEveryEarlierSessionButNotItsOwn() throws {
+        let root = try root()
+        let home = temp.url("home").path
+        let team = try LeadTeam.make(slug: "journeys", root: root, parts: [("lead", "glue"), ("ui", "views")])
+        let name = (LeadLaunch.claudeProjectFolder(team[0].worktree, home: home) as NSString).lastPathComponent
+        let folder = (home as NSString).appendingPathComponent(".claude/projects/\(name)")
+        let integrator = "0d3e2d68-d467-49bc-b4db-9f13858722ab"
+        try FileManager.default.createDirectory(atPath: folder + "/\(integrator)/tool-results", withIntermediateDirectories: true)
+        try "{}".write(toFile: folder + "/\(integrator).jsonl", atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(atPath: folder + "/memory", withIntermediateDirectories: true)
+
+        let rule = "~/.claude/projects/\(name)"
+        let rules = LeadLaunch.memberTranscripts(root: root, slug: "journeys", team: team, cwd: team[0].worktree, home: home)
+        let mine = rules.filter { $0.hasPrefix("Read(\(rule)") && !$0.hasPrefix("Read(\(rule)--") }
+        #expect(Set(mine) == ["Read(\(rule)/*.jsonl)", "Read(\(rule)/memory*)", "Read(\(rule)/memory*/**)",
+                              "Read(\(rule)/\(integrator))", "Read(\(rule)/\(integrator)/**)",
+                              "Read(\(rule)/\(integrator).jsonl)", "Read(\(rule)/\(integrator).jsonl/**)",
+                              "Read(\(rule)/memory)", "Read(\(rule)/memory/**)"], "\(mine)")
+        // The other member's folder, where the verifier never starts, whole.
+        let other = LeadLaunch.claudeProjectFolder(team[1].worktree, home: "~")
+        #expect(rules.contains("Read(\(other))") && rules.contains("Read(\(other)/**)"))
+
+        // An entry a rule can't hold as it's named: the folder is denied whole.
+        try FileManager.default.createDirectory(atPath: folder + "/a b)", withIntermediateDirectories: true)
+        let whole = LeadLaunch.memberTranscripts(root: root, slug: "journeys", team: team, cwd: team[0].worktree, home: home)
+        #expect(whole.contains("Read(\(rule))") && whole.contains("Read(\(rule)/**)") && !whole.contains { $0.contains("a b") })
     }
 
     @Test func aBoardThatCantBeReadStartsNoVerifier() throws {
