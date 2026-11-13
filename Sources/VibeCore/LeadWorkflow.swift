@@ -926,7 +926,7 @@ public enum LeadPrompts {
                 + "fix out with `git diff <pre-fix> HEAD -- <the fix's files> | git apply -R` (not the test's files), run the "
                 + "test, and put the fix back with the same command without `-R`; `git status` is clean again. Each runs as a "
                 + "command of its own, the commit spelled out: no `$VAR`, nothing after `git apply`, the test run separately. "
-                + "To put back a file you changed but didn't commit (`git checkout --` and `git restore` are blocked): "
+                + "To put back a file you changed but didn't commit (checking it out or restoring it is blocked): "
                 + "`git diff HEAD -- <file> | git apply -R`."
         }
 
