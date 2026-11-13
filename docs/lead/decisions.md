@@ -428,3 +428,7 @@ The lead proposed it with a 30 min timer and the user didn't answer in time, so 
 
 The user said the project is going toward swarms. The 2026-11-13 measurement only covered tips between independent tasks and can't see the gain from teams on one larger task, so the lead proposed building it with a pre-set bar; the proposal's 30-minute timer passed with no other answer (question 6080384A). The transcript rule keeps the audit independent of what members told each other; it is the lead's call as architecture.
 
+## 2026-11-13 22:49:20 A task's boundaries name the function or behaviour it must change wherever it lives, and always allow the minimal edits the compiler forces elsewhere (exhaustive switches), to be listed in the done report. When a worker's done report names an edit outside its boundaries that the lead accepts, and the audit has already started, settle a 'suspect' verdict with update_task(exception, accept_verdict) instead of a new audit round; findings from a suspect verdict are sent to the worker by the lead at once, since auto_advance doesn't send them.
+
+Twice on 2026-11-13 (teammate-sender-a-frame, member-worktrees-a-sub) the lead's boundaries were narrower than the goal, the worker rightly edited outside them, and the lead's exception was recorded after auto_advance had started the audit. The first cost a suspect verdict and 8 minutes with the task sitting failed, which the user noticed.
+
