@@ -858,7 +858,6 @@ public final class HostedSession {
         let left = programs.filter { pid in
             var status: Int32 = 0
             let reaped = waitpid(pid, &status, WNOHANG)
-            if reaped == pid { SessionIdentityChecks.noteReaped(pid) }
             return reaped == 0 || (reaped < 0 && errno == EINTR)
         }
         guard !left.isEmpty, Date() < deadline else { return }

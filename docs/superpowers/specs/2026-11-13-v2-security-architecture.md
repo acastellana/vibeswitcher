@@ -569,7 +569,10 @@ with the sandbox.
 `HostedSessionTerminalTests.aReusedProgramPidIsNotTheSession`,
 `HostedSessionTerminalTests.anAncestorYoungerThanItsChildBreaksTheChain`,
 `HostedSessionTerminalTests.aChildReparentedWhileItsChainIsReadBreaksIt`,
-`HostedSessionTerminalTests.aReapedSessionIsNotLive` (Task 6, the last six on Linux only); planned: stage 2 plan task 10.
+`HostedSessionTerminalTests.aReapedSessionIsNotLive` (Task 6; on Linux only: the four from
+`aProcessThatTookASessionsTerminalFirstIsNotThatSession` to `anAncestorYoungerThanItsChildBreaksTheChain`, and
+`aReapedSessionIsNotLive`, which `TIOCGSID` holds, as a session leader that exits leaves its terminal with no session;
+`aChildReparentedWhileItsChainIsReadBreaksIt` runs on both systems); planned: stage 2 plan task 10.
 
 **Tests to write:** Task 10:
 `VerifierBranchCodeHostTests.anEscapedVerifierCommandWithoutSetsidIsNobodys`,

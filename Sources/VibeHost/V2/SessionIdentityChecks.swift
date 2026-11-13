@@ -18,7 +18,10 @@ import VibeCore
 ///   number was given again), and a child's parent is read again after its parent was, so a reparenting between the
 ///   two reads breaks the chain. A chain that fails is no session's.
 /// - **A program reaped is no session's**, also when `HostedSession.reap(_:until:)`, on a queue of its own, reaped it
-///   before the session's queue heard (`noteReaped`).
+///   before the session's queue heard. No list of reaped programs is kept: a program leads its session, and a session
+///   leader that exits leaves its terminal with no session before it can be reaped, so `TIOCGSID` on the master no
+///   longer names it (`holdsIdentity`); and `HostedSession.close()`, `reap(_:until:)`'s only caller, closes the
+///   session before it starts reaping.
 ///
 /// The Mac's paths are today's: its launcher ignores `makeControlling`'s answer, and `HostServer.session(of:)` keeps
 /// its body there.
@@ -64,8 +67,6 @@ enum SessionIdentityChecks {
     /// Linux only; nil on the Mac.
     static func programStarted(_ pid: pid_t) -> Platform.PeerToken? {
         guard !Platform.CodeIdentity.isAvailable else { return nil }
-        // Its number, reaped once before as another session's program, is this program's now.
-        reaped.remove(pid)
         return Platform.Processes.token(pid)
     }
 
@@ -77,31 +78,12 @@ enum SessionIdentityChecks {
         return token
     }
 
-    /// `HostedSession.reap(_:until:)` reaped `pid`, a closed session's program: it is no session's from now on, before
-    /// any session's queue hears of it. Linux only.
-    static func noteReaped(_ pid: pid_t) {
-        guard !Platform.CodeIdentity.isAvailable else { return }
-        reaped.insert(pid)
-    }
-
-    /// Whether a session still counts as live to who a process is (Linux): it hasn't ended, isn't closed, its program
-    /// wasn't reaped, and its terminal's session is its program's (the launcher took it, and the program, which is
-    /// the launcher after its exec, still leads it: a session leader that ended has lost its terminal).
+    /// Whether a session still counts as live to who a process is (Linux): it hasn't ended, isn't closed, and its
+    /// terminal's session is its program's (the launcher took it, and the program, which is the launcher after its
+    /// exec, still leads it: a session leader that exited, reaped or not yet, has left its terminal with no session).
     static func holdsIdentity(isLive: Bool, closed: Bool, master: Int32, program: pid_t) -> Bool {
-        guard isLive, !closed, master >= 0, !reaped.contains(program) else { return false }
+        guard isLive, !closed, master >= 0 else { return false }
         return Platform.Terminals.session(ofMaster: master) == program
-    }
-
-    private static let reaped = ReapedPrograms()
-
-    /// The programs `HostedSession.reap(_:until:)` reaped, by pid, until their number is a new program's.
-    private final class ReapedPrograms: @unchecked Sendable {
-        private let lock = NSLock()
-        private var pids: Set<pid_t> = []
-
-        func insert(_ pid: pid_t) { lock.lock(); pids.insert(pid); lock.unlock() }
-        func remove(_ pid: pid_t) { lock.lock(); pids.remove(pid); lock.unlock() }
-        func contains(_ pid: pid_t) -> Bool { lock.lock(); defer { lock.unlock() }; return pids.contains(pid) }
     }
 
     // MARK: Who a process is

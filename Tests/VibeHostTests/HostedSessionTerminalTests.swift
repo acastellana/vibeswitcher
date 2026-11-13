@@ -202,7 +202,9 @@ import Testing
     }
 
     /// A program reaped by `HostedSession.reap(_:until:)` (on its own queue), its session's queue not having heard, is
-    /// no session's program: asked while the host's queue is held, a chain through it is no session's.
+    /// no session's program: asked while the host's queue is held, a chain through it is no session's. Held by
+    /// `TIOCGSID` on the master (`SessionIdentityChecks.holdsIdentity`): the program led its session, and a session
+    /// leader that exits leaves its terminal with no session.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's live rule; the Mac's is unchanged"))
     func aReapedSessionIsNotLive() async throws {
         let host = try TestHost()
