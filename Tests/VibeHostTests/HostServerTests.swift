@@ -337,10 +337,15 @@ struct HostServerTests {
         #expect(stat(host.socket, &info) == 0 && info.st_mode & 0o777 == 0o600)
     }
 
-    /// No session's program holds a connection the host accepted while it was starting that session: the accept is
-    /// close-on-exec from its making (accept4 on Linux), and the launcher keeps nothing but its terminal (`keep: []`,
-    /// with which the spawn closes everything from 3 up). Either alone holds it. One thread makes 200 connections
-    /// while sessions start, each of whose programs lists its own descriptors.
+    /// No session's program holds a connection the host accepted while sessions were starting. Two guards hold it:
+    /// the launcher keeps nothing but its terminal (`keep: []`, with which the spawn closes everything from 3 up), and
+    /// each connection is close-on-exec before any session can be spawned after its accept, because `acceptAll` and
+    /// the session spawns run on the host's one serial queue, and `acceptAll` marks each connection (`configure`'s
+    /// FD_CLOEXEC, on Linux after accept4's SOCK_CLOEXEC) before it gives the queue back. So no spawn of the host
+    /// falls between an accept and its mark, and this test can't show accept4 on its own: that is
+    /// `SocketsTests.anAcceptedConnectionIsClosedOnExecFromItsMaking` and `CloseOnExecLintTests`. It fails only with
+    /// `keep` nil and the connections left open on exec (plain `accept` and no FD_CLOEXEC in `configure`). One
+    /// thread makes 200 connections while sessions start, each of whose programs lists its own descriptors.
     @Test func aSpawnDuringAnAcceptInheritsNoConnection() async throws {
         let host = try TestHost()
         let client = try TestClient(host)

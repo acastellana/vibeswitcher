@@ -33,7 +33,7 @@ struct CloseOnExecLintTests {
         ("Sources/VibePlatform/Sys.swift", nil,
          "the raw wrappers themselves (`Sys.pipe`, `Sys.accept`, `Sys.open`) and the Mac's pipe then FD_CLOEXEC in `pipeClosedOnExec`"),
         ("Sources/VibePlatform/PipeCommand+Darwin.swift", "pipe(",
-         "the Mac's status-line pipes, marked close-on-exec right after as they always were: the Mac has no pipe2"),
+         "the Mac's status-line pipes, left as they are (not marked close-on-exec): changing them would change the Mac (docs/process/v2-mac-tasks.md)"),
         ("Sources/VibePlatform/FolderWatch+Darwin.swift", "open(",
          "the Mac's folder watch opens with O_EVTONLY and marks it close-on-exec after, as it always did"),
         ("Sources/VibePlatform/FolderWatch+Darwin.swift", "pipe(",

@@ -71,6 +71,11 @@ that two pushes haven't explained comes here too, with the experiment that will 
   an own-process read for `ProcessUsage`, `StallWatch`, `SessionStrays` and `TestLock`; one `PROC_PIDTASKALLINFO` for
   `LoadRecorder`; terminal names looked up lazily; no kqueue in `FolderWatch(descriptor:)`. Measure each against
   main's.
+- **`runPiped`'s pipes on the Mac aren't close-on-exec** (`PipeCommand+Darwin.swift:8-9`, as on main): its own
+  spawn keeps only what it dups (`POSIX_SPAWN_CLOEXEC_DEFAULT`), but a spawn on another thread of the same process
+  that doesn't use that flag inherits them while a status line runs. Left as it is on `v2` (no behaviour change on
+  the Mac; `CloseOnExecLintTests` lists it). Check whether the status-line process spawns anything else meanwhile,
+  and mark them close-on-exec on main if it does.
 - **The two replaced oracles**: the raw Darwin reads `IndexLockTests` and `ProcessTableTests` checked against, now
   platform calls; restore them under `#if canImport(Darwin)`.
 
